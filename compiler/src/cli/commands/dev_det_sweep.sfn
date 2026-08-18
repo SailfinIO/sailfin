@@ -36,6 +36,7 @@ import {
     _shell_read_cmd
 } from "../../build/fs";
 import { host_exe_name } from "../../build/target";
+import { module_name_for_source } from "../../capsule_resolver/identity";
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import {
     char_code_at_text,
@@ -47,48 +48,12 @@ import {
 import { CliContext } from "../context";
 import { _resolve_test_self_path } from "./test/pool";
 
-fn _det_capsule_src_separator(path: string) -> int {
-    let needle = "/src/";
-    let mut i: int = 0;
-    loop {
-        if i + needle.length > path.length { break; }
-        if substring(path, i, i + needle.length) == needle { return i; }
-        i += 1;
-    }
-    return -1;
-}
-
-// Module slug: compiler-driver sources stay rooted at `compiler/src`, runtime
-// sources keep their `runtime/` prefix, and compiler implementation capsules
-// use their canonical `sfn/<capsule>/<module>` identity. The latter must match
-// workspace resolution so determinism artifacts exercise the same mangling as
-// a self-host build.
-fn _det_slug_of(src: string) -> string {
-    let is_runtime = starts_with(src, "runtime/");
-    let mut slug = src;
-    if starts_with(slug, "compiler/capsules/") {
-        let rest = substring(slug, 18, slug.length);
-        let separator = _det_capsule_src_separator(rest);
-        if separator >= 0 {
-            let capsule = substring(rest, 0, separator);
-            let module_start = separator + 5;
-            slug = "sfn/" + capsule + "/" + substring(rest, module_start, rest.length);
-        }
-    } else if starts_with(slug, "compiler/src/") {
-        slug = substring(slug, 13, slug.length);
-    }
-    if starts_with(slug, "runtime/") {
-        slug = substring(slug, 8, slug.length);
-    }
-    if ends_with(slug, ".sfn") {
-        slug = substring(slug, 0, slug.length - 4);
-    }
-    if is_runtime { slug = "runtime/" + slug; }
-    return slug;
+fn _det_slug_of(src: string) -> string ![io] {
+    return module_name_for_source(src);
 }
 
 // Filesystem-safe form of a slug: every `/` flattened to `_` (bash line 48).
-fn _det_safe_of(src: string) -> string {
+fn _det_safe_of(src: string) -> string ![io] {
     let slug = _det_slug_of(src);
     let mut out = "";
     let mut i = 0;

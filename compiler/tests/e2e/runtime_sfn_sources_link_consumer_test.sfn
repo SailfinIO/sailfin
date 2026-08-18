@@ -132,6 +132,8 @@ fn _setup_workspace(ws: string, marker_second_fn: boolean) ![io] {
         + "required = []\n\n"
         + "[build]\n"
         + "kind = \"runtime\"\n"
+        + "sfn-source-root = \"../sfn\"\n"
+        + "sfn-module-prefix = \"runtime/sfn\"\n"
         + "c-sources = []\n"
         + "ll-sources = []\n"
         + "sfn-sources = [\"../sfn/test_marker.sfn\", \"../sfn/clock.sfn\", "

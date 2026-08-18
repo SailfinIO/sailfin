@@ -76,8 +76,8 @@ fn _sidecar_path_for_capsule(capsule_name: string) -> string {
 // flat objects with no whitespace inside the `modules` array. The
 // two fields it extracts have constrained value spaces by
 // construction:
-//   - `slug` is produced by `module_name_from_path`, which
-//     emits `/`-separated path components without `"`, `\`, or `]`.
+//   - `slug` is produced by the manifest-aware source identity service and
+//     contains only `/`-separated path components.
 //   - `cache_key` is the sha256 hex of `CacheKey.digest` — strictly
 //     `[0-9a-f]{64}` or `""` (caching disabled / digest rejected).
 // `ir_path` is skipped entirely; the embedded `]`-or-`"` risk for

@@ -31,6 +31,11 @@
 // resolver does the workspace-rooted resolution once.
 import { canonical_effects } from "sfn/analyzer/effect_taxonomy";
 
+import {
+    SourceIdentityOwner,
+    source_identity_for,
+    source_role_runtime_provider
+} from "./module_paths";
 import { contains_string, strip_prefix, substring } from "./string_utils";
 import {
     toml_get_build_kind,
@@ -41,7 +46,9 @@ import {
     toml_get_ll_sources,
     toml_get_name,
     toml_get_prelude_entry,
+    toml_get_sfn_module_prefix,
     toml_get_sfn_source_gate,
+    toml_get_sfn_source_root,
     toml_get_sfn_sources,
     toml_get_workspace_members
 } from "./toml_parser";
@@ -72,6 +79,8 @@ struct RuntimeCapsuleArtifacts {
     include_dirs: string[];
     link_libs: string[];
     prelude_entry: string;
+    sfn_source_root: string;
+    sfn_module_prefix: string;
     // Ordinary `kind = "library"` capsules this runtime capsule declares in
     // `[dependencies]`. Spec names only (`["sfn/crypto"]`); the declared
     // version is deliberately dropped, because a runtime capsule's dep is
@@ -116,6 +125,8 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
         include_dirs: empty3,
         link_libs: empty4,
         prelude_entry: "",
+        sfn_source_root: "",
+        sfn_module_prefix: "",
         capsule_deps: empty6,
         sfn_source_gates: empty7
     };
@@ -269,14 +280,10 @@ fn _rcr_root_prefix_len(path: string) -> int {
 // identical property — its own output re-parsed reads `a` as a share
 // too — so this matches the platform including its lossiness.
 //
-// DO NOT unify this with the `\`→`/` flattener in
-// `module_name_from_path` (`main.sfn`). That one rewrites separators
-// unconditionally,
-// which maps a UNC `\\srv\share` to `//srv/share` — exactly the
-// rewrite avoided above. The two do not conflict today (main.sfn
-// produces a module slug that is never re-fed to itself), but
-// collapsing them into one helper reintroduces the
-// `//server/share` → `/server/share` corruption on the second pass.
+// The manifest-aware source-identity service applies the same lexical root
+// rules to source and owner paths. Keep this resolver-facing helper aligned;
+// it remains here because manifest resolution and its platform path tests use
+// it directly before identity is assigned.
 //
 // Two POSIX inputs DO change meaning, deliberately. `\` is a legal
 // character in a POSIX filename, so host-agnostic string logic
@@ -518,6 +525,39 @@ fn _rcr_resolve_source_gates(manifest_dir: string, manifest_text: string) -> str
     return out;
 }
 
+fn _rcr_runtime_identity_inputs_valid(sources: string[], gates: string[], owner: SourceIdentityOwner) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        if !source_identity_for(sources[i], owner, source_role_runtime_provider()).ok {
+            return false;
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= gates.length { break; }
+        let record = gates[i];
+        let mut tab: int = -1;
+        let mut k: int = 0;
+        loop {
+            if k >= record.length { break; }
+            if substring(record, k, k + 1) == "\t" {
+                tab = k;
+                break;
+            }
+            k += 1;
+        }
+        if tab < 0 || tab + 1 >= record.length { return false; }
+        let path = substring(record, tab + 1, record.length);
+        if !source_identity_for(path, owner, source_role_runtime_provider()).ok {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
 fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, manifest_text: string) -> RuntimeCapsuleArtifacts {
     let kind = toml_get_build_kind(manifest_text);
     if kind != "runtime" { return empty_runtime_capsule_artifacts(); }
@@ -540,6 +580,8 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
     let c_sources_rel = toml_get_c_sources(manifest_text);
     let ll_sources_rel = toml_get_ll_sources(manifest_text);
     let sfn_sources_rel = toml_get_sfn_sources(manifest_text);
+    let sfn_source_root_rel = toml_get_sfn_source_root(manifest_text);
+    let sfn_module_prefix = toml_get_sfn_module_prefix(manifest_text);
     let include_dirs_rel = toml_get_include_dirs(manifest_text);
     let link_libs = toml_get_link_libs(manifest_text);
     let capsule_deps = _rcr_parse_dep_specs(toml_get_dependencies(manifest_text));
@@ -548,17 +590,31 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
     if prelude_entry_rel.length > 0 {
         prelude_entry = _rcr_resolve_path(manifest_dir, prelude_entry_rel);
     }
+    let sfn_source_root = _rcr_resolve_path(manifest_dir, sfn_source_root_rel);
+    let sfn_sources = _rcr_resolve_paths(manifest_dir, sfn_sources_rel);
+    let sfn_source_gates = _rcr_resolve_source_gates(manifest_dir, manifest_text);
+    let identity_owner = SourceIdentityOwner {
+        manifest_name: name,
+        member_root: manifest_dir,
+        source_root: sfn_source_root,
+        module_prefix: sfn_module_prefix
+    };
+    if !_rcr_runtime_identity_inputs_valid(sfn_sources, sfn_source_gates, identity_owner) {
+        return empty_runtime_capsule_artifacts();
+    }
     return RuntimeCapsuleArtifacts {
         capsule_name: name,
         manifest_dir: manifest_dir,
         c_sources: _rcr_resolve_paths(manifest_dir, c_sources_rel),
         ll_sources: _rcr_resolve_paths(manifest_dir, ll_sources_rel),
-        sfn_sources: _rcr_resolve_paths(manifest_dir, sfn_sources_rel),
+        sfn_sources: sfn_sources,
         include_dirs: _rcr_resolve_paths(manifest_dir, include_dirs_rel),
         link_libs: link_libs,
         prelude_entry: prelude_entry,
+        sfn_source_root: sfn_source_root,
+        sfn_module_prefix: sfn_module_prefix,
         capsule_deps: capsule_deps,
-        sfn_source_gates: _rcr_resolve_source_gates(manifest_dir, manifest_text)
+        sfn_source_gates: sfn_source_gates
     };
 }
 

@@ -2,8 +2,8 @@
 // build resolver facade prevents `sfn check` from importing driver emission
 // and LLVM lowering modules that it never executes.
 import { BuildCacheConfig } from "../build_cache";
-import { module_name_from_path } from "../module_paths";
 import { toml_get_entry } from "../toml_parser";
+import { module_name_for_source } from "./identity";
 import {
     _cr_dirname,
     _cr_import_context_root,
@@ -35,7 +35,7 @@ fn _check_project_entry_artifact(entry_paths: string[], work_dir: string) -> str
         if entry_paths[index] == source_path { return ""; }
         index += 1;
     }
-    let slug = module_name_from_path(source_path);
+    let slug = module_name_for_source(source_path);
     let context_root = _cr_import_context_root(work_dir);
     let artifact = context_root + "/" + slug + ".sfn-asm";
     let manifest = context_root + "/" + slug + ".layout-manifest";

@@ -1,0 +1,162 @@
+// Resolve physical sources through workspace/capsule manifests, then delegate
+// the actual role mapping to the pure source-identity service.
+import {
+    SourceIdentityOwner,
+    _source_identity_normalize_path,
+    module_name_from_path,
+    source_identity_for,
+    source_role_library,
+    source_role_runtime_provider,
+    source_role_selected_binary
+} from "../module_paths";
+import {
+    toml_get_build_kind,
+    toml_get_name,
+    toml_get_prelude_entry,
+    toml_get_sfn_module_prefix,
+    toml_get_sfn_source_root
+} from "../toml_parser";
+import { _cr_dirname, _cr_path_join, discover_project_root } from "./paths";
+import { WorkspaceMember } from "./types";
+import { discover_workspace_root, load_workspace_members } from "./workspace";
+
+fn _cr_source_role(build_kind: string) -> string {
+    if build_kind == "binary" { return source_role_selected_binary(); }
+    if build_kind == "runtime" { return source_role_runtime_provider(); }
+    return source_role_library();
+}
+
+fn _cr_source_owner(member: WorkspaceMember) -> SourceIdentityOwner {
+    return SourceIdentityOwner {
+        manifest_name: member.name,
+        member_root: member.member_path,
+        source_root: member.src_dir,
+        module_prefix: member.module_prefix
+    };
+}
+
+fn module_name_for_source_with_members(source_path: string, members: WorkspaceMember[]) -> string {
+    let mut best = "";
+    let mut best_root_len: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= members.length { break; }
+        let member = members[index];
+        index += 1;
+        let identity = source_identity_for(source_path, _cr_source_owner(member), _cr_source_role(member.build_kind));
+        if identity.ok && member.src_dir.length > best_root_len {
+            best = identity.module_name;
+            best_root_len = member.src_dir.length;
+        }
+    }
+    if best.length > 0 { return best; }
+    return module_name_from_path(source_path);
+}
+
+fn _cr_module_name_from_project(source_path: string, project_root: string) -> string ![io] {
+    if project_root.length == 0 { return ""; }
+    let manifest_path = _cr_path_join(project_root, "capsule.toml");
+    if !fs.exists(manifest_path) { return ""; }
+    let text = fs.readFile(manifest_path);
+    let kind = toml_get_build_kind(text);
+    let mut source_root = _cr_path_join(project_root, "src");
+    let mut module_prefix = "";
+    if kind == "runtime" {
+        let declared_root = toml_get_sfn_source_root(text);
+        if declared_root.length == 0 { return ""; }
+        source_root = _cr_path_join(project_root, declared_root);
+        module_prefix = toml_get_sfn_module_prefix(text);
+    }
+    let owner = SourceIdentityOwner {
+        manifest_name: toml_get_name(text),
+        member_root: project_root,
+        source_root: source_root,
+        module_prefix: module_prefix
+    };
+    let identity = source_identity_for(source_path, owner, _cr_source_role(kind));
+    if identity.ok { return identity.module_name; }
+    // The runtime prelude deliberately remains outside `sfn-source-root`
+    // until SFEP-0072's dedicated migration. Match only the manifest's exact
+    // compatibility entry, then preserve its historical `runtime/prelude`
+    // identity just as runtime object compilation does.
+    if kind == "runtime" {
+        let prelude_entry = toml_get_prelude_entry(text);
+        if prelude_entry.length > 0 {
+            let declared_prelude = _source_identity_normalize_path(_cr_path_join(project_root, prelude_entry));
+            let normalized_source = _source_identity_normalize_path(source_path);
+            if declared_prelude == normalized_source {
+                let compatibility = source_identity_for(source_path, SourceIdentityOwner {
+                    manifest_name: owner.manifest_name, member_root: project_root, source_root: _cr_dirname(_source_identity_normalize_path(source_root)), module_prefix: "runtime"
+                }, source_role_runtime_provider());
+                if compatibility.ok { return compatibility.module_name; }
+            }
+        }
+    }
+    return "";
+}
+
+fn source_identity_member_for_project(project_root: string) -> WorkspaceMember ![io] {
+    let empty = WorkspaceMember {
+        name: "",
+        member_path: "",
+        src_dir: "",
+        build_kind: "",
+        module_prefix: ""
+    };
+    if project_root.length == 0 { return empty; }
+    let manifest_path = _cr_path_join(project_root, "capsule.toml");
+    if !fs.exists(manifest_path) { return empty; }
+    let text = fs.readFile(manifest_path);
+    let name = toml_get_name(text);
+    if name.length == 0 { return empty; }
+    let kind = toml_get_build_kind(text);
+    let mut source_root = _cr_path_join(project_root, "src");
+    let mut module_prefix = "";
+    if kind == "runtime" {
+        let declared_root = toml_get_sfn_source_root(text);
+        if declared_root.length == 0 { return empty; }
+        source_root = _cr_path_join(project_root, declared_root);
+        module_prefix = toml_get_sfn_module_prefix(text);
+    }
+    return WorkspaceMember {
+        name: name,
+        member_path: project_root,
+        src_dir: source_root,
+        build_kind: kind,
+        module_prefix: module_prefix
+    };
+}
+
+fn module_name_for_source(source_path: string) -> string ![io] {
+    let source_dir = _cr_dirname(source_path);
+    let project_root = discover_project_root(source_dir);
+    // The nearest manifest is authoritative for sources it explicitly owns,
+    // including the deferred runtime prelude compatibility entry. Evaluate it
+    // before broader workspace members so an unlisted nested project cannot be
+    // claimed by a containing library source root.
+    let project_name = _cr_module_name_from_project(source_path, project_root);
+    if project_name.length > 0 { return project_name; }
+    let workspace_root = discover_workspace_root(source_dir);
+    if workspace_root.length > 0 {
+        let mut members = load_workspace_members(workspace_root);
+        // A selected project may be nested below a workspace member without
+        // appearing in `workspace.toml`. Include it in the same longest-root
+        // choice used by resolver traversal so direct CLI entry points cannot
+        // inherit the outer library's identity.
+        let selected = source_identity_member_for_project(project_root);
+        if selected.name.length > 0 { members.push(selected); }
+        let workspace_name = module_name_for_source_with_members(source_path, members);
+        if workspace_name != module_name_from_path(source_path) {
+            return workspace_name;
+        }
+    }
+    return module_name_from_path(source_path);
+}
+
+export {
+    _cr_source_owner,
+    _cr_source_role,
+    module_name_for_source,
+    module_name_for_source_with_members,
+    source_identity_member_for_project
+};

@@ -60,10 +60,10 @@ test "workspace: trailing newline does not add empty entry" {
 test "workspace: spec lookup returns matching member src_dir" {
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src"
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: ""
     });
     members.push(WorkspaceMember {
-        name: "sfn/test", member_path: "capsules/sfn/test", src_dir: "/repo/capsules/sfn/test/src"
+        name: "sfn/test", member_path: "capsules/sfn/test", src_dir: "/repo/capsules/sfn/test/src", build_kind: "library", module_prefix: ""
     });
     assert _str_eq(workspace_member_for_spec(members, "sfn/http"), "/repo/capsules/sfn/http/src");
     assert _str_eq(workspace_member_for_spec(members, "sfn/test"), "/repo/capsules/sfn/test/src");
@@ -72,7 +72,7 @@ test "workspace: spec lookup returns matching member src_dir" {
 test "workspace: spec lookup returns empty when missing" {
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src"
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: ""
     });
     assert _str_eq(workspace_member_for_spec(members, "sfn/missing"), "");
     assert _str_eq(workspace_member_for_spec(members, ""), "");
@@ -81,7 +81,7 @@ test "workspace: spec lookup returns empty when missing" {
 test "workspace: spec lookup is exact match (sfn/http != http)" {
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src"
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: ""
     });
     // Bare names must NOT match a scoped member — the resolver walks the
     // import surface in scoped form ("sfn/http") and the workspace file is
@@ -240,10 +240,10 @@ test "workspace: default-members entry that is not a member is ignored" {
 test "workspace: a declared member resolves to its local path" {
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src"
+        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src", build_kind: "library", module_prefix: ""
     });
     members.push(WorkspaceMember {
-        name: "priv/base", member_path: "capsules/priv/base", src_dir: "/ws/capsules/priv/base/src"
+        name: "priv/base", member_path: "capsules/priv/base", src_dir: "/ws/capsules/priv/base/src", build_kind: "library", module_prefix: ""
     });
     assert _str_eq(workspace_member_for_spec(members, "priv/lib"), "/ws/capsules/priv/lib/src");
     assert _str_eq(workspace_member_for_spec(members, "priv/base"), "/ws/capsules/priv/base/src");
@@ -254,7 +254,7 @@ test "workspace: an undeclared spec has no local member to resolve" {
     // undeclared spec falls through, where the provenance gate applies.
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src"
+        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src", build_kind: "library", module_prefix: ""
     });
     assert _str_eq(workspace_member_for_spec(members, "priv/absent"), "");
 }

@@ -7,6 +7,7 @@
 // narrower input set (no dep manifests — see the function's doc comment
 // for why).
 import { cache_key_for, is_valid_digest, stage_cache_key_for } from "../../src/build_cache";
+import { SourceIdentityOwner, source_identity_for, source_role_library } from "../../src/module_paths";
 
 fn _sck_tmp_root(label: string) -> string ![io] {
     let root = "/tmp/sfn_stage_cache_key_test_" + label;
@@ -47,6 +48,54 @@ test "stage_cache_key_for: differing slug -> different digest" ![io] {
     let key_a = stage_cache_key_for(src, "mod_a", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
     let key_b = stage_cache_key_for(src, "mod_b", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
     assert key_a.digest != key_b.digest;
+    _sck_cleanup(scratch);
+}
+
+test "stage_cache_key_for: physical move with stable manifest identity reuses digest" ![io] {
+    let scratch = _sck_tmp_root("manifest_identity_move");
+    let old_root = scratch + "/old/src";
+    let new_root = scratch + "/new/src";
+    process.run(["mkdir", "-p", old_root]);
+    process.run(["mkdir", "-p", new_root]);
+    let old_source = old_root + "/mod.sfn";
+    let new_source = new_root + "/mod.sfn";
+    _sck_write(old_source, "fn hello() -> string { return \"world\"; }");
+    _sck_write(new_source, "fn hello() -> string { return \"world\"; }");
+    let old_identity = source_identity_for(old_source, SourceIdentityOwner {
+        manifest_name: "sfn/example", member_root: scratch + "/old", source_root: old_root, module_prefix: ""
+    }, source_role_library());
+    let new_identity = source_identity_for(new_source, SourceIdentityOwner {
+        manifest_name: "sfn/example", member_root: scratch + "/new", source_root: new_root, module_prefix: ""
+    }, source_role_library());
+    assert old_identity.ok;
+    assert new_identity.ok;
+    assert old_identity.module_name == new_identity.module_name;
+    let old_key = stage_cache_key_for(old_source, old_identity.module_name, "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    let new_key = stage_cache_key_for(new_source, new_identity.module_name, "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    assert old_key.digest == new_key.digest;
+    let no_deps: string[] = [];
+    let no_dep_slugs: string[] = [];
+    let old_module_key = cache_key_for(old_source, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", old_identity.module_name, "x86_64-unknown-linux-gnu");
+    let new_module_key = cache_key_for(new_source, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", new_identity.module_name, "x86_64-unknown-linux-gnu");
+    assert old_module_key.digest == new_module_key.digest;
+    _sck_cleanup(scratch);
+}
+
+test "stage_cache_key_for: manifest rename invalidates digest" ![io] {
+    let scratch = _sck_tmp_root("manifest_identity_rename");
+    let source_root = scratch + "/src";
+    process.run(["mkdir", "-p", source_root]);
+    let source = source_root + "/mod.sfn";
+    _sck_write(source, "fn hello() -> string { return \"world\"; }");
+    let first = source_identity_for(source, SourceIdentityOwner {
+        manifest_name: "sfn/first", member_root: scratch, source_root: source_root, module_prefix: ""
+    }, source_role_library());
+    let second = source_identity_for(source, SourceIdentityOwner {
+        manifest_name: "sfn/second", member_root: scratch, source_root: source_root, module_prefix: ""
+    }, source_role_library());
+    let first_key = stage_cache_key_for(source, first.module_name, "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    let second_key = stage_cache_key_for(source, second.module_name, "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    assert first_key.digest != second_key.digest;
     _sck_cleanup(scratch);
 }
 

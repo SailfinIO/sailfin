@@ -230,7 +230,9 @@ struct ProjectCapsuleResult {
 struct WorkspaceMember {
     name: string;  // canonical name, e.g. "sfn/http"
     member_path: string;  // path relative to workspace root, e.g. "capsules/sfn/http"
-    src_dir: string;  // path to the member's src/ dir (workspace-rooted)
+    src_dir: string;  // declared source root (workspace-rooted)
+    build_kind: string;  // binary, library, or runtime
+    module_prefix: string;  // runtime virtual prefix; empty otherwise
 }
 
 // SFEP-0051 Phase 4a/4b: one member's effect surface audited against the

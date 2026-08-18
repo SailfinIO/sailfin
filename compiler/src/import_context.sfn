@@ -50,6 +50,12 @@ fn _resolve_artifact_slug(root: string, slug: string) -> string ![io] {
     }
     let alias_path = root + "/" + slug + ".slugalias";
     if fs.exists(alias_path) { return trim(fs.readFile(alias_path)); }
+    if !ends_with(slug, "/mod") {
+        let mod_alias_path = root + "/" + slug + "/mod.slugalias";
+        if fs.exists(mod_alias_path) {
+            return trim(fs.readFile(mod_alias_path));
+        }
+    }
     return slug;
 }
 

@@ -1,96 +1,51 @@
-// #873 regression: `_cr_capsule_slug_for_path` must map a relatively-
-// imported capsule source (identified by its `module_name_from_path`
-// PATH SLUG) to its workspace member's canonical spec slug, and MUST
-// return "" for any slug not owned by a member.
-//
-// The load-bearing case is self-host safety: this repo's `workspace.toml`
-// lists `compiler` and `runtime/native` as members, but
-// `module_name_from_path` strips the `compiler/src/` and `runtime/`
-// prefixes BEFORE the slug reaches this helper, so a compiler-internal
-// import arrives as `llvm/lowering/abi_hash` (no `compiler/src/` segment)
-// and must NOT match the `compiler` member — otherwise every unit test
-// that relative-imports a compiler module fails to link. The
-// `compiler`/`runtime/native` members are present in `_members()` below
-// precisely so these tests would catch that regression.
-//
-// The resolver decomposition keeps this import within the standalone unit-test
-// timeout while exercising the production path-to-capsule mapping directly.
-import { _cr_capsule_slug_for_path } from "../../src/capsule_resolver/relative";
+// SFN-930: relative traversal and manifest discovery must converge on the
+// same source-identity service for binary, library, and runtime members.
+import { module_name_for_source_with_members } from "../../src/capsule_resolver/identity";
 import { WorkspaceMember } from "../../src/capsule_resolver/types";
 
-fn _str_eq(a: string, b: string) -> boolean {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if substring(a, i, i + 1) != substring(b, i, i + 1) { return false; }
-        i += 1;
-    }
-    return true;
+fn _member(name: string, path: string, root: string, kind: string, prefix: string) -> WorkspaceMember {
+    return WorkspaceMember {
+        name: name,
+        member_path: path,
+        src_dir: root,
+        build_kind: kind,
+        module_prefix: prefix
+    };
 }
 
-// Members mirror this repo's workspace.toml: the `capsules/*` stdlib
-// members PLUS `compiler` and `runtime/native` (whose presence is the
-// whole point of the self-host-safety cases below).
 fn _members() -> WorkspaceMember[] {
     let mut out: WorkspaceMember[] = [];
-    out.push(WorkspaceMember {
-        name: "sfn/crypto", member_path: "capsules/sfn/crypto", src_dir: "capsules/sfn/crypto/src"
-    });
-    out.push(WorkspaceMember {
-        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "capsules/sfn/http/src"
-    });
-    out.push(WorkspaceMember {
-        name: "sfn/compiler", member_path: "compiler", src_dir: "compiler/src"
-    });
-    out.push(WorkspaceMember {
-        name: "sfn/runtime-native", member_path: "runtime", src_dir: "runtime/src"
-    });
+    out.push(_member("sfn/compiler", "compiler", "compiler/src", "binary", ""));
+    out.push(_member("sfn/crypto", "capsules/sfn/crypto", "capsules/sfn/crypto/src", "library", ""));
+    out.push(_member("sfn/runtime-native", "runtime", "runtime/sfn", "runtime", "runtime/sfn"));
     return out;
 }
 
-test "capsule slug: capsule source path slug maps to spec slug" {
-    let slug = _cr_capsule_slug_for_path("capsules/sfn/crypto/src/mod", _members());
-    assert _str_eq(slug, "sfn/crypto/mod");
+test "relative identity: selected binary source is source-root relative" {
+    assert module_name_for_source_with_members("compiler/src/llvm/lowering/abi_hash.sfn", _members()) == "llvm/lowering/abi_hash";
 }
 
-test "capsule slug: nested capsule source keeps the tail" {
-    let slug = _cr_capsule_slug_for_path("capsules/sfn/crypto/src/util/hex", _members());
-    assert _str_eq(slug, "sfn/crypto/util/hex");
+test "relative identity: library source is manifest prefixed" {
+    assert module_name_for_source_with_members("capsules/sfn/crypto/src/util/hex.sfn", _members()) == "sfn/crypto/util/hex";
 }
 
-test "capsule slug: second member resolves to its own spec" {
-    let slug = _cr_capsule_slug_for_path("capsules/sfn/http/src/mod", _members());
-    assert _str_eq(slug, "sfn/http/mod");
+test "relative identity: runtime source uses declared virtual prefix" {
+    assert module_name_for_source_with_members("runtime/sfn/memory/arena.sfn", _members()) == "runtime/sfn/memory/arena";
 }
 
-test "capsule slug: absolute path slug still matches via the src segment" {
-    let slug = _cr_capsule_slug_for_path("/home/user/sailfin/capsules/sfn/crypto/src/mod", _members());
-    assert _str_eq(slug, "sfn/crypto/mod");
+test "relative identity: arbitrary member root uses manifest name" {
+    let mut members: WorkspaceMember[] = [];
+    members.push(_member("sfn/syntax", "/workspace/private/parser", "/workspace/private/parser/src", "library", ""));
+    assert module_name_for_source_with_members("/workspace/private/parser/src/ast/mod.sfn", members) == "sfn/syntax/ast/mod";
 }
 
-// SELF-HOST GUARD: `module_name_from_path` strips `compiler/src/`, so a
-// compiler-internal import reaches the helper as `llvm/lowering/abi_hash`.
-// Even with the `compiler` member present, that slug has no
-// `compiler/src/` segment, so it must NOT canonicalize.
-test "capsule slug: stripped compiler slug returns empty despite compiler member" {
-    let slug = _cr_capsule_slug_for_path("llvm/lowering/abi_hash", _members());
-    assert _str_eq(slug, "");
+test "relative identity: longest owning source root wins" {
+    let mut members: WorkspaceMember[] = [];
+    members.push(_member("sfn/outer", "/workspace/outer", "/workspace/outer/src", "library", ""));
+    members.push(_member("sfn/nested", "/workspace/outer/src/vendor", "/workspace/outer/src/vendor/src", "library", ""));
+    assert module_name_for_source_with_members("/workspace/outer/src/vendor/src/mod.sfn", members) == "sfn/nested/mod";
 }
 
-// SELF-HOST GUARD: `module_name_from_path` strips `runtime/`, so a runtime
-// import reaches the helper as e.g. `prelude` and must NOT canonicalize.
-test "capsule slug: stripped runtime slug returns empty despite runtime member" {
-    let slug = _cr_capsule_slug_for_path("prelude", _members());
-    assert _str_eq(slug, "");
-}
-
-test "capsule slug: slug outside any member src returns empty" {
-    let slug = _cr_capsule_slug_for_path("/tmp/widget/src/main", _members());
-    assert _str_eq(slug, "");
-}
-
-test "capsule slug: member dir slug without a /src/ tail returns empty" {
-    let slug = _cr_capsule_slug_for_path("capsules/sfn/crypto/capsule", _members());
-    assert _str_eq(slug, "");
+test "relative identity: non-member source uses repository-agnostic fallback" {
+    assert module_name_for_source_with_members("fixtures/helper.sfn", _members()) == "fixtures/helper";
 }

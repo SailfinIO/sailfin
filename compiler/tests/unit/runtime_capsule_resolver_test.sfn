@@ -61,6 +61,8 @@ fn _setup_scratch_workspace(scratch: string) ![io] {
         + "\n"
         + "[build]\n"
         + "kind = \"runtime\"\n"
+        + "sfn-source-root = \"../sfn\"\n"
+        + "sfn-module-prefix = \"runtime/sfn\"\n"
         + "c-sources = [\"src/sailfin_arena.c\", \"src/sailfin_runtime.c\"]\n"
         + "ll-sources = [\"ir/runtime_globals.ll\"]\n"
         + "sfn-sources = [\"../sfn/io.sfn\", \"../sfn/clock.sfn\"]\n"
@@ -140,9 +142,49 @@ test "enumerate: sfn_sources resolved relative to manifest dir" ![io] {
     // downstream `sfn emit` invocations don't trip the import
     // resolver on unnormalized paths (see `_rcr_normalize_path`
     // for the rationale).
+    assert a.sfn_source_root == scratch + "/runtime/sfn";
+    assert a.sfn_module_prefix == "runtime/sfn";
     assert a.sfn_sources.length == 2;
     assert a.sfn_sources[0] == scratch + "/runtime/sfn/io.sfn";
     assert a.sfn_sources[1] == scratch + "/runtime/sfn/clock.sfn";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: rejects sfn source outside declared source root" ![io] {
+    let scratch = "build/sailfin/.runtime-resolver-test-source-escape";
+    _setup_scratch_workspace(scratch);
+    fs.writeFile(scratch + "/runtime/native/capsule.toml", "[capsule]\nname = \"sfn/runtime-native\"\nversion = \"0.1.0\"\n\n"
+        + "[build]\nkind = \"runtime\"\n"
+        + "sfn-source-root = \"../sfn\"\n"
+        + "sfn-module-prefix = \"runtime/sfn\"\n"
+        + "sfn-sources = [\"../../escape.sfn\"]\n");
+    let result = enumerate_runtime_capsule_artifacts(scratch, []);
+    assert result.length == 0;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: rejects runtime module prefix with dot segments" ![io] {
+    let scratch = "build/sailfin/.runtime-resolver-test-prefix-escape";
+    _setup_scratch_workspace(scratch);
+    fs.writeFile(scratch + "/runtime/native/capsule.toml", "[capsule]\nname = \"sfn/runtime-native\"\nversion = \"0.1.0\"\n\n"
+        + "[build]\nkind = \"runtime\"\n"
+        + "sfn-source-root = \"../sfn\"\n"
+        + "sfn-module-prefix = \"runtime/../escape\"\n"
+        + "sfn-sources = [\"../sfn/io.sfn\"]\n");
+    let result = enumerate_runtime_capsule_artifacts(scratch, []);
+    assert result.length == 0;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: rejects gated source outside declared source root" ![io] {
+    let scratch = "build/sailfin/.runtime-resolver-test-gate-escape";
+    _setup_scratch_workspace(scratch);
+    let manifest_path = scratch + "/runtime/native/capsule.toml";
+    let manifest = fs.readFile(manifest_path)
+        + "\n[sfn-source-gates]\nnet = [\"../../escape.sfn\"]\n";
+    fs.writeFile(manifest_path, manifest);
+    let result = enumerate_runtime_capsule_artifacts(scratch, []);
+    assert result.length == 0;
     process.run(["rm", "-rf", scratch]);
 }
 

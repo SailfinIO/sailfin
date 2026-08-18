@@ -11,6 +11,8 @@ required = []
 
 [build]
 kind = "runtime"
+sfn-source-root = "sfn"
+sfn-module-prefix = "runtime/sfn"
 
 # Stage D PR1 schema (docs/proposals/0006-build-architecture.md §Part 5):
 # `kind = "runtime"` capsules ship declarative source lists rather

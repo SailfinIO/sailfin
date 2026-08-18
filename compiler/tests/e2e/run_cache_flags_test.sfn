@@ -362,8 +362,8 @@ test "sfn run --clean wipes the staged import-context tree (SFN-872)" ![io] {
     let cold = _run_with_cwd(fixture_dir, test_scratch, cache_dir, []);
     report_child_failure("run-cache-flags SFN-872 cold run", cold.exit, cold.log, "");
     assert cold.exit == 0;
-    assert fs.exists(import_context + "/src/util.sfn-asm");
-    assert fs.exists(import_context + "/src/util.srchash");
+    assert fs.exists(import_context + "/util.sfn-asm");
+    assert fs.exists(import_context + "/util.srchash");
 
     // Plant a sentinel in the staged tree to prove `--clean` wipes the
     // whole tree, not just the specific artifacts a normal build touches.
@@ -380,5 +380,5 @@ test "sfn run --clean wipes the staged import-context tree (SFN-872)" ![io] {
     assert ! fs.exists(sentinel);
     // The staged artifact is back — the post-clean build re-emitted it
     // rather than serving a stale staged artifact.
-    assert fs.exists(import_context + "/src/util.sfn-asm");
+    assert fs.exists(import_context + "/util.sfn-asm");
 }

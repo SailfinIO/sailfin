@@ -86,7 +86,7 @@ import { discover_project_root } from "../../../capsule_resolver/paths";
 import { ResolverConsumer, TestCapsuleResolution } from "../../../capsule_resolver/types";
 import { discover_workspace_root, load_workspace_default_members } from "../../../capsule_resolver/workspace";
 import { format_backend_failure_banner } from "../../../ice";
-import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
+import { compile_tests_to_llvm_file_with_module_imports } from "../../../main";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
 import { _has_prefix_cmd, _sort_strings_cmd } from "../../../string_cmd_utils";
 import {

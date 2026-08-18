@@ -1,19 +1,95 @@
 import { expect_eq_str } from "sfn/test";
 
-import { module_name_from_path } from "../../src/module_paths";
+import {
+    SourceIdentityOwner,
+    module_name_from_path,
+    source_identity_for,
+    source_role_library,
+    source_role_runtime_provider,
+    source_role_selected_binary
+} from "../../src/module_paths";
 
-test "module paths: compiler driver source keeps its historical slug" {
-    assert expect_eq_str(module_name_from_path("compiler/src/main.sfn"), "main").ok;
+fn _owner(name: string, member_root: string, source_root: string, prefix: string) -> SourceIdentityOwner {
+    return SourceIdentityOwner {
+        manifest_name: name,
+        member_root: member_root,
+        source_root: source_root,
+        module_prefix: prefix
+    };
 }
 
-test "module paths: compiler capsule source uses its workspace identity" {
-    assert expect_eq_str(module_name_from_path("compiler/capsules/syntax/src/ast.sfn"), "sfn/syntax/ast").ok;
+test "source identity: current compiler driver keeps cli/main" {
+    let result = source_identity_for("compiler/src/cli/main.sfn", _owner("sfn/compiler", "compiler", "compiler/src", ""), source_role_selected_binary());
+    assert result.ok;
+    assert expect_eq_str(result.module_name, "cli/main").ok;
 }
 
-test "module paths: analyzer capsule uses its workspace identity" {
-    assert expect_eq_str(module_name_from_path("compiler/capsules/analyzer/src/analyzer.sfn"), "sfn/analyzer/analyzer").ok;
+test "source identity: relocated compiler driver keeps cli/main" {
+    let result = source_identity_for("/checkout/compiler/driver/src/cli/main.sfn", _owner("sfn/compiler", "/checkout/compiler/driver", "/checkout/compiler/driver/src", ""), source_role_selected_binary());
+    assert result.ok;
+    assert expect_eq_str(result.module_name, "cli/main").ok;
 }
 
-test "module paths: absolute compiler capsule path uses its workspace identity" {
-    assert expect_eq_str(module_name_from_path("/checkout/compiler/capsules/syntax/src/parser/mod.sfn"), "sfn/syntax/parser/mod").ok;
+test "source identity: library uses manifest name from arbitrary root" {
+    let result = source_identity_for("/tmp/member-anywhere/src/parser/mod.sfn", _owner("sfn/syntax", "/tmp/member-anywhere", "/tmp/member-anywhere/src", ""), source_role_library());
+    assert result.ok;
+    assert expect_eq_str(result.module_name, "sfn/syntax/parser/mod").ok;
+}
+
+test "source identity: public library move preserves manifest-prefixed identity" {
+    let result = source_identity_for("/checkout/stdlib/strings/src/mod.sfn", _owner("sfn/strings", "/checkout/stdlib/strings", "/checkout/stdlib/strings/src", ""), source_role_library());
+    assert result.ok;
+    assert expect_eq_str(result.module_name, "sfn/strings/mod").ok;
+}
+
+test "source identity: runtime uses declared root and virtual prefix" {
+    let result = source_identity_for("/relocated/provider/src/string.sfn", _owner("sfn/runtime-native", "/relocated/provider", "/relocated/provider/src", "runtime/sfn"), source_role_runtime_provider());
+    assert result.ok;
+    assert expect_eq_str(result.module_name, "runtime/sfn/string").ok;
+}
+
+test "source identity: Windows separators normalize consistently" {
+    let result = source_identity_for("C:\\repo\\runtime\\sfn\\string.sfn", _owner("sfn/runtime-native", "C:\\repo\\runtime", "C:\\repo\\runtime\\sfn", "runtime\\sfn"), source_role_runtime_provider());
+    assert result.ok;
+    assert expect_eq_str(result.module_name, "runtime/sfn/string").ok;
+}
+
+test "source identity: declared roots and sources collapse dot segments" {
+    let result = source_identity_for("/repo/runtime/native/../sfn/string.sfn", _owner("sfn/runtime-native", "/repo/runtime", "/repo/runtime/native/../sfn", "runtime/sfn"), source_role_runtime_provider());
+    assert result.ok;
+    assert expect_eq_str(result.module_name, "runtime/sfn/string").ok;
+}
+
+test "source identity: UNC roots remain component aware" {
+    let result = source_identity_for("\\\\server\\share\\runtime\\sfn\\string.sfn", _owner("sfn/runtime-native", "\\\\server\\share\\runtime", "\\\\server\\share\\runtime\\sfn", "runtime/sfn"), source_role_runtime_provider());
+    assert result.ok;
+    assert expect_eq_str(result.module_name, "runtime/sfn/string").ok;
+}
+
+test "source identity: source outside declared root is rejected" {
+    let result = source_identity_for("/repo/runtime/other/string.sfn", _owner("sfn/runtime-native", "/repo/runtime", "/repo/runtime/sfn", "runtime/sfn"), source_role_runtime_provider());
+    assert ! result.ok;
+}
+
+test "source identity: root containment is component aware" {
+    let result = source_identity_for("/repo/runtime/sfn2/string.sfn", _owner("sfn/runtime-native", "/repo/runtime", "/repo/runtime/sfn", "runtime/sfn"), source_role_runtime_provider());
+    assert ! result.ok;
+}
+
+test "source identity: manifest name dot segments are rejected before normalization" {
+    let result = source_identity_for("/repo/library/src/mod.sfn", _owner("sfn/a/../b", "/repo/library", "/repo/library/src", ""), source_role_library());
+    assert ! result.ok;
+}
+
+test "source identity: runtime prefix dot segments are rejected before normalization" {
+    let result = source_identity_for("/repo/runtime/sfn/string.sfn", _owner("sfn/runtime-native", "/repo/runtime", "/repo/runtime/sfn", "runtime/../escape"), source_role_runtime_provider());
+    assert ! result.ok;
+}
+
+test "source identity: standalone fallback has no repository special cases" {
+    assert expect_eq_str(module_name_from_path("compiler/capsules/syntax/src/ast.sfn"), "compiler/capsules/syntax/src/ast").ok;
+}
+
+test "source identity: standalone absolute fallback strips the root separator" {
+    assert expect_eq_str(module_name_from_path("/tmp/project/src/main.sfn"), "tmp/project/src/main").ok;
 }
