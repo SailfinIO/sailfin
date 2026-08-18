@@ -75,9 +75,10 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 20
+        with:
+          packages: clang-18 llvm-18 jq
 
       - name: Fetch released seed compiler (the oracle)
         shell: bash
