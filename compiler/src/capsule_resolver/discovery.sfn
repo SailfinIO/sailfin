@@ -15,6 +15,7 @@ import { _collect_sfn_files_cmd } from "../build/fs";
 import { is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
 import { _display_capsule_name_cmd } from "../capsule_names";
 import { lock_get_versions } from "../lock";
+import { SourceIdentityOwner, source_identity_for, source_role_library } from "../module_paths";
 import { enumerate_runtime_capsule_artifacts, runtime_capsule_from_root } from "../runtime_capsule_resolver";
 import {
     SemVer,
@@ -182,12 +183,7 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string, origin: string) ->
     let mut out: CapsuleSource[] = [];
     if !fs.exists(src_dir) { return out; }
 
-    // Queues run in lockstep: at position i, dir_queue[i] is a filesystem
-    // path and slug_queue[i] is the slug prefix that every .sfn file in
-    // that directory should inherit (e.g. src root = `spec`; nested
-    // src/util/ = `spec/util`).
     let mut dir_queue: string[] = [src_dir];
-    let mut slug_queue: string[] = [spec];
     let mut head: int = 0;
     // Belt-and-suspenders cap on the BFS — guards against a pathological
     // symlink loop or a runaway listDirectory binding. The previous
@@ -213,7 +209,6 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string, origin: string) ->
         }
         iterations += 1;
         let dir = dir_queue[head];
-        let slug_prefix = slug_queue[head];
         head += 1;
         if !fs.exists(dir) { continue; }
         let entries = fs.listDirectory(dir);
@@ -223,8 +218,10 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string, origin: string) ->
             let entry = entries[i];
             let full = _cr_path_join(dir, entry);
             if _cr_ends_with(entry, ".sfn") {
-                let stem = substring(entry, 0, entry.length - 4);
-                let slug = slug_prefix + "/" + stem;
+                let identity = source_identity_for(full, SourceIdentityOwner {
+                    manifest_name: spec, member_root: _cr_dirname(src_dir), source_root: src_dir, module_prefix: ""
+                }, source_role_library());
+                let slug = identity.module_name;
                 // ll_path is filled in by `_cr_resolve_and_dedupe`
                 // once the consumer + dep layout is known (Stage
                 // C2b2). Constructing it here would require
@@ -239,10 +236,7 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string, origin: string) ->
                 // subdirectory. listDirectory on a non-directory returns
                 // an empty list which we skip naturally.
                 let child_entries = fs.listDirectory(full);
-                if child_entries.length > 0 {
-                    dir_queue.push(full);
-                    slug_queue.push(slug_prefix + "/" + entry);
-                }
+                if child_entries.length > 0 { dir_queue.push(full); }
             }
             i += 1;
         }

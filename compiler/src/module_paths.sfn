@@ -1,151 +1,285 @@
-// Stable source-path to module-slug conversion shared by driver modules.
+// Manifest-aware source identity shared by the compiler driver.
+//
+// A physical path is not a module identity. The resolved member and build
+// role decide whether the source is selected-binary-relative,
+// manifest-prefixed, or runtime-provider-prefixed. The standalone fallback is
+// deliberately repository-agnostic so future source moves do not grow another
+// physical-path compatibility branch here.
 import { substring } from "./string_utils";
 
-fn module_name_from_path(source_path: string) -> string {
-    if source_path.length == 0 { return "main"; }
+struct SourceIdentityOwner {
+    manifest_name: string;
+    member_root: string;
+    source_root: string;
+    module_prefix: string;
+}
 
-    let mut normalized: string = "";
+struct SourceIdentityResult {
+    ok: boolean;
+    module_name: string;
+}
+
+fn source_role_selected_binary() -> string { return "selected-binary"; }
+
+fn source_role_library() -> string { return "library"; }
+
+fn source_role_runtime_provider() -> string { return "runtime-provider"; }
+
+fn source_role_standalone() -> string { return "standalone"; }
+
+fn empty_source_identity_owner() -> SourceIdentityOwner {
+    return SourceIdentityOwner {
+        manifest_name: "",
+        member_root: "",
+        source_root: "",
+        module_prefix: ""
+    };
+}
+
+fn _source_identity_is_separator(ch: string) -> boolean {
+    return ch == "/" || ch == "\\";
+}
+
+fn _source_identity_is_drive_letter(ch: string) -> boolean {
+    let code = char_code(ch);
+    if code >= 65 && code <= 90 { return true; }
+    return code >= 97 && code <= 122;
+}
+
+fn _source_identity_root_length(path: string) -> int {
+    if path.length == 0 { return 0; }
+    if path.length >= 2 && substring(path, 0, 2) == "\\\\" {
+        let mut index: int = 2;
+        loop {
+            if index >= path.length { break; }
+            if _source_identity_is_separator(substring(path, index, index + 1)) {
+                break;
+            }
+            index += 1;
+        }
+        if index >= path.length { return path.length; }
+        index += 1;
+        loop {
+            if index >= path.length { break; }
+            if _source_identity_is_separator(substring(path, index, index + 1)) {
+                break;
+            }
+            index += 1;
+        }
+        return index;
+    }
+    if path.length >= 2 && substring(path, 1, 2) == ":"
+        && _source_identity_is_drive_letter(substring(path, 0, 1)) {
+        if path.length >= 3 && _source_identity_is_separator(substring(path, 2, 3)) {
+            return 3;
+        }
+        return 2;
+    }
+    if _source_identity_is_separator(substring(path, 0, 1)) { return 1; }
+    return 0;
+}
+
+// Lexical canonicalization only: separators and `.`/`..` segments converge,
+// while symlinks and filesystem state never participate in module identity.
+fn _source_identity_normalize_path(path: string) -> string {
+    if path.length == 0 { return path; }
+    if path.length >= 4 && substring(path, 0, 2) == "\\\\" && substring(path, 3, 4) == "\\" {
+        let device = substring(path, 2, 3);
+        if device == "?" || device == "." { return path; }
+    }
+
+    let root_length = _source_identity_root_length(path);
+    let mut root = substring(path, 0, root_length);
+    let drive_relative = root_length == 2 && substring(path, 1, 2) == ":";
+    let mut absolute = root_length > 0;
+    if drive_relative { absolute = false; }
+    if root_length == 1 { root = "/"; }
+    if root_length == 3 && substring(path, 1, 2) == ":" {
+        root = substring(path, 0, 2) + "/";
+    }
+
+    let mut segments: string[] = [];
+    let mut start = root_length;
+    let mut index = root_length;
+    loop {
+        if index > path.length { break; }
+        if index == path.length || _source_identity_is_separator(substring(path, index, index
+            + 1)) {
+            if index > start {
+                let segment = substring(path, start, index);
+                if segment == "." {
+                    // Skip lexical current-directory segments.
+                } else if segment == ".." {
+                    if segments.length > 0 && segments[segments.length - 1] != ".." {
+                        let mut shortened: string[] = [];
+                        let mut copy_index: int = 0;
+                        loop {
+                            if copy_index >= segments.length - 1 { break; }
+                            shortened.push(segments[copy_index]);
+                            copy_index += 1;
+                        }
+                        segments = shortened;
+                    } else if !absolute { segments.push(".."); }
+                } else { segments.push(segment); }
+            }
+            start = index + 1;
+        }
+        index += 1;
+    }
+
+    if segments.length == 0 {
+        if root.length > 0 { return root; }
+        return ".";
+    }
+    let mut separator = "";
+    if root.length > 0 && !drive_relative && !_source_identity_is_separator(substring(root, root.length - 1, root.length)) {
+        separator = "/";
+    }
+    let mut normalized = root;
+    index = 0;
+    loop {
+        if index >= segments.length { break; }
+        if index == 0 { normalized = normalized + separator; } else {
+            normalized = normalized + "/";
+        }
+        normalized = normalized + segments[index];
+        index += 1;
+    }
+    return normalized;
+}
+
+fn _source_identity_strip_extension(path: string) -> string {
+    let mut last_slash: int = -1;
     let mut index: int = 0;
     loop {
-        if index >= source_path.length { break; }
-        let ch = source_path[index];
+        if index >= path.length { break; }
+        if substring(path, index, index + 1) == "/" { last_slash = index; }
+        index += 1;
+    }
+    let mut dot: int = -1;
+    index = path.length;
+    loop {
+        if index <= last_slash + 1 { break; }
+        index -= 1;
+        if substring(path, index, index + 1) == "." {
+            dot = index;
+            break;
+        }
+    }
+    if dot >= 0 { return substring(path, 0, dot); }
+    return path;
+}
+
+fn _source_identity_safe_prefix(prefix: string) -> boolean {
+    if prefix.length == 0 { return false; }
+    if substring(prefix, 0, 1) == "/" { return false; }
+    if prefix.length >= 2 && substring(prefix, 1, 2) == ":"
+        && _source_identity_is_drive_letter(substring(prefix, 0, 1)) {
+        return false;
+    }
+    if substring(prefix, prefix.length - 1, prefix.length) == "/" {
+        return false;
+    }
+    let mut start: int = 0;
+    loop {
+        if start >= prefix.length { break; }
+        let mut end = start;
+        loop {
+            if end >= prefix.length { break; }
+            if substring(prefix, end, end + 1) == "/" { break; }
+            end += 1;
+        }
+        let segment = substring(prefix, start, end);
+        if segment.length == 0 || segment == "." || segment == ".." {
+            return false;
+        }
+        start = end + 1;
+    }
+    return true;
+}
+
+fn _source_identity_normalize_prefix(prefix: string) -> string {
+    let mut normalized = "";
+    let mut index: int = 0;
+    loop {
+        if index >= prefix.length { break; }
+        let ch = substring(prefix, index, index + 1);
         if ch == "\\" { normalized = normalized + "/"; } else {
             normalized = normalized + ch;
         }
         index += 1;
     }
-
-    loop {
-        if normalized.length < 2 { break; }
-        if substring(normalized, 0, 2) != "./" { break; }
-        normalized = substring(normalized, 2, normalized.length);
-    }
-
-    // Compiler implementation capsules use their workspace identity even when
-    // a direct check/emit names the physical source path. Workspace builds
-    // already canonicalize these through `_cr_capsule_slug_for_path`; doing it
-    // here keeps direct tooling and resolver-driven mangling identical.
-    let compiler_capsule_prefix = "compiler/capsules/";
-    let mut last_capsule: int = -1;
-    let capsule_search_limit = normalized.length - compiler_capsule_prefix.length;
-    index = 0;
-    loop {
-        if index > capsule_search_limit { break; }
-        if substring(normalized, index, index + compiler_capsule_prefix.length) == compiler_capsule_prefix {
-            last_capsule = index;
-        }
-        index += 1;
-    }
-    if last_capsule >= 0 {
-        let role_start = last_capsule + compiler_capsule_prefix.length;
-        let src_separator = "/src/";
-        let mut separator: int = -1;
-        index = role_start;
-        loop {
-            if index + src_separator.length > normalized.length { break; }
-            if substring(normalized, index, index + src_separator.length) == src_separator {
-                separator = index;
-                break;
-            }
-            index += 1;
-        }
-        if separator > role_start {
-            let role = substring(normalized, role_start, separator);
-            let tail = substring(normalized, separator + src_separator.length, normalized.length);
-            normalized = "sfn/" + role + "/" + tail;
-        }
-    }
-
-    let compiler_prefix = "compiler/src/";
-    let runtime_prefix = "runtime/";
-    let mut start: int = 0;
-    let mut last_compiler: int = -1;
-    let compiler_search_limit = normalized.length - compiler_prefix.length;
-    index = 0;
-    loop {
-        if index > compiler_search_limit { break; }
-        if substring(normalized, index, index + compiler_prefix.length) == compiler_prefix {
-            last_compiler = index;
-        }
-        index += 1;
-    }
-    if last_compiler >= 0 { start = last_compiler + compiler_prefix.length; } else {
-        let mut is_absolute: boolean = false;
-        if normalized.length > 0 {
-            if normalized[0] == "/" { is_absolute = true; }
-        }
-        if !is_absolute {
-            if normalized.length >= 3 {
-                if normalized[1] == ":" {
-                    if normalized[2] == "/" { is_absolute = true; }
-                }
-            }
-        }
-        if is_absolute {
-            let mut last_runtime: int = -1;
-            let runtime_search_limit = normalized.length - runtime_prefix.length;
-            index = 0;
-            loop {
-                if index > runtime_search_limit { break; }
-                if substring(normalized, index, index + runtime_prefix.length) == runtime_prefix {
-                    last_runtime = index;
-                }
-                index += 1;
-            }
-            if last_runtime >= 0 { start = last_runtime; }
-        } else {
-            let mut first_named: int = 0;
-            loop {
-                let remaining = normalized.length - first_named;
-                if remaining >= 3 {
-                    if substring(normalized, first_named, first_named + 3) == "../" {
-                        first_named += 3;
-                        continue;
-                    }
-                }
-                if remaining >= 2 {
-                    if substring(normalized, first_named, first_named + 2) == "./" {
-                        first_named += 2;
-                        continue;
-                    }
-                }
-                break;
-            }
-            if first_named + runtime_prefix.length <= normalized.length {
-                if substring(normalized, first_named, first_named
-                    + runtime_prefix.length) == runtime_prefix {
-                    start = first_named;
-                }
-            }
-        }
-    }
-
-    let mut last_slash: int = -1;
-    index = start;
-    loop {
-        if index >= normalized.length { break; }
-        if normalized[index] == "/" { last_slash = index; }
-        index += 1;
-    }
-    let mut end: int = normalized.length;
-    let mut dot_index: int = -1;
-    index = normalized.length;
-    let dot_limit = last_slash + 1;
-    loop {
-        if index <= dot_limit { break; }
-        index -= 1;
-        if normalized[index] == "." {
-            dot_index = index;
-            break;
-        }
-    }
-    if dot_index >= 0 { end = dot_index; }
-
-    if end <= start { return "main"; }
-    let mut base = substring(normalized, start, end);
-    if base.length == 0 { return "main"; }
-    if base[0] == "/" { base = substring(base, 1, base.length); }
-    return base;
+    if !_source_identity_safe_prefix(normalized) { return ""; }
+    return normalized;
 }
 
-export { module_name_from_path };
+fn source_identity_for(source_path: string, owner: SourceIdentityOwner, role: string) -> SourceIdentityResult {
+    let source = _source_identity_normalize_path(source_path);
+    if role == source_role_standalone() {
+        let standalone = module_name_from_path(source);
+        return SourceIdentityResult {
+            ok: standalone.length > 0,
+            module_name: standalone
+        };
+    }
+    let source_root = _source_identity_normalize_path(owner.source_root);
+    if source.length == 0 || source_root.length == 0 {
+        return SourceIdentityResult { ok: false, module_name: "" };
+    }
+    let root_prefix = source_root + "/";
+    if source.length <= root_prefix.length {
+        return SourceIdentityResult { ok: false, module_name: "" };
+    }
+    if substring(source, 0, root_prefix.length) != root_prefix {
+        return SourceIdentityResult { ok: false, module_name: "" };
+    }
+    let relative = _source_identity_strip_extension(substring(source, root_prefix.length, source.length));
+    if relative.length == 0 {
+        return SourceIdentityResult { ok: false, module_name: "" };
+    }
+    if role == source_role_selected_binary() {
+        return SourceIdentityResult { ok: true, module_name: relative };
+    }
+    let mut declared_prefix = owner.manifest_name;
+    if role == source_role_runtime_provider() {
+        declared_prefix = owner.module_prefix;
+    }
+    let prefix = _source_identity_normalize_prefix(declared_prefix);
+    if prefix.length == 0 {
+        return SourceIdentityResult { ok: false, module_name: "" };
+    }
+    if role != source_role_library() && role != source_role_runtime_provider() {
+        return SourceIdentityResult { ok: false, module_name: "" };
+    }
+    return SourceIdentityResult {
+        ok: true,
+        module_name: prefix + "/" + relative
+    };
+}
+
+// Repository-agnostic identity for a source with no resolved member. Managed
+// workspace and runtime sources must use `source_identity_for` instead.
+fn module_name_from_path(source_path: string) -> string {
+    if source_path.length == 0 { return "main"; }
+    let normalized = _source_identity_normalize_path(source_path);
+    let mut stripped = _source_identity_strip_extension(normalized);
+    if stripped.length == 0 { return "main"; }
+    if substring(stripped, 0, 1) == "/" {
+        stripped = substring(stripped, 1, stripped.length);
+    }
+    if stripped.length == 0 { return "main"; }
+    return stripped;
+}
+
+export {
+    SourceIdentityOwner,
+    SourceIdentityResult,
+    _source_identity_normalize_path,
+    empty_source_identity_owner,
+    module_name_from_path,
+    source_identity_for,
+    source_role_library,
+    source_role_runtime_provider,
+    source_role_selected_binary,
+    source_role_standalone
+};

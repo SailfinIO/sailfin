@@ -34,3 +34,23 @@ test "import-context reader: native-only capsule entry takes the mod fallback" !
     assert context.module_aliases[0].import_slug == "sfn/example";
     assert context.module_aliases[0].provider_slug == "sfn/example/mod";
 }
+
+test "import-context reader: directory import follows a physical mod alias" ![io] {
+    let root = fs.mkdtemp("sfn-import-context-alias-");
+    fs.createDirectory(root + "/compiler/src/capsule_resolver", true);
+    fs.createDirectory(root + "/capsule_resolver", true);
+    let native_text = ".module capsule_resolver/mod\n";
+    fs.writeFile(root + "/capsule_resolver/mod.sfn-asm", native_text);
+    fs.writeFile(root + "/compiler/src/capsule_resolver/mod.slugalias", "capsule_resolver/mod");
+
+    let imports: NativeImport[] = [NativeImport {
+        kind: "import", module: "../../src/capsule_resolver", specifiers: []
+    }];
+    let context = load_imported_module_context(imports, "compiler/tests/unit/probe", root);
+
+    assert context.native_texts.length == 1;
+    assert context.native_texts[0] == native_text;
+    assert context.module_aliases.length == 1;
+    assert context.module_aliases[0].import_slug == "compiler/src/capsule_resolver";
+    assert context.module_aliases[0].provider_slug == "capsule_resolver/mod";
+}

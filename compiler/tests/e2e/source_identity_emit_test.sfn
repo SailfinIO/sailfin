@@ -1,0 +1,118 @@
+// SFN-930: direct emit must resolve the same manifest-owned identity as build
+// and relative traversal, without a `--module-name` override.
+import { contains, trim_right } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut out: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { out.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { out.push("HOME=" + home); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { out.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return out;
+}
+
+fn _cwd() -> string ![io] {
+    let exit = process.run_capture(["pwd"], []);
+    let out = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return trim_right(out);
+}
+
+fn _emit_native(source: string, output: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", output, "native", source], _child_env());
+    let _stdout = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    if exit != 0 || !fs.exists(output) { return ""; }
+    return fs.readFile(output);
+}
+
+test "direct emit: arbitrary library root uses manifest-prefixed identity" ![io] {
+    let ws = fs.mkdtemp("sfn-identity-emit-lib-");
+    fs.createDirectory(ws + "/private/parser/src", true);
+    fs.writeFile(ws + "/workspace.toml", "[workspace]\nmembers = [\"private/parser\"]\n");
+    fs.writeFile(ws + "/private/parser/capsule.toml", "[capsule]\nname = \"sfn/syntax\"\nversion = \"0.0.1\"\n\n[capabilities]\nrequired = []\n\n[build]\nkind = \"library\"\n");
+    let source = ws + "/private/parser/src/ast.sfn";
+    fs.writeFile(source, "struct Ast {}\n");
+    let native = _emit_native(source, ws + "/ast.sfn-asm");
+    assert contains(native, ".module sfn/syntax/ast");
+}
+
+test "direct emit: selected binary is relative to its source root" ![io] {
+    let ws = fs.mkdtemp("sfn-identity-emit-bin-");
+    fs.createDirectory(ws + "/driver/src/cli", true);
+    fs.writeFile(ws + "/workspace.toml", "[workspace]\nmembers = [\"driver\"]\n");
+    fs.writeFile(ws + "/driver/capsule.toml", "[capsule]\nname = \"sfn/compiler\"\nversion = \"0.0.1\"\n\n[capabilities]\nrequired = []\n\n[build]\nkind = \"binary\"\nentry = \"src/cli/main.sfn\"\n");
+    let source = ws + "/driver/src/cli/main.sfn";
+    fs.writeFile(source, "fn main() {}\n");
+    let native = _emit_native(source, ws + "/main.sfn-asm");
+    assert contains(native, ".module cli/main");
+}
+
+test "direct emit: unlisted nested binary outranks containing workspace library" ![io] {
+    let ws = fs.mkdtemp("sfn-identity-emit-nested-bin-");
+    fs.createDirectory(ws + "/outer/src/tool/src/cli", true);
+    fs.writeFile(ws + "/workspace.toml", "[workspace]\nmembers = [\"outer\"]\n");
+    fs.writeFile(ws + "/outer/capsule.toml", "[capsule]\nname = \"sfn/outer\"\nversion = \"0.0.1\"\n\n[build]\nkind = \"library\"\n");
+    fs.writeFile(ws + "/outer/src/tool/capsule.toml", "[capsule]\nname = \"sfn/nested-tool\"\nversion = \"0.0.1\"\n\n[build]\nkind = \"binary\"\nentry = \"src/cli/main.sfn\"\n");
+    let source = ws + "/outer/src/tool/src/cli/main.sfn";
+    fs.writeFile(source, "fn main() {}\n");
+    let native = _emit_native(source, ws + "/nested-main.sfn-asm");
+    assert contains(native, ".module cli/main");
+}
+
+test "absolute standalone entry converges with relative imports" ![io] {
+    let root = fs.mkdtemp("sfn-identity-standalone-absolute-");
+    fs.writeFile(root + "/dep.sfn", "fn answer() -> int { return 42; }\n\nexport { answer };\n");
+    let main_source = root + "/main.sfn";
+    fs.writeFile(main_source, "import { answer } from \"./dep\";\n\nfn main() -> int { return answer() - 42; }\n");
+    let exit = process.run_capture([_sfn_bin(), "run", main_source], _child_env());
+    let _stdout = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "direct emit: runtime prelude identity agrees for relative and absolute paths" ![io] {
+    let root = fs.mkdtemp("sfn-identity-runtime-prelude-");
+    let relative_native = _emit_native("runtime/prelude.sfn", root
+        + "/relative.sfn-asm");
+    let absolute_native = _emit_native(_cwd() + "/runtime/prelude.sfn", root
+        + "/absolute.sfn-asm");
+    assert contains(relative_native, ".module runtime/prelude");
+    assert contains(absolute_native, ".module runtime/prelude");
+}
+
+test "direct emit: unlisted nested runtime prelude outranks containing library" ![io] {
+    let ws = fs.mkdtemp("sfn-identity-nested-runtime-prelude-");
+    fs.createDirectory(ws + "/outer/src/provider/sfn", true);
+    fs.writeFile(ws + "/workspace.toml", "[workspace]\nmembers = [\"outer\"]\n");
+    fs.writeFile(ws + "/outer/capsule.toml", "[capsule]\nname = \"sfn/outer\"\nversion = \"0.0.1\"\n\n[build]\nkind = \"library\"\n");
+    fs.writeFile(ws + "/outer/src/provider/capsule.toml", "[capsule]\nname = \"sfn/nested-runtime\"\nversion = \"0.0.1\"\n\n[build]\nkind = \"runtime\"\nsfn-source-root = \"sfn\"\nsfn-module-prefix = \"runtime/sfn\"\nprelude-entry = \"prelude.sfn\"\nsfn-sources = []\n");
+    let prelude = ws + "/outer/src/provider/prelude.sfn";
+    fs.writeFile(prelude, "fn prelude_probe() {}\n");
+    let native = _emit_native(prelude, ws + "/nested-prelude.sfn-asm");
+    assert contains(native, ".module runtime/prelude");
+}
+
+test "relative traversal: absolute-path library test converges on provider identity" ![io] {
+    let ws = fs.mkdtemp("sfn-identity-relative-");
+    fs.createDirectory(ws + "/lib/src", true);
+    fs.createDirectory(ws + "/lib/tests", true);
+    fs.writeFile(ws + "/workspace.toml", "[workspace]\nmembers = [\"lib\"]\n");
+    fs.writeFile(ws + "/lib/capsule.toml", "[capsule]\nname = \"sfn/example\"\nversion = \"0.0.1\"\n\n[capabilities]\nrequired = []\n\n[build]\nkind = \"library\"\n");
+    fs.writeFile(ws + "/lib/src/mod.sfn", "fn answer() -> int { return 42; }\n");
+    let test_source = ws + "/lib/tests/mod_test.sfn";
+    fs.writeFile(test_source, "import { answer } from \"../src/mod\";\n\ntest \"provider identity\" { assert answer() == 42; }\n");
+    let exit = process.run_capture([_sfn_bin(), "test", test_source], _child_env());
+    let _stdout = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    assert exit == 0;
+}

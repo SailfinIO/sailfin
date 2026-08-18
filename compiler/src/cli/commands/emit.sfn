@@ -46,11 +46,11 @@ import {
 import { _write_llvm_text } from "../../build/cache";
 import { _read_import_deps, _resolve_self_path } from "../../build/paths";
 import { stage_capsule_imports_for_emit } from "../../capsule_resolver";
+import { module_name_for_source } from "../../capsule_resolver/identity";
 import { emit_llvm_with_retry, emit_parse_nonneg_int } from "../../emit_helpers";
 import {
     compile_to_llvm_with_module_timed,
     compile_to_sailfin,
-    module_name_from_path,
     print_llvm_with_module,
     print_native_text_with_module_gated,
     print_typed_ssa_with_module,
@@ -74,7 +74,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
     let timing: boolean = has_flag(matches, "timing");
     let out_path: string = get_or(matches, "o", "");
     // Stage D PR3: explicit module-name override for symbol mangling of
-    // cross-capsule deps; empty falls back to `module_name_from_path(path)`.
+    // cross-capsule deps; empty resolves the path through workspace manifests.
     let module_name_override: string = get_or(matches, "module-name", "");
     // #957: root of the staged import-context tree. When set, the llvm-emit
     // path reads `<root>/<module-name>.import-deps` so callee-effect
@@ -125,7 +125,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
         }
     }
     let source = fs.readFile(path);
-    let mut module_name = module_name_from_path(path);
+    let mut module_name = module_name_for_source(path);
     if module_name_override.length > 0 { module_name = module_name_override; }
     let has_out = out_path.length > 0;
     if strings_equal(mode, "llvm") {

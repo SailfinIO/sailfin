@@ -12,39 +12,49 @@ import {
     _det_slug_of
 } from "../../src/cli/commands/dev_det_sweep";
 
-test "det-sweep: slug strips compiler/src prefix" {
+test "det-sweep: slug strips compiler/src prefix" ![io] {
     assert _det_slug_of("compiler/src/main.sfn") == "main";
 }
 
-test "det-sweep: slug canonicalizes the codegen-llvm capsule" {
+test "det-sweep: slug canonicalizes the codegen-llvm capsule" ![io] {
     assert _det_slug_of("compiler/capsules/codegen-llvm/src/lowering/entrypoints.sfn") == "sfn/codegen-llvm/lowering/entrypoints";
 }
 
-test "det-sweep: slug canonicalizes a compiler implementation capsule" {
+test "det-sweep: slug canonicalizes a compiler implementation capsule" ![io] {
     assert _det_slug_of("compiler/capsules/syntax/src/ast.sfn") == "sfn/syntax/ast";
 }
 
-test "det-sweep: slug canonicalizes the analyzer capsule" {
+test "det-sweep: slug canonicalizes the analyzer capsule" ![io] {
     assert _det_slug_of("compiler/capsules/analyzer/src/analyzer.sfn") == "sfn/analyzer/analyzer";
 }
 
-test "det-sweep: slug canonicalizes the codegen capsule" {
+test "det-sweep: slug canonicalizes the codegen capsule" ![io] {
     assert _det_slug_of("compiler/capsules/codegen/src/emit_native.sfn") == "sfn/codegen/emit_native";
 }
 
-test "det-sweep: slug canonicalizes a nested compiler capsule module" {
+test "det-sweep: slug canonicalizes a nested compiler capsule module" ![io] {
     assert _det_slug_of("compiler/capsules/syntax/src/parser/mod.sfn") == "sfn/syntax/parser/mod";
 }
 
-test "det-sweep: slug re-prefixes runtime for top-level runtime module" {
+test "det-sweep: slug re-prefixes runtime for top-level runtime module" ![io] {
     assert _det_slug_of("runtime/prelude.sfn") == "runtime/prelude";
 }
 
-test "det-sweep: slug re-prefixes runtime for nested runtime module" {
+test "det-sweep: slug re-prefixes runtime for nested runtime module" ![io] {
     assert _det_slug_of("runtime/sfn/io.sfn") == "runtime/sfn/io";
 }
 
-test "det-sweep: safe name flattens slashes to underscores" {
+test "det-sweep: arbitrary library root uses manifest identity" ![io] {
+    let ws = fs.mkdtemp("sfn-det-identity-");
+    fs.createDirectory(ws + "/private/parser/src", true);
+    fs.writeFile(ws + "/workspace.toml", "[workspace]\nmembers = [\"private/parser\"]\n");
+    fs.writeFile(ws + "/private/parser/capsule.toml", "[capsule]\nname = \"sfn/syntax\"\nversion = \"0.0.1\"\n\n[build]\nkind = \"library\"\n");
+    let source = ws + "/private/parser/src/ast.sfn";
+    fs.writeFile(source, "struct Ast {}\n");
+    assert _det_slug_of(source) == "sfn/syntax/ast";
+}
+
+test "det-sweep: safe name flattens slashes to underscores" ![io] {
     assert _det_safe_of("runtime/sfn/io.sfn") == "runtime_sfn_io";
 }
 

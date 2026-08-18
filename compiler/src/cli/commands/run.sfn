@@ -47,9 +47,10 @@ import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import { build_target_os, target_exe_name } from "../../build/target";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { prepare_project_capsules } from "../../capsule_resolver";
+import { module_name_for_source } from "../../capsule_resolver/identity";
 import { ResolverConsumer } from "../../capsule_resolver/types";
 import { format_backend_failure_banner } from "../../ice";
-import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
+import { compile_to_llvm_file_with_module } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
 import { toolchain_gate_or_dispatch } from "./toolchain";
@@ -158,7 +159,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let capsule_lls = run_capsule_result.ll_paths;
 
     let source = fs.readFile(input_path);
-    let module_name = module_name_from_path(input_path);
+    let module_name = module_name_for_source(input_path);
     let ok = compile_to_llvm_file_with_module(source, module_name, ll_path, "");
     if !ok {
         print("failed to compile LLVM for: " + input_path);

@@ -523,6 +523,17 @@ fn toml_get_sfn_sources(text: string) -> string[] {
     return _toml_split_lines_into_array(toml_get_string_array(text, "build", "sfn-sources"));
 }
 
+// SFEP-0072: the physical root and stable virtual prefix for runtime-provider
+// Sailfin sources. Kept as string getters rather than SailToml fields so the
+// parser's serialized shape remains seed-compatible.
+fn toml_get_sfn_source_root(text: string) -> string {
+    return toml_get_string(text, "build", "sfn-source-root");
+}
+
+fn toml_get_sfn_module_prefix(text: string) -> string {
+    return toml_get_string(text, "build", "sfn-module-prefix");
+}
+
 // SFN-882: read one gate list from `[sfn-source-gates]` — the sources a runtime
 // capsule compiles only when the build's declared effect surface demands
 // `effect`. Absent key → `[]`, which reads as "nothing is gated on this

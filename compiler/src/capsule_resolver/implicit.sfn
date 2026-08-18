@@ -5,14 +5,9 @@
 // project's own `src/` tree, the workspace-implicit path (a sibling member
 // imported by scope name), and the cache-implicit path (a scoped import
 // resolved against `~/.sfn/cache` on a manifest-less bare build).
-//
-// `int_to_string` comes from the `sfn/strings` standard-library capsule rather
-// than via `../main`; `module_name_from_path` is defined in `main.sfn` and has
-// no other home.
 import { int_to_string } from "sfn/strings";
 
 import { _cr_source_imports_host, collect_scoped_import_specs } from "../capsule_import_scan";
-import { module_name_from_path } from "../module_paths";
 import { substring } from "../string_utils";
 import { toml_get_dependencies } from "../toml_parser";
 import { workspace_member_for_spec } from "./capability";
@@ -35,7 +30,7 @@ import {
     capsule_origin_workspace,
     capsule_provenance_rejects
 } from "./provenance";
-import { _cr_relative_slug, enumerate_relative_sources } from "./relative";
+import { _cr_relative_slug_with_members, enumerate_relative_sources } from "./relative";
 import { CapsuleSource, ResolverConsumer, WorkspaceMember } from "./types";
 
 // Stage D PR3: walk every `.sfn` under `<project_root>/src/` for
@@ -52,21 +47,20 @@ import { CapsuleSource, ResolverConsumer, WorkspaceMember } from "./types";
 // `.sfn` under `compiler/src/` is fed into the build, regardless
 // of whether anything imports it.
 //
-// Slugs come from the same `_cr_relative_slug` helper the
-// relative-import walker uses, which delegates to
-// `module_name_from_path`. That gives a slug rooted at
+// Slugs come from the same manifest-aware source identity helper the
+// relative-import walker uses. That gives a slug rooted at
 // `compiler/src/` (e.g. `cli_main`, `llvm/lowering/entrypoints`)
 // — so when a file IS reachable from the entry, the
 // relative-import walk and this walker emit the same slug for it
 // and `_cr_resolve_and_dedupe`'s slug-collision check sees them
 // as exact duplicates (same path + same slug → silent dedupe).
 //
-// `entry_path` is forwarded to `_cr_relative_slug` for parameter
+// `entry_path` is forwarded to the relative identity helper for parameter
 // stability with the existing call shape; the helper ignores its
-// `entry_dir` argument and slugs purely off `module_name_from_path`,
+// `entry_dir` argument and resolves the owning workspace member,
 // so this walker stays in lockstep regardless of which entry the
 // `-p` resolution picked.
-fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) -> CapsuleSource[] ![io] {
+fn enumerate_binary_capsule_sources(project_root: string, entry_path: string, members: WorkspaceMember[]) -> CapsuleSource[] ![io] {
     let mut out: CapsuleSource[] = [];
     if project_root.length == 0 { return out; }
     let src_dir = _cr_path_join(project_root, "src");
@@ -119,7 +113,7 @@ fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) ->
                 // contract in `enumerate_relative_sources` so the
                 // dedupe loop never sees the entry twice.
                 if !strings_equal(full, entry_path) {
-                    let slug = _cr_relative_slug(entry_dir, full);
+                    let slug = _cr_relative_slug_with_members(entry_dir, full, members);
                     out.push(CapsuleSource {
                         spec: "", source_path: full, slug: slug, ll_path: "",
                         // The project's own `src/` tree — the thing being

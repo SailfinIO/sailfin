@@ -88,7 +88,6 @@ import { _LockEntry, lock_get_versions } from "../lock";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports,
-    module_name_from_path,
     write_native_text_file_with_module
 } from "../main";
 import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
@@ -128,6 +127,7 @@ import {
     _cr_locate_cached_capsule_src_latest,
     enumerate_capsule_sources
 } from "./discovery";
+import { module_name_for_source } from "./identity";
 import {
     _cr_any_entry_imports_host,
     _cr_dep_specs_from_text,
@@ -448,7 +448,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     if consumer.walk_project_src && entry_paths.length > 0 {
         let entry_path = entry_paths[0];
         if fs.exists(entry_path) {
-            let entry_slug = module_name_from_path(entry_path);
+            let entry_slug = module_name_for_source(entry_path);
             let mut entry_src: CapsuleSource[] = [];
             entry_src.push(CapsuleSource {
                 spec: "", source_path: entry_path, slug: entry_slug, ll_path: "",

@@ -35,7 +35,6 @@ import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports
 } from "../main";
-import { module_name_from_path } from "../module_paths";
 import { resolve_compiler_version_for_cache } from "../version";
 import {
     _cr_dirname,

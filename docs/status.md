@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-17 (SFN-751, SFN-894). Seed pinned to `0.10.0` (`bootstrap.toml`
+Updated: 2026-08-18 (SFN-930). Seed pinned to `0.10.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -131,6 +131,15 @@ here.
   the in-tree content-addressed cache, and determinism checks now include the
   compiler's per-module sidecar data rather than degrading to a binary-only
   comparison.
+- **Manifest-aware source identity** (SFN-930, SFEP-0072 §3.2). Module names
+  are derived from the resolved workspace member and build role rather than
+  physical `compiler/`, `capsules/`, or `runtime/` directory spellings. A
+  selected binary is relative to its declared source root; a library is
+  prefixed by its manifest name; and a runtime provider uses the declared
+  `[build] sfn-source-root` plus `sfn-module-prefix`. Build, run, check, test,
+  direct emit, relative traversal, runtime-object caching, and determinism all
+  consume that identity, so a physical source-root move preserves symbols and
+  cache keys while manifest identity changes invalidate them deliberately.
 - **Build driver.** `<seed> build -p compiler` is the sole self-build driver
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the

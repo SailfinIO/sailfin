@@ -18,8 +18,9 @@ import {
 } from "../../../build_cache";
 import { _env_flag, _legacy_flag_file } from "../../../build_flags";
 import { prepare_project_capsules_for_test } from "../../../capsule_resolver";
+import { module_name_for_source } from "../../../capsule_resolver/identity";
 import { format_backend_failure_banner } from "../../../ice";
-import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
+import { compile_tests_to_llvm_file_with_module_imports } from "../../../main";
 import {
     TestEntry,
     collect_test_entries,
@@ -217,7 +218,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         if json_output { entries = per_file_entries[index]; }
         if !json_output { print("test: " + path); }
         let source = fs.readFile(path);
-        let module_name = module_name_from_path(path);
+        let module_name = module_name_for_source(path);
 
         if dump_sources {
             let safe = _sanitize_filename_cmd(path);

@@ -108,6 +108,8 @@ fn _setup_workspace(ws: string) ![io] {
         + "required = []\n\n"
         + "[build]\n"
         + "kind = \"runtime\"\n"
+        + "sfn-source-root = \"../sfn\"\n"
+        + "sfn-module-prefix = \"runtime/sfn\"\n"
         + "c-sources = []\n"
         + "ll-sources = []\n"
         + "sfn-sources = [\"../sfn/structlib.sfn\", \"../sfn/structuse.sfn\", "

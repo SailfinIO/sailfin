@@ -24,13 +24,8 @@
 // workspace.toml (which registers the in-tree capsules/ tree; no symlinks
 // required). Content is deterministic so concurrent parallel runs are safe.
 //
-// NOTE: the bash original `cd`'d into the scratch project and built `-p .`,
-// which made `module_name_from_path` yield the bare project-relative slug
-// `src/util`. The native runner cannot change CWD, so it builds
-// `-p build/sfn-ir-layout-test`; the relative module's slug then carries
-// the project-root prefix (`build/sfn-ir-layout-test/src/util`). The
-// slug-alignment assertions therefore lock the CWD-independent invariant:
-// the slug ends with `src/util` and its tail matches the ir_path tail.
+// The manifest-aware source identity makes this independent of the runner's
+// CWD: `demo/widget/src/util.sfn` is always `demo/widget/util`.
 //
 // NOTE: assert on captured output / parse JSON with `sfn/strings`
 // predicates — the `sfn/test` `expect_*` matchers are `![pure]` and cannot
@@ -210,10 +205,10 @@ test "ir layout: manifest dep .ll lands at build/capsules/sfn/math/ir/mod.ll" ![
 }
 
 // ---- Test 3: relative-import .ll lives under the consumer's tree ----
-test "ir layout: relative-import .ll lands at build/capsules/demo/widget/ir/src/util.ll" ![io] {
+test "ir layout: relative-import .ll lands at build/capsules/demo/widget/ir/util.ll" ![io] {
     let report = _report_path("rel");
     assert _run_build_json(report) == 0;
-    assert fs.exists("build/capsules/demo/widget/ir/src/util.ll");
+    assert fs.exists("build/capsules/demo/widget/ir/util.ll");
 }
 
 // ---- Test 4: legacy mangled paths are NOT written for manifest deps ----
@@ -333,15 +328,14 @@ test "ir layout: modules[] entries align slug + ir_path for dep + relative routi
 // ---- Test 9: relative-import modules[] entry has slug + ir_path locked ----
 // The relative `./util` source must produce a {slug, ir_path} pair where
 // ir_path lives under the consumer's tree and the slug is the
-// project-relative path-shaped form ending in `src/util` (the CWD-prefix
-// is carried because the runner builds `-p <root>`, not `-p .`).
-test "ir layout: modules[] surfaces relative-import entry with slug ending src/util + consumer-tree ir_path" ![io] {
+// manifest-owned `demo/widget/util` identity.
+test "ir layout: modules[] surfaces relative-import manifest identity + consumer-tree ir_path" ![io] {
     let report = _report_path("modrel");
     assert _run_build_json(report) == 0;
     let sidecar = fs.readFile(_sidecar());
-    let ir_path = "build/capsules/demo/widget/ir/src/util.ll";
+    let ir_path = "build/capsules/demo/widget/ir/util.ll";
     assert _count_modules_with_ir_path(sidecar, ir_path) == 1;
     let slug = _slug_for_ir_path(sidecar, ir_path);
     assert slug.length > 0;
-    assert ends_with(slug, "src/util");
+    assert slug == "demo/widget/util";
 }

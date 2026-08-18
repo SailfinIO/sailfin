@@ -35,7 +35,7 @@ import {
     _shell_read_cmd
 } from "../../build/fs";
 import { _ensure_dir, _resolve_self_path } from "../../build/paths";
-import { module_name_from_path } from "../../main";
+import { module_name_for_source } from "../../capsule_resolver/identity";
 import { char_code_at_text, index_of } from "../../string_utils";
 import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
@@ -85,7 +85,9 @@ fn _fmt_secs(ms: int) -> string {
 // reusing the same prefix-stripping logic the emit path itself uses for
 // symbol mangling, so the slug passed to `--module-name` matches the
 // import-context's on-disk artifact names exactly.
-fn _bench_slug(src: string) -> string { return module_name_from_path(src); }
+fn _bench_slug(src: string) -> string ![io] {
+    return module_name_for_source(src);
+}
 
 // Flatten a slug's slashes into `__` for a filesystem-safe, human-readable
 // module label (e.g. `parser/mod` -> `parser__mod`), matching the bash

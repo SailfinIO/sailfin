@@ -9,10 +9,10 @@
 // (test-infra Phase 3, epic #842). The original `cd`'d into a throwaway
 // capsule and ran `sfn build -p .`; here we drive `sfn build -p <abs>`
 // from the runner's repo-root cwd. The per-module sidecar lands at the
-// repo-root-relative
-// `build/compiler/import-context/<fixture-abs-path>/src/util/sib.import-deps`
-// (slug derived from the source's absolute path, which is unique per
-// test tag so concurrent runs in the parallel pool never collide).
+// source-root-relative
+// `build/compiler/import-context/util/sib.import-deps`. The selected binary
+// owns the source identity, so moving the fixture capsule does not rename the
+// module or its sidecars.
 //
 // Before #984, `_cr_stage_import_deps` resolved import slugs against
 // `resolved.sources` ONLY, which excludes the `-p` entry; an import of
@@ -108,12 +108,9 @@ fn _build(root: string) -> BuildRun ![io] {
     return BuildRun { exit: exit, out: out + err };
 }
 
-// The slug for the sibling sidecar is derived from the source's absolute
-// path: `build/compiler/import-context/<root-without-leading-slash>/src/util/sib.import-deps`.
-fn _sidecar_path(root: string) -> string {
-    // Strip the leading "/" from the absolute root.
-    let rel = substring(root, 1, root.length);
-    return "build/compiler/import-context/" + rel + "/src/util/sib.import-deps";
+// Selected-binary module identities are relative to the manifest source root.
+fn _sidecar_path() -> string {
+    return "build/compiler/import-context/util/sib.import-deps";
 }
 
 // ---- Test 1: good sibling — its sidecar lists the entry's .sfn-asm ----
@@ -125,7 +122,7 @@ test "effect gate entry: sibling .import-deps lists the -p entry's .sfn-asm" ![i
     _write_sib(root, " ![io]");
     let _ = _build(root);
 
-    let sidecar = _sidecar_path(root);
+    let sidecar = _sidecar_path();
     assert fs.exists(sidecar);
     let body = fs.readFile(sidecar);
     assert find(body, "main.sfn-asm", 0) >= 0;

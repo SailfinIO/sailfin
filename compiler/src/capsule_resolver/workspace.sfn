@@ -6,7 +6,10 @@
 // each member's canonical name + `src/` directory into `WorkspaceMember[]`.
 import { substring } from "../string_utils";
 import {
+    toml_get_build_kind,
     toml_get_name,
+    toml_get_sfn_module_prefix,
+    toml_get_sfn_source_root,
     toml_get_workspace_default_members,
     toml_get_workspace_exclude,
     toml_get_workspace_members
@@ -71,12 +74,10 @@ fn discover_workspace_root(start_dir: string) -> string ![io] {
     return "";
 }
 
-// Read the canonical name of a workspace member by loading its capsule.toml.
-// Returns "" if the member directory has no capsule.toml or no [capsule].name.
-fn _cr_read_member_name(workspace_root: string, member_path: string) -> string ![io] {
+fn _cr_read_member_manifest(workspace_root: string, member_path: string) -> string ![io] {
     let manifest = _cr_path_join(_cr_path_join(workspace_root, member_path), "capsule.toml");
     if !fs.exists(manifest) { return ""; }
-    return toml_get_name(fs.readFile(manifest));
+    return fs.readFile(manifest);
 }
 
 // Check that a workspace member path is safe to join onto the workspace
@@ -238,16 +239,24 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
             i += 1;
             continue;
         }
-        let name = _cr_read_member_name(workspace_root, path);
+        let manifest_text = _cr_read_member_manifest(workspace_root, path);
+        let name = toml_get_name(manifest_text);
         if name.length == 0 {
             print.err("workspace: skipping member \"" + path
                 + "\" — capsule.toml missing or has no [capsule].name");
             i += 1;
             continue;
         }
-        let src = _cr_path_join(_cr_path_join(workspace_root, path), "src");
+        let kind = toml_get_build_kind(manifest_text);
+        let mut source_root = "src";
+        let mut module_prefix = "";
+        if strings_equal(kind, "runtime") {
+            source_root = toml_get_sfn_source_root(manifest_text);
+            module_prefix = toml_get_sfn_module_prefix(manifest_text);
+        }
+        let src = _cr_path_join(_cr_path_join(workspace_root, path), source_root);
         out.push(WorkspaceMember {
-            name: name, member_path: path, src_dir: src
+            name: name, member_path: path, src_dir: src, build_kind: kind, module_prefix: module_prefix
         });
         i += 1;
     }

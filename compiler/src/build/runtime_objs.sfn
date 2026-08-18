@@ -23,7 +23,13 @@ import {
 import { _env_flag } from "../build_flags";
 import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
 import { locate_runtime_dep_capsule_src } from "../capsule_resolver/locate";
-import { module_name_from_path } from "../main";
+import {
+    SourceIdentityOwner,
+    module_name_from_path,
+    source_identity_for,
+    source_role_library,
+    source_role_runtime_provider
+} from "../module_paths";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { contains_string } from "../string_utils";
 import { resolve_compiler_version } from "../version";
@@ -142,61 +148,29 @@ fn _runtime_obj_stem(cap_prefix: string, src: string, opt_flag: string, target_t
     return cap_prefix + _path_basename(src) + "-" + target_tag + opt_flag;
 }
 
-// SFN-146: derive a STABLE runtime-relative module slug (`runtime/<rel>`)
-// for a runtime-capsule source, rooted at the capsule's on-disk root
-// (`manifest_dir`) rather than at whatever `runtime/` segment happens to
-// appear in the absolute path. `module_name_from_path` roots an absolute
-// source at its last literal `runtime/` path segment, so a source reached
-// through an out-of-tree `SAILFIN_RUNTIME_ROOT` whose directory is not
-// named `runtime` (e.g. `/tmp/x/runtime-copy/sfn/type_meta.sfn`) found no
-// such segment and slugged to its full absolute path. That path-derived
-// slug neither starts with `runtime/` — so `apply_module_symbol_mangling`
-// mangled every stable runtime ABI symbol — nor matched
-// `type_descriptors.sfn`'s `_module_owns_register`, which then emitted a
-// `sfn_type_register` ctor + declare into `type_meta`'s own module and
-// collided with its real definition (`invalid redefinition of function`).
-// Re-anchoring at `manifest_dir` and re-prefixing with the canonical
-// `runtime/` reproduces the in-tree slug byte-for-byte and keeps both
-// invariants regardless of where the root lives. `manifest_dir` is
-// lexically normalized at construction (runtime_capsule_resolver.sfn), the
-// same normalization the resolved `src` paths get, so it is a clean prefix
-// of every runtime source even for a non-canonical `SAILFIN_RUNTIME_ROOT`
-// (trailing slash, `./`). The `module_name_from_path` fallback is a
-// defensive last resort for a `src` genuinely not under `manifest_dir`.
-fn _runtime_module_slug(manifest_dir: string, src: string) -> string {
-    if manifest_dir.length > 0 {
-        let prefix = manifest_dir + "/";
-        if src.length > prefix.length && substring(src, 0, prefix.length) == prefix {
-            let rel = substring(src, prefix.length, src.length);
-            return "runtime/" + _strip_module_ext(rel);
-        }
-    }
+// Derive runtime provider identity from its declared physical root and stable
+// virtual prefix. Relocating the provider therefore preserves its ABI names.
+fn _runtime_module_slug(cap: RuntimeCapsuleArtifacts, src: string) -> string {
+    let owner = SourceIdentityOwner {
+        manifest_name: cap.capsule_name,
+        member_root: cap.manifest_dir,
+        source_root: cap.sfn_source_root,
+        module_prefix: cap.sfn_module_prefix
+    };
+    let identity = source_identity_for(src, owner, source_role_runtime_provider());
+    if identity.ok { return identity.module_name; }
+    // The prelude entry remains outside the declared runtime source root until
+    // SFEP-0072's dedicated adoption slice. Route that compatibility entry
+    // through the same service with its historical manifest-root role.
+    let legacy_owner = SourceIdentityOwner {
+        manifest_name: cap.capsule_name,
+        member_root: cap.manifest_dir,
+        source_root: _dirname(cap.sfn_source_root),
+        module_prefix: "runtime"
+    };
+    let legacy = source_identity_for(src, legacy_owner, source_role_runtime_provider());
+    if legacy.ok { return legacy.module_name; }
     return module_name_from_path(src);
-}
-
-// Strip the final path segment's extension: `sfn/type_meta.sfn` ->
-// `sfn/type_meta`, `prelude.sfn` -> `prelude`. Mirrors the extension
-// handling in `module_name_from_path` (last `.` after the last `/`).
-fn _strip_module_ext(rel: string) -> string {
-    let mut last_slash: int = -1;
-    let mut i: int = 0;
-    loop {
-        if i >= rel.length { break; }
-        if substring(rel, i, i + 1) == "/" { last_slash = i; }
-        i += 1;
-    }
-    let mut dot: int = -1;
-    let mut k: int = rel.length;
-    loop {
-        if k <= last_slash + 1 { break; }
-        k -= 1;
-        if substring(rel, k, k + 1) == "." {
-            dot = k;
-            break;
-        }
-    }
-    if dot >= 0 { return substring(rel, 0, dot); }
-    return rel;
 }
 
 // Content-addressed cache gate for a runtime object compile (#632).
@@ -595,7 +569,7 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if sj >= srcs.length { break; }
             let src = srcs[sj];
-            let slug = _runtime_module_slug(cap.manifest_dir, src);
+            let slug = _runtime_module_slug(cap, src);
             let obj_base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag)
                 + ".o";
             // SFN-870: the slug fold sits inside the target fold, exactly
@@ -611,7 +585,7 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
             // The prelude entry is never staged (#1288), so it has no
             // `.sfn-asm` context entry to stamp.
             if sj < cap.sfn_sources.length {
-                let asm_key = runtime_object_cache_key_with_identity(src, "", compiler_identity);
+                let asm_key = runtime_asm_cache_key(src, slug, compiler_identity);
                 if asm_key.length > 0 {
                     text = text + "asm/" + slug + "=" + sha256_hex_of_string(asm_key)
                         + "\n";
@@ -864,9 +838,9 @@ fn _runtime_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io]
     if to_stderr { print.err(out); } else { print(out); }
 }
 
-fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, manifest_dir: string, target_triple: string) -> RuntimeSfnObjectPlan ![io] {
+fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, cap: RuntimeCapsuleArtifacts, target_triple: string) -> RuntimeSfnObjectPlan ![io] {
     let mut stats = empty_cache_stats();
-    let slug = _runtime_module_slug(manifest_dir, src);
+    let slug = _runtime_module_slug(cap, src);
     let target_tag = target_artifact_tag(target_triple);
     let stem = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
     let ll_path = _path_join(out_dir, stem + ".ll");
@@ -1420,7 +1394,7 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let slug = _runtime_module_slug(cap.manifest_dir, src);
+            let slug = _runtime_module_slug(cap, src);
             if !_stage_one_runtime_sfn_import_context(self_path, src, slug, ctx_root, compiler_identity, shared_cache_root) {
                 return false;
             }
@@ -1485,8 +1459,11 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
                 fi += 1;
                 if dep_src.length <= prefix.length { continue; }
                 if substring(dep_src, 0, prefix.length) != prefix { continue; }
-                let rel = substring(dep_src, prefix.length, dep_src.length);
-                let dep_slug = spec + "/" + _strip_module_ext(rel);
+                let identity = source_identity_for(dep_src, SourceIdentityOwner {
+                    manifest_name: spec, member_root: _dirname(located.src_dir), source_root: located.src_dir, module_prefix: ""
+                }, source_role_library());
+                if !identity.ok { return false; }
+                let dep_slug = identity.module_name;
                 if !_stage_one_runtime_sfn_import_context(self_path, dep_src, dep_slug, ctx_root, compiler_identity, shared_cache_root) {
                     return false;
                 }
@@ -1682,7 +1659,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let plan = _prepare_runtime_sfn_object(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap.manifest_dir, target_triple);
+            let plan = _prepare_runtime_sfn_object(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap, target_triple);
             if plan.obj_path.length == 0 {
                 _delete_runtime_sfn_object_staging(plans);
                 return _failed_runtime_link_inputs();
@@ -1721,7 +1698,7 @@ fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: strin
         if i >= caps.length { break; }
         let c = caps[i];
         out.push(RuntimeCapsuleArtifacts {
-            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, capsule_deps: c.capsule_deps, sfn_source_gates: c.sfn_source_gates
+            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, sfn_source_root: c.sfn_source_root, sfn_module_prefix: c.sfn_module_prefix, capsule_deps: c.capsule_deps, sfn_source_gates: c.sfn_source_gates
         });
         i += 1;
     }
@@ -1810,7 +1787,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
                 // `.import-deps` sidecar — the threaded context root
                 // is inert here and the prelude keeps its legacy
                 // descriptor-based emit byte-for-byte (#940 Risk R2).
-                let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap.manifest_dir, target_triple);
+                let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap, target_triple);
                 if prelude_plan.obj_path.length == 0 {
                     _delete_runtime_sfn_object_staging(prelude_plans);
                     return _failed_runtime_link_inputs();

@@ -8,7 +8,6 @@
 import { compute_runtime_demand, runtime_demand_all } from "../build/runtime_selection";
 import { cache_key_for } from "../build_cache";
 import { capsule_artifact_layout_from_specs } from "../capsule_artifact";
-import { module_name_from_path } from "../module_paths";
 import { enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
 import {
     toml_get_build_full_runtime,
@@ -17,6 +16,7 @@ import {
     toml_get_name
 } from "../toml_parser";
 import { _cr_enumerate_host_capsule_sources, enumerate_capsule_sources } from "./discovery";
+import { source_identity_member_for_project } from "./identity";
 import {
     _cr_any_entry_imports_host,
     _cr_dep_specs_from_text,
@@ -255,6 +255,14 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     if workspace_root.length > 0 {
         members = load_workspace_members(workspace_root);
     }
+    let mut project_root: string = "";
+    if entry_paths.length > 0 {
+        project_root = discover_project_root(anchor_dir);
+        let selected_member = source_identity_member_for_project(project_root);
+        if selected_member.name.length > 0 {
+            members.push(selected_member);
+        }
+    }
 
     // (1) Relative imports — walked from every entry; the dedupe loop
     // below collapses overlapping sets. A relatively-imported file that
@@ -286,11 +294,6 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         ei += 1;
     }
 
-    let mut project_root: string = "";
-    if entry_paths.length > 0 {
-        project_root = discover_project_root(anchor_dir);
-    }
-
     // (1b) Stage D PR3: opt-in `<project_root>/src/**/*.sfn` walk
     // for `kind = "binary"` `-p` builds. The relative-import
     // walker only follows modules transitively imported from the
@@ -306,7 +309,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             let mut bei: int = 0;
             loop {
                 if bei >= entry_paths.length { break; }
-                let bin_sources = enumerate_binary_capsule_sources(project_root, entry_paths[bei]);
+                let bin_sources = enumerate_binary_capsule_sources(project_root, entry_paths[bei], members);
                 let mut bsi: int = 0;
                 loop {
                     if bsi >= bin_sources.length { break; }
@@ -584,10 +587,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     }
     let layout = capsule_artifact_layout_from_specs(dep_specs, consumer.scope, consumer.name);
 
-    // For intra-capsule (relative-import) sources, the slug
-    // produced by `module_name_from_path` is a path-shaped
-    // identifier — for files outside `compiler/src/` and
-    // `runtime/` it's the full source path minus extension (e.g.
+    // For standalone relative-import sources outside a manifest owner, the
+    // repository-agnostic fallback is a path-shaped identifier (e.g.
     // `/tmp/widget/src/util` for an absolute entry). That's
     // unsuitable as a tail under `<consumer>/ir/` (it'd start
     // with `/`). Strip the discovered `project_root` prefix so

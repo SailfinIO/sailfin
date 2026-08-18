@@ -113,7 +113,7 @@ test "binary-capsule walker: binary links and runs" ![io] {
 // ---- Test 3: walker picked up the orphaned sibling ----
 // The orphan's .ll is written to the scratch capsules dir (under
 // SAILFIN_TEST_SCRATCH/capsules/ when set, else build/sailfin/capsules/).
-// The mangled slug ends with `src__util__orphan.ll` so we search for that
+// The selected-binary slug ends with `util__orphan.ll` so we search for that
 // suffix, which remains stable across mktemp directory names.
 test "binary-capsule walker: orphan sibling is compiled" ![io] {
     let root = _make_capsule("orphan");
@@ -130,7 +130,7 @@ test "binary-capsule walker: orphan sibling is compiled" ![io] {
     let mut i = 0;
     loop {
         if i >= files.length { break; }
-        if find(files[i], "src__util__orphan.ll", 0) >= 0 { found = true; }
+        if find(files[i], "util__orphan.ll", 0) >= 0 { found = true; }
         i += 1;
     }
     assert found;

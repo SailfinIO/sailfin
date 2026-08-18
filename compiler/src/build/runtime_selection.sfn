@@ -163,7 +163,7 @@ fn select_runtime_sfn_sources(caps: RuntimeCapsuleArtifacts[], demand: string[])
             s += 1;
         }
         out.push(RuntimeCapsuleArtifacts {
-            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: kept, include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, capsule_deps: c.capsule_deps, sfn_source_gates: c.sfn_source_gates
+            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: kept, include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, sfn_source_root: c.sfn_source_root, sfn_module_prefix: c.sfn_module_prefix, capsule_deps: c.capsule_deps, sfn_source_gates: c.sfn_source_gates
         });
         i += 1;
     }
