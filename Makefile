@@ -878,58 +878,6 @@ rebuild:
 
 rebuild-impl:
 	@mkdir -p build
-	@# The pre-build snapshot is what lets `dev bootstrap install` below
-	@# detect a genuine mid-build source edit, and what it requires before
-	@# it will publish $(COMPILER_SOURCE_FINGERPRINT) at all.
-	@#
-	@# SFN-679: it is best-effort in shape. A binary predating
-	@# `dev bootstrap fingerprint` cannot produce a digest — it falls
-	@# through its subcommand dispatch to a usage line on STDOUT instead
-	@# (exit 0, so the redirect still needs the same shape check
-	@# `compile-impl` uses). That is not an error; it is exactly the
-	@# transitional build this recipe has to complete. Write nothing rather
-	@# than a malformed snapshot: `dev bootstrap install` treats an absent
-	@# `.pending` as "no race guard available" the same as a malformed one.
-	@#
-	@# SFN-918: but on a COLD build — a fresh checkout, or the tree left by
-	@# `make clean-build` — $(NATIVE_BIN) does not exist at all, so probing
-	@# only it left no snapshot, `dev bootstrap install` skipped the
-	@# freshness record, and the freshly self-hosted tree carried no
-	@# $(COMPILER_SOURCE_FINGERPRINT). compile-impl's
-	@# `-n "$$stored_fingerprint"` guard then failed and the NEXT
-	@# `make compile` burned a full redundant rebuild — which the two
-	@# Make-contract e2e files fired concurrently under the default test
-	@# pool, racing the shared build/ tree. So fall back to the same seed
-	@# the build step below resolves. Sound because the digest is a SHA-256
-	@# over the working-tree sources
-	@# (compiler/src/build/source_fingerprint.sfn) — a statement about the
-	@# SOURCES, not about the binary that hashed them — so any compiler
-	@# carrying the verb computes the identical value. It stays a genuine
-	@# PRE-build snapshot, so a mid-build edit still trips the
-	@# `pending != cur` refusal; nothing here weakens fingerprint
-	@# correctness. A seed too old for the verb hits the SFN-679 case above
-	@# and degrades to the previous no-snapshot behaviour.
-	@current_fingerprint=""; \
-	seed="$${SEED_NATIVE:-$(SEED)}"; \
-	if command -v "$$seed" >/dev/null 2>&1; then \
-		seed="$$(command -v "$$seed")"; \
-	fi; \
-	for probe in "$(NATIVE_BIN)" "$$seed"; do \
-		if [ -z "$$current_fingerprint" ] && [ -x "$$probe" ]; then \
-			candidate="$$("$$probe" dev bootstrap fingerprint 2>/dev/null || true)"; \
-			case "$$candidate" in \
-				*[!0-9a-f]*|"") candidate="" ;; \
-				????????????????????????????????????????????????????????????????) ;; \
-				*) candidate="" ;; \
-			esac; \
-			current_fingerprint="$$candidate"; \
-		fi; \
-	done; \
-	if [ -n "$$current_fingerprint" ]; then \
-		printf '%s\n' "$$current_fingerprint" > "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
-	else \
-		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
-	fi
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -973,6 +921,57 @@ rebuild-impl:
 	@# recipe line. The `&&` chain ensures every diagnostic
 	@# message reaches the user before we exit.
 	@rm -f build/capsules/sfn/compiler/bin/compiler build/capsules/sfn/compiler/bin/compiler.exe build/sailfin/program.ll
+	@# Snapshot the sources BEFORE the build. `dev bootstrap install` needs
+	@# this to do two things: detect a source edit made during the ~10-minute
+	@# build, and publish $(COMPILER_SOURCE_FINGERPRINT) at all — it skips the
+	@# freshness record entirely when no well-formed snapshot is present.
+	@#
+	@# SFN-918: this used to probe only $(NATIVE_BIN), which does not exist on
+	@# a cold build, so a cold self-host published no fingerprint. compile-impl's
+	@# `-n "$$stored_fingerprint"` guard then failed and the NEXT `make compile`
+	@# burned a full redundant rebuild — which the two Make-contract e2e files
+	@# fired concurrently under the default test pool, racing the shared build/
+	@# tree. It runs after the seed is resolved (and fetched, on a fresh clone)
+	@# so the seed can stand in, and still well before the build below.
+	@#
+	@# The seed is a valid oracle because the digest is a SHA-256 over the
+	@# working-tree .sfn sources under compiler/src, compiler/capsules and
+	@# runtime (compiler/src/build/source_fingerprint.sfn) — a statement about
+	@# the SOURCES, not about the binary that hashed them. It is therefore
+	@# compared ACROSS binaries: a seed-produced snapshot against a digest the
+	@# freshly built compiler recomputes. That makes the digest definition
+	@# seed-coupled — changing default_fingerprint_roots() or the manifest
+	@# format is a seed-blocker (.claude/rules/seed-dependency.md), because
+	@# until the new definition reaches the pinned seed every cold build fails
+	@# the `pending != cur` check at the final step. The note in
+	@# source_fingerprint.sfn records this.
+	@#
+	@# SFN-679: still best-effort in shape. A binary predating
+	@# `dev bootstrap fingerprint` prints a usage line on STDOUT instead of a
+	@# digest; the shape check below blanks anything that is not a 64-char
+	@# lowercase-hex string, so such a seed degrades to no snapshot — the
+	@# previous behaviour — rather than a malformed one.
+	@current_fingerprint=""; \
+	snapshot_seed=""; \
+	if [ -f build/.seed-resolved ]; then \
+		snapshot_seed="$$(cat build/.seed-resolved)"; \
+	fi; \
+	for probe in "$(NATIVE_BIN)" "$$snapshot_seed"; do \
+		if [ -z "$$current_fingerprint" ] && [ -n "$$probe" ] && [ -x "$$probe" ]; then \
+			candidate="$$("$$probe" dev bootstrap fingerprint 2>/dev/null || true)"; \
+			case "$$candidate" in \
+				*[!0-9a-f]*|"") candidate="" ;; \
+				????????????????????????????????????????????????????????????????) ;; \
+				*) candidate="" ;; \
+			esac; \
+			current_fingerprint="$$candidate"; \
+		fi; \
+	done; \
+	if [ -n "$$current_fingerprint" ]; then \
+		printf '%s\n' "$$current_fingerprint" > "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+	else \
+		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+	fi
 	@# #1120: under the JSON=1 / SAILFIN_AGENT_REPORT=1 gate, append
 	@# `--json` so the seed emits its single-line BuildReport on stdout,
 	@# and tee that to build/native/.build-report.json for the report
@@ -1009,9 +1008,11 @@ rebuild-impl:
 	@mkdir -p build/native $(dir $(NATIVE_OUT))
 	@# SFN-679: delegate the race re-check, atomic install, and fingerprint
 	@# promotion to the FRESHLY BUILT compiler's own `dev bootstrap install`.
-	@# The freshly built program carries the new install/fingerprint logic
-	@# even though the pinned seed that built it does not — that is exactly
-	@# why this targets the scoped compiler artifact and not $(SEED).
+	@# This targets the scoped compiler artifact, never $(SEED), so the
+	@# install/fingerprint logic that runs is always the one built from the
+	@# sources in this tree — independent of what the pinned seed happens to
+	@# carry. (The seed does supply the pre-build snapshot on a cold build,
+	@# but that is the digest only, not this promotion step.)
 	@chmod +x build/capsules/sfn/compiler/bin/compiler$(EXE_EXT) 2>/dev/null || true
 	@build/capsules/sfn/compiler/bin/compiler$(EXE_EXT) dev bootstrap install
 	@# Save .ll files to a location `make test` won't clobber. Each
