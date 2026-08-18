@@ -154,34 +154,33 @@ extern fn atoi(s: *u8) -> i32;
 // `addr` is spelled `* u8` (the `net.sfn` opaque-handle policy:
 // adapters cast the family-specific sockaddr struct through `* u8`
 // at the call site). Identical C ABI to `const struct sockaddr *`.
-// Socket creation and disposal route through `platform/socket_ops.sfn`
-// rather than libc `socket`/`close`, because both diverge on Windows:
+// Socket creation, disposal, timeouts, and recv/send route through
+// `platform/socket_ops.sfn` rather than libc `socket`/`close`/
+// `setsockopt`/`recv`/`send` directly, because all diverge on Windows:
 // POSIX `close` on a Winsock `SOCKET` fastfails the process
-// (`0xC0000409`) instead of returning an error, and Winsock refuses
-// every call until `WSAStartup` has run, which nothing did. That module
-// is swapped for `socket_ops_windows.sfn` on a Windows target by
-// `target_condition_runtime_sfn_sources`, so these stay ordinary
-// externs and the linker binds whichever sibling was compiled — the
-// same shape as `_sfn_fs_access_exec_mode` in `filesystem.sfn`
-// (SFN-671).
+// (`0xC0000409`) instead of returning an error, Winsock refuses every
+// call until `WSAStartup` has run, its `SO_RCVTIMEO`/`SO_SNDTIMEO`
+// optval is a millisecond `DWORD` rather than a `struct timeval`, and
+// its `recv`/`send` are 32-bit rather than POSIX's 64-bit `ssize_t`
+// (SFN-927). That module is swapped for `socket_ops_windows.sfn` on a
+// Windows target by `target_condition_runtime_sfn_sources`, so these
+// stay ordinary externs and the linker binds whichever sibling was
+// compiled — the same shape as `_sfn_fs_access_exec_mode` in
+// `filesystem.sfn` (SFN-671).
 extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+extern fn sfn_socket_send(fd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+extern fn sfn_socket_recv(fd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn sfn_socket_close(fd: i32) -> i32;
 
-// `setsockopt` — arm SO_RCVTIMEO / SO_SNDTIMEO (recv/send deadlines) on
-// the client socket (#1581). `optval` is the `struct timeval` byte buffer
-// cast through `* u8` (the `net.sfn` opaque-handle policy — no struct-by-
-// value at the boundary). Identical C ABI to
-// `int setsockopt(int, int, int, const void *, socklen_t)`. Declared
-// inline (not imported) per the same SFN-635 cross-module-extern workaround
-// as the other socket externs above.
-extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
+// Arm SO_RCVTIMEO / SO_SNDTIMEO (recv/send deadlines) on the client
+// socket (#1581). See `platform/socket_ops.sfn` for why this is not a
+// raw `setsockopt` call.
+extern fn sfn_socket_set_timeouts(fd: i32, secs: i32) -> void;
 
 // ── DNS resolution (libc) ─────────────────────────────────────
 // `int getaddrinfo(const char *node, const char *service,
@@ -395,31 +394,17 @@ fn _http_io_timeout_secs() -> i64 { return 10; }
 // so a recv/send against a non-responsive peer returns (EAGAIN → a clean
 // failure) instead of blocking forever.
 //
-// `struct timeval { tv_sec; tv_usec; }` is 16 bytes on both targets this
-// runtime builds for (Linux x86_64: i64 + i64; macOS arm64: i64 + i32 +
-// 4 pad). `tv_sec` is an i64 at offset 0 on both, so zeroing the 16 bytes
-// and writing the seconds as the low byte at offset 0 (both targets are
-// little-endian) yields `{sec, 0}` portably for any budget < 256s.
-//
-// The SOL_SOCKET / SO_*TIMEO option numbers DIFFER by platform and the
-// platform-agnostic emitted IR cannot branch on the target (the same
-// constraint as the dual `sockaddr_in` layout in `_connect_tcp`), so we
-// issue both the Linux and the macOS variant and ignore failures: the
-// wrong-platform call returns ENOPROTOOPT and leaves the socket at its
-// prior (blocking) state — the pre-fix status quo, never an error
-// surfaced to the caller.
-//   - Linux x86_64: SOL_SOCKET=1,      SO_RCVTIMEO=20,     SO_SNDTIMEO=21.
-//   - macOS arm64:  SOL_SOCKET=0xffff, SO_RCVTIMEO=0x1006, SO_SNDTIMEO=0x1005.
+// Delegates to `platform/socket_ops.sfn::sfn_socket_set_timeouts`, which
+// diverges by target: issuing both the Linux and the macOS `setsockopt`
+// variant and ignoring failures is safe on POSIX because the
+// wrong-platform call reliably returns ENOPROTOOPT and leaves the socket
+// at its prior (blocking) state, but Windows shares the macOS
+// SOL_SOCKET/SO_*TIMEO option numbers and disagrees only on the optval
+// type (`struct timeval` vs. a millisecond DWORD), so the macOS branch
+// silently succeeds there with a 1000x-wrong timeout instead of erroring
+// (SFN-927) — see that module for the corrected Windows sibling.
 fn _set_socket_timeouts(fd: i32) -> void {
-    let tv: *u8 = malloc(16 as usize);
-    if tv as i64 == 0 { return; }
-    memset(tv, 0, 16 as usize);
-    memset(_ptr_off(tv, 0), _http_io_timeout_secs() as i32, 1 as usize);
-    setsockopt(fd, 1, 20, tv, 16);
-    setsockopt(fd, 1, 21, tv, 16);
-    setsockopt(fd, 65535, 4102, tv, 16);
-    setsockopt(fd, 65535, 4101, tv, 16);
-    free(tv);
+    sfn_socket_set_timeouts(fd, _http_io_timeout_secs() as i32);
 }
 
 // `_connect_tcp(host, port)` — build an IPv4 `sockaddr_in`, open a
@@ -493,7 +478,7 @@ fn _send_all(fd: i32, ssl: *u8, buf: *u8, total: i64) -> bool ![net] {
         if ssl as i64 != 0 {
             n = tls_write(ssl, _ptr_off(buf, sent), total - sent);
         } else {
-            n = send(fd, _ptr_off(buf, sent), total - sent, 0);
+            n = sfn_socket_send(fd, _ptr_off(buf, sent), total - sent, 0);
         }
         if n <= 0 { return false; }
         sent = sent + n;
@@ -537,7 +522,7 @@ fn _recv_all(fd: i32, ssl: *u8, len_slot: *i64) -> *u8 ![net] {
         if ssl as i64 != 0 {
             n = tls_read(ssl, _ptr_off(buf, len), chunk);
         } else {
-            n = recv(fd, _ptr_off(buf, len), chunk, 0);
+            n = sfn_socket_recv(fd, _ptr_off(buf, len), chunk, 0);
         }
         // Distinguish a socket error from a clean close: a partial
         // buffer from an errored socket must not look like success.
@@ -1386,7 +1371,7 @@ fn _recv_one_response(fd: i32, ssl: *u8, len_slot: *i64) -> *u8 ![net] {
         if ssl as i64 != 0 {
             n = tls_read(ssl, _ptr_off(buf, len), chunk);
         } else {
-            n = recv(fd, _ptr_off(buf, len), chunk, 0);
+            n = sfn_socket_recv(fd, _ptr_off(buf, len), chunk, 0);
         }
         if n < 0 {
             free(buf);
@@ -1435,7 +1420,7 @@ fn _recv_one_response(fd: i32, ssl: *u8, len_slot: *i64) -> *u8 ![net] {
         if ssl as i64 != 0 {
             n = tls_read(ssl, _ptr_off(buf, len), want);
         } else {
-            n = recv(fd, _ptr_off(buf, len), want, 0);
+            n = sfn_socket_recv(fd, _ptr_off(buf, len), want, 0);
         }
         if n < 0 {
             free(buf);

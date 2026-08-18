@@ -29,15 +29,26 @@ fn _contains(haystack: string, needle: string) -> boolean {
     return index_of(haystack, needle) >= 0;
 }
 
-test "lowering: runtime/sfn/io.sfn lowers the imported libc write call" ![io] {
+// SFN-927 moved this off the bare libc `write`. `io.sfn` now imports
+// `sfn_fd_write` from the target-swapped `platform/fd_io.sfn` pair,
+// because the UCRT's `_write` is 32-bit and a raw `-> i64` extern turned
+// a `-1` error into 4294967295 on Windows — defeating the `got <= 0`
+// guard and overrunning a malloc by ~4 GiB. The lowering shape this test
+// pins is unchanged; only the symbol moved.
+test "lowering: runtime/sfn/io.sfn lowers the imported fd-write call" ![io] {
     let source = fs.readFile("runtime/sfn/io.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
     let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", empty_llvm_import_context(), resolve_llvm_provider_context());
 
-    // The inlined extern is declared and called against.
-    assert _contains(ir, "declare i64 @write(");
-    assert _contains(ir, "call i64 @write(");
+    // The imported extern is declared and called against.
+    assert _contains(ir, "declare i64 @sfn_fd_write(");
+    assert _contains(ir, "call i64 @sfn_fd_write(");
+
+    // And the bare libc symbol is gone: reaching for it directly is the
+    // defect SFN-927 removed, so its reappearance here is a regression
+    // rather than a stale expectation.
+    assert ! _contains(ir, "declare i64 @write(");
 }
 
 // Symbol-surface coverage for the print-family flip (#1310, C4/R3 of

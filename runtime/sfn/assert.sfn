@@ -53,9 +53,15 @@ extern fn strlen(s: *u8) -> usize;
 extern fn getenv(name: *u8) -> *u8;
 
 // Write `count` bytes of `buf` to file descriptor `fd`. The records-over-
-// stderr sink (fd 2). Same declaration re-used across `runtime/sfn/*`
-// (io.sfn, process.sfn, exception.sfn, …).
-extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+// stderr sink (fd 2). Routed through `platform/fd_io.sfn`'s `sfn_fd_write`
+// rather than a raw `write` extern: the UCRT's `_write` is `int` (32-bit),
+// not POSIX's `ssize_t` (64-bit), so a raw `-> i64` extern here would
+// silently promote a `-1` error into `4294967295` — the same defect
+// `platform/socket_ops.sfn` fixes for `recv`/`send` (SFN-927). Moot on
+// the mingw cross RUNTIME_MODS path (this module is excluded there, see
+// the header), but this module IS compiled for the native MSVC target via
+// the ordinary `target_condition_runtime_sfn_sources` swap.
+extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8;
 
@@ -230,7 +236,7 @@ fn _sftr_write(kind: string, status: string, name: *u8, hook: string, file: *u8,
     let mut off: i64 = 0;
     loop {
         if off >= cur { break; }
-        let nw: i64 = write(2, (base + off) as *u8, (cur - off) as usize);
+        let nw: i64 = sfn_fd_write(2, (base + off) as *u8, (cur - off) as usize);
         if nw <= 0 { break; }
         off = off + nw;
     }

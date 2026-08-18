@@ -161,8 +161,17 @@ fn _st_connect(port: i64) -> i32 {
 // `struct timeval` layout (16 bytes, tv_sec as the low byte at offset 0,
 // little-endian, tv_usec zero) and dual-platform option numbers the fix
 // uses. Linux SOL_SOCKET=1 / SO_RCVTIMEO=20 / SO_SNDTIMEO=21; macOS
-// SOL_SOCKET=0xffff / SO_RCVTIMEO=0x1006 / SO_SNDTIMEO=0x1005. The
-// wrong-platform variant returns ENOPROTOOPT (ignored).
+// SOL_SOCKET=0xffff / SO_RCVTIMEO=0x1006 / SO_SNDTIMEO=0x1005. On POSIX
+// the wrong-platform variant returns ENOPROTOOPT (ignored) — that claim
+// does NOT extend to Windows, where the same macOS constants resolve to
+// a real `SO_RCVTIMEO`/`SO_SNDTIMEO` with a different optval type
+// (SFN-927; see `platform/socket_ops.sfn` for the corrected mechanism).
+// This fixture inlines its own raw `socket`/`close`/`setsockopt` rather
+// than routing through `platform/socket_ops.sfn`'s
+// `sfn_socket_set_timeouts` and so duplicates that logic; it cannot run
+// on a Windows host regardless (POSIX `close` on a Winsock `SOCKET`
+// fastfails the process), so it stays a Linux/macOS-only regression
+// fixture rather than being ported.
 fn _st_set_timeouts(fd: i32, secs: i64) -> void {
     let tv: *u8 = malloc(16 as usize);
     if tv as i64 == 0 { return; }

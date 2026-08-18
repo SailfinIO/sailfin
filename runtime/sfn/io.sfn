@@ -74,16 +74,30 @@
 // *extern* signatures only for the platform symbols the seed snapshot
 // pre-stages; reaching for any other libc surface through an `import`
 // fails the isolated per-module emit with "cannot resolve return type
-// for call to …". So `write` is declared locally here, mirroring the
+// for call to …". So these are declared locally here, mirroring the
 // `arena.sfn` / `string.sfn` / `process.sfn` discipline.
-extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+//
+// Routed through `platform/fd_io.sfn`'s `sfn_fd_write`/`sfn_fd_read`
+// rather than a raw `write`/`read` extern: the UCRT's `_write`/`_read`
+// are `int` (32-bit), not POSIX's `ssize_t` (64-bit), so a raw `-> i64`
+// extern here would silently promote a `-1` error into `4294967295` on
+// Windows — the identical defect `sfn_socket_recv`/`sfn_socket_send`
+// fixed on the socket path (SFN-927). `platform/fd_io.sfn`, not
+// `platform/socket_ops.sfn`, because generic-fd I/O and Winsock socket
+// I/O are distinct handle spaces and the POSIX `socket_ops.sfn` is
+// genuinely socket-only — see that module's header for the full
+// reasoning, including why the `net`-gate is NOT the justification
+// (the gate does not bound link inputs; SFN-943).
+// `platform/fd_io.sfn` is swapped for its Windows
+// sibling by `target_condition_runtime_sfn_sources`, so linking against
+// these two symbols here is a plain cross-module runtime reference —
+// the same shape `adapters/http.sfn` uses for the socket wrappers.
+extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
-// libc `read` — the read-side primitive for the `io.read_fd` /
-// `io.read_line` builtins (#1579, epic #1540 Track A gap A2: the MCP
-// proxy reads JSON-RPC frames from its own fd 0). Symmetric with the
-// `write` extern above and declared inline for the same SFN-635
-// cross-module-extern reason; mirrors `posix.sfn:53`.
-extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
+// The read-side counterpart, for the `io.read_fd` / `io.read_line`
+// builtins (#1579, epic #1540 Track A gap A2: the MCP proxy reads
+// JSON-RPC frames from its own fd 0).
+extern fn sfn_fd_read(fd: i32, buf: *u8, count: usize) -> i64;
 
 // libc `strlen` — recovers the byte length of a NUL-terminated cstring for
 // the `sfn_print_sfn` prelude entry (which carries no length parameter).
@@ -152,7 +166,7 @@ struct OwnedBuf {
 }
 
 fn sfn_write_fd(fd: i32, buf: *u8, count: usize) -> i64 ![io] {
-    return write(fd, buf, count);
+    return sfn_fd_write(fd, buf, count);
 }
 
 // `sfn_read_fd(fd, n)` — the bare canonical symbol behind the
@@ -188,7 +202,7 @@ fn sfn_read_fd(fd: i64, n: i64) -> OwnedBuf ![io] {
     let cap: i64 = ((n + 1 + 7) / 8) * 8;
     let buf: *u8 = malloc(cap as usize);
     if buf as i64 == 0 { return empty; }
-    let got: i64 = read(fd as i32, buf, n as usize);
+    let got: i64 = sfn_fd_read(fd as i32, buf, n as usize);
     if got <= 0 {
         free(buf);
         return empty;
@@ -229,7 +243,7 @@ fn sfn_read_line(fd: i64) -> *u8 ![io] {
     if scratch as i64 == 0 { return 0 as *u8; }
     // The first read distinguishes immediate EOF (None) from a real line
     // (including a blank `"\n"` line, which is Some("")).
-    let first: i64 = read(fd as i32, scratch, 1 as usize);
+    let first: i64 = sfn_fd_read(fd as i32, scratch, 1 as usize);
     if first <= 0 {
         free(scratch);
         return 0 as *u8;
@@ -248,7 +262,7 @@ fn sfn_read_line(fd: i64) -> *u8 ![io] {
         memset(buf, first_b, 1 as usize);
         len = 1;
         loop {
-            let n: i64 = read(fd as i32, scratch, 1 as usize);
+            let n: i64 = sfn_fd_read(fd as i32, scratch, 1 as usize);
             if n <= 0 { break; }
             let b: i32 = sailfin_intrinsic_pointer_read_i32(scratch) & 255;
             if b == 10 { break; }
@@ -300,7 +314,7 @@ fn _sfn_write_all(fd: i32, data: *u8, len: i64) -> void ![io] {
     loop {
         if off >= len { break; }
         let chunk: *u8 = (data as i64 + off) as *u8;
-        let n: i64 = write(fd, chunk, (len - off) as usize);
+        let n: i64 = sfn_fd_write(fd, chunk, (len - off) as usize);
         if n <= 0 { break; }
         off = off + n;
     }

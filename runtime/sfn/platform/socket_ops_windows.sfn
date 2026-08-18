@@ -3,9 +3,10 @@
 // Windows sibling of `socket_ops.sfn`, swapped in for a Windows
 // target by `target_condition_runtime_sfn_sources`
 // (`compiler/src/build/target.sfn`). See that module's header for why
-// only creation and disposal are conditioned; everything else in the
-// socket surface is byte-compatible with POSIX and resolves from
-// `ws2_32.dll`, already linked by `target_extra_link_libs` (SFN-649).
+// creation, disposal, timeouts, and recv/send are the ones conditioned;
+// everything else in the socket surface is byte-compatible with POSIX
+// and resolves from `ws2_32.dll`, already linked by
+// `target_extra_link_libs` (SFN-649).
 //
 // `closesocket` instead of `close` — `close` on a `SOCKET` is a
 // process-killing `__fastfail(0xC0000409)`, not an error return.
@@ -58,6 +59,36 @@ extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
 
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
+
+extern fn getsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: *i32) -> i32;
+
+// Winsock's `int recv(SOCKET, char *, int, int)` / `int send(...)` — both
+// 32-bit, unlike POSIX's 64-bit `ssize_t`. Declaring these `-> i64` (as
+// the POSIX sibling correctly does) makes Winsock write only the low 32
+// bits of the return register; a `-1` error then reads back as
+// `4294967295` through the `i64` reinterpretation, so the `if n < 0`
+// failure guards used throughout the adapters never fire. Measured on
+// real hardware: this silently promoted a `recv` failure into a phantom
+// 137 GB `realloc` request (SFN-927). `sfn_socket_recv`/`sfn_socket_send`
+// below declare the true 32-bit width and sign-extend the result to i64,
+// which both restores the negative-error signal and is exact for any
+// count `recv`/`send` can legitimately return (bounded by `int`).
+extern fn recv(sockfd: i32, buf: *u8, len: i32, flags: i32) -> i32;
+
+extern fn send(sockfd: i32, buf: *u8, len: i32, flags: i32) -> i32;
+
+// `_sock_ptr_off(p, off)` — byte-stride pointer arithmetic (copy of the
+// net.sfn / http.sfn helper). The `_sock_` prefix gives this file-local
+// runtime helper a unique external symbol, since the native backend
+// gives file-local runtime helpers external linkage.
+fn _sock_ptr_off(p: *u8, off: i64) -> *u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as *u8;
+}
+
 // `MAKEWORD(2, 2)` — Winsock 2.2, the version every supported Windows
 // provides.
 let WSA_VERSION_2_2: i32 = 514;
@@ -89,4 +120,75 @@ fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32 {
 // Dispose of a socket. `closesocket`, never `close`.
 fn sfn_socket_close(fd: i32) -> i32 { return closesocket(fd); }
 
-export { sfn_socket_open, sfn_socket_close };
+// Arm `SO_RCVTIMEO`/`SO_SNDTIMEO`. Unlike POSIX's `struct timeval` optval,
+// Winsock's is a plain millisecond `DWORD` (4 bytes) — the POSIX sibling's
+// `struct timeval` byte layout is meaningless here. `SOL_SOCKET`
+// (`0xffff`)/`SO_RCVTIMEO` (`0x1006`)/`SO_SNDTIMEO` (`0x1005`) happen to be
+// the exact same numbers macOS uses, which is precisely what let this bug
+// hide for so long: issuing both the Linux and macOS variants and ignoring
+// failures is only safe when the wrong-platform call errors, and on Windows
+// it does not — it succeeds against the shared macOS constants with a
+// `struct timeval`-shaped optval that Winsock reads as a `DWORD`, so only
+// the low byte (the intended whole-second count) becomes the millisecond
+// timeout: a 10s budget silently becomes 10ms (SFN-927). This sibling
+// writes the correct 4-byte millisecond DWORD instead.
+fn sfn_socket_set_timeouts(fd: i32, secs: i32) -> void {
+    let dw: *u8 = malloc(4 as usize);
+    if dw as i64 == 0 { return; }
+    let ms: i32 = secs * 1000;
+    memset(dw, ms & 255, 1 as usize);
+    memset(_sock_ptr_off(dw, 1), (ms >> 8) & 255, 1 as usize);
+    memset(_sock_ptr_off(dw, 2), (ms >> 16) & 255, 1 as usize);
+    memset(_sock_ptr_off(dw, 3), (ms >> 24) & 255, 1 as usize);
+    setsockopt(fd, 65535, 4102, dw, 4);
+    setsockopt(fd, 65535, 4101, dw, 4);
+    free(dw);
+}
+
+// Sign-extend Winsock's 32-bit `recv`/`send` result to i64 so the
+// adapters' `if n < 0` guards see the true error signal instead of a
+// truncated positive count (SFN-927).
+fn sfn_socket_recv(fd: i32, buf: *u8, len: i64, flags: i32) -> i64 {
+    let n: i32 = recv(fd, buf, len as i32, flags);
+    return n as i64;
+}
+
+fn sfn_socket_send(fd: i32, buf: *u8, len: i64, flags: i32) -> i64 {
+    let n: i32 = send(fd, buf, len as i32, flags);
+    return n as i64;
+}
+
+// Read back the effective `SO_RCVTIMEO`, already in milliseconds — no
+// conversion needed, unlike the POSIX sibling's `tv_sec * 1000`. See
+// that sibling for why a readback (rather than a duration or a bare
+// `< 0` assertion) is the regression test's mechanism (SFN-927).
+fn sfn_socket_timeout_readback_ms(fd: i32) -> i64 {
+    let ms: *u8 = malloc(4 as usize);
+    if ms as i64 == 0 { return 0 - 1; }
+    let lenbuf: *u8 = malloc(4 as usize);
+    if lenbuf as i64 == 0 {
+        free(ms);
+        return 0 - 1;
+    }
+    memset(ms, 0, 4 as usize);
+    memset(lenbuf, 0, 4 as usize);
+    memset(lenbuf, 4, 1 as usize);
+    let rc: i32 = getsockopt(fd, 65535, 4102, ms, lenbuf as *i32);
+    free(lenbuf);
+    if rc != 0 {
+        free(ms);
+        return 0 - 1;
+    }
+    let dword: i32 = sailfin_intrinsic_pointer_read_i32(ms);
+    free(ms);
+    return dword as i64;
+}
+
+export {
+    sfn_socket_open,
+    sfn_socket_close,
+    sfn_socket_set_timeouts,
+    sfn_socket_recv,
+    sfn_socket_send,
+    sfn_socket_timeout_readback_ms
+};

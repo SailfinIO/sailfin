@@ -45,6 +45,51 @@ fn _has_declare(ir: string, sym: string) -> boolean {
     return false;
 }
 
+// True iff some line of `ir` contains both `needle_a` and `needle_b`.
+// Matching on line content rather than a full-line string (with its
+// compiler-assigned SSA register numbers) keeps the SFN-927 IR-literal
+// assertions below from breaking on an unrelated change to this module
+// that shifts `%tN` numbering.
+fn _line_has_both(ir: string, needle_a: string, needle_b: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, needle_a) && contains(line, needle_b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// How many lines of `ir` contain both needles.
+//
+// The count matters, not just presence: these modules sign-extend in more
+// than one function, and a presence check is satisfied by any single
+// surviving site. `fd_io_windows.sfn` sign-extends in both `sfn_fd_read`
+// and `sfn_fd_write`, so dropping the `sext` from the read half alone —
+// the memory-unsafe path, feeding `io.sfn`'s `got <= 0` guard and the
+// `memset` that overran by ~4 GiB before SFN-927 — would leave the write
+// half's `sext` holding a presence assertion green. `socket_ops_windows`
+// is weaker still at three sites (`recv`, `send`, and the timeout
+// readback), where `readback` alone would mask both socket halves.
+//
+// Asserting an exact count also fails loudly when a fourth site appears,
+// which is the right direction: a new sign-extending function should
+// force a deliberate look at this pin rather than inherit its coverage.
+fn _count_lines_with_both(ir: string, needle_a: string, needle_b: string) -> int {
+    let lines = split(ir, "\n");
+    let mut i: int = 0;
+    let mut found: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, needle_a) && contains(line, needle_b) { found += 1; }
+        i += 1;
+    }
+    return found;
+}
+
 // Same shape as `_has_declare` but for a module-scope `define`. The two
 // are NOT interchangeable: a bare `contains(ir, "@sym(")` is satisfied
 // by a forward `declare`, so a module that only declared the pair would
@@ -104,7 +149,7 @@ test "socket-ops: the POSIX module keeps close and never links Winsock" ![io] {
     assert outcome == 0;
 }
 
-// Both halves must define the same two symbols, or the swap produces a
+// Both halves must define the same six symbols, or the swap produces a
 // link with an unresolved reference on whichever target loses. This is
 // the contract `target_condition_runtime_sfn_sources` depends on and
 // that no type checker enforces across a module swap.
@@ -116,8 +161,125 @@ test "socket-ops: both siblings define the same exported surface" ![io] {
         assert win != "EMIT_FAILED";
         assert _has_define(posix, "sfn_socket_open");
         assert _has_define(posix, "sfn_socket_close");
+        assert _has_define(posix, "sfn_socket_set_timeouts");
+        assert _has_define(posix, "sfn_socket_recv");
+        assert _has_define(posix, "sfn_socket_send");
+        assert _has_define(posix, "sfn_socket_timeout_readback_ms");
         assert _has_define(win, "sfn_socket_open");
         assert _has_define(win, "sfn_socket_close");
+        assert _has_define(win, "sfn_socket_set_timeouts");
+        assert _has_define(win, "sfn_socket_recv");
+        assert _has_define(win, "sfn_socket_send");
+        assert _has_define(win, "sfn_socket_timeout_readback_ms");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// SFN-927 defect 2, pinned statically: Winsock's `recv`/`send` are `int`
+// (32-bit), not POSIX's `ssize_t` (64-bit). A caller-side `-> i64` extern
+// against the Windows symbol reads a `-1` error back as `4294967295`
+// instead of a negative value, which silently defeats every `if n < 0`
+// guard in the adapters. This is checkable without running anything —
+// `sfn emit` prints the raw extern declaration widths — so it is
+// host-independent and catches a regression on any CI runner, including
+// a Windows one, unlike the earlier "issue a live request" style
+// coverage this bug slipped through (nothing in CI makes an outbound
+// request from a Windows binary).
+test "socket-ops: the Windows sibling declares 32-bit recv/send, the POSIX sibling 64-bit" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let win = _emit("sockwin3", "runtime/sfn/platform/socket_ops_windows.sfn", dir);
+        let posix = _emit("sockposix3", "runtime/sfn/platform/socket_ops.sfn", dir);
+        assert win != "EMIT_FAILED";
+        assert posix != "EMIT_FAILED";
+        assert contains(win, "declare i32 @recv(");
+        assert contains(win, "declare i32 @send(");
+        assert ! contains(win, "declare i64 @recv(");
+        assert ! contains(win, "declare i64 @send(");
+        assert contains(posix, "declare i64 @recv(");
+        assert contains(posix, "declare i64 @send(");
+        // The narrowed declaration is useless without a genuine `sext` back
+        // to i64 (a `zext` would still turn Winsock's `-1` into a large
+        // positive number). `core_cast_lowering.sfn` selects `sext` for a
+        // signed `i32 -> i64` widening today; this pins that the emitted
+        // body actually does, so a regression in that selector (not just
+        // the declared width) fails here instead of passing silently
+        // because these assertions never looked inside the function body.
+        //
+        // Counted, not merely present: this module sign-extends in three
+        // places — `sfn_socket_recv`, `sfn_socket_send`, and
+        // `sfn_socket_timeout_readback_ms`. A presence check is satisfied
+        // by any one of them, so both socket halves could lose their
+        // `sext` while the readback alone kept the assertion green.
+        assert _count_lines_with_both(win, "sext i32", "to i64") == 3;
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// SFN-927 defect 1, pinned statically: Winsock's `SO_RCVTIMEO`/
+// `SO_SNDTIMEO` optval is a 4-byte millisecond DWORD, not a 16-byte
+// POSIX `struct timeval`. The Windows sibling must convert seconds to
+// milliseconds (`secs * 1000`) and pass a 4-byte optlen; the POSIX
+// sibling must keep passing the unconverted seconds count with a
+// 16-byte optlen. Checking the emitted IR literals is a host-independent
+// substitute for a live `getsockopt` readback, which would require
+// actually running the compiled Windows binary — not possible on the
+// Linux-only CI fleet this suite runs on.
+test "socket-ops: the Windows sibling converts seconds to a millisecond DWORD" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let win = _emit("sockwin4", "runtime/sfn/platform/socket_ops_windows.sfn", dir);
+        let posix = _emit("sockposix4", "runtime/sfn/platform/socket_ops.sfn", dir);
+        assert win != "EMIT_FAILED";
+        assert posix != "EMIT_FAILED";
+        // secs -> ms, and a 4-byte DWORD optlen on both SO_RCVTIMEO/SO_SNDTIMEO calls.
+        assert contains(win, "mul i32 %secs, 1000");
+        assert _line_has_both(win, "i32 65535, i32 4102", "i32 4)");
+        assert _line_has_both(win, "i32 65535, i32 4101", "i32 4)");
+        // The POSIX sibling keeps the unconverted `struct timeval` shape:
+        // no ms conversion, 16-byte optlen throughout.
+        assert ! contains(posix, "mul i32 %secs, 1000");
+        assert _line_has_both(posix, "i32 1, i32 20", "i32 16)");
+        assert _line_has_both(posix, "i32 1, i32 21", "i32 16)");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// SFN-927's generic-fd counterpart to the two tests above, for the
+// `platform/fd_io.sfn` / `fd_io_windows.sfn` pair `io.sfn`/`assert.sfn`
+// route through. Content pins, not just plumbing: `fd_io_windows.sfn`
+// declaring the UCRT's `_read`/`_write` at the wrong (64-bit) width is a
+// memory-unsafety regression nothing else in this suite catches — no
+// Windows CI leg runs `sfn test`, and `cross_windows_runtime_modules_test.sfn`
+// only proves the manifest/Makefile agree the sibling is swapped in, not
+// what the sibling's body contains.
+test "fd-io: the Windows sibling declares 32-bit _read/_write and sign-extends; the POSIX sibling 64-bit read/write" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let win = _emit("fdiowin", "runtime/sfn/platform/fd_io_windows.sfn", dir);
+        let posix = _emit("fdioposix", "runtime/sfn/platform/fd_io.sfn", dir);
+        assert win != "EMIT_FAILED";
+        assert posix != "EMIT_FAILED";
+        assert contains(win, "declare i32 @_read(");
+        assert contains(win, "declare i32 @_write(");
+        assert ! contains(win, "declare i64 @_read(");
+        assert ! contains(win, "declare i64 @_write(");
+        // The Windows sibling must never fall back to the un-underscored
+        // POSIX names: `read`/`write` are not what the UCRT exports them
+        // as, and `_has_declare`'s exact-symbol match means "read" would
+        // NOT be satisfied by a stray "_read" substring, so this is a
+        // real assertion.
+        assert ! _has_declare(win, "read");
+        assert ! _has_declare(win, "write");
+        assert contains(posix, "declare i64 @read(");
+        assert contains(posix, "declare i64 @write(");
+        // Same sign-extension pin as the socket pair above (W2): the
+        // narrowed declaration alone does not restore the negative-error
+        // signal without a genuine `sext`. Counted, not merely present —
+        // both `sfn_fd_read` and `sfn_fd_write` must sign-extend, and a
+        // presence check would stay green if only the read half (the
+        // memory-unsafe path) lost its `sext`.
+        assert _count_lines_with_both(win, "sext i32", "to i64") == 2;
         return 0;
     });
     assert outcome == 0;
