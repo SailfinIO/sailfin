@@ -90,10 +90,14 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 lld jq
-          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: clang-18 llvm-18 lld jq
+
+      - name: Set CLANG env (Linux)
+        shell: bash
+        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       - name: Build native compiler (via Makefile)
         uses: ./.github/actions/sailfin-build
@@ -237,10 +241,14 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 lld jq
-          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: clang-18 llvm-18 lld jq
+
+      - name: Set CLANG env (Linux)
+        shell: bash
+        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       - name: Download shared compiler build
         uses: actions/download-artifact@v8
