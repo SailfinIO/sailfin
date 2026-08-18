@@ -131,6 +131,23 @@ fn triple_target_os(triple: string) -> string {
     return "";
 }
 
+// The arch component of a triple ("x86_64" | "aarch64"), or "" for a
+// triple outside the closed set (SFN-923). Mirrors `triple_target_os`
+// above — `_resolve_llvm_target_arch` (`./llvm_provider_context.sfn`)
+// consults this before falling back to its host probe, so an aarch64
+// target resolves aarch64 codegen even on an x86_64 host, matching the
+// vocabulary `stat_st_mode_offset_value` and `syscall_contract_error`
+// already use for the arch axis.
+fn triple_target_arch(triple: string) -> string {
+    if triple == "x86_64-unknown-linux-gnu" { return "x86_64"; }
+    if triple == "aarch64-unknown-linux-gnu" { return "aarch64"; }
+    if triple == "x86_64-apple-darwin" { return "x86_64"; }
+    if triple == "arm64-apple-darwin" { return "aarch64"; }
+    if triple == "x86_64-pc-windows-msvc" { return "x86_64"; }
+    if triple == "x86_64-w64-mingw32" { return "x86_64"; }
+    return "";
+}
+
 // The ABI component of a triple ("gnu" | "mach" | "msvc"), or "" for a
 // triple outside the closed set. Only the two Windows triples diverge on
 // ABI (`msvc` vs `gnu`) — every other target has exactly one ABI in this
@@ -427,16 +444,16 @@ fn target_extra_link_libs(triple: string) -> string[] {
 // basename so the manifest-root prefix is irrelevant, and rebuild the
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
-// `rlimit.sfn`/`terminal.sfn`/`rand.sfn`/`fs_exec_mode.sfn`/`socket_ops.sfn`/
-// `rename_ops.sfn`/`cert_roots.sfn` already live in `platform/`, so their
-// siblings are joined directly onto that same directory rather than
-// appending another `platform/` segment.
+// `rlimit.sfn`/`terminal.sfn`/`rand.sfn`/`fs_exec_mode.sfn`/`fd_io.sfn`/
+// `socket_ops.sfn`/`rename_ops.sfn`/`cert_roots.sfn` already live in
+// `platform/`, so their siblings are joined directly onto that same
+// directory rather than appending another `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
     if !target_os_is_windows(target_os) { return sources; }
     let mut out: string[] = [];
     // Anchor for the append block below — the `platform/` directory,
     // discovered from whichever of rlimit.sfn/terminal.sfn/rand.sfn/tls.sfn/
-    // fs_exec_mode.sfn/socket_ops.sfn/rename_ops.sfn/cert_roots.sfn/
+    // fs_exec_mode.sfn/fd_io.sfn/socket_ops.sfn/rename_ops.sfn/cert_roots.sfn/
     // exec.sfn happens to be present in `sources`, since none of these
     // is guaranteed by this function's own contract.
     let mut platform_dir: string = "";
@@ -475,6 +492,18 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // the Windows sibling supplies `F_OK` (0) instead (SFN-649).
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "fs_exec_mode_windows.sfn"));
+        } else if base == "fd_io.sfn" {
+            // Already in platform/ — same as the four above. The UCRT's
+            // `_read`/`_write` are `int` (32-bit) rather than POSIX's
+            // `ssize_t` (64-bit), so a raw `-> i64` extern silently
+            // promotes a `-1` error into `4294967295`, defeating every
+            // downstream `<= 0`/`< 0` guard in `io.sfn`/`assert.sfn`
+            // (SFN-927 — the generic-fd counterpart of `socket_ops.sfn`'s
+            // `recv`/`send` fix below; kept in a separate module because
+            // `socket_ops.sfn` is gated behind the `net` effect and
+            // `io.sfn`/`assert.sfn` are not).
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "fd_io_windows.sfn"));
         } else if base == "socket_ops.sfn" {
             // Already in platform/ — same as the four above. POSIX
             // `close` on a Winsock `SOCKET` fastfails the process
@@ -578,5 +607,6 @@ export {
     triple_abi,
     triple_artifact_tags,
     triple_is_supported,
+    triple_target_arch,
     triple_target_os
 };

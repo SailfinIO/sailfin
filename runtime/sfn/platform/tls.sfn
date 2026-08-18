@@ -126,9 +126,15 @@ extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+// `sfn_socket_recv`/`sfn_socket_send`, not raw `recv`/`send` — Winsock
+// declares both `int` (32-bit) rather than POSIX's `ssize_t` (64-bit), so
+// a raw extern here would truncate a Winsock error return into a large
+// positive count instead of the negative failure this module's guards
+// test for (SFN-927). `platform/socket_ops.sfn` sign-extends on Windows
+// and is a pass-through on POSIX.
+extern fn sfn_socket_recv(fd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+extern fn sfn_socket_send(fd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn sfn_tls_record_seal(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64;
 
@@ -387,7 +393,7 @@ fn _tls_send_all(fd: i64, buf: *u8, n: i64) -> bool ![net] {
         // bytes forever must not spin.
         guard = guard + 1;
         if guard > 1048576 { return false; }
-        let wrote: i64 = send(fd as i32, _tls_ptr_off(buf, off), n - off, 0);
+        let wrote: i64 = sfn_socket_send(fd as i32, _tls_ptr_off(buf, off), n - off, 0);
         if wrote <= 0 { return false; }
         off = off + wrote;
     }
@@ -429,7 +435,7 @@ fn _tls_rx_fill(s: *TlsSession, need: i64) -> i64 ![net] {
         guard = guard + 1;
         if guard > 1048576 { return 0 - 1; }
         let space: i64 = s.rx_cap - s.rx_len;
-        let got: i64 = recv(s.fd as i32, _tls_ptr_off(s.rx_addr as *u8, s.rx_len), space, 0);
+        let got: i64 = sfn_socket_recv(s.fd as i32, _tls_ptr_off(s.rx_addr as *u8, s.rx_len), space, 0);
         if got == 0 {
             s.eof = 1;
             return 0;

@@ -1,20 +1,29 @@
 // runtime/sfn/platform/socket_ops.sfn
 //
-// Socket creation and disposal, isolated behind two symbols so the
-// Windows divergence is expressible as a module swap. Swapped for
-// `socket_ops_windows.sfn` on a Windows target by
+// Socket creation, disposal, timeouts, and recv/send, isolated behind
+// five symbols so the Windows divergence is expressible as a module
+// swap. Swapped for `socket_ops_windows.sfn` on a Windows target by
 // `target_condition_runtime_sfn_sources`
 // (`compiler/src/build/target.sfn`) — the same mechanism that swaps
 // `fs_exec_mode.sfn`, and for the same reason (SFN-671).
 //
-// Why these two operations and not the whole socket surface: they are
-// the only two that actually diverge. Measured against Winsock rather
-// than assumed, on MSVC/UCRT:
+// Why these operations and not the whole socket surface: they are the
+// ones that actually diverge. Measured against Winsock rather than
+// assumed, on MSVC/UCRT:
 //
-//   * `socket`/`bind`/`listen`/`accept`/`connect`/`send`/`recv`/
-//     `setsockopt` are exported by `ws2_32.dll` under the same names
-//     with the same signatures, and `-lws2_32` is already added for
-//     Windows targets by `target_extra_link_libs` (SFN-649).
+//   * `socket`/`bind`/`listen`/`accept`/`connect`/`setsockopt` are
+//     exported by `ws2_32.dll` under the same names with the same
+//     signatures, and `-lws2_32` is already added for Windows targets
+//     by `target_extra_link_libs` (SFN-649). `recv`/`send` are NOT —
+//     Winsock declares both `int` (32-bit), not POSIX's `ssize_t`
+//     (64-bit), and `setsockopt`'s `SO_RCVTIMEO`/`SO_SNDTIMEO` optval
+//     is a millisecond `DWORD`, not a `struct timeval`. Both went
+//     unnoticed because Windows happens to share the macOS
+//     `SOL_SOCKET`/`SO_*TIMEO` option numbers, so the existing
+//     "issue both variants and ignore failures" pattern for those
+//     numbers succeeds instead of erroring on Windows — silently
+//     setting a 1000x-wrong timeout and hiding `recv` failures behind
+//     a sign-truncated positive count (SFN-927).
 //   * `AF_INET` is 2 and `SOCK_STREAM` is 1 on both, so the callers'
 //     literal `socket(2, 1, 0)` is correct on both.
 //   * `SD_RECEIVE`/`SD_SEND`/`SD_BOTH` are 0/1/2, identical to POSIX
@@ -43,9 +52,33 @@
 //
 // On POSIX both are pass-throughs, so this target's behaviour is
 // unchanged.
+//
+// `sfn_socket_set_timeouts`/`sfn_socket_recv`/`sfn_socket_send` join
+// creation and disposal here for the same reason (SFN-927): Winsock's
+// `SO_RCVTIMEO`/`SO_SNDTIMEO` optval is a millisecond DWORD rather
+// than a `struct timeval`, and its `recv`/`send` are declared `int`
+// (32-bit) rather than POSIX's `ssize_t` (64-bit) — a caller-side raw
+// extern gets Winsock's ABI silently wrong (10ms instead of 10s; a
+// `-1` arriving as `4294967295`) instead of failing loudly. Routing
+// both through this pair keeps POSIX's semantics exactly as they were
+// and confines the divergence to the Windows sibling.
 extern fn close(fd: i32) -> i32;
 
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
+
+extern fn getsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: *i32) -> i32;
+
+extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+
+extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 // Create a socket. POSIX needs no library initialization, so this is
 // a direct pass-through; the Windows sibling does `WSAStartup` first.
@@ -57,4 +90,83 @@ fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32 {
 // namespace, so `close` is correct here.
 fn sfn_socket_close(fd: i32) -> i32 { return close(fd); }
 
-export { sfn_socket_open, sfn_socket_close };
+// Arm `SO_RCVTIMEO`/`SO_SNDTIMEO` with a `struct timeval { tv_sec; tv_usec; }`
+// (16 bytes on both POSIX targets this runtime builds for; `tv_sec` is an
+// `i64` at offset 0 on both, little-endian, so zeroing the 16 bytes and
+// writing `secs` as the low byte at offset 0 yields `{secs, 0}` portably
+// for any budget < 256s — unchanged from the pre-SFN-927 call site, just
+// moved here). The SOL_SOCKET/SO_*TIMEO option numbers differ between
+// Linux and macOS and the platform-agnostic emitted IR cannot branch on
+// the target, so both variants are issued and failures ignored: on POSIX
+// the wrong-platform call reliably returns `ENOPROTOOPT` and leaves the
+// socket at its prior (blocking) state, which is safe. That safety does
+// NOT extend to Windows — see the Windows sibling's header (SFN-927).
+fn sfn_socket_set_timeouts(fd: i32, secs: i32) -> void {
+    let tv: *u8 = malloc(16 as usize);
+    if tv as i64 == 0 { return; }
+    memset(tv, 0, 16 as usize);
+    memset(tv, secs, 1 as usize);
+    setsockopt(fd, 1, 20, tv, 16);
+    setsockopt(fd, 1, 21, tv, 16);
+    setsockopt(fd, 65535, 4102, tv, 16);
+    setsockopt(fd, 65535, 4101, tv, 16);
+    free(tv);
+}
+
+// `recv`/`send` pass-throughs — POSIX declares both `ssize_t` (64-bit),
+// so no width conditioning is needed here; the Windows sibling's are
+// not pass-throughs.
+fn sfn_socket_recv(fd: i32, buf: *u8, len: i64, flags: i32) -> i64 {
+    return recv(fd, buf, len, flags);
+}
+
+fn sfn_socket_send(fd: i32, buf: *u8, len: i64, flags: i32) -> i64 {
+    return send(fd, buf, len, flags);
+}
+
+// Read back the effective `SO_RCVTIMEO`, in milliseconds, for the
+// regression test (SFN-927): a duration-based test is flaky and a bare
+// `< 0` assertion on a `recv` is blind to a unit mismatch (10ms vs.
+// 10s), but a readback of the value the kernel actually armed catches
+// exactly this bug on any target. `getsockopt`'s optval is the POSIX
+// `struct timeval`; `tv_sec` is an `i64` at offset 0 on both POSIX
+// targets this runtime builds for (see `sfn_socket_set_timeouts`), so
+// the readback is `tv_sec * 1000`. Same dual-platform SOL_SOCKET/
+// SO_RCVTIMEO issue-both-and-check-which-succeeded pattern as the
+// setter. Returns -1 if neither platform's `getsockopt` succeeds.
+fn sfn_socket_timeout_readback_ms(fd: i32) -> i64 {
+    let tv: *u8 = malloc(16 as usize);
+    if tv as i64 == 0 { return 0 - 1; }
+    let lenbuf: *u8 = malloc(4 as usize);
+    if lenbuf as i64 == 0 {
+        free(tv);
+        return 0 - 1;
+    }
+    memset(tv, 0, 16 as usize);
+    memset(lenbuf, 0, 4 as usize);
+    memset(lenbuf, 16, 1 as usize);
+    let mut rc: i32 = getsockopt(fd, 1, 20, tv, lenbuf as *i32);
+    if rc != 0 {
+        memset(tv, 0, 16 as usize);
+        memset(lenbuf, 0, 4 as usize);
+        memset(lenbuf, 16, 1 as usize);
+        rc = getsockopt(fd, 65535, 4102, tv, lenbuf as *i32);
+    }
+    free(lenbuf);
+    if rc != 0 {
+        free(tv);
+        return 0 - 1;
+    }
+    let sec: i64 = sailfin_intrinsic_pointer_read_i64(tv);
+    free(tv);
+    return sec * 1000;
+}
+
+export {
+    sfn_socket_open,
+    sfn_socket_close,
+    sfn_socket_set_timeouts,
+    sfn_socket_recv,
+    sfn_socket_send,
+    sfn_socket_timeout_readback_ms
+};

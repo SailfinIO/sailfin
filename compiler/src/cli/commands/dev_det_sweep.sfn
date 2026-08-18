@@ -175,6 +175,11 @@ fn _det_worker(src: string, seed: string, iters: int, out: string) -> int ![io] 
         process.run(["rm", "-rf", mod_cwd + "/build/sailfin"]);
         _ensure_dir_cmd(mod_cwd + "/build/sailfin");
         let out_ll = out + "/out/" + safe + ".iter" + int_to_string(k) + ".ll";
+        // SFN-923: deliberately NOT routed through `emit_child_argv`. This
+        // spawns `abs_seed` — the PINNED SEED binary, not the freshly built
+        // compiler — and the seed's `emit` predates the `--target` flag, so
+        // it rejects unknown flags with exit 2. Adding `--target` here would
+        // break every determinism-sweep invocation.
         let _ec = process.run_capture_cwd(["timeout", "60", abs_seed, "emit", "-o", out_ll, "llvm", abs_src], base_env, mod_cwd);
         let _o = process.capture_take_stdout();
         let _e = process.capture_take_stderr();

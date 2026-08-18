@@ -8,11 +8,21 @@ import { ImportedModuleContext } from "sfn/ir";
 
 import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../build_flags";
 import { test_runner_active, test_runner_trace } from "../test_runner_state";
-import { build_target_os } from "./target";
+import { build_target_os, build_target_triple, triple_target_arch } from "./target";
 
+// SFN-923: consults the resolved TARGET triple before falling back to a
+// host probe. Previously this probed the HOST unconditionally, so
+// `--target=aarch64-unknown-linux-gnu` on an x86_64 host resolved
+// `x86_64` codegen — in the parent as well as every emit child, since the
+// wrong value was baked into the LLVM provider context both sides
+// installed. `SAILFIN_TARGET_ARCH` keeps top precedence (the existing
+// override contract, mirrored by `direct_link.sfn`'s own arch probe per
+// the three-probes-must-agree note at `target.sfn:189-193`).
 fn _resolve_llvm_target_arch() -> string ![io] {
     let target_override = _get_env_cmd("SAILFIN_TARGET_ARCH");
     if target_override.length > 0 { return target_override; }
+    let from_triple = triple_target_arch(build_target_triple());
+    if from_triple.length > 0 { return from_triple; }
     if fs.exists("/lib/ld-linux-aarch64.so.1") { return "aarch64"; }
     return "x86_64";
 }

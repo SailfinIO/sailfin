@@ -114,7 +114,11 @@ fn _setup_workspace(ws: string) ![io] {
         + "ll-sources = []\n"
         + "sfn-sources = [\"../sfn/structlib.sfn\", \"../sfn/structuse.sfn\", "
         + "\"../sfn/clock.sfn\", \"../sfn/exception.sfn\", \"../sfn/type_meta.sfn\", "
-        + "\"../sfn/io.sfn\", \"../sfn/memory/arena.sfn\", \"../sfn/memory/ownedbuf.sfn\", "
+    // SFN-927: `io.sfn` calls `sfn_fd_write`/`sfn_fd_read` from the
+    // target-swapped `platform/fd_io.sfn` pair, so this fixture must
+    // list it or the link leaves those symbols undefined.
+    + "\"../sfn/io.sfn\", \"../sfn/platform/fd_io.sfn\", "
+        + "\"../sfn/memory/arena.sfn\", \"../sfn/memory/ownedbuf.sfn\", "
         + "\"../sfn/string.sfn\", \"../sfn/array.sfn\", \"../sfn/memory/mem.sfn\"]\n"
         + "include-dirs = []\n"
         + "link-libs = [\"-lm\"]\n"
@@ -136,6 +140,8 @@ fn _setup_workspace(ws: string) ![io] {
     _copy("runtime/sfn/platform/posix.sfn", ws
         + "/runtime/sfn/platform/posix.sfn");
     _copy("runtime/sfn/platform/libc.sfn", ws + "/runtime/sfn/platform/libc.sfn");
+    _copy("runtime/sfn/platform/fd_io.sfn", ws
+        + "/runtime/sfn/platform/fd_io.sfn");
 
     // The struct-defining sibling. Returned by value across the module
     // boundary — the case an inline `extern fn` cannot express (E0805).

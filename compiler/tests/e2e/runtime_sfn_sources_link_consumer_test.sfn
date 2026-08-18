@@ -138,6 +138,11 @@ fn _setup_workspace(ws: string, marker_second_fn: boolean) ![io] {
         + "ll-sources = []\n"
         + "sfn-sources = [\"../sfn/test_marker.sfn\", \"../sfn/clock.sfn\", "
         + "\"../sfn/exception.sfn\", \"../sfn/type_meta.sfn\", \"../sfn/io.sfn\", "
+    // SFN-927: `io.sfn` calls `sfn_fd_write`/`sfn_fd_read`, which live
+    // in the target-swapped `platform/fd_io.sfn` pair. Omitting it here
+    // leaves those symbols undefined at link for this fixture even
+    // though the module is ungated in the real manifest.
+    + "\"../sfn/platform/fd_io.sfn\", "
         + "\"../sfn/memory/arena.sfn\", \"../sfn/memory/ownedbuf.sfn\", "
         + "\"../sfn/string.sfn\", \"../sfn/array.sfn\", \"../sfn/memory/mem.sfn\"]\n"
         + "include-dirs = []\n"
@@ -159,6 +164,8 @@ fn _setup_workspace(ws: string, marker_second_fn: boolean) ![io] {
     _copy("runtime/sfn/platform/posix.sfn", ws
         + "/runtime/sfn/platform/posix.sfn");
     _copy("runtime/sfn/platform/libc.sfn", ws + "/runtime/sfn/platform/libc.sfn");
+    _copy("runtime/sfn/platform/fd_io.sfn", ws
+        + "/runtime/sfn/platform/fd_io.sfn");
 
     _write_marker(ws, marker_second_fn);
 

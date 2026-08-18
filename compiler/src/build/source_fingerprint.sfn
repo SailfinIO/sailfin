@@ -24,6 +24,16 @@
 // hasher (`sha256_hex_of_string` / `_sha256_of_file`), so the
 // result depends only on file contents and paths — never on mtimes,
 // permissions, or the order the filesystem happens to enumerate.
+//
+// SFN-918: this definition is compared ACROSS compiler binaries, so it is
+// seed-coupled. `rebuild-impl` lets the pinned seed take the pre-build
+// snapshot when no `build/bin/sfn` exists yet (a cold build), and
+// `_dev_bootstrap_install` then compares that snapshot against a digest the
+// freshly built compiler recomputes. Changing the steps above — or
+// `default_fingerprint_roots()` — is therefore a `seed-blocker`
+// (.claude/rules/seed-dependency.md): until the new definition reaches the
+// pinned seed, the two disagree and every cold build fails the
+// "sources changed during the build" check at the final step of a self-host.
 import {
     _atomic_rename_into_place,
     _collect_sfn_files_cmd,

@@ -18,7 +18,7 @@
 //       || compiler_version
 //       || canonical(flags)
 //       || slug
-//       || "\ntgt2:" || target_triple
+//       || "\ntgt3:" || target_triple
 //   )
 //
 // The target component is SFN-677, promoted from `target_os` to the
@@ -47,7 +47,7 @@
 // it may originate from an unvalidated `SAILFIN_TARGET_TRIPLE`/
 // `SAILFIN_TARGET_OS` env string that can contain any byte. It is
 // therefore placed last, with nothing following it: the first
-// `\ntgt2:` splits the tail unambiguously (no slug can contain that
+// `\ntgt3:` splits the tail unambiguously (no slug can contain that
 // sequence), so whatever `target_triple` holds, it cannot absorb a
 // following component and alias another tuple. Appending anything
 // after it would forfeit that. See `cache_key_for`.
@@ -1312,11 +1312,21 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
     // var, say), that input must enter this key in its own right — a
     // derived value can never stand in for its input, which is the
     // SFN-661 lesson recorded above.
+    // SFN-923: marker bumped `tgt2:` -> `tgt3:`. This is NOT cosmetic. The
+    // key folds the PARENT-resolved triple, but before SFN-923 the artifact
+    // stored under it could have been emitted by a HOST-flavoured emit
+    // child (the `--target` process cell never reached per-module emit
+    // subprocesses), so a Windows-keyed entry could legitimately hold Linux
+    // IR. Those poisoned entries never self-heal — they invalidate only on
+    // a `cache_compiler_identity` change, which never happens for a fixed
+    // released seed. Without this bump, anyone who attempted a cross build
+    // before the SFN-923 fix keeps a poisoned `tgt2:` entry that silently
+    // defeats it even after upgrading.
     let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_version + "\n"
         + flags_canonical
         + "\n"
         + slug
-        + "\ntgt2:"
+        + "\ntgt3:"
         + target_triple;
     let final_digest = _sha256_of_string(final_input, slug + "_final");
     return CacheKey { digest: final_digest };
@@ -1342,7 +1352,7 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
 // emit is provably target-neutral.
 //
 // `stage1:` is a domain separator, distinct from `cache_key_for`'s
-// `tgt2:`, so the two key spaces can never collide even for the same
+// `tgt3:`, so the two key spaces can never collide even for the same
 // source/slug/version/triple tuple.
 // Hashes through `sha256_of_file` — the SAME entry point the `.srchash`
 // sidecar uses (`_cr_write_srchash`). That identity is load-bearing, not

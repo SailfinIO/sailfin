@@ -69,6 +69,7 @@ sfn-sources = [
     "sfn/platform/pthread_layout.sfn",
     "sfn/platform/rand.sfn",
     "sfn/platform/fs_exec_mode.sfn",
+    "sfn/platform/fd_io.sfn",
     "sfn/platform/socket_ops.sfn",
     "sfn/platform/rename_ops.sfn",
     "sfn/platform/cert_roots.sfn",

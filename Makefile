@@ -878,27 +878,6 @@ rebuild:
 
 rebuild-impl:
 	@mkdir -p build
-	@# SFN-679: the pre-build snapshot is best-effort. On a clean checkout
-	@# $(NATIVE_BIN) does not exist yet, and a binary predating
-	@# `dev bootstrap fingerprint` cannot produce one — it falls through its
-	@# subcommand dispatch to a usage line on STDOUT instead (exit 0, so the
-	@# redirect below still needs the same shape check `compile-impl` uses).
-	@# Neither case is an error; both are exactly the cold/transitional
-	@# builds this recipe has to complete. Write nothing rather than a
-	@# malformed snapshot; `dev bootstrap install` below treats an absent
-	@# `.pending` as "no race guard available" the same as a malformed one,
-	@# but a real digest here still lets it detect a genuine mid-build edit.
-	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD) 2>/dev/null || true)"; \
-	case "$$current_fingerprint" in \
-		*[!0-9a-f]*|"") current_fingerprint="" ;; \
-		????????????????????????????????????????????????????????????????) ;; \
-		*) current_fingerprint="" ;; \
-	esac; \
-	if [ -n "$$current_fingerprint" ]; then \
-		printf '%s\n' "$$current_fingerprint" > "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
-	else \
-		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
-	fi
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -942,6 +921,57 @@ rebuild-impl:
 	@# recipe line. The `&&` chain ensures every diagnostic
 	@# message reaches the user before we exit.
 	@rm -f build/capsules/sfn/compiler/bin/compiler build/capsules/sfn/compiler/bin/compiler.exe build/sailfin/program.ll
+	@# Snapshot the sources BEFORE the build. `dev bootstrap install` needs
+	@# this to do two things: detect a source edit made during the ~10-minute
+	@# build, and publish $(COMPILER_SOURCE_FINGERPRINT) at all — it skips the
+	@# freshness record entirely when no well-formed snapshot is present.
+	@#
+	@# SFN-918: this used to probe only $(NATIVE_BIN), which does not exist on
+	@# a cold build, so a cold self-host published no fingerprint. compile-impl's
+	@# `-n "$$stored_fingerprint"` guard then failed and the NEXT `make compile`
+	@# burned a full redundant rebuild — which the two Make-contract e2e files
+	@# fired concurrently under the default test pool, racing the shared build/
+	@# tree. It runs after the seed is resolved (and fetched, on a fresh clone)
+	@# so the seed can stand in, and still well before the build below.
+	@#
+	@# The seed is a valid oracle because the digest is a SHA-256 over the
+	@# working-tree .sfn sources under compiler/src, compiler/capsules and
+	@# runtime (compiler/src/build/source_fingerprint.sfn) — a statement about
+	@# the SOURCES, not about the binary that hashed them. It is therefore
+	@# compared ACROSS binaries: a seed-produced snapshot against a digest the
+	@# freshly built compiler recomputes. That makes the digest definition
+	@# seed-coupled — changing default_fingerprint_roots() or the manifest
+	@# format is a seed-blocker (.claude/rules/seed-dependency.md), because
+	@# until the new definition reaches the pinned seed every cold build fails
+	@# the `pending != cur` check at the final step. The note in
+	@# source_fingerprint.sfn records this.
+	@#
+	@# SFN-679: still best-effort in shape. A binary predating
+	@# `dev bootstrap fingerprint` prints a usage line on STDOUT instead of a
+	@# digest; the shape check below blanks anything that is not a 64-char
+	@# lowercase-hex string, so such a seed degrades to no snapshot — the
+	@# previous behaviour — rather than a malformed one.
+	@current_fingerprint=""; \
+	snapshot_seed=""; \
+	if [ -f build/.seed-resolved ]; then \
+		snapshot_seed="$$(cat build/.seed-resolved)"; \
+	fi; \
+	for probe in "$(NATIVE_BIN)" "$$snapshot_seed"; do \
+		if [ -z "$$current_fingerprint" ] && [ -n "$$probe" ] && [ -x "$$probe" ]; then \
+			candidate="$$("$$probe" dev bootstrap fingerprint 2>/dev/null || true)"; \
+			case "$$candidate" in \
+				*[!0-9a-f]*|"") candidate="" ;; \
+				????????????????????????????????????????????????????????????????) ;; \
+				*) candidate="" ;; \
+			esac; \
+			current_fingerprint="$$candidate"; \
+		fi; \
+	done; \
+	if [ -n "$$current_fingerprint" ]; then \
+		printf '%s\n' "$$current_fingerprint" > "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+	else \
+		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+	fi
 	@# #1120: under the JSON=1 / SAILFIN_AGENT_REPORT=1 gate, append
 	@# `--json` so the seed emits its single-line BuildReport on stdout,
 	@# and tee that to build/native/.build-report.json for the report
@@ -978,9 +1008,11 @@ rebuild-impl:
 	@mkdir -p build/native $(dir $(NATIVE_OUT))
 	@# SFN-679: delegate the race re-check, atomic install, and fingerprint
 	@# promotion to the FRESHLY BUILT compiler's own `dev bootstrap install`.
-	@# The freshly built program carries the new install/fingerprint logic
-	@# even though the pinned seed that built it does not — that is exactly
-	@# why this targets the scoped compiler artifact and not $(SEED).
+	@# This targets the scoped compiler artifact, never $(SEED), so the
+	@# install/fingerprint logic that runs is always the one built from the
+	@# sources in this tree — independent of what the pinned seed happens to
+	@# carry. (The seed does supply the pre-build snapshot on a cold build,
+	@# but that is the digest only, not this promotion step.)
 	@chmod +x build/capsules/sfn/compiler/bin/compiler$(EXE_EXT) 2>/dev/null || true
 	@build/capsules/sfn/compiler/bin/compiler$(EXE_EXT) dev bootstrap install
 	@# Save .ll files to a location `make test` won't clobber. Each
@@ -1204,6 +1236,14 @@ ci-cross-windows:
 	: "sibling uses MoveFileExA + MOVEFILE_REPLACE_EXISTING. This"; \
 	: "list feeds the RELEASED Windows seed, so without the entry"; \
 	: "the shipped seed carries the broken POSIX leg."; \
+	: "Also MINUS platform/fd_io.sfn PLUS its sibling"; \
+	: "platform/fd_io_windows.sfn (SFN-927): the POSIX module's raw"; \
+	: "read(2)/write(2) declare -> i64 (ssize_t), but the UCRT's"; \
+	: "_read/_write are int (32-bit), so a -1 error reads back as"; \
+	: "4294967295 and defeats every downstream <= 0 guard. The sibling"; \
+	: "declares the true 32-bit width and sign-extends. io.sfn (already"; \
+	: "in this list) and assert.sfn call sfn_fd_read/sfn_fd_write, which"; \
+	: "have no definition in the bridge link without this entry."; \
 	: "clock is"; \
 	: "re-emitted with SAILFIN_TARGET_OS=Windows for the errno->_errno"; \
 	: "fix (#877), and exec for the exe-path intrinsic leg (#967/#971):"; \
@@ -1212,7 +1252,7 @@ ci-cross-windows:
 	: "readlink reference once the MinGW stub is gone; Windows selects the"; \
 	: "GetModuleFileNameA leg instead. The rest are target-independent IR"; \
 	: "compiled for mingw. Each <module>:<source> pair is space-separated."; \
-	RUNTIME_MODS="prelude:runtime/prelude.sfn runtime_globals:runtime/sfn/runtime_globals.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn fs_exec_mode_windows:runtime/sfn/platform/fs_exec_mode_windows.sfn rlimit_windows:runtime/sfn/platform/rlimit_windows.sfn terminal_windows:runtime/sfn/platform/terminal_windows.sfn socket_ops_windows:runtime/sfn/platform/socket_ops_windows.sfn rename_ops_windows:runtime/sfn/platform/rename_ops_windows.sfn"; \
+	RUNTIME_MODS="prelude:runtime/prelude.sfn runtime_globals:runtime/sfn/runtime_globals.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn fs_exec_mode_windows:runtime/sfn/platform/fs_exec_mode_windows.sfn fd_io_windows:runtime/sfn/platform/fd_io_windows.sfn rlimit_windows:runtime/sfn/platform/rlimit_windows.sfn terminal_windows:runtime/sfn/platform/terminal_windows.sfn socket_ops_windows:runtime/sfn/platform/socket_ops_windows.sfn rename_ops_windows:runtime/sfn/platform/rename_ops_windows.sfn"; \
 	RUNTIME_OBJS=""; \
 	for pair in $$RUNTIME_MODS; do \
 		mod="$${pair%%:*}"; \

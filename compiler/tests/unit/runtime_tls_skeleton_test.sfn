@@ -47,9 +47,12 @@ test "lowering: runtime/sfn/platform/tls.sfn emits a declare for every extern" !
     assert _contains(ir, "@memcpy(");
     assert _contains(ir, "@memset(");
     // Socket I/O. The driver owns the fd directly rather than going through
-    // `io.sfn`, so the record layer can see short reads.
-    assert _contains(ir, "@recv(");
-    assert _contains(ir, "@send(");
+    // `io.sfn`, so the record layer can see short reads. Routed through the
+    // target-swapped `socket_ops` pair since SFN-927: Winsock's `recv`/`send`
+    // return 32-bit `int`, so a bare `-> i64` extern turned a `-1` into
+    // 4294967295 and killed every `< 0` guard on Windows.
+    assert _contains(ir, "@sfn_socket_recv(");
+    assert _contains(ir, "@sfn_socket_send(");
     // AEAD record seal/open — the one hot path that stays out of Sailfin.
     assert _contains(ir, "@sfn_tls_record_seal(");
     assert _contains(ir, "@sfn_tls_record_open(");

@@ -30,8 +30,19 @@ export {
     crc32_finish
 } from "./crc32";
 
-export { GzipHeader, GzipHeaderResult, gzip_parse_header } from "./gzip";
+export {
+    GzipHeader,
+    GzipHeaderResult,
+    gzip_parse_header,
+    gzip_write_all
+} from "./gzip";
 
 // RFC 1951 decompression — stored, fixed-Huffman, and dynamic-Huffman
 // blocks. Pure, like `crc32`/`gzip_parse_header` above (SFEP-0071 §3.4).
 export { inflate_all } from "./inflate";
+
+// RFC 1951 compression — fixed Huffman with greedy LZ77, plus a stored-block
+// fallback (SFEP-0071 §3.9). Dynamic Huffman is a non-gating follow-up
+// (`DeflateStrategy.Dynamic` is parsed but rejected with `UnsupportedFeature`
+// today).
+export { DeflateOptions, DeflateStrategy, deflate_all } from "./deflate";

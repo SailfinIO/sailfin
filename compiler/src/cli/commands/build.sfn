@@ -52,6 +52,7 @@ import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { _runtime_bundle_exists, clean_runtime_object_cache } from "../../build/runtime_objs";
 import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import { build_target_os, target_exe_name, triple_is_supported } from "../../build/target";
+import { supported_targets_hint, unsupported_target_diagnostic } from "../../build/target_diagnostics";
 import { clear_build_target, set_build_target } from "../../build/target_state";
 import {
     cache_root,
@@ -59,6 +60,7 @@ import {
     merge_cache_stats,
     resolve_build_cache_config
 } from "../../build_cache";
+import { _get_env_cmd } from "../../build_flags";
 import { emit_compiler_build_stamp_if_applicable } from "../../build_stamp";
 import {
     capsule_artifact_bin_path,
@@ -115,18 +117,24 @@ fn _print_build_usage() ![io] {
     print("       distinct from `sfn package --target`, which takes a platform label.");
 }
 
-// E0614: an `sfn build --target=<triple>` value outside the closed
-// SFEP-0068 §3.1 set. No source span — the flag is not part of any
-// `.sfn` file — so `primary` is null, matching the location-only
-// rendering the E0600 re-export diagnostics already use.
-fn _unsupported_target_diagnostic(triple: string) -> Diagnostic {
+// E0614: an unsupported triple reached `build_target_triple()` via the
+// AMBIENT `SAILFIN_TARGET_TRIPLE` env var rather than the `--target` flag
+// (review A1/B1, SFN-923). Before `emit_child_argv` forwarded the resolved
+// triple to every per-module emit child, an unsupported
+// `SAILFIN_TARGET_TRIPLE` was tolerated here — it flowed unvalidated into
+// the single in-process compile. Now it also reaches each emit child as
+// `--target`, and that child's OWN validation (`cli/commands/emit.sfn`)
+// would reject it with a message naming `--target`, which the user never
+// typed. Fail closed HERE instead, in the parent, so the message names the
+// actual cause. Same code and hint text as `unsupported_target_diagnostic`
+// (`../../build/target_diagnostics`): both are "this triple is outside the
+// closed set," differing only in provenance.
+fn _unsupported_ambient_target_diagnostic(triple: string) -> Diagnostic {
     return Diagnostic {
         code: "E0614",
         severity: "error",
-        message: "unsupported --target triple: \"" + triple
-            + "\" (supported: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, "
-            + "x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, "
-            + "x86_64-w64-mingw32)",
+        message: "unsupported SAILFIN_TARGET_TRIPLE: \"" + triple + "\" "
+            + supported_targets_hint(),
         file_path: "",
         primary: null,
         suggestion: null
@@ -158,9 +166,27 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     set_build_target(target_flag);
     if target_flag.length > 0 && !triple_is_supported(target_flag) {
         let empty_lines: string[] = [];
-        print.err(render_terminal_diagnostic(diagnostic_to_diag(_unsupported_target_diagnostic(target_flag), "build"), empty_lines, "build"));
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(unsupported_target_diagnostic(target_flag), "build"), empty_lines, "build"));
         clear_build_target();
         return 2;
+    }
+    // Review A1/B1 (SFN-923): with no explicit `--target`, `--target`'s own
+    // validation above never ran, but `build_target_triple()` (every
+    // downstream per-module emit child now reads it via `emit_child_argv`)
+    // still falls through to the ambient `SAILFIN_TARGET_TRIPLE` override
+    // verbatim and unvalidated. The `SAILFIN_TARGET_OS` legacy alias does
+    // NOT need this check: `_host_default_triple` maps every OS string,
+    // recognized or not, to a valid triple in the closed set
+    // (`build/target.sfn:195-208`), so only `SAILFIN_TARGET_TRIPLE` can
+    // carry an unsupported value down this path.
+    if target_flag.length == 0 {
+        let ambient_triple: string = _get_env_cmd("SAILFIN_TARGET_TRIPLE");
+        if ambient_triple.length > 0 && !triple_is_supported(ambient_triple) {
+            let empty_lines: string[] = [];
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(_unsupported_ambient_target_diagnostic(ambient_triple), "build"), empty_lines, "build"));
+            clear_build_target();
+            return 2;
+        }
     }
     let _build_positionals: string[] = positionals(matches, "path");
     let mut input_path: string = "";
