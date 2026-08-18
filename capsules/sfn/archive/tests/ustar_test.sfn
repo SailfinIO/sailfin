@@ -1,0 +1,277 @@
+// capsules/sfn/archive/tests/ustar_test.sfn
+//
+// POSIX.1-1988 / GNU ustar header decode (SFEP-0071 §3.8, §8.1). Every
+// vector here is a hand-built 512-byte header block, patched with a real
+// unsigned checksum unless the test is specifically exercising checksum
+// rejection — this module touches no filesystem, so a synthetic block is
+// the fixture shape available at this layer (interop against a real GNU
+// tar / bsdtar archive is `compiler/tests/e2e`'s job).
+import { char_code_at } from "sfn/strings";
+
+import {
+    ByteCursor,
+    bytes_cursor,
+    bytes_free,
+    bytes_from_int_array
+} from "../src/bytes";
+import { UstarHeader, ustar_decode_header } from "../src/ustar";
+
+let _OFF_NAME: int = 0;
+let _OFF_MODE: int = 100;
+let _OFF_SIZE: int = 124;
+let _OFF_CHKSUM: int = 148;
+let _OFF_TYPEFLAG: int = 156;
+let _OFF_LINKNAME: int = 157;
+let _OFF_MAGIC: int = 257;
+let _OFF_VERSION: int = 263;
+let _OFF_PREFIX: int = 345;
+
+fn _zeros(n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push(0);
+        i += 1;
+    }
+    return out;
+}
+
+fn _set_ascii(block: int[], offset: int, text: string) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        block[offset + i] = char_code_at(text, i);
+        i += 1;
+    }
+}
+
+fn _set_octal(block: int[], offset: int, width: int, value: int) -> void {
+    // Zero-padded octal digits filling `width - 1` bytes, then a trailing
+    // NUL — the common ustar numeric-field shape.
+    let digits: int = width - 1;
+    let mut v: int = value;
+    let mut i: int = digits - 1;
+    loop {
+        if i < 0 { break; }
+        block[offset + i] = 48 + (v % 8);
+        v = v / 8;
+        i -= 1;
+    }
+    block[offset + digits] = 0;
+}
+
+// Sum the unsigned byte values, treating the checksum field as eight ASCII
+// spaces, and patch it in — the standard ustar checksum algorithm
+// (SFEP-0071 §3.8), computed independently of `ustar.sfn`'s own
+// `_ustar_verify_checksum` so this fixture builder is not just re-running
+// the code under test.
+fn _patch_checksum(block: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i < 8 { block[_OFF_CHKSUM + i] = 32; }
+        i += 1;
+        if i >= 8 { break; }
+    }
+    let mut sum: int = 0;
+    let mut j: int = 0;
+    loop {
+        if j >= 512 { break; }
+        sum += block[j];
+        j += 1;
+    }
+    _set_octal(block, _OFF_CHKSUM, 8, sum);
+}
+
+// A minimal valid POSIX ustar regular-file header for `name`, `size` bytes,
+// mode `0644`. Callers mutate the returned array before calling
+// `_patch_checksum` if they need a different shape.
+fn _posix_header(name: string) -> int[] {
+    let mut block: int[] = _zeros(512);
+    _set_ascii(block, _OFF_NAME, name);
+    _set_octal(block, _OFF_MODE, 8, 420);
+    _set_octal(block, _OFF_SIZE, 12, 0);
+    block[_OFF_TYPEFLAG] = 48;  // '0'
+    _set_ascii(block, _OFF_MAGIC, "ustar");
+    block[_OFF_MAGIC + 5] = 0;
+    _set_ascii(block, _OFF_VERSION, "00");
+    return block;
+}
+
+fn _decode(block: int[]) -> Result<UstarHeader, string> {
+    let built = bytes_from_int_array(block);
+    match built {
+        Result.Ok { value }
+        : {
+            let cursor = bytes_cursor(value);
+            let decoded = ustar_decode_header(cursor);
+            bytes_free(value);
+            match decoded {
+                Result.Ok { value }
+                : {
+                    return Result.Ok { value: value };
+                },
+                Result.Err { error }
+                : {
+                    return Result.Err { error: error.message };
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error.message };
+        }
+    }
+}
+
+test "archive ustar: decodes a valid POSIX header with a matching checksum" {
+    let mut block = _posix_header("hello.txt");
+    _patch_checksum(block);
+    let decoded = _decode(block);
+    match decoded {
+        Result.Ok { value }
+        : {
+            assert value.name == "hello.txt";
+            assert value.typeflag == 48;
+            assert value.size == 0;
+            assert ! value.is_zero_block;
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+test "archive ustar: rejects a header whose checksum does not match" {
+    let mut block = _posix_header("hello.txt");
+    _patch_checksum(block);
+    // Corrupt one content byte after the checksum was computed, so the
+    // stored checksum no longer matches either summation convention.
+    block[_OFF_NAME] = char_code_at("H", 0);
+    let decoded = _decode(block);
+    match decoded {
+        Result.Ok { value }
+        : {
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert true;
+        }
+    }
+}
+
+test "archive ustar: joins prefix + '/' + name for a POSIX header" {
+    let mut block = _posix_header("name.txt");
+    _set_ascii(block, _OFF_PREFIX, "some/long/prefix");
+    _patch_checksum(block);
+    let decoded = _decode(block);
+    match decoded {
+        Result.Ok { value }
+        : {
+            assert value.name == "some/long/prefix/name.txt";
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+test "archive ustar: GNU magic never joins prefix" {
+    let mut block = _zeros(512);
+    _set_ascii(block, _OFF_NAME, "name.txt");
+    _set_octal(block, _OFF_MODE, 8, 420);
+    _set_octal(block, _OFF_SIZE, 12, 0);
+    block[_OFF_TYPEFLAG] = 48;
+    _set_ascii(block, _OFF_MAGIC, "ustar");
+    block[_OFF_MAGIC + 5] = 32;
+    block[_OFF_MAGIC + 6] = 32;
+    // A GNU header's `prefix` bytes are not a real prefix field at all —
+    // set them to garbage to prove they are ignored, not merely empty.
+    _set_ascii(block, _OFF_PREFIX, "should-be-ignored");
+    _patch_checksum(block);
+    let decoded = _decode(block);
+    match decoded {
+        Result.Ok { value }
+        : {
+            assert value.name == "name.txt";
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+test "archive ustar: an all-zero block decodes as the end-of-archive marker" {
+    let block = _zeros(512);
+    let decoded = _decode(block);
+    match decoded {
+        Result.Ok { value }
+        : {
+            assert value.is_zero_block;
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+test "archive ustar: a NUL typeflag normalizes to regular-file" {
+    let mut block = _posix_header("v7.txt");
+    block[_OFF_TYPEFLAG] = 0;
+    _patch_checksum(block);
+    let decoded = _decode(block);
+    match decoded {
+        Result.Ok { value }
+        : {
+            assert value.typeflag == 48;
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+test "archive ustar: rejects a GNU base-256 size field" {
+    let mut block = _posix_header("big.bin");
+    // High bit set in the first byte of the size field signals GNU
+    // base-256 encoding, which this reader detects and refuses rather
+    // than misinterpreting as octal garbage (SFEP-0071 §3.8).
+    block[_OFF_SIZE] = 128;
+    _patch_checksum(block);
+    let decoded = _decode(block);
+    match decoded {
+        Result.Ok { value }
+        : {
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert true;
+        }
+    }
+}
+
+test "archive ustar: decodes a symlink header's linkname" {
+    let mut block = _posix_header("link");
+    block[_OFF_TYPEFLAG] = 50;  // '2'
+    _set_ascii(block, _OFF_LINKNAME, "target.txt");
+    _patch_checksum(block);
+    let decoded = _decode(block);
+    match decoded {
+        Result.Ok { value }
+        : {
+            assert value.typeflag == 50;
+            assert value.linkname == "target.txt";
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}

@@ -4,6 +4,14 @@ version = "0.3.0"
 description = "In-process .tar.gz reading and writing for Sailfin"
 
 [dependencies]
+# `char_code_at` (embedded-NUL detection in the path guard) and
+# `ascii_lowercase` (Windows reserved-device-name comparison, case-folded)
+# back `src/path_guard.sfn`; `parse_int`/`int_to_string` back the ustar
+# numeric fields in `src/ustar.sfn`. Precedent: `sfn/crypto` depends on
+# `sfn/strings` the same way (`capsules/sfn/crypto/capsule.toml`), and the
+# compiler already depends on both, so this introduces no new name-collision
+# surface (SFN-893).
+"sfn/strings" = "*"
 
 [capabilities]
 # The pure layers — bytes, crc32, inflate, deflate, ustar framing, and the

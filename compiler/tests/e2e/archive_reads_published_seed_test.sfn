@@ -1,0 +1,96 @@
+// compiler/tests/e2e/archive_reads_published_seed_test.sfn
+//
+// Extract a REAL published seed tarball (a `sailfin_<version>_<os>_<arch>.tar.gz`
+// release asset, ustar + GNU long-name/PAX shapes and all) with
+// `targz_extract` and confirm the `sailfin` binary and the `sfn -> sailfin`
+// symlink both materialize correctly — the acceptance evidence for
+// SFEP-0071 §3.8's ustar-conformance claim and §3.5's symlink policy
+// together, on the exact asset shape `sfn toolchain install` consumes.
+//
+// Gated on the asset already being present locally — this test NEVER
+// downloads. Point `SAILFIN_SEED_TARBALL` at a cached
+// `sailfin_*_<os>_<arch>.tar.gz` (e.g. the asset a prior `sfn toolchain
+// install` or release-CI leg already fetched) to exercise it; unset or
+// missing, the test skips rather than reaching for the network, matching
+// the `tool_present` degrade pattern used across this suite.
+import { ExtractOptions, targz_extract } from "sfn/archive";
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Search `dir` (non-recursive) for an entry literally named `target`.
+fn _dir_has_entry(dir: string, target: string) -> boolean ![io] {
+    let entries = fs.listDirectory(dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if entries[i] == target { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// A shallow (depth-2) search for a `sailfin` binary and an `sfn` entry that
+// is a real symlink pointing at it — the seed layout puts both either at
+// the extraction root or one `bin/`-shaped directory below it, and this
+// test does not assume which.
+fn _seed_layout_ok(root: string) -> boolean ![io] {
+    if _dir_has_entry(root, "sailfin") {
+        let link = fs.read_link(root + "/sfn");
+        if link == "sailfin" { return true; }
+    }
+    let entries = fs.listDirectory(root);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let child = root + "/" + entries[i];
+        if fs.is_directory(child) {
+            if _dir_has_entry(child, "sailfin") {
+                let link = fs.read_link(child + "/sfn");
+                if link == "sailfin" { return true; }
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+test "archive reads published seed: extracts the real tarball with the sfn -> sailfin symlink intact" ![io] {
+    let tarball = env.get("SAILFIN_SEED_TARBALL");
+    if tarball.length == 0 {
+        assert true;
+        return;
+    }
+    if !fs.exists(tarball) {
+        assert true;
+        return;
+    }
+
+    let dest_dir = _scratch_dir() + "/archive-published-seed/dest";
+    fs.createDirectory(dest_dir, true);
+    let opts = ExtractOptions {
+        copy_instead_of_link: false,
+        apply_modes: true,
+        max_total_bytes: 1073741824,
+        max_members: 65536,
+        host_is_windows: false
+    };
+    let result = targz_extract(tarball, dest_dir, opts);
+    match result {
+        Result.Ok { value }
+        : {
+            assert value.member_count > 0;
+        },
+        Result.Err { error }
+        : {
+            print("targz_extract failed: " + error.message);
+            assert false;
+        }
+    }
+
+    assert _seed_layout_ok(dest_dir);
+}

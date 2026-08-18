@@ -1,0 +1,710 @@
+// sfn/archive — the `.tar.gz` extractor (SFEP-0071 §3.4, §3.6, §3.8).
+//
+// Composes gzip -> inflate -> ustar -> path_guard -> filesystem write. This
+// phase reads and decompresses the whole archive into memory rather than
+// streaming: the streaming `gzip_reader_open`/`gzip_read` API (SFEP-0071
+// §3.4) is a later phase of this epic and does not exist yet, so
+// `_tr_read_whole_file` + `inflate_all` is the pragmatic whole-buffer
+// implementation available today. Published seed tarballs are single-digit
+// megabytes; a `sfn package` tree of unbounded size is exactly what the
+// streaming follow-up is for.
+//
+// Every member is checked against the extraction path policy
+// (`path_guard.sfn`, SFEP-0071 §3.6) on raw header bytes before any
+// filesystem call. The first rejection aborts the whole extraction and
+// leaves no further members written — verified by
+// `tests/path_guard_test.sfn` and the traversal E2E test.
+import { char_code_at, split } from "sfn/strings";
+
+import {
+    ByteBuf,
+    ByteCursor,
+    _byte_at,
+    bytes_append_slice,
+    bytes_cursor,
+    bytes_free,
+    bytes_new
+} from "./bytes";
+import {
+    ArchiveError,
+    ArchiveErrorKind,
+    archive_error,
+    archive_error_at,
+    archive_error_member
+} from "./error";
+import { GzipHeaderResult, gzip_parse_header } from "./gzip";
+import { inflate_all } from "./inflate";
+import { archive_check_beneath, archive_check_member_path } from "./path_guard";
+import {
+    UstarHeader,
+    UstarTypeflags,
+    ustar_decode_header,
+    ustar_typeflags
+} from "./ustar";
+
+// libc file I/O, redeclared per-module per the #306 cross-module extern
+// limit (matching `capsules/sfn/os/src/mod.sfn`, `bytes.sfn` above). `File`
+// is the same builtin opaque type `compiler/src/build/fs.sfn` and
+// `runtime/sfn/adapters/http.sfn` declare `extern fn`s over with no local
+// struct definition.
+extern fn fopen(path: *u8, mode: *u8) -> *File;
+
+extern fn fclose(f: *File) -> i32;
+
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn ferror(f: *File) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+struct ExtractOptions {
+    // Materialize symlink and hard-link members as copies instead of real
+    // links. Forced on regardless of this flag whenever `host_is_windows`,
+    // or the member is a hard link (SFEP-0071 §3.5): we never create a
+    // hard link on any host.
+    copy_instead_of_link: boolean;
+    // Apply the stored permission bits via `fs.set_perms`. A no-op on
+    // Windows (`capsules/sfn/fs/src/mod.sfn:93-100`).
+    apply_modes: boolean;
+    // Refuse an archive whose total decompressed member size exceeds this,
+    // so a decompression bomb fails closed rather than filling the disk.
+    max_total_bytes: int;
+    max_members: int;
+    // The Windows-shaped path-guard rules (§3.6 rules 3/6) and the
+    // link-materialization policy above both depend on which host is
+    // extracting — supplied by the caller rather than probed here, since
+    // host detection (`compiler/src/build/target.sfn::host_is_windows`) is
+    // compiler-internal and out of reach for capsule source.
+    host_is_windows: boolean;
+}
+
+struct ExtractSummary {
+    member_count: int;
+    bytes_written: int;
+}
+
+// A symlink or hard-link member whose target may not exist yet at the point
+// it is read — tar member order is not guaranteed to place a link's target
+// before the link itself (SFEP-0071 §3.5). Collected during the main pass,
+// replayed after every regular member and directory has been written.
+struct _DeferredLink {
+    rel_path: string;
+    target: string;
+    is_symlink: boolean;
+}
+
+// True for a directory member name that denotes the archive's own root —
+// ".", "./", or "" — after stripping trailing `/` characters. Any deeper
+// name (`a/`, `./a/`) is a real component and returns false.
+fn _tr_is_archive_root_name(name: string) -> boolean {
+    let mut end: int = name.length;
+    loop {
+        if end <= 0 { break; }
+        if _tr_char_at(name, end - 1) != 47 { break; }
+        end -= 1;
+    }
+    if end == 0 { return true; }
+    if end == 1 && _tr_char_at(name, 0) == 46 { return true; }
+    return false;
+}
+
+fn _tr_char_at(text: string, index: int) -> int {
+    return char_code_at(text, index);
+}
+
+fn _tr_padded_len(size: int) -> int {
+    if size <= 0 { return 0; }
+    return ((size + 511) / 512) * 512;
+}
+
+// Read the entire contents of `path` into a `ByteBuf` without going through
+// a Sailfin `string`, so a binary `.tar.gz` (which routinely contains NUL
+// bytes) survives intact. Models `_read_file_bytes`
+// (`compiler/src/build/fs.sfn:766`), rebuilt here in terms of this
+// capsule's own `ByteBuf` rather than the compiler-internal `FileBytes`.
+fn _tr_read_whole_file(path: string) -> Result<ByteBuf, ArchiveError> ![io] {
+    if !fs.exists(path) {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "archive file not found: "
+                + path)
+        };
+    }
+    let read_mode: string = "rb";
+    let f: *File = fopen(path as *u8, read_mode as *u8);
+    if (f as i64) == 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "cannot open archive file: "
+                + path)
+        };
+    }
+
+    let opened: Result<ByteBuf, ArchiveError> = bytes_new(65536);
+    let mut out: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match opened {
+        Result.Ok { value }
+        : {
+            out = value;
+        },
+        Result.Err { error }
+        : {
+            fclose(f);
+            return Result.Err { error: error };
+        }
+    }
+
+    let chunk: int = 65536;
+    let chunk_buf: *u8 = malloc(chunk as usize);
+    if (chunk_buf as i64) == 0 {
+        bytes_free(out);
+        fclose(f);
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "out of memory reading archive file")
+        };
+    }
+
+    let mut ok: boolean = true;
+    let mut guard: int = 0;
+    // 200000 * 64 KiB is a ~13 GiB backstop — far past any archive this
+    // capsule is expected to read — guarding a pathologically short-reading
+    // source rather than a large file.
+    let max_iters: int = 200000;
+    loop {
+        guard += 1;
+        if guard > max_iters {
+            ok = false;
+            break;
+        }
+        let got: int = fread(chunk_buf, 1 as usize, chunk as usize, f) as int;
+        if got <= 0 { break; }
+        let appended: Result<ByteBuf, ArchiveError> = bytes_append_slice(out, chunk_buf as i64, got);
+        match appended {
+            Result.Ok { value }
+            : {
+                out = value;
+            },
+            Result.Err { error }
+            : {
+                ok = false;
+                break;
+            }
+        }
+        if got < chunk { break; }
+    }
+
+    let had_error: boolean = ferror(f) != 0;
+    free(chunk_buf);
+    fclose(f);
+    if !ok || had_error {
+        bytes_free(out);
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "I/O error reading archive file: "
+                + path)
+        };
+    }
+    return Result.Ok { value: out };
+}
+
+fn _tr_rest_is_zero(buf: ByteBuf, from: int) -> boolean {
+    let mut i: int = from;
+    loop {
+        if i >= buf.len { break; }
+        if _byte_at(buf.addr + (i as i64)) != 0 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// A NUL-terminated (or field-length-bounded) string read out of `buf`
+// starting at `start`, spanning at most `field_len` bytes and capped at
+// `max_len` — the GNU `L`/`K` long-name bound (SFEP-0071 §3.8).
+fn _tr_read_cstr_field(buf: ByteBuf, start: int, field_len: int, max_len: int) -> Result<string, ArchiveError> {
+    if field_len > max_len {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.CorruptStream, "GNU long-name/long-link body exceeds 4096 bytes")
+        };
+    }
+    if start + field_len > buf.len {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Truncated, "archive ends mid-body")
+        };
+    }
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= field_len { break; }
+        let b: int = _byte_at(buf.addr + ((start + i) as i64));
+        if b == 0 { break; }
+        out = out + char_from_code(b);
+        i += 1;
+    }
+    return Result.Ok { value: out };
+}
+
+struct _PaxRecords {
+    has_path: boolean;
+    path: string;
+    has_linkpath: boolean;
+    linkpath: string;
+    has_size: boolean;
+    size: int;
+}
+
+fn _tr_pax_parse_decimal(buf: ByteBuf, start: int, end: int) -> int {
+    let mut value: int = 0;
+    let mut i: int = start;
+    loop {
+        if i >= end { break; }
+        let b: int = _byte_at(buf.addr + (i as i64));
+        if b < 48 || b > 57 { break; }
+        value = (value * 10) + (b - 48);
+        i += 1;
+    }
+    return value;
+}
+
+// PAX per-file extended header (typeflag `x`, SFEP-0071 §3.8): a sequence
+// of `"<decimal length> <keyword>=<value>\n"` records, the length counting
+// itself. Only `path`, `linkpath`, and `size` are honoured; every other
+// keyword is skipped, which is what lets us read a bsdtar-produced archive
+// without understanding its full extension vocabulary.
+fn _tr_read_pax_body(buf: ByteBuf, start: int, size: int) -> Result<_PaxRecords, ArchiveError> {
+    if size < 0 || start + size > buf.len {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Truncated, "archive ends mid-PAX-header")
+        };
+    }
+    let mut records: _PaxRecords = _PaxRecords {
+        has_path: false,
+        path: "",
+        has_linkpath: false,
+        linkpath: "",
+        has_size: false,
+        size: 0
+    };
+    let end: int = start + size;
+    let mut i: int = start;
+    let mut guard: int = 0;
+    let max_records: int = size + 8;
+    loop {
+        if i >= end { break; }
+        guard += 1;
+        if guard > max_records {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "PAX extended header exceeded its own record-count bound")
+            };
+        }
+        let len_start: int = i;
+        let record_len: int = _tr_pax_parse_decimal(buf, i, end);
+        if record_len <= 0 {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "malformed PAX record: missing or zero length prefix")
+            };
+        }
+        let record_end: int = len_start + record_len;
+        if record_end > end {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "PAX record length runs past its extended header")
+            };
+        }
+        // Skip the decimal digits just consumed, then the single space
+        // separating the length prefix from `keyword=value`.
+        let mut digit_end: int = len_start;
+        loop {
+            if digit_end >= record_end { break; }
+            let b: int = _byte_at(buf.addr + (digit_end as i64));
+            if b < 48 || b > 57 { break; }
+            digit_end += 1;
+        }
+        let content_start: int = digit_end + 1;
+        // record_end - 1 is the trailing '\n'; content runs up to it.
+        let content_end: int = record_end - 1;
+        let mut eq_pos: int = -1;
+        let mut j: int = content_start;
+        loop {
+            if j >= content_end { break; }
+            if _byte_at(buf.addr + (j as i64)) == 61 {
+                eq_pos = j;
+                break;
+            }
+            j += 1;
+        }
+        if eq_pos < 0 {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "malformed PAX record: missing '='")
+            };
+        }
+        let keyword: string = _tr_read_cstr_field(buf, content_start, eq_pos - content_start, 4096)?;
+        let value_len: int = content_end - (eq_pos + 1);
+        let value: string = _tr_read_cstr_field(buf, eq_pos + 1, value_len, 4096)?;
+        if keyword == "path" {
+            records.has_path = true;
+            records.path = value;
+        } else if keyword == "linkpath" {
+            records.has_linkpath = true;
+            records.linkpath = value;
+        } else if keyword == "size" {
+            records.has_size = true;
+            records.size = _tr_pax_parse_decimal(buf, eq_pos + 1, content_end);
+        }
+        i = record_end;
+    }
+    return Result.Ok { value: records };
+}
+
+// Rule 8 (SFEP-0071 §3.6): walk `dest_dir` down to (but not including) the
+// last component of `checked_relative`, refusing to create through an
+// existing symlink at any level. This closes the "member `a` is a symlink
+// to `/etc`, member `a/b` writes through it" hole that rules 1-7 alone
+// leave open.
+fn _tr_ensure_parent_dirs(dest_dir: string, checked_relative: string, include_last: boolean) -> Result<int, ArchiveError> ![io] {
+    let components: string[] = split(checked_relative, "/");
+    let mut cur: string = dest_dir;
+    let mut limit: int = components.length;
+    if !include_last { limit = components.length - 1; }
+    let mut i: int = 0;
+    loop {
+        if i >= limit { break; }
+        cur = cur + "/" + components[i];
+        let link_target: string = fs.read_link(cur);
+        if link_target.length > 0 {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.LinkRejected, "refusing to create through an existing symlink at "
+                    + cur, checked_relative)
+            };
+        }
+        if !fs.exists(cur) { fs.createDirectory(cur, true); } else if !fs.is_directory(cur) {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.PathRejected, "extraction path component is not a directory: "
+                    + cur, checked_relative)
+            };
+        }
+        i += 1;
+    }
+    return Result.Ok { value: 0 };
+}
+
+fn _tr_write_file_from_buf(full_path: string, src_addr: i64, n: int) -> Result<int, ArchiveError> ![io] {
+    let write_mode: string = "wb";
+    let f: *File = fopen(full_path as *u8, write_mode as *u8);
+    if (f as i64) == 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "cannot open extraction target for writing: "
+                + full_path)
+        };
+    }
+    if n > 0 {
+        let written: int = fwrite(src_addr as *u8, 1 as usize, n as usize, f) as int;
+        if written != n {
+            fclose(f);
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.Io, "short write extracting: "
+                    + full_path)
+            };
+        }
+    }
+    fclose(f);
+    return Result.Ok { value: n };
+}
+
+fn _tr_copy_file(src_path: string, dst_path: string) -> Result<int, ArchiveError> ![io] {
+    let read_mode: string = "rb";
+    let f: *File = fopen(src_path as *u8, read_mode as *u8);
+    if (f as i64) == 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "deferred link target missing after extraction: "
+                + src_path)
+        };
+    }
+    let write_mode: string = "wb";
+    let out: *File = fopen(dst_path as *u8, write_mode as *u8);
+    if (out as i64) == 0 {
+        fclose(f);
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "cannot open deferred-link copy target for writing: "
+                + dst_path)
+        };
+    }
+    let chunk: int = 65536;
+    let chunk_buf: *u8 = malloc(chunk as usize);
+    if (chunk_buf as i64) == 0 {
+        fclose(f);
+        fclose(out);
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "out of memory copying a deferred link target")
+        };
+    }
+    let mut ok: boolean = true;
+    let mut guard: int = 0;
+    let max_iters: int = 200000;
+    loop {
+        guard += 1;
+        if guard > max_iters {
+            ok = false;
+            break;
+        }
+        let got: int = fread(chunk_buf, 1 as usize, chunk as usize, f) as int;
+        if got <= 0 { break; }
+        let written: int = fwrite(chunk_buf, 1 as usize, got as usize, out) as int;
+        if written != got {
+            ok = false;
+            break;
+        }
+        if got < chunk { break; }
+    }
+    free(chunk_buf);
+    fclose(f);
+    fclose(out);
+    if !ok {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "I/O error copying a deferred link target")
+        };
+    }
+    return Result.Ok { value: 0 };
+}
+
+// Resolve a symlink/hard-link target relative to the directory containing
+// `rel_path`, matching tar's own convention. Both sides already passed the
+// path guard (no `..`, not absolute), so the joined result cannot escape
+// `dest_dir`.
+fn _tr_resolve_link_target(dest_dir: string, rel_path: string, target: string) -> string {
+    let components: string[] = split(rel_path, "/");
+    let mut dir: string = dest_dir;
+    let mut i: int = 0;
+    loop {
+        if i >= components.length - 1 { break; }
+        dir = dir + "/" + components[i];
+        i += 1;
+    }
+    return dir + "/" + target;
+}
+
+fn _tr_replay_deferred(dest_dir: string, link: _DeferredLink) -> Result<int, ArchiveError> ![io] {
+    let full_path: string = dest_dir + "/" + link.rel_path;
+    let src_path: string = _tr_resolve_link_target(dest_dir, link.rel_path, link.target);
+    if !fs.exists(src_path) {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.LinkRejected, "link target was never extracted: "
+                + link.target, link.rel_path)
+        };
+    }
+    return _tr_copy_file(src_path, full_path);
+}
+
+// Extract `archive_path` beneath `dest_dir`. Every member is checked
+// against the path policy (`path_guard.sfn`) before any filesystem call;
+// the first rejection aborts and leaves no further members written.
+fn targz_extract(archive_path: string, dest_dir: string, opts: ExtractOptions) -> Result<ExtractSummary, ArchiveError> ![io] {
+    let compressed: ByteBuf = _tr_read_whole_file(archive_path)?;
+
+    let gz_cursor: ByteCursor = bytes_cursor(compressed);
+    let header_result: Result<GzipHeaderResult, ArchiveError> = gzip_parse_header(gz_cursor);
+    let mut gz_body: ByteCursor = ByteCursor { addr: 0, len: 0, pos: 0 };
+    match header_result {
+        Result.Ok { value }
+        : {
+            gz_body = value.body;
+        },
+        Result.Err { error }
+        : {
+            bytes_free(compressed);
+            return Result.Err { error: error };
+        }
+    }
+
+    // 4 GiB output cap for the in-memory decompressed tar stream — well
+    // past any published seed tarball or reasonable `sfn package` tree,
+    // and the decompression-bomb guard `ExtractOptions.max_total_bytes`
+    // applies again below, per member, after this.
+    let max_inflate_output: int = 4294967296;
+    let inflated: Result<ByteBuf, ArchiveError> = inflate_all(gz_body, max_inflate_output);
+    bytes_free(compressed);
+    let mut decompressed: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match inflated {
+        Result.Ok { value }
+        : {
+            decompressed = value;
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+
+    let extracted: Result<ExtractSummary, ArchiveError> = _tr_extract_members(decompressed, dest_dir, opts);
+    bytes_free(decompressed);
+    return extracted;
+}
+
+fn _tr_extract_members(buf: ByteBuf, dest_dir: string, opts: ExtractOptions) -> Result<ExtractSummary, ArchiveError> ![io] {
+    let tf: UstarTypeflags = ustar_typeflags();
+    let host_win: boolean = opts.host_is_windows;
+    let mut pos: int = 0;
+    let mut member_count: int = 0;
+    let mut bytes_written: int = 0;
+    let mut pending_name: string = "";
+    let mut pending_link: string = "";
+    let mut pending_size: int = -1;
+    let mut deferred: _DeferredLink[] = [];
+
+    let mut guard: int = 0;
+    // One iteration per 512-byte block is the loosest possible bound —
+    // every real path through the loop advances `pos` by at least 512.
+    let max_iters: int = (buf.len / 512) + 16;
+    loop {
+        guard += 1;
+        if guard > max_iters {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "archive header scan exceeded the maximum possible block count for its length")
+            };
+        }
+        if pos >= buf.len { break; }
+
+        let cursor: ByteCursor = ByteCursor {
+            addr: buf.addr,
+            len: buf.len,
+            pos: pos
+        };
+        let header: UstarHeader = ustar_decode_header(cursor)?;
+
+        if header.is_zero_block {
+            if !_tr_rest_is_zero(buf, pos + 512) {
+                return Result.Err {
+                    error: archive_error_at(ArchiveErrorKind.CorruptStream, "non-zero data follows the archive's end-of-archive marker", "", pos)
+                };
+            }
+            break;
+        }
+
+        pos += 512;
+        let typeflag: int = header.typeflag;
+
+        if typeflag == tf.gnu_longname || typeflag == tf.gnu_longlink {
+            let body: string = _tr_read_cstr_field(buf, pos, header.size, 4096)?;
+            pos += _tr_padded_len(header.size);
+            if typeflag == tf.gnu_longname { pending_name = body; } else {
+                pending_link = body;
+            }
+            continue;
+        }
+
+        if typeflag == tf.pax_extended {
+            let records: _PaxRecords = _tr_read_pax_body(buf, pos, header.size)?;
+            pos += _tr_padded_len(header.size);
+            if records.has_path { pending_name = records.path; }
+            if records.has_linkpath { pending_link = records.linkpath; }
+            if records.has_size { pending_size = records.size; }
+            continue;
+        }
+
+        if typeflag == tf.pax_global {
+            pos += _tr_padded_len(header.size);
+            continue;
+        }
+
+        if typeflag == tf.chardev || typeflag == tf.blockdev || typeflag == tf.fifo
+            || typeflag == tf.contiguous {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.UnsupportedFeature, "archive member has an unsupported device, FIFO, or contiguous-file typeflag", header.name)
+            };
+        }
+
+        let mut name: string = header.name;
+        if pending_name.length > 0 { name = pending_name; }
+        let mut linkname: string = header.linkname;
+        if pending_link.length > 0 { linkname = pending_link; }
+        let mut size: int = header.size;
+        if pending_size >= 0 { size = pending_size; }
+        pending_name = "";
+        pending_link = "";
+        pending_size = -1;
+
+        // A directory member naming the archive's own root ("." or "./",
+        // the conventional first entry GNU/bsdtar emit for `tar -czf x
+        // .`) has no real path component to validate or create — `dest_dir`
+        // already exists as the extraction root. Skipping it here, rather
+        // than routing it through the path guard, avoids rejecting a
+        // routine archive shape as "no real components" (found extracting
+        // the real published seed tarball while implementing this file).
+        if typeflag == tf.directory && _tr_is_archive_root_name(name) {
+            pos += _tr_padded_len(size);
+            continue;
+        }
+
+        member_count += 1;
+        if member_count > opts.max_members {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.LimitExceeded, "archive exceeds the configured max_members", name)
+            };
+        }
+
+        let checked_path: string = archive_check_member_path(name, host_win)?;
+        let full_path: string = dest_dir + "/" + checked_path;
+        archive_check_beneath(dest_dir, checked_path, full_path)?;
+
+        if typeflag == tf.directory {
+            _tr_ensure_parent_dirs(dest_dir, checked_path, true)?;
+            if opts.apply_modes {
+                fs.set_perms(full_path, header.mode & 511);
+            }
+            pos += _tr_padded_len(size);
+            continue;
+        }
+
+        if typeflag == tf.symlink || typeflag == tf.hardlink {
+            let checked_target: string = archive_check_member_path(linkname, host_win)?;
+            let is_symlink: boolean = typeflag == tf.symlink;
+            let force_copy: boolean = opts.copy_instead_of_link || host_win || !is_symlink;
+            _tr_ensure_parent_dirs(dest_dir, checked_path, false)?;
+            if !force_copy {
+                if !fs.symlink(checked_target, full_path) {
+                    return Result.Err {
+                        error: archive_error_member(ArchiveErrorKind.Io, "fs.symlink failed", name)
+                    };
+                }
+            } else {
+                deferred.push(_DeferredLink {
+                    rel_path: checked_path, target: checked_target, is_symlink: is_symlink
+                });
+            }
+            pos += _tr_padded_len(size);
+            continue;
+        }
+
+        // Regular file (typeflag '0', or NUL normalized to it).
+        _tr_ensure_parent_dirs(dest_dir, checked_path, false)?;
+        if bytes_written + size > opts.max_total_bytes {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.LimitExceeded, "archive exceeds the configured max_total_bytes", name)
+            };
+        }
+        if pos + size > buf.len {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.Truncated, "archive ends mid-member body", name)
+            };
+        }
+        _tr_write_file_from_buf(full_path, buf.addr + (pos as i64), size)?;
+        bytes_written += size;
+        if opts.apply_modes {
+            fs.set_perms(full_path, header.mode & 511);
+        }
+        pos += _tr_padded_len(size);
+    }
+
+    let mut di: int = 0;
+    loop {
+        if di >= deferred.length { break; }
+        _tr_replay_deferred(dest_dir, deferred[di])?;
+        di += 1;
+    }
+
+    return Result.Ok {
+        value: ExtractSummary {
+            member_count: member_count,
+            bytes_written: bytes_written
+        }
+    };
+}

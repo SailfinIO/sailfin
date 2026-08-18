@@ -1,0 +1,229 @@
+// sfn/archive — the mandatory extraction path policy (SFEP-0071 §3.6).
+//
+// Extraction runs with the user's privileges over content fetched from the
+// network, so this module enforces all 8 policy rules on the *joined*
+// member name (or link target) before any filesystem call. Pure: no `![io]`,
+// so the whole rejection table is a unit test with no filesystem
+// (`tests/path_guard_test.sfn`).
+//
+// Deliberately does NOT depend on `sfn/path::normalize`
+// (`capsules/sfn/path/src/mod.sfn:93`). A normalizer's job is to collapse
+// `..` into a shorter path; this guard's job is to *notice* `..` and refuse
+// it. The capsule declares no dependency on `sfn/path` (`capsule.toml`) and
+// this module must never grow one.
+//
+// Rule 4 (no backslash) and the rule-3 drive-letter/UNC checks run on EVERY
+// host, not only Windows: an archive is extracted on whatever host downloads
+// it, and `a\..\..\x` is one component under a POSIX-only `/` split — it
+// would pass rule 5 and then escape on a Windows extraction of the same
+// archive. A check that only fires on Windows is a check that was never
+// tested on Linux.
+import { ascii_lowercase, char_code_at, substring } from "sfn/strings";
+
+import { ArchiveError, ArchiveErrorKind, archive_error_member } from "./error";
+
+let _MAX_NAME_BYTES: int = 4096;
+
+// Windows reserved device names (case-insensitive, extension ignored).
+// Accepted on POSIX, where they are ordinary file names — this list is
+// consulted only under `host_is_windows == true`.
+//
+// A function returning a fresh literal, not a module-level `let` array
+// global: a non-empty array-literal module global's runtime init can pass
+// `sfn check` and still crash at `sfn build`/execution (the residual gap
+// `compiler/tests/e2e/check_build_agree_module_global_test.sfn` documents
+// for the narrower #1386/#1389 empty-array case) — reproduced here for the
+// non-empty case while implementing this file, so the workaround stays
+// local rather than filed as a fix in this capsule's scope.
+fn _win_reserved_names() -> string[] {
+    return ["con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"];
+}
+
+// Split on `/`. Unlike a general-purpose splitter, empty segments (from a
+// leading, trailing, or doubled `/`) and `.` segments are silently dropped
+// here rather than surfaced as components — rule 5 treats both as no-ops,
+// and a trailing `/` (the directory-member convention) is exactly a
+// trailing empty segment.
+fn _pg_split_components(name: string) -> string[] {
+    let mut parts: string[] = [];
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= name.length {
+            if i > start { parts.push(substring(name, start, i)); }
+            break;
+        }
+        if char_code_at(name, i) == 47 {
+            if i > start { parts.push(substring(name, start, i)); }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    return parts;
+}
+
+// Rule 2's defense-in-depth check: the current `string` runtime is
+// NUL-terminated (`.length` is a `strnlen` scan, `runtime/sfn/string.sfn`
+// `sfn_str_len`), so no in-bounds byte a Sailfin string exposes can be a
+// NUL today — this can only ever return `false` under present semantics.
+// It stays rather than being deleted: `ustar.sfn`'s header decode already
+// stops at the first NUL when building `name`/`linkname` (so a
+// NUL-truncation attempt yields a shorter string, not one this function
+// could see), and this is the rule the policy names for that scenario if
+// the string representation ever changes to carry embedded NULs.
+fn _pg_contains_nul(name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= name.length { break; }
+        if char_code_at(name, i) == 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _pg_contains_backslash(name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= name.length { break; }
+        if char_code_at(name, i) == 92 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _pg_is_reserved_component(component: string) -> boolean {
+    // Strip any extension (everything from the first `.` onward) before
+    // comparing — `CON`, `con.txt`, and `Con.tar.gz` are all reserved.
+    let mut stem: string = component;
+    let mut i: int = 0;
+    loop {
+        if i >= component.length { break; }
+        if char_code_at(component, i) == 46 {
+            stem = substring(component, 0, i);
+            break;
+        }
+        i += 1;
+    }
+    let lowered: string = ascii_lowercase(stem);
+    let reserved: string[] = _win_reserved_names();
+    let mut j: int = 0;
+    loop {
+        if j >= reserved.length { break; }
+        if lowered == reserved[j] { return true; }
+        j += 1;
+    }
+    return false;
+}
+
+// Validate `name` (a member path or a symlink/hardlink target, already
+// joined per ustar `prefix`+`/`+`name` rules) against every §3.6 rule.
+// Returns the cleaned, `/`-joined relative path — with `.` and empty
+// components dropped — on success.
+fn archive_check_member_path(name: string, host_is_windows: boolean) -> Result<string, ArchiveError> {
+    // Rule 1: non-empty, at most 4096 bytes.
+    if name.length == 0 {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path is empty", name)
+        };
+    }
+    if name.length > _MAX_NAME_BYTES {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path exceeds 4096 bytes", name)
+        };
+    }
+
+    // Rule 2: no NUL byte inside the joined name.
+    if _pg_contains_nul(name) {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path contains an embedded NUL byte", name)
+        };
+    }
+
+    // Rule 4: no backslash anywhere, on every host. Checked before rule 3
+    // so a name like `a\..\..\x` is rejected here rather than surviving to
+    // the POSIX-only `/` split in rule 5 (SFEP-0071 §3.6 rule 4).
+    if _pg_contains_backslash(name) {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path contains a backslash", name)
+        };
+    }
+
+    // Rule 3: not absolute — leading `/`, leading `\`, leading `\\` (UNC),
+    // or a drive-letter prefix (`C:x`). The backslash forms are already
+    // excluded by rule 4 above; the drive-letter check is not, since
+    // `C:x` contains no backslash.
+    if char_code_at(name, 0) == 47 {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path is absolute", name)
+        };
+    }
+    if name.length >= 2 && char_code_at(name, 1) == 58 {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path has a drive-letter prefix", name)
+        };
+    }
+
+    // Rule 5: split on `/`, drop `.` and empty components, reject any `..`.
+    let raw_components: string[] = _pg_split_components(name);
+    let mut cleaned: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= raw_components.length { break; }
+        let component: string = raw_components[i];
+        if component == "." {
+            i += 1;
+            continue;
+        }
+        if component == ".." {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path contains a '..' component", name)
+            };
+        }
+        // Rule 6: Windows reserved device names, checked only under the
+        // Windows flag — ordinary names on POSIX.
+        if host_is_windows && _pg_is_reserved_component(component) {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path contains a reserved Windows device name", name)
+            };
+        }
+        cleaned.push(component);
+        i += 1;
+    }
+
+    if cleaned.length == 0 {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "archive member path has no real components", name)
+        };
+    }
+
+    let mut joined: string = cleaned[0];
+    let mut k: int = 1;
+    loop {
+        if k >= cleaned.length { break; }
+        joined = joined + "/" + cleaned[k];
+        k += 1;
+    }
+    return Result.Ok { value: joined };
+}
+
+// Rule 7: after joining the guard's cleaned relative path to `dest_dir`,
+// confirm the result is lexically beneath `dest_dir`. Rules 3-5 already
+// guarantee this for any path that reached here, so a failure here is an
+// internal invariant violation rather than a reachable user-facing
+// rejection — a guard that can only be right is a guard nobody notices
+// going wrong (SFEP-0071 §3.6 rule 7).
+fn archive_check_beneath(dest_dir: string, joined_relative: string, full_path: string) -> Result<string, ArchiveError> {
+    let prefix: string = dest_dir + "/";
+    if full_path.length <= prefix.length {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "internal invariant violation: extraction path is not beneath dest_dir", joined_relative)
+        };
+    }
+    let head: string = substring(full_path, 0, prefix.length);
+    if head != prefix {
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.PathRejected, "internal invariant violation: extraction path is not beneath dest_dir", joined_relative)
+        };
+    }
+    return Result.Ok { value: full_path };
+}

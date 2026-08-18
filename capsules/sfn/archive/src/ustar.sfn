@@ -1,0 +1,266 @@
+// sfn/archive — POSIX.1-1988 ustar header decode (SFEP-0071 §3.8).
+//
+// Pure: operates on an in-memory `ByteCursor` over an already-decompressed
+// archive buffer and declares no effect, matching the pure-codec-layer split
+// in SFEP-0071 §4. Decodes exactly one 512-byte header block; the GNU
+// `L`/`K` long-name extension and the PAX `x`/`g` extended-header records
+// span *multiple* blocks (an extension header plus its data blocks, applied
+// to the header that follows), so gluing them together is `tar_read.sfn`'s
+// job — this module only ever looks at one block at a time.
+import { ByteCursor, _byte_at } from "./bytes";
+import {
+    ArchiveError,
+    ArchiveErrorKind,
+    archive_error,
+    archive_error_at
+} from "./error";
+
+let _BLOCK_SIZE: int = 512;
+
+// Field byte offsets within a 512-byte ustar header block (POSIX.1-1988 /
+// GNU tar's "Basic Tar Format" chapter).
+let _OFF_NAME: int = 0;
+let _LEN_NAME: int = 100;
+let _OFF_MODE: int = 100;
+let _LEN_MODE: int = 8;
+let _OFF_SIZE: int = 124;
+let _LEN_SIZE: int = 12;
+let _OFF_CHKSUM: int = 148;
+let _LEN_CHKSUM: int = 8;
+let _OFF_TYPEFLAG: int = 156;
+let _OFF_LINKNAME: int = 157;
+let _LEN_LINKNAME: int = 100;
+let _OFF_MAGIC: int = 257;
+let _LEN_MAGIC: int = 6;
+let _OFF_VERSION: int = 263;
+let _LEN_VERSION: int = 2;
+let _OFF_PREFIX: int = 345;
+let _LEN_PREFIX: int = 155;
+
+// ustar typeflag byte values, named for readability at call sites in
+// `tar_read.sfn`. A NUL typeflag (old v7 tar) means regular file too —
+// `ustar_decode_header` normalizes it to `typeflags().regular`.
+//
+// A function returning a fresh struct, not module-level `let` scalar
+// globals: an imported module-level scalar `let` read from a DIFFERENT
+// module compared reliably `false` against every real value at runtime
+// (typeflag `'L'` never matched `TYPEFLAG_GNU_LONGNAME`, so a GNU
+// long-name header silently fell through to the regular-file path and
+// extracted as a literal `@LongLink` file) despite `sfn check` reporting
+// clean — the same check/build-agreement gap
+// `check_build_agree_module_global_test.sfn` documents for the narrower
+// empty-array case (#1386/#1389), reproduced here for a cross-module
+// scalar constant while implementing this file. Confirmed against a real
+// GNU-tar-produced long-name fixture; the workaround stays local rather
+// than being filed as a compiler fix in this capsule's scope.
+struct UstarTypeflags {
+    regular: int;
+    hardlink: int;
+    symlink: int;
+    chardev: int;
+    blockdev: int;
+    directory: int;
+    fifo: int;
+    contiguous: int;
+    gnu_longlink: int;
+    gnu_longname: int;
+    pax_global: int;
+    pax_extended: int;
+}
+
+fn ustar_typeflags() -> UstarTypeflags {
+    return UstarTypeflags {
+        regular: 48,  // '0'
+        hardlink: 49,  // '1'
+        symlink: 50,  // '2'
+        chardev: 51,  // '3'
+        blockdev: 52,  // '4'
+        directory: 53,  // '5'
+        fifo: 54,  // '6'
+        contiguous: 55,  // '7'
+        gnu_longlink: 75,  // 'K'
+        gnu_longname: 76,  // 'L'
+        pax_global: 103,  // 'g'
+        pax_extended: 120  // 'x'
+    };
+}
+
+struct UstarHeader {
+    // Fully joined name: `prefix + "/" + name` for a POSIX ustar header
+    // with a non-empty prefix, else the raw `name` field. GNU headers never
+    // join `prefix` (SFEP-0071 §3.8) — `tar_read.sfn` applies any pending
+    // GNU `L` / PAX `path` override on top of this.
+    name: string;
+    linkname: string;
+    typeflag: int;
+    size: int;
+    mode: int;
+    // True when all 512 bytes of the block are NUL — the ustar end-of-
+    // archive marker. Every other field is meaningless when this is true.
+    is_zero_block: boolean;
+}
+
+fn _ustar_u8(cursor: ByteCursor, base: int, off: int) -> int {
+    return _byte_at(cursor.addr + ((base + off) as i64));
+}
+
+fn _ustar_is_zero_block(cursor: ByteCursor, base: int) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= _BLOCK_SIZE { break; }
+        if _ustar_u8(cursor, base, i) != 0 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Read a NUL-terminated (or field-length-bounded) field as a string.
+fn _ustar_cstr_field(cursor: ByteCursor, base: int, off: int, len: int) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+        let b: int = _ustar_u8(cursor, base, off + i);
+        if b == 0 { break; }
+        // `char_from_code` is a prelude builtin, in scope with no import
+        // (established at `capsules/sfn/crypto/src/mod.sfn:524`).
+        out = out + char_from_code(b);
+        i += 1;
+    }
+    return out;
+}
+
+// Parse an ustar octal numeric field: leading spaces skipped, then octal
+// digits accumulated up to the first non-digit terminator (space or NUL).
+// A high bit set in the first non-space byte is a GNU base-256 field,
+// which SFEP-0071 §3.8 requires we detect and reject rather than
+// misinterpret as octal garbage.
+fn _ustar_parse_octal(cursor: ByteCursor, base: int, off: int, len: int, field_name: string) -> Result<int, ArchiveError> {
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+        if _ustar_u8(cursor, base, off + i) != 32 { break; }
+        i += 1;
+    }
+    if i < len && _ustar_u8(cursor, base, off + i) >= 128 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.UnsupportedFeature, "ustar "
+                + field_name
+                + " field uses GNU base-256 encoding, which this reader does not support")
+        };
+    }
+    let mut value: int = 0;
+    loop {
+        if i >= len { break; }
+        let b: int = _ustar_u8(cursor, base, off + i);
+        if b < 48 || b > 55 { break; }
+        value = (value * 8) + (b - 48);
+        i += 1;
+    }
+    return Result.Ok { value: value };
+}
+
+fn _ustar_bytes_equal(cursor: ByteCursor, base: int, off: int, expected: int[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= expected.length { break; }
+        if _ustar_u8(cursor, base, off + i) != expected[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// The two accepted checksum conventions (SFEP-0071 §3.8): the standard
+// unsigned-byte sum, and the historical signed-byte sum some writers
+// produce on a platform where `char` is signed. The checksum field itself
+// is treated as eight ASCII spaces while summing, per the ustar spec.
+fn _ustar_verify_checksum(cursor: ByteCursor, base: int, stored: int) -> boolean {
+    let mut unsigned_sum: int = 0;
+    let mut signed_sum: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= _BLOCK_SIZE { break; }
+        let mut b: int = _ustar_u8(cursor, base, i);
+        if i >= _OFF_CHKSUM && i < _OFF_CHKSUM + _LEN_CHKSUM { b = 32; }
+        unsigned_sum += b;
+        if b >= 128 { signed_sum += b - 256; } else { signed_sum += b; }
+        i += 1;
+    }
+    return unsigned_sum == stored || signed_sum == stored;
+}
+
+// Decode the 512-byte ustar header at `cursor.pos`. Accepts POSIX ustar
+// (`magic == "ustar\0"`, `version == "00"`, with `prefix` joining), GNU
+// (`magic == "ustar  "`, no `prefix` joining), and v7 old-tar (all-NUL
+// magic, `prefix` ignored) per SFEP-0071 §3.8.
+fn ustar_decode_header(cursor: ByteCursor) -> Result<UstarHeader, ArchiveError> {
+    let base: int = cursor.pos;
+    if cursor.len - base < _BLOCK_SIZE {
+        return Result.Err {
+            error: archive_error_at(ArchiveErrorKind.Truncated, "archive ends mid-header (fewer than 512 bytes remain)", "", base)
+        };
+    }
+
+    if _ustar_is_zero_block(cursor, base) {
+        return Result.Ok {
+            value: UstarHeader {
+                name: "",
+                linkname: "",
+                typeflag: 0,
+                size: 0,
+                mode: 0,
+                is_zero_block: true
+            }
+        };
+    }
+
+    let posix_magic: int[] = [117, 115, 116, 97, 114, 0];  // "ustar\0"
+    let posix_version: int[] = [48, 48];  // "00"
+    let gnu_magic: int[] = [117, 115, 116, 97, 114, 32, 32];  // "ustar  " (7 bytes: magic[6] + version[0])
+
+    let is_posix: boolean = _ustar_bytes_equal(cursor, base, _OFF_MAGIC, posix_magic)
+        && _ustar_bytes_equal(cursor, base, _OFF_VERSION, posix_version);
+    let is_gnu: boolean = !is_posix && _ustar_bytes_equal(cursor, base, _OFF_MAGIC, gnu_magic);
+    let all_zero_magic: int[] = [0, 0, 0, 0, 0, 0];
+    let is_v7: boolean = !is_posix && !is_gnu && _ustar_bytes_equal(cursor, base, _OFF_MAGIC, all_zero_magic);
+
+    if !is_posix && !is_gnu && !is_v7 {
+        return Result.Err {
+            error: archive_error_at(ArchiveErrorKind.BadMagic, "ustar header has an unrecognized magic value", "", base)
+        };
+    }
+
+    let mode: int = _ustar_parse_octal(cursor, base, _OFF_MODE, _LEN_MODE, "mode")?;
+    let size: int = _ustar_parse_octal(cursor, base, _OFF_SIZE, _LEN_SIZE, "size")?;
+    let chksum: int = _ustar_parse_octal(cursor, base, _OFF_CHKSUM, _LEN_CHKSUM, "chksum")?;
+    if !_ustar_verify_checksum(cursor, base, chksum) {
+        return Result.Err {
+            error: archive_error_at(ArchiveErrorKind.BadChecksum, "ustar header checksum does not match either the unsigned or signed sum", "", base)
+        };
+    }
+
+    let mut typeflag: int = _ustar_u8(cursor, base, _OFF_TYPEFLAG);
+    if typeflag == 0 {
+        typeflag = 48;
+    }  // '0' — see `ustar_typeflags()` above.
+
+    let raw_name: string = _ustar_cstr_field(cursor, base, _OFF_NAME, _LEN_NAME);
+    let linkname: string = _ustar_cstr_field(cursor, base, _OFF_LINKNAME, _LEN_LINKNAME);
+
+    let mut name: string = raw_name;
+    if is_posix {
+        let prefix: string = _ustar_cstr_field(cursor, base, _OFF_PREFIX, _LEN_PREFIX);
+        if prefix.length > 0 { name = prefix + "/" + raw_name; }
+    }
+
+    return Result.Ok {
+        value: UstarHeader {
+            name: name,
+            linkname: linkname,
+            typeflag: typeflag,
+            size: size,
+            mode: mode,
+            is_zero_block: false
+        }
+    };
+}
