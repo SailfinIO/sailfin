@@ -1,0 +1,7 @@
+[capsule]
+name = "sfn/duplicate"
+version = "0.0.0"
+
+[build]
+kind = "library"
+entry = "src/mod.sfn"

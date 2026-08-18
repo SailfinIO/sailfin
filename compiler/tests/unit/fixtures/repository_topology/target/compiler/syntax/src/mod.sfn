@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/target/compiler/syntax/src/mod.sfn
+//
+// Target compiler-role fixture for SFN-929.
+fn syntax_marker() { }

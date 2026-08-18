@@ -131,6 +131,23 @@ fn triple_target_os(triple: string) -> string {
     return "";
 }
 
+// The arch component of a triple ("x86_64" | "aarch64"), or "" for a
+// triple outside the closed set (SFN-923). Mirrors `triple_target_os`
+// above — `_resolve_llvm_target_arch` (`./llvm_provider_context.sfn`)
+// consults this before falling back to its host probe, so an aarch64
+// target resolves aarch64 codegen even on an x86_64 host, matching the
+// vocabulary `stat_st_mode_offset_value` and `syscall_contract_error`
+// already use for the arch axis.
+fn triple_target_arch(triple: string) -> string {
+    if triple == "x86_64-unknown-linux-gnu" { return "x86_64"; }
+    if triple == "aarch64-unknown-linux-gnu" { return "aarch64"; }
+    if triple == "x86_64-apple-darwin" { return "x86_64"; }
+    if triple == "arm64-apple-darwin" { return "aarch64"; }
+    if triple == "x86_64-pc-windows-msvc" { return "x86_64"; }
+    if triple == "x86_64-w64-mingw32" { return "x86_64"; }
+    return "";
+}
+
 // The ABI component of a triple ("gnu" | "mach" | "msvc"), or "" for a
 // triple outside the closed set. Only the two Windows triples diverge on
 // ABI (`msvc` vs `gnu`) — every other target has exactly one ABI in this
@@ -590,5 +607,6 @@ export {
     triple_abi,
     triple_artifact_tags,
     triple_is_supported,
+    triple_target_arch,
     triple_target_os
 };

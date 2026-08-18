@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/target/compiler/driver/src/main.sfn
+//
+// Target driver fixture for SFN-929.
+fn main() { }

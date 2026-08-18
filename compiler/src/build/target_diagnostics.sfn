@@ -1,0 +1,36 @@
+// compiler/src/build/target_diagnostics.sfn
+//
+// The E0614 "unsupported --target triple" diagnostic, shared by `sfn build
+// --target` and `sfn emit --target` (SFN-923 review C1). Previously
+// duplicated as two message literals (`cli/commands/build.sfn` and
+// `cli/commands/emit.sfn`), so the supported-triple list lived in two
+// places that a future addition to `triple_is_supported`'s closed set
+// (`./target.sfn`) could silently diverge — the exact drift sharing a
+// diagnostic is meant to prevent. One source of truth; both commands now
+// render byte-identical text for the identical mistake.
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+
+// The closed-set hint text shared by every "unsupported triple" message,
+// regardless of the value's provenance (`--target` flag vs. an ambient
+// `SAILFIN_TARGET_TRIPLE`, `cli/commands/build.sfn`) — one literal for
+// `triple_is_supported`'s (`./target.sfn`) closed set instead of one per
+// message.
+fn supported_targets_hint() -> string {
+    return "(supported: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, "
+        + "x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, "
+        + "x86_64-w64-mingw32)";
+}
+
+fn unsupported_target_diagnostic(triple: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0614",
+        severity: "error",
+        message: "unsupported --target triple: \"" + triple + "\" "
+            + supported_targets_hint(),
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+export { supported_targets_hint, unsupported_target_diagnostic };

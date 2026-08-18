@@ -23,6 +23,7 @@
 import { _env_flag, _get_env_cmd } from "../build_flags";
 import { starts_with, substring } from "../string_utils";
 import { _shell_read_cmd } from "./fs";
+import { build_target_triple, triple_target_arch } from "./target";
 
 // The resolved Linux link contract. `ok` gates the direct path;
 // when false, `reason` names why the driver falls back to clang. Every
@@ -135,9 +136,16 @@ fn resolve_direct_ld_lld(target_os: string) -> DirectLinkContract ![io] {
         return _direct_fail("target is not Linux (" + target_os + ")");
     }
     // Mirror SFN-471's non-shelling host-arch seam: the override is the
-    // cross-emit/e2e hook, then the aarch64 glibc loader marker, with
+    // cross-emit/e2e hook, then the resolved TARGET triple (SFN-923 — this
+    // previously probed only the HOST here, disagreeing with
+    // `_resolve_llvm_target_arch`'s triple-first resolution on the
+    // identical axis, per the three-probes-must-agree note at
+    // `./target.sfn:189-193`), then the aarch64 glibc loader marker, with
     // x86_64 as the dominant Tier-1 default.
     let mut arch = _get_env_cmd("SAILFIN_TARGET_ARCH");
+    if arch.length == 0 {
+        arch = triple_target_arch(build_target_triple());
+    }
     if arch.length == 0 {
         arch = "x86_64";
         if fs.exists("/lib/ld-linux-aarch64.so.1") { arch = "aarch64"; }

@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/target/stdlib/prelude/src/mod.sfn
+//
+// Target implicit-prelude fixture for SFN-929.
+fn prelude_marker() { }

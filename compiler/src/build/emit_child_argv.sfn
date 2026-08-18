@@ -1,0 +1,42 @@
+// compiler/src/build/emit_child_argv.sfn
+//
+// The ONE constructor for a `sfn emit` child spawn's ENTIRE argv (SFN-923).
+// `--target` lives in a process-local cell (`./target_state`), so a per-module
+// emit that runs in a CHILD process starts with an empty cell and, with no
+// equivalent given to it, lowers for the HOST while the parent thinks it is
+// cross-building — the SFN-923 bug (a Windows COFF link then dies on
+// duplicate `__sfn_type_desc.*` symbols, since the comdat gate sees
+// `_target_os != "Windows"` in the child).
+//
+// This builds the COMPLETE argv, not just the `--target` suffix: every call
+// site (`native_emit_subprocess.sfn`, `emit_helpers.sfn`,
+// `capsule_emit_parallel.sfn`, `cli/commands/bench.sfn`) hands in its
+// slug/output/mode/source/import-context and gets back a finished argv with
+// nothing left to assemble. That is load-bearing, not stylistic — a caller
+// that built its own `[exe, "emit", …]` literal and merely piped it through
+// an appender could still forget the append at a fifth call site; a caller
+// with no argv literal left to write has nothing to forget.
+//
+// `--attempts 1 --no-validate --no-resolve-gate` are unconditional: every
+// existing call site already passed them (the resolver/retry layer above
+// owns attempts and validation, and `--no-resolve-gate` (#906) suppresses
+// the lowering dry-run gate for a per-module intermediate emit that carries
+// no cross-module import context), and both flags are no-ops against
+// `emit`'s own defaults (attempts=1, validate=off) for the one caller
+// (`cli/commands/bench.sfn`) that previously omitted them.
+import { build_target_triple } from "./target";
+
+fn emit_child_argv(sailfin_exe: string, slug: string, out_path: string, mode: string, source_path: string, import_context_root: string) -> string[] ![io] {
+    let mut argv: string[] = [sailfin_exe, "emit", "--module-name", slug, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", out_path];
+    if import_context_root.length > 0 {
+        argv.push("--import-context");
+        argv.push(import_context_root);
+    }
+    argv.push("--target");
+    argv.push(build_target_triple());
+    argv.push(mode);
+    argv.push(source_path);
+    return argv;
+}
+
+export { emit_child_argv };
