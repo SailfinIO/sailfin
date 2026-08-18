@@ -103,9 +103,10 @@ jobs:
 
       - name: Install clang (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: clang-18 llvm-18 jq
 
       - name: Install jq + LLVM tools (macOS)
         if: runner.os == 'macOS'

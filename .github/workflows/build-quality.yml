@@ -116,12 +116,14 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang + llvm + jq
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: clang-18 llvm-18 jq
+
+      - name: Set CLANG env
         shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
-          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       # Cache priming for PR CI. This job runs on push:main, so the
       # caches it saves land in the default-branch scope that every PR
@@ -411,12 +413,14 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang + llvm + jq
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: clang-18 llvm-18 jq
+
+      - name: Set CLANG env
         shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
-          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       - name: Restore seed cache
         uses: actions/cache@v6

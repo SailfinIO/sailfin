@@ -119,12 +119,13 @@ jobs:
           fi
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
+      # `time` provides /usr/bin/time -v for peak-RSS measurement (distinct
+      # from the bash `time` builtin, which the bench scripts cannot read).
       - name: Install clang + GNU time
-        run: |
-          sudo apt-get update
-          # `time` provides /usr/bin/time -v for peak-RSS measurement (distinct
-          # from the bash `time` builtin, which the bench scripts cannot read).
-          sudo apt-get install -y clang-18 llvm-18 jq time
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: clang-18 llvm-18 jq time
 
       - name: Fetch released seed compiler
         shell: bash

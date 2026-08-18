@@ -1,0 +1,54 @@
+# A stalled Ubuntu/Azure mirror makes `apt-get install` hang rather than
+# error, so a single flaky fetch can burn a whole job's `timeout-minutes`
+# budget (SFN-946: the Windows self-host gate never ran in run 32158358685
+# because the clang/llvm install step alone ran 90 minutes). This composite
+# bounds every attempt with `timeout`, retries with backoff, and asks apt
+# itself to retry transient fetch failures — the same shape already proven
+# for the mingw `.deb` fetch (#1402).
+name: apt-install
+description: Install apt packages with a bounded timeout and retry/backoff.
+
+inputs:
+  packages:
+    description: Space-separated list of packages to install.
+    required: true
+  no-install-recommends:
+    description: Pass --no-install-recommends to apt-get install.
+    required: false
+    default: "false"
+  attempts:
+    description: Number of install attempts before failing.
+    required: false
+    default: "3"
+  timeout-seconds:
+    description: Per-attempt timeout, in seconds, for both apt-get update and apt-get install.
+    required: false
+    default: "300"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        PACKAGES="${{ inputs.packages }}"
+        ATTEMPTS="${{ inputs.attempts }}"
+        TIMEOUT="${{ inputs.timeout-seconds }}"
+        RECOMMENDS_FLAG=""
+        if [ "${{ inputs.no-install-recommends }}" = "true" ]; then
+          RECOMMENDS_FLAG="--no-install-recommends"
+        fi
+        for attempt in $(seq 1 "$ATTEMPTS"); do
+          echo "[apt] install attempt ${attempt}/${ATTEMPTS}: ${PACKAGES}"
+          if sudo timeout "$TIMEOUT" apt-get update \
+            && sudo timeout "$TIMEOUT" apt-get install -y -o Acquire::Retries=3 \
+                 $RECOMMENDS_FLAG $PACKAGES; then
+            break
+          fi
+          if [ "${attempt}" = "$ATTEMPTS" ]; then
+            echo "[apt] install failed after ${ATTEMPTS} attempts: ${PACKAGES}" >&2
+            exit 1
+          fi
+          echo "[apt] attempt ${attempt} failed or timed out; backing off"
+          sleep $((attempt * 15))
+        done

@@ -80,10 +80,14 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang + llvm (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
-          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: clang-18 llvm-18 jq
+
+      - name: Set CLANG env (Linux)
+        shell: bash
+        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       - name: Build native compiler (self-host main)
         uses: ./.github/actions/sailfin-build
@@ -97,10 +101,15 @@ jobs:
           package: 'false'
 
       - name: Install MinGW-w64 cross-compiler (Linux)
-        run: |
-          set -euo pipefail
-          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
-          x86_64-w64-mingw32-gcc --version | head -1
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: gcc-mingw-w64-x86-64
+          no-install-recommends: 'true'
+
+      - name: Verify MinGW-w64 cross-compiler (Linux)
+        shell: bash
+        run: x86_64-w64-mingw32-gcc --version | head -1
 
       - name: Cross-compile the bootstrap seed (Linux)
         shell: bash

@@ -128,6 +128,14 @@ jobs:
           test "$("${GLOBAL_BIN_DIR}/sfn" --version)" = "sfn ${SEED_VERSION}"
           "${GLOBAL_BIN_DIR}/sfn" run examples/basics/hello-world.sfn
 
+      - name: Install native ARM build toolchain
+        if: ${{ matrix.verify_seed_selfhost }}
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: binutils clang-18 lld llvm-18
+          no-install-recommends: 'true'
+
       - name: Verify pinned native ARM seed self-host
         if: ${{ matrix.verify_seed_selfhost }}
         shell: bash
@@ -135,9 +143,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            binutils clang-18 lld llvm-18
           make fetch-seed
           file -L build/toolchains/seed/bin/sfn \
             | grep -E 'ELF 64-bit.*ARM aarch64'

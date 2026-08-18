@@ -400,10 +400,14 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
-          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: clang-18 llvm-18 jq
+
+      - name: Set CLANG env (Linux)
+        shell: bash
+        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       - name: Build native compiler (via Makefile)
         uses: ./.github/actions/sailfin-build
@@ -685,10 +689,18 @@ jobs:
           Architectures: arm64
           Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
           EOF
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            binutils-aarch64-linux-gnu clang-18 gcc-14-aarch64-linux-gnu \
-            libc6-dev:arm64 lld llvm-18
+
+      - name: Install aarch64 cross toolchain
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: binutils-aarch64-linux-gnu clang-18 gcc-14-aarch64-linux-gnu libc6-dev:arm64 lld llvm-18
+          no-install-recommends: 'true'
+
+      - name: Link aarch64 gcc-cross CRT
+        shell: bash
+        run: |
+          set -euo pipefail
           # The direct-link probe deliberately ignores /usr/lib/gcc-cross.
           # Expose the matching target CRT under the native multiarch layout
           # so pass-1 and the native rebuild use the same ld.lld contract.
@@ -769,12 +781,11 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install native LLVM toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            binutils clang-18 lld llvm-18
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: binutils clang-18 lld llvm-18
+          no-install-recommends: 'true'
 
       - name: Download cross-emitted compiler
         uses: actions/download-artifact@v8
