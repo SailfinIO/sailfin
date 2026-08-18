@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/duplicate_name/stdlib/alpha/src/mod.sfn
+//
+// First duplicate-identity fixture for SFN-929.
+fn alpha_marker() { }

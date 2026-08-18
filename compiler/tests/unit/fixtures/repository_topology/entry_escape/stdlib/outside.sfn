@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/entry_escape/stdlib/outside.sfn
+//
+// Out-of-member entry target for SFN-929.
+fn outside_marker() { }

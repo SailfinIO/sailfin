@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/transitional/compiler/analyzer/src/mod.sfn
+//
+// Transitional target-role fixture for SFN-929.
+fn analyzer_marker() { }

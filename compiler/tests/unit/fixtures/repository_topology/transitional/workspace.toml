@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "compiler",
+    "compiler/capsules/*",
+    "compiler/*",
+    "runtime",
+    "capsules/sfn/*",
+    "stdlib/*",
+]

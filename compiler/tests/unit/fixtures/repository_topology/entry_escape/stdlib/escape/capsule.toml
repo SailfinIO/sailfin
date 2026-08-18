@@ -1,0 +1,7 @@
+[capsule]
+name = "sfn/escape"
+version = "0.0.0"
+
+[build]
+kind = "library"
+entry = "../outside.sfn"

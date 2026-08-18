@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/target/stdlib/strings/src/mod.sfn
+//
+// Target standard-library fixture for SFN-929.
+fn strings_marker() { }
