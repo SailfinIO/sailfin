@@ -4,15 +4,36 @@
 // matrix with each optional field present alone and in combination, plus
 // the two hard-error cases a reader must reject before ever touching a
 // deflate decoder — bad magic and an unsupported compression method.
+//
+// The write-side tests below (SFN-897) exist because nothing else in this
+// capsule ever validates a gzip *trailer*: `gzip_parse_header` stops once it
+// finds the deflate stream's start, and `inflate_all` stops at BFINAL and
+// never looks at the bytes after it. A byte-order slip in CRC-32 or ISIZE is
+// therefore invisible to every test that only round-trips through our own
+// reader — it would surface only under `gzip -t`, GNU tar, or Python
+// `tarfile`, on a user's machine, holding a release artifact. So the header
+// bytes are pinned literally and the trailer is checked against an
+// independently computed CRC-32/ISIZE, never against whatever the writer
+// itself produced.
 import {
     ByteBuf,
     ByteCursor,
     bytes_cursor,
     bytes_free,
-    bytes_from_int_array
+    bytes_from_int_array,
+    bytes_get,
+    bytes_len
 } from "../src/bytes";
-import { ArchiveErrorKind } from "../src/error";
-import { GzipHeader, GzipHeaderResult, gzip_parse_header } from "../src/gzip";
+import { crc32 } from "../src/crc32";
+import { DeflateOptions, DeflateStrategy } from "../src/deflate";
+import { ArchiveError, ArchiveErrorKind } from "../src/error";
+import {
+    GzipHeader,
+    GzipHeaderResult,
+    gzip_parse_header,
+    gzip_write_all
+} from "../src/gzip";
+import { inflate_all } from "../src/inflate";
 
 let _FLG_FHCRC: int = 2;
 let _FLG_FEXTRA: int = 4;
@@ -301,4 +322,154 @@ test "archive gzip: a header truncated before FNAME's terminator errors rather t
             assert false;
         }
     }
+}
+
+// ---------------------------------------------------------------------
+// Writing (SFN-897): see the file header for why the header bytes are
+// pinned literally and the trailer is checked independently of the writer.
+fn _gen_payload(n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push((i * 7 + 3) % 256);
+        i += 1;
+    }
+    return out;
+}
+
+fn _assert_get(buf: ByteBuf, idx: int) -> int {
+    let got = bytes_get(buf, idx);
+    match got {
+        Result.Ok { value }
+        : return value,
+        Result.Err { error }
+        : {
+            assert false;
+            return 0;
+        }
+    }
+}
+
+// The owned input buffer plus the `gzip_write_all` output built from it —
+// both stay live so a test can read the trailer bytes AND independently
+// recompute CRC-32/ISIZE from the same input. The caller frees both.
+struct _WrittenGzip {
+    input: ByteBuf;
+    output: ByteBuf;
+}
+
+fn _assert_gzip_write(data: int[]) -> _WrittenGzip {
+    let src_buf = bytes_from_int_array(data);
+    match src_buf {
+        Result.Ok { value }
+        : {
+            let owned: ByteBuf = value;
+            let cursor: ByteCursor = bytes_cursor(owned);
+            let opts = DeflateOptions { strategy: DeflateStrategy.Fixed };
+            let written = gzip_write_all(cursor, opts);
+            match written {
+                Result.Ok { value }
+                : {
+                    return _WrittenGzip { input: owned, output: value };
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                    return _WrittenGzip { input: owned, output: owned };
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+            return _WrittenGzip {
+                input: ByteBuf { addr: 0, len: 0, cap: 0 },
+                output: ByteBuf { addr: 0, len: 0, cap: 0 }
+            };
+        }
+    }
+}
+
+// RFC 1952 §2.3: magic (0x1f, 0x8b), CM=8 (deflate), FLG=0 (no optional
+// fields), then the SFEP-0071 §3.7 reproducibility pins — MTIME=0 (4
+// zero bytes), XFL=0, OS=255 (unknown) — checked byte-for-byte, not just
+// "parses" (`gzip_parse_header` alone cannot tell a wrong OS byte from a
+// right one; only a literal pin can).
+test "archive gzip: gzip_write_all pins the fixed 10-byte header literally" {
+    let data: int[] = _gen_payload(300);
+    let w = _assert_gzip_write(data);
+    let expected_header: int[] = [31, 139, 8, 0, 0, 0, 0, 0, 0, 255,];
+    assert bytes_len(w.output) >= 10;
+    let mut i: int = 0;
+    loop {
+        if i >= 10 { break; }
+        assert _assert_get(w.output, i) == expected_header[i];
+        i += 1;
+    }
+    bytes_free(w.output);
+    bytes_free(w.input);
+}
+
+// The end-to-end claim this capsule exists to make: a member written by
+// `gzip_write_all` is a valid gzip stream our own reader accepts, and it
+// decompresses back to the exact input bytes.
+test "archive gzip: gzip_write_all round-trips through gzip_parse_header and inflate_all" {
+    let data: int[] = _gen_payload(5000);
+    let w = _assert_gzip_write(data);
+    let parsed = gzip_parse_header(bytes_cursor(w.output));
+    match parsed {
+        Result.Ok { value }
+        : {
+            let decompressed = inflate_all(value.body, data.length + 1024);
+            match decompressed {
+                Result.Ok { value }
+                : {
+                    assert bytes_len(value) == data.length;
+                    let mut i: int = 0;
+                    let mut all_match: boolean = true;
+                    loop {
+                        if i >= data.length { break; }
+                        if _assert_get(value, i) != data[i] {
+                            all_match = false;
+                        }
+                        i += 1;
+                    }
+                    assert all_match;
+                    bytes_free(value);
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+    bytes_free(w.output);
+    bytes_free(w.input);
+}
+
+// The trailer, checked against values computed independently of
+// `gzip_write_all` itself — a byte-order slip in either field would pass
+// every other test in this suite (neither `gzip_parse_header` nor
+// `inflate_all` ever look at the trailer) and surface only under a real
+// gzip reader, on a release artifact. 70000 bytes spans two deflate blocks
+// (SFEP-0071 §3.9's 65535-byte chunking), so ISIZE also covers the
+// multi-block case.
+test "archive gzip: gzip_write_all trailer matches an independently computed CRC-32 and ISIZE" {
+    let data: int[] = _gen_payload(70000);
+    let w = _assert_gzip_write(data);
+    let expected_crc: int = crc32(bytes_cursor(w.input));
+    let expected_isize: int = data.length & 4294967295;
+    let n: int = bytes_len(w.output);
+    let got_crc: int = _assert_get(w.output, n - 8) | (_assert_get(w.output, n - 7) << 8) | (_assert_get(w.output, n - 6) << 16) | (_assert_get(w.output, n - 5) << 24);
+    let got_isize: int = _assert_get(w.output, n - 4) | (_assert_get(w.output, n - 3) << 8) | (_assert_get(w.output, n - 2) << 16) | (_assert_get(w.output, n - 1) << 24);
+    assert got_crc == expected_crc;
+    assert got_isize == expected_isize;
+    bytes_free(w.output);
+    bytes_free(w.input);
 }

@@ -1,0 +1,542 @@
+// sfn/archive — RFC 1951 DEFLATE compression.
+//
+// Pure: this module operates on an in-memory `ByteCursor` and produces a
+// `ByteBuf`, with no effect declared, matching the pure-codec-layer split in
+// SFEP-0071 §4 — only the file-backed `gzip_writer_*` API (a later phase)
+// carries `![io]`.
+//
+// SFEP-0071 §3.9: fixed Huffman with greedy LZ77, plus a stored-block
+// fallback. Fixed Huffman WITHOUT the matcher is a bug, not a simplification
+// — the fixed literal code is near-flat (8 bits for 0-143, 9 bits for
+// 144-255), so a literals-only stream expands binary data by roughly 12.5%.
+// Dynamic Huffman (RFC 1951 §3.2.7) is an explicit, non-gating follow-up
+// (§6.7) and is not implemented here.
+//
+// Per-block strategy: the input is split into chunks of at most 65535 bytes
+// (the largest a stored block's LEN field can express). Each chunk is
+// greedy-LZ77-matched against a persistent 32 KiB-window hash chain, encoded
+// with the RFC 1951 §3.2.6 fixed tables, and its *exact* encoded bit cost is
+// compared against the chunk's raw length. If fixed encoding would not be
+// smaller, the chunk is written as a stored block instead — bounding growth
+// on incompressible input to roughly 5 bytes per 65535-byte block (1 byte of
+// header/alignment + 4 bytes of LEN/NLEN), the RFC 1951 §3.2.4 stored-block
+// overhead. A fixed block's bits continue directly from wherever the
+// previous block ended — RFC 1951 has no alignment between two Huffman-coded
+// blocks, only before a stored one, so the encoder never pads a boundary the
+// decoder would not also skip.
+import {
+    ByteBuf,
+    ByteCursor,
+    _byte_at,
+    bytes_append_byte,
+    bytes_append_slice,
+    bytes_new
+} from "./bytes";
+import { ArchiveError, ArchiveErrorKind, archive_error } from "./error";
+import {
+    _dist_base,
+    _dist_extra,
+    _length_base,
+    _length_extra
+} from "./inflate";
+
+// `Fixed` is implemented; `Stored` forces every block to the stored
+// fallback (useful for debugging against a known-good container per
+// SFEP-0071 §3.4); `Dynamic` is the §6.7 follow-up and is rejected today.
+enum DeflateStrategy {
+    Fixed,
+    Dynamic,
+    Stored
+}
+
+struct DeflateOptions {
+    strategy: DeflateStrategy;
+}
+
+let _WINDOW_SIZE: int = 32768;  // 1 << 15, RFC 1951's maximum back-reference distance
+let _HASH_SIZE: int = 32768;  // 1 << 15, per SFEP-0071 §3.9's head/prev table sizing
+let _MIN_MATCH: int = 3;
+let _MAX_MATCH: int = 258;
+let _MAX_CHAIN: int = 32;  // bounded hash-chain search depth; a speed/ratio knob, not a correctness one
+let _BLOCK_SIZE: int = 65535;  // largest length a stored block's LEN field can express
+
+// ---------------------------------------------------------------------
+// Bit writer — LSB-first within each byte (RFC 1951 §3.1.1), mirroring the
+// bit reader in `inflate.sfn`. A Huffman code is packed MSB-first, the
+// opposite order; `_bw_put_huffman_code` pre-reverses before calling
+// `_bw_put_bits`, which itself only ever packs LSB-first.
+struct _BitWriter {
+    bitbuf: int;
+    bitcnt: int;
+    out: ByteBuf;
+}
+
+fn _bw_new(out: ByteBuf) -> _BitWriter {
+    return _BitWriter { bitbuf: 0, bitcnt: 0, out: out };
+}
+
+// Push the low `nbits` bits of `value` (bit 0 first) into the stream,
+// flushing whole bytes to `out` as they fill. `nbits` never exceeds 16 in
+// this codec (the widest single field is a reversed 15-bit Huffman code),
+// so `bitbuf` — an `int`, 64 bits — never risks overflow across a flush.
+//
+// `value & mask` silently drops any bit at or above `nbits` rather than
+// erroring. Every caller today passes a value already known to fit (a
+// 0/1 BFINAL bit, a 2-bit BTYPE, extra bits sized by the RFC 1951 §3.2.5
+// tables, or a pre-reversed Huffman code), so the mask is inert — but it is
+// the seam that would turn a future matcher bug (an extra-bit value
+// computed one bit too wide) into silently wrong output bytes instead of a
+// caught error. Worth knowing if this function ever grows a new caller.
+fn _bw_put_bits(w: _BitWriter, value: int, nbits: int) -> Result<_BitWriter, ArchiveError> {
+    let mask_span: int = 1 << nbits;
+    let mask: int = mask_span - 1;
+    let mut buf: int = w.bitbuf | ((value & mask) << w.bitcnt);
+    let mut cnt: int = w.bitcnt + nbits;
+    let mut out: ByteBuf = w.out;
+    loop {
+        if cnt < 8 { break; }
+        // `?` only lowers out of a `let` initializer (E1002 on a bare
+        // reassignment), so the flushed byte lands in a fresh binding first
+        // and `out` is reassigned from that, never from the `?` expression
+        // itself — same shape as `inflate.sfn`'s loop-carried `buf`/`cur`.
+        let flushed: ByteBuf = bytes_append_byte(out, buf & 255)?;
+        out = flushed;
+        buf = buf >> 8;
+        cnt -= 8;
+    }
+    return Result.Ok {
+        value: _BitWriter { bitbuf: buf, bitcnt: cnt, out: out }
+    };
+}
+
+// Reverse the low `nbits` bits of `value` — turns a canonical Huffman code
+// (conventionally written MSB-first) into the bit sequence `_bw_put_bits`
+// must be given to reproduce that same MSB-first order in an LSB-first
+// packer.
+fn _bit_reverse(value: int, nbits: int) -> int {
+    let mut v: int = value;
+    let mut r: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= nbits { break; }
+        r = (r << 1) | (v & 1);
+        v = v >> 1;
+        i += 1;
+    }
+    return r;
+}
+
+fn _bw_put_huffman_code(w: _BitWriter, code: int, len: int) -> Result<_BitWriter, ArchiveError> {
+    let reversed: int = _bit_reverse(code, len);
+    return _bw_put_bits(w, reversed, len);
+}
+
+// Flush any partial byte, zero-padded — RFC 1951 §3.2.4: "any bits of input
+// up to the next byte boundary are ignored" before a stored block, and the
+// same padding closes the stream at the end.
+fn _bw_align(w: _BitWriter) -> Result<_BitWriter, ArchiveError> {
+    if w.bitcnt == 0 {
+        return Result.Ok { value: w };
+    }
+    let out: ByteBuf = bytes_append_byte(w.out, w.bitbuf & 255)?;
+    return Result.Ok {
+        value: _BitWriter { bitbuf: 0, bitcnt: 0, out: out }
+    };
+}
+
+fn _bw_finish(w: _BitWriter) -> Result<ByteBuf, ArchiveError> {
+    let aligned: _BitWriter = _bw_align(w)?;
+    return Result.Ok { value: aligned.out };
+}
+
+// ---------------------------------------------------------------------
+// RFC 1951 §3.2.6 fixed Huffman codes, given directly by the RFC's
+// formulaic definition (canonical, MSB-first values) rather than built via
+// generic canonical-code construction — the write side of the same tables
+// `inflate.sfn`'s `_fixed_lit_lengths`/`_fixed_dist_lengths` decode.
+struct _CodeSpec {
+    code: int;
+    len: int;
+}
+
+fn _fixed_lit_code(sym: int) -> _CodeSpec {
+    if sym < 144 {
+        return _CodeSpec { code: sym + 48, len: 8 };
+    }
+    if sym < 256 {
+        return _CodeSpec { code: sym - 144 + 400, len: 9 };
+    }
+    if sym < 280 {
+        return _CodeSpec { code: sym - 256, len: 7 };
+    }
+    return _CodeSpec { code: sym - 280 + 192, len: 8 };
+}
+
+fn _fixed_dist_code(sym: int) -> _CodeSpec {
+    return _CodeSpec { code: sym, len: 5 };
+}
+
+// ---------------------------------------------------------------------
+// Length/distance value -> (symbol, extra bits) — the write-side inverse of
+// `inflate.sfn`'s `_length_base`/`_dist_base` tables, imported rather than
+// duplicated so the two directions cannot drift apart.
+struct _MatchSym {
+    sym: int;
+    extra_bits: int;
+    extra_value: int;
+}
+
+fn _length_symbol(length: int) -> _MatchSym {
+    let bases: int[] = _length_base();
+    let extras: int[] = _length_extra();
+    let mut idx: int = bases.length - 1;
+    loop {
+        if idx <= 0 { break; }
+        if bases[idx] <= length { break; }
+        idx -= 1;
+    }
+    return _MatchSym {
+        sym: 257 + idx,
+        extra_bits: extras[idx],
+        extra_value: length - bases[idx]
+    };
+}
+
+fn _dist_symbol(distance: int) -> _MatchSym {
+    let bases: int[] = _dist_base();
+    let extras: int[] = _dist_extra();
+    let mut idx: int = bases.length - 1;
+    loop {
+        if idx <= 0 { break; }
+        if bases[idx] <= distance { break; }
+        idx -= 1;
+    }
+    return _MatchSym {
+        sym: idx,
+        extra_bits: extras[idx],
+        extra_value: distance - bases[idx]
+    };
+}
+
+// ---------------------------------------------------------------------
+// Greedy LZ77 matcher: a 32 KiB-window hash chain over 3-byte prefixes
+// (SFEP-0071 §3.9). `head`/`prev` are `int[]`, which are reference-typed
+// (`capsules/sfn/crypto/src/aead_chacha20poly1305.sfn:_append_bytes`'s
+// documented precedent), so mutating them through a helper function is
+// visible to every caller sharing the same `_MatchTables`.
+struct _MatchTables {
+    head: int[];
+    prev: int[];
+}
+
+fn _match_tables_new() -> _MatchTables {
+    let mut head: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= _HASH_SIZE { break; }
+        head.push(-1);
+        i += 1;
+    }
+    let mut prev: int[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= _WINDOW_SIZE { break; }
+        prev.push(-1);
+        j += 1;
+    }
+    return _MatchTables { head: head, prev: prev };
+}
+
+// A cheap multiplicative-shift hash of a 3-byte prefix into `_HASH_SIZE`
+// buckets. Quality only affects match-finding speed, never correctness:
+// `_match_length` always confirms a real common prefix, so a hash collision
+// just costs a wasted chain step.
+fn _hash3(b0: int, b1: int, b2: int) -> int {
+    return ((b0 << 10) ^ (b1 << 5) ^ b2) & (_HASH_SIZE - 1);
+}
+
+// The true byte-for-byte common-prefix length between `pos` and an earlier
+// candidate `cand`, capped at `max_len`. Independent of the hash that found
+// `cand` — a collision simply yields a short (possibly zero) length here.
+fn _match_length(base_addr: i64, total_len: int, pos: int, cand: int, max_len: int) -> int {
+    let mut len: int = 0;
+    loop {
+        if len >= max_len { break; }
+        if pos + len >= total_len { break; }
+        let a: int = _byte_at(base_addr + ((cand + len) as i64));
+        let b: int = _byte_at(base_addr + ((pos + len) as i64));
+        if a != b { break; }
+        len += 1;
+    }
+    return len;
+}
+
+struct _Match {
+    length: int;
+    distance: int;
+}
+
+fn _find_match(tables: _MatchTables, base_addr: i64, total_len: int, pos: int, hash: int) -> _Match {
+    let mut cand: int = tables.head[hash];
+    let mut best_len: int = 0;
+    let mut best_dist: int = 0;
+    let mut chain: int = 0;
+    loop {
+        if cand < 0 { break; }
+        if (pos - cand) > _WINDOW_SIZE { break; }
+        chain += 1;
+        if chain > _MAX_CHAIN { break; }
+        let len: int = _match_length(base_addr, total_len, pos, cand, _MAX_MATCH);
+        if len > best_len {
+            best_len = len;
+            best_dist = pos - cand;
+            if len >= _MAX_MATCH { break; }
+        }
+        cand = tables.prev[cand & (_WINDOW_SIZE - 1)];
+    }
+    return _Match { length: best_len, distance: best_dist };
+}
+
+fn _insert_hash(tables: _MatchTables, base_addr: i64, total_len: int, pos: int) -> void {
+    if pos + _MIN_MATCH > total_len { return; }
+    let b0: int = _byte_at(base_addr + (pos as i64));
+    let b1: int = _byte_at(base_addr + ((pos + 1) as i64));
+    let b2: int = _byte_at(base_addr + ((pos + 2) as i64));
+    let h: int = _hash3(b0, b1, b2);
+    tables.prev[pos & (_WINDOW_SIZE - 1)] = tables.head[h];
+    tables.head[h] = pos;
+}
+
+// A block's token stream: `kind` 0 = literal (`a` = byte value), 1 = match
+// (`a` = length, `b` = distance). `bit_cost` accumulates the exact fixed-
+// Huffman encoded size in bits, including the 3-bit block header and the
+// 7-bit end-of-block symbol, so the caller can compare it against the
+// stored-block alternative without a second encoding pass.
+struct _Tokens {
+    kind: int[];
+    a: int[];
+    b: int[];
+    bit_cost: int;
+}
+
+// Run the matcher over `[chunk_start, chunk_end)`, updating `tables` in
+// place. A match is capped so it never crosses `chunk_end` — this keeps
+// each block's token stream covering exactly its own chunk, which is what
+// makes the stored-block size comparison in `deflate_all` exact.
+//
+// Returns `Result`, not a bare `_Tokens`, for the same reason `deflate_all`'s
+// own block-count guard does (§ below): every iteration advances `pos` by at
+// least 1, so `guard` can never actually exceed `max_iters` before `pos`
+// reaches `chunk_end` first — this branch is provably unreachable today. But
+// `_Tokens` carries no partial/complete flag, so a bare `break` here would
+// silently truncate the token stream while `deflate_all` still advances
+// `chunk_start` as if the block were whole: silent wrong output, not a
+// caught error, if that invariant is ever broken by a future edit. Failing
+// closed costs one `Result` layer; failing open costs a corrupted archive.
+fn _lz77_chunk(base_addr: i64, total_len: int, chunk_start: int, chunk_end: int, tables: _MatchTables) -> Result<_Tokens, ArchiveError> {
+    let mut kind: int[] = [];
+    let mut a: int[] = [];
+    let mut b: int[] = [];
+    let mut bit_cost: int = 3;  // BFINAL (1 bit) + BTYPE (2 bits)
+    let mut pos: int = chunk_start;
+    let mut guard: int = 0;
+    let max_iters: int = (chunk_end - chunk_start) + 4;
+    loop {
+        if pos >= chunk_end { break; }
+        guard += 1;
+        if guard > max_iters {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "internal: deflate LZ77 chunk loop exceeded its expected iteration bound")
+            };
+        }
+
+        let mut match_len: int = 0;
+        let mut match_dist: int = 0;
+        if pos + _MIN_MATCH <= total_len {
+            let b0: int = _byte_at(base_addr + (pos as i64));
+            let b1: int = _byte_at(base_addr + ((pos + 1) as i64));
+            let b2: int = _byte_at(base_addr + ((pos + 2) as i64));
+            let h: int = _hash3(b0, b1, b2);
+            let found: _Match = _find_match(tables, base_addr, total_len, pos, h);
+            match_len = found.length;
+            match_dist = found.distance;
+        }
+        if match_len >= _MIN_MATCH {
+            let max_allowed: int = chunk_end - pos;
+            if match_len > max_allowed { match_len = max_allowed; }
+        }
+
+        if match_len >= _MIN_MATCH {
+            let len_sym: _MatchSym = _length_symbol(match_len);
+            let dist_sym: _MatchSym = _dist_symbol(match_dist);
+            kind.push(1);
+            a.push(match_len);
+            b.push(match_dist);
+            bit_cost = bit_cost + _fixed_lit_code(len_sym.sym).len + len_sym.extra_bits
+                + _fixed_dist_code(dist_sym.sym).len
+                + dist_sym.extra_bits;
+            let mut k: int = 0;
+            loop {
+                if k >= match_len { break; }
+                _insert_hash(tables, base_addr, total_len, pos + k);
+                k += 1;
+            }
+            pos += match_len;
+        } else {
+            let literal: int = _byte_at(base_addr + (pos as i64));
+            kind.push(0);
+            a.push(literal);
+            b.push(0);
+            bit_cost = bit_cost + _fixed_lit_code(literal).len;
+            _insert_hash(tables, base_addr, total_len, pos);
+            pos += 1;
+        }
+    }
+    bit_cost = bit_cost + _fixed_lit_code(256).len;  // end-of-block
+    return Result.Ok {
+        value: _Tokens {
+            kind: kind,
+            a: a,
+            b: b,
+            bit_cost: bit_cost
+        }
+    };
+}
+
+fn _write_fixed_block(writer_in: _BitWriter, tokens: _Tokens, bfinal: boolean) -> Result<_BitWriter, ArchiveError> {
+    let mut bfinal_bit: int = 0;
+    if bfinal { bfinal_bit = 1; }
+    // Every step below is a fresh `let` even though the block's purpose is
+    // just "thread `w` through a chain of fallible writes" — a bare
+    // reassignment fed directly by `?` does not lower (E1002), only a `?`
+    // inside a `let` initializer does, so each write lands in its own
+    // binding and `w` is reassigned from that binding on the next line.
+    let after_bfinal: _BitWriter = _bw_put_bits(writer_in, bfinal_bit, 1)?;
+    let after_btype: _BitWriter = _bw_put_bits(after_bfinal, 1, 2)?;  // BTYPE = 01, fixed Huffman
+    let mut w: _BitWriter = after_btype;
+
+    let mut i: int = 0;
+    loop {
+        if i >= tokens.kind.length { break; }
+        if tokens.kind[i] == 0 {
+            let spec: _CodeSpec = _fixed_lit_code(tokens.a[i]);
+            let after_lit: _BitWriter = _bw_put_huffman_code(w, spec.code, spec.len)?;
+            w = after_lit;
+        } else {
+            let length: int = tokens.a[i];
+            let distance: int = tokens.b[i];
+            let len_sym: _MatchSym = _length_symbol(length);
+            let lspec: _CodeSpec = _fixed_lit_code(len_sym.sym);
+            let after_len_code: _BitWriter = _bw_put_huffman_code(w, lspec.code, lspec.len)?;
+            w = after_len_code;
+            if len_sym.extra_bits > 0 {
+                let after_len_extra: _BitWriter = _bw_put_bits(w, len_sym.extra_value, len_sym.extra_bits)?;
+                w = after_len_extra;
+            }
+            let dist_sym: _MatchSym = _dist_symbol(distance);
+            let dspec: _CodeSpec = _fixed_dist_code(dist_sym.sym);
+            let after_dist_code: _BitWriter = _bw_put_huffman_code(w, dspec.code, dspec.len)?;
+            w = after_dist_code;
+            if dist_sym.extra_bits > 0 {
+                let after_dist_extra: _BitWriter = _bw_put_bits(w, dist_sym.extra_value, dist_sym.extra_bits)?;
+                w = after_dist_extra;
+            }
+        }
+        i += 1;
+    }
+
+    let eob: _CodeSpec = _fixed_lit_code(256);
+    let after_eob: _BitWriter = _bw_put_huffman_code(w, eob.code, eob.len)?;
+    return Result.Ok { value: after_eob };
+}
+
+// RFC 1951 §3.2.4 stored block: BFINAL + BTYPE=00, align to the next byte,
+// then LEN/NLEN (little-endian, NLEN the one's complement of LEN) and the
+// raw bytes verbatim.
+fn _write_stored_block(writer_in: _BitWriter, base_addr: i64, chunk_start: int, chunk_len: int, bfinal: boolean) -> Result<_BitWriter, ArchiveError> {
+    let mut bfinal_bit: int = 0;
+    if bfinal { bfinal_bit = 1; }
+    let after_bfinal: _BitWriter = _bw_put_bits(writer_in, bfinal_bit, 1)?;
+    let after_btype: _BitWriter = _bw_put_bits(after_bfinal, 0, 2)?;  // BTYPE = 00, stored
+    let aligned: _BitWriter = _bw_align(after_btype)?;
+
+    let len: int = chunk_len;
+    let nlen: int = 65535 - len;
+    let with_len_lo: ByteBuf = bytes_append_byte(aligned.out, len & 255)?;
+    let with_len_hi: ByteBuf = bytes_append_byte(with_len_lo, (len >> 8) & 255)?;
+    let with_nlen_lo: ByteBuf = bytes_append_byte(with_len_hi, nlen & 255)?;
+    let with_nlen_hi: ByteBuf = bytes_append_byte(with_nlen_lo, (nlen >> 8) & 255)?;
+    let with_data: ByteBuf = bytes_append_slice(with_nlen_hi, base_addr + (chunk_start as i64), chunk_len)?;
+    return Result.Ok {
+        value: _BitWriter { bitbuf: 0, bitcnt: 0, out: with_data }
+    };
+}
+
+// ---------------------------------------------------------------------
+// Public entry point (SFEP-0071 §3.4, §3.9). Whole-buffer, for RFC vectors
+// and small in-memory uses — not what the streaming tar/gzip write path (a
+// later phase) will call.
+fn deflate_all(src: ByteCursor, opts: DeflateOptions) -> Result<ByteBuf, ArchiveError> {
+    if opts.strategy == DeflateStrategy.Dynamic {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.UnsupportedFeature, "dynamic Huffman deflate is not implemented (SFEP-0071 section 6.7 follow-up)")
+        };
+    }
+
+    let total_len: int = src.len - src.pos;
+    let base_addr: i64 = src.addr + (src.pos as i64);
+    let out0: ByteBuf = bytes_new(256)?;
+    let mut w: _BitWriter = _bw_new(out0);
+
+    if total_len == 0 {
+        // RFC 1951 has no representation for "zero blocks"; the smallest
+        // legal encoding of empty input is one final stored block with
+        // LEN=0.
+        let empty: _BitWriter = _write_stored_block(w, base_addr, 0, 0, true)?;
+        return _bw_finish(empty);
+    }
+
+    let tables: _MatchTables = _match_tables_new();
+    let mut chunk_start: int = 0;
+    let mut guard: int = 0;
+    let max_chunks: int = (total_len / _BLOCK_SIZE) + 4;
+    loop {
+        if chunk_start >= total_len { break; }
+        guard += 1;
+        if guard > max_chunks {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "internal: deflate block loop exceeded its expected iteration bound")
+            };
+        }
+
+        let mut chunk_end: int = chunk_start + _BLOCK_SIZE;
+        if chunk_end > total_len { chunk_end = total_len; }
+        let bfinal: boolean = chunk_end >= total_len;
+        let chunk_len: int = chunk_end - chunk_start;
+
+        // No unconditional alignment here: a stored block aligns itself
+        // (RFC 1951 §3.2.4, inside `_write_stored_block`), but a fixed
+        // block's bits continue directly from wherever the previous block
+        // ended — the decoder never skips padding between two Huffman-coded
+        // blocks, only before a stored one. Padding every block boundary
+        // regardless of type corrupts the stream: the decoder would read
+        // the zero padding as the start of the next block's BFINAL/BTYPE.
+        if opts.strategy == DeflateStrategy.Stored {
+            let written: _BitWriter = _write_stored_block(w, base_addr, chunk_start, chunk_len, bfinal)?;
+            w = written;
+        } else {
+            let tokens: _Tokens = _lz77_chunk(base_addr, total_len, chunk_start, chunk_end, tables)?;
+            let fixed_bytes: int = (tokens.bit_cost + 7) / 8;
+            if fixed_bytes < chunk_len + 5 {
+                let written: _BitWriter = _write_fixed_block(w, tokens, bfinal)?;
+                w = written;
+            } else {
+                let written: _BitWriter = _write_stored_block(w, base_addr, chunk_start, chunk_len, bfinal)?;
+                w = written;
+            }
+        }
+        chunk_start = chunk_end;
+    }
+
+    return _bw_finish(w);
+}

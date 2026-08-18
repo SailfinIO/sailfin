@@ -1,21 +1,42 @@
-// sfn/archive — RFC 1952 gzip container framing, header parse only.
+// sfn/archive — RFC 1952 gzip container framing: header parse (SFN-895/A1)
+// and whole-buffer header/trailer write (SFN-897/A4).
 //
-// This phase (SFN-895/A1) parses the fixed header plus the optional
+// Reading: parses the fixed header plus the optional
 // FEXTRA/FNAME/FCOMMENT/FHCRC fields and reports where the deflate stream
 // begins. Inflating that stream is SFN-896's `inflate.sfn`; the streaming
 // `gzip_reader_open`/`gzip_read` API that owns a `FILE*` and therefore
 // carries `![io]` is a later phase too (SFEP-0071 §3.4).
 //
+// Writing: `gzip_write_all` assembles a complete member — fixed header,
+// deflate-compressed body (`deflate.sfn`, SFN-897), then the CRC-32/ISIZE
+// trailer — over an in-memory `ByteCursor`. It is the whole-buffer
+// counterpart to `gzip_parse_header` + `inflate_all`, not the streaming
+// `gzip_writer_open`/`gzip_write` API (a later phase, `![io]`).
+//
 // Pure: this module operates on an in-memory `ByteCursor` and declares no
 // effect, matching the pure-codec-layer split in SFEP-0071 §4 — only the
-// stream openers that touch a `FILE*` carry `![io]`, not header parsing
-// over bytes already in memory.
-import { ByteCursor, _byte_at } from "./bytes";
+// stream openers that touch a `FILE*` carry `![io]`, not header parsing or
+// whole-buffer writing over bytes already in memory.
+import {
+    ByteBuf,
+    ByteCursor,
+    _byte_at,
+    bytes_append_byte,
+    bytes_append_slice,
+    bytes_cursor,
+    bytes_free,
+    bytes_new
+} from "./bytes";
+import { crc32 } from "./crc32";
+import { DeflateOptions, deflate_all } from "./deflate";
 import { ArchiveError, ArchiveErrorKind, archive_error } from "./error";
 
 let _GZIP_MAGIC0: int = 31;  // 0x1f
 let _GZIP_MAGIC1: int = 139;  // 0x8b
 let _GZIP_CM_DEFLATE: int = 8;
+// RFC 1952 §2.3.1 OS field, value 255 = "unknown" — the canonical choice
+// per SFEP-0071 §3.7, so the same tree gzips to the same bytes on any host.
+let _GZIP_OS_UNKNOWN: int = 255;
 
 let _FLG_FHCRC: int = 2;
 let _FLG_FEXTRA: int = 4;
@@ -198,4 +219,102 @@ fn gzip_parse_header(cursor: ByteCursor) -> Result<GzipHeaderResult, ArchiveErro
             }
         }
     };
+}
+
+// ---------------------------------------------------------------------
+// Writing (SFN-897/A4). `_gzip_try_append_byte`/`_gzip_try_append_slice`
+// free `out` and propagate on failure, so every call site below can chain
+// with `?` and still honor "owns its allocations end to end, frees on
+// every exit path" (SFEP-0071 §3.3) without a match arm at each byte.
+fn _gzip_try_append_byte(out: ByteBuf, byte_value: int) -> Result<ByteBuf, ArchiveError> {
+    let appended = bytes_append_byte(out, byte_value);
+    match appended {
+        Result.Ok { value }
+        : return Result.Ok { value: value },
+        Result.Err { error }
+        : {
+            bytes_free(out);
+            return Result.Err { error: error };
+        }
+    }
+}
+
+fn _gzip_try_append_slice(out: ByteBuf, src_addr: i64, n: int) -> Result<ByteBuf, ArchiveError> {
+    let appended = bytes_append_slice(out, src_addr, n);
+    match appended {
+        Result.Ok { value }
+        : return Result.Ok { value: value },
+        Result.Err { error }
+        : {
+            bytes_free(out);
+            return Result.Err { error: error };
+        }
+    }
+}
+
+// Assemble a complete RFC 1952 gzip member over `src`: the fixed 10-byte
+// header, the deflate-compressed body (`deflate.sfn`), then the CRC-32 +
+// ISIZE trailer (RFC 1952 §2.3.1), all little-endian. Every host-varying
+// field is zeroed per SFEP-0071 §3.7 — FLG=0 (no optional fields), MTIME=0,
+// XFL=0, OS=255 (unknown) — so `gzip_write_all` over the same bytes, on any
+// host, produces byte-identical output. Owns `out` end to end and frees it
+// on every error path, matching `inflate_all`'s discipline.
+fn gzip_write_all(src: ByteCursor, opts: DeflateOptions) -> Result<ByteBuf, ArchiveError> {
+    // Every step below lands in a fresh `let` binding, never a bare
+    // reassignment fed directly by `?` — the emit-stage `?` desugar only
+    // lowers out of a `let` initializer (E1002 on a plain assignment), the
+    // same constraint `deflate.sfn`'s `_BitWriter` threading works around.
+    let out0: ByteBuf = bytes_new(256)?;
+    let out1: ByteBuf = _gzip_try_append_byte(out0, _GZIP_MAGIC0)?;
+    let out2: ByteBuf = _gzip_try_append_byte(out1, _GZIP_MAGIC1)?;
+    let out3: ByteBuf = _gzip_try_append_byte(out2, _GZIP_CM_DEFLATE)?;
+    let out4: ByteBuf = _gzip_try_append_byte(out3, 0)?;  // FLG
+    let out5: ByteBuf = _gzip_try_append_byte(out4, 0)?;  // MTIME byte 0
+    let out6: ByteBuf = _gzip_try_append_byte(out5, 0)?;  // MTIME byte 1
+    let out7: ByteBuf = _gzip_try_append_byte(out6, 0)?;  // MTIME byte 2
+    let out8: ByteBuf = _gzip_try_append_byte(out7, 0)?;  // MTIME byte 3
+    let out9: ByteBuf = _gzip_try_append_byte(out8, 0)?;  // XFL
+    let out10: ByteBuf = _gzip_try_append_byte(out9, _GZIP_OS_UNKNOWN)?;  // OS
+
+    let compressed = deflate_all(src, opts);
+    let mut body: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match compressed {
+        Result.Ok { value }
+        : {
+            body = value;
+        },
+        Result.Err { error }
+        : {
+            bytes_free(out10);
+            return Result.Err { error: error };
+        }
+    }
+
+    let body_cursor: ByteCursor = bytes_cursor(body);
+    let appended = _gzip_try_append_slice(out10, body_cursor.addr, body_cursor.len);
+    bytes_free(body);
+    let mut out11: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match appended {
+        Result.Ok { value }
+        : {
+            out11 = value;
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+
+    let crc: int = crc32(src);
+    let isize: int = (src.len - src.pos) & 4294967295;
+    let out12: ByteBuf = _gzip_try_append_byte(out11, crc & 255)?;
+    let out13: ByteBuf = _gzip_try_append_byte(out12, (crc >> 8) & 255)?;
+    let out14: ByteBuf = _gzip_try_append_byte(out13, (crc >> 16) & 255)?;
+    let out15: ByteBuf = _gzip_try_append_byte(out14, (crc >> 24) & 255)?;
+    let out16: ByteBuf = _gzip_try_append_byte(out15, isize & 255)?;
+    let out17: ByteBuf = _gzip_try_append_byte(out16, (isize >> 8) & 255)?;
+    let out18: ByteBuf = _gzip_try_append_byte(out17, (isize >> 16) & 255)?;
+    let out19: ByteBuf = _gzip_try_append_byte(out18, (isize >> 24) & 255)?;
+
+    return Result.Ok { value: out19 };
 }
