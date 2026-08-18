@@ -72,6 +72,22 @@ fn _check_exit(path: string) -> i64 ![io] {
     return rc;
 }
 
+fn _delete_if_exists(path: string) -> void ![io] {
+    if fs.exists(path) { fs.deleteFile(path); }
+}
+
+fn _delete_staged_module(slug: string, source_path: string) -> void ![io] {
+    let context_root = "build/compiler/import-context";
+    let artifact_base = context_root + "/" + slug;
+    _delete_if_exists(artifact_base + ".import-deps");
+    _delete_if_exists(artifact_base + ".srchash");
+    _delete_if_exists(artifact_base + ".layout-manifest");
+    _delete_if_exists(artifact_base + ".sfn-asm");
+
+    let path_slug = module_name_from_path(source_path);
+    _delete_if_exists(context_root + "/" + path_slug + ".slugalias");
+}
+
 test "E0420: undefined free-function callee exits non-zero with the diagnostic" ![io] {
     let fixture = _mint_fixture("undef.sfn", "fn main() {\n    notarealfunction_813(\"hi\");\n}\n");
 
@@ -99,18 +115,54 @@ test "E0420: locally-defined callee checks clean (envelope negative case)" ![io]
 }
 
 test "SFN-544: workspace export missing from imports reports span and provider" ![io] {
-    let fixture = "compiler/tests/fixtures/unresolved_identifier_missing_import.sfn";
-    let rc = _check_exit(fixture);
+    // Stage a provider with a collision-resistant logical name immediately
+    // before checking its consumer. Depending on the ambient compiler entry
+    // artifact made this assertion order-dependent: another test building a
+    // temporary `main.sfn` can legitimately replace the shared `main` slot.
+    let dir = fs.mkdtemp("sfn-544-provider-");
+    assert dir.length > 0;
+    let unique_suffix = substring(dir, dir.length - 6, dir.length);
+    let provider_slug = "sfn544_workspace_export_provider_" + unique_suffix;
+    fs.createDirectory(dir + "/src", true);
+    let provider = dir + "/src/" + provider_slug + ".sfn";
+    let support_slug = "sfn544_workspace_export_support_" + unique_suffix;
+    let support = dir + "/src/" + support_slug + ".sfn";
+    let consumer = dir + "/consumer.sfn";
+    let manifest = dir + "/capsule.toml";
+    let out_bin = dir + "/provider-bin";
+    fs.writeFile(manifest, "[capsule]\nname = \"sfn544-provider-fixture\"\nversion = \"0.1.0\"\n\n"
+        + "[build]\nentry = \"src/"
+        + provider_slug
+        + ".sfn\"\nkind = \"binary\"\n");
+    fs.writeFile(provider, "fn compile_to_sailfin(source: string) -> string { return source; }\n"
+        + "fn main() {}\n");
+    // Binary capsule staging excludes the entry from the source walk and
+    // publishes it alongside the remaining source set. Keep one sibling so
+    // this fixture exercises that real entry-inventory path.
+    fs.writeFile(support, "fn sfn544_support() -> int { return 1; }\n");
+    fs.writeFile(consumer, "// SFN-544 regression fixture.\n\n"
+        + "fn unresolved_identifier_repro() -> string { return compile_to_sailfin(\"x\"); }\n");
+
+    let build_rc = process.run_capture(["build/bin/sfn", "build", "-p", dir, "-o", out_bin], process.environ());
+    let build_log = process.capture_take_stdout() + process.capture_take_stderr();
+    if build_rc != 0 { print.err(build_log); }
+    assert build_rc == 0;
+
+    let rc = _check_exit(consumer);
     assert rc != 0;
 
-    let combined = _check_output(fixture);
+    let combined = _check_output(consumer);
     assert _contains(combined, "error[E0420]: undefined function `compile_to_sailfin`");
     assert _contains(combined, "3 | fn unresolved_identifier_repro() -> string { return compile_to_sailfin(\"x\"); }");
     assert _contains(combined, "^^^^^^^^^^^^^^^^^^");
     assert _contains(combined, "import { compile_to_sailfin }");
-    assert _contains(combined, "from \"main\"");
+    assert _contains(combined, "from \"" + provider_slug + "\"");
     assert ! _contains(combined, "internal compiler error");
     assert ! _contains(combined, "ice.md");
+
+    _delete_staged_module(provider_slug, provider);
+    _delete_staged_module(support_slug, support);
+    fs.removeDirectory(dir, true);
 }
 
 test "check resolver: a broken configured entry does not fail a healthy file" ![io] {
