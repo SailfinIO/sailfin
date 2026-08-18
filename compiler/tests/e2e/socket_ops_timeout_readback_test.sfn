@@ -56,8 +56,20 @@ extern fn sfn_socket_timeout_readback_ms(fd: i32) -> i64;
 // Fixed loopback port for this test. Distinct from every other
 // server-binding e2e test's port so the parallel `--jobs N` pool cannot
 // collide (see `socket_recv_timeout_test.sfn`'s port-collision note,
-// #1862): 18790-18795 and 18882-18886 are taken; 18796 is unshared.
-fn _tr_port() -> i64 { return 18796; }
+// #1862).
+//
+// 18796 was the original choice and was WRONG: it is
+// `runtime_tls_verify_failure_test.sfn:344`'s port, and two other files
+// already record that ownership (`toolchain_install_test.sfn:161`,
+// `tls_loopback_test.sfn:109`). The collision is invisible to a serial
+// local run and fails only under the pool, which is exactly the
+// pool-only class `.claude/rules/no-bash-e2e.md` warns about.
+//
+// Ports in use across `compiler/tests/` at the time of writing:
+// 18790-18799, 18882, 18884-18886, 18893-18895, 18898-18899. 18883 sits
+// inside the 1888x block but is unclaimed, so it is taken here rather
+// than extending the range.
+fn _tr_port() -> i64 { return 18883; }
 
 fn _tr_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;

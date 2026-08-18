@@ -14,21 +14,34 @@
 // POSIX `socket_ops.sfn` is genuinely socket-only, so an ungated
 // consumer like `io.sfn` or `assert.sfn` has no business importing it.
 //
-// It would be natural to justify the split by saying `socket_ops.sfn` is
-// gated behind the `net` effect (`runtime/capsule.toml`
-// `[sfn-source-gates]`) and so would be absent from a non-networked
-// link. **That reasoning does not hold on the target this pair exists
-// for, and must not be relied on here.** The gate fails open on msvc:
-// `compute_runtime_demand` (`build/runtime_selection.sfn`) short-circuits
-// to "retain everything" when `runtime_link_dead_strips()` is false, and
-// that predicate tests `target_uses_gnu_link_gc`, which is false for the
-// msvc ABI. Measured on a plain `![io]` hello-world with
-// `SAILFIN_TRACE_LINK=1`: `socket_ops_windows.sfn`'s object is on the
-// link line, along with every other `net`-gated module. What removes the
-// unreferenced code there is the linker's dead-strip
-// (`-ffunction-sections` + `/OPT:REF`), not the effect system. The gate
-// does narrow on Linux and macOS, so this is a Windows-specific hole,
-// not a general one. Tracked as SFN-943.
+// The link-time argument for the split is real, but it is
+// target-dependent, so state it precisely rather than either way round.
+//
+// On Linux and macOS the `net` gate (`runtime/capsule.toml`
+// `[sfn-source-gates]`) does narrow: a binary that never declares
+// `![net]` does not link `socket_ops.sfn`, so an ungated consumer
+// reaching for `sfn_fd_read`/`sfn_fd_write` there would leave them
+// undefined at link. That is not hypothetical — it is exactly the
+// failure the SFN-927 fixture manifests produced when `fd_io.sfn` was
+// added to `io.sfn`'s call path but omitted from their `sfn-sources`
+// lists: `ld.lld: error: undefined symbol: sfn_fd_write, referenced by
+// io.sfn`.
+//
+// On the msvc target the same argument does NOT hold, and must not be
+// relied on: the gate fails open there. `compute_runtime_demand`
+// (`build/runtime_selection.sfn`) short-circuits to "retain everything"
+// when `runtime_link_dead_strips()` is false, and that predicate tests
+// `target_uses_gnu_link_gc`, false for the msvc ABI. Measured on a plain
+// `![io]` hello-world with `SAILFIN_TRACE_LINK=1`:
+// `socket_ops_windows.sfn`'s object is on the link line, along with
+// every other `net`-gated module, and what removes the unreferenced code
+// is the linker's dead-strip (`-ffunction-sections` + `/OPT:REF`), not
+// the effect system. Tracked as SFN-943.
+//
+// So: the split is right everywhere, load-bearing on Linux and macOS,
+// and merely tidy on msvc. Do not simplify this to one target's answer —
+// an earlier revision of this comment asserted each half in turn, and
+// both were wrong for the other target.
 //
 // The UCRT's low-fd `_read`/`_write` (the CRT names — NOT usable on a
 // Winsock `SOCKET`, which is a distinct handle space reached only
