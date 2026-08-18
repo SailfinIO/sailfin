@@ -1,0 +1,75 @@
+// End-to-end coverage for the zero-argument capsule workflow scaffolded by
+// `sfn init`: the generated `[build].entry` drives both build and run.
+import { find, split } from "sfn/strings";
+import {
+    clean_runner_env,
+    expect_eq_int,
+    nested_runner_scratch,
+    with_tmp_dir
+} from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("init-project-pwd")));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
+}
+
+test "sfn init: bare build uses the generated capsule entry" ![io] {
+    let sfn = _sfn_bin_abs();
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let child_env = clean_runner_env(nested_runner_scratch("init-project-build"));
+        let init_rc = process.run_capture_cwd([sfn, "init"], child_env, dir);
+        let init_out = process.capture_take_stdout();
+        let init_err = process.capture_take_stderr();
+        assert init_rc == 0;
+        let _ = init_out;
+        let _ = init_err;
+
+        let build_rc = process.run_capture_cwd([sfn, "build"], child_env, dir);
+        let build_out = process.capture_take_stdout();
+        let build_err = process.capture_take_stderr();
+        assert build_rc == 0;
+        assert find(build_out + build_err, "built:", 0) >= 0;
+        assert fs.exists(dir + "/build/sailfin/program") || fs.exists(dir
+            + "/build/sailfin/program.exe");
+        return 0;
+    });
+    expect_eq_int(exit, 0);
+}
+
+test "sfn init: bare run uses the generated capsule entry" ![io] {
+    let sfn = _sfn_bin_abs();
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let child_env = clean_runner_env(nested_runner_scratch("init-project-run"));
+        let init_rc = process.run_capture_cwd([sfn, "init"], child_env, dir);
+        let init_out = process.capture_take_stdout();
+        let init_err = process.capture_take_stderr();
+        assert init_rc == 0;
+        let _ = init_out;
+        let _ = init_err;
+
+        let run_rc = process.run_capture_cwd([sfn, "run"], child_env, dir);
+        let run_out = process.capture_take_stdout();
+        let run_err = process.capture_take_stderr();
+        assert run_rc == 0;
+        assert find(run_out + run_err, "Hello, Sailfin!", 0) >= 0;
+        return 0;
+    });
+    expect_eq_int(exit, 0);
+}
