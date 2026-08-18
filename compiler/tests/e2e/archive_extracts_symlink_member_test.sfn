@@ -1,0 +1,151 @@
+// compiler/tests/e2e/archive_extracts_symlink_member_test.sfn
+//
+// The §3.5 symlink-materialization policy under a real, `tar`-built
+// archive. Header-level decode is covered by
+// `capsules/sfn/archive/tests/ustar_test.sfn` ("decodes a symlink
+// header's linkname") and target rejection by
+// `capsules/sfn/archive/tests/path_guard_test.sfn`, but neither exercises
+// the real write path in `tar_read.sfn`'s deferred-link replay
+// (`_DeferredLink`, `tar_read.sfn:657-675`) that turns a typeflag '2'
+// member into bytes on disk. This test closes that gap.
+//
+// `sfn/archive` carries no writer yet (SFN-899), so the ARCHIVE is built
+// with the HOST `tar`, the same oracle role `tar` plays in
+// `archive_path_traversal_reject_test.sfn`. GNU `tar -czf` stores a
+// symlink as a typeflag '2' member by default (it does not dereference
+// without `-h`), which is exactly the shape under test. The symlink
+// itself is made with `fs.symlink` rather than a shelled `ln`, so the
+// fixture needs one external tool instead of two.
+//
+// Two extraction policies are asserted against the same fixture shape:
+// the default (`copy_instead_of_link: false`) materializes a real
+// symlink, and `copy_instead_of_link: true` — forced on internally
+// whenever `host_is_windows` (`tar_read.sfn:660`), since Windows cannot
+// create symlinks without elevation — materializes a regular file
+// instead. That second branch is the one the native-Windows extraction
+// path actually takes.
+import { ExtractOptions, targz_extract } from "sfn/archive";
+import { tool_present } from "sfn/test";
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+test "archive extracts symlink member: a symlink member materializes as a real symlink" ![io] {
+    if !tool_present("tar") {
+        assert true;
+        return;
+    }
+    let root = _scratch_dir() + "/archive-symlink-member";
+    fs.createDirectory(root, true);
+    let src = root + "/src";
+    fs.createDirectory(src, true);
+    fs.writeFile(src + "/sailfin", "binary-payload");
+
+    // A filesystem without symlink support can't carry this fixture;
+    // degrade like the `tool_present` gate rather than fail on an
+    // environment limitation unrelated to the extractor.
+    if !fs.symlink("sailfin", src + "/sfn") {
+        assert true;
+        return;
+    }
+
+    let tarball = root + "/fixture.tar.gz";
+    let build_exit = process.run_capture(["tar", "-czf", tarball, "-C", src, "sailfin", "sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if build_exit != 0 {
+        assert true;
+        return;
+    }
+
+    let dest_dir = root + "/dest";
+    fs.createDirectory(dest_dir, true);
+    let opts = ExtractOptions {
+        copy_instead_of_link: false,
+        apply_modes: true,
+        max_total_bytes: 1073741824,
+        max_members: 65536,
+        host_is_windows: false
+    };
+    let result = targz_extract(tarball, dest_dir, opts);
+    match result {
+        Result.Ok { value }
+        : {
+            assert value.member_count > 0;
+        },
+        Result.Err { error }
+        : {
+            print("targz_extract failed: " + error.message);
+            assert false;
+        }
+    }
+
+    assert fs.read_link(dest_dir + "/sfn") == "sailfin";
+    assert fs.exists(dest_dir + "/sailfin");
+}
+
+test "archive extracts symlink member: copy_instead_of_link materializes a regular file instead" ![io] {
+    if !tool_present("tar") {
+        assert true;
+        return;
+    }
+    let root = _scratch_dir() + "/archive-symlink-member-copy";
+    fs.createDirectory(root, true);
+    let src = root + "/src";
+    fs.createDirectory(src, true);
+    fs.writeFile(src + "/sailfin", "binary-payload");
+
+    if !fs.symlink("sailfin", src + "/sfn") {
+        assert true;
+        return;
+    }
+
+    let tarball = root + "/fixture.tar.gz";
+    let build_exit = process.run_capture(["tar", "-czf", tarball, "-C", src, "sailfin", "sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if build_exit != 0 {
+        assert true;
+        return;
+    }
+
+    let dest_dir = root + "/dest";
+    fs.createDirectory(dest_dir, true);
+    let opts = ExtractOptions {
+        copy_instead_of_link: true,
+        apply_modes: true,
+        max_total_bytes: 1073741824,
+        max_members: 65536,
+        host_is_windows: false
+    };
+    let result = targz_extract(tarball, dest_dir, opts);
+    match result {
+        Result.Ok { value }
+        : {
+            assert value.member_count > 0;
+        },
+        Result.Err { error }
+        : {
+            print("targz_extract failed: " + error.message);
+            assert false;
+        }
+    }
+
+    assert fs.exists(dest_dir + "/sfn");
+    // `fs.read_link` on a non-symlink returns "" (`capsules/sfn/fs/src/mod.sfn:155-161`,
+    // SFN-46) — the copy policy must not leave a real symlink behind.
+    assert fs.read_link(dest_dir + "/sfn").length == 0;
+}
