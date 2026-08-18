@@ -4,7 +4,7 @@ title: Native Runtime Architecture
 status: Implemented
 type: runtime
 created: 2026-06-26
-updated: 2026-07-27
+updated: 2026-08-18
 author: "agent:compiler-architect"
 tracking: "#321, #322, #451, #822, #1089, #1118, #1181, #1203, #1209, SFN-558"
 supersedes:
@@ -352,6 +352,16 @@ API: `sfn_try_enter(frame) -> i32` (push frame onto the TLS chain, call `setjmp`
 on first entry, non-zero on throw), `sfn_try_leave(frame)` (pop), `sfn_throw(message)
 -> noreturn` (write message into the top frame, pop, `longjmp`),
 `sfn_take_exception(frame) -> SfnString` (read the caught message).
+
+**Amendment (SFN-940).** `sfn_try_enter` / `sfn_try_leave` were removed from
+`runtime/sfn/exception.sfn`. M2.7b did not inline these functions;
+`compiler/capsules/codegen-llvm/src/lowering/instructions_try.sfn` emits
+`sfn_exception_push_frame` + a target-conditioned inline save point +
+`sfn_exception_pop_frame` directly at the user try block. The function form was
+C11 §7.13.2 UB on every target (the save point dies when the callee returns) and
+its POSIX one-argument `setjmp` declaration was wrong for the Windows UCRT ABI
+(SFN-647). The shipped ABI is the four symbols in
+`site/src/content/docs/docs/reference/runtime-abi.md`.
 
 **Drop-on-unwind (v0):** the compiler emits cleanup at catch entry. It knows which
 locals are live at each `try` scope and emits drops for all owned in-scope locals at

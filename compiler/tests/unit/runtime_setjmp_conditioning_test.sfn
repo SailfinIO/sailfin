@@ -1,0 +1,80 @@
+// SFN-940: no-exceptions guard against a runtime module ever declaring its
+// own `setjmp` again.
+//
+// The invariant has no exceptions: the only legitimate save point is
+// compiler-emitted and target-conditioned via `target_setjmp_symbol`
+// (`compiler/capsules/codegen-llvm/src/lowering_debug_state.sfn:115`). A
+// runtime module declaring its own `setjmp` cannot see the target and
+// silently emits the POSIX one-argument form into a Windows link — the
+// exact defect SFN-940 deleted (`sfn_try_enter` in
+// `runtime/sfn/exception.sfn`, whose POSIX `setjmp` declaration was wrong
+// for the Windows UCRT ABI, SFN-647).
+//
+// `longjmp` is deliberately NOT guarded here: `runtime/sfn/exception.sfn:137`
+// declares it, it is live on the `sfn_throw` path, and the symbol is spelled
+// identically on both ABIs.
+//
+// The audit set is derived from `target_condition_runtime_sfn_sources`
+// itself rather than a hand-maintained list, so it stays self-maintaining
+// as Windows siblings are added — the manifest never lists them directly.
+// No build, no subprocess, no nested runner (`.claude/rules/no-bash-e2e.md`).
+import {
+    contains,
+    find,
+    join,
+    split
+} from "sfn/strings";
+
+import { target_condition_runtime_sfn_sources } from "../../src/build/target";
+import { toml_get_sfn_sources } from "../../src/toml_parser";
+
+// Drop everything from the first `//` on each line. Whole-file `contains`
+// over `![io]`-read text is the stable form here — the array-parsing-with
+// -in-loop-slicing form at `cross_windows_runtime_modules_test.sfn:19-42`
+// miscompiles.
+fn _strip_line_comments(text: string) -> string {
+    let lines = split(text, "\n");
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        let idx = find(line, "//", 0);
+        if idx < 0 { out.push(line); } else {
+            out.push(substring(line, 0, idx));
+        }
+    }
+    return join(out, "\n");
+}
+
+test "runtime: no runtime source declares or calls setjmp" ![io] {
+    let manifest = fs.readFile("runtime/capsule.toml");
+    let sources = toml_get_sfn_sources(manifest);
+    let mut audit: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        audit.push("runtime/" + sources[i]);
+        i += 1;
+    }
+    let windows_sources = target_condition_runtime_sfn_sources(audit, "Windows");
+    let mut w: int = 0;
+    loop {
+        if w >= windows_sources.length { break; }
+        audit.push(windows_sources[w]);
+        w += 1;
+    }
+    audit.push("runtime/prelude.sfn");
+    audit.push("runtime/sfn/platform/libc.sfn");
+
+    let mut a: int = 0;
+    loop {
+        if a >= audit.length { break; }
+        let path = audit[a];
+        a += 1;
+        if !fs.exists(path) { continue; }
+        let text = _strip_line_comments(fs.readFile(path));
+        assert ! contains(text, "setjmp");
+    }
+}

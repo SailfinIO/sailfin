@@ -11,16 +11,17 @@
 // and M2.7c deletes it once every emission site has cut over.
 //
 // Status: pure-Sailfin frame management with direct
-// `call i32 @setjmp(...)` / `call void @longjmp(...)` IR. The
-// canonical API surface from architect §2.4.2 (`sfn_try_enter`,
-// `sfn_try_leave`, `sfn_throw`, `sfn_take_exception`) ships
+// `call void @longjmp(...)` IR. The canonical API surface from
+// architect §2.4.2 (`sfn_throw`, `sfn_take_exception`) ships
 // here as Sailfin functions. The Sailfin module exports also
 // include `sfn_exception_alloc_frame` / `sfn_exception_free_frame`
 // (heap-owned frames during the M2.7a window — see "Frame
 // layout" below) and explicit chain-mutation primitives
 // (`sfn_exception_push_frame`, `sfn_exception_pop_frame`,
 // `sfn_exception_frame_head`) that M2.7b's compiler emission
-// inlines at the user code's try-block boundary.
+// wraps around an inline, target-conditioned save point at the
+// user code's try-block boundary
+// (`compiler/capsules/codegen-llvm/src/lowering/instructions_try.sfn:386-419`).
 //
 // Frame layout deviation from the architect spec.
 //   The architect spells `SfnExceptionFrame` as
@@ -56,9 +57,8 @@
 // runtime frame layout arch-conditional (SFN-471, SFEP-0056 §3.3).
 //
 // Naming. No `_sfn_` infix on the architect's canonical
-// `sfn_try_enter / sfn_try_leave / sfn_throw / sfn_take_exception`
-// because the C runtime exposes no `sfn_try_*` / `sfn_throw`
-// / `sfn_take_exception` symbols today (it uses the
+// `sfn_throw / sfn_take_exception` because the C runtime exposes
+// no `sfn_throw` / `sfn_take_exception` symbols today (it uses the
 // `sailfin_runtime_*` family — see
 // `sailfin_runtime.c:223-296` in the retired C runtime). The
 // `sfn_exception_*` helpers carry the longer prefix so a future
@@ -74,16 +74,16 @@
 // fires, the saved frame is dead — that pattern is C11 UB
 // (§7.13.2) and glibc's pointer-mangled `longjmp` silently
 // no-ops on it (verified with a `clang -O0` reproducer during
-// M2.7a bring-up). The `sfn_try_enter` function form below
-// therefore carries the canonical setjmp call site (IR-pinning
-// surface for the M2.7b migration) but is not safe to call as a
-// regular function across a frame boundary. The cross-frame
-// unwinding test in `test_runtime_exception_frames.sh` exercises
-// the architect's intent — inline `setjmp` (from
-// `runtime/sfn/platform/libc.sfn`) on a `SfnExceptionFrame.
-// jmp_buf` allocated by `sfn_exception_alloc_frame`, followed by
-// a Sailfin-side `sfn_throw` call from a deeper frame — and that
-// path works end-to-end on Linux x86_64.
+// M2.7a bring-up). That is why the save point must be inline at
+// the user's try-block-containing function rather than behind a
+// callable primitive: a `setjmp` call inside a helper function
+// goes stale the moment that helper returns. This module
+// therefore declares no `setjmp` —
+// the save point is emitted directly by the compiler,
+// target-conditioned by `target_setjmp_symbol`
+// (`compiler/capsules/codegen-llvm/src/lowering_debug_state.sfn:115`),
+// at `compiler/capsules/codegen-llvm/src/lowering/instructions_try.sfn:386-419`
+// (SFN-940).
 //
 // TLS. The architect spec calls for a thread-local
 // `current_frame` pointer. The `thread_local` storage-class
@@ -123,17 +123,20 @@ extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-// `setjmp` / `longjmp` declared on `* u8` rather than the
-// architect-canonical `* JmpBuf` (which lives in
-// `runtime/sfn/platform/libc.sfn`). Both lower to
-// `declare i32 @setjmp(i8*)` / `declare void @longjmp(i8*, i32)`
-// at the LLVM level — the opaque-pointee rule
-// (`is_extern_opaque_pointee`) maps `* JmpBuf` to `i8*`, so the
-// two declarations bind to the same libc entrypoint. Using
+// `longjmp` is the sole libc jump primitive this module
+// declares, on `* u8` rather than the architect-canonical
+// `* JmpBuf` (which lives in `runtime/sfn/platform/libc.sfn`).
+// Both spellings lower to `declare void @longjmp(i8*, i32)` at
+// the LLVM level — the opaque-pointee rule
+// (`is_extern_opaque_pointee`) maps `* JmpBuf` to `i8*`. Using
 // `* u8` here keeps the body's pointer-arithmetic and cast-shim
-// chains uniform with the rest of this module.
-extern fn setjmp(env: *u8) -> i32;
-
+// chains uniform with the rest of this module. The matching
+// save point is emitted by the compiler at the user's try
+// block, target-conditioned by `target_setjmp_symbol`
+// (`compiler/capsules/codegen-llvm/src/lowering_debug_state.sfn:115`);
+// on Windows that is `_setjmp(buf, null)`, whose NULL
+// `_JUMP_BUFFER.Frame` keeps this `longjmp` on the
+// register-restore path rather than `RtlUnwindEx` (SFN-647).
 extern fn longjmp(env: *u8, val: i32) -> void;
 
 // `abort()` ends the process. Called by `sfn_throw` when the
@@ -288,47 +291,6 @@ fn sfn_exception_pop_frame(frame: *SfnExceptionFrame) -> void {
 // try-lowering follow-up.
 fn sfn_exception_reset_head() -> void { sfn_exception_frame_head_addr = 0; }
 
-// `sfn_try_enter(frame)` is the architect's composite primitive
-// (§2.4.2): push `frame` onto the chain head, then `setjmp` on
-// `frame.jmp_buf`. Returns 0 on first call, non-zero when a
-// matching `longjmp` (via `sfn_throw`) restores the save point.
-//
-// IR pinning. The body contains exactly one
-// `call i32 @setjmp(...)`. This is the surface the M2.7b
-// `instructions_try.sfn` migration will inline at user code's
-// try-block entry, replacing the
-// `sailfin_runtime_try_enter`-then-`has_exception`-polling
-// emission with direct frame setup + setjmp + branch. Tests
-// pin the IR shape here so a regression that retargets the
-// inlining onto a different runtime symbol surfaces here
-// instead of at link time.
-//
-// Setjmp lifetime note. Calling `sfn_try_enter` as a regular
-// function from another function is C11 UB once the
-// `sfn_try_enter` frame returns — the saved save-point becomes
-// stale (see the file-header "Setjmp/longjmp safety" note). The
-// architect's intent is that the M2.7b emission INLINES this
-// function at the user's try-block-containing function, where
-// the setjmp save point stays live across the throw. Until that
-// migration lands, real cross-frame unwinding uses the inline
-// `setjmp` extern from `runtime/sfn/platform/libc.sfn` directly
-// — exercised by `test_runtime_exception_frames.sh`.
-fn sfn_try_enter(frame: *SfnExceptionFrame) -> i32 {
-    sfn_exception_push_frame(frame);
-    return setjmp(frame.jmp_buf);
-}
-
-// `sfn_try_leave(frame)` pops `frame` off the chain. Thin
-// alias over `sfn_exception_pop_frame` — preserves the
-// architect's canonical name for symmetry with `sfn_try_enter`
-// and so the M2.7b emission has a single composite primitive
-// per architect §2.4.2 to bind to. The function form is safe to
-// call across frame boundaries — it only mutates the chain
-// global, no setjmp/longjmp state involved.
-fn sfn_try_leave(frame: *SfnExceptionFrame) -> void {
-    sfn_exception_pop_frame(frame);
-}
-
 // `sfn_throw(message)` writes `message` into the top frame's
 // `message` slot, pops that frame off the chain, then
 // `longjmp`s back to the matching `setjmp` save point. Popping
@@ -400,7 +362,7 @@ fn sfn_take_exception(frame: *SfnExceptionFrame) -> *u8 {
 // live TLS-polling exception path (`sailfin_runtime_*` set/clear/has and
 // the value-error raiser in the retired C runtime) into
 // Sailfin. This is a SEPARATE surface from the setjmp/frame API above:
-// the frame API (`sfn_throw` / `sfn_try_enter` / `sfn_take_exception`)
+// the frame API (`sfn_throw` / `sfn_take_exception`)
 // backs `try`/`throw` lowering, while this message-slot API backs the
 // `runtime.*` value-error path and the TLS-polling declares that
 // `compiler/capsules/codegen-llvm/src/effects.sfn` still emits for seed-compiled call
