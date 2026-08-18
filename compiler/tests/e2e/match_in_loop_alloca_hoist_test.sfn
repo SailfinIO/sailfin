@@ -1,0 +1,122 @@
+// compiler/tests/e2e/match_in_loop_alloca_hoist_test.sfn
+//
+// SFN-967: a `match` inside a `loop` must hoist its arm pattern-binding
+// `alloca`s to the function entry block (`current_allocas`, spliced in by
+// `emission.sfn:604`) rather than emitting them into `current_lines`, the
+// per-iteration body. `instructions_match.sfn` was the only lowering module
+// still pushing `alloca` text straight into `current_lines`: a taken arm
+// leaked 16 bytes per iteration, growing the stack unbounded until the 8 MiB
+// default overflowed and the process took SIGSEGV.
+//
+// -O2 masks the leak (`mem2reg` erases the per-iteration allocas); -O0 does
+// not. `sfn build`/`sfn run` link at -O2, so they cannot observe the leak —
+// only `sfn test` links at -O0 (`compiler/src/cli/commands/test/link.sfn`).
+// This test therefore drives the fixture through a nested `sfn test`
+// invocation rather than `sfn build`. The predicted threshold (8 MiB / 16 B
+// = 524,288 taken-arm iterations) is comfortably cleared by this fixture's
+// 2,000,000: on the unfixed compiler this reproduces a real SIGSEGV (child
+// exit 139), confirmed by reverting the fix locally and observing the crash
+// before writing this test.
+import { count, find, substring } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-967-match-in-loop-alloca";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// A `loop` around a `match` whose taken arm binds an enum payload field —
+// the same lowering shape as `_inflate_huff_block` in the archive capsule,
+// the original reported instance. Runs 2,000,000 iterations, well past the
+// 524,288 SIGSEGV threshold for the unhoisted-alloca leak.
+fn _fixture_source() -> string {
+    return "enum Step {\n" + "    Continue { value: int },\n" + "    Done\n"
+        + "}\n"
+        + "\n"
+        + "fn classify(i: int) -> Step {\n"
+        + "    if i < 2000000 { return Step.Continue { value: i }; }\n"
+        + "    return Step.Done;\n"
+        + "}\n"
+        + "\n"
+        + "test \"match in loop repro\" ![io] {\n"
+        + "    let mut i: int = 0;\n"
+        + "    let mut sum: int = 0;\n"
+        + "    loop {\n"
+        + "        let step = classify(i);\n"
+        + "        match step {\n"
+        + "            Step.Continue { value } => {\n"
+        + "                sum = sum + value;\n"
+        + "            },\n"
+        + "            Step.Done => { break; }\n"
+        + "        }\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    assert sum == 1999999000000;\n"
+        + "}\n";
+}
+
+test "match in loop: nested sfn test at -O0 runs 2,000,000 taken-arm iterations and exits 0" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/match_in_loop_alloca_967_test.sfn";
+    if fs.exists(src) { fs.deleteFile(src); }
+    fs.writeFile(src, _fixture_source());
+
+    let child_env = clean_runner_env(nested_runner_scratch("sfn967-nested"));
+    // 0 + 1 + ... + 1,999,999 = 1,999,999,000,000 (asserted inside the
+    // fixture itself). A reintroduced leak crashes this nested run with
+    // SIGSEGV (child exit 139) well before the assertion is reached.
+    let test_exit = process.run_capture([_sfn_bin(), "test", src], child_env);
+    let _to = process.capture_take_stdout();
+    let _te = process.capture_take_stderr();
+    assert test_exit == 0;
+
+    fs.deleteFile(src);
+}
+
+// Acceptance check named in SFN-967: the emitted IR for a match-in-loop must
+// show zero `alloca` inside `matchbody*` blocks — every arm-binding alloca
+// belongs in the function entry block, not the per-iteration body.
+test "match in loop: emitted IR has zero alloca inside matchbody blocks" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/match_in_loop_alloca_967_ir.sfn";
+    let out_ll = dir + "/match_in_loop_alloca_967_ir.ll";
+    if fs.exists(src) { fs.deleteFile(src); }
+    if fs.exists(out_ll) { fs.deleteFile(out_ll); }
+    fs.writeFile(src, _fixture_source());
+
+    let child_env = clean_runner_env(nested_runner_scratch("sfn967-emit"));
+    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", src], child_env);
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+    assert fs.exists(out_ll);
+
+    let ir = fs.readFile(out_ll);
+    let mut pos: int = 0;
+    let mut checked_any: boolean = false;
+    loop {
+        let label_idx = find(ir, "\nmatchbody", pos);
+        if label_idx < 0 { break; }
+        let body_start = label_idx + 1;
+        let next_label = find(ir, "\n\n", body_start);
+        let mut body_end = next_label;
+        if body_end < 0 { body_end = ir.length; }
+        let block = substring(ir, body_start, body_end);
+        assert count(block, " = alloca ") == 0;
+        checked_any = true;
+        pos = body_end;
+    }
+    assert checked_any;
+
+    fs.deleteFile(src);
+    fs.deleteFile(out_ll);
+}
