@@ -1,47 +1,64 @@
-# Windows Native Self-Host (M7/M8) — exploratory bootstrap harness.
+# Windows Native Self-Host (M7/M8/M9 tier B) — the unconditional nightly
+# fixed point.
 #
-# Executes SFEP-0021 milestone M7 (SFN-53): produce the first *native
-# MSVC-ABI* Sailfin compiler on a `windows-latest` runner and prove it
-# boots. There is no released native Windows seed yet (that is M11), so
-# per SFEP-0021 §4.3 the bootstrap seed is the mingw-cross exe, which can
-# only be produced on Linux — hence two jobs:
+# Executes SFEP-0021 milestones M7 (SFN-53) and M8 (SFN-54) on every push to
+# `main` and once nightly: the `cross-seed` job rebuilds the mingw-cross
+# bootstrap seed on Linux (there is no released native Windows seed yet —
+# that is M11/SFN-57 — so per SFEP-0021 §4.3 the seed comes from `make
+# ci-cross-windows`, uploaded under the same artifact name ci.yml's
+# `build-compiler-linux` uses); `native-build` stages it and drives the SFN-53
+# ladder plus the boot / check / run / R1 (try-throw) / R3 (struct-channel)
+# ABI gates via the shared `.github/actions/sailfin-build-windows` composite,
+# then runs the self-host fixed point: the native compiler rebuilds itself
+# twice and pass-2 must be byte-identical to pass-1.
 #
-#   cross-seed   (ubuntu)  — self-host main + `make ci-cross-windows` →
-#                            the mingw-cross sailfin.exe (bootstrap seed).
-#   native-build (windows) — run `<cross-exe> build -p compiler` with
-#                            SAILFIN_TARGET_OS=Windows (the target seam
-#                            SFN-52 already wired), then --version / check
-#                            / R1 (try-throw) / R3 (struct-channel) gates,
-#                            then milestone M8 (SFN-54): the native compiler
-#                            rebuilds itself twice and pass-2 must be
-#                            byte-identical to pass-1 (self-host fixed point).
-#
-# This is a manual/dispatch harness, not the permanent CI job (that is
-# M9/SFN-55). It is expected to iterate: the deepest unknowns are R1
-# (`setjmp` symbol binding under MSVC UCRT) and R3 (struct-by-value ABI),
-# plus the UCRT/stub link surface — all of which only a real native link
-# surfaces. Keep it dispatchable until M7 is green, then fold into M9.
-name: Windows Native Self-Host (M7)
+# This is SFN-55 (SFEP-0021 M9) tier B: the *unconditional* backstop to tier
+# A's path-filtered `build-compiler-windows` job in `ci.yml`. Tier A only
+# runs on PRs whose changed paths match the Windows filter (SFN-55 §4); this
+# workflow runs on every push to `main` regardless of what changed, plus a
+# daily cron, so a false negative in tier A's filter is caught within 24h
+# instead of never.
+name: Windows native self-host (fixed point)
+
+# SFN-55 review A3: ci.yml sets this at workflow scope (`ci.yml:17`), so tier
+# A builds under the arena allocator. Without the same pin here, tier B's
+# fixed point proves determinism of the malloc path instead, and an
+# arena-only Windows nondeterminism would be invisible to the one gate meant
+# to catch it.
+env:
+  SAILFIN_USE_ARENA: "1"
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - claude/sfn-53-windows-native-runner
+    branches: [main]
+  schedule:
+    - cron: "0 8 * * *" # after nightly-selfhost's 07:00
+  workflow_dispatch:
 
-# One run per ref. The native leg carries a 90-minute timeout on a
-# `windows-latest` runner (billed at 2x), so without this a burst of
-# pushes leaves every superseded run grinding to its own timeout in
-# parallel — three concurrent runs of a harness whose whole purpose is to
-# report on the newest commit.
+# `push: main` and `schedule` both carry `github.ref = refs/heads/main`, so a
+# group key on `github.ref` alone puts them in the SAME group — a merge
+# landing every ~20 min would cancel the 08:00 cron mid-run, and the cron
+# would cancel an in-flight push run, on a job that takes ~45-60 min. Either
+# way the fixed point never finishes and the gate it exists to run never goes
+# red. Keying on `github.event_name` too separates the two triggers into
+# independent groups; `cancel-in-progress` is true for everything except
+# `schedule` (`push` and `workflow_dispatch`), where superseding an in-flight
+# run with the newest commit is still correct (SFN-55 review A1) — a burst of
+# merges should still collapse to the latest push, just not at the cost of
+# cancelling the nightly.
 concurrency:
-  group: windows-native-selfhost-${{ github.ref }}
-  cancel-in-progress: true
+  group: windows-native-selfhost-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 permissions:
   contents: read
 
 jobs:
+  # ci.yml's `build-compiler-linux` produces and uploads this same archive
+  # on every source PR, but only within that workflow's own run — there is
+  # no sibling `ci.yml` run for a `push: main` or `schedule` event to
+  # download from. Rebuilding it inline here (~2 min on a 1x ubuntu job)
+  # also keeps `make ci-cross-windows` itself exercised nightly.
   cross-seed:
     name: Build mingw-cross bootstrap seed [linux]
     runs-on: ubuntu-latest
@@ -89,18 +106,23 @@ jobs:
         shell: bash
         run: make ci-cross-windows
 
+      # Named to match ci.yml's `build-compiler-linux` upload: the
+      # `sailfin-build-windows` composite (used by both tier A in ci.yml and
+      # this job) downloads `ci-installer-windows-x86_64` unconditionally,
+      # so both callers can share one download step regardless of which
+      # workflow produced the artifact.
       - name: Upload mingw-cross bootstrap seed
         uses: actions/upload-artifact@v7
         with:
-          name: windows-cross-seed
+          name: ci-installer-windows-x86_64
           path: dist/installer-windows-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 1
 
   native-build:
-    name: Native MSVC build from cross seed [windows-latest]
+    name: Native MSVC build from cross seed [windows-2025]
     needs: cross-seed
-    runs-on: windows-latest
+    runs-on: windows-2025 # pinned, not `windows-latest` — SFN-55 Risk R3
     timeout-minutes: 90
     # The whole job runs with the Windows target seam active. SFN-52's
     # build_target_os() would also probe %SystemRoot% natively, but the
@@ -108,203 +130,17 @@ jobs:
     # an empty env), and it documents intent.
     env:
       SAILFIN_TARGET_OS: Windows
+    outputs:
+      gate_name: ${{ steps.identify_gate.outputs.gate_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Download mingw-cross bootstrap seed
-        uses: actions/download-artifact@v8
+      - name: Build native Windows compiler
+        id: build_windows
+        uses: ./.github/actions/sailfin-build-windows
         with:
-          name: windows-cross-seed
-          path: seed-dl
-
-      - name: Stage the bootstrap seed
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p seed
-          tar -xzf seed-dl/installer-windows-x86_64.tar.gz -C seed
-          EXE="$(find "$PWD/seed" -name sailfin.exe | head -1)"
-          [ -n "$EXE" ] || { echo "sailfin.exe not found in bootstrap seed" >&2; exit 1; }
-          echo "SEED_EXE=$EXE" >> "$GITHUB_ENV"
-          echo "staged seed: $EXE"
-          "$EXE" --version || true
-
-      - name: Set up MSVC developer environment (UCRT + libs on PATH/LIB/INCLUDE)
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Ensure LLVM (clang + lld-link) present
-        shell: bash
-        run: |
-          set -euo pipefail
-          # windows-latest ships LLVM; surface the versions the native link
-          # will use so a toolchain mismatch is visible in the log.
-          clang --version | head -1
-          lld-link --version || true
-          echo "clang: $(command -v clang)"
-
-      # ── Staircase (SFN-53) ────────────────────────────────────────
-      # Four cheap rungs before the 281-module self-host, each proving
-      # one capability and each bounded by its own `timeout`.
-      #
-      # Why: four consecutive runs reached the 90-minute job timeout in
-      # the self-host step having emitted ZERO bytes, so every attempt
-      # cost 90 minutes and distinguished nothing — not a hang from a
-      # slow build, not a broken seed from a broken fan-out. Jumping
-      # straight to the hardest possible task made every failure
-      # maximally expensive and minimally informative.
-      #
-      # Each rung isolates one layer, so the first one that fails names
-      # the culprit directly:
-      #   1 boots        — the mingw-cross exe runs under UCRT at all
-      #   2 frontend     — parse/typecheck/effects, fully in-process
-      #   3 one module   — emit -> clang -> lld-link, ONE child spawn
-      #   4 the artifact — the binary it produced actually executes
-      # Rung 3 is the sharp one: it is the smallest possible exercise of
-      # emit -> compile -> link for a single module.
-      #
-      # The rungs were written against a "the self-host hangs on Windows"
-      # hypothesis. That hypothesis was wrong: measurement on a native
-      # Windows host found no hang at all. Every `s[i]` re-derived the
-      # string's length with a full `strnlen`, which made lowering
-      # quadratic — 47M scans totalling 243 GB for ONE module — and
-      # Windows merely lacked the SIMD `strnlen` that hides the same cost
-      # on Linux. The self-host was running correctly the whole time, just
-      # ~20x slower than the job timeout allowed, and printing nothing.
-      # The ladder is kept because bounded rungs beat one 90-minute
-      # all-or-nothing step regardless of what is being diagnosed.
-      #
-      # `continue-on-error` so a failed rung still lets later rungs run
-      # and report — one run then yields the whole ladder's shape
-      # instead of only its first break.
-      - name: "Rung 1 — seed boots (--version)"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          timeout 60 "$SEED_EXE" --version; echo "rung1 exit=$?"
-
-      - name: "Rung 2 — seed frontend check (hello-world)"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          timeout 120 "$SEED_EXE" check examples/basics/hello-world.sfn; echo "rung2 exit=$?"
-
-      - name: "Rung 3 — seed builds ONE module (emit -> clang -> lld-link)"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          # The single most diagnostic step in the workflow: one child
-          # spawn, one link. SAILFIN_BUILD_JOBS=1 pins the serial path so
-          # a failure here is not confounded by the parallel pool.
-          SAILFIN_BUILD_JOBS=1 timeout 600 "$SEED_EXE" build examples/basics/hello-world.sfn -o hello.exe
-          echo "rung3 exit=$?"
-          ls -la hello.exe || true
-
-      - name: "Rung 4 — run the produced binary"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          if [ -f hello.exe ]; then timeout 60 ./hello.exe; echo "rung4 exit=$?";
-          else echo "rung4 skipped — rung 3 produced no binary"; fi
-
-      - name: Native MSVC build of the compiler (Stage 2)
-        shell: bash
-        timeout-minutes: 30
-        run: |
-          set -euo pipefail
-          # Call the seed directly rather than `make rebuild` — the
-          # GnuWin32 make on windows-latest is too old (SFEP-0021 §4.4),
-          # and `build -p compiler` is exactly what `make rebuild` shells
-          # (Makefile rebuild-impl). SAILFIN_TARGET_OS=Windows drives the
-          # SFN-52 target seam (MSVC triple, lld-link, POSIX-lib drop,
-          # process_windows.sfn swap).
-          #
-          # The build driver emits no progress output: a full self-host
-          # prints under 1 KB, all of it at exit (measured on both Linux
-          # and Windows). A working build and a hung one are therefore
-          # byte-identical to a watcher, and a timeout kill leaves no
-          # diagnostic whatsoever — run 30166490718 logged ZERO bytes
-          # between this step opening and its cancellation 90 minutes
-          # later, which is what made the native leg so expensive to
-          # iterate on remotely. Count emitted artifacts on an interval
-          # so a slow build reads as slow and a stuck one as stuck. Drop
-          # this once the driver reports progress natively.
-          (
-            # `set +e` is load-bearing: the subshell inherits `set -e` from
-            # the step, so any single failing command inside the loop would
-            # kill the heartbeat silently and restore the exact zero-output
-            # condition it exists to prevent.
-            set +e
-            while :; do
-              sleep 30
-              printf '[heartbeat] %s sfn-asm=%s ll=%s o=%s\n' \
-                "$(date -u +%H:%M:%S)" \
-                "$(find build -name '*.sfn-asm' 2>/dev/null | wc -l)" \
-                "$(find build -name '*.ll' 2>/dev/null | wc -l)" \
-                "$(find build -name '*.o' 2>/dev/null | wc -l)"
-            done
-          ) &
-          heartbeat_pid=$!
-          # Kill the subshell, and its in-flight `sleep` where the tooling
-          # allows: a survivor inherits this step's stdout and can hold the
-          # step open. `pkill` is absent from Git for Windows' bundled msys
-          # set, so the child reap is best-effort — killing the subshell
-          # alone still bounds any delay at one sleep interval.
-          trap 'pkill -P "$heartbeat_pid" 2>/dev/null || true; kill "$heartbeat_pid" 2>/dev/null || true' EXIT
-          "$SEED_EXE" build -p compiler
-          echo "--- locating native-built compiler ---"
-          OUT=""
-          for c in build/capsules/sfn/compiler/bin/compiler.exe build/capsules/sfn/compiler/bin/compiler build/bin/sfn.exe build/bin/sfn; do
-            if [ -f "$c" ]; then OUT="$PWD/$c"; break; fi
-          done
-          [ -n "$OUT" ] || { echo "native-built compiler not found under build/" >&2; ls -R build | head -50; exit 1; }
-          echo "NATIVE_SFN=$OUT" >> "$GITHUB_ENV"
-          echo "native compiler: $OUT"
-
-      - name: Gate — boots and prints version
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$("$NATIVE_SFN" --version)"
-          echo "version: $out"
-          case "$out" in
-            "sfn "*) echo "ok: native MSVC compiler boots" ;;
-            *) echo "FAIL: unexpected --version output: $out" >&2; exit 1 ;;
-          esac
-
-      - name: Gate — frontend check (hello-world)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$NATIVE_SFN" check examples/basics/hello-world.sfn
-          echo "ok: check passed"
-
-      - name: Gate — end-to-end run (hello-world)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$NATIVE_SFN" run examples/basics/hello-world.sfn
-          echo "ok: hello-world ran"
-
-      - name: Gate R1 — try/throw (setjmp/longjmp under MSVC UCRT)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$NATIVE_SFN" run examples/basics/try-catch-finally.sfn
-          echo "ok: R1 try/throw ran"
-
-      - name: Gate R3 — struct-channel round-trip (Microsoft x64 struct ABI)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$NATIVE_SFN" run examples/concurrency/channels.sfn
-          echo "ok: R3 struct-channel ran"
+          seed_source: cross
 
       # M8 (SFN-54): the native compiler self-hosts twice and pass-2 must be
       # byte-identical to pass-1. Mirrors the POSIX fixed-point gate
@@ -337,6 +173,7 @@ jobs:
       # job cancellation instead of this step's own timeout message —
       # a worse diagnostic, not a wrong verdict.
       - name: Gate — self-host fixed point (pass-2 == pass-1)
+        id: fixed_point
         shell: bash
         timeout-minutes: 30
         run: |
@@ -397,3 +234,191 @@ jobs:
             exit 1
           fi
           echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
+
+      # SFN-55 review A2: `notify-failure` needs a gate name to file the
+      # regression issue under. Two values only — the fixed-point step's own
+      # outcome distinguishes a determinism break from everything upstream of
+      # it (seed staging, the ladder, the Stage 2 build, or an ABI gate),
+      # which all collapse to "the native build itself is broken".
+      - name: Identify failed gate
+        id: identify_gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.fixed_point.outcome }}" = "failure" ]; then
+            gate=windows-fixed-point
+          else
+            gate=windows-native-build
+          fi
+          echo "gate_name=$gate" >> "$GITHUB_OUTPUT"
+
+  # SFN-55 review A2: without this, A1's fix (letting the fixed point survive
+  # to a genuine red/green result instead of being cancelled every ~20 min)
+  # still fails into a void — a nightly nobody reads is the same rot this
+  # issue exists to close. Instantiates `build-quality.yml`'s existing
+  # mechanism (`:621-869`) rather than inventing a second one; adapted to
+  # this workflow's two-job shape (no separate cache-warmer job) instead of
+  # build-quality's three-gate one. Triage runbook:
+  # `docs/runbooks/windows-native.md`.
+  notify-failure:
+    name: Open regression issue + PR comment on failure
+    needs: [cross-seed, native-build]
+    # `always()`, not `!cancelled()`: a `timeout-minutes` expiry on the
+    # job-level 90-minute caps (either `cross-seed` or `native-build`)
+    # surfaces as a `cancelled` job conclusion — a step-level timeout (the
+    # fixed-point step's own 30 min) instead marks the step and the job
+    # `failure`, already caught by the `== 'failure'` disjuncts below without
+    # needing `always()`. After A1, a job-level cancellation is the single
+    # most likely failure signal this workflow can produce, and
+    # `!cancelled()` would suppress it (copied verbatim from
+    # `build-quality.yml:632-638`). `cross-seed` gets the same `cancelled`
+    # disjunct as `native-build`: it carries its own 90-minute timeout and
+    # does real work (a full Linux self-host + `make ci-cross-windows`), and
+    # without it a `cross-seed` cancellation leaves `native-build` `skipped`
+    # — no disjunct holds, and nothing is filed (SFN-55 review, round 2).
+    if: >-
+      always() &&
+      (needs.cross-seed.result == 'failure' ||
+       needs.cross-seed.result == 'cancelled' ||
+       needs.native-build.result == 'failure' ||
+       needs.native-build.result == 'cancelled')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Elevated beyond the workflow-level `contents: read` (`:52-53`) —
+    # `gh issue create`/`gh pr comment` need `issues: write` and
+    # `pull-requests: write`, and the classify step below queries the Actions
+    # API (`actions: read`) — omitted in round 1, which meant every
+    # cancellation the `always()` comment above calls out as "the single most
+    # likely failure signal" hit a 403 under `set -euo pipefail`, aborted the
+    # classify step, and silently filed nothing (SFN-55 review, round 2).
+    # Scoped to this job alone so the two build jobs stay minimally
+    # privileged.
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: write
+    env:
+      GATE_NAME: ${{ needs.native-build.outputs.gate_name != '' && needs.native-build.outputs.gate_name || 'windows-native-build' }}
+      FAIL_SHA: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      EVENT_NAME: ${{ github.event_name }}
+      REF: ${{ github.ref }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # A1 puts every `push` run (and every `workflow_dispatch` run) to
+      # `main` in one concurrency group with `cancel-in-progress: true`, so a
+      # newer push legitimately cancels an older still-running one — expected
+      # coalescing, not a regression. Distinguish that from a genuine
+      # timeout/host cancellation by checking whether a newer run of the same
+      # event type has since started: if so, this run was superseded: if this
+      # is still the newest run of its event type, the cancellation is real.
+      - name: Classify cancellation (supersede vs timeout)
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          report=true
+          if [ "${{ needs.cross-seed.result }}" != "failure" ] &&
+             [ "${{ needs.native-build.result }}" != "failure" ] &&
+             { [ "${{ needs.cross-seed.result }}" = "cancelled" ] ||
+               [ "${{ needs.native-build.result }}" = "cancelled" ]; }; then
+            # `branch=main` matches `push`/`schedule` (always `main`), but
+            # `workflow_dispatch` can run on any ref — strip the `refs/heads/`
+            # prefix so a manual dispatch from a feature branch compares
+            # against the latest run of that SAME branch, not main's.
+            branch="${REF#refs/heads/}"
+            latest_run_id="$(gh api \
+              "/repos/${REPO}/actions/workflows/windows-native-selfhost.yml/runs?event=${EVENT_NAME}&branch=${branch}&per_page=1" \
+              --jq '.workflow_runs[0].id // empty')"
+            if [ -n "$latest_run_id" ] && [ "$latest_run_id" != "$RUN_ID" ]; then
+              report=false
+              echo "[notify] superseded by run ${latest_run_id}; expected concurrency coalescing, no regression notification"
+            else
+              echo "[notify] this is the latest ${EVENT_NAME} run on ${branch} and still cancelled; reporting as a genuine cancellation/timeout"
+            fi
+          fi
+          echo "report=${report}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or append regression issue
+        id: regression_issue
+        if: steps.classify.outputs.report == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate="${GATE_NAME}"
+          title="windows-native regression: ${gate}"
+
+          existing="$(gh issue list \
+            --repo "$REPO" \
+            --state open \
+            --label windows-native-regression \
+            --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"${title}\")] | .[0].number // empty")"
+
+          {
+            echo "**Failure run:** ${RUN_URL}"
+            echo "**Commit:** \`${FAIL_SHA}\`"
+            echo "**Event:** \`${EVENT_NAME}\` on \`${REF}\`"
+            echo "**Gate:** \`${gate}\`"
+            echo "**cross-seed result:** \`${{ needs.cross-seed.result }}\`"
+            echo "**native-build result:** \`${{ needs.native-build.result }}\`"
+          } > regression-body.md
+
+          if [ -n "$existing" ]; then
+            echo "[notify] appending comment to existing regression issue #${existing}"
+            gh issue comment "$existing" --repo "$REPO" --body-file regression-body.md
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "# windows-native regression: ${gate}"
+              echo ""
+              echo "The \`windows-native-selfhost.yml\` gate (SFN-55 tier B) failed on \`${gate}\`. This issue tracks the regression and aggregates additional failures via comments — see \`docs/runbooks/windows-native.md\` for the triage runbook."
+              echo ""
+              echo "## Latest failure"
+              echo ""
+              cat regression-body.md
+            } > regression-new-body.md
+            new_number="$(gh issue create \
+              --repo "$REPO" \
+              --title "$title" \
+              --label "area:architecture" \
+              --label "windows-native-regression" \
+              --body-file regression-new-body.md \
+              | awk -F/ '/^https:/{print $NF}')"
+            echo "[notify] opened new regression issue #${new_number}"
+            echo "number=$new_number" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Per §6: PR comment only on `push: main` events. `schedule` and
+      # `workflow_dispatch` runs aren't tied to a single merging PR.
+      - name: Comment on merging PR
+        if: >-
+          steps.classify.outputs.report == 'true' &&
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number="${{ steps.regression_issue.outputs.number }}"
+          pr_number="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/commits/${FAIL_SHA}/pulls" \
+            --jq '.[0].number // empty')"
+          if [ -z "$pr_number" ]; then
+            echo "[notify] no merging PR found for ${FAIL_SHA}; skipping PR comment"
+            exit 0
+          fi
+          echo "[notify] commenting on merging PR #${pr_number}"
+          {
+            echo "windows-native-selfhost gate failed on this merge: \`${GATE_NAME}\`."
+            echo ""
+            echo "- Tracking issue: #${issue_number}"
+            echo "- Failing run: ${RUN_URL}"
+            echo "- Runbook: \`docs/runbooks/windows-native.md\`"
+          } > pr-comment.md
+          gh pr comment "$pr_number" --repo "$REPO" --body-file pr-comment.md

@@ -56,6 +56,28 @@ One claim that did survive and is worth keeping: **§3.1's "`grep -rn
 SAILFIN_HOST_OS .github/` returns nothing"** was verified independently. Twelve
 files' Windows branches had never executed in CI.
 
+**§3.3/§13 — `windows-native-selfhost.yml` keeps its `cross-seed` job; it does
+not "have no cross-seed job."** §3.3's body text and acceptance criterion 8
+(§13) both say the job should be deleted, on the theory that tier B, like
+tier A, can source its bootstrap seed from `ci.yml`'s
+`ci-installer-windows-x86_64` artifact. That theory does not survive contact
+with the trigger set §3.3 itself specifies: `push: main` and `schedule` have
+no sibling `ci.yml` run to download that artifact from (§8 says as much,
+recommending "the inline rebuild" — the note contradicts itself between §3.3
+and §8 rather than resolving it). Implementation kept `cross-seed`, renamed
+its uploaded artifact to `ci-installer-windows-x86_64` so it and tier A's
+`build-compiler-linux` feed the same composite-action download step
+regardless of which workflow produced the artifact, and left it as the only
+way tier B can run un-triggered by a sibling `ci.yml` PR run. Acceptance
+criterion 8 and the `:573` file-plan row are stale; this correction
+supersedes them.
+
+**§11's file-plan row for `windows-native-selfhost.yml` — drop "append pass-3 +
+`sfn selfhost` strict (SFN-668 absorption)."** The owner decided against folding
+that absorption into this issue: it stays tracked as its own narrowed issue,
+blocked on SFN-55, rather than landing here. The row as written would instruct
+a future reader to add it to this file; it does not belong in tier B's scope.
+
 ---
 
 ## 1. Goal
