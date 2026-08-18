@@ -243,3 +243,34 @@ runs:
         set -euo pipefail
         "$NATIVE_SFN" run examples/concurrency/channels.sfn
         echo "ok: R3 struct-channel ran"
+
+    # Gate R4 — the first `sfn test` ever executed on a Windows host.
+    #
+    # Until this step, no Windows leg ran the test suite at all: four ladder
+    # rungs plus five bespoke inline gates, and nothing else. That is why the
+    # SFN-927 Winsock fixes could be shipped without being demonstrable on the
+    # one platform they exist for — the readback assertion guarding them runs
+    # on Linux, where it exercises the POSIX sibling, not the Windows one.
+    #
+    # `socket_ops_timeout_readback_test.sfn` is the deliberate first choice
+    # rather than the whole suite. It is the only socket e2e that is portable
+    # as written: it imports nothing from `sfn/test`, spawns no subprocess,
+    # and touches no `/tmp` or `/bin/sh` — just malloc/socket externs and the
+    # `sfn_socket_*` wrappers, binding loopback in-process. Most of its
+    # siblings inline raw POSIX `socket()`/`close()`, which on Windows dies at
+    # `WSANOTINITIALISED` and then `__fastfail`.
+    #
+    # And it asserts the thing that actually broke: that `SO_RCVTIMEO` reads
+    # back as 10000ms rather than 10 (the timeval-vs-DWORD defect), and that a
+    # timed-out `recv` returns a genuine negative rather than 4294967295 (the
+    # 32-bit return-width defect). Passing here is the first evidence either
+    # fix works on Windows rather than in a C twin.
+    #
+    # Fatal, not advisory: an `sfn test` gate that cannot fail would restate
+    # the exact problem this step exists to fix.
+    - name: Gate R4 — sfn test on a Windows host (socket timeout readback)
+      shell: bash
+      run: |
+        set -euo pipefail
+        "$NATIVE_SFN" test compiler/tests/e2e/socket_ops_timeout_readback_test.sfn
+        echo "ok: R4 sfn test ran natively on Windows"
