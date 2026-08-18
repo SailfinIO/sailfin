@@ -878,22 +878,53 @@ rebuild:
 
 rebuild-impl:
 	@mkdir -p build
-	@# SFN-679: the pre-build snapshot is best-effort. On a clean checkout
-	@# $(NATIVE_BIN) does not exist yet, and a binary predating
-	@# `dev bootstrap fingerprint` cannot produce one — it falls through its
-	@# subcommand dispatch to a usage line on STDOUT instead (exit 0, so the
-	@# redirect below still needs the same shape check `compile-impl` uses).
-	@# Neither case is an error; both are exactly the cold/transitional
-	@# builds this recipe has to complete. Write nothing rather than a
-	@# malformed snapshot; `dev bootstrap install` below treats an absent
-	@# `.pending` as "no race guard available" the same as a malformed one,
-	@# but a real digest here still lets it detect a genuine mid-build edit.
-	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD) 2>/dev/null || true)"; \
-	case "$$current_fingerprint" in \
-		*[!0-9a-f]*|"") current_fingerprint="" ;; \
-		????????????????????????????????????????????????????????????????) ;; \
-		*) current_fingerprint="" ;; \
-	esac; \
+	@# The pre-build snapshot is what lets `dev bootstrap install` below
+	@# detect a genuine mid-build source edit, and what it requires before
+	@# it will publish $(COMPILER_SOURCE_FINGERPRINT) at all.
+	@#
+	@# SFN-679: it is best-effort in shape. A binary predating
+	@# `dev bootstrap fingerprint` cannot produce a digest — it falls
+	@# through its subcommand dispatch to a usage line on STDOUT instead
+	@# (exit 0, so the redirect still needs the same shape check
+	@# `compile-impl` uses). That is not an error; it is exactly the
+	@# transitional build this recipe has to complete. Write nothing rather
+	@# than a malformed snapshot: `dev bootstrap install` treats an absent
+	@# `.pending` as "no race guard available" the same as a malformed one.
+	@#
+	@# SFN-918: but on a COLD build — a fresh checkout, or the tree left by
+	@# `make clean-build` — $(NATIVE_BIN) does not exist at all, so probing
+	@# only it left no snapshot, `dev bootstrap install` skipped the
+	@# freshness record, and the freshly self-hosted tree carried no
+	@# $(COMPILER_SOURCE_FINGERPRINT). compile-impl's
+	@# `-n "$$stored_fingerprint"` guard then failed and the NEXT
+	@# `make compile` burned a full redundant rebuild — which the two
+	@# Make-contract e2e files fired concurrently under the default test
+	@# pool, racing the shared build/ tree. So fall back to the same seed
+	@# the build step below resolves. Sound because the digest is a SHA-256
+	@# over the working-tree sources
+	@# (compiler/src/build/source_fingerprint.sfn) — a statement about the
+	@# SOURCES, not about the binary that hashed them — so any compiler
+	@# carrying the verb computes the identical value. It stays a genuine
+	@# PRE-build snapshot, so a mid-build edit still trips the
+	@# `pending != cur` refusal; nothing here weakens fingerprint
+	@# correctness. A seed too old for the verb hits the SFN-679 case above
+	@# and degrades to the previous no-snapshot behaviour.
+	@current_fingerprint=""; \
+	seed="$${SEED_NATIVE:-$(SEED)}"; \
+	if command -v "$$seed" >/dev/null 2>&1; then \
+		seed="$$(command -v "$$seed")"; \
+	fi; \
+	for probe in "$(NATIVE_BIN)" "$$seed"; do \
+		if [ -z "$$current_fingerprint" ] && [ -x "$$probe" ]; then \
+			candidate="$$("$$probe" dev bootstrap fingerprint 2>/dev/null || true)"; \
+			case "$$candidate" in \
+				*[!0-9a-f]*|"") candidate="" ;; \
+				????????????????????????????????????????????????????????????????) ;; \
+				*) candidate="" ;; \
+			esac; \
+			current_fingerprint="$$candidate"; \
+		fi; \
+	done; \
 	if [ -n "$$current_fingerprint" ]; then \
 		printf '%s\n' "$$current_fingerprint" > "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
 	else \
