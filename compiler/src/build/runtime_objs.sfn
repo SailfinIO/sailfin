@@ -754,6 +754,31 @@ fn _runtime_obj_key_with_slug(base_key: string, slug: string) -> string {
 // `target_triple` last; keep it that way. Should a target-derived input
 // ever depend on something NOT derived from the triple, that input must
 // be folded in on its own.
+// SFN-923: this marker deliberately did NOT bump alongside
+// `build_cache.sfn:cache_key_for`'s `tgt2:` -> `tgt3:` move. That module
+// key needed the bump because a Windows-keyed entry could hold IR a
+// HOST-flavoured emit child actually produced (`emit_child_argv` did not
+// exist yet, so the per-module emit subprocess silently ignored the
+// parent's resolved target). This runtime-object key is not exposed to
+// that failure mode the same way: every runtime `.sfn` emit child already
+// received the target via `SAILFIN_TARGET_TRIPLE` injection
+// (`_runtime_emit_child_env`, `:818-836`), so a pre-SFN-923 runtime object
+// keyed under `tgt2:` was genuinely built for the triple its key records —
+// UNLIKE the module-emit poisoning this fix closes. Reachability of a
+// mismatch here is additionally low for a non-Windows-msvc target:
+// `target_clang_triple` (`./target.sfn`) returns `""` for every non-Windows
+// triple, so the pre-fix aarch64-cross-Linux arch defect (§2.2/§5 row 11)
+// baked the WRONG arch into a runtime object while still keying it under a
+// correct-LOOKING triple string — a real but narrower gap than the module
+// key's. A marker bump here WOULD close it: a bump orphans every pre-bump
+// entry by changing the hashed input, so the stale entries become
+// unreachable regardless of what their triple field reads (the same
+// orphan-never-mismatch property `build_cache.sfn:cache_key_for` relies
+// on). It is left unbumped on reachability grounds alone: because
+// `target_clang_triple` returns `""` for every non-Windows triple, the
+// aarch64 and Darwin cross paths were never wired, so the poisoned
+// entries are near-unreachable and a second orphan sweep would cost more
+// than the residual it clears.
 fn _runtime_obj_key_with_target(base_key: string, target_triple: string) -> string {
     if base_key.length == 0 { return ""; }
     return base_key + "\ntgt2:" + target_triple;

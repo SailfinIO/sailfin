@@ -61,6 +61,19 @@ networking:** the resulting binary still cannot make network calls at all — pl
 independent of this note, but it means SFN-923 alone does not deliver a working
 `sfn toolchain install` on Windows.
 
+**§4.2 and §9 step 5's `E0615` allocation collided with an independent
+concurrent claim and was reassigned to `E0617` during implementation.** This
+note's own §4.2 reasoning ("`E0615` is free … which already owns `E0614` … and
+`E0616`") checked `docs/style-guide.md`'s registry at the time and found it
+empty at that slot — but the registry was incomplete: `E0615` was already
+allocated in shipped code (`capsules/sfn/archive/src/error.sfn`, SFEP-0071
+§3.6 / SFN-753) without a corresponding style-guide row, so grepping the
+registry alone could not surface the collision. The implementation used
+`E0617` for the fail-closed target-disagreement guard instead, and added the
+missing `E0615` row to close the gap that caused the near-miss. Every `E0615`
+reference below (§4.2, the example diagnostic text, §7.2 Test C, §9 step 5) is
+stale by that substitution; read it as `E0617`.
+
 ---
 
 ## 1. Goal
