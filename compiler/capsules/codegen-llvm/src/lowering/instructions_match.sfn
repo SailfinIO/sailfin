@@ -562,7 +562,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
                         } else {
                             subject_alloca_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines.push("  " + subject_alloca_temp
+                            base_allocas.push("  " + subject_alloca_temp
                                 + " = alloca "
                                 + subject_operand.llvm_type);
                             current_lines.push("  store " + subject_operand.llvm_type
@@ -574,7 +574,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
                                 + subject_alloca_temp);
                         }
 
-                        // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
                         let mut binding_idx: int = 0;
                         loop {
                             if binding_idx >= lowered_condition.field_bindings.length {
@@ -643,7 +642,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
                             // 6. Allocate a local for this binding
                             let local_alloca_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines.push("  " + local_alloca_temp
+                            base_allocas.push("  " + local_alloca_temp
                                 + " = alloca "
                                 + field_binding.field_type);
 
@@ -730,7 +729,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
                         // Allocate a local for this binding.
                         let local_alloca_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + local_alloca_temp
+                        base_allocas.push("  " + local_alloca_temp
                             + " = alloca "
                             + binding.field_type);
                         current_lines.push("  store " + binding.field_type + " "
@@ -788,7 +787,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
 
                         let local_alloca_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + local_alloca_temp
+                        base_allocas.push("  " + local_alloca_temp
                             + " = alloca "
                             + payload_type);
                         current_lines.push("  store " + payload_type + " "
