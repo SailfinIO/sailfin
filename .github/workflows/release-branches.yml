@@ -144,7 +144,7 @@ jobs:
             - name: Install clang (Linux)
               if: runner.os == 'Linux' && matrix.package_label != 'linux-arm64'
               uses: ./.github/actions/apt-install
-              timeout-minutes: 10
+              timeout-minutes: 20
               with:
                   packages: clang-18 llvm-18 jq
 
@@ -156,7 +156,7 @@ jobs:
             - name: Install native build toolchain (aarch64 Linux)
               if: matrix.package_label == 'linux-arm64'
               uses: ./.github/actions/apt-install
-              timeout-minutes: 10
+              timeout-minutes: 20
               with:
                   packages: binutils clang-18 curl jq lld llvm-18
                   no-install-recommends: 'true'
@@ -199,7 +199,7 @@ jobs:
             - name: Install emulated x86_64 seed toolchain (aarch64 Linux)
               if: matrix.package_label == 'linux-arm64' && steps.arm_seed.outputs.mode == 'qemu'
               uses: ./.github/actions/apt-install
-              timeout-minutes: 10
+              timeout-minutes: 20
               with:
                   packages: binfmt-support qemu-user qemu-user-binfmt libc6-dev:amd64 libgcc-13-dev:amd64
                   no-install-recommends: 'true'

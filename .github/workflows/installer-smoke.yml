@@ -131,7 +131,7 @@ jobs:
       - name: Install native ARM build toolchain
         if: ${{ matrix.verify_seed_selfhost }}
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: binutils clang-18 lld llvm-18
           no-install-recommends: 'true'

@@ -401,7 +401,7 @@ jobs:
 
       - name: Install clang (Linux)
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: clang-18 llvm-18 jq
 
@@ -692,7 +692,7 @@ jobs:
 
       - name: Install aarch64 cross toolchain
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: binutils-aarch64-linux-gnu clang-18 gcc-14-aarch64-linux-gnu libc6-dev:arm64 lld llvm-18
           no-install-recommends: 'true'
@@ -782,7 +782,7 @@ jobs:
 
       - name: Install native LLVM toolchain
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: binutils clang-18 lld llvm-18
           no-install-recommends: 'true'
@@ -925,7 +925,7 @@ jobs:
 
       - name: Install native LLVM toolchain
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: clang-18 lld llvm-18
           no-install-recommends: 'true'
@@ -1090,7 +1090,7 @@ jobs:
 
       - name: Install native LLVM toolchain
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: clang-18 lld llvm-18
           no-install-recommends: 'true'
@@ -1193,7 +1193,7 @@ jobs:
       # version 18.
       - name: Install clang (Linux)
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: clang-18 llvm-18 lld jq
 
@@ -2266,7 +2266,7 @@ jobs:
 
       - name: Install clang (Linux)
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: clang-18 llvm-18 jq
 

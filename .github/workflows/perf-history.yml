@@ -123,7 +123,7 @@ jobs:
       # from the bash `time` builtin, which the bench scripts cannot read).
       - name: Install clang + GNU time
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: clang-18 llvm-18 jq time
 

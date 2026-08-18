@@ -81,7 +81,7 @@ jobs:
 
       - name: Install clang + llvm (Linux)
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: clang-18 llvm-18 jq
 
@@ -102,7 +102,7 @@ jobs:
 
       - name: Install MinGW-w64 cross-compiler (Linux)
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: gcc-mingw-w64-x86-64
           no-install-recommends: 'true'

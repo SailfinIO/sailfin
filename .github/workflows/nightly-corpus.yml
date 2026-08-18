@@ -76,7 +76,7 @@ jobs:
 
       - name: Install clang
         uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+        timeout-minutes: 20
         with:
           packages: clang-18 llvm-18 jq
 

@@ -5,6 +5,11 @@
 # bounds every attempt with `timeout`, retries with backoff, and asks apt
 # itself to retry transient fetch failures — the same shape already proven
 # for the mingw `.deb` fetch (#1402).
+#
+# The default attempts/timeout-seconds keep the worst case
+# (attempts * 2 * timeout-seconds + backoff) inside the 20-minute
+# `timeout-minutes` every converted workflow step carries — raise one only
+# together with the other (SFN-946).
 name: apt-install
 description: Install apt packages with a bounded timeout and retry/backoff.
 
@@ -19,28 +24,37 @@ inputs:
   attempts:
     description: Number of install attempts before failing.
     required: false
-    default: "3"
+    default: "2"
   timeout-seconds:
     description: Per-attempt timeout, in seconds, for both apt-get update and apt-get install.
     required: false
-    default: "300"
+    default: "240"
 
 runs:
   using: composite
   steps:
     - shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        ATTEMPTS: ${{ inputs.attempts }}
+        TIMEOUT: ${{ inputs.timeout-seconds }}
+        NO_INSTALL_RECOMMENDS: ${{ inputs.no-install-recommends }}
       run: |
         set -euo pipefail
-        PACKAGES="${{ inputs.packages }}"
-        ATTEMPTS="${{ inputs.attempts }}"
-        TIMEOUT="${{ inputs.timeout-seconds }}"
         RECOMMENDS_FLAG=""
-        if [ "${{ inputs.no-install-recommends }}" = "true" ]; then
+        if [ "$NO_INSTALL_RECOMMENDS" = "true" ]; then
           RECOMMENDS_FLAG="--no-install-recommends"
         fi
         for attempt in $(seq 1 "$ATTEMPTS"); do
+          if [ "$attempt" -gt 1 ]; then
+            # A prior attempt's `timeout` can fire mid-unpack/configure,
+            # leaving dpkg half-configured; without this, every retry after
+            # the first fails instantly with "dpkg was interrupted" instead
+            # of getting a genuine second try (SFN-946).
+            sudo dpkg --configure -a || true
+          fi
           echo "[apt] install attempt ${attempt}/${ATTEMPTS}: ${PACKAGES}"
-          if sudo timeout "$TIMEOUT" apt-get update \
+          if sudo timeout "$TIMEOUT" apt-get update -o Acquire::Retries=3 \
             && sudo timeout "$TIMEOUT" apt-get install -y -o Acquire::Retries=3 \
                  $RECOMMENDS_FLAG $PACKAGES; then
             break
