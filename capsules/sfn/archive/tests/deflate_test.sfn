@@ -10,8 +10,13 @@
 // byte past it (forces a second block); a highly repetitive buffer (forces
 // LZ77 matches); an incompressible pseudorandom buffer spanning two blocks
 // (forces the stored-block fallback, with its growth bound checked
-// directly); a buffer containing all 256 byte values; and a buffer whose
-// only match sits exactly at the 32768-byte window edge.
+// directly); a buffer containing all 256 byte values; a buffer with a match
+// at exactly the 32768-byte window edge (checked directly against the
+// matcher's own token stream, not inferred from round-trip success or
+// compressed size — see the test itself for why); and a fixed block
+// immediately followed by a stored block (the mid-byte `_bw_align`
+// transition `sfn package` produces: a compressible text member, then an
+// already-compressed blob).
 import {
     ByteBuf,
     ByteCursor,
@@ -21,6 +26,12 @@ import {
     bytes_get,
     bytes_len
 } from "../src/bytes";
+import {
+    _MatchTables,
+    _Tokens,
+    _lz77_chunk,
+    _match_tables_new
+} from "../src/deflate";
 import {
     ArchiveErrorKind,
     DeflateOptions,
@@ -143,9 +154,13 @@ fn _gen_repeat(byte_value: int, n: int) -> int[] {
     return out;
 }
 
-// A deterministic, non-repeating (mod 251, a prime near 256) byte sequence —
-// used as filler that a hash-chain matcher should not confuse with the
-// deliberate markers placed around it in the window-edge test below.
+// A deterministic byte sequence, period 251 (`(i*37+11) % 251`, 251 prime
+// and coprime with the multiplier so every residue 0..250 appears once per
+// period): compressible filler, dense with its own distance-251 LZ77
+// matches — NOT non-repeating. `_gen_window_edge` below relies on that
+// density only for realism (a real compiler tarball is not one long unique
+// string either); it verifies the window-edge match directly against the
+// matcher's own token stream rather than assuming this filler stays quiet.
 fn _gen_sequence(n: int) -> int[] {
     let mut out: int[] = [];
     let mut i: int = 0;
@@ -188,9 +203,11 @@ fn _gen_all_byte_values() -> int[] {
     return out;
 }
 
-// A marker (10, 20, 30) at position 0, non-repeating filler in between, then
-// the same marker again at exactly position 32768 — the only 3-byte match
-// in this buffer sits at the maximum RFC 1951 window distance.
+// A marker (10, 20, 30) at position 0, `_gen_sequence` filler in between
+// (period-251, so genuinely dense with its own short-distance matches — see
+// `_gen_sequence`'s comment), then the same marker again at exactly position
+// 32768: a legal match there is at the maximum RFC 1951 window distance, but
+// it is one match among many the filler already produces, not the only one.
 fn _gen_window_edge() -> int[] {
     let mut out: int[] = [10, 20, 30];
     let filler: int[] = _gen_sequence(32765);
@@ -230,8 +247,53 @@ test "archive deflate: a buffer containing all 256 byte values round-trips" {
     _assert_roundtrips(_gen_all_byte_values(), _fixed_opts());
 }
 
-test "archive deflate: a match at exactly the 32768-byte window edge round-trips" {
-    _assert_roundtrips(_gen_window_edge(), _fixed_opts());
+// A round-trip alone does not test this edge: tightening `_find_match`'s
+// `(pos - cand) > _WINDOW_SIZE` to `>=` would drop the legal distance-32768
+// match entirely, and the buffer would still round-trip fine as all
+// literals plus whatever shorter matches the filler already supplies. So
+// this asserts directly against the matcher's own token stream — the same
+// `_lz77_chunk` `deflate_all` calls, run here as a single whole-buffer
+// chunk — for a match token whose distance is exactly 32768, rather than
+// inferring it happened from round-trip success or from compressed size
+// (which the filler's own dense matching would swamp either way).
+test "archive deflate: a match at exactly the 32768-byte window edge round-trips and is actually used" {
+    let data: int[] = _gen_window_edge();
+    _assert_roundtrips(data, _fixed_opts());
+
+    let src_buf = bytes_from_int_array(data);
+    match src_buf {
+        Result.Ok { value }
+        : {
+            let owned: ByteBuf = value;
+            let tables: _MatchTables = _match_tables_new();
+            let chunked = _lz77_chunk(owned.addr, owned.len, 0, owned.len, tables);
+            match chunked {
+                Result.Ok { value }
+                : {
+                    let tokens: _Tokens = value;
+                    let mut found_edge_match: boolean = false;
+                    let mut i: int = 0;
+                    loop {
+                        if i >= tokens.kind.length { break; }
+                        if tokens.kind[i] == 1 && tokens.b[i] == 32768 {
+                            found_edge_match = true;
+                        }
+                        i += 1;
+                    }
+                    assert found_edge_match;
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                }
+            }
+            bytes_free(owned);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
 }
 
 test "archive deflate: forced Stored strategy round-trips" {
@@ -281,4 +343,31 @@ test "archive deflate: incompressible input falls back to stored and never grows
     let compressed_len: int = _compressed_len(data, _fixed_opts());
     assert compressed_len >= 0;
     assert compressed_len <= data.length + 10;
+}
+
+// Every stored block elsewhere in this file starts byte-aligned by
+// construction (the forced-`Stored` case, and the PRNG case above whose
+// first block is already stored), so the mid-byte fixed-to-stored
+// `_bw_align` transition is otherwise never exercised — and that is exactly
+// what a `sfn package` tree produces: a compressible text member (ending
+// mid-byte, since Huffman-coded content essentially never lands on a byte
+// boundary) followed immediately by an already-compressed, incompressible
+// blob.
+test "archive deflate: a fixed block immediately followed by a stored block round-trips" {
+    let compressible: int[] = _gen_repeat(66, 40000);
+    let incompressible: int[] = _gen_prng(555111333, 40000);
+    let mut data: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= compressible.length { break; }
+        data.push(compressible[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= incompressible.length { break; }
+        data.push(incompressible[j]);
+        j += 1;
+    }
+    _assert_roundtrips(data, _fixed_opts());
 }

@@ -79,6 +79,14 @@ fn _bw_new(out: ByteBuf) -> _BitWriter {
 // flushing whole bytes to `out` as they fill. `nbits` never exceeds 16 in
 // this codec (the widest single field is a reversed 15-bit Huffman code),
 // so `bitbuf` — an `int`, 64 bits — never risks overflow across a flush.
+//
+// `value & mask` silently drops any bit at or above `nbits` rather than
+// erroring. Every caller today passes a value already known to fit (a
+// 0/1 BFINAL bit, a 2-bit BTYPE, extra bits sized by the RFC 1951 §3.2.5
+// tables, or a pre-reversed Huffman code), so the mask is inert — but it is
+// the seam that would turn a future matcher bug (an extra-bit value
+// computed one bit too wide) into silently wrong output bytes instead of a
+// caught error. Worth knowing if this function ever grows a new caller.
 fn _bw_put_bits(w: _BitWriter, value: int, nbits: int) -> Result<_BitWriter, ArchiveError> {
     let mask_span: int = 1 << nbits;
     let mask: int = mask_span - 1;
@@ -315,7 +323,17 @@ struct _Tokens {
 // place. A match is capped so it never crosses `chunk_end` — this keeps
 // each block's token stream covering exactly its own chunk, which is what
 // makes the stored-block size comparison in `deflate_all` exact.
-fn _lz77_chunk(base_addr: i64, total_len: int, chunk_start: int, chunk_end: int, tables: _MatchTables) -> _Tokens {
+//
+// Returns `Result`, not a bare `_Tokens`, for the same reason `deflate_all`'s
+// own block-count guard does (§ below): every iteration advances `pos` by at
+// least 1, so `guard` can never actually exceed `max_iters` before `pos`
+// reaches `chunk_end` first — this branch is provably unreachable today. But
+// `_Tokens` carries no partial/complete flag, so a bare `break` here would
+// silently truncate the token stream while `deflate_all` still advances
+// `chunk_start` as if the block were whole: silent wrong output, not a
+// caught error, if that invariant is ever broken by a future edit. Failing
+// closed costs one `Result` layer; failing open costs a corrupted archive.
+fn _lz77_chunk(base_addr: i64, total_len: int, chunk_start: int, chunk_end: int, tables: _MatchTables) -> Result<_Tokens, ArchiveError> {
     let mut kind: int[] = [];
     let mut a: int[] = [];
     let mut b: int[] = [];
@@ -326,7 +344,11 @@ fn _lz77_chunk(base_addr: i64, total_len: int, chunk_start: int, chunk_end: int,
     loop {
         if pos >= chunk_end { break; }
         guard += 1;
-        if guard > max_iters { break; }
+        if guard > max_iters {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "internal: deflate LZ77 chunk loop exceeded its expected iteration bound")
+            };
+        }
 
         let mut match_len: int = 0;
         let mut match_dist: int = 0;
@@ -371,11 +393,13 @@ fn _lz77_chunk(base_addr: i64, total_len: int, chunk_start: int, chunk_end: int,
         }
     }
     bit_cost = bit_cost + _fixed_lit_code(256).len;  // end-of-block
-    return _Tokens {
-        kind: kind,
-        a: a,
-        b: b,
-        bit_cost: bit_cost
+    return Result.Ok {
+        value: _Tokens {
+            kind: kind,
+            a: a,
+            b: b,
+            bit_cost: bit_cost
+        }
     };
 }
 
@@ -501,7 +525,7 @@ fn deflate_all(src: ByteCursor, opts: DeflateOptions) -> Result<ByteBuf, Archive
             let written: _BitWriter = _write_stored_block(w, base_addr, chunk_start, chunk_len, bfinal)?;
             w = written;
         } else {
-            let tokens: _Tokens = _lz77_chunk(base_addr, total_len, chunk_start, chunk_end, tables);
+            let tokens: _Tokens = _lz77_chunk(base_addr, total_len, chunk_start, chunk_end, tables)?;
             let fixed_bytes: int = (tokens.bit_cost + 7) / 8;
             if fixed_bytes < chunk_len + 5 {
                 let written: _BitWriter = _write_fixed_block(w, tokens, bfinal)?;
