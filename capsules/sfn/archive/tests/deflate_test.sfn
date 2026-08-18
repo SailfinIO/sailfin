@@ -1,0 +1,284 @@
+// capsules/sfn/archive/tests/deflate_test.sfn
+//
+// RFC 1951 DEFLATE compression coverage (SFEP-0071 §3.9, §8.1): the
+// strongest cheap correctness check is `inflate(deflate(x)) == x`, so every
+// case below round-trips through the real `inflate_all` decompressor rather
+// than pinning encoded bytes — the encoder is free to choose any legal
+// encoding, only the decompressed result is contractual.
+//
+// Corpus: empty; a single byte; the 65535-byte stored-block boundary; one
+// byte past it (forces a second block); a highly repetitive buffer (forces
+// LZ77 matches); an incompressible pseudorandom buffer spanning two blocks
+// (forces the stored-block fallback, with its growth bound checked
+// directly); a buffer containing all 256 byte values; and a buffer whose
+// only match sits exactly at the 32768-byte window edge.
+import {
+    ByteBuf,
+    ByteCursor,
+    bytes_cursor,
+    bytes_free,
+    bytes_from_int_array,
+    bytes_get,
+    bytes_len
+} from "../src/bytes";
+import {
+    ArchiveErrorKind,
+    DeflateOptions,
+    DeflateStrategy,
+    deflate_all,
+    inflate_all
+} from "../src/mod";
+
+fn _fixed_opts() -> DeflateOptions {
+    return DeflateOptions { strategy: DeflateStrategy.Fixed };
+}
+
+fn _bytes_equal_int_array(buf: ByteBuf, expected: int[]) -> boolean {
+    if bytes_len(buf) != expected.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= expected.length { break; }
+        let got = bytes_get(buf, i);
+        match got {
+            Result.Ok { value }
+            : {
+                if value != expected[i] { return false; }
+            },
+            Result.Err { error }
+            : {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// Compress `data`, decompress the result, and assert it reproduces `data`
+// byte-for-byte. Frees every intermediate `ByteBuf` on every path.
+fn _assert_roundtrips(data: int[], opts: DeflateOptions) -> void {
+    let src_buf = bytes_from_int_array(data);
+    match src_buf {
+        Result.Ok { value }
+        : {
+            let owned: ByteBuf = value;
+            let cursor: ByteCursor = bytes_cursor(owned);
+            let compressed = deflate_all(cursor, opts);
+            match compressed {
+                Result.Ok { value }
+                : {
+                    let comp_buf: ByteBuf = value;
+                    let comp_cursor: ByteCursor = bytes_cursor(comp_buf);
+                    let decompressed = inflate_all(comp_cursor, data.length
+                        + 1024);
+                    match decompressed {
+                        Result.Ok { value }
+                        : {
+                            assert _bytes_equal_int_array(value, data);
+                            bytes_free(value);
+                        },
+                        Result.Err { error }
+                        : {
+                            assert false;
+                        }
+                    }
+                    bytes_free(comp_buf);
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                }
+            }
+            bytes_free(owned);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// The compressed byte length for `data`, or -1 on any failure — used only
+// by the incompressible-input growth-bound test below, where the round trip
+// alone would not show the size regression the RFC 1951 §3.2.4 stored
+// fallback exists to bound.
+fn _compressed_len(data: int[], opts: DeflateOptions) -> int {
+    let src_buf = bytes_from_int_array(data);
+    let mut result: int = -1;
+    match src_buf {
+        Result.Ok { value }
+        : {
+            let owned: ByteBuf = value;
+            let cursor: ByteCursor = bytes_cursor(owned);
+            let compressed = deflate_all(cursor, opts);
+            match compressed {
+                Result.Ok { value }
+                : {
+                    result = bytes_len(value);
+                    bytes_free(value);
+                },
+                Result.Err { error }
+                : {
+                    result = -1;
+                }
+            }
+            bytes_free(owned);
+        },
+        Result.Err { error }
+        : {
+            result = -1;
+        }
+    }
+    return result;
+}
+
+fn _gen_repeat(byte_value: int, n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push(byte_value);
+        i += 1;
+    }
+    return out;
+}
+
+// A deterministic, non-repeating (mod 251, a prime near 256) byte sequence —
+// used as filler that a hash-chain matcher should not confuse with the
+// deliberate markers placed around it in the window-edge test below.
+fn _gen_sequence(n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push((i * 37 + 11) % 251);
+        i += 1;
+    }
+    return out;
+}
+
+// A small xorshift PRNG (state masked to 63 bits throughout so `>>` never
+// meets a negative operand). Good enough to be effectively incompressible
+// for a hash-chain LZ77 matcher: real matches are rare and short, so most of
+// this buffer must fall back to the stored block per chunk.
+fn _gen_prng(seed_in: int, n: int) -> int[] {
+    let mut state: int = seed_in & 9223372036854775807;
+    if state == 0 { state = 2463534242; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        state = (state ^ (state << 13)) & 9223372036854775807;
+        state = (state ^ (state >> 7)) & 9223372036854775807;
+        state = (state ^ (state << 17)) & 9223372036854775807;
+        out.push(state & 255);
+        i += 1;
+    }
+    return out;
+}
+
+fn _gen_all_byte_values() -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 256 { break; }
+        out.push(i);
+        i += 1;
+    }
+    return out;
+}
+
+// A marker (10, 20, 30) at position 0, non-repeating filler in between, then
+// the same marker again at exactly position 32768 — the only 3-byte match
+// in this buffer sits at the maximum RFC 1951 window distance.
+fn _gen_window_edge() -> int[] {
+    let mut out: int[] = [10, 20, 30];
+    let filler: int[] = _gen_sequence(32765);
+    let mut i: int = 0;
+    loop {
+        if i >= filler.length { break; }
+        out.push(filler[i]);
+        i += 1;
+    }
+    out.push(10);
+    out.push(20);
+    out.push(30);
+    return out;
+}
+
+test "archive deflate: empty input round-trips" {
+    _assert_roundtrips([], _fixed_opts());
+}
+
+test "archive deflate: a single byte round-trips" {
+    _assert_roundtrips([65], _fixed_opts());
+}
+
+test "archive deflate: exactly 65535 bytes (the stored-block boundary) round-trips" {
+    _assert_roundtrips(_gen_sequence(65535), _fixed_opts());
+}
+
+test "archive deflate: 65536 bytes (one past the stored-block boundary, forcing a second block) round-trips" {
+    _assert_roundtrips(_gen_sequence(65536), _fixed_opts());
+}
+
+test "archive deflate: a highly repetitive buffer round-trips" {
+    _assert_roundtrips(_gen_repeat(66, 100000), _fixed_opts());
+}
+
+test "archive deflate: a buffer containing all 256 byte values round-trips" {
+    _assert_roundtrips(_gen_all_byte_values(), _fixed_opts());
+}
+
+test "archive deflate: a match at exactly the 32768-byte window edge round-trips" {
+    _assert_roundtrips(_gen_window_edge(), _fixed_opts());
+}
+
+test "archive deflate: forced Stored strategy round-trips" {
+    _assert_roundtrips(_gen_sequence(5000), DeflateOptions {
+        strategy: DeflateStrategy.Stored
+    });
+}
+
+test "archive deflate: Dynamic strategy is rejected as unsupported, not silently downgraded" {
+    let src_buf = bytes_from_int_array([1, 2, 3]);
+    match src_buf {
+        Result.Ok { value }
+        : {
+            let owned: ByteBuf = value;
+            let cursor: ByteCursor = bytes_cursor(owned);
+            let result = deflate_all(cursor, DeflateOptions {
+                strategy: DeflateStrategy.Dynamic
+            });
+            bytes_free(owned);
+            match result {
+                Result.Ok { value }
+                : {
+                    bytes_free(value);
+                    assert false;
+                },
+                Result.Err { error }
+                : {
+                    assert error.kind == ArchiveErrorKind.UnsupportedFeature;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// Incompressible input, spanning two blocks (70000 bytes = 65535 + 4465), so
+// this covers both the per-block stored fallback and the multi-block case
+// together. RFC 1951 §3.2.4's stored-block overhead is exactly 5 bytes per
+// block (1 byte header/alignment + 4 bytes LEN/NLEN), so two blocks must
+// never cost more than 10 bytes beyond the raw length.
+test "archive deflate: incompressible input falls back to stored and never grows by more than 5 bytes per 65535-byte block" {
+    let data: int[] = _gen_prng(123456789, 70000);
+    _assert_roundtrips(data, _fixed_opts());
+    let compressed_len: int = _compressed_len(data, _fixed_opts());
+    assert compressed_len >= 0;
+    assert compressed_len <= data.length + 10;
+}
