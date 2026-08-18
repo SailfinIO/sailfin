@@ -8,6 +8,7 @@ import { int_to_string } from "sfn/strings";
 // building block out of capsule_resolver.sfn was the second cut (after
 // capsule_import_scan.sfn) to bring that module under the 2 GB CI per-job
 // gate. capsule_resolver re-imports the public entry points.
+import { emit_child_argv } from "./build/emit_child_argv";
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { build_host_os } from "./build/target";
 import { validate_llvm_ir } from "./llvm_validation";
@@ -341,24 +342,6 @@ struct ParallelProcessRun {
     peak_in_flight: int;
 }
 
-// The emit child's argv — ONE construction shared by the serial branch and
-// the parallel pool, so the two can never drift. Flag ownership is
-// unchanged and out of scope: `--attempts 1 --no-validate` pins the child
-// to a single bare emit (the resolver layer owns retry + validation), and
-// `--no-resolve-gate` (#906) suppresses the lowering dry-run gate for a
-// per-module intermediate emit that carries no cross-module import
-// context. Mirrors `emit_helpers.emit_subprocess_with_retry`.
-fn _cr_emit_child_argv(sailfin_exe: string, slug: string, emit_target: string, mode: string, source_path: string, import_context_root: string) -> string[] {
-    let mut argv: string[] = [sailfin_exe, "emit", "--module-name", slug, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", emit_target];
-    if import_context_root.length > 0 {
-        argv.push("--import-context");
-        argv.push(import_context_root);
-    }
-    argv.push(mode);
-    argv.push(source_path);
-    return argv;
-}
-
 // The emit children's environment. `spawn_with_env` takes an EXPLICIT
 // environment — an empty array means the EMPTY environment, never
 // "inherit" — whereas the retired `env … sh driver` pipeline let every
@@ -560,7 +543,7 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
         staged.push(tmp);
         targets.push(target);
         process_tasks.push(ParallelProcessTask {
-            argv: _cr_emit_child_argv(sailfin_exe, t.slug, target, mode, t.source_path, import_context_root)
+            argv: emit_child_argv(sailfin_exe, t.slug, target, mode, t.source_path, import_context_root)
         });
         ti += 1;
     }
@@ -657,7 +640,7 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
             let staged = _mktemp_sibling_cmd(t.output_path);
             let mut emit_target: string = t.output_path;
             if staged.length > 0 { emit_target = staged; }
-            let rc = process.run(_cr_emit_child_argv(sailfin_exe, t.slug, emit_target, mode, t.source_path, import_context_root));
+            let rc = process.run(emit_child_argv(sailfin_exe, t.slug, emit_target, mode, t.source_path, import_context_root));
             if rc != 0 {
                 if staged.length > 0 { fs.deleteFile(staged); }
                 return false;

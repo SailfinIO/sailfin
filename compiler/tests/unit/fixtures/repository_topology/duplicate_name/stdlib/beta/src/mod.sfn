@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/duplicate_name/stdlib/beta/src/mod.sfn
+//
+// Second duplicate-identity fixture for SFN-929.
+fn beta_marker() { }

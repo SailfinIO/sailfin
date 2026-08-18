@@ -31,7 +31,8 @@ import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
 import { _llvm_text_assemble_argv } from "../../src/build/clang_argv";
-import { empty_llvm_import_context } from "../../src/build/llvm_provider_context";
+import { emit_child_argv } from "../../src/build/emit_child_argv";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import {
     build_host_os,
     build_target_triple,
@@ -50,6 +51,7 @@ import {
     triple_abi,
     triple_artifact_tags,
     triple_is_supported,
+    triple_target_arch,
     triple_target_os
 } from "../../src/build/target";
 import { active_build_target, clear_build_target, set_build_target } from "../../src/build/target_state";
@@ -633,4 +635,72 @@ test "target: clear_build_target is idempotent" ![io] {
     clear_build_target();
     clear_build_target();
     assert expect_eq_str(active_build_target(), "").ok;
+}
+
+// ---- SFN-923: the arch axis (`triple_target_arch`, `_resolve_llvm_target_arch`) ----
+test "target: triple_target_arch resolves each triple in the closed set" ![pure] {
+    assert expect_eq_str(triple_target_arch("x86_64-unknown-linux-gnu"), "x86_64").ok;
+    assert expect_eq_str(triple_target_arch("aarch64-unknown-linux-gnu"), "aarch64").ok;
+    assert expect_eq_str(triple_target_arch("x86_64-apple-darwin"), "x86_64").ok;
+    assert expect_eq_str(triple_target_arch("arm64-apple-darwin"), "aarch64").ok;
+    assert expect_eq_str(triple_target_arch("x86_64-pc-windows-msvc"), "x86_64").ok;
+    assert expect_eq_str(triple_target_arch("x86_64-w64-mingw32"), "x86_64").ok;
+}
+
+test "target: triple_target_arch is empty for an unrecognized triple" ![pure] {
+    assert expect_eq_str(triple_target_arch("bogus-triple"), "").ok;
+}
+
+// The SFN-923 defect, pinned: `_resolve_llvm_target_arch`
+// (`build/llvm_provider_context.sfn`) previously probed only the HOST,
+// ignoring the resolved TARGET triple entirely — so `--target=aarch64-
+// unknown-linux-gnu` on an x86_64 host baked `x86_64` codegen into the
+// LLVM provider context regardless. With the cell set to an aarch64
+// triple, the resolved `target_arch` must be `aarch64` even though this
+// test host is x86_64.
+test "target: resolve_llvm_provider_context derives target_arch from an explicit --target, not the host" ![io] {
+    set_build_target("aarch64-unknown-linux-gnu");
+    let ctx = resolve_llvm_provider_context();
+    assert expect_eq_str(ctx.target_arch, "aarch64").ok;
+    clear_build_target();
+}
+
+// ---- SFN-923 (review A1): the PARENT half — `emit_child_argv` itself ----
+//
+// The e2e coverage in `cross_target_emit_test.sfn` drives `sfn emit
+// --target=…` directly, which only pins the CHILD-side wiring (the flag
+// parses, `set_build_target` seeds the cell, the comdat gate flips). It
+// exercises nothing about whether a build's per-module emit spawners
+// (`native_emit_subprocess.sfn`, `emit_helpers.sfn`,
+// `capsule_emit_parallel.sfn`, `cli/commands/bench.sfn`) actually call
+// through `emit_child_argv` to REACH that flag. This test pins the other
+// half directly: the constructor itself must append `--target` and the
+// resolved triple to the complete argv it builds, for every caller shape
+// (with and without an import-context root).
+test "emit_child_argv: the full argv carries --target and the resolved triple" ![io] {
+    set_build_target("x86_64-pc-windows-msvc");
+    let argv = emit_child_argv("sailfin", "mymod", "out.ll", "llvm", "in.sfn", "");
+    assert expect_eq_bool(_argv_contains(argv, "--target"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "x86_64-pc-windows-msvc"), true).ok;
+    clear_build_target();
+}
+
+test "emit_child_argv: --target is still carried when an import-context root is present" ![io] {
+    set_build_target("aarch64-unknown-linux-gnu");
+    let argv = emit_child_argv("sailfin", "mymod", "out.ll", "native", "in.sfn", "/tmp/import-ctx");
+    assert expect_eq_bool(_argv_contains(argv, "--target"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "aarch64-unknown-linux-gnu"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "--import-context"), true).ok;
+    clear_build_target();
+}
+
+// No explicit `--target` (the common host-build path): `emit_child_argv`
+// still appends the flag unconditionally, carrying whatever
+// `build_target_triple()` resolves absent the cell — same-host builds are
+// unaffected because that is exactly what the child would have probed for
+// itself (design note §8).
+test "emit_child_argv: --target is appended even with no active cell" ![io] {
+    clear_build_target();
+    let argv = emit_child_argv("sailfin", "mymod", "out.ll", "llvm", "in.sfn", "");
+    assert expect_eq_bool(_argv_contains(argv, "--target"), true).ok;
 }
