@@ -113,15 +113,47 @@ fn sfn_socket_set_timeouts(fd: i32, secs: i32) -> void {
     free(tv);
 }
 
-// `recv`/`send` pass-throughs — POSIX declares both `ssize_t` (64-bit),
-// so no width conditioning is needed here; the Windows sibling's are
-// not pass-throughs.
+// `recv` is a pass-through — POSIX declares it `ssize_t` (64-bit), so no
+// width conditioning is needed here; the Windows sibling's is not a
+// pass-through. `send` below is no longer one either, for a reason unrelated
+// to width.
 fn sfn_socket_recv(fd: i32, buf: *u8, len: i64, flags: i32) -> i64 {
     return recv(fd, buf, len, flags);
 }
 
+// POSIX `EINTR` (4 on both targets this module builds for) — the one `send`
+// failure that is resumable rather than terminal.
+let SFN_SOCKET_EINTR: i32 = 4;
+
+// `send` is not a bare pass-through: a signal delivered mid-call fails it
+// with -1/`EINTR` having consumed nothing, and every caller resumes from a
+// byte offset it tracks itself, so surfacing that as an error makes each of
+// them mistake a resumable interrupt for a dead socket.
+//
+// Retrying HERE rather than in each caller is what makes the four send loops
+// agree: `../adapters/http.sfn::_send_all`,
+// `../platform/tls.sfn::_tls_send_all`,
+// `../concurrency/serve.sfn::_serve_send_all`, and
+// `../adapters/websocket.sfn::_ws_send_all` all treat a non-positive return
+// as fatal, and only two of them are in a position to read `errno` at all —
+// this module is POSIX-only by construction (swapped wholesale for
+// `socket_ops_windows.sfn`), whereas `http.sfn` is compiled for Windows too,
+// where the CRT `errno` this reads is not what Winsock reports through
+// `WSAGetLastError()` and the glibc `__errno_location` symbol does not exist
+// to link against (SFN-984).
+//
+// The guard bounds a pathological signal storm; `recv` is deliberately left
+// a pass-through, since no read path currently resumes across an interrupt.
 fn sfn_socket_send(fd: i32, buf: *u8, len: i64, flags: i32) -> i64 {
-    return send(fd, buf, len, flags);
+    let mut guard: i64 = 0;
+    loop {
+        guard = guard + 1;
+        if guard > 1048576 { return 0 - 1; }
+        let n: i64 = send(fd, buf, len, flags);
+        if n >= 0 { return n; }
+        let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+        if err != SFN_SOCKET_EINTR { return n; }
+    }
 }
 
 // Read back the effective `SO_RCVTIMEO`, in milliseconds, for the

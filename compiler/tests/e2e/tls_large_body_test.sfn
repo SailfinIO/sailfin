@@ -115,17 +115,24 @@ fn _tlb_connect(port: i64) -> i32 {
     return 0 - 1;
 }
 
-// Fixed loopback ports for this test — distinct from every other native
-// loopback e2e (18790 serve, 18795/18796/18797 tls-client/verify, 18882
-// stateful, 18884/18885 websocket, 18893 serve-tls, 18894/18895 tls-loopback,
-// 18910-18912 anchor-cache) so the pool's `--jobs N` does not collide.
-fn _tls_port() -> i64 { return 18898; }
+// Fixed loopback ports for this test. A collision here is invisible to a
+// serial local run and fails only under the pool's `--jobs N`, which is the
+// pool-only class `.claude/rules/no-bash-e2e.md` warns about — so the survey
+// matters more than the specific numbers.
+//
+// Claimed across `compiler/tests/` at the time of writing: 18790-18799,
+// 18882-18886, 18893-18895, 18898-18900, 18902, 18910-18912. 18913-18919 is
+// the nearest free block; 18916/18917 are taken here rather than extending a
+// range. 18898/18899 were the original choice and were WRONG —
+// `runtime_tls_aes_gcm_client_test.sfn:304,350` owns them, and
+// `socket_ops_timeout_readback_test.sfn:69` already records that ownership.
+fn _tls_port() -> i64 { return 18916; }
 
-fn _tls_port_str() -> string { return "18898"; }
+fn _tls_port_str() -> string { return "18916"; }
 
-fn _plain_port() -> i64 { return 18899; }
+fn _plain_port() -> i64 { return 18917; }
 
-fn _plain_port_str() -> string { return "18899"; }
+fn _plain_port_str() -> string { return "18917"; }
 
 // The payload floor, in bytes, for both the request and the response: 16x
 // the 2^14 TLS record limit, so a correct implementation must emit 16
