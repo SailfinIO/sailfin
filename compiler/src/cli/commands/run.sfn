@@ -38,6 +38,7 @@ import {
     with_arg,
     with_flag
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import {
     _print_cache_summary,
@@ -72,6 +73,34 @@ fn command_def() -> Command {
     cmd = with_flag(cmd, flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation"));
     cmd = with_arg(cmd, arg_variadic("file", "Sailfin source file (or prebuilt executable); omit to run the current capsule"));
     return cmd;
+}
+
+// SFN-719: mint a per-invocation exe path so a nested or concurrent `sfn
+// run` never targets the same file as another still-running one. On
+// Windows a running `.exe` is locked by the OS, so reusing the fixed
+// `run` name blocks the link step of a second invocation outright; on
+// every platform it's also a correctness hazard (one run's binary could
+// be overwritten mid-execution by another). `monotonic_millis()` seeds
+// the suffix; the `fs.exists` probe only rules out a STALE name still on
+// disk from an earlier invocation — it is NOT an atomic claim, so two
+// invocations starting in the same millisecond can still race onto the
+// same candidate. Closing that window needs an exclusive-create that
+// reports created-vs-existed, which no primitive here provides:
+// `sfn_fs_mkdir` discards `mkdir`'s return and treats a later existence
+// probe as authoritative, and `_mktemp_from_template_cmd` returns "" on
+// a Windows host by design. SFN-974 adds that primitive; this probe and
+// this comment are deleted when `_unique_run_exe_path` moves onto it.
+// Bounded so the probe loop can't run forever.
+fn _unique_run_exe_path(run_cache_dir: string) -> string ![clock, io] {
+    let base = run_cache_dir + "/run-" + int_to_string(monotonic_millis());
+    let mut candidate = target_exe_name(base, build_target_os());
+    let mut attempt = 1;
+    loop {
+        if !fs.exists(candidate) { return candidate; }
+        if attempt > 1000 { return candidate; }
+        candidate = target_exe_name(base + "-" + int_to_string(attempt), build_target_os());
+        attempt += 1;
+    }
 }
 
 // Reproduce the legacy `_legacy_dispatch_run` body against typed matches.
@@ -147,7 +176,17 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // Derived name (never an explicit `-o`), so it carries Windows' `.exe`
     // suffix from birth: `CreateProcessA` below and the link's `-o` must
     // agree by construction (SFN-693).
-    let exe_path = target_exe_name(run_cache_dir + "/run", build_target_os());
+    //
+    // SFN-719: the pooled-test path above is already isolated (each
+    // `SAILFIN_TEST_SCRATCH` is per-invocation), so the fixed `run` name
+    // stays there untouched. Only the unguarded default (`build/sailfin`,
+    // shared across every plain-CLI and nested `sfn run`) gets a
+    // per-invocation unique name — that's the path where a still-running
+    // `.exe` (locked on Windows) or a concurrent invocation can collide
+    // with a fixed name.
+    let run_exe_unguarded = env.get("SAILFIN_TEST_SCRATCH").length == 0;
+    let mut exe_path = target_exe_name(run_cache_dir + "/run", build_target_os());
+    if run_exe_unguarded { exe_path = _unique_run_exe_path(run_cache_dir); }
 
     // Resolve and compile capsule deps before lowering the main file. The
     // unified resolver covers relative imports, manifest-declared capsule
@@ -249,6 +288,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if run_rc != 0 && !fs.exists(exe_path) {
         print.err("sfn run: no binary at " + exe_path);
     }
+    // SFN-719: `process.run` is synchronous, so by the time it returns
+    // THIS invocation's own child has exited and its exe is no longer
+    // locked. Delete only this invocation's own path — never a sweep of
+    // the shared directory — so the per-invocation naming scheme above
+    // doesn't accumulate across repeated `sfn run` calls without ever
+    // touching an artifact another live invocation owns.
+    if run_exe_unguarded && fs.exists(exe_path) { fs.deleteFile(exe_path); }
     return run_rc;
 }
 
