@@ -1,0 +1,68 @@
+// compiler/tests/unit/package_iso8601_test.sfn
+//
+// SFN-973: `sfn package`'s manifest `build_date` used to shell out to
+// `date -u`, which does not exist on native Windows. This pins the
+// ISO-8601 formatter and the `civil_from_days` conversion (Howard
+// Hinnant's inverse of `der_days_from_civil`,
+// `capsules/sfn/crypto/src/der.sfn`) that replaced it — both pure, so
+// no `clock` effect is needed here.
+import { der_days_from_civil } from "sfn/crypto";
+
+import { _iso8601_utc_from_unix_millis, civil_from_days } from "../../src/cli/commands/package";
+
+test "package: iso8601 formats the Unix epoch" {
+    assert _iso8601_utc_from_unix_millis(0) == "1970-01-01T00:00:00Z";
+}
+
+test "package: iso8601 formats one second past the epoch" {
+    assert _iso8601_utc_from_unix_millis(1000) == "1970-01-01T00:00:01Z";
+}
+
+test "package: iso8601 handles the century leap year (divisible by 400)" {
+    assert _iso8601_utc_from_unix_millis(951782400000) == "2000-02-29T00:00:00Z";
+}
+
+test "package: iso8601 handles an ordinary leap year" {
+    assert _iso8601_utc_from_unix_millis(1709164800000) == "2024-02-29T00:00:00Z";
+}
+
+test "package: iso8601 formats the last second of a leap year" {
+    assert _iso8601_utc_from_unix_millis(1735689599000) == "2024-12-31T23:59:59Z";
+}
+
+test "package: iso8601 formats a near-present date" {
+    assert _iso8601_utc_from_unix_millis(1767225600000) == "2026-01-01T00:00:00Z";
+}
+
+test "package: iso8601 floors negative millis to the second before the epoch" {
+    assert _iso8601_utc_from_unix_millis(-1000) == "1969-12-31T23:59:59Z";
+}
+
+test "package: iso8601 floors a full negative day" {
+    assert _iso8601_utc_from_unix_millis(-86400000) == "1969-12-31T00:00:00Z";
+}
+
+test "package: iso8601 pads a 4-digit year at the upper bound" {
+    assert _iso8601_utc_from_unix_millis(253402300799000) == "9999-12-31T23:59:59Z";
+}
+
+test "package: iso8601 truncates (not rounds) sub-second milliseconds" {
+    assert _iso8601_utc_from_unix_millis(1500) == "1970-01-01T00:00:01Z";
+}
+
+// Round-trip property test: `civil_from_days` is the documented inverse
+// of the existing, exported `der_days_from_civil`. Walk every 7th day
+// across 1900-2100 rather than a handful of points — the round trip is
+// the strongest available oracle for a from-scratch calendar inverse.
+test "package: civil_from_days round-trips through der_days_from_civil across 1900-2100" {
+    let start_days: int = der_days_from_civil(1900, 1, 1);
+    let end_days: int = der_days_from_civil(2100, 12, 31);
+    let mut d: int = start_days;
+    loop {
+        if d > end_days { break; }
+        let civil = civil_from_days(d);
+        let round_tripped: int = der_days_from_civil(civil.year, civil.month, civil.day);
+        assert round_tripped == d;
+        d += 7;
+    }
+}
