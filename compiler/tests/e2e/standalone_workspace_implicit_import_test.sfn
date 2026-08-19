@@ -3,8 +3,15 @@
 // the compiler starts in the checkout or the entry file's directory. Before
 // SFN-352, `sfn check` passed from the entry cwd, but `build` and `run` did not
 // stage `sfn/strings` and failed during lowering.
-import { contains, find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
+import {
+    contains,
+    ends_with,
+    find,
+    split
+} from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+import { _copy_file_preserving_mode } from "../../src/build/fs";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -89,4 +96,281 @@ test "standalone check/build/run: entry cwd stages bundled sfn/strings" ![io] {
     let output = fs.readFile(marker);
     if fs.exists(marker) { fs.deleteFile(marker); }
     assert contains(output, "a-b");
+}
+
+fn _write_implicit_provider(root: string, name: string, deps: string, implicit: boolean) -> void ![io] {
+    fs.createDirectory(root + "/" + name + "/src", true);
+    let mut implicit_value = "false";
+    if implicit { implicit_value = "true"; }
+    fs.writeFile(root + "/" + name + "/capsule.toml", "[capsule]\n"
+        + "name = \"demo/implicit\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[dependencies]\n"
+        + deps
+        + "\n[capabilities]\n"
+        + "required = [\"net\"]\n\n"
+        + "[build]\n"
+        + "kind = \"library\"\n"
+        + "entry = \"src/mod.sfn\"\n"
+        + "implicit = "
+        + implicit_value
+        + "\n");
+    fs.writeFile(root + "/" + name + "/src/mod.sfn", "struct ImplicitLinkedMarker {\n"
+        + "    value: int;\n"
+        + "}\n\n"
+        + "fn latent_net() -> int ![net] {\n"
+        + "    return 7;\n"
+        + "}\n\n"
+        + "export { latent_net };\n");
+}
+
+fn _write_consumer_workspace(root: string, explicit_dep: boolean) -> string ![io] {
+    fs.createDirectory(root + "/app/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\n"
+        + "members = [\"app\"]\n\n"
+        + "[workspace.capabilities]\n"
+        + "allow = [\"io\"]\n"
+        + "deny = [\"net\"]\n");
+    let mut deps = "";
+    if explicit_dep { deps = "\"demo/implicit\" = \"*\"\n"; }
+    fs.writeFile(root + "/app/capsule.toml", "[capsule]\n"
+        + "name = \"demo/app\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[dependencies]\n"
+        + deps
+        + "\n[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/app/src/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
+    return root + "/app/src/main.sfn";
+}
+
+fn _copy_toolchain(root: string) -> string ![io] {
+    fs.createDirectory(root + "/bin", true);
+    let dst = root + "/bin/sfn";
+    if !_copy_file_preserving_mode(_sfn_bin_abs(), dst) { return ""; }
+    if !fs.set_perms(dst, 493) { return ""; }
+    return dst;
+}
+
+fn _implicit_build_env(label: string) -> string[] ![io] {
+    let mut child = clean_runner_env(nested_runner_scratch(label));
+    let repo = env.get("PWD");
+    child.push("SAILFIN_RUNTIME_ROOT=" + repo + "/runtime");
+    return child;
+}
+
+fn _defined_symbol_count(binary: string, symbol: string, label: string) -> int ![io] {
+    let exit = process.run_capture(["nm", binary], _implicit_build_env(label));
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    if exit != 0 { return -1; }
+    let lines = split(output, "\n");
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if ends_with(lines[i], " " + symbol) || ends_with(lines[i], "_" + symbol) {
+            count += 1;
+        }
+        i += 1;
+    }
+    return count;
+}
+
+fn _has_effect_error(message: string) -> boolean {
+    return contains(message, "E0400") || contains(message, "E0402");
+}
+
+fn _build_with_bundled_implicit(root: string, explicit_dep: boolean, label: string) -> int ![io] {
+    let toolchain = root + "/toolchain";
+    let consumer = root + "/consumer";
+    fs.createDirectory(toolchain, true);
+    fs.writeFile(toolchain + "/workspace.toml", "[workspace]\nmembers = [\"provider\"]\n");
+    _write_implicit_provider(toolchain, "provider", "", true);
+    let compiler = _copy_toolchain(toolchain);
+    if compiler.length == 0 { return 97; }
+    let entry = _write_consumer_workspace(consumer, explicit_dep);
+    let output = root + "/app-out";
+    let exit = process.run_capture([compiler, "build", "-o", output, entry], _implicit_build_env(label));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { fs.writeFile(root + "/build-error.txt", out + err); }
+    if exit == 0 {
+        let symbol = "__sfn_module_type_init__demoimplicitmod";
+        if _defined_symbol_count(output, symbol, label + "-nm") != 1 {
+            return 98;
+        }
+    }
+    return exit;
+}
+
+test "workspace implicit: bundled provider links exactly once without widening a pure consumer" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        return _build_with_bundled_implicit(root, false, "sfn-931-implicit");
+    });
+    assert result == 0;
+}
+
+test "workspace implicit: explicit dependency deduplicates the same provider" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        return _build_with_bundled_implicit(root, true, "sfn-931-explicit");
+    });
+    assert result == 0;
+}
+
+test "workspace implicit: calls propagate the provider's declared effects" ![io] {
+    let marker = _marker("effect-propagation");
+    let result = with_tmp_dir(fn (root: string) -> int {
+        let toolchain = root + "/toolchain";
+        fs.createDirectory(toolchain, true);
+        fs.writeFile(toolchain + "/workspace.toml", "[workspace]\nmembers = [\"provider\"]\n");
+        _write_implicit_provider(toolchain, "provider", "", true);
+        let compiler = _copy_toolchain(toolchain);
+        let entry = _write_consumer_workspace(root + "/consumer", true);
+        fs.writeFile(entry, "import { latent_net } from \"demo/implicit\";\n\n"
+            + "fn main() -> int {\n"
+            + "    let _value = latent_net();\n"
+            + "    return 0;\n"
+            + "}\n");
+        let check_exit = process.run_capture([compiler, "check", entry], _implicit_build_env("sfn-931-effects-check"));
+        let check_out = process.capture_take_stdout();
+        let check_err = process.capture_take_stderr();
+        let build_exit = process.run_capture([compiler, "build", "-o", root
+            + "/effect-out", entry], _implicit_build_env("sfn-931-effects-build"));
+        let build_out = process.capture_take_stdout();
+        let build_err = process.capture_take_stderr();
+        let run_exit = process.run_capture([compiler, "run", entry], _implicit_build_env("sfn-931-effects-run"));
+        let run_out = process.capture_take_stdout();
+        let run_err = process.capture_take_stderr();
+        fs.writeFile(marker, "CHECK\n" + check_out + check_err + "BUILD\n"
+            + build_out
+            + build_err
+            + "RUN\n"
+            + run_out
+            + run_err);
+        if check_exit != 0 && build_exit != 0 && run_exit != 0
+            && _has_effect_error(check_out
+            + check_err)
+            && _has_effect_error(build_out
+            + build_err)
+            && _has_effect_error(run_out
+            + run_err) { return 0; }
+        return 96;
+    });
+    assert result == 0;
+    let message = fs.readFile(marker);
+    fs.deleteFile(marker);
+    assert contains(message, "E0400") || contains(message, "E0402");
+    assert contains(message, "net");
+}
+
+test "workspace implicit: provider capability ceiling is validated locally" ![io] {
+    let marker = _marker("provider-capability");
+    let result = with_tmp_dir(fn (root: string) -> int {
+        let toolchain = root + "/toolchain";
+        fs.createDirectory(toolchain, true);
+        fs.writeFile(toolchain + "/workspace.toml", "[workspace]\nmembers = [\"provider\"]\n");
+        _write_implicit_provider(toolchain, "provider", "", true);
+        fs.writeFile(toolchain + "/provider/capsule.toml", "[capsule]\n"
+            + "name = \"demo/implicit\"\n"
+            + "version = \"0.1.0\"\n\n"
+            + "[capabilities]\nrequired = [\"io\"]\n\n"
+            + "[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\nimplicit = true\n");
+        let compiler = _copy_toolchain(toolchain);
+        let entry = _write_consumer_workspace(root + "/consumer", false);
+        let exit = process.run_capture([compiler, "run", entry], _implicit_build_env("sfn-931-provider-cap"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(marker, out + err);
+        return exit;
+    });
+    assert result != 0;
+    let message = fs.readFile(marker);
+    fs.deleteFile(marker);
+    assert contains(message, "E0403");
+    assert contains(message, "net");
+}
+
+test "workspace implicit: transitive provider capability ceiling is validated locally" ![io] {
+    let marker = _marker("transitive-provider-capability");
+    let result = with_tmp_dir(fn (root: string) -> int {
+        let toolchain = root + "/toolchain";
+        fs.createDirectory(toolchain + "/root-provider/src", true);
+        fs.createDirectory(toolchain + "/transitive-provider/src", true);
+        fs.writeFile(toolchain + "/workspace.toml", "[workspace]\nmembers = [\"root-provider\", \"transitive-provider\"]\n");
+        fs.writeFile(toolchain + "/root-provider/capsule.toml", "[capsule]\n"
+            + "name = \"demo/implicit\"\nversion = \"0.1.0\"\n\n"
+            + "[dependencies]\n\"demo/transitive\" = \"*\"\n\n"
+            + "[capabilities]\nrequired = []\n\n"
+            + "[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\nimplicit = true\n");
+        fs.writeFile(toolchain + "/root-provider/src/mod.sfn", "fn root_value() -> int { return 1; }\n");
+        fs.writeFile(toolchain + "/transitive-provider/capsule.toml", "[capsule]\n"
+            + "name = \"demo/transitive\"\nversion = \"0.1.0\"\n\n"
+            + "[capabilities]\nrequired = [\"io\"]\n\n"
+            + "[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\nimplicit = false\n");
+        fs.writeFile(toolchain + "/transitive-provider/src/mod.sfn", "fn latent_net() -> int ![net] { return 7; }\n");
+        let compiler = _copy_toolchain(toolchain);
+        let entry = _write_consumer_workspace(root + "/consumer", false);
+        let exit = process.run_capture([compiler, "check", entry], _implicit_build_env("sfn-931-transitive-cap"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(marker, out + err);
+        return exit;
+    });
+    assert result != 0;
+    let message = fs.readFile(marker);
+    fs.deleteFile(marker);
+    assert contains(message, "E0403");
+    assert contains(message, "net");
+}
+
+test "workspace implicit: duplicate canonical providers fail deterministically" ![io] {
+    let marker = _marker("duplicate-provider");
+    let result = with_tmp_dir(fn (root: string) -> int {
+        let toolchain = root + "/toolchain";
+        fs.createDirectory(toolchain, true);
+        fs.writeFile(toolchain + "/workspace.toml", "[workspace]\nmembers = [\"z-provider\", \"a-provider\"]\n");
+        _write_implicit_provider(toolchain, "z-provider", "", true);
+        _write_implicit_provider(toolchain, "a-provider", "", true);
+        let compiler = _copy_toolchain(toolchain);
+        let entry = _write_consumer_workspace(root + "/consumer", false);
+        let exit = process.run_capture([compiler, "check", entry], _implicit_build_env("sfn-931-duplicate"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(marker, out + err);
+        return exit;
+    });
+    assert result != 0;
+    let message = fs.readFile(marker);
+    fs.deleteFile(marker);
+    assert contains(message, "duplicate workspace providers for \"demo/implicit\"");
+    assert find(message, "a-provider", 0) < find(message, "z-provider", 0);
+}
+
+test "workspace implicit: dependency cycles fail deterministically" ![io] {
+    let marker = _marker("dependency-cycle");
+    let result = with_tmp_dir(fn (root: string) -> int {
+        let toolchain = root + "/toolchain";
+        fs.createDirectory(toolchain + "/a/src", true);
+        fs.createDirectory(toolchain + "/b/src", true);
+        fs.writeFile(toolchain + "/workspace.toml", "[workspace]\nmembers = [\"a\", \"b\"]\n");
+        fs.writeFile(toolchain + "/a/capsule.toml", "[capsule]\nname = \"demo/a\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"demo/b\" = \"*\"\n\n[capabilities]\nrequired = []\n\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\nimplicit = true\n");
+        fs.writeFile(toolchain + "/b/capsule.toml", "[capsule]\nname = \"demo/b\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"demo/a\" = \"*\"\n\n[capabilities]\nrequired = []\n\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\n");
+        fs.writeFile(toolchain + "/a/src/mod.sfn", "fn a() -> int { return 1; }\n");
+        fs.writeFile(toolchain + "/b/src/mod.sfn", "fn b() -> int { return 2; }\n");
+        let compiler = _copy_toolchain(toolchain);
+        let entry = _write_consumer_workspace(root + "/consumer", false);
+        let exit = process.run_capture([compiler, "check", entry], _implicit_build_env("sfn-931-cycle"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(marker, out + err);
+        return exit;
+    });
+    assert result != 0;
+    let message = fs.readFile(marker);
+    fs.deleteFile(marker);
+    assert contains(message, "workspace dependency cycle involving \"demo/a\", \"demo/b\"");
 }

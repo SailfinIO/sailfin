@@ -15,6 +15,7 @@ import {
     toml_get_dependencies,
     toml_get_name
 } from "../toml_parser";
+import { workspace_member_capability_gate } from "./capability";
 import { _cr_enumerate_host_capsule_sources, enumerate_capsule_sources } from "./discovery";
 import { source_identity_member_for_project } from "./identity";
 import {
@@ -22,7 +23,9 @@ import {
     _cr_dep_specs_from_text,
     enumerate_binary_capsule_sources,
     enumerate_cache_implicit_sources,
-    enumerate_workspace_implicit_sources
+    enumerate_workspace_implicit_sources,
+    validate_workspace_implicit_graph,
+    workspace_implicit_dependency_closure
 } from "./implicit";
 import {
     _cr_consumer_root_prefix,
@@ -41,7 +44,13 @@ import {
     WorkspaceMember,
     empty_resolver_consumer
 } from "./types";
-import { discover_workspace_root, load_workspace_members } from "./workspace";
+import {
+    discover_workspace_root,
+    load_workspace_members,
+    merge_workspace_members,
+    select_workspace_implicit_members,
+    validate_unique_workspace_member_names
+} from "./workspace";
 
 // Result of the shared resolution + dedupe pass shared between the
 // build (`prepare_project_capsules`) and check
@@ -178,6 +187,20 @@ fn _cr_specs_union(base: string[], provided: CapsuleSource[]) -> string[] {
     return out;
 }
 
+fn _cr_resolver_graph_error(workspace_root: string) -> ResolverDedupeResult {
+    let empty_sources: CapsuleSource[] = [];
+    let empty_strings: string[] = [];
+    return ResolverDedupeResult {
+        sources: empty_sources,
+        has_collision: true,
+        capabilities_required: empty_strings,
+        manifest_dep_specs: empty_strings,
+        workspace_root: workspace_root,
+        root_source_paths: empty_strings,
+        runtime_demand: runtime_demand_all()
+    };
+}
+
 fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
     let mut sources: CapsuleSource[] = [];
     let empty_sources: CapsuleSource[] = [];
@@ -236,30 +259,85 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     if entry_paths.length > 0 {
         source_workspace_root = discover_workspace_root(anchor_dir);
     }
-    let mut workspace_root = source_workspace_root;
-    if workspace_root.length == 0 {
-        // SFN-352: the compiler driver supplies an absolute binary directory,
-        // which remains stable when a standalone command runs with the entry
-        // directory as cwd. Prefer that anchor for bundled workspace capsules;
-        // retain the cwd probe for direct/internal callers without driver
-        // context. An installed compiler normally finds no workspace from
-        // either anchor and continues into the cache-implicit leg below.
-        if bundled_workspace_start.length > 0 {
-            workspace_root = discover_workspace_root(bundled_workspace_start);
-        }
-        if workspace_root.length == 0 {
-            workspace_root = discover_workspace_root("");
+    // Resolve the consumer workspace and the compiler-bundled workspace
+    // independently. Source members override bundled providers by canonical
+    // name; the bundled inventory still supplies globally implicit roots and
+    // their dependency closure when the consumer has its own workspace.
+    let mut bundled_workspace_root: string = "";
+    if bundled_workspace_start.length > 0 {
+        bundled_workspace_root = discover_workspace_root(bundled_workspace_start);
+    }
+    if bundled_workspace_root.length == 0 {
+        bundled_workspace_root = discover_workspace_root("");
+    }
+    if strings_equal(bundled_workspace_root, source_workspace_root) {
+        bundled_workspace_root = "";
+    }
+    let mut source_members: WorkspaceMember[] = [];
+    if source_workspace_root.length > 0 {
+        source_members = load_workspace_members(source_workspace_root);
+        if !validate_unique_workspace_member_names(source_members, source_workspace_root) {
+            return _cr_resolver_graph_error(source_workspace_root);
         }
     }
-    let mut members: WorkspaceMember[] = [];
-    if workspace_root.length > 0 {
-        members = load_workspace_members(workspace_root);
+    let mut bundled_members: WorkspaceMember[] = [];
+    if bundled_workspace_root.length > 0 {
+        bundled_members = load_workspace_members(bundled_workspace_root);
+        if !validate_unique_workspace_member_names(bundled_members, bundled_workspace_root) {
+            return _cr_resolver_graph_error(bundled_workspace_root);
+        }
+    }
+    let mut workspace_root = source_workspace_root;
+    if workspace_root.length == 0 { workspace_root = bundled_workspace_root; }
+    let mut members = merge_workspace_members(source_members, bundled_members);
+    let implicit_members = select_workspace_implicit_members(source_members, bundled_members);
+    let mut implicit_specs: string[] = [];
+    let mut implicit_index: int = 0;
+    loop {
+        if implicit_index >= implicit_members.length { break; }
+        implicit_specs.push(implicit_members[implicit_index].name);
+        implicit_index += 1;
+    }
+    if !validate_workspace_implicit_graph(members, implicit_specs) {
+        return _cr_resolver_graph_error(workspace_root);
+    }
+    let implicit_closure_specs = workspace_implicit_dependency_closure(members, implicit_specs);
+    // Every workspace provider in the reachable implicit closure owns its
+    // own capability ceiling. Validate the complete closure before staging or
+    // cache lookup; checking only the roots would let an under-declared
+    // transitive provider bypass E0403.
+    let mut closure_index: int = 0;
+    loop {
+        if closure_index >= implicit_closure_specs.length { break; }
+        let closure_spec = implicit_closure_specs[closure_index];
+        closure_index += 1;
+        let mut member_index: int = 0;
+        loop {
+            if member_index >= members.length { break; }
+            if strings_equal(members[member_index].name, closure_spec) {
+                if workspace_member_capability_gate(members[member_index]) != 0 {
+                    return _cr_resolver_graph_error(workspace_root);
+                }
+                break;
+            }
+            member_index += 1;
+        }
     }
     let mut project_root: string = "";
     if entry_paths.length > 0 {
         project_root = discover_project_root(anchor_dir);
         let selected_member = source_identity_member_for_project(project_root);
-        if selected_member.name.length > 0 {
+        let mut selected_present: boolean = false;
+        let mut selected_index: int = 0;
+        loop {
+            if selected_index >= members.length { break; }
+            if strings_equal(members[selected_index].name, selected_member.name) {
+                selected_present = true;
+                break;
+            }
+            selected_index += 1;
+        }
+        if selected_member.name.length > 0 && !selected_present {
             members.push(selected_member);
         }
     }
@@ -361,7 +439,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             capabilities_required = toml_get_capabilities_required(manifest_text);
             project_full_runtime = toml_get_build_full_runtime(manifest_text);
         }
-        let dep_sources = enumerate_capsule_sources(project_root, consumer.runtime_root);
+        let dep_sources = enumerate_capsule_sources(project_root, consumer.runtime_root, implicit_specs, members);
         let mut di: int = 0;
         loop {
             if di >= dep_sources.length { break; }
@@ -426,7 +504,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                 }
             }
         }
-    } else if consumer.runtime_root.length > 0 {
+    } else if consumer.runtime_root.length > 0 || implicit_specs.length > 0 {
         // SFN-341: a manifest-less build (`sfn build prog.sfn`) never enters
         // the branch above, but the runtime's own `[dependencies]` still have
         // to reach the link set — the runtime's `sfn-sources` are in every
@@ -436,7 +514,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         // Kept as a separate branch rather than widening the gate above: the
         // host-capsule and lockfile logic there reads `<project_root>/…`
         // paths that would resolve cwd-relative under an empty root.
-        let rt_dep_sources = enumerate_capsule_sources("", consumer.runtime_root);
+        let rt_dep_sources = enumerate_capsule_sources("", consumer.runtime_root, implicit_specs, members);
         let mut rdsi: int = 0;
         loop {
             if rdsi >= rt_dep_sources.length { break; }
@@ -623,7 +701,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     loop {
         if rp >= resolved.length { break; }
         let key = _cr_strip_leading_dot_slash(resolved[rp].source_path);
-        if !_cr_string_array_contains(dep_leg_paths, key) {
+        if !_cr_string_array_contains(dep_leg_paths, key)
+            || _cr_string_array_contains(implicit_specs, resolved[rp].spec) {
             root_source_paths.push(key);
         }
         rp += 1;
@@ -647,7 +726,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         let mut dp: int = 0;
         loop {
             if dp >= resolved.length { break; }
-            demand_paths.push(resolved[dp].source_path);
+            if !_cr_string_array_contains(implicit_closure_specs, resolved[dp].spec) {
+                demand_paths.push(resolved[dp].source_path);
+            }
             dp += 1;
         }
         let mut ep: int = 0;

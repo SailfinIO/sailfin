@@ -22,6 +22,7 @@ import {
     _cr_ends_with,
     _cr_find_char,
     _cr_path_join,
+    _cr_sort_strings,
     _cr_string_array_contains
 } from "./paths";
 import {
@@ -32,6 +33,150 @@ import {
 } from "./provenance";
 import { _cr_relative_slug_with_members, enumerate_relative_sources } from "./relative";
 import { CapsuleSource, ResolverConsumer, WorkspaceMember } from "./types";
+
+fn _cr_implicit_member_index(members: WorkspaceMember[], name: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        if strings_equal(members[i].name, name) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _cr_implicit_string_index(values: string[], value: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if strings_equal(values[i], value) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _cr_member_manifest_path(member: WorkspaceMember) -> string {
+    return _cr_path_join(_cr_dirname(member.src_dir), "capsule.toml");
+}
+
+fn _cr_workspace_member_dependencies(member: WorkspaceMember) -> string[] ![io] {
+    let manifest = _cr_member_manifest_path(member);
+    if !fs.exists(manifest) { return []; }
+    return _cr_sort_strings(_cr_dep_specs_from_text(toml_get_dependencies(fs.readFile(manifest))));
+}
+
+// Canonical-name closure of workspace members reachable from the selected
+// implicit roots. External/cache dependencies are left to the normal
+// dependency resolver; this set classifies only provider-local workspace
+// sources for reachability and demand isolation.
+fn workspace_implicit_dependency_closure(members: WorkspaceMember[], roots: string[]) -> string[] ![io] {
+    let mut queue = _cr_sort_strings(roots);
+    let mut out: string[] = [];
+    let mut head: int = 0;
+    loop {
+        if head >= queue.length { break; }
+        let spec = queue[head];
+        head += 1;
+        if _cr_string_array_contains(out, spec) { continue; }
+        let member_index = _cr_implicit_member_index(members, spec);
+        if member_index < 0 { continue; }
+        out.push(spec);
+        let deps = _cr_workspace_member_dependencies(members[member_index]);
+        let mut di: int = 0;
+        loop {
+            if di >= deps.length { break; }
+            if _cr_implicit_member_index(members, deps[di]) >= 0 {
+                queue.push(deps[di]);
+            }
+            di += 1;
+        }
+    }
+    return _cr_sort_strings(out);
+}
+
+fn _cr_join_cycle_members(names: string[]) -> string {
+    let mut out = "";
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + "\"" + names[i] + "\"";
+        i += 1;
+    }
+    return out;
+}
+
+// Kahn validation over the reachable workspace-member graph. Choosing the
+// first zero-indegree node from a sorted canonical-name list and reporting the
+// sorted unprocessed remainder makes cycle failures checkout- and manifest-
+// order independent.
+fn validate_workspace_implicit_graph(members: WorkspaceMember[], roots: string[]) -> boolean ![io] {
+    let reachable = workspace_implicit_dependency_closure(members, roots);
+    let mut indegree: int[] = [];
+    let mut processed: boolean[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= reachable.length { break; }
+        indegree.push(0);
+        processed.push(false);
+        i += 1;
+    }
+    let mut from_i: int = 0;
+    loop {
+        if from_i >= reachable.length { break; }
+        let member_index = _cr_implicit_member_index(members, reachable[from_i]);
+        if member_index >= 0 {
+            let deps = _cr_workspace_member_dependencies(members[member_index]);
+            let mut di: int = 0;
+            loop {
+                if di >= deps.length { break; }
+                let to_i = _cr_implicit_string_index(reachable, deps[di]);
+                if to_i >= 0 { indegree[to_i] += 1; }
+                di += 1;
+            }
+        }
+        from_i += 1;
+    }
+    let mut done: int = 0;
+    loop {
+        if done >= reachable.length { break; }
+        let mut next: int = -1;
+        let mut zi: int = 0;
+        loop {
+            if zi >= reachable.length { break; }
+            if !processed[zi] && indegree[zi] == 0 {
+                next = zi;
+                break;
+            }
+            zi += 1;
+        }
+        if next < 0 {
+            let mut remaining: string[] = [];
+            let mut ri: int = 0;
+            loop {
+                if ri >= reachable.length { break; }
+                if !processed[ri] { remaining.push(reachable[ri]); }
+                ri += 1;
+            }
+            print.err("capsule-resolver: workspace dependency cycle involving "
+                + _cr_join_cycle_members(remaining));
+            return false;
+        }
+        processed[next] = true;
+        done += 1;
+        let member_index = _cr_implicit_member_index(members, reachable[next]);
+        if member_index >= 0 {
+            let deps = _cr_workspace_member_dependencies(members[member_index]);
+            let mut di: int = 0;
+            loop {
+                if di >= deps.length { break; }
+                let to_i = _cr_implicit_string_index(reachable, deps[di]);
+                if to_i >= 0 { indegree[to_i] -= 1; }
+                di += 1;
+            }
+        }
+    }
+    return true;
+}
 
 // Stage D PR3: walk every `.sfn` under `<project_root>/src/` for
 // `kind = "binary"` `-p` builds (opt-in via

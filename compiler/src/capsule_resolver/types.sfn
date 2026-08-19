@@ -193,6 +193,10 @@ struct CompileCapsuleResult {
 // compile loop.
 struct ProjectCapsuleResult {
     ll_paths: string[];
+    // Direct-import effect artifacts for the consumer entry. Build and run
+    // pass these into the entry's effect gate so their behavior matches
+    // `sfn check` for calls into resolved capsule providers.
+    entry_import_asm_paths: string[];
     // Issue #991: distinguishes a legitimate empty `ll_paths` (the
     // project declares no capsule dependencies — `success = true`)
     // from a resolver/compile failure that left `ll_paths` empty
@@ -233,6 +237,11 @@ struct WorkspaceMember {
     src_dir: string;  // declared source root (workspace-rooted)
     build_kind: string;  // binary, library, or runtime
     module_prefix: string;  // runtime virtual prefix; empty otherwise
+    // `[build] implicit = true` makes this member a resolver graph root even
+    // when the consumer has no explicit dependency/import edge to it. The
+    // provider remains an ordinary workspace member for provenance and
+    // capability validation; this bit controls selection only.
+    implicit: boolean;
 }
 
 // SFEP-0051 Phase 4a/4b: one member's effect surface audited against the

@@ -19,6 +19,8 @@
 import { find, split } from "sfn/strings";
 import { with_tmp_dir } from "sfn/test";
 
+import { _copy_file_preserving_mode } from "../../src/build/fs";
+
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted binary
 // relative to the repo root the runner starts from (mirrors `sfn/test`'s
 // `_resolve_sfn_bin`).
@@ -279,4 +281,95 @@ fn _scratch_marker(name: string) -> string ![io] {
     let path = dir + "/sfn-capgate-" + name + ".out";
     if fs.exists(path) { fs.deleteFile(path); }
     return path;
+}
+
+fn _make_implicit_override_ws(root: string, grant_net: boolean, deny_net: boolean) -> string ![io] {
+    fs.createDirectory(root + "/app/src", true);
+    fs.createDirectory(root + "/provider/src", true);
+    let mut envelope = "[workspace.capabilities]\nallow = [\"io\"]\n";
+    if deny_net { envelope = envelope + "deny = [\"net\"]\n"; }
+    if grant_net {
+        envelope = envelope + "\n[workspace.capabilities.grants]\n"
+            + "\"demo/implicit\" = [\"net\"]\n";
+    }
+    fs.writeFile(root + "/workspace.toml", "[workspace]\n"
+        + "members = [\"app\", \"provider\"]\n\n"
+        + envelope);
+    fs.writeFile(root + "/app/capsule.toml", "[capsule]\n"
+        + "name = \"demo/app\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[capabilities]\nrequired = []\n\n"
+        + "[build]\nkind = \"binary\"\nentry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/app/src/main.sfn", "fn main() -> int { return 0; }\n");
+    fs.writeFile(root + "/provider/capsule.toml", "[capsule]\n"
+        + "name = \"demo/implicit\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[capabilities]\nrequired = [\"net\"]\n\n"
+        + "[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\nimplicit = false\n");
+    fs.writeFile(root + "/provider/src/mod.sfn", "fn latent_net() -> int ![net] { return 7; }\n");
+    return root + "/app/src/main.sfn";
+}
+
+fn _make_implicit_override_toolchain(root: string) -> string ![io] {
+    let toolchain = root + "/toolchain";
+    fs.createDirectory(toolchain + "/bin", true);
+    fs.createDirectory(toolchain + "/provider/src", true);
+    fs.writeFile(toolchain + "/workspace.toml", "[workspace]\nmembers = [\"provider\"]\n");
+    // The bundled slot is intentionally under-declared. A passing grant test
+    // therefore proves that the same-name source member replaced this provider
+    // before provider-local validation, rather than merely auditing an
+    // unrelated ordinary workspace member.
+    fs.writeFile(toolchain + "/provider/capsule.toml", "[capsule]\n"
+        + "name = \"demo/implicit\"\nversion = \"0.1.0\"\n\n"
+        + "[capabilities]\nrequired = [\"io\"]\n\n"
+        + "[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\nimplicit = true\n");
+    fs.writeFile(toolchain + "/provider/src/mod.sfn", "fn latent_net() -> int ![net] { return 9; }\n");
+    let compiler = toolchain + "/bin/sfn";
+    if !_copy_file_preserving_mode(_sfn_bin_abs(), compiler) { return ""; }
+    if !fs.set_perms(compiler, 493) { return ""; }
+    return compiler;
+}
+
+fn _implicit_override_env() -> string[] ![io] {
+    let mut child = _child_env();
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit == 0 {
+        child.push("SAILFIN_RUNTIME_ROOT=" + _first_line(out) + "/runtime");
+    }
+    return child;
+}
+
+test "capability gate: explicit implicit-provider override obeys workspace grant" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        let compiler = _make_implicit_override_toolchain(root);
+        if compiler.length == 0 { return 97; }
+        let entry = _make_implicit_override_ws(root + "/consumer", true, false);
+        let exit = process.run_capture([compiler, "run", entry], _implicit_override_env());
+        let _out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        return exit;
+    });
+    assert result == 0;
+}
+
+test "capability gate: explicit implicit-provider override deny wins over grant" ![io] {
+    let marker = _scratch_marker("implicit-override-deny");
+    let result = with_tmp_dir(fn (root: string) -> int {
+        let compiler = _make_implicit_override_toolchain(root);
+        if compiler.length == 0 { return 97; }
+        let entry = _make_implicit_override_ws(root + "/consumer", true, true);
+        let exit = process.run_capture([compiler, "run", entry], _implicit_override_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(marker, out + err);
+        return exit;
+    });
+    assert result != 0;
+    let message = fs.readFile(marker);
+    fs.deleteFile(marker);
+    assert find(message, "E0405", 0) >= 0;
+    assert find(message, "demo/implicit", 0) >= 0;
+    assert find(message, "net", 0) >= 0;
 }

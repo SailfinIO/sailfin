@@ -4,15 +4,13 @@ version = "0.5.9"
 description = "Sailfin standard prelude (collections, strings, type checks)"
 
 [capabilities]
-required = []
+required = ["clock", "io", "net"]
 
 [build]
 kind = "library"
 entry = "../../../runtime/prelude.sfn"
-implicit = true
+implicit = false
 
-# Stage A: parse-only. The entry path points back at the existing
-# runtime/prelude.sfn rather than moving the file under this capsule's
-# src/ — moving it changes every consumer's import slug and is squarely
-# Stage B work (see docs/proposals/0006-build-architecture.md, Part 5,
-# Stage A "Open question to resolve in this stage's PR").
+# SFN-931 keeps this shell dormant while making its capability ceiling honest.
+# `runtime/capsule.toml prelude-entry` remains the sole provider until the
+# SFEP-0072 prelude-adoption slice moves the source into this capsule.

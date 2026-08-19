@@ -41,16 +41,18 @@ import {
 
 import { _print_cache_summary, _resolve_sailfin_cache_dir_for_work } from "../../build/cache";
 import { _clang_link_multi } from "../../build/link";
-import { _ends_with, _ensure_dir } from "../../build/paths";
+import { _dirname, _ends_with, _ensure_dir } from "../../build/paths";
 import { _runtime_bundle_exists } from "../../build/runtime_objs";
 import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import { build_target_os, target_exe_name } from "../../build/target";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { prepare_project_capsules } from "../../capsule_resolver";
+import { workspace_capability_gate } from "../../capsule_resolver/capability";
 import { module_name_for_source } from "../../capsule_resolver/identity";
 import { ResolverConsumer } from "../../capsule_resolver/types";
+import { discover_workspace_root } from "../../capsule_resolver/workspace";
 import { format_backend_failure_banner } from "../../ice";
-import { compile_to_llvm_file_with_module } from "../../main";
+import { compile_to_llvm_file_with_module_imports } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
 import { toolchain_gate_or_dispatch } from "./toolchain";
@@ -106,6 +108,11 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let _tc = toolchain_gate_or_dispatch(input_path, ctx, has_flag(matches, "skip-toolchain-check"));
     if _tc != 0 { return _tc; }
 
+    // `run` is a build-then-execute surface and must enforce the same source
+    // workspace grant/deny envelope as build and check before any emit/link.
+    let capability_workspace_root = discover_workspace_root(_dirname(input_path));
+    if workspace_capability_gate(capability_workspace_root) != 0 { return 1; }
+
     // #1411: route the top-level `run.ll`/`run` executable under the
     // per-invocation scratch when one is set (`SAILFIN_TEST_SCRATCH`),
     // exactly as `sfn build` does. Bare-file dispatch delegates here
@@ -156,11 +163,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         retain_full_runtime: false
     };
     let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, run_consumer, "", ctx.compiler_path, "", binary_dir);
+    if !run_capsule_result.success { return 1; }
     let capsule_lls = run_capsule_result.ll_paths;
 
     let source = fs.readFile(input_path);
     let module_name = module_name_for_source(input_path);
-    let ok = compile_to_llvm_file_with_module(source, module_name, ll_path, "");
+    let ok = compile_to_llvm_file_with_module_imports(source, module_name, ll_path, "", run_capsule_result.entry_import_asm_paths);
     if !ok {
         print("failed to compile LLVM for: " + input_path);
 

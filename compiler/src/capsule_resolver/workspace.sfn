@@ -6,6 +6,7 @@
 // each member's canonical name + `src/` directory into `WorkspaceMember[]`.
 import { substring } from "../string_utils";
 import {
+    toml_get_build_implicit,
     toml_get_build_kind,
     toml_get_name,
     toml_get_sfn_module_prefix,
@@ -256,9 +257,126 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
         }
         let src = _cr_path_join(_cr_path_join(workspace_root, path), source_root);
         out.push(WorkspaceMember {
-            name: name, member_path: path, src_dir: src, build_kind: kind, module_prefix: module_prefix
+            name: name, member_path: path, src_dir: src, build_kind: kind, module_prefix: module_prefix, implicit: toml_get_build_implicit(manifest_text)
         });
         i += 1;
+    }
+    return out;
+}
+
+fn _cr_workspace_member_index(members: WorkspaceMember[], name: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        if strings_equal(members[i].name, name) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Reject two physical providers for one canonical name within a workspace.
+// Paths are sorted in the diagnostic so manifest declaration order cannot
+// change the failure text.
+fn validate_unique_workspace_member_names(members: WorkspaceMember[], workspace_root: string) -> boolean ![io] {
+    let mut names: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        if !_cr_str_in(names, members[i].name) {
+            names.push(members[i].name);
+        }
+        i += 1;
+    }
+    names = _cr_sort_strings(names);
+    let mut valid: boolean = true;
+    let mut ni: int = 0;
+    loop {
+        if ni >= names.length { break; }
+        let name = names[ni];
+        ni += 1;
+        let mut paths: string[] = [];
+        let mut mi: int = 0;
+        loop {
+            if mi >= members.length { break; }
+            if strings_equal(members[mi].name, name) {
+                paths.push(members[mi].member_path);
+            }
+            mi += 1;
+        }
+        if paths.length <= 1 { continue; }
+        paths = _cr_sort_strings(paths);
+        valid = false;
+        print.err("capsule-resolver: duplicate workspace providers for \""
+            + name
+            + "\" in "
+            + workspace_root
+            + ":\n  "
+            + paths[0]
+            + "\n  "
+            + paths[1]);
+    }
+    return valid;
+}
+
+// Merge source-workspace and bundled-workspace inventories by canonical name.
+// A source member is an explicit local override, even when it has
+// `implicit = false`; bundled members fill only names the source omits.
+fn merge_workspace_members(source: WorkspaceMember[], bundled: WorkspaceMember[]) -> WorkspaceMember[] {
+    let mut out: WorkspaceMember[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= source.length { break; }
+        out.push(source[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= bundled.length { break; }
+        let candidate = bundled[j];
+        j += 1;
+        if _cr_workspace_member_index(out, candidate.name) < 0 {
+            out.push(candidate);
+        }
+    }
+    return out;
+}
+
+// Select every manifest-declared implicit provider exactly once. Bundled
+// implicit names remain graph roots when a source workspace overrides them;
+// the source provider is selected and then audited under the source
+// workspace's normal capability envelope.
+fn select_workspace_implicit_members(source: WorkspaceMember[], bundled: WorkspaceMember[]) -> WorkspaceMember[] {
+    let mut names: string[] = [];
+    let mut si: int = 0;
+    loop {
+        if si >= source.length { break; }
+        if source[si].implicit && !_cr_str_in(names, source[si].name) {
+            names.push(source[si].name);
+        }
+        si += 1;
+    }
+    let mut bi: int = 0;
+    loop {
+        if bi >= bundled.length { break; }
+        if bundled[bi].implicit && !_cr_str_in(names, bundled[bi].name) {
+            names.push(bundled[bi].name);
+        }
+        bi += 1;
+    }
+    names = _cr_sort_strings(names);
+    let mut out: WorkspaceMember[] = [];
+    let mut ni: int = 0;
+    loop {
+        if ni >= names.length { break; }
+        let name = names[ni];
+        ni += 1;
+        let source_index = _cr_workspace_member_index(source, name);
+        if source_index >= 0 {
+            out.push(source[source_index]);
+            continue;
+        }
+        let bundled_index = _cr_workspace_member_index(bundled, name);
+        if bundled_index >= 0 { out.push(bundled[bundled_index]); }
     }
     return out;
 }
