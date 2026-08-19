@@ -1,0 +1,38 @@
+// compiler/tests/unit/pthread_extern_dedup_test.sfn
+//
+// Drift guard for SFN-645: `runtime/sfn/platform/pthread.sfn` is the single
+// declaration site for the `pthread_*` C-ABI extern surface, imported by
+// `scheduler.sfn` / `channel.sfn` / `nursery.sfn` rather than hand-copied.
+// The hazard the de-duplication closes is silent divergence — a signature
+// edit landing in one copy but not the others produces an ABI mismatch, not
+// a compile error (the #1265 shape). This test reads the four runtime
+// source files as text and asserts every `pthread_*` extern is declared in
+// exactly one of them; it FAILS the moment any consumer re-adds an inline
+// `extern fn pthread_*` declaration.
+import { index_of } from "../../src/string_utils";
+
+fn _declares(source: string, symbol: string) -> boolean {
+    return index_of(source, "extern fn " + symbol + "(") >= 0;
+}
+
+test "runtime: pthread_* externs are declared in exactly one module" ![io] {
+    let pthread = fs.readFile("runtime/sfn/platform/pthread.sfn");
+    let scheduler = fs.readFile("runtime/sfn/concurrency/scheduler.sfn");
+    let channel = fs.readFile("runtime/sfn/concurrency/channel.sfn");
+    let nursery = fs.readFile("runtime/sfn/concurrency/nursery.sfn");
+
+    let symbols = ["pthread_create", "pthread_join", "pthread_mutex_init", "pthread_mutex_lock", "pthread_mutex_unlock", "pthread_mutex_destroy", "pthread_cond_init", "pthread_cond_wait", "pthread_cond_signal", "pthread_cond_broadcast", "pthread_cond_destroy"];
+
+    for symbol in symbols {
+        let mut count = 0;
+        if _declares(pthread, symbol) { count = count + 1; }
+        if _declares(scheduler, symbol) { count = count + 1; }
+        if _declares(channel, symbol) { count = count + 1; }
+        if _declares(nursery, symbol) { count = count + 1; }
+
+        // Exactly one declaration site — `pthread.sfn`. If a consumer
+        // re-adds an inline copy, count rises to 2 and this fails.
+        assert count == 1;
+        assert _declares(pthread, symbol);
+    }
+}

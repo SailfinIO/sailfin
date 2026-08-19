@@ -49,9 +49,16 @@
 // `Nursery` is the single source of truth in
 // `runtime/sfn/platform/pthread_layout.sfn`, imported here rather than
 // hand-copied (a stale copy is the #1265 heap-corruption hazard this
-// de-duplication closes). The `pthread_mutex_*` externs below stay
-// re-declared inline per the SFN-635 precedent, referencing the imported
-// struct as an opaque pointee.
+// de-duplication closes). The `pthread_mutex_*` externs are imported from
+// the single declaration site in `pthread.sfn` rather than hand-copied
+// (SFN-645) — cross-module `extern fn` import already ships (`clock.sfn`
+// importing `posix.sfn`'s externs).
+import {
+    pthread_mutex_destroy,
+    pthread_mutex_init,
+    pthread_mutex_lock,
+    pthread_mutex_unlock
+} from "../platform/pthread";
 import { PthreadMutex } from "../platform/pthread_layout";
 
 // A nursery: the owner of the tasks spawned in a `routine` scope.
@@ -94,14 +101,6 @@ extern fn malloc(size: usize) -> *u8;
 extern fn free(ptr: *u8) -> void;
 
 extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
-
-extern fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32;
-
-extern fn pthread_mutex_lock(m: *PthreadMutex) -> i32;
-
-extern fn pthread_mutex_unlock(m: *PthreadMutex) -> i32;
-
-extern fn pthread_mutex_destroy(m: *PthreadMutex) -> i32;
 
 // The single-task join surface from the scheduler (#1089). The nursery
 // blocks on each registered task here; the result pointer is discarded

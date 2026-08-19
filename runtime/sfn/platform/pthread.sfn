@@ -9,12 +9,11 @@
 // same v0 C-ABI accept-list enforced by `check_extern_signature`
 // in `compiler/capsules/analyzer/src/typecheck_types/declaration_and_statement_checks.sfn` (E0801–E0805).
 //
-// Status: typecheck smoke test. Not imported anywhere yet; the
-// scheduler/channel implementation that consumes these lands at
-// M4 (`docs/proposals/0025-native-runtime-architecture.md`). Today this file
-// proves the extern pipeline handles pointer-to-pointer parameters
-// (`* * u8` for `pthread_join`'s result out-param) — a shape the
-// libc skeleton does not exercise.
+// Status: single declaration site, imported by `scheduler.sfn`,
+// `channel.sfn`, and `nursery.sfn` (SFN-645) — none re-declare the
+// extern surface inline anymore. This file proves the extern pipeline
+// handles pointer-to-pointer parameters (`* * u8` for `pthread_join`'s
+// result out-param) — a shape the libc skeleton does not exercise.
 //
 // Function-pointer parameters intentionally degraded to `* u8`.
 // The architect's design target spells `pthread_create`'s `start`
