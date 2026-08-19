@@ -3,15 +3,22 @@
 # budget (SFN-946: the Windows self-host gate never ran in run 32158358685
 # because the clang/llvm install step alone ran 90 minutes). This composite
 # bounds every attempt with `timeout`, retries with backoff, and asks apt
-# itself to retry transient fetch failures — the same shape already proven
-# for the mingw `.deb` fetch (#1402).
+# itself to retry transient fetch failures.
+#
+# Retry alone is not enough: it cannot help when the mirror is unreachable
+# for the whole retry window, and SFN-982 measured a ~21% failure rate on
+# apt-dependent jobs even after the bounding landed. The decisive fix is the
+# `.deb` cache below — a cache hit installs without contacting the mirror at
+# all, so mirror availability stops mattering for the steady state. That
+# shape was already proven for the mingw fetch (#1402) in `release-tag.yml`;
+# this composite is where it belongs, so every caller gets it.
 #
 # The default attempts/timeout-seconds keep the worst case
 # (attempts * 2 * timeout-seconds + backoff) inside the 20-minute
 # `timeout-minutes` every converted workflow step carries — raise one only
 # together with the other (SFN-946).
 name: apt-install
-description: Install apt packages with a bounded timeout and retry/backoff.
+description: Install apt packages with a bounded timeout, retry/backoff, and a .deb cache.
 
 inputs:
   packages:
@@ -29,22 +36,25 @@ inputs:
     description: Per-attempt timeout, in seconds, for both apt-get update and apt-get install.
     required: false
     default: "240"
+  cache:
+    description: Cache the downloaded .deb set so a later hit installs without the mirror.
+    required: false
+    default: "true"
 
 runs:
   using: composite
   steps:
-    - shell: bash
+    # Split from the install so the cache key is available to `actions/cache`
+    # as a step input. Also decides whether anything needs doing at all: when
+    # the runner image already ships every requested package, both the cache
+    # restore and the install are pure cost.
+    - id: plan
+      shell: bash
       env:
         PACKAGES: ${{ inputs.packages }}
-        ATTEMPTS: ${{ inputs.attempts }}
-        TIMEOUT: ${{ inputs.timeout-seconds }}
         NO_INSTALL_RECOMMENDS: ${{ inputs.no-install-recommends }}
       run: |
         set -euo pipefail
-        RECOMMENDS_FLAG=""
-        if [ "$NO_INSTALL_RECOMMENDS" = "true" ]; then
-          RECOMMENDS_FLAG="--no-install-recommends"
-        fi
 
         # The stall observed in SFN-971 happens inside `apt-get update`
         # itself; when the runner image already ships every requested
@@ -63,8 +73,85 @@ runs:
         done
         if [ "$all_installed" = "1" ]; then
           echo "[apt] all packages already installed, skipping: ${PACKAGES}"
+          echo "needed=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
+        echo "needed=true" >> "$GITHUB_OUTPUT"
+
+        # The key must change whenever the RESOLVED .deb set could change.
+        # Package order is not meaningful, so sort it — otherwise two callers
+        # requesting the same set in a different order miss each other's
+        # cache. The runner image identity is included because the resolved
+        # dependency closure is image-specific: reusing another image's .debs
+        # would install the wrong build of a transitive dependency.
+        pkg_key="$(printf '%s\n' $PACKAGES | LC_ALL=C sort | tr '\n' ' ')"
+        key_material="${pkg_key}|recommends=${NO_INSTALL_RECOMMENDS}|${RUNNER_OS:-}|${RUNNER_ARCH:-}|${ImageOS:-}|${ImageVersion:-}"
+        hash="$(printf '%s' "$key_material" | sha256sum | cut -c1-32)"
+        # Per-set directory, so two apt-install calls in one job cannot mix
+        # their .debs into a single `dpkg -i` glob.
+        echo "deb-dir=${HOME}/.cache/sfn-apt-debs/${hash}" >> "$GITHUB_OUTPUT"
+        echo "cache-key=sfn-apt-debs-v1-${hash}" >> "$GITHUB_OUTPUT"
+
+    - if: ${{ steps.plan.outputs.needed == 'true' && inputs.cache == 'true' }}
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.plan.outputs.deb-dir }}
+        key: ${{ steps.plan.outputs.cache-key }}
+
+    - if: ${{ steps.plan.outputs.needed == 'true' }}
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        ATTEMPTS: ${{ inputs.attempts }}
+        TIMEOUT: ${{ inputs.timeout-seconds }}
+        NO_INSTALL_RECOMMENDS: ${{ inputs.no-install-recommends }}
+        DEB_DIR: ${{ steps.plan.outputs.deb-dir }}
+        USE_CACHE: ${{ inputs.cache }}
+      run: |
+        set -euo pipefail
+        RECOMMENDS_FLAG=""
+        if [ "$NO_INSTALL_RECOMMENDS" = "true" ]; then
+          RECOMMENDS_FLAG="--no-install-recommends"
+        fi
+
+        # True once every requested package reports `installed`. The cached
+        # path is only allowed to short-circuit the network path if this
+        # holds afterwards — a partial `dpkg -i` must not read as success.
+        all_present() {
+          local pkg
+          for pkg in $PACKAGES; do
+            dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null \
+              | grep -qx 'installed' || return 1
+          done
+          return 0
+        }
+
+        # Fast path: install from previously cached .debs, contacting no
+        # mirror. Deliberately best-effort — any failure falls through to the
+        # bounded network path below, so the cache can only ever save time,
+        # never turn a working install into a broken one (SFN-982).
+        if [ "$USE_CACHE" = "true" ] \
+           && find "$DEB_DIR" -maxdepth 1 -type f -name '*.deb' -print -quit 2>/dev/null | grep -q .; then
+          deb_count="$(find "$DEB_DIR" -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d ' ')"
+          echo "[apt] cache hit: ${deb_count} .deb(s); installing without contacting the mirror"
+          sudo dpkg -i "$DEB_DIR"/*.deb >/dev/null 2>&1 \
+            || sudo timeout "$TIMEOUT" apt-get install -y -f >/dev/null 2>&1 \
+            || true
+          if all_present; then
+            echo "[apt] installed from cache: ${PACKAGES}"
+            exit 0
+          fi
+          echo "[apt] cached .debs did not satisfy every package; falling back to the mirror" >&2
+        fi
+
+        # Download into the cache directory rather than apt's default, so a
+        # successful install also populates the cache for the next run. This
+        # keeps `apt-get install` as the thing that actually installs —
+        # semantics are unchanged from before the cache existed.
+        # No chown here: apt runs under sudo and root can write into a
+        # runner-owned directory regardless, so forcing ownership would add a
+        # failure mode under `set -e` without buying anything.
+        mkdir -p "$DEB_DIR/partial"
 
         for attempt in $(seq 1 "$ATTEMPTS"); do
           if [ "$attempt" -gt 1 ]; then
@@ -81,8 +168,18 @@ runs:
           sudo timeout "$TIMEOUT" apt-get update -o Acquire::Retries=3 || \
             echo "[apt] update failed or timed out; continuing with existing package lists"
           if sudo timeout "$TIMEOUT" apt-get install -y -o Acquire::Retries=3 \
+               -o Dir::Cache::archives="$DEB_DIR" \
                $RECOMMENDS_FLAG $PACKAGES; then
-            break
+            # `partial` holds nothing reusable and `actions/cache` would
+            # otherwise archive it; the chown hands the tree back to the
+            # runner user so the cache save can read it.
+            # Caching is an optimization: never let its bookkeeping fail an
+            # install that already succeeded, so both steps tolerate failure.
+            # The chown hands root's freshly downloaded .debs back to the
+            # runner user so `actions/cache` can read them.
+            sudo rm -rf "$DEB_DIR/partial" || true
+            sudo chown -R "$(id -u):$(id -g)" "$DEB_DIR" || true
+            exit 0
           fi
           if [ "${attempt}" = "$ATTEMPTS" ]; then
             echo "[apt] install failed after ${ATTEMPTS} attempts: ${PACKAGES}" >&2
