@@ -9,7 +9,8 @@ fn _member(name: string, path: string, root: string, kind: string, prefix: strin
         member_path: path,
         src_dir: root,
         build_kind: kind,
-        module_prefix: prefix
+        module_prefix: prefix,
+        implicit: false
     };
 }
 

@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-18 (SFN-930, SFN-898). Seed pinned to `0.10.0` (`bootstrap.toml`
+Updated: 2026-08-18 (SFN-931, SFN-930, SFN-898). Seed pinned to `0.10.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -140,6 +140,17 @@ here.
   direct emit, relative traversal, runtime-object caching, and determinism all
   consume that identity, so a physical source-root move preserves symbols and
   cache keys while manifest identity changes invalidate them deliberately.
+- **Implicit workspace capsule graph** (SFN-931, SFEP-0072 §§3.3, 3.7 slice
+  2). Workspace libraries with `[build] implicit = true` enter the resolved
+  graph and final link exactly once; an ordinary dependency on the same
+  canonical provider deduplicates. Source-workspace members override bundled
+  providers by canonical name, duplicate providers and dependency cycles fail
+  deterministically, and overrides remain subject to the workspace
+  grant/deny envelope. Provider capability ceilings are validated locally,
+  while unused latent API effects do not widen the consumer's capabilities or
+  runtime demand. The current `sfn/prelude` shell remains dormant with
+  `implicit = false` and the honest `clock`/`io`/`net` ceiling; runtime
+  `prelude-entry` remains its sole link path until the later adoption slice.
 - **Build driver.** `<seed> build -p compiler` is the sole self-build driver
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the

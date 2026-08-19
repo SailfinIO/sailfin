@@ -10,6 +10,7 @@ import {
     source_role_selected_binary
 } from "../module_paths";
 import {
+    toml_get_build_implicit,
     toml_get_build_kind,
     toml_get_name,
     toml_get_prelude_entry,
@@ -101,7 +102,8 @@ fn source_identity_member_for_project(project_root: string) -> WorkspaceMember !
         member_path: "",
         src_dir: "",
         build_kind: "",
-        module_prefix: ""
+        module_prefix: "",
+        implicit: false
     };
     if project_root.length == 0 { return empty; }
     let manifest_path = _cr_path_join(project_root, "capsule.toml");
@@ -123,7 +125,8 @@ fn source_identity_member_for_project(project_root: string) -> WorkspaceMember !
         member_path: project_root,
         src_dir: source_root,
         build_kind: kind,
-        module_prefix: module_prefix
+        module_prefix: module_prefix,
+        implicit: toml_get_build_implicit(text)
     };
 }
 

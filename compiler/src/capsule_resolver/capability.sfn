@@ -5,13 +5,14 @@
 // audits each member's declared and inferred effects against it, and renders
 // the resulting diagnostics. Also owns workspace-inherited version resolution
 // and the lock-entry lookup that shares the same member-walk.
-import { inferred_public_effects } from "sfn/analyzer/effect_checker";
+import { inferred_public_effects, validate_capsule_capabilities } from "sfn/analyzer/effect_checker";
 import { empty_import_symbols } from "sfn/analyzer/effect_imports";
 import { effect_subsumes, is_canonical_effect } from "sfn/analyzer/effect_taxonomy";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
 
 import { _collect_sfn_files_cmd } from "../build/fs";
+import { capability_violation_to_diagnostic, split_source_lines } from "../diagnostics_render";
 import { _LockEntry } from "../lock";
 import { render_terminal_diagnostic } from "../terminal_output";
 import {
@@ -25,6 +26,7 @@ import {
     toml_value_is_workspace_inherit
 } from "../toml_parser";
 import {
+    _cr_dirname,
     _cr_path_join,
     _cr_sort_strings,
     _cr_string_array_contains,
@@ -32,6 +34,41 @@ import {
 } from "./paths";
 import { CapabilityDriftReport, MemberCapabilityAudit, WorkspaceMember } from "./types";
 import { load_workspace_members } from "./workspace";
+
+// Validate a selected implicit provider against its own capsule capability
+// ceiling without adding that ceiling to the consumer's capability surface.
+// This runs before cache lookup/compilation so a cached provider cannot bypass
+// E0403 and an unused latent API never widens the consumer.
+fn workspace_member_capability_gate(member: WorkspaceMember) -> int ![io] {
+    let manifest = _cr_path_join(_cr_dirname(member.src_dir), "capsule.toml");
+    if !fs.exists(manifest) { return 0; }
+    let required = toml_get_capabilities_required(fs.readFile(manifest));
+    let files = _collect_sfn_files_cmd(member.src_dir, 64);
+    let mut errors: int = 0;
+    let mut fi: int = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        fi += 1;
+        if !fs.exists(path) { continue; }
+        let source = fs.readFile(path);
+        let program = parse_program(source);
+        let violations = validate_capsule_capabilities(program, required);
+        let lines = split_source_lines(source);
+        let mut vi: int = 0;
+        loop {
+            if vi >= violations.length { break; }
+            let mut violation = violations[vi];
+            violation.severity = "error";
+            let mut diagnostic = capability_violation_to_diagnostic(violation);
+            diagnostic.file_path = path;
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(diagnostic, "effect"), lines, "effect"));
+            errors += 1;
+            vi += 1;
+        }
+    }
+    return errors;
+}
 
 // SFEP-0051 Phase 4a — capability-envelope audit (declared surface).
 //

@@ -14,10 +14,23 @@ import {
     _cr_filter_excluded,
     _cr_is_safe_member_path,
     _cr_select_default_member_paths,
-    parse_workspace_member_paths
+    merge_workspace_members,
+    parse_workspace_member_paths,
+    select_workspace_implicit_members
 } from "../../src/capsule_resolver/workspace";
 
 fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+fn _workspace_member(name: string, path: string, implicit: boolean) -> WorkspaceMember {
+    return WorkspaceMember {
+        name: name,
+        member_path: path,
+        src_dir: "/workspace/" + path + "/src",
+        build_kind: "library",
+        module_prefix: "",
+        implicit: implicit
+    };
+}
 
 // ---- parse_workspace_member_paths ----
 test "workspace: empty member list parses to empty array" {
@@ -60,10 +73,10 @@ test "workspace: trailing newline does not add empty entry" {
 test "workspace: spec lookup returns matching member src_dir" {
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: ""
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: "", implicit: false
     });
     members.push(WorkspaceMember {
-        name: "sfn/test", member_path: "capsules/sfn/test", src_dir: "/repo/capsules/sfn/test/src", build_kind: "library", module_prefix: ""
+        name: "sfn/test", member_path: "capsules/sfn/test", src_dir: "/repo/capsules/sfn/test/src", build_kind: "library", module_prefix: "", implicit: false
     });
     assert _str_eq(workspace_member_for_spec(members, "sfn/http"), "/repo/capsules/sfn/http/src");
     assert _str_eq(workspace_member_for_spec(members, "sfn/test"), "/repo/capsules/sfn/test/src");
@@ -72,7 +85,7 @@ test "workspace: spec lookup returns matching member src_dir" {
 test "workspace: spec lookup returns empty when missing" {
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: ""
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: "", implicit: false
     });
     assert _str_eq(workspace_member_for_spec(members, "sfn/missing"), "");
     assert _str_eq(workspace_member_for_spec(members, ""), "");
@@ -81,7 +94,7 @@ test "workspace: spec lookup returns empty when missing" {
 test "workspace: spec lookup is exact match (sfn/http != http)" {
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: ""
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src", build_kind: "library", module_prefix: "", implicit: false
     });
     // Bare names must NOT match a scoped member — the resolver walks the
     // import surface in scoped form ("sfn/http") and the workspace file is
@@ -240,10 +253,10 @@ test "workspace: default-members entry that is not a member is ignored" {
 test "workspace: a declared member resolves to its local path" {
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src", build_kind: "library", module_prefix: ""
+        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src", build_kind: "library", module_prefix: "", implicit: false
     });
     members.push(WorkspaceMember {
-        name: "priv/base", member_path: "capsules/priv/base", src_dir: "/ws/capsules/priv/base/src", build_kind: "library", module_prefix: ""
+        name: "priv/base", member_path: "capsules/priv/base", src_dir: "/ws/capsules/priv/base/src", build_kind: "library", module_prefix: "", implicit: false
     });
     assert _str_eq(workspace_member_for_spec(members, "priv/lib"), "/ws/capsules/priv/lib/src");
     assert _str_eq(workspace_member_for_spec(members, "priv/base"), "/ws/capsules/priv/base/src");
@@ -254,7 +267,42 @@ test "workspace: an undeclared spec has no local member to resolve" {
     // undeclared spec falls through, where the provenance gate applies.
     let mut members: WorkspaceMember[] = [];
     members.push(WorkspaceMember {
-        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src", build_kind: "library", module_prefix: ""
+        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src", build_kind: "library", module_prefix: "", implicit: false
     });
     assert _str_eq(workspace_member_for_spec(members, "priv/absent"), "");
+}
+
+test "workspace implicit: false members are not selected" {
+    let source = [_workspace_member("demo/source", "source", false)];
+    let selected = select_workspace_implicit_members(source, []);
+    assert selected.length == 0;
+}
+
+test "workspace implicit: bundled true member is selected" {
+    let bundled = [_workspace_member("demo/provider", "bundled/provider", true)];
+    let selected = select_workspace_implicit_members([], bundled);
+    assert selected.length == 1;
+    assert _str_eq(selected[0].name, "demo/provider");
+    assert selected[0].implicit;
+}
+
+test "workspace implicit: source member overrides bundled provider by canonical name" {
+    let source = [_workspace_member("demo/provider", "local/provider", false)];
+    let bundled = [_workspace_member("demo/provider", "bundled/provider", true)];
+    let merged = merge_workspace_members(source, bundled);
+    let selected = select_workspace_implicit_members(source, bundled);
+    assert merged.length == 1;
+    assert selected.length == 1;
+    assert _str_eq(merged[0].member_path, "local/provider");
+    assert _str_eq(selected[0].member_path, "local/provider");
+    assert ! selected[0].implicit;
+}
+
+test "workspace implicit: selected providers are canonical-name ordered" {
+    let source = [_workspace_member("demo/z", "z", true)];
+    let bundled = [_workspace_member("demo/a", "a", true)];
+    let selected = select_workspace_implicit_members(source, bundled);
+    assert selected.length == 2;
+    assert _str_eq(selected[0].name, "demo/a");
+    assert _str_eq(selected[1].name, "demo/z");
 }

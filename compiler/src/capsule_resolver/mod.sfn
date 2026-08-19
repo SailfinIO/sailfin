@@ -319,6 +319,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         // `_cr_resolve_and_dedupe`), not a "no deps" build.
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
+            entry_import_asm_paths: empty_paths,
             success: false,
             stats: empty_cache_stats(),
             module_events: empty_events,
@@ -348,6 +349,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         // here is success, not a compile failure.
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
+            entry_import_asm_paths: empty_paths,
             success: true,
             stats: empty_cache_stats(),
             module_events: empty_events,
@@ -411,6 +413,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
+            entry_import_asm_paths: empty_paths,
             success: false,
             stats: empty_cache_stats(),
             module_events: empty_events,
@@ -461,6 +464,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
                     + entry_path);
                 return ProjectCapsuleResult {
                     ll_paths: empty_paths,
+                    entry_import_asm_paths: empty_paths,
                     success: false,
                     stats: empty_cache_stats(),
                     module_events: empty_events,
@@ -472,6 +476,23 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         }
     }
 
+    // The entry is lowered by the build/run driver rather than by
+    // `compile_capsule_modules`. Derive its direct-import effect artifacts
+    // from the same resolved slug universe so that consumer effect checking
+    // has parity with the capsule-module and `sfn check` paths.
+    let mut entry_import_asm_paths: string[] = [];
+    if entry_paths.length > 0 && fs.exists(entry_paths[0]) {
+        let mut entry_sources: CapsuleSource[] = [];
+        entry_sources.push(CapsuleSource {
+            spec: "", source_path: entry_paths[0], slug: module_name_for_source(entry_paths[0]), ll_path: "", origin: capsule_origin_local()
+        });
+        let entry_dep_slugs = _cr_collect_per_source_dep_slugs(entry_sources, resolved.sources);
+        let entry_dep_manifests = _cr_dep_manifest_paths_for_slugs(entry_dep_slugs, work_dir);
+        if entry_dep_manifests.length > 0 {
+            entry_import_asm_paths = _cr_manifests_to_asm_paths(entry_dep_manifests[0]);
+        }
+    }
+
     let result = compile_capsule_modules(resolved.sources, slug_universe_extra, config, effective_exe, work_dir);
     if !result.success {
         // A per-module emit failed (e.g. an effect-gate `E0402`).
@@ -480,6 +501,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         // surviving modules.
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
+            entry_import_asm_paths: empty_paths,
             success: false,
             stats: result.stats,
             module_events: result.module_events,
@@ -489,6 +511,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     }
     return ProjectCapsuleResult {
         ll_paths: result.ll_paths,
+        entry_import_asm_paths: entry_import_asm_paths,
         success: true,
         stats: result.stats,
         module_events: result.module_events,
