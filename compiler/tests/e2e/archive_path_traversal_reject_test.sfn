@@ -1,0 +1,87 @@
+// compiler/tests/e2e/archive_path_traversal_reject_test.sfn
+//
+// The §3.6 path guard under a real, hand-crafted malicious archive. The
+// fixture is built with the HOST `tar` (via `--transform`, which lets a
+// creator embed a `..`-shaped member name that GNU tar itself refuses at
+// *extraction* time but not at *creation* time) — `sfn/archive` carries no
+// writer yet (SFN-899), so a real external tool is how a hostile-shaped
+// archive gets built for this test, the same oracle role `tar` already
+// plays in `sfn_package_test.sfn:89` and
+// `build_hash_matches_sha256sum_test.sfn:87`.
+//
+// The acceptance property under test is stronger than "the call errored":
+// after `targz_extract` rejects the archive, the SIBLING directory the
+// `..`-shaped member would have escaped into must be untouched — "it
+// errored" and "it wrote nothing outside dest_dir" are different claims,
+// and only the second is the security property SFEP-0071 §3.6 exists for.
+import { ExtractOptions, targz_extract } from "sfn/archive";
+import { tool_present } from "sfn/test";
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+test "archive path traversal: a hand-crafted ../-escaping member is rejected and writes nothing outside dest_dir" ![io] {
+    if !tool_present("tar") {
+        assert true;
+        return;
+    }
+
+    let root = _scratch_dir() + "/archive-traversal-escape";
+    fs.createDirectory(root, true);
+    let src = root + "/src";
+    fs.createDirectory(src, true);
+    fs.writeFile(src + "/evil.txt", "pwned");
+
+    let tarball = root + "/mal.tar.gz";
+    let build_exit = process.run_capture(["tar", "-czf", tarball, "--transform", "s,^,../,", "-C", src, "evil.txt"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if build_exit != 0 {
+        // A host `tar` too old/unusual to honor `--transform` can't build
+        // this fixture; degrade like the other `tool_present` gates rather
+        // than fail on an environment limitation unrelated to the guard.
+        assert true;
+        return;
+    }
+
+    let dest_dir = root + "/dest";
+    fs.createDirectory(dest_dir, true);
+    let opts = ExtractOptions {
+        copy_instead_of_link: false,
+        apply_modes: true,
+        max_total_bytes: 1073741824,
+        max_members: 65536,
+        host_is_windows: false
+    };
+    let result = targz_extract(tarball, dest_dir, opts);
+    match result {
+        Result.Ok { value }
+        : {
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert true;
+        }
+    }
+
+    // The member's stored name is `../evil.txt`; joined against `dest_dir`
+    // that is `root + "/evil.txt"` — the sibling directory (`root` itself,
+    // one level above `dest_dir`) must not contain it.
+    assert ! fs.exists(root + "/evil.txt");
+    let dest_listing = fs.listDirectory(dest_dir);
+    assert dest_listing.length == 0;
+}

@@ -291,13 +291,29 @@ annotation is needed.
 ## Organizing into a Project
 
 Once your program grows beyond a single file, organize it as a capsule (Sailfin's
-package format). Create a `capsule.toml` in the root of your project:
+package format). The CLI can scaffold the manifest and starter source for you:
+
+```bash
+mkdir my-app
+cd my-app
+sfn init
+sfn run
+```
+
+The generated `capsule.toml` has this structure:
 
 ```toml
 [capsule]
 name    = "my-app"
 version = "0.1.0"
-entry   = "src/main.sfn"
+
+[dependencies]
+
+[capabilities]
+required = []
+
+[build]
+entry = "src/main.sfn"
 ```
 
 A typical project layout:
@@ -312,9 +328,10 @@ my-app/
     greet_test.sfn
 ```
 
-With a `capsule.toml` present, running `sfn run` from the project root uses the
-`entry` field to find the entry point, and `sfn test` discovers all `*_test.sfn`
-files recursively.
+With a `capsule.toml` present, `sfn run` and `sfn build` from the project root
+use `[build].entry` to find the program, and `sfn test` discovers all
+`*_test.sfn` files recursively. You can still run an individual source file
+with `sfn run path/to/file.sfn`.
 
 You can import from other source files within the same capsule using import
 statements at the top of a file:

@@ -19,6 +19,7 @@
 // `SAILFIN_TOOLCHAIN` knob are the sibling leaf SFN-172, out of scope
 // here.
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
+import { ExtractOptions, targz_extract } from "sfn/archive";
 import {
     Command,
     Matches,
@@ -30,7 +31,6 @@ import {
     with_subcommand
 } from "sfn/cli";
 import { ed25519_verify_utf8 } from "sfn/crypto";
-import { int_to_string } from "sfn/strings";
 
 import {
     _copy_file,
@@ -590,15 +590,32 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     // 6. Verified — extract and lay out the store entry. The `.sha256`
     //    marker is written LAST so a store dir without it reads as an
     //    incomplete install on the next run.
+    // Extraction runs with the user's privileges over network-fetched
+    // bytes, so the path policy (SFEP-0071 §3.6) is not optional and a
+    // rejection aborts the install rather than skipping a member.
     let extract_dir = tmp + "/extract";
     ensure_dir_p(extract_dir);
-    let tar_rc = process.run(["tar", "-xzf", tarball, "-C", extract_dir]);
-    if tar_rc != 0 {
-        print("error: failed to extract " + asset + " (tar exit "
-            + int_to_string(tar_rc)
-            + ")");
-        remove_tree(tmp);
-        return 1;
+    let extract_opts = ExtractOptions {
+        copy_instead_of_link: host_is_windows(),
+        apply_modes: true,
+        max_total_bytes: 1073741824,
+        max_members: 65536,
+        host_is_windows: host_is_windows()
+    };
+    let extracted = targz_extract(tarball, extract_dir, extract_opts);
+    match extracted {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            print("error [E0615]: failed to extract " + asset);
+            print("  " + error.message);
+            if error.member.length > 0 {
+                print("  member: " + error.member);
+            }
+            remove_tree(tmp);
+            return 1;
+        }
     }
     let root = _find_extracted_root(extract_dir);
     if root.length == 0 {

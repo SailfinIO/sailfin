@@ -1,0 +1,116 @@
+// sfn/archive — the §3.6 extraction path policy rejection table.
+//
+// Pure: `archive_check_member_path` makes no filesystem call, so every case
+// below runs with no `![io]` at all — this is the whole point of keeping
+// the guard in its own module (SFEP-0071 §3.6).
+import { archive_check_member_path } from "../src/path_guard";
+
+fn _accepted(name: string, host_is_windows: boolean, expected: string) -> boolean {
+    let result = archive_check_member_path(name, host_is_windows);
+    match result {
+        Result.Ok { value }
+        : {
+            return value == expected;
+        },
+        Result.Err { error }
+        : {
+            return false;
+        }
+    }
+}
+
+fn _rejected(name: string, host_is_windows: boolean) -> boolean {
+    let result = archive_check_member_path(name, host_is_windows);
+    match result {
+        Result.Ok { value }
+        : {
+            return false;
+        },
+        Result.Err { error }
+        : {
+            return true;
+        }
+    }
+}
+
+test "archive path_guard: accepts an ordinary relative name" {
+    assert _accepted("a/b/c.txt", false, "a/b/c.txt");
+}
+
+test "archive path_guard: normalizes a./b to a/b (dot components dropped)" {
+    assert _accepted("a/./b", false, "a/b");
+}
+
+test "archive path_guard: accepts a trailing slash as a directory-shaped name" {
+    assert _accepted("a/b/", false, "a/b");
+}
+
+test "archive path_guard: rejects an absolute POSIX path" {
+    assert _rejected("/etc/passwd", false);
+}
+
+test "archive path_guard: rejects a leading .." {
+    assert _rejected("../x", false);
+}
+
+test "archive path_guard: rejects an embedded .. component" {
+    assert _rejected("a/../../x", false);
+}
+
+test "archive path_guard: rejects a Windows drive-letter prefix on every host" {
+    assert _rejected("C:\\x", false);
+    assert _rejected("C:\\x", true);
+}
+
+test "archive path_guard: rejects a bare drive-letter prefix with no backslash" {
+    assert _rejected("c:x", false);
+    assert _rejected("c:x", true);
+}
+
+test "archive path_guard: rejects a UNC-shaped path on every host" {
+    assert _rejected("\\\\server\\share\\x", false);
+    assert _rejected("\\\\server\\share\\x", true);
+}
+
+test "archive path_guard: rejects a backslash-disguised traversal on every host" {
+    // `a\..\..\x` is one component under a POSIX-only `/` split — it must
+    // be caught by the backslash rule, not silently accepted because it
+    // has no `/`-delimited `..` component (SFEP-0071 §3.6 rule 4).
+    assert _rejected("a\\..\\..\\x", false);
+    assert _rejected("a\\..\\..\\x", true);
+}
+
+test "archive path_guard: rejects a name over 4096 bytes" {
+    let mut long_name: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 4097 { break; }
+        long_name = long_name + "a";
+        i += 1;
+    }
+    assert _rejected(long_name, false);
+}
+
+test "archive path_guard: rejects an empty name" {
+    assert _rejected("", false);
+}
+
+test "archive path_guard: Windows reserved device names rejected only under the Windows flag" {
+    assert _rejected("CON", true);
+    assert _rejected("com1.txt", true);
+    assert _rejected("a/NUL/b", true);
+    assert _accepted("CON", false, "CON");
+    assert _accepted("com1.txt", false, "com1.txt");
+}
+
+test "archive path_guard: a symlink target of /etc is rejected" {
+    assert _rejected("/etc", false);
+}
+
+test "archive path_guard: a symlink target of ../.. is rejected" {
+    assert _rejected("../..", false);
+}
+
+test "archive path_guard: an empty symlink target is rejected" {
+    assert _rejected("", false);
+}

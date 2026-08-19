@@ -46,3 +46,17 @@ export { inflate_all } from "./inflate";
 // (`DeflateStrategy.Dynamic` is parsed but rejected with `UnsupportedFeature`
 // today).
 export { DeflateOptions, DeflateStrategy, deflate_all } from "./deflate";
+
+// POSIX.1-1988 / GNU ustar header decode. Pure — one 512-byte block at a
+// time; `tar_read.sfn` glues GNU `L`/`K` and PAX `x`/`g` extensions across
+// blocks (SFEP-0071 §3.8).
+export { UstarHeader, ustar_decode_header } from "./ustar";
+
+// The mandatory extraction path policy (SFEP-0071 §3.6). Pure — no
+// filesystem call, so the whole rejection table is a unit test.
+export { archive_check_beneath, archive_check_member_path } from "./path_guard";
+
+// The extractor: gzip -> inflate -> ustar -> path_guard -> filesystem
+// write, `![io]` (SFEP-0071 §3.4). `toolchain.sfn`'s `tar -xzf` cutover is
+// this export's first and only consumer today.
+export { ExtractOptions, ExtractSummary, targz_extract } from "./tar_read";

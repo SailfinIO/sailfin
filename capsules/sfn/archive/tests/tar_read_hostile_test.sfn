@@ -1,0 +1,343 @@
+// capsules/sfn/archive/tests/tar_read_hostile_test.sfn
+//
+// Hostile PAX/GNU-longname regression tests (SFN-898, SFEP-0071 §3.6,
+// §3.8). `_tr_pax_parse_decimal` used to accumulate `value = value*10 +
+// digit` with no ceiling, so a PAX extended header carrying
+// `size=9223372036854775807` produced an `int` that wrapped every
+// downstream additive bounds check in `_tr_extract_members` negative,
+// reaching `fwrite` with a ~2^63 byte count — an out-of-bounds heap read.
+// The fix bounds the parse by a caller-supplied `limit` and returns -1 on
+// overflow; the PAX `size` record is now bounded by `buf.len` and rejected
+// as `CorruptStream`.
+//
+// Nothing else in this capsule glued a PAX or GNU longname override
+// through `targz_extract` end to end — exactly where the bug lived, since
+// both overrides are applied to `pending_name`/`pending_size` BEFORE the
+// path guard and bounds checks run (`tar_read.sfn:653-661`). These tests
+// hand-build a real ustar+PAX/`L` byte stream, gzip it with this capsule's
+// own writer (SFN-897), and drive it through the public `targz_extract` —
+// `_tr_read_pax_body` is module-private, so there is no lower-level seam
+// to test this from. Checksums are patched for real, matching
+// `ustar_test.sfn`'s fixture discipline: a wrong checksum is rejected
+// before any of this logic runs.
+import { char_code_at } from "sfn/strings";
+
+import {
+    ByteBuf,
+    ByteCursor,
+    bytes_cursor,
+    bytes_free,
+    bytes_from_int_array
+} from "../src/bytes";
+import { DeflateOptions, DeflateStrategy } from "../src/deflate";
+import { ArchiveErrorKind } from "../src/error";
+import { gzip_write_all } from "../src/gzip";
+import { ExtractOptions, targz_extract } from "../src/tar_read";
+
+// libc file I/O, redeclared per-module per the #306 cross-module extern
+// limit (matching `tar_read.sfn:50-56`) — this test needs to land raw,
+// possibly-NUL-containing gzip bytes on disk, which a `string`-typed
+// `fs.writeFile` cannot carry intact.
+extern fn fopen(path: *u8, mode: *u8) -> *File;
+
+extern fn fclose(f: *File) -> i32;
+
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+let _OFF_NAME: int = 0;
+let _OFF_MODE: int = 100;
+let _OFF_SIZE: int = 124;
+let _OFF_CHKSUM: int = 148;
+let _OFF_TYPEFLAG: int = 156;
+let _OFF_MAGIC: int = 257;
+let _OFF_VERSION: int = 263;
+
+let _TYPE_REGULAR: int = 48;  // '0'
+let _TYPE_GNU_LONGNAME: int = 76;  // 'L'
+let _TYPE_PAX_EXTENDED: int = 120;  // 'x'
+
+fn _zeros(n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push(0);
+        i += 1;
+    }
+    return out;
+}
+
+fn _set_ascii(block: int[], offset: int, text: string) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        block[offset + i] = char_code_at(text, i);
+        i += 1;
+    }
+}
+
+fn _set_octal(block: int[], offset: int, width: int, value: int) -> void {
+    // Zero-padded octal digits filling `width - 1` bytes, then a trailing
+    // NUL — the common ustar numeric-field shape (`ustar_test.sfn`).
+    let digits: int = width - 1;
+    let mut v: int = value;
+    let mut i: int = digits - 1;
+    loop {
+        if i < 0 { break; }
+        block[offset + i] = 48 + (v % 8);
+        v = v / 8;
+        i -= 1;
+    }
+    block[offset + digits] = 0;
+}
+
+// Sum the unsigned byte values, treating the checksum field as eight ASCII
+// spaces, and patch it in — computed independently of `ustar.sfn`'s own
+// verification, matching `ustar_test.sfn:64-84`.
+fn _patch_checksum(block: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i < 8 { block[_OFF_CHKSUM + i] = 32; }
+        i += 1;
+        if i >= 8 { break; }
+    }
+    let mut sum: int = 0;
+    let mut j: int = 0;
+    loop {
+        if j >= 512 { break; }
+        sum += block[j];
+        j += 1;
+    }
+    _set_octal(block, _OFF_CHKSUM, 8, sum);
+}
+
+// A checksummed 512-byte ustar header block for any typeflag — the PAX
+// extended header, the GNU longname header, and the regular-file member
+// that follows each all share this one shape.
+fn _header_block(name: string, typeflag: int, size: int) -> int[] {
+    let mut block: int[] = _zeros(512);
+    _set_ascii(block, _OFF_NAME, name);
+    _set_octal(block, _OFF_MODE, 8, 420);
+    _set_octal(block, _OFF_SIZE, 12, size);
+    block[_OFF_TYPEFLAG] = typeflag;
+    _set_ascii(block, _OFF_MAGIC, "ustar");
+    block[_OFF_MAGIC + 5] = 0;
+    _set_ascii(block, _OFF_VERSION, "00");
+    _patch_checksum(block);
+    return block;
+}
+
+fn _push_all(dst: int[], src: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        dst.push(src[i]);
+        i += 1;
+    }
+}
+
+fn _ascii_bytes(text: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        out.push(char_code_at(text, i));
+        i += 1;
+    }
+    return out;
+}
+
+// `payload` followed by zero padding up to the next 512-byte boundary,
+// matching `tar_read.sfn::_tr_padded_len`'s framing so the reader's `pos`
+// advance lands exactly on the next header block.
+fn _padded_body(payload: int[]) -> int[] {
+    let mut out: int[] = [];
+    _push_all(out, payload);
+    let padded_len: int = ((payload.length + 511) / 512) * 512;
+    let mut i: int = payload.length;
+    loop {
+        if i >= padded_len { break; }
+        out.push(0);
+        i += 1;
+    }
+    return out;
+}
+
+// A PAX extended header block plus its padded body, immediately followed
+// by one small regular-file member and the two end-of-archive zero
+// blocks — the minimal shape that puts a PAX override in front of a real
+// member.
+fn _pax_archive(pax_record: string) -> int[] {
+    let pax_body: int[] = _ascii_bytes(pax_record);
+    let mut out: int[] = [];
+    _push_all(out, _header_block("PaxHeader/hostile", _TYPE_PAX_EXTENDED, pax_body.length));
+    _push_all(out, _padded_body(pax_body));
+
+    let member_body: int[] = _ascii_bytes("hi");
+    _push_all(out, _header_block("safe.txt", _TYPE_REGULAR, member_body.length));
+    _push_all(out, _padded_body(member_body));
+
+    _push_all(out, _zeros(512));
+    _push_all(out, _zeros(512));
+    return out;
+}
+
+// A GNU longname header block plus its NUL-terminated padded body,
+// immediately followed by one small regular-file member and the two
+// end-of-archive zero blocks.
+fn _gnu_longname_archive(long_name: string) -> int[] {
+    let name_bytes: int[] = _ascii_bytes(long_name);
+    name_bytes.push(0);  // GNU longname bodies are NUL-terminated.
+    let mut out: int[] = [];
+    _push_all(out, _header_block("", _TYPE_GNU_LONGNAME, name_bytes.length));
+    _push_all(out, _padded_body(name_bytes));
+
+    let member_body: int[] = _ascii_bytes("hi");
+    _push_all(out, _header_block("safe.txt", _TYPE_REGULAR, member_body.length));
+    _push_all(out, _padded_body(member_body));
+
+    _push_all(out, _zeros(512));
+    _push_all(out, _zeros(512));
+    return out;
+}
+
+fn _write_bytes_to_file(path: string, buf: ByteBuf) -> void ![io] {
+    let write_mode: string = "wb";
+    let f: *File = fopen(path as *u8, write_mode as *u8);
+    assert(f as i64) != 0;
+    if buf.len > 0 {
+        fwrite(buf.addr as *u8, 1 as usize, buf.len as usize, f);
+    }
+    fclose(f);
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// gzip `raw_tar` with this capsule's own writer (SFN-897) and land it on
+// disk under `subdir` — `targz_extract` takes a file path, not a buffer.
+fn _write_targz_fixture(raw_tar: int[], subdir: string) -> string ![io] {
+    let root: string = _scratch_dir() + "/" + subdir;
+    fs.createDirectory(root, true);
+    let path: string = root + "/fixture.tar.gz";
+
+    let built = bytes_from_int_array(raw_tar);
+    match built {
+        Result.Ok { value }
+        : {
+            let cursor: ByteCursor = bytes_cursor(value);
+            let opts = DeflateOptions { strategy: DeflateStrategy.Fixed };
+            let written = gzip_write_all(cursor, opts);
+            bytes_free(value);
+            match written {
+                Result.Ok { value }
+                : {
+                    _write_bytes_to_file(path, value);
+                    bytes_free(value);
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+    return path;
+}
+
+fn _default_extract_opts() -> ExtractOptions {
+    return ExtractOptions {
+        copy_instead_of_link: false,
+        apply_modes: true,
+        max_total_bytes: 1073741824,
+        max_members: 65536,
+        host_is_windows: false
+    };
+}
+
+test "archive tar_read: a PAX size record larger than the stream is rejected" ![io] {
+    // "28 size=9223372036854775807\n" — the leading "28" is this record's
+    // own total length (digits + space + "size=9223372036854775807" (24
+    // bytes) + newline = 2 + 1 + 24 + 1 = 28), the PAX record framing
+    // `_tr_read_pax_body` expects.
+    let raw_tar: int[] = _pax_archive("28 size=9223372036854775807\n");
+    let root: string = _scratch_dir() + "/tar-hostile-pax-size";
+    let archive_path: string = _write_targz_fixture(raw_tar, "tar-hostile-pax-size");
+    let dest_dir: string = root + "/dest";
+    fs.createDirectory(dest_dir, true);
+
+    let result = targz_extract(archive_path, dest_dir, _default_extract_opts());
+    match result {
+        Result.Ok { value }
+        : {
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.CorruptStream;
+        }
+    }
+
+    // "it errored" and "it wrote nothing" are different claims — only the
+    // second is the security property the ceiling exists for.
+    let listing: string[] = fs.listDirectory(dest_dir);
+    assert listing.length == 0;
+}
+
+test "archive tar_read: a PAX path override escaping dest_dir is rejected" ![io] {
+    // "18 path=../escape\n" — digits(2) + space(1) + "path=../escape"(14) +
+    // newline(1) = 18. The following member's own header name is
+    // innocuous ("safe.txt"); this proves the PAX override is applied
+    // BEFORE the path guard, not after.
+    let raw_tar: int[] = _pax_archive("18 path=../escape\n");
+    let root: string = _scratch_dir() + "/tar-hostile-pax-path";
+    let archive_path: string = _write_targz_fixture(raw_tar, "tar-hostile-pax-path");
+    let dest_dir: string = root + "/dest";
+    fs.createDirectory(dest_dir, true);
+
+    let result = targz_extract(archive_path, dest_dir, _default_extract_opts());
+    match result {
+        Result.Ok { value }
+        : {
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.PathRejected;
+        }
+    }
+
+    // The override's joined path is `dest_dir/../escape` — one level
+    // above `dest_dir`, inside `root` — and must not exist.
+    assert ! fs.exists(root + "/escape");
+}
+
+test "archive tar_read: a GNU longname escaping dest_dir is rejected" ![io] {
+    let raw_tar: int[] = _gnu_longname_archive("../escape");
+    let root: string = _scratch_dir() + "/tar-hostile-gnu-longname";
+    let archive_path: string = _write_targz_fixture(raw_tar, "tar-hostile-gnu-longname");
+    let dest_dir: string = root + "/dest";
+    fs.createDirectory(dest_dir, true);
+
+    let result = targz_extract(archive_path, dest_dir, _default_extract_opts());
+    match result {
+        Result.Ok { value }
+        : {
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.PathRejected;
+        }
+    }
+
+    assert ! fs.exists(root + "/escape");
+}

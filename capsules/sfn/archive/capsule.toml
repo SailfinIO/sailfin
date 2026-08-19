@@ -4,6 +4,15 @@ version = "0.4.0"
 description = "In-process .tar.gz reading and writing for Sailfin"
 
 [dependencies]
+# `ascii_lowercase` (Windows reserved-device-name comparison, case-folded),
+# `char_code_at` (embedded-NUL detection), and `substring` back
+# `src/path_guard.sfn` — the capsule's only `sfn/strings` consumer.
+# `src/ustar.sfn` parses its octal numeric fields by hand and imports
+# nothing from here. Precedent: `sfn/crypto` depends on
+# `sfn/strings` the same way (`capsules/sfn/crypto/capsule.toml`), and the
+# compiler already depends on both, so this introduces no new name-collision
+# surface (SFN-893).
+"sfn/strings" = "*"
 
 [capabilities]
 # The pure layers — bytes, crc32, inflate, deflate, ustar framing, and the

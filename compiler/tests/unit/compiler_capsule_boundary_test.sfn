@@ -96,7 +96,8 @@ fn _role_from_internal_spec(spec: string) -> string {
     if spec == "sfn/compiler" || starts_with(spec, "sfn/compiler/") {
         return ROLE_DRIVER;
     }
-    if _spec_is_capsule(spec, "sfn/bench") || _spec_is_capsule(spec, "sfn/cli")
+    if _spec_is_capsule(spec, "sfn/archive") || _spec_is_capsule(spec, "sfn/bench")
+        || _spec_is_capsule(spec, "sfn/cli")
         || _spec_is_capsule(spec, "sfn/device")
         || _spec_is_capsule(spec, "sfn/fs")
         || _spec_is_capsule(spec, "sfn/http")
