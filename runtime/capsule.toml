@@ -67,6 +67,7 @@ sfn-sources = [
     "sfn/platform/tls.sfn",
     "sfn/platform/tls_record.sfn",
     "sfn/platform/pthread_layout.sfn",
+    "sfn/platform/pthread.sfn",
     "sfn/platform/rand.sfn",
     "sfn/platform/fs_exec_mode.sfn",
     "sfn/platform/fd_io.sfn",
