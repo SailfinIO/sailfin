@@ -3,6 +3,8 @@
 // Provides SHA-256 and SHA-512 hashing (data integrity, checksums,
 // content-addressable storage), base64 encode/decode, and Ed25519 signing and
 // verification (RFC 8032). No effects required — pure computation.
+import { concat_all } from "sfn/strings";
+
 import { hex_byte, strict_base64_bytes, string_to_bytes } from "./bits";
 import { hmac_sha256_bytes, sha256_bytes } from "./hkdf";
 
@@ -448,17 +450,20 @@ fn base64_encode(data: string) -> string {
     let mut bytes: int[] = string_to_bytes(data);
 
     let len: int = bytes.length;
-    let mut out: string = "";
+    // Accumulate one 4-char group per push (rather than four single-char
+    // pushes) and merge with `concat_all` instead of sequential `out = out +
+    // …`, which was one allocation per output character — quadratic in the
+    // zero-GC runtime (SFN-976).
+    let mut groups: string[] = [];
 
     // Full 3-byte groups → 4 base64 chars.
     let mut i: int = 0;
     loop {
         if i + 2 >= len { break; }
         let v: int = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-        out = out + alphabet[(v >> 18) & 63];
-        out = out + alphabet[(v >> 12) & 63];
-        out = out + alphabet[(v >> 6) & 63];
-        out = out + alphabet[v & 63];
+        groups.push(alphabet[(v >> 18) & 63] + alphabet[(v >> 12) & 63]
+            + alphabet[(v >> 6) & 63]
+            + alphabet[v & 63]);
         i += 3;
     }
 
@@ -466,15 +471,15 @@ fn base64_encode(data: string) -> string {
     if i < len {
         let mut v: int = bytes[i] << 16;
         if i + 1 < len { v = v | (bytes[i + 1] << 8); }
-        out = out + alphabet[(v >> 18) & 63];
-        out = out + alphabet[(v >> 12) & 63];
-        if i + 1 < len { out = out + alphabet[(v >> 6) & 63]; } else {
-            out = out + "=";
+        let mut tail: string = alphabet[(v >> 18) & 63] + alphabet[(v >> 12) & 63];
+        if i + 1 < len { tail = tail + alphabet[(v >> 6) & 63]; } else {
+            tail = tail + "=";
         }
-        out = out + "=";
+        tail = tail + "=";
+        groups.push(tail);
     }
 
-    return out;
+    return concat_all(groups);
 }
 
 fn base64_decode(s: string) -> string {
