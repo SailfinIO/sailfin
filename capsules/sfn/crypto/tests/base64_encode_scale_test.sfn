@@ -1,0 +1,103 @@
+// Regression coverage for the `base64_encode` allocation-strategy rewrite
+// (SFN-976): the encoder now accumulates 4-char groups into an array and
+// merges with `concat_all` instead of one `out = out + …` per output
+// character, which was quadratic in the zero-GC runtime and aborted under
+// the 8 GiB `RLIMIT_AS` on capsule-sized input (`sfn publish` on
+// `sfn/archive`, ~228K base64 chars).
+import { base64_encode } from "../src/mod";
+
+// A from-scratch reference encoder, independent of `base64_encode`'s
+// internal accumulation strategy, used only to pin byte-for-byte output
+// across padding residues. Not a fix target — SFN-976 is scoped to the
+// production encoder.
+fn _reference_base64(data: string) -> string {
+    let alphabet: string[] = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "+", "/",];
+    let mut bytes: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= data.length { break; }
+        bytes.push(char_code(data[i]));
+        i += 1;
+    }
+    let len = bytes.length;
+    let mut out: string = "";
+    i = 0;
+    loop {
+        if i + 2 >= len { break; }
+        let v: int = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+        out = out + alphabet[(v >> 18) & 63];
+        out = out + alphabet[(v >> 12) & 63];
+        out = out + alphabet[(v >> 6) & 63];
+        out = out + alphabet[v & 63];
+        i += 3;
+    }
+    if i < len {
+        let mut v: int = bytes[i] << 16;
+        if i + 1 < len { v = v | (bytes[i + 1] << 8); }
+        out = out + alphabet[(v >> 18) & 63];
+        out = out + alphabet[(v >> 12) & 63];
+        if i + 1 < len { out = out + alphabet[(v >> 6) & 63]; } else {
+            out = out + "=";
+        }
+        out = out + "=";
+    }
+    return out;
+}
+
+// Doubles a small seed string up to at least `min_len` bytes in O(log n)
+// concatenations (each copying the current, doubling size), so building a
+// large fixture here does not itself hit the quadratic defect under test.
+fn _build_at_least(min_len: int) -> string {
+    let mut s: string = "0123456789abcdef";
+    loop {
+        if s.length >= min_len { break; }
+        s = s + s;
+    }
+    return s;
+}
+
+test "base64_encode: byte-identical to the reference encoder (empty)" {
+    assert base64_encode("") == _reference_base64("");
+}
+
+test "base64_encode: byte-identical to the reference encoder (residue 0)" {
+    let data = _build_at_least(300);
+    let data0 = data + "abc";
+    assert base64_encode(data0) == _reference_base64(data0);
+}
+
+test "base64_encode: byte-identical to the reference encoder (residue 1)" {
+    let data = _build_at_least(300);
+    let data1 = data + "abcd";
+    assert base64_encode(data1) == _reference_base64(data1);
+}
+
+test "base64_encode: byte-identical to the reference encoder (residue 2)" {
+    let data = _build_at_least(300);
+    let data2 = data + "abcde";
+    assert base64_encode(data2) == _reference_base64(data2);
+}
+
+test "base64_encode: byte-identical to the reference encoder (single byte)" {
+    assert base64_encode("f") == _reference_base64("f");
+}
+
+test "base64_encode: byte-identical to the reference encoder (two bytes)" {
+    assert base64_encode("fo") == _reference_base64("fo");
+}
+
+// The case that aborts today: 150 KB+ input under the default 8 GiB
+// RLIMIT_AS. Sequential accumulation predicts ~tens of GB of cumulative
+// allocation for this size; the balanced-merge rewrite must complete well
+// within the cap.
+test "base64_encode: encodes a 150 KB input under the default memory cap" {
+    let data = _build_at_least(150000);
+    let encoded = base64_encode(data);
+    // `_reference_base64` is the same sequential-accumulation shape this fix
+    // removes, so it is not called here — at this size it would reproduce
+    // the quadratic abort under test. Confirm completion and expected output
+    // length instead; correctness at this shape is covered by the residue
+    // tests above and the balanced-merge unit tests on `concat_all`.
+    let expected_len = ((data.length + 2) / 3) * 4;
+    assert encoded.length == expected_len;
+}

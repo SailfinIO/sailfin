@@ -1,0 +1,108 @@
+// Tests for `concat_all` and the `join`/`repeat` rewrites that sit on top of
+// it. The zero-GC runtime makes sequential `out = out + piece` accumulation
+// in a loop O(n^2) cumulative bytes; `concat_all` merges adjacent pairs
+// instead, and `join`/`repeat` build a parts array and delegate to it
+// (SFN-976).
+import { concat_all, join, repeat } from "../src/mod";
+
+test "concat_all: empty array returns empty string" {
+    let parts: string[] = [];
+    assert concat_all(parts) == "";
+}
+
+test "concat_all: single element returns it unchanged" {
+    let parts: string[] = ["only"];
+    assert concat_all(parts) == "only";
+}
+
+test "concat_all: two elements concatenate in order" {
+    let parts: string[] = ["ab", "cd"];
+    assert concat_all(parts) == "abcd";
+}
+
+test "concat_all: odd count carries the final element through" {
+    let parts: string[] = ["a", "b", "c"];
+    assert concat_all(parts) == "abc";
+}
+
+test "concat_all: even count merges fully" {
+    let parts: string[] = ["a", "b", "c", "d"];
+    assert concat_all(parts) == "abcd";
+}
+
+test "concat_all: a larger odd count merges correctly" {
+    let parts: string[] = ["1", "2", "3", "4", "5", "6", "7"];
+    assert concat_all(parts) == "1234567";
+}
+
+test "concat_all: an element containing an empty string is preserved" {
+    let parts: string[] = ["a", "", "b"];
+    assert concat_all(parts) == "ab";
+}
+
+test "concat_all: all-empty elements return empty string" {
+    let parts: string[] = ["", "", ""];
+    assert concat_all(parts) == "";
+}
+
+fn _naive_join(parts: string[], separator: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= parts.length { break; }
+        if i > 0 { out = out + separator; }
+        out = out + parts[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _naive_repeat(text: string, count: int) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        out = out + text;
+        i += 1;
+    }
+    return out;
+}
+
+test "join: empty array yields empty string" {
+    let parts: string[] = [];
+    assert join(parts, ",") == "";
+}
+
+test "join: single element needs no separator" {
+    let parts: string[] = ["only"];
+    assert join(parts, ",") == "only";
+}
+
+test "join: multiple elements interleave the separator" {
+    let parts: string[] = ["a", "b", "c"];
+    assert join(parts, ", ") == "a, b, c";
+}
+
+test "join: matches the naive accumulation across several sizes" {
+    let two: string[] = ["x", "y"];
+    let five: string[] = ["p", "q", "r", "s", "t"];
+    assert join(two, "-") == _naive_join(two, "-");
+    assert join(five, "-") == _naive_join(five, "-");
+}
+
+test "repeat: zero count yields empty string" {
+    assert repeat("ab", 0) == "";
+}
+
+test "repeat: negative count yields empty string" {
+    assert repeat("ab", -3) == "";
+}
+
+test "repeat: one count returns the text unchanged" {
+    assert repeat("ab", 1) == "ab";
+}
+
+test "repeat: several counts match the naive accumulation" {
+    assert repeat("ab", 5) == _naive_repeat("ab", 5);
+    assert repeat("xyz", 7) == _naive_repeat("xyz", 7);
+}
