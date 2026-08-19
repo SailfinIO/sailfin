@@ -45,6 +45,27 @@ runs:
         if [ "$NO_INSTALL_RECOMMENDS" = "true" ]; then
           RECOMMENDS_FLAG="--no-install-recommends"
         fi
+
+        # The stall observed in SFN-971 happens inside `apt-get update`
+        # itself; when the runner image already ships every requested
+        # package, that step buys nothing, so skip the whole attempt loop.
+        all_installed=1
+        for pkg in $PACKAGES; do
+          # `dpkg -s` also exits 0 for a package left in `deinstall ok
+          # config-files` state, whose binaries are already gone. Matching the
+          # status field instead keeps a removed package from reading as
+          # present and silently skipping an install it still needs.
+          if ! dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null \
+               | grep -qx 'installed'; then
+            all_installed=0
+            break
+          fi
+        done
+        if [ "$all_installed" = "1" ]; then
+          echo "[apt] all packages already installed, skipping: ${PACKAGES}"
+          exit 0
+        fi
+
         for attempt in $(seq 1 "$ATTEMPTS"); do
           if [ "$attempt" -gt 1 ]; then
             # A prior attempt's `timeout` can fire mid-unpack/configure,
@@ -54,9 +75,13 @@ runs:
             sudo dpkg --configure -a || true
           fi
           echo "[apt] install attempt ${attempt}/${ATTEMPTS}: ${PACKAGES}"
-          if sudo timeout "$TIMEOUT" apt-get update -o Acquire::Retries=3 \
-            && sudo timeout "$TIMEOUT" apt-get install -y -o Acquire::Retries=3 \
-                 $RECOMMENDS_FLAG $PACKAGES; then
+          # `apt-get update` stalling (SFN-971) must not fail the attempt on
+          # its own; `apt-get install` against the image's existing package
+          # lists is usually sufficient and remains the real gate below.
+          sudo timeout "$TIMEOUT" apt-get update -o Acquire::Retries=3 || \
+            echo "[apt] update failed or timed out; continuing with existing package lists"
+          if sudo timeout "$TIMEOUT" apt-get install -y -o Acquire::Retries=3 \
+               $RECOMMENDS_FLAG $PACKAGES; then
             break
           fi
           if [ "${attempt}" = "$ATTEMPTS" ]; then
