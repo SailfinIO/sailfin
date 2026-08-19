@@ -33,10 +33,22 @@
 // embedded by value in `Channel` is the single source of truth in
 // `runtime/sfn/platform/pthread_layout.sfn`, imported here rather than
 // hand-copied — a stale copy is exactly the #1265 heap-corruption hazard
-// this de-duplication closes. The C-ABI `pthread_*` extern declarations
-// below stay re-declared inline per the SFN-635 precedent (they reference the
-// imported struct as an opaque pointee).
-import { PthreadMutex, PthreadCond } from "../platform/pthread_layout";
+// this de-duplication closes. The C-ABI `pthread_*` externs are imported
+// from the single declaration site in `pthread.sfn` rather than
+// hand-copied (SFN-645) — cross-module `extern fn` import already ships
+// (`clock.sfn` importing `posix.sfn`'s externs).
+import {
+    pthread_cond_broadcast,
+    pthread_cond_destroy,
+    pthread_cond_init,
+    pthread_cond_signal,
+    pthread_cond_wait,
+    pthread_mutex_destroy,
+    pthread_mutex_init,
+    pthread_mutex_lock,
+    pthread_mutex_unlock
+} from "../platform/pthread";
+import { PthreadCond, PthreadMutex } from "../platform/pthread_layout";
 
 // Bounded MPMC channel.  `buffer_addr` points at a flat `capacity *
 // elem_size` byte array; slots are addressed by
@@ -73,24 +85,6 @@ extern fn malloc(size: usize) -> *u8;
 extern fn free(ptr: *u8) -> void;
 
 extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
-
-extern fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32;
-
-extern fn pthread_mutex_lock(m: *PthreadMutex) -> i32;
-
-extern fn pthread_mutex_unlock(m: *PthreadMutex) -> i32;
-
-extern fn pthread_mutex_destroy(m: *PthreadMutex) -> i32;
-
-extern fn pthread_cond_init(c: *PthreadCond, attr: *PthreadCondAttr) -> i32;
-
-extern fn pthread_cond_wait(c: *PthreadCond, m: *PthreadMutex) -> i32;
-
-extern fn pthread_cond_signal(c: *PthreadCond) -> i32;
-
-extern fn pthread_cond_broadcast(c: *PthreadCond) -> i32;
-
-extern fn pthread_cond_destroy(c: *PthreadCond) -> i32;
 
 // ── Layout helpers ────────────────────────────────────────────────
 // Byte offset of the `closed` field, which sits after the two conds. The

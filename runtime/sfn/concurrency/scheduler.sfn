@@ -57,7 +57,20 @@
 // generates no cross-module call symbol, so the import resolves from
 // typecheck and lowers correctly under both the capsule build (#1288
 // import-context staging) and a standalone `sfn emit`.
-import { PthreadMutex, PthreadCond } from "../platform/pthread_layout";
+import {
+    pthread_cond_broadcast,
+    pthread_cond_destroy,
+    pthread_cond_init,
+    pthread_cond_signal,
+    pthread_cond_wait,
+    pthread_create,
+    pthread_join,
+    pthread_mutex_destroy,
+    pthread_mutex_init,
+    pthread_mutex_lock,
+    pthread_mutex_unlock
+} from "../platform/pthread";
+import { PthreadCond, PthreadMutex } from "../platform/pthread_layout";
 
 // A single unit of deferred work. Mirrors the §2.6.1 `Task`
 // layout. `fn_ptr` is the worker entry (`fn(* u8) -> * u8`) stored
@@ -145,54 +158,14 @@ struct Scheduler {
 }
 
 // ── Externs ───────────────────────────────────────────────────
-// Declared inline rather than imported from
-// `runtime/sfn/platform/pthread.sfn` / `.../libc.sfn`, matching the
-// `arena.sfn` / `mem.sfn` / `rc.sfn` precedent (SFN-635): the seed
-// resolves imported *defined* functions unreliably, so runtime
-// modules outside `platform/` re-declare the extern surface they
-// call. The signatures mirror `pthread.sfn` exactly — `attr`
-// parameters keep the opaque `* PthreadMutexAttr` / `* PthreadCondAttr`
-// pointee names (callers pass `null` for default attributes) so the
-// emitted `declare` shape is identical if the two modules are ever
-// linked together. `PthreadMutex` / `PthreadCond` resolve to the
-// concrete structs above, so a bare embedded-field read like
-// `q.mutex` in argument position lowers to the field address
-// (`%PthreadMutex*`) and reaches the extern with the right LLVM
-// type — no `&` operator is needed (and `& q.mutex` would not
-// compile: the borrow lowering only addresses plain locals).
+// `malloc`/`free` are declared inline, matching the `arena.sfn` /
+// `mem.sfn` / `rc.sfn` precedent (SFN-635): the seed resolves imported
+// *defined* functions unreliably, so runtime modules outside `platform/`
+// re-declare non-pthread externs they call. The pthread mutex/cond/thread
+// surface is imported above instead (SFN-645).
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
-
-extern fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32;
-
-extern fn pthread_mutex_lock(m: *PthreadMutex) -> i32;
-
-extern fn pthread_mutex_unlock(m: *PthreadMutex) -> i32;
-
-extern fn pthread_mutex_destroy(m: *PthreadMutex) -> i32;
-
-extern fn pthread_cond_init(c: *PthreadCond, attr: *PthreadCondAttr) -> i32;
-
-extern fn pthread_cond_wait(c: *PthreadCond, m: *PthreadMutex) -> i32;
-
-extern fn pthread_cond_signal(c: *PthreadCond) -> i32;
-
-extern fn pthread_cond_broadcast(c: *PthreadCond) -> i32;
-
-extern fn pthread_cond_destroy(c: *PthreadCond) -> i32;
-
-// Thread lifecycle for the worker pool. `pthread_create` writes the new
-// `pthread_t` into the `* usize` out-slot and takes the worker entry as
-// a raw `* u8` start_routine (the address of `sfn_scheduler_worker`,
-// materialised via `<fn> as * u8` — the function-reference → address
-// lowering shipped in #1146). `pthread_join` consumes a `pthread_t` by
-// value (`usize`) and discards the worker return (`null` result). These
-// mirror `runtime/sfn/platform/pthread.sfn` exactly, so the emitted
-// `declare` shape is identical if the two modules are ever linked.
-extern fn pthread_create(thread: *usize, attr: *PthreadAttr, start: *u8, arg: *u8) -> i32;
-
-extern fn pthread_join(thread: usize, result: **u8) -> i32;
 
 // Process/environment surface for pool sizing. `sysconf` queries the
 // online CPU count (`_SC_NPROCESSORS_ONLN`); `getenv` + `atoi` read the
