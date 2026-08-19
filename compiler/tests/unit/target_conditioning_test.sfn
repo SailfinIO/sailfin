@@ -575,6 +575,14 @@ test "target: host targets leave the derived name unchanged" ![pure] {
     assert expect_eq_str(target_exe_name("build/sailfin/program", "Darwin"), "build/sailfin/program").ok;
 }
 
+// An unrecognized `target_os` (e.g. `_package_target_os`'s fallback for a
+// target string outside its closed set, `compiler/src/cli/commands/
+// package.sfn`) must leave the name unchanged rather than defaulting to
+// the Windows branch.
+test "target: an unrecognized target_os leaves the derived name unchanged" ![pure] {
+    assert expect_eq_str(target_exe_name("sfn", ""), "sfn").ok;
+}
+
 test "target: an already-.exe name is not doubled" ![pure] {
     assert expect_eq_str(target_exe_name("build/sailfin/program.exe", "Windows"), "build/sailfin/program.exe").ok;
 }
