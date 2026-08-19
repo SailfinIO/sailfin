@@ -2,6 +2,7 @@
 //
 // Top-level symbol collection: gathering struct, interface, and global
 // declarations into the `SymbolEntry` tables the scope checks run against.
+import { ImplicitSymbol } from "sfn/ir";
 import {
     Program,
     Statement,
@@ -106,6 +107,27 @@ fn _symbols_from_global_names(names: string[]) -> SymbolEntry[] {
             name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: "", function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false
         });
         i += 1;
+    }
+    return out;
+}
+
+// Structured implicit-provider declarations precede local symbols in the
+// resolution scope so ordinary source declarations retain their existing
+// shadowing behavior. Unlike the legacy name-only scanner rows, function
+// entries preserve the complete callable contract required by named function
+// values and callback expected-type propagation.
+fn _symbols_from_implicit_provider(symbols: ImplicitSymbol[]) -> SymbolEntry[] {
+    let mut out: SymbolEntry[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= symbols.length { break; }
+        let symbol = symbols[index];
+        let mut kind = symbol.kind;
+        if kind == "value" { kind = "variable"; }
+        out.push(SymbolEntry {
+            name: symbol.name, kind: kind, span: null, is_generic: symbol.is_generic, is_c_abi: symbol.is_c_abi, element_kind: "", declared_prim: "", declared_struct: "", declared_type: symbol.declared_type, function_parameter_types: symbol.parameter_types, function_return_type: symbol.return_type, function_effects: symbol.effects, function_is_async: symbol.is_async, is_top_level_function: kind == "function"
+        });
+        index += 1;
     }
     return out;
 }

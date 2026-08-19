@@ -13,9 +13,10 @@
 // via `sfn emit llvm`), most importantly `char_from_code`, which now
 // derives `{i8*, i64}` — correcting the old hand-typed registry row's
 // `i8*` (a pre-existing latent ABI drift, SFEP-0035 §2.1).
+import { apply_module_symbol_mangling } from "sfn/codegen-llvm/lowering/lowering_helpers_mangling";
 import { render_runtime_helper_declarations } from "sfn/codegen-llvm/rendering";
 import { TypeContext } from "sfn/codegen-llvm/types";
-import { NativeFunction } from "sfn/ir";
+import { ImplicitSymbol, NativeFunction } from "sfn/ir";
 
 fn _empty_context() -> TypeContext {
     return TypeContext {
@@ -75,4 +76,27 @@ test "prelude-mirror derivation (#1780): string_starts_with derives declare i1 @
 test "prelude-mirror derivation (#1780): record_eq_flag_message derives declare i1 @record_eq_flag_message(i1, {i8*, i64}, i1, {i8*, i64})" {
     let lines = _derive("record_eq_flag_message");
     assert _has_line(lines, "declare i1 @record_eq_flag_message(i1, {i8*, i64}, i1, {i8*, i64})");
+}
+
+test "implicit provider provenance (SFN-932): mirror call and function value share provider-qualified rewrite" {
+    let implicit = ImplicitSymbol {
+        name: "char_code",
+        kind: "function",
+        provider_module: "demo/implicit/mod",
+        signature: "fn",
+        effects: [],
+        parameter_types: ["string"],
+        return_type: "int",
+        parameter_count: 1,
+        required_parameter_count: 1,
+        declared_type: "",
+        is_async: false,
+        is_generic: false,
+        is_c_abi: false
+    };
+    let lines: string[] = ["declare i64 @char_code({i8*, i64})", "@slot = global i8* bitcast (i64 ({i8*, i64})* @char_code to i8*)", "define i64 @probe({i8*, i64} %value) {", "  %result = call i64 @char_code({i8*, i64} %value)", "  ret i64 %result", "}"];
+    let mangled = apply_module_symbol_mangling(lines, [], "consumer/mod", [], [], [implicit], "");
+    assert _has_line(mangled.lines, "declare i64 @char_code__demo__implicit__mod({i8*, i64})");
+    assert _has_line(mangled.lines, "@slot = global i8* bitcast (i64 ({i8*, i64})* @char_code__demo__implicit__mod to i8*)");
+    assert _has_line(mangled.lines, "  %result = call i64 @char_code__demo__implicit__mod({i8*, i64} %value)");
 }

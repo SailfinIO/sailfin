@@ -56,7 +56,7 @@ import { module_name_for_source } from "../../capsule_resolver/identity";
 import { ResolverConsumer } from "../../capsule_resolver/types";
 import { discover_workspace_root } from "../../capsule_resolver/workspace";
 import { format_backend_failure_banner } from "../../ice";
-import { compile_to_llvm_file_with_module_imports } from "../../main";
+import { compile_to_llvm_file_with_module_imports_and_implicit } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
 import { toolchain_gate_or_dispatch } from "./toolchain";
@@ -186,7 +186,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
 
     let source = fs.readFile(input_path);
     let module_name = module_name_for_source(input_path);
-    let ok = compile_to_llvm_file_with_module_imports(source, module_name, ll_path, "", run_capsule_result.entry_import_asm_paths);
+    let ok = compile_to_llvm_file_with_module_imports_and_implicit(source, module_name, ll_path, "", run_capsule_result.entry_import_asm_paths, run_capsule_result.implicit_provider_asm_paths);
     if !ok {
         print("failed to compile LLVM for: " + input_path);
 

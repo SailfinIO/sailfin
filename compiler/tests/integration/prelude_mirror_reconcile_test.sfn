@@ -21,10 +21,13 @@
 // the old hand-typed registry row's `i8*` with the derived `{i8*, i64}` shape
 // (matching the prelude's real `char_from_code(code: int) -> string`), so it
 // no longer needs the exclusion this test previously carried.
+import { empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { typecheck_diagnostics_with_import_symbols_prelude_implicit } from "sfn/analyzer/typecheck";
 import { render_runtime_helper_declarations } from "sfn/codegen-llvm/rendering";
 import { TypeContext } from "sfn/codegen-llvm/types";
-import { NativeFunction, NativeParameter } from "sfn/ir";
+import { ImplicitSymbol, NativeFunction, NativeParameter } from "sfn/ir";
 import { find } from "sfn/strings";
+import { parse_program } from "sfn/syntax";
 
 fn _empty_context() -> TypeContext {
     return TypeContext {
@@ -115,4 +118,25 @@ test "prelude-mirror reconcile (#1779): record_eq_flag_message reconciles clean 
 test "prelude-mirror reconcile (#1780): char_from_code reconciles clean and is suppressed" {
     // prelude: char_from_code(code: int) -> string  ⇒  {i8*, i64} ⟵ [i64]
     assert _reconciles_and_suppresses("char_from_code", "string", [_param("int")]);
+}
+
+test "implicit provider provenance (SFN-932): named function value uses structured provider signature" {
+    let symbol = ImplicitSymbol {
+        name: "supplied",
+        kind: "function",
+        provider_module: "demo/implicit/mod",
+        signature: "fn",
+        effects: [],
+        parameter_types: ["int"],
+        return_type: "int",
+        parameter_count: 1,
+        required_parameter_count: 1,
+        declared_type: "",
+        is_async: false,
+        is_generic: false,
+        is_c_abi: false
+    };
+    let program = parse_program("fn main() { let callback: fn(int) -> int = supplied; }");
+    let diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit(program, [], empty_import_symbols(), ["supplied"], [symbol]);
+    assert diagnostics.length == 0;
 }

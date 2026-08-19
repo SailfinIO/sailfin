@@ -1,4 +1,5 @@
 import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { ImplicitSymbol } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
@@ -18,7 +19,7 @@ import { discover_workspace_root } from "../../../capsule_resolver/workspace";
 import { substring } from "../../../string_utils";
 import { test_decl_is_matching_test, test_decl_matches_filters } from "../../../test_runner_state";
 import { toml_get_name } from "../../../toml_parser";
-import { load_imported_interfaces_from_paths } from "../../../typecheck_import_loader";
+import { load_imported_interfaces_with_implicit_paths } from "../../../typecheck_import_loader";
 
 fn _looks_like_test_file_cmd(name: string) -> boolean {
     return _ends_with_cmd(name, "_test.sfn");
@@ -130,6 +131,7 @@ struct TestGroup {
     // that calls an imported effectful helper without declaring the
     // effect produces an `E0402` diagnostic.
     function_effects: ImportSymbolTable;
+    implicit_symbols: ImplicitSymbol[];
     // Phase F: capsule manifest's `[capabilities] required = [...]`
     // surface, populated from the same per-group resolver pass. A
     // test body declaring an effect outside this surface produces
@@ -319,8 +321,9 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
             let empty_texts: string[] = [];
             let empty_lls: string[] = [];
             let empty_caps: string[] = [];
+            let empty_implicit: ImplicitSymbol[] = [];
             groups.push(TestGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), capabilities_required: empty_caps, runtime_demand: runtime_demand_all()
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, runtime_demand: runtime_demand_all()
             });
             idx = groups.length - 1;
         }
@@ -397,8 +400,24 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
         // (for typecheck-with-imports) and the raw `.sfn-asm` text set
         // (for `apply_module_symbol_mangling`'s provider-name lookup),
         // reading each artifact off disk exactly once.
-        let load = load_imported_interfaces_from_paths(resolution.asm_paths);
+        let load = load_imported_interfaces_with_implicit_paths(resolution.asm_paths, resolution.implicit_provider_asm_paths);
+        if load.implicit_diagnostics.length > 0 {
+            let mut implicit_diag_index: int = 0;
+            loop {
+                if implicit_diag_index >= load.implicit_diagnostics.length {
+                    break;
+                }
+                print.err(load.implicit_diagnostics[implicit_diag_index]);
+                implicit_diag_index += 1;
+            }
+            return TestGroupResolution {
+                groups: groups,
+                file_group_index: file_group_index,
+                staging_failed: true
+            };
+        }
         groups[gi].interfaces = load.interfaces;
+        groups[gi].implicit_symbols = load.implicit_symbols;
         groups[gi].native_texts = load.native_texts;
         groups[gi].dep_ll_paths = resolution.ll_paths;
         // Phase E: stash the cross-module function-effect table so

@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-18 (SFN-931, SFN-930, SFN-898). Seed pinned to `0.10.0` (`bootstrap.toml`
+Updated: 2026-08-19 (SFN-932, SFN-931, SFN-930). Seed pinned to `0.10.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -151,6 +151,16 @@ here.
   runtime demand. The current `sfn/prelude` shell remains dormant with
   `implicit = false` and the honest `clock`/`io`/`net` ceiling; runtime
   `prelude-entry` remains its sole link path until the later adoption slice.
+- **Implicit provider provenance** (SFN-932, SFEP-0072 §§3.3, 3.7 slice 2).
+  Selected implicit entry interfaces carry their canonical artifact `.module`
+  identity and structured function, nominal-type, interface, enum, and value
+  declarations through analysis and LLVM lowering. Bare calls, named function
+  values, mirror references, and materialized immutable globals bind to the
+  provider identity; incompatible declarations in the shared implicit
+  namespace fail deterministically. Physical workspace roots do not enter the
+  identity. The production runtime/prelude name scanner remains authoritative
+  while `sfn/prelude` is dormant (`implicit = false`), preserving the current
+  self-host and determinism path until adoption.
 - **Build driver.** `<seed> build -p compiler` is the sole self-build driver
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the

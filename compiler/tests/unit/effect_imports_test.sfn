@@ -18,7 +18,9 @@ import { EffectViolation } from "sfn/analyzer/effect_checker/types";
 import {
     ImportSymbolTable,
     ImportedFunctionSignature,
+    append_implicit_function_signature_from_module,
     append_import_function,
+    append_import_function_signature_from_module,
     append_local_function,
     empty_import_symbols,
     localize_import_symbols_for_program,
@@ -156,6 +158,20 @@ test "lookup_imported_function: returns the entry by exact name" {
     assert entry.name == "fetch";
 }
 
+test "implicit callable metadata survives a same-named ordinary dependency" {
+    let mut table = empty_import_symbols();
+    table = append_implicit_function_signature_from_module(table, "shared", ["io"], "demo/implicit/mod", "int", 0, 0);
+    table = append_import_function_signature_from_module(table, "shared", ["net"], false, "demo/ordinary/mod", "string", 1, 1);
+    assert table.functions.length == 2;
+    let implicit = lookup_imported_function(table, "shared");
+    assert implicit != null;
+    let entry: ImportedFunctionSignature? = implicit;
+    assert entry.origin == "implicit";
+    assert entry.provider_module == "demo/implicit/mod";
+    assert entry.return_type == "int";
+    assert entry.parameter_count == 0;
+}
+
 // -------------------------------------------------------------------
 // Localization (alias resolution + scope filter)
 // -------------------------------------------------------------------
@@ -196,6 +212,35 @@ test "localize: rewrites aliases so call sites use the local name" {
     assert local.functions.length == 1;
     assert local.functions[0].name == "get";
     assert local.functions[0].effects[0] == "net";
+}
+
+test "localize: an explicit import wins over the same-named implicit callable" {
+    let mut global = empty_import_symbols();
+    global = append_implicit_function_signature_from_module(global, "shared", ["io"], "demo/implicit/mod", "int", 0, 0);
+    global = append_import_function_signature_from_module(global, "shared", ["net"], false, "demo/ordinary/mod", "string", 1, 1);
+    let import_stmt = _import_decl("shared", null, "demo/ordinary");
+    let program = Program { statements: [import_stmt] };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 1;
+    assert local.functions[0].origin == "import";
+    assert local.functions[0].provider_module == "demo/ordinary/mod";
+    assert local.functions[0].effects[0] == "net";
+    assert local.functions[0].return_type == "string";
+    assert local.functions[0].parameter_count == 1;
+}
+
+test "localize: an explicit import from the implicit provider ignores an unrelated ordinary collision" {
+    let mut global = empty_import_symbols();
+    global = append_implicit_function_signature_from_module(global, "shared", ["io"], "demo/implicit/mod", "int", 0, 0);
+    global = append_import_function_signature_from_module(global, "shared", ["net"], false, "demo/ordinary/mod", "string", 1, 1);
+    let import_stmt = _import_decl("shared", null, "demo/implicit");
+    let program = Program { statements: [import_stmt] };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 1;
+    assert local.functions[0].provider_module == "demo/implicit/mod";
+    assert local.functions[0].effects[0] == "io";
+    assert local.functions[0].return_type == "int";
+    assert local.functions[0].parameter_count == 0;
 }
 
 // -------------------------------------------------------------------

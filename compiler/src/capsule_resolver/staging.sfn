@@ -730,3 +730,36 @@ fn _cr_stage_import_deps(sources: CapsuleSource[], universe: CapsuleSource[], wo
         i += 1;
     }
 }
+
+// Selected implicit provider entry interfaces are a distinct channel from
+// source imports. Every emitted consumer module receives the same canonical
+// provider artifacts, except the provider module itself. A separate sidecar
+// keeps implicit namespace membership resolver-owned and prevents transitive
+// provider dependencies from becoming implicitly visible.
+fn _cr_stage_implicit_deps(sources: CapsuleSource[], provider_slugs: string[], work_dir: string) -> void ![io] {
+    let context_root = _cr_import_context_root(work_dir);
+    let mut source_index: int = 0;
+    loop {
+        if source_index >= sources.length { break; }
+        let source = sources[source_index];
+        let mut content = "";
+        let mut provider_index: int = 0;
+        loop {
+            if provider_index >= provider_slugs.length { break; }
+            let provider_slug = provider_slugs[provider_index];
+            if provider_slug != source.slug {
+                content = content + context_root + "/" + provider_slug
+                    + ".sfn-asm\n";
+            }
+            provider_index += 1;
+        }
+        let deps_path = context_root + "/" + source.slug + ".implicit-deps";
+        _cr_ensure_dir(_cr_dirname(deps_path));
+        let tmp = _mktemp_sibling_cmd(deps_path);
+        if tmp.length == 0 { fs.writeFile(deps_path, content); } else {
+            fs.writeFile(tmp, content);
+            _atomic_rename_into_place(tmp, deps_path);
+        }
+        source_index += 1;
+    }
+}

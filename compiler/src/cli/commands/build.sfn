@@ -76,7 +76,7 @@ import { module_name_for_source } from "../../capsule_resolver/identity";
 import { ResolverConsumer } from "../../capsule_resolver/types";
 import { discover_workspace_root, load_workspace_default_members } from "../../capsule_resolver/workspace";
 import { format_backend_failure_banner } from "../../ice";
-import { compile_to_llvm_file_with_module_imports } from "../../main";
+import { compile_to_llvm_file_with_module_imports_and_implicit } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { render_terminal_diagnostic } from "../../terminal_output";
 import { CliContext } from "../context";
@@ -512,7 +512,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     let ll_path = sailfin_cache_dir + "/program.ll";
     let source = fs.readFile(input_path);
     let module_name = module_name_for_source(input_path);
-    let ok = compile_to_llvm_file_with_module_imports(source, module_name, ll_path, work_dir, capsule_result.entry_import_asm_paths);
+    let ok = compile_to_llvm_file_with_module_imports_and_implicit(source, module_name, ll_path, work_dir, capsule_result.entry_import_asm_paths, capsule_result.implicit_provider_asm_paths);
     if !ok {
         print("failed to compile LLVM for: " + input_path);
 

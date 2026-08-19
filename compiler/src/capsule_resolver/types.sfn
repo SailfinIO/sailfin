@@ -197,6 +197,7 @@ struct ProjectCapsuleResult {
     // pass these into the entry's effect gate so their behavior matches
     // `sfn check` for calls into resolved capsule providers.
     entry_import_asm_paths: string[];
+    implicit_provider_asm_paths: string[];
     // Issue #991: distinguishes a legitimate empty `ll_paths` (the
     // project declares no capsule dependencies — `success = true`)
     // from a resolver/compile failure that left `ll_paths` empty
@@ -275,6 +276,7 @@ struct CapabilityDriftReport {
 // should consume for cross-module interface conformance.
 struct CheckCapsuleResolution {
     asm_paths: string[];  // build/compiler/import-context/<slug>.sfn-asm
+    implicit_provider_asm_paths: string[];
     capsule_count: int;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision or stage-write failure
     // Phase F (`docs/proposals/0008-effect-validation.md` §5): the
@@ -298,6 +300,7 @@ struct CheckCapsuleResolution {
 // been masking the resolver's correctness — was fixed.)
 struct TestCapsuleResolution {
     asm_paths: string[];  // build/compiler/import-context/<slug>.sfn-asm
+    implicit_provider_asm_paths: string[];
     // build/capsules/<scope>/<name>/ir/<rel>.ll (or legacy
     // build/sailfin/capsules/<mangled>.ll fallback). See
     // `CapsuleSource.ll_path` for the routing rules.
