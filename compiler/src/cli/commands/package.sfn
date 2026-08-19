@@ -37,6 +37,7 @@ import {
     has_flag,
     with_flag
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import {
     _copy_file_preserving_mode,
@@ -86,7 +87,116 @@ import { _is_safe_capsule_version_cmd, _package_basename } from "./cmd_shared";
 // <path>`) first. Auto-rebuilding from inside a Sailfin-native
 // command shelling out to `make` is a bootstrapping smell (the
 // compiler would be rebuilding itself before packaging itself).
-fn handle_package_command(args: string[]) -> int ![io] {
+// SFN-973: the manifest `build_date` used to shell out to `date -u`
+// (`_shell_read_cmd`), which does not exist on native Windows. The
+// wall-clock epoch (`runtime_unix_millis_fn` — SFN-623) and ISO-8601
+// formatting below replace that shell-out with a pure computation.
+// Floor division: Sailfin `/` truncates toward zero (LLVM `sdiv`), so a
+// negative dividend needs this correction to floor instead. Mirrors
+// `capsules/sfn/crypto/src/der.sfn::_floor_div`, duplicated locally
+// because that helper is module-private and `sfn/crypto`'s public
+// surface doesn't need to grow for one caller.
+fn _floor_div(a: int, b: int) -> int {
+    let q: int = a / b;
+    let r: int = a - q * b;
+    if r != 0 && ((r < 0) != (b < 0)) { return q - 1; }
+    return q;
+}
+
+struct CivilDate {
+    year: int;
+    month: int;
+    day: int;
+}
+
+// Inverse of `capsules/sfn/crypto/src/der.sfn::der_days_from_civil` —
+// Howard Hinnant's `civil_from_days`: exact integer arithmetic, no
+// floating point, no lookup table. `days` is the signed day count
+// since 1970-01-01 (proleptic Gregorian); negative values (pre-1970)
+// require floor division throughout, which is why `era` uses
+// `_floor_div` rather than plain `/`.
+fn civil_from_days(days: int) -> CivilDate {
+    let z: int = days + 719468;
+    let era: int = _floor_div(z, 146097);
+    let doe: int = z - era * 146097;  // [0, 146096]
+    let yoe: int = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;  // [0, 399]
+    let y: int = yoe + era * 400;
+    let doy: int = doe - (365 * yoe + yoe / 4 - yoe / 100);  // [0, 365]
+    let mp: int = (5 * doy + 2) / 153;  // [0, 11]
+    let d: int = doy - (153 * mp + 2) / 5 + 1;  // [1, 31]
+    let mut m: int = mp + 3;
+    if mp >= 10 { m = mp - 9; }
+    let mut year: int = y;
+    if m <= 2 { year += 1; }
+    return CivilDate { year: year, month: m, day: d };
+}
+
+fn _pad2(n: int) -> string {
+    if n < 10 { return "0" + int_to_string(n); }
+    return int_to_string(n);
+}
+
+fn _pad4(n: int) -> string {
+    if n < 10 { return "000" + int_to_string(n); }
+    if n < 100 { return "00" + int_to_string(n); }
+    if n < 1000 { return "0" + int_to_string(n); }
+    return int_to_string(n);
+}
+
+// Format signed epoch milliseconds as `YYYY-MM-DDTHH:MM:SSZ`.
+// Milliseconds are truncated, not rounded, and not emitted. Pure (no
+// effects) so it is directly unit-testable without a clock — see
+// `compiler/tests/unit/package_iso8601_test.sfn`.
+fn _iso8601_utc_from_unix_millis(millis: int) -> string {
+    let seconds: int = _floor_div(millis, 1000);
+    let days: int = _floor_div(seconds, 86400);
+    let sec_of_day: int = seconds - days * 86400;  // [0, 86399]
+    let hour: int = sec_of_day / 3600;
+    let minute: int = (sec_of_day - hour * 3600) / 60;
+    let sec: int = sec_of_day - hour * 3600 - minute * 60;
+    let civil: CivilDate = civil_from_days(days);
+    return _pad4(civil.year) + "-" + _pad2(civil.month) + "-" + _pad2(civil.day)
+        + "T"
+        + _pad2(hour)
+        + ":"
+        + _pad2(minute)
+        + ":"
+        + _pad2(sec)
+        + "Z";
+}
+
+// Read the realtime wall clock and format it as ISO-8601 UTC, replacing
+// the `date -u` shell-out this module used before SFN-973 (does not
+// exist on native Windows). Mirrors `capsules/sfn/time/src/mod.sfn`'s
+// `unix_millis()`: `runtime_unix_millis_fn` is the internal
+// status/out-pointer target for `sfn_clock_unix_millis`
+// (`runtime/sfn/clock.sfn`), recognized as a bare builtin by the effect
+// checker (`compiler/capsules/analyzer/src/effect_checker/collector.sfn`)
+// independent of which module calls it. A failed clock read must not be
+// swallowed into a silent empty `build_date` — that is the exact bug
+// this issue exists to fix, just triggered by a different provider
+// failure than the Windows `date -u` shell-out — so this returns
+// `Result<string, string>` (`.claude/rules/code-style.md`: new internal
+// fallible code returns `Result<T, E>`) rather than a sentinel, matching
+// `_unix_millis_result` (same file as above). The out-param is read
+// through `sailfin_intrinsic_pointer_read_i64`, not the bare local: the
+// runtime writes the result via `memcpy` through the pointer
+// (`runtime/sfn/clock.sfn:163`), so reading the local directly would
+// rely on the compiler knowing it was mutated through an alias.
+fn _package_build_date() -> Result<string, string> ![clock] {
+    let mut epoch_ms: i64 = 0;
+    let out: *i64 = & epoch_ms;
+    let status: i32 = runtime_unix_millis_fn(out);
+    if status != 1 {
+        return Result.Err {
+            error: "sfn package: realtime clock provider failed"
+        };
+    }
+    let value: i64 = sailfin_intrinsic_pointer_read_i64(out);
+    return Result.Ok { value: _iso8601_utc_from_unix_millis(value as int) };
+}
+
+fn handle_package_command(args: string[]) -> int ![clock, io] {
     // Parse args.
     let mut target_arg: string = "";
     let mut out_dir: string = "dist";
@@ -201,7 +311,7 @@ fn _package_detect_target() -> string ![io] {
 
 // Package the compiler. Reads `compiler/capsule.toml` for version,
 // stages `<bin>/sailfin` + `<bin>/sfn`, tars + sha256s + manifest.
-fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> int ![io] {
+fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> int ![clock, io] {
     if !fs.exists(compiler_bin) {
         print("sfn package: compiler binary not found: " + compiler_bin);
         print("hint: run `make compile` first");
@@ -286,7 +396,19 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 
     let binary_size = _package_size_of_file(compiler_bin);
     let tarball_size = _package_size_of_file(tarball);
-    let build_date = _shell_read_cmd("date -u +%Y-%m-%dT%H:%M:%SZ");
+    let mut build_date: string = "";
+    match _package_build_date() {
+        Result.Ok { value }
+        : {
+            build_date = value;
+        },
+        Result.Err { error }
+        : {
+            print(error);
+            remove_tree(staging);
+            return 1;
+        }
+    }
 
     let mut manifest = empty_dist_manifest();
     manifest.name = "sailfin-native";
@@ -370,7 +492,7 @@ fn _package_dep_specs(deps_text: string) -> string[] {
     return out;
 }
 
-fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> int ![io] {
+fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> int ![clock, io] {
     if !fs.exists(compiler_bin) {
         print("sfn package: compiler binary not found: " + compiler_bin);
         print("hint: run `make compile` first");
@@ -628,7 +750,19 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     // material with size already encoded in `tarball_size`.
     let binary_size = _package_size_of_file(compiler_bin);
     let tarball_size = _package_size_of_file(tarball);
-    let build_date = _shell_read_cmd("date -u +%Y-%m-%dT%H:%M:%SZ");
+    let mut build_date: string = "";
+    match _package_build_date() {
+        Result.Ok { value }
+        : {
+            build_date = value;
+        },
+        Result.Err { error }
+        : {
+            print(error);
+            remove_tree(staging);
+            return 1;
+        }
+    }
 
     let mut dm = empty_dist_manifest();
     dm.name = stem;
@@ -657,7 +791,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
 // artifact path and kind. Stages binary/object + sidecar +
 // capsule.toml into the tarball — minimal contents until a
 // post-1.0 `--include-ir` flag adds the per-module IR.
-fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) -> int ![io] {
+fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) -> int ![clock, io] {
     // Normalise trailing slash on the path.
     let mut path = capsule_path;
     if path.length > 0 {
@@ -813,7 +947,19 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
 
     let artifact_size = _package_size_of_file(artifact_path);
     let tarball_size = _package_size_of_file(tarball);
-    let build_date = _shell_read_cmd("date -u +%Y-%m-%dT%H:%M:%SZ");
+    let mut build_date: string = "";
+    match _package_build_date() {
+        Result.Ok { value }
+        : {
+            build_date = value;
+        },
+        Result.Err { error }
+        : {
+            print(error);
+            remove_tree(staging);
+            return 1;
+        }
+    }
 
     let mut manifest = empty_dist_manifest();
     manifest.name = safe_name;
@@ -924,7 +1070,7 @@ fn command_def() -> Command {
 // `compiler-bin` → "build/bin/sfn") and its own mutual-exclusion
 // check exactly as before. `ctx` is part of the per-command contract but
 // unused here (package sources no driver state).
-fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     let mut args: string[] = ["package"];
     let target: string = get_or(matches, "target", "");
     if target.length > 0 {
