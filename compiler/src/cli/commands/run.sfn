@@ -84,10 +84,13 @@ fn command_def() -> Command {
 // the suffix; the `fs.exists` probe only rules out a STALE name still on
 // disk from an earlier invocation — it is NOT an atomic claim, so two
 // invocations starting in the same millisecond can still race onto the
-// same candidate (SFN-719 review: neither `fs.createDirectory` nor
-// `mkstemp` gives a genuine cross-platform atomic claim through the
-// primitives this change is scoped to — see the PR discussion). Bounded
-// so the probe loop can't run forever.
+// same candidate. Closing that window needs an exclusive-create that
+// reports created-vs-existed, which no primitive here provides:
+// `sfn_fs_mkdir` discards `mkdir`'s return and treats a later existence
+// probe as authoritative, and `_mktemp_from_template_cmd` returns "" on
+// a Windows host by design. SFN-974 adds that primitive; this probe and
+// this comment are deleted when `_unique_run_exe_path` moves onto it.
+// Bounded so the probe loop can't run forever.
 fn _unique_run_exe_path(run_cache_dir: string) -> string ![clock, io] {
     let base = run_cache_dir + "/run-" + int_to_string(monotonic_millis());
     let mut candidate = target_exe_name(base, build_target_os());
