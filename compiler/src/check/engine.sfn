@@ -19,6 +19,7 @@ import { analyze_program } from "sfn/analyzer";
 import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
 import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
+import { ImplicitSymbol } from "sfn/ir";
 import { Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 import { Token } from "sfn/syntax";
@@ -48,7 +49,7 @@ import {
 import {
     ImportedInterfaceLoadResult,
     build_closure_symbol_set,
-    load_imported_interfaces_from_paths
+    load_imported_interfaces_with_implicit_paths
 } from "../typecheck_import_loader";
 
 // One distinct `(project_root, workspace_root)` resolution group. Every
@@ -65,6 +66,7 @@ struct CheckGroup {
     // the analyzer so a caller missing
     // `![<callee_effect>]` produces an `E0402` diagnostic.
     function_effects: ImportSymbolTable;
+    implicit_symbols: ImplicitSymbol[];
     // Phase F: capsule manifest's `[capabilities] required = [...]`
     // surface, sourced from the same per-group resolver pass that
     // populates `interfaces`. Threaded into
@@ -281,12 +283,13 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
             let empty_interfaces: Statement[] = [];
             let empty_caps: string[] = [];
             let empty_names: string[] = [];
+            let empty_implicit: ImplicitSymbol[] = [];
             let empty_closure = ClosureSymbolSet {
                 names: empty_names,
                 complete: false
             };
             groups.push(CheckGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), capabilities_required: empty_caps, closure_symbols: empty_closure
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, closure_symbols: empty_closure
             });
             idx = groups.length - 1;
         }
@@ -354,8 +357,20 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
             // appropriately.
             return 2;
         }
-        let load = load_imported_interfaces_from_paths(resolution.asm_paths);
+        let load = load_imported_interfaces_with_implicit_paths(resolution.asm_paths, resolution.implicit_provider_asm_paths);
+        if load.implicit_diagnostics.length > 0 {
+            let mut implicit_diag_index: int = 0;
+            loop {
+                if implicit_diag_index >= load.implicit_diagnostics.length {
+                    break;
+                }
+                print.err(load.implicit_diagnostics[implicit_diag_index]);
+                implicit_diag_index += 1;
+            }
+            return 2;
+        }
         groups[gi].interfaces = load.interfaces;
+        groups[gi].implicit_symbols = load.implicit_symbols;
         // Phase E: stash the cross-module function-effect table so
         // the per-file analysis loop below can hand it to
         // the analyzer alongside the interface list.
@@ -434,7 +449,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
         let program = parse_program(source);
-        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].closure_symbols, allow_bare_assert);
+        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].closure_symbols, allow_bare_assert, groups[group_idx].implicit_symbols);
         let result = check_result_from_analysis(analyze_program(analyzer_input), source);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually
@@ -464,6 +479,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
     }
 
     let empty_interfaces: Statement[] = [];
+    let empty_implicit: ImplicitSymbol[] = [];
     let empty_texts: string[] = [];
     let aggregate_load_result = ImportedInterfaceLoadResult {
         interfaces: empty_interfaces,
@@ -471,7 +487,9 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         missing_paths: aggregate_missing,
         parse_failure_paths: aggregate_parse_failures,
         skipped_paths: aggregate_skipped,
-        native_texts: empty_texts
+        native_texts: empty_texts,
+        implicit_symbols: empty_implicit,
+        implicit_diagnostics: []
     };
 
     if json {

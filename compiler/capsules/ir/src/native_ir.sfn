@@ -222,6 +222,27 @@ struct NativeBinding {
     value: string?;
 }
 
+// One declaration made available without a source import by an implicit
+// capsule provider. `provider_module` is the canonical staged module slug,
+// never a physical source path. `signature` is a deterministic declaration
+// fingerprint used by the driver to reject ambiguous duplicate surfaces
+// before analyzer or lowering tables can silently choose by staging order.
+struct ImplicitSymbol {
+    name: string;
+    kind: string;
+    provider_module: string;
+    signature: string;
+    effects: string[];
+    parameter_types: string[];
+    return_type: string;
+    parameter_count: int;
+    required_parameter_count: int;
+    declared_type: string;
+    is_async: boolean;
+    is_generic: boolean;
+    is_c_abi: boolean;
+}
+
 struct EnumParseResult {
     definition: NativeEnum?;
     next_index: int;
@@ -364,6 +385,10 @@ struct ImportedModuleContext {
     native_texts: string[];
     diagnostics: string[];
     module_aliases: ImportModuleAlias[];
+    // Provider-qualified declarations from selected implicit capsule entry
+    // interfaces. Appended last so existing context field offsets stay stable
+    // while the pinned seed compiles this capability family.
+    implicit_symbols: ImplicitSymbol[];
 }
 
 struct BindingComponents {

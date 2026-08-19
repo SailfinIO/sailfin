@@ -8,6 +8,7 @@ import {
     typecheck_diagnostics,
     typecheck_diagnostics_with_import_symbols,
     typecheck_diagnostics_with_import_symbols_prelude,
+    typecheck_diagnostics_with_import_symbols_prelude_implicit,
     typecheck_diagnostics_with_imports,
     typecheck_diagnostics_with_prelude,
     typecheck_has_errors,
@@ -30,6 +31,7 @@ import {
     take_lowering_trace_buffer
 } from "sfn/codegen-llvm";
 import {
+    ImplicitSymbol,
     ImportedModuleContext,
     LayoutManifest,
     LoweringDiagnostic,
@@ -38,7 +40,7 @@ import {
 import { parse_native_artifact, parse_native_artifact_from_lines } from "sfn/ir";
 import { lines_to_native_text, native_lines_have_text } from "sfn/ir";
 import { render_module } from "sfn/ir";
-import { int_to_string } from "sfn/strings";
+import { int_to_string, split } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 import { Token } from "sfn/syntax";
@@ -62,14 +64,19 @@ import { ice_enter_stage, ice_set_source } from "./ice";
 import {
     import_context_root,
     imported_module_context_from_loaded_data,
-    load_imported_module_context
+    imported_module_context_from_loaded_data_with_implicit,
+    load_imported_module_context,
+    load_imported_module_context_with_implicit
 } from "./import_context";
 import { load_prelude_global_names } from "./prelude_globals";
 import { substring } from "./string_utils";
 import { render_terminal_diagnostic } from "./terminal_output";
 import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";
 import { toml_get_dependencies } from "./toml_parser";
-import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
+import {
+    load_imported_interfaces_from_paths,
+    load_imported_interfaces_with_implicit_paths
+} from "./typecheck_import_loader";
 
 // Phase-scoped arena reclamation (SFEP-0043). The arena mark/rewind pair
 // snapshots and restores the arena bump pointer so the AST/typecheck/emit
@@ -118,11 +125,28 @@ fn _load_llvm_import_context(native_text: string, module_name: string, context_r
             manifests: [],
             native_texts: [],
             diagnostics: [],
-            module_aliases: []
+            module_aliases: [],
+            implicit_symbols: []
         };
     }
     let parsed = parse_native_artifact(native_text);
     return load_imported_module_context(parsed.imports, module_name, context_root);
+}
+
+fn _load_llvm_import_context_with_implicit(native_text: string, module_name: string, context_root: string, implicit_symbols: ImplicitSymbol[]) -> ImportedModuleContext ![io] {
+    if native_text.length == 0 {
+        return ImportedModuleContext {
+            manifests: [],
+            native_texts: [],
+            diagnostics: [],
+            module_aliases: [],
+            implicit_symbols: implicit_symbols
+        };
+    }
+    let parsed = parse_native_artifact(native_text);
+    let mut context = load_imported_module_context_with_implicit(parsed.imports, module_name, context_root, implicit_symbols);
+    context.implicit_symbols = implicit_symbols;
+    return context;
 }
 
 fn _llvm_import_context_from_loaded_data(native_text: string, module_name: string, context_root: string, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> ImportedModuleContext ![io] {
@@ -546,7 +570,7 @@ fn _filter_program_tests(program: Program) -> Program {
     return Program { statements: kept };
 }
 
-fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[]) -> boolean ![io] {
+fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[], implicit_symbols: ImplicitSymbol[]) -> boolean ![io] {
     let trace = test_runner_trace();
     if trace { print.err("test compiler (imports): parse_program start"); }
     let mut program: Program = parse_program(source);
@@ -558,7 +582,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     // the harness is never synthesized empty.
     if test_filters_active() { program = _filter_program_tests(program); }
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
-    let diagnostics = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, imported_function_effects, prelude_globals);
+    let diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols);
     let mut has_errors: boolean = false;
     let mut di: int = 0;
     loop {
@@ -610,7 +634,8 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     }
 
     let empty_diagnostics: string[] = [];
-    let import_context = _llvm_import_context_from_loaded_data(native_text, module_name, import_context_root(""), imported_manifests, imported_native_texts, empty_diagnostics);
+    let parsed_native = parse_native_artifact(native_text);
+    let import_context = imported_module_context_from_loaded_data_with_implicit(parsed_native.imports, module_name, import_context_root(""), imported_manifests, imported_native_texts, empty_diagnostics, implicit_symbols);
     let generated = lower_llvm_for_tests_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
     _drain_llvm_lowering_traces();
     if !_publish_llvm_artifact(generated, out_path, "test llvm: wrote truncated IR to "
@@ -827,10 +852,20 @@ fn _publish_llvm_artifact(result: LLVMArtifactResult, out_path: string, publicat
 // (`compile_to_llvm_with_module_timed`, ad-hoc `sailfin emit llvm
 // <file>` with no `--import-context`) are unaffected.
 fn compile_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, work_dir: string, import_asm_paths: string[]) -> boolean ![io] {
-    return compile_to_llvm_file_with_module_import_context_root(source, module_name, out_path, work_dir, import_asm_paths, import_context_root(work_dir));
+    let empty_implicit: string[] = [];
+    return compile_to_llvm_file_with_module_imports_and_implicit(source, module_name, out_path, work_dir, import_asm_paths, empty_implicit);
 }
 
 fn compile_to_llvm_file_with_module_import_context_root(source: string, module_name: string, out_path: string, work_dir: string, import_asm_paths: string[], context_root: string) -> boolean ![io] {
+    let empty_implicit: string[] = [];
+    return compile_to_llvm_file_with_module_import_context_root_and_implicit(source, module_name, out_path, work_dir, import_asm_paths, empty_implicit, context_root);
+}
+
+fn compile_to_llvm_file_with_module_imports_and_implicit(source: string, module_name: string, out_path: string, work_dir: string, import_asm_paths: string[], implicit_asm_paths: string[]) -> boolean ![io] {
+    return compile_to_llvm_file_with_module_import_context_root_and_implicit(source, module_name, out_path, work_dir, import_asm_paths, implicit_asm_paths, import_context_root(work_dir));
+}
+
+fn compile_to_llvm_file_with_module_import_context_root_and_implicit(source: string, module_name: string, out_path: string, work_dir: string, import_asm_paths: string[], implicit_asm_paths: string[], context_root: string) -> boolean ![io] {
     // Phase-scoped arena reclamation: enabled unless SAILFIN_ARENA_PHASE_REWIND=0.
     // The mark is taken here, before parse, so the rewind at the end of the
     // emit pass reclaims the entire AST/typecheck/emit region — letting
@@ -839,6 +874,18 @@ fn compile_to_llvm_file_with_module_import_context_root(source: string, module_n
     let arena_mark: f64 = sfn_arena_sfn_mark();
     let program: Program = parse_program(source);
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
+    let loaded = load_imported_interfaces_with_implicit_paths(import_asm_paths, implicit_asm_paths);
+    if loaded.implicit_diagnostics.length > 0 {
+        let mut implicit_diag_index: int = 0;
+        loop {
+            if implicit_diag_index >= loaded.implicit_diagnostics.length {
+                break;
+            }
+            print.err(loaded.implicit_diagnostics[implicit_diag_index]);
+            implicit_diag_index += 1;
+        }
+        return false;
+    }
     let mut skip_typecheck_probe: string = "build/sailfin/.skip_typecheck";
     if work_dir.length > 0 {
         skip_typecheck_probe = work_dir + "/sailfin/.skip_typecheck";
@@ -846,8 +893,8 @@ fn compile_to_llvm_file_with_module_import_context_root(source: string, module_n
     let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
         || _legacy_flag_file(skip_typecheck_probe);
     if !skip_typecheck {
-        if typecheck_has_errors_with_prelude(program, prelude_globals) {
-            let diagnostics = typecheck_diagnostics_with_prelude(program, prelude_globals);
+        let diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit(program, loaded.interfaces, loaded.function_effects, prelude_globals, loaded.implicit_symbols);
+        if diagnostics.length > 0 {
             _emit_typecheck_diagnostics(diagnostics, source, module_name);
             return false;
         }
@@ -856,11 +903,7 @@ fn compile_to_llvm_file_with_module_import_context_root(source: string, module_n
     }
     if _reject_parse_errors(program) { return false; }
     if _reject_reexport_violations(program) { return false; }
-    let mut imports = empty_import_symbols();
-    if import_asm_paths.length > 0 {
-        let loaded = load_imported_interfaces_from_paths(import_asm_paths);
-        imports = loaded.function_effects;
-    }
+    let imports = loaded.function_effects;
     if validate_and_render_effects(program, source, module_name, imports) > 0 {
         return false;
     }
@@ -896,12 +939,38 @@ fn compile_to_llvm_file_with_module_import_context_root(source: string, module_n
     // Disabled when SAILFIN_ARENA_PHASE_REWIND=0.
     if phase_rewind {
         let heap_text: string = relocate_string_to_heap(lines_to_native_text(native_lines));
+        // Preserve the established one-scalar rewind path exactly when no
+        // implicit provider is selected. Besides protecting determinism, this
+        // avoids carrying an arena-backed array container across the rewind.
+        if implicit_asm_paths.length == 0 {
+            sfn_arena_sfn_rewind(arena_mark);
+            let import_context = _load_llvm_import_context(heap_text, module_name, context_root);
+            let generated = lower_native_text_to_llvm_artifact_with_context_and_provider(heap_text, module_name, import_context, resolve_llvm_provider_context());
+            _drain_llvm_lowering_traces();
+            let ok = _publish_llvm_artifact(generated, out_path, "");
+            free_heap_string(heap_text);
+            return ok;
+        }
+        let mut implicit_paths_text = "";
+        let mut implicit_path_index: int = 0;
+        loop {
+            if implicit_path_index >= implicit_asm_paths.length { break; }
+            if implicit_path_index > 0 {
+                implicit_paths_text = implicit_paths_text + "\n";
+            }
+            implicit_paths_text = implicit_paths_text + implicit_asm_paths[implicit_path_index];
+            implicit_path_index += 1;
+        }
+        let heap_implicit_paths = relocate_string_to_heap(implicit_paths_text);
         sfn_arena_sfn_rewind(arena_mark);
         let mut ok: boolean = false;
-        let import_context = _load_llvm_import_context(heap_text, module_name, context_root);
+        let relocated_implicit_paths = split(heap_implicit_paths, "\n");
+        let reloaded = load_imported_interfaces_with_implicit_paths([], relocated_implicit_paths);
+        let import_context = _load_llvm_import_context_with_implicit(heap_text, module_name, context_root, reloaded.implicit_symbols);
         let generated = lower_native_text_to_llvm_artifact_with_context_and_provider(heap_text, module_name, import_context, resolve_llvm_provider_context());
         _drain_llvm_lowering_traces();
         ok = _publish_llvm_artifact(generated, out_path, "");
+        free_heap_string(heap_implicit_paths);
         free_heap_string(heap_text);
         return ok;
     }
@@ -911,7 +980,9 @@ fn compile_to_llvm_file_with_module_import_context_root(source: string, module_n
     // function signatures (#999). The empty-import / in-process path
     // (`import_asm_paths.length == 0`) keeps routing through the direct
     // provider entrypoint.
-    let import_context = _load_llvm_import_context_from_lines(native_lines, module_name, context_root);
+    let parsed_native = parse_native_artifact_from_lines(native_lines);
+    let mut import_context = load_imported_module_context_with_implicit(parsed_native.imports, module_name, context_root, loaded.implicit_symbols);
+    import_context.implicit_symbols = loaded.implicit_symbols;
     let generated = lower_native_lines_to_llvm_artifact_with_context_and_provider(native_lines, module_name, import_context, resolve_llvm_provider_context());
     _drain_llvm_lowering_traces();
     return _publish_llvm_artifact(generated, out_path, "");

@@ -40,10 +40,12 @@ import { int_to_string } from "sfn/strings";
 // that can't mutate their own environment.
 import { emit_child_argv } from "./build/emit_child_argv";
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
+import { _read_implicit_deps } from "./build/paths";
 import { validate_llvm_ir } from "./llvm_validation";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_import_context_root,
+    compile_to_llvm_file_with_module_import_context_root_and_implicit,
     compile_to_llvm_file_with_module_imports
 } from "./main";
 import { substring } from "./string_utils";
@@ -155,7 +157,8 @@ fn emit_llvm_with_retry_injected(source_path: string, module_name: string, out_p
         let source = fs.readFile(source_path);
         let mut emitted: boolean = false;
         if import_context_root.length > 0 {
-            emitted = compile_to_llvm_file_with_module_import_context_root(source, module_name, out_path, "", import_asm_paths, import_context_root);
+            let implicit_asm_paths = _read_implicit_deps(import_context_root, module_name);
+            emitted = compile_to_llvm_file_with_module_import_context_root_and_implicit(source, module_name, out_path, "", import_asm_paths, implicit_asm_paths, import_context_root);
         } else if import_asm_paths.length > 0 {
             emitted = compile_to_llvm_file_with_module_imports(source, module_name, out_path, "", import_asm_paths);
         } else {

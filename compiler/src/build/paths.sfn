@@ -143,9 +143,9 @@ fn _ensure_dir(path: string) ![io] {
     fs.createDirectory(path, true);
 }
 
-fn _read_import_deps(context_root: string, slug: string) -> string[] ![io] {
+fn _read_dep_sidecar(context_root: string, slug: string, suffix: string) -> string[] ![io] {
     let mut out: string[] = [];
-    let deps_path = context_root + "/" + slug + ".import-deps";
+    let deps_path = context_root + "/" + slug + suffix;
     if !fs.exists(deps_path) { return out; }
     let content = fs.readFile(deps_path);
     let mut pos: int = 0;
@@ -160,6 +160,14 @@ fn _read_import_deps(context_root: string, slug: string) -> string[] ![io] {
         pos = nl + 1;
     }
     return out;
+}
+
+fn _read_import_deps(context_root: string, slug: string) -> string[] ![io] {
+    return _read_dep_sidecar(context_root, slug, ".import-deps");
+}
+
+fn _read_implicit_deps(context_root: string, slug: string) -> string[] ![io] {
+    return _read_dep_sidecar(context_root, slug, ".implicit-deps");
 }
 
 fn _ends_with(value: string, suffix: string) -> boolean {
@@ -245,6 +253,7 @@ export {
     _path_basename,
     _path_join,
     _paths_equal_ignoring_sep,
+    _read_implicit_deps,
     _read_import_deps,
     _resolve_self_path
 };

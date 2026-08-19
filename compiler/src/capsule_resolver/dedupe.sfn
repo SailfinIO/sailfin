@@ -13,6 +13,7 @@ import {
     toml_get_build_full_runtime,
     toml_get_capabilities_required,
     toml_get_dependencies,
+    toml_get_entry,
     toml_get_name
 } from "../toml_parser";
 import { workspace_member_capability_gate } from "./capability";
@@ -96,6 +97,10 @@ struct ResolverDedupeResult {
     // Build/link adds runtime roots; `sfn check` uses its explicit requested
     // files as entry roots and keeps the closure complete for those files.
     root_source_paths: string[];
+    // Canonical module slugs for selected implicit capsule entry interfaces.
+    // Their transitive dependency closure stays ordinary; only these roots
+    // contribute names to the consumer's implicit namespace.
+    implicit_provider_slugs: string[];
     // SFN-882: the canonical effect roots this build demands, or the `"*"`
     // sentinel meaning "retain everything". Drives demand-driven runtime
     // `sfn-source` selection at all three consumers — runtime-root seeding
@@ -197,6 +202,7 @@ fn _cr_resolver_graph_error(workspace_root: string) -> ResolverDedupeResult {
         manifest_dep_specs: empty_strings,
         workspace_root: workspace_root,
         root_source_paths: empty_strings,
+        implicit_provider_slugs: empty_strings,
         runtime_demand: runtime_demand_all()
     };
 }
@@ -224,6 +230,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             manifest_dep_specs: empty_specs,
             workspace_root: "",
             root_source_paths: empty_roots,
+            implicit_provider_slugs: empty_roots,
             runtime_demand: runtime_demand_all()
         };
     }
@@ -594,6 +601,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             manifest_dep_specs: covered_specs,
             workspace_root: workspace_root,
             root_source_paths: empty_roots,
+            implicit_provider_slugs: empty_roots,
             runtime_demand: runtime_demand_all()
         };
     }
@@ -630,6 +638,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                         manifest_dep_specs: covered_specs,
                         workspace_root: workspace_root,
                         root_source_paths: empty_roots,
+                        implicit_provider_slugs: empty_roots,
                         runtime_demand: runtime_demand_all()
                     };
                 }
@@ -708,6 +717,29 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         rp += 1;
     }
 
+    let mut implicit_provider_slugs: string[] = [];
+    let mut provider_index: int = 0;
+    loop {
+        if provider_index >= implicit_members.length { break; }
+        let provider = implicit_members[provider_index];
+        let member_root = _cr_dirname(provider.src_dir);
+        let manifest_path = _cr_path_join(member_root, "capsule.toml");
+        if fs.exists(manifest_path) {
+            let entry = toml_get_entry(fs.readFile(manifest_path));
+            let entry_path = _cr_path_join(member_root, entry);
+            let mut source_index: int = 0;
+            loop {
+                if source_index >= resolved.length { break; }
+                if strings_equal(resolved[source_index].source_path, entry_path) {
+                    implicit_provider_slugs.push(resolved[source_index].slug);
+                    break;
+                }
+                source_index += 1;
+            }
+        }
+        provider_index += 1;
+    }
+
     // SFN-882: the demand scan reads the UNFILTERED set plus the entry paths.
     // Scanning the filtered closure would be circular — the closure depends on
     // which runtime roots are seeded, which depends on this answer.
@@ -752,6 +784,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         manifest_dep_specs: covered_specs,
         workspace_root: workspace_root,
         root_source_paths: root_source_paths,
+        implicit_provider_slugs: implicit_provider_slugs,
         runtime_demand: resolved_demand
     };
 }

@@ -144,17 +144,46 @@ fn split(text: string, separator: string) -> string[] {
     return parts;
 }
 
+// Concatenate an array of strings with balanced (pairwise) merging rather
+// than sequential `out = out + parts[i]` accumulation. The runtime is
+// zero-GC (`sfn_mem_free` is a no-op), so sequential accumulation abandons
+// the previous `out` every iteration and costs O(n^2) cumulative bytes to
+// build an n-byte result. Repeatedly merging adjacent pairs until one
+// element remains does the same total copy in O(n log n) bytes instead
+// (SFN-976).
+fn concat_all(parts: string[]) -> string {
+    if parts.length == 0 { return ""; }
+    if parts.length == 1 { return parts[0]; }
+    let mut current: string[] = parts;
+    loop {
+        if current.length == 1 { break; }
+        let mut next: string[] = [];
+        let mut i: int = 0;
+        loop {
+            if i + 1 >= current.length { break; }
+            next.push(current[i] + current[i + 1]);
+            i += 2;
+        }
+        if i < current.length { next.push(current[i]); }
+        current = next;
+    }
+    return current[0];
+}
+
 fn join(parts: string[], separator: string) -> string {
-    // Join an array of strings with a separator.
-    let mut out: string = "";
+    // Join an array of strings with a separator. Interleaves the separator
+    // into a flat parts array and merges with `concat_all` (SFN-976) rather
+    // than accumulating sequentially, which is the same quadratic defect.
+    if parts.length == 0 { return ""; }
+    let mut pieces: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= parts.length { break; }
-        if i > 0 { out = out + separator; }
-        out = out + parts[i];
+        if i > 0 { pieces.push(separator); }
+        pieces.push(parts[i]);
         i += 1;
     }
-    return out;
+    return concat_all(pieces);
 }
 
 fn replace(text: string, old_str: string, new_str: string) -> string {
@@ -165,15 +194,17 @@ fn replace(text: string, old_str: string, new_str: string) -> string {
 }
 
 fn repeat(text: string, count: int) -> string {
-    // Repeat text count times.
-    let mut out: string = "";
+    // Repeat text count times. Builds the parts array and merges with
+    // `concat_all` (SFN-976) instead of sequential accumulation.
+    if count <= 0 { return ""; }
+    let mut pieces: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= count { break; }
-        out = out + text;
+        pieces.push(text);
         i += 1;
     }
-    return out;
+    return concat_all(pieces);
 }
 
 fn to_upper(ch: string) -> string {

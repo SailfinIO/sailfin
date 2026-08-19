@@ -46,7 +46,8 @@ fn empty_llvm_import_context() -> ImportedModuleContext {
         manifests: [],
         native_texts: [],
         diagnostics: [],
-        module_aliases: []
+        module_aliases: [],
+        implicit_symbols: []
     };
 }
 

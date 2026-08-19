@@ -3,6 +3,7 @@
 // Core LLVM lowering orchestrator. Phase-specific work lives in the
 // sibling modules in this folder and in lowering_phase_*.sfn.
 import {
+    ImplicitSymbol,
     ImportedModuleContext,
     LayoutManifest,
     LoweringDiagnostic,
@@ -112,6 +113,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     let diagnostics_in = import_context.diagnostics;
     let mut module_aliases = import_context.module_aliases;
     if module_aliases == null { module_aliases = []; }
+    let mut implicit_symbols = import_context.implicit_symbols;
+    if implicit_symbols == null { implicit_symbols = []; }
     // Generic-function monomorphization (#1869, SFEP-0038 §3.3). This is the
     // single lowering choke point every entry path funnels through. Specialize
     // generic `.fn`s and rewrite their call sites, then re-parse the rewritten
@@ -236,7 +239,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // Immediate destructure into locals matches the PR #229 "same-module
     // destructure before downstream use" pattern that closed the April 21
     // ParseNativeResult cross-module ABI SEGV.
-    let imported_syms = gather_imported_module_symbols(safe_imported_native_texts, safe_imported_manifests);
+    let imported_syms = gather_imported_module_symbols(safe_imported_native_texts, safe_imported_manifests, implicit_symbols);
     let imported_structs = imported_syms.structs;
     let imported_enums = imported_syms.enums;
     let imported_interfaces = imported_syms.interfaces;
@@ -473,7 +476,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
             existing_global_names.push(module_global_locals[_eg].name);
             _eg += 1;
         }
-        let _ib = lower_imported_bindings_to_globals(imported_bindings, type_context, existing_global_names);
+        let _ib = lower_imported_bindings_to_globals(imported_bindings, type_context, existing_global_names, safe_imports, native_module.module_name, module_aliases);
         if _ib.preamble_lines.length > 0 {
             module_preamble_lines = extend_string_lines(module_preamble_lines, _ib.preamble_lines);
         }
@@ -605,7 +608,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
         }
     }
     if effective_mangle_symbols {
-        let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, module_aliases, native_text_override_path);
+        let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, module_aliases, implicit_symbols, native_text_override_path);
         let mut _ci0: int = 0;
         loop {
             if _ci0 >= mangled.diagnostics.length { break; }

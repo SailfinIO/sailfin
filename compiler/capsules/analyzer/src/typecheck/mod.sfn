@@ -18,6 +18,7 @@
 // `symbols_index.sfn` drops `_`-prefixed names before indexing, so they
 // never appear in `sfn symbols` — check the whole folder, not just the
 // defining module, before concluding one is unused.
+import { ImplicitSymbol } from "sfn/ir";
 import { Program, Statement } from "sfn/syntax";
 
 import {
@@ -34,6 +35,7 @@ import {
     _generic_struct_names,
     _names_from_symbols,
     _symbols_from_global_names,
+    _symbols_from_implicit_provider,
     check_generic_instantiation_sites,
     collect_interface_definitions,
     collect_struct_definitions,
@@ -55,7 +57,8 @@ fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
 // tripping E0420.
 fn typecheck_diagnostics_with_prelude(program: Program, prelude_globals: string[]) -> Diagnostic[] {
     let empty_imports: Statement[] = [];
-    return typecheck_diagnostics_full(program, empty_imports, empty_import_symbols(), prelude_globals);
+    let empty_implicit: ImplicitSymbol[] = [];
+    return typecheck_diagnostics_full(program, empty_imports, empty_import_symbols(), prelude_globals, empty_implicit);
 }
 
 fn typecheck_error_count_with_prelude(program: Program, prelude_globals: string[]) -> int {
@@ -119,7 +122,8 @@ fn typecheck_diagnostics_with_imports(program: Program, imported_interfaces: Sta
 // never imported.
 fn typecheck_diagnostics_with_import_symbols(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable) -> Diagnostic[] {
     let empty_prelude: string[] = [];
-    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, empty_prelude);
+    let empty_implicit: ImplicitSymbol[] = [];
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, empty_prelude, empty_implicit);
 }
 
 // Prelude-aware symbol path (#812). The `sfn test` resolver
@@ -129,14 +133,19 @@ fn typecheck_diagnostics_with_import_symbols(program: Program, imported_interfac
 // bodies (`assert` → `runtime_assert_fail_fn`) and bare prelude calls in
 // checked source resolve.
 fn typecheck_diagnostics_with_import_symbols_prelude(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[]) -> Diagnostic[] {
-    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals);
+    let empty_implicit: ImplicitSymbol[] = [];
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, empty_implicit);
+}
+
+fn typecheck_diagnostics_with_import_symbols_prelude_implicit(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[]) -> Diagnostic[] {
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols);
 }
 
 // Full implementation behind every typecheck entry point.
 // `prelude_globals` carries the implicitly-available prelude/runtime
 // declaration names (#812); callers without `![io]` to load them pass
 // an empty list and fall back to import-specifier + builtin resolution.
-fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[]) -> Diagnostic[] {
+fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[]) -> Diagnostic[] {
     let local_imports = localize_import_symbols_for_program(program, imported_function_effects);
     let top_level = collect_top_level_symbols(program);
     let local_interfaces = collect_interface_definitions(program);
@@ -150,7 +159,7 @@ fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[]
     // or a bare prelude helper resolves instead of false-positiving. The
     // duplicate-symbol diagnostics already came from `collect_top_level_-
     // symbols` above; this scope is resolution-only.
-    let resolution_scope = top_level.symbols.concat(_collect_imported_call_symbols(program)).concat(_symbols_from_global_names(prelude_globals));
+    let resolution_scope = _symbols_from_implicit_provider(implicit_symbols).concat(top_level.symbols).concat(_collect_imported_call_symbols(program)).concat(_symbols_from_global_names(prelude_globals));
     let local_structs = collect_struct_definitions(program);
     let generic_struct_names = _generic_struct_names(local_structs);
     // SFN-555: the same resolution scope answers "is this a known type name?".

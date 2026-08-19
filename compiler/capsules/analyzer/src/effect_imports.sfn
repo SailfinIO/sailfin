@@ -153,6 +153,10 @@ fn append_import_function_signature_from_module(table: ImportSymbolTable, name: 
     return _append_function_with_origin(table, name, effects, "import", is_decorator, provider_module, return_type, parameter_count, required_parameter_count);
 }
 
+fn append_implicit_function_signature_from_module(table: ImportSymbolTable, name: string, effects: string[], provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1) -> ImportSymbolTable {
+    return _append_function_with_origin(table, name, effects, "implicit", false, provider_module, return_type, parameter_count, required_parameter_count);
+}
+
 // G1b (#1184): record a same-module top-level `fn` (name, effects) in the
 // per-program symbol table so the effect checker resolves local callees
 // (`foo()`) the same way it resolves imports — but flags them in-module
@@ -170,7 +174,9 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
     let mut i: int = 0;
     loop {
         if i >= updated.functions.length { break; }
-        if updated.functions[i].name == name {
+        let existing_is_implicit = updated.functions[i].origin == "implicit";
+        let incoming_is_implicit = origin == "implicit";
+        if updated.functions[i].name == name && existing_is_implicit == incoming_is_implicit {
             existing_index = i;
             break;
         }
@@ -249,6 +255,31 @@ fn lookup_imported_function(table: ImportSymbolTable, name: string) -> ImportedF
     return null;
 }
 
+fn _provider_matches_import_source(provider_module: string, source: string) -> boolean {
+    if provider_module == source { return true; }
+    return provider_module == source + "/mod";
+}
+
+fn _lookup_explicit_imported_function(table: ImportSymbolTable, name: string, source: string) -> ImportedFunctionSignature? {
+    let mut i: int = 0;
+    loop {
+        if i >= table.functions.length { break; }
+        let entry = table.functions[i];
+        if entry.name == name && _provider_matches_import_source(entry.provider_module, source) {
+            return entry;
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= table.functions.length { break; }
+        let entry = table.functions[i];
+        if entry.name == name && entry.origin != "implicit" { return entry; }
+        i += 1;
+    }
+    return null;
+}
+
 // Produce a per-program-localized symbol table from a global one.
 // The loader stages every standalone-fn `effects` field across every
 // dependency artifact, so the global `table` is keyed by exporting-
@@ -271,6 +302,11 @@ fn lookup_imported_function(table: ImportSymbolTable, name: string) -> ImportedF
 // global table + program in-memory and assert the localized result.
 fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTable) -> ImportSymbolTable {
     let mut local = with_intrinsic_effects(empty_import_symbols(), table.intrinsic_effects);
+    // Resolve source imports before adding the implicit namespace. The global
+    // loader retains same-named ordinary and implicit declarations as separate
+    // rows, so an explicit source import can select the ordinary row while a
+    // bare implicit call keeps the provider row. This also prevents an
+    // unrelated staged dependency from erasing implicit callable metadata.
     let mut i: int = 0;
     loop {
         if i >= program.statements.length { break; }
@@ -280,7 +316,12 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
             loop {
                 if s >= statement.import_specifiers.length { break; }
                 let spec = statement.import_specifiers[s];
-                let entry_opt = lookup_imported_function(table, spec.name);
+                let mut entry_opt = _lookup_explicit_imported_function(table, spec.name, statement.source);
+                // A provider may be both implicit and explicitly depended on;
+                // resolver deduplication leaves only its implicit-origin row.
+                if entry_opt == null {
+                    entry_opt = lookup_imported_function(table, spec.name);
+                }
                 if entry_opt != null {
                     let entry: ImportedFunctionSignature? = entry_opt;
                     let mut local_name = spec.name;
@@ -296,6 +337,18 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
         }
         i += 1;
     }
+    // Implicit-provider callables are already in lexical scope and need no
+    // ImportDeclaration. Explicit source imports above win on the same local
+    // name; aliases do not hide the provider's original bare name.
+    let mut implicit_index: int = 0;
+    loop {
+        if implicit_index >= table.functions.length { break; }
+        let implicit_entry = table.functions[implicit_index];
+        if implicit_entry.origin == "implicit" && lookup_imported_function(local, implicit_entry.name) == null {
+            local = append_implicit_function_signature_from_module(local, implicit_entry.name, implicit_entry.effects, implicit_entry.provider_module, implicit_entry.return_type, implicit_entry.parameter_count, implicit_entry.required_parameter_count);
+        }
+        implicit_index += 1;
+    }
     return local;
 }
 
@@ -306,6 +359,7 @@ export {
     append_import_decorator_function,
     append_import_function_from_module,
     append_import_function_signature_from_module,
+    append_implicit_function_signature_from_module,
     append_local_function,
     empty_import_symbols,
     localize_import_symbols_for_program,
