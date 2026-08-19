@@ -262,6 +262,11 @@ fn _tls_fail_if_unset(reason: i64, detail: string) -> void ![io] {
 // 5-byte header — the largest wire record the driver will buffer.
 fn _tls_max_record_wire() -> i64 { return 16645; }
 
+// Maximum TLSInnerPlaintext content in one record, 2^14 (§5.1). A caller
+// buffer longer than this is fragmented across records by `tls_write`;
+// `_tls_seal_record` fail-closes above it.
+fn _tls_max_record_plaintext() -> i64 { return 16384; }
+
 // Session roles.
 fn _tls_role_client() -> i64 { return 0; }
 
@@ -381,20 +386,40 @@ fn _tls_buf_to_bytes(src: *u8, off: i64, n: i64) -> int[] {
 }
 
 // ── Socket I/O ───────────────────────────────────────────────────
+// POSIX `EINTR` (4 on Linux, macOS, and mingw) — the one `send` failure
+// that is resumable rather than terminal. Read host-portably through the
+// `sailfin_intrinsic_errno_location` sentinel, the same discipline as
+// `../process.sfn` and `../clock.sfn`.
+let SFN_TLS_EINTR: i32 = 4;
+
 // Write every byte of `buf[0..n)` to the socket. Returns false on any
 // short/failed write, which the caller turns into a failed session —
 // a partial record on the wire is unrecoverable.
+//
+// A `send` interrupted by a signal (-1/`EINTR`) consumed nothing and is
+// resumable from the same `off`, so it is retried rather than failing the
+// session (SFN-984). Every other non-positive return stays fatal. The
+// distinction matters most for large payloads: `tls_write` now fragments a
+// multi-record buffer into one `_tls_send_all` per record, so the number of
+// `send` syscalls — and with it the chance of catching a signal mid-transfer
+// — scales with body size. Retrying here is also what keeps an interrupted
+// write from leaving a partial record on the wire.
 fn _tls_send_all(fd: i64, buf: *u8, n: i64) -> bool ![net] {
     let mut off: i64 = 0;
     let mut guard: i64 = 0;
     loop {
         if off >= n { break; }
         // Input-driven loop guard (style rule): a peer that accepts zero
-        // bytes forever must not spin.
+        // bytes forever must not spin. Bounds EINTR resumption too.
         guard = guard + 1;
         if guard > 1048576 { return false; }
         let wrote: i64 = sfn_socket_send(fd as i32, _tls_ptr_off(buf, off), n - off, 0);
-        if wrote <= 0 { return false; }
+        if wrote < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err == SFN_TLS_EINTR { continue; }
+            return false;
+        }
+        if wrote == 0 { return false; }
         off = off + wrote;
     }
     return true;
@@ -590,7 +615,7 @@ fn _tls_suite_key_len(suite: i64) -> i64 {
 // `5 + content_len + 1 + tag`, which is what both callers allocate.
 fn _tls_seal_record(s: *TlsSession, content_type: i64, content: *u8, content_len: i64, out: *u8) -> i64 {
     if content_len < 0 { return 0 - 1; }
-    if content_len > 16384 { return 0 - 1; }
+    if content_len > _tls_max_record_plaintext() { return 0 - 1; }
     let alg: int = _tls_suite_aead(s.suite);
     if alg == 0 { return 0 - 1; }
     return sfn_tls_record_seal(alg, s.write_key_addr as *u8, s.write_key_len, s.write_iv_addr as *u8, 12, s.write_seq, content_type, content, content_len, 0, out);
@@ -1609,22 +1634,52 @@ fn tls_accept_fd(ctx: *u8, fd: i32) -> *u8 ![net, rand] {
 // ── Application data ─────────────────────────────────────────────
 // `tls_write(ssl, buf, n)` — encrypt and send. Returns bytes accepted or
 // -1, matching the raw `send` contract.
+//
+// A buffer longer than one record's 2^14-byte plaintext limit (§5.1) is
+// fragmented across successive records. Fragmentation belongs here because
+// §5.1 assigns it to the record layer, and because no caller can see the
+// limit: `../adapters/http.sfn::_send_all`,
+// `../adapters/websocket.sfn::_ws_send_all`, and
+// `../concurrency/serve.sfn::_serve_conn_send` all hand over a whole buffer.
+// Before SFN-984 this sealed exactly one record, so `_tls_seal_record`'s
+// fail-closed `content_len > 16384` guard turned any larger write into -1 —
+// which surfaced as `sfn publish` being unable to POST a capsule above ~12 KB
+// of source, base64 inflating 4/3 so that 12 KiB of source is exactly 16384
+// body bytes.
+//
+// The return stays all-or-nothing (`n`, never a short count): unlike
+// `_send_all`, `../concurrency/serve.sfn::_serve_conn_send` returns this
+// value to a caller that does not resume from a partial write, so a short
+// count there would silently truncate a response body.
+//
+// `span` is always >= 1 while `sent < n`, so the loop advances strictly and
+// terminates in ceil(n / 16384) iterations — bounded by the caller's buffer,
+// not by anything a peer controls, hence no trip guard.
 fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
     if ssl as i64 == 0 { return 0 - 1; }
     let s: *TlsSession = ssl as *TlsSession;
     if s.state != _tls_state_connected() { return 0 - 1; }
     if n <= 0 { return 0; }
-    let out: *u8 = malloc((5 + n + 1 + 16) as usize);
-    if out as i64 == 0 { return 0 - 1; }
-    let wrote: i64 = _tls_seal_record(s, _tls_ct_application_data(), buf, n, out);
-    if wrote < 0 {
+    let mut sent: i64 = 0;
+    loop {
+        if sent >= n { break; }
+        let mut span: i64 = n - sent;
+        if span > _tls_max_record_plaintext() {
+            span = _tls_max_record_plaintext();
+        }
+        let out: *u8 = malloc((5 + span + 1 + 16) as usize);
+        if out as i64 == 0 { return 0 - 1; }
+        let wrote: i64 = _tls_seal_record(s, _tls_ct_application_data(), _tls_ptr_off(buf, sent), span, out);
+        if wrote < 0 {
+            free(out);
+            return 0 - 1;
+        }
+        s.write_seq = s.write_seq + 1;
+        let ok: bool = _tls_send_all(s.fd, out, wrote);
         free(out);
-        return 0 - 1;
+        if !ok { return 0 - 1; }
+        sent = sent + span;
     }
-    s.write_seq = s.write_seq + 1;
-    let ok: bool = _tls_send_all(s.fd, out, wrote);
-    free(out);
-    if !ok { return 0 - 1; }
     return n;
 }
 

@@ -466,19 +466,43 @@ fn _connect_tcp(host: *u8, port: i64) -> i32 ![net] {
     return 0 - 1;
 }
 
+// POSIX `EINTR` (4 on Linux, macOS, and mingw) — the one `send` failure that
+// is resumable rather than terminal. Read host-portably through the
+// `sailfin_intrinsic_errno_location` sentinel, the same discipline as
+// `../process.sfn` and `../clock.sfn`.
+let SFN_HTTP_EINTR: i32 = 4;
+
 // `_send_all(fd, ssl, buf, total)` — write `total` bytes, retrying on
 // short sends. When `ssl` is non-null the bytes go through `tls_write`
 // (TLS record layer); otherwise raw `send` on `fd`. Returns false if a
-// write ever fails.
+// write ever fails fatally.
+//
+// A raw `send` interrupted by a signal (-1/`EINTR`) consumed nothing and is
+// resumable from the same offset, so it is retried; every other non-positive
+// return is fatal (SFN-984). Collapsing the two — which this did before —
+// reported a signal caught mid-transfer as `publish failed — could not reach
+// registry`, and the chance of catching one scales with the syscall count,
+// i.e. with body size. The TLS branch needs no case here: `tls_write` resumes
+// its own interrupted `send`s in `../platform/tls.sfn::_tls_send_all`, so a
+// -1 from it is already fatal by the time it returns.
 fn _send_all(fd: i32, ssl: *u8, buf: *u8, total: i64) -> bool ![net] {
     let mut sent: i64 = 0;
+    let mut guard: i64 = 0;
     loop {
         if sent >= total { break; }
+        // Bounds EINTR resumption so a pathological signal storm cannot
+        // spin here forever.
+        guard = guard + 1;
+        if guard > 1048576 { return false; }
         let mut n: i64 = 0;
         if ssl as i64 != 0 {
             n = tls_write(ssl, _ptr_off(buf, sent), total - sent);
         } else {
             n = sfn_socket_send(fd, _ptr_off(buf, sent), total - sent, 0);
+            if n < 0 {
+                let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+                if err == SFN_HTTP_EINTR { continue; }
+            }
         }
         if n <= 0 { return false; }
         sent = sent + n;
