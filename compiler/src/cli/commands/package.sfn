@@ -45,7 +45,12 @@ import {
     _shell_read_cmd
 } from "../../build/fs";
 import { copy_tree, ensure_dir_p, remove_tree } from "../../build/fs_tree";
-import { build_host_os, host_exe_name } from "../../build/target";
+import {
+    build_host_os,
+    host_exe_name,
+    target_exe_name,
+    triple_target_os
+} from "../../build/target";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
 import { locate_runtime_dep_capsule_src } from "../../capsule_resolver/locate";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "../../dist_manifest";
@@ -199,8 +204,23 @@ fn _package_detect_target() -> string ![io] {
     return "unknown-" + os + "-" + arch;
 }
 
+// Short-form package targets (`windows-x86_64`, `linux-arm64`, ...) are the
+// vocabulary `_package_detect_target` emits. `triple_target_os` decodes only
+// full triples, so it cannot replace these prefix tests directly — but it
+// composes fine as a fallback for a caller that passes a full triple via
+// `--target` (e.g. `x86_64-pc-windows-msvc`), so an unrecognized short form
+// still resolves before falling through to "" (which leaves `target_exe_name`
+// a no-op).
+fn _package_target_os(target: string) -> string {
+    if index_of(target, "windows-") == 0 { return "Windows"; }
+    if index_of(target, "linux-") == 0 { return "Linux"; }
+    if index_of(target, "macos-") == 0 { return "Darwin"; }
+    return triple_target_os(target);
+}
+
 // Package the compiler. Reads `compiler/capsule.toml` for version,
-// stages `<bin>/sailfin` + `<bin>/sfn`, tars + sha256s + manifest.
+// stages `<bin>/sailfin` + `<bin>/sfn` (`.exe`-suffixed on a Windows
+// target), tars + sha256s + manifest.
 fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> int ![io] {
     if !fs.exists(compiler_bin) {
         print("sfn package: compiler binary not found: " + compiler_bin);
@@ -233,6 +253,12 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     let staging = "build/sailfin/.package-staging";
     let staging_root = staging + "/sailfin-native-" + target;
     let staging_bin = staging_root + "/bin";
+    // Target-gated (not host-gated): a staged tarball member is a
+    // distribution artifact for `target`, not a binary this host must run
+    // (SFN-972; see `target_exe_name`'s doc comment, `build/target.sfn`).
+    let pkg_target_os = _package_target_os(target);
+    let sailfin_name = target_exe_name("sailfin", pkg_target_os);
+    let sfn_name = target_exe_name("sfn", pkg_target_os);
 
     // Staging is wiped on entry AND exit so a prior failed run
     // can't bleed contents into this run. The entry wipe's result is
@@ -244,12 +270,13 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
         return 1;
     }
     ensure_dir_p(staging_bin);
-    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/sailfin") {
+    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/"
+        + sailfin_name) {
         print("sfn package: failed to stage sailfin binary");
         remove_tree(staging);
         return 1;
     }
-    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/sfn") {
+    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/" + sfn_name) {
         print("sfn package: failed to stage sfn binary");
         remove_tree(staging);
         return 1;
@@ -258,9 +285,10 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";
     let create_opts = CreateOptions {
-        exec_paths: ["sailfin-native-" + target + "/bin/sailfin", "sailfin-native-"
+        exec_paths: ["sailfin-native-" + target + "/bin/" + sailfin_name, "sailfin-native-"
             + target
-            + "/bin/sfn"],
+            + "/bin/"
+            + sfn_name],
         link_policy: LinkPolicy.Preserve,
         deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
     };
@@ -328,7 +356,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 // Tarball contents (under top-level `<root>/`, no wrapping dir —
 // `targz_create(tarball, staging, [], ...)` walks the whole staging
 // tree, mirroring the historical `tar -czf <out> -C <staging> .`):
-//   - bin/sailfin, bin/sfn               — the compiler
+//   - bin/sailfin, bin/sfn               — the compiler (`.exe`-suffixed on a Windows target)
 //   - runtime/capsule.toml               — runtime capsule manifest
 //   - runtime/prelude.sfn, runtime/sfn/  — the Sailfin runtime sources
 //   - import-context/                    — staged .sfn-asm tree (if available)
@@ -397,6 +425,12 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let staging = "build/sailfin/.installer-staging";
     let staging_bin = staging + "/bin";
     let staging_runtime = staging + "/runtime";
+    // Target-gated (not host-gated): a staged tarball member is a
+    // distribution artifact for `target`, not a binary this host must run
+    // (SFN-972; see `target_exe_name`'s doc comment, `build/target.sfn`).
+    let pkg_target_os = _package_target_os(target);
+    let sailfin_name = target_exe_name("sailfin", pkg_target_os);
+    let sfn_name = target_exe_name("sfn", pkg_target_os);
     // Staging is wiped on entry AND exit so a prior failed run can't
     // bleed contents into this run.
     if !remove_tree(staging) {
@@ -405,12 +439,13 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     }
     ensure_dir_p(staging_bin);
     ensure_dir_p(staging_runtime);
-    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/sailfin") {
+    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/"
+        + sailfin_name) {
         print("sfn package: failed to stage sailfin binary");
         remove_tree(staging);
         return 1;
     }
-    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/sfn") {
+    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/" + sfn_name) {
         print("sfn package: failed to stage sfn binary");
         remove_tree(staging);
         return 1;
@@ -597,7 +632,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";
     let create_opts = CreateOptions {
-        exec_paths: ["bin/sailfin", "bin/sfn"],
+        exec_paths: ["bin/" + sailfin_name, "bin/" + sfn_name],
         link_policy: LinkPolicy.Preserve,
         deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
     };

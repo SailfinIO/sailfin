@@ -1,0 +1,302 @@
+// compiler/tests/e2e/sfn_package_target_exe_suffix_test.sfn
+//
+// SFN-972: a staged tarball member is a distribution artifact for the
+// `--target` the package is built FOR, not for the host running `sfn
+// package` — so the staged/archived binary names must be TARGET-gated
+// (`_package_target_os` + `target_exe_name`, `compiler/src/cli/commands/
+// package.sfn`), never HOST-gated (`host_exe_name`). Every runtime spawn
+// site on Windows (`runtime/sfn/platform/process_windows.sfn`) calls
+// `CreateProcessA` with `lpApplicationName = null`, so an extensionless PE
+// this compiler stages into a Windows tarball is unlaunchable (SFN-693).
+//
+// Covers both staging sites (`_package_compiler` and `_package_installer`)
+// and both target flavours:
+//   - `--target windows-x86_64` -> `bin/sfn.exe`, `bin/sailfin.exe`
+//   - `--target linux-x86_64`   -> `bin/sfn`, `bin/sailfin` (today's shape,
+//     byte-identical)
+//
+// Also asserts the exec bit survives the rename on the Windows members —
+// `CreateOptions.exec_paths` (`sfn/archive`) is matched against archive
+// member paths, so if the staged file is renamed but `exec_paths` is not
+// updated in lockstep, the match silently fails and the binary archives
+// 0644 instead of 0755 with NO error (the SFN-972 spec's "silent-failure
+// trap"). Uses `tar -tvzf` (permission-bit listing) rather than the plain
+// `-tzf` listing `sfn_package_test.sfn` uses elsewhere, since only the
+// verbose form carries the mode string.
+//
+// The `--compiler-bin` source MUST be non-executable (0644), not the live
+// host `sfn` binary: `_tw_is_executable`
+// (`capsules/sfn/archive/src/tar_write.sfn`) ORs `exec_paths` membership
+// with a live `fs.is_executable` probe on the STAGED file, and
+// `_copy_file_preserving_mode` (`compiler/src/build/fs.sfn`) copies the
+// source's mode onto the staged copy. An executable source (0755) makes
+// the `fs.is_executable` fallback fire regardless of `exec_paths`, so the
+// exec-bit assertions below would pass even through the exact lockstep
+// regression SFN-972 exists to catch. `_nonexec_compiler_bin` stages a
+// 0644 copy so the archived exec bit can only come from `exec_paths`.
+//
+// This drives a real `sfn package --target ...` against the actual host
+// binary (a Linux ELF) staged under a Windows-flavoured name — the naming
+// and archiving decision is independent of what platform the binary was
+// actually built for, matching `sfn_package_test.sfn`'s existing shape
+// (`--compiler-bin` pointed at the host binary regardless of `--target`).
+import { contains, split } from "sfn/strings";
+import { tool_present } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _test_root(tag: string) -> string ![io] {
+    let root = _scratch_dir() + "/sfnpkg-exe-" + tag;
+    fs.createDirectory(root, true);
+    return root;
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// `tar -tvzf <tarball>` -> full verbose listing text (permission bits +
+// member path per line), the only `tar` listing form that carries mode.
+fn _tar_list_verbose(tarball: string) -> string ![io] {
+    let exit = process.run_capture(["tar", "-tvzf", tarball], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return out;
+}
+
+// The verbose listing line whose path ends in `suffix`, or "" if none.
+fn _verbose_line_for_suffix(listing: string, suffix: string) -> string {
+    let lines = split(listing, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if line.length >= suffix.length {
+            let tail = substring(line, line.length - suffix.length, line.length);
+            if tail == suffix { return line; }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// A ustar verbose listing line's leading permission field starts with
+// `-rwx` for an executable regular file (the mode `_copy_file_preserving_mode`
+// + `CreateOptions.exec_paths` are meant to produce for a staged binary).
+fn _line_is_exec(line: string) -> bool {
+    if line.length < 4 { return false; }
+    return substring(line, 0, 4) == "-rwx";
+}
+
+// True when `tar`, `cp`, and `chmod` are all present — the full toolset the
+// exec-bit tests below need (`tool_present("tar")` alone is not enough
+// once `--compiler-bin` is staged through `cp`/`chmod`).
+fn _exec_bit_tools_present() -> bool ![io] {
+    if !tool_present("tar") { return false; }
+    if !tool_present("cp") { return false; }
+    if !tool_present("chmod") { return false; }
+    return true;
+}
+
+// A 0644 copy of `src` at `<root>/cbin/sfn`, for use as `--compiler-bin`.
+// See the module doc comment: the staged file's mode must NOT be
+// executable, or `_tw_is_executable`'s live-probe fallback masks an
+// `exec_paths` lockstep regression.
+fn _nonexec_compiler_bin(root: string, src: string) -> string ![io] {
+    fs.createDirectory(root + "/cbin", true);
+    let bin = root + "/cbin/sfn";
+    let cp_exit = process.run_capture(["cp", src, bin], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if cp_exit != 0 { return ""; }
+    let chmod_exit = process.run_capture(["chmod", "644", bin], _child_env());
+    let _mo = process.capture_take_stdout();
+    let _me = process.capture_take_stderr();
+    if chmod_exit != 0 { return ""; }
+    return bin;
+}
+
+fn _find_tarball(dir: string, prefix: string) -> string ![io] {
+    if !fs.exists(dir) { return ""; }
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        let starts = name.length >= prefix.length && substring(name, 0, prefix.length) == prefix;
+        let ends = name.length >= 7 && substring(name, name.length - 7, name.length) == ".tar.gz";
+        if starts && ends { return dir + "/" + name; }
+        i += 1;
+    }
+    return "";
+}
+
+// =====================================================================
+// Compiler mode
+// =====================================================================
+test "sfn package (compiler mode): windows target stages .exe members with exec bit" ![io] {
+    if !_exec_bit_tools_present() {
+        assert true;
+        return;
+    }
+
+    let root = _test_root("compiler-win");
+    let dist = root + "/dist";
+    let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
+    assert bin.length > 0;
+
+    let exit = process.run_capture([_sfn_bin(), "package", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    let tarball = _find_tarball(dist, "sailfin-native-windows-x86_64-");
+    assert tarball.length > 0;
+
+    let listing = _tar_list_verbose(tarball);
+    let sfn_line = _verbose_line_for_suffix(listing, "/bin/sfn.exe");
+    let sailfin_line = _verbose_line_for_suffix(listing, "/bin/sailfin.exe");
+    assert sfn_line.length > 0;
+    assert sailfin_line.length > 0;
+    // The plain (non-`.exe`) names must be ABSENT — the member was renamed,
+    // not duplicated under both names.
+    assert _verbose_line_for_suffix(listing, "/bin/sfn") == "";
+    assert _verbose_line_for_suffix(listing, "/bin/sailfin") == "";
+
+    // The exec-bit trap (SFN-972): the rename must be reflected in
+    // `exec_paths` too, or these members silently archive 0644.
+    assert _line_is_exec(sfn_line);
+    assert _line_is_exec(sailfin_line);
+}
+
+test "sfn package (compiler mode): linux target keeps today's suffixless members" ![io] {
+    if !_exec_bit_tools_present() {
+        assert true;
+        return;
+    }
+
+    let root = _test_root("compiler-linux");
+    let dist = root + "/dist";
+    let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
+    assert bin.length > 0;
+
+    let exit = process.run_capture([_sfn_bin(), "package", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    let tarball = _find_tarball(dist, "sailfin-native-linux-x86_64-");
+    assert tarball.length > 0;
+
+    let listing = _tar_list_verbose(tarball);
+    let sfn_line = _verbose_line_for_suffix(listing, "/bin/sfn");
+    let sailfin_line = _verbose_line_for_suffix(listing, "/bin/sailfin");
+    assert sfn_line.length > 0;
+    assert sailfin_line.length > 0;
+    assert ! contains(listing, "/bin/sfn.exe");
+    assert ! contains(listing, "/bin/sailfin.exe");
+    assert _line_is_exec(sfn_line);
+    assert _line_is_exec(sailfin_line);
+}
+
+// =====================================================================
+// Installer mode
+// =====================================================================
+test "sfn package --installer: windows target stages .exe members with exec bit" ![io] {
+    if !_exec_bit_tools_present() {
+        assert true;
+        return;
+    }
+
+    let root = _test_root("installer-win");
+    let dist = root + "/dist";
+    let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
+    assert bin.length > 0;
+
+    let exit = process.run_capture([_sfn_bin(), "package", "--installer", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    let tarball = _find_tarball(dist, "installer-windows-x86_64");
+    assert tarball.length > 0;
+
+    let listing = _tar_list_verbose(tarball);
+    let sfn_line = _verbose_line_for_suffix(listing, "bin/sfn.exe");
+    let sailfin_line = _verbose_line_for_suffix(listing, "bin/sailfin.exe");
+    assert sfn_line.length > 0;
+    assert sailfin_line.length > 0;
+    // The plain (non-`.exe`) names must be ABSENT — the member was renamed,
+    // not duplicated under both names.
+    assert _verbose_line_for_suffix(listing, "bin/sfn") == "";
+    assert _verbose_line_for_suffix(listing, "bin/sailfin") == "";
+    assert _line_is_exec(sfn_line);
+    assert _line_is_exec(sailfin_line);
+}
+
+test "sfn package --installer: linux target keeps today's suffixless members" ![io] {
+    if !_exec_bit_tools_present() {
+        assert true;
+        return;
+    }
+
+    let root = _test_root("installer-linux");
+    let dist = root + "/dist";
+    let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
+    assert bin.length > 0;
+
+    let exit = process.run_capture([_sfn_bin(), "package", "--installer", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    let tarball = _find_tarball(dist, "installer-linux-x86_64");
+    assert tarball.length > 0;
+
+    let listing = _tar_list_verbose(tarball);
+    let sfn_line = _verbose_line_for_suffix(listing, "bin/sfn");
+    let sailfin_line = _verbose_line_for_suffix(listing, "bin/sailfin");
+    assert sfn_line.length > 0;
+    assert sailfin_line.length > 0;
+    assert ! contains(listing, "bin/sfn.exe");
+    assert ! contains(listing, "bin/sailfin.exe");
+    assert _line_is_exec(sfn_line);
+    assert _line_is_exec(sailfin_line);
+}
