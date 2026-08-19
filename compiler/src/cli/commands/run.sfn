@@ -38,6 +38,7 @@ import {
     with_arg,
     with_flag
 } from "sfn/cli";
+import { find, int_to_string } from "sfn/strings";
 
 import {
     _print_cache_summary,
@@ -72,6 +73,46 @@ fn command_def() -> Command {
     cmd = with_flag(cmd, flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation"));
     cmd = with_arg(cmd, arg_variadic("file", "Sailfin source file (or prebuilt executable); omit to run the current capsule"));
     return cmd;
+}
+
+// SFN-719: mint a per-invocation exe path so a nested or concurrent `sfn
+// run` never targets the same file as another still-running one. On
+// Windows a running `.exe` is locked by the OS, so reusing the fixed
+// `run` name blocks the link step of a second invocation outright; on
+// every platform it's also a correctness hazard (one run's binary could
+// be overwritten mid-execution by another). `monotonic_millis()` seeds
+// the suffix; the `fs.exists` probe covers the rare same-millisecond
+// collision under genuine concurrency, bounded so it can't loop forever.
+fn _unique_run_exe_path(run_cache_dir: string) -> string ![clock, io] {
+    let base = run_cache_dir + "/run-" + int_to_string(monotonic_millis());
+    let mut candidate = target_exe_name(base, build_target_os());
+    let mut attempt = 1;
+    loop {
+        if !fs.exists(candidate) { return candidate; }
+        if attempt > 1000 { return candidate; }
+        candidate = target_exe_name(base + "-" + int_to_string(attempt), build_target_os());
+        attempt += 1;
+    }
+}
+
+// SFN-719: sweep exe artifacts left by earlier invocations before minting
+// this run's own unique name, so the per-invocation scheme above doesn't
+// accumulate binaries under `run_cache_dir` across repeated `sfn run`
+// calls. Best-effort — a prior binary still running (and thus locked on
+// Windows) simply survives to the next sweep, bounding growth to the
+// current concurrency level rather than every invocation ever made.
+fn _sweep_stale_run_exes(run_cache_dir: string) ![io] {
+    if !fs.exists(run_cache_dir) { return; }
+    let entries = fs.listDirectory(run_cache_dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        if find(name, "run-", 0) == 0 {
+            fs.deleteFile(run_cache_dir + "/" + name);
+        }
+        i += 1;
+    }
 }
 
 // Reproduce the legacy `_legacy_dispatch_run` body against typed matches.
@@ -147,7 +188,19 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // Derived name (never an explicit `-o`), so it carries Windows' `.exe`
     // suffix from birth: `CreateProcessA` below and the link's `-o` must
     // agree by construction (SFN-693).
-    let exe_path = target_exe_name(run_cache_dir + "/run", build_target_os());
+    //
+    // SFN-719: the pooled-test path above is already isolated (each
+    // `SAILFIN_TEST_SCRATCH` is per-invocation), so the fixed `run` name
+    // stays there untouched. Only the unguarded default (`build/sailfin`,
+    // shared across every plain-CLI and nested `sfn run`) gets a
+    // per-invocation unique name — that's the path where a still-running
+    // `.exe` (locked on Windows) or a concurrent invocation can collide
+    // with a fixed name.
+    let mut exe_path = target_exe_name(run_cache_dir + "/run", build_target_os());
+    if env.get("SAILFIN_TEST_SCRATCH").length == 0 {
+        _sweep_stale_run_exes(run_cache_dir);
+        exe_path = _unique_run_exe_path(run_cache_dir);
+    }
 
     // Resolve and compile capsule deps before lowering the main file. The
     // unified resolver covers relative imports, manifest-declared capsule
