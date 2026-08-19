@@ -14,6 +14,7 @@
 //
 // Ordering: the import-context tree this reads is written by
 // `./staging`, which must run first (see that module's header).
+import { _read_implicit_deps } from "../build/paths";
 import { build_target_triple } from "../build/target";
 import {
     BuildCacheConfig,
@@ -31,21 +32,20 @@ import {
 } from "../build_cache";
 import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../capsule_emit_parallel";
 import { emit_subprocess_with_retry } from "../emit_helpers";
-import {
-    compile_to_llvm_file_with_module,
-    compile_to_llvm_file_with_module_imports
-} from "../main";
+import { compile_to_llvm_file_with_module_imports_and_implicit } from "../main";
 import { resolve_compiler_version_for_cache } from "../version";
 import {
     _cr_dirname,
     _cr_ensure_dir,
     _cr_import_context_root,
-    _cr_scratch_root
+    _cr_scratch_root,
+    _cr_string_in_array
 } from "./paths";
 import {
     _cr_collect_per_source_dep_slugs,
     _cr_dep_manifest_paths_for_slugs,
     _cr_manifests_to_asm_paths,
+    _cr_stage_implicit_deps,
     _cr_stage_import_deps
 } from "./staging";
 import {
@@ -157,7 +157,8 @@ fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: strin
         // as the subprocess path, using the direct-import `.sfn-asm`
         // derived from this module's dep manifests.
         let import_asm_paths = _cr_manifests_to_asm_paths(dep_manifests);
-        ok = compile_to_llvm_file_with_module_imports(source, src.slug, src.ll_path, work_dir, import_asm_paths);
+        let implicit_asm_paths = _read_implicit_deps(context_root, src.slug);
+        ok = compile_to_llvm_file_with_module_imports_and_implicit(source, src.slug, src.ll_path, work_dir, import_asm_paths, implicit_asm_paths);
     }
     if !ok {
         print.err("capsule-resolver: failed to lower " + src.slug
@@ -207,7 +208,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: strin
 // env-driven behaviour. Honours `config.clean` by wiping the cache
 // root before any per-module work — done once per build, not per
 // module, so a single `--clean` run can't double-wipe.
-fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string, work_dir: string) -> CompileCapsuleResult ![io] {
+fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string, work_dir: string, implicit_provider_slugs: string[]) -> CompileCapsuleResult ![io] {
     let scratch_root = _cr_scratch_root();
     _cr_ensure_dir(scratch_root);
     _cr_ensure_dir(scratch_root + "/capsules");
@@ -254,6 +255,22 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // slugs pin the provider identity that determines call-site name
     // mangling, the manifests pin the provider's layout bytes.
     let per_source_dep_slugs = _cr_collect_per_source_dep_slugs(sources, slug_universe);
+    let mut implicit_source_index: int = 0;
+    loop {
+        if implicit_source_index >= sources.length { break; }
+        let mut implicit_slug_index: int = 0;
+        loop {
+            if implicit_slug_index >= implicit_provider_slugs.length { break; }
+            let provider_slug = implicit_provider_slugs[implicit_slug_index];
+            if provider_slug != sources[implicit_source_index].slug {
+                if !_cr_string_in_array(per_source_dep_slugs[implicit_source_index], provider_slug) {
+                    per_source_dep_slugs[implicit_source_index].push(provider_slug);
+                }
+            }
+            implicit_slug_index += 1;
+        }
+        implicit_source_index += 1;
+    }
     let per_source_dep_manifests = _cr_dep_manifest_paths_for_slugs(per_source_dep_slugs, work_dir);
     // #957: stage the per-module `.import-deps` sidecars the
     // `emit --import-context` subprocess reads to enforce cross-module
@@ -262,6 +279,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // #984: sidecars are still written only for `sources`; only the slug
     // resolution universe is widened.
     _cr_stage_import_deps(sources, slug_universe, work_dir);
+    _cr_stage_implicit_deps(sources, implicit_provider_slugs, work_dir);
     let cache_root_path = cache_root(config.capsule_name);
     if config.clean {
         // `--clean` is a destructive opt-in. If the wipe fails

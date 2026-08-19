@@ -6,7 +6,7 @@
 // diagnostic passes without filesystem, network, clock, process, or CLI
 // authority. Presentation is deliberately absent: driver adapters render the
 // returned diagnostic data as human text or protocol envelopes.
-import { IntrinsicEffectTable } from "sfn/ir";
+import { ImplicitSymbol, IntrinsicEffectTable } from "sfn/ir";
 import { Program, Statement } from "sfn/syntax";
 import { Token, TokenKind } from "sfn/syntax";
 
@@ -25,7 +25,7 @@ import { check_ownership_with_imports } from "./ownership_checker";
 import { collect_reexport_violations } from "./reexport_check";
 import {
     collect_decorator_deprecation_findings,
-    typecheck_diagnostics_with_import_symbols_prelude
+    typecheck_diagnostics_with_import_symbols_prelude_implicit
 } from "./typecheck";
 import { Diagnostic } from "./typecheck_types";
 
@@ -44,6 +44,9 @@ struct AnalyzerInput {
     import_context: ImportResolutionContext;
     allow_bare_assert: boolean;
     effect_severity: string;
+    // Structured provider surface for declarations made available without a
+    // source import. Trailing for pinned-seed positional layout stability.
+    implicit_symbols: ImplicitSymbol[];
 }
 
 // Semantic data retained for downstream analysis/codegen consumers. The
@@ -53,6 +56,7 @@ struct AnalyzedProgram {
     program: Program;
     imported_interfaces: Statement[];
     imported_symbols: ImportSymbolTable;
+    implicit_symbols: ImplicitSymbol[];
 }
 
 // `producers` is parallel to `diagnostics` and remains separate from the
@@ -101,7 +105,7 @@ fn _record_severity(diagnostic: Diagnostic, errors: int, warnings: int) -> int[]
 fn analyze_program(input: AnalyzerInput) -> AnalyzerResult {
     let program = input.program;
     let analysis_symbols = with_intrinsic_effects(input.imported_symbols, input.intrinsic_effects);
-    let type_diagnostics = typecheck_diagnostics_with_import_symbols_prelude(program, input.imported_interfaces, analysis_symbols, input.prelude_globals);
+    let type_diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit(program, input.imported_interfaces, analysis_symbols, input.prelude_globals, input.implicit_symbols);
     let ownership_findings = check_ownership_with_imports(program, analysis_symbols);
     let effect_violations = validate_effects_with_imports_api(program, analysis_symbols);
     let capability_violations = validate_capsule_capabilities_api(program, input.capabilities_required);
@@ -275,7 +279,8 @@ fn analyze_program(input: AnalyzerInput) -> AnalyzerResult {
         analyzed_program: AnalyzedProgram {
             program: program,
             imported_interfaces: input.imported_interfaces,
-            imported_symbols: analysis_symbols
+            imported_symbols: analysis_symbols,
+            implicit_symbols: input.implicit_symbols
         },
         diagnostics: diagnostics,
         producers: producers,
