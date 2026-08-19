@@ -51,7 +51,12 @@ runs:
         # package, that step buys nothing, so skip the whole attempt loop.
         all_installed=1
         for pkg in $PACKAGES; do
-          if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+          # `dpkg -s` also exits 0 for a package left in `deinstall ok
+          # config-files` state, whose binaries are already gone. Matching the
+          # status field instead keeps a removed package from reading as
+          # present and silently skipping an install it still needs.
+          if ! dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null \
+               | grep -qx 'installed'; then
             all_installed=0
             break
           fi
