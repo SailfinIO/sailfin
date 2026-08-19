@@ -1,0 +1,473 @@
+// capsules/sfn/archive/tests/tar_write_test.sfn
+//
+// ustar header write-side (SFN-899, SFEP-0071 §3.7, §3.8): the pure
+// encode/decode round trip, the name-splitting and hard-error boundaries,
+// and — filesystem-touching — `targz_create`'s tree walk, canonical
+// modes, and the byte-reproducibility claim that is the entire point of
+// this phase (SFEP-0071 §2.2): two `targz_create` runs over the same tree
+// produce byte-identical archives.
+import { char_code_at } from "sfn/strings";
+
+import {
+    ByteBuf,
+    ByteCursor,
+    _byte_at,
+    bytes_append_slice,
+    bytes_cursor,
+    bytes_free,
+    bytes_new
+} from "../src/bytes";
+import { DeflateOptions, DeflateStrategy } from "../src/deflate";
+import { ArchiveErrorKind } from "../src/error";
+import { ExtractOptions, targz_extract } from "../src/tar_read";
+import { CreateOptions, LinkPolicy, targz_create } from "../src/tar_write";
+import { UstarHeader, ustar_decode_header, ustar_encode_header } from "../src/ustar";
+
+// libc file I/O, redeclared per-module per the #306 cross-module extern
+// limit (matching `tar_read_hostile_test.sfn`) — this test reads raw
+// archive bytes off disk for the byte-reproducibility comparison, which a
+// `string`-typed `fs.readFile` cannot carry intact (a `.tar.gz` routinely
+// contains NUL bytes).
+extern fn fopen(path: *u8, mode: *u8) -> *File;
+
+extern fn fclose(f: *File) -> i32;
+
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _test_root(subdir: string) -> string ![io] {
+    let root: string = _scratch_dir() + "/" + subdir;
+    fs.createDirectory(root, true);
+    return root;
+}
+
+fn _fixed_opts() -> CreateOptions {
+    return CreateOptions {
+        exec_paths: [],
+        link_policy: LinkPolicy.Preserve,
+        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+    };
+}
+
+fn _read_whole_file(path: string) -> ByteBuf ![io] {
+    let read_mode: string = "rb";
+    let f: *File = fopen(path as *u8, read_mode as *u8);
+    let built = bytes_new(65536);
+    let mut out: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match built {
+        Result.Ok { value }
+        : {
+            out = value;
+        },
+        Result.Err { error }
+        : {
+            fclose(f);
+            return out;
+        }
+    }
+    let chunk: int = 65536;
+    let chunk_buf: *u8 = malloc(chunk as usize);
+    loop {
+        let got: int = fread(chunk_buf, 1 as usize, chunk as usize, f) as int;
+        if got <= 0 { break; }
+        let appended = bytes_append_slice(out, chunk_buf as i64, got);
+        match appended {
+            Result.Ok { value }
+            : {
+                out = value;
+            },
+            Result.Err { error }
+            : {
+                break;
+            }
+        }
+        if got < chunk { break; }
+    }
+    free(chunk_buf);
+    fclose(f);
+    return out;
+}
+
+fn _bytes_equal(a: ByteBuf, b: ByteBuf) -> boolean {
+    if a.len != b.len { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.len { break; }
+        let ab: int = _byte_at(a.addr + (i as i64));
+        let bb: int = _byte_at(b.addr + (i as i64));
+        if ab != bb { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------
+// Pure: header encode/decode round trip.
+test "archive tar_write: encodes and decodes a regular-file header" {
+    let h: UstarHeader = UstarHeader {
+        name: "hello.txt",
+        linkname: "",
+        typeflag: 48,  // '0'
+        size: 42,
+        mode: 420,  // 0644
+        is_zero_block: false
+    };
+    let started = bytes_new(512);
+    let mut out: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match started {
+        Result.Ok { value }
+        : {
+            out = value;
+        },
+        Result.Err { error }
+        : {
+            assert false;
+            return;
+        }
+    }
+    let encoded = ustar_encode_header(h, out);
+    match encoded {
+        Result.Ok { value }
+        : {
+            let cursor: ByteCursor = bytes_cursor(value);
+            let decoded = ustar_decode_header(cursor);
+            match decoded {
+                Result.Ok { value }
+                : {
+                    assert value.name == "hello.txt";
+                    assert value.typeflag == 48;
+                    assert value.size == 42;
+                    assert value.mode == 420;
+                    assert ! value.is_zero_block;
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                }
+            }
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// A name longer than 100 bytes but with a `/` splittable within the
+// 155/100 prefix/name budget round-trips through the SAME prefix+name
+// join `ustar_decode_header`'s POSIX path performs.
+test "archive tar_write: splits a long name into prefix/name and rejoins on decode" {
+    // Segments are `/`-separated so that a split point exists whose prefix
+    // half fits the 155-byte `prefix` field and whose tail fits the
+    // 100-byte `name` field. A name whose only `/` sits past byte 155 is
+    // genuinely unrepresentable in ustar without a GNU `L` extension
+    // (never emitted, SFEP-0071 3.8) and is covered separately below.
+    let mut long_dir: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 5 { break; }
+        long_dir = long_dir + "some-long-directory-segment/";
+        i += 1;
+    }
+    let full_name: string = long_dir + "file.txt";
+    assert full_name.length > 100;
+
+    let h: UstarHeader = UstarHeader {
+        name: full_name,
+        linkname: "",
+        typeflag: 48,
+        size: 0,
+        mode: 420,
+        is_zero_block: false
+    };
+    let started = bytes_new(512);
+    let mut out: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match started {
+        Result.Ok { value }
+        : {
+            out = value;
+        },
+        Result.Err { error }
+        : {
+            assert false;
+            return;
+        }
+    }
+    let encoded = ustar_encode_header(h, out);
+    match encoded {
+        Result.Ok { value }
+        : {
+            let cursor: ByteCursor = bytes_cursor(value);
+            let decoded = ustar_decode_header(cursor);
+            match decoded {
+                Result.Ok { value }
+                : {
+                    assert value.name == full_name;
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                }
+            }
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// A name with no `/` at all that still exceeds 100 bytes cannot be split
+// into prefix/name at all, and GNU long-name extensions are never emitted
+// (SFEP-0071 §3.8) — this must be a hard error, not a silent truncation.
+test "archive tar_write: an unsplittable over-long name is a hard error" {
+    let mut name: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 110 { break; }
+        name = name + "x";
+        i += 1;
+    }
+    let h: UstarHeader = UstarHeader {
+        name: name,
+        linkname: "",
+        typeflag: 48,
+        size: 0,
+        mode: 420,
+        is_zero_block: false
+    };
+    let started = bytes_new(512);
+    let mut out: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match started {
+        Result.Ok { value }
+        : {
+            out = value;
+        },
+        Result.Err { error }
+        : {
+            assert false;
+            return;
+        }
+    }
+    let encoded = ustar_encode_header(h, out);
+    match encoded {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.UnsupportedFeature;
+        }
+    }
+}
+
+// A name that DOES contain a `/`, but whose only split point sits past the
+// 155-byte `prefix` field, is just as unrepresentable as one with no `/` at
+// all — the prefix half cannot fit. Distinct from the no-separator case
+// above, and worth its own coverage: the split scan finds a candidate and
+// must still reject it on the length bound rather than truncating.
+test "archive tar_write: a split point past the prefix field is a hard error" {
+    let mut long_dir: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 12 { break; }
+        long_dir = long_dir + "some-long-directory-segment-";
+        i += 1;
+    }
+    let full_name: string = long_dir + "/file.txt";
+    assert full_name.length > 100;
+
+    let h: UstarHeader = UstarHeader {
+        name: full_name,
+        linkname: "",
+        typeflag: 48,
+        size: 0,
+        mode: 420,
+        is_zero_block: false
+    };
+    let started = bytes_new(512);
+    let mut out: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match started {
+        Result.Ok { value }
+        : {
+            out = value;
+        },
+        Result.Err { error }
+        : {
+            assert false;
+            return;
+        }
+    }
+    let encoded = ustar_encode_header(h, out);
+    match encoded {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.UnsupportedFeature;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// `![io]`: real filesystem tree, real archive.
+test "archive tar_write: create then extract round-trips a small tree" ![io] {
+    let root: string = _test_root("tar-write-roundtrip");
+    let src: string = root + "/src";
+    fs.createDirectory(src, true);
+    fs.createDirectory(src + "/sub", true);
+    fs.writeFile(src + "/top.txt", "top-level content\n");
+    fs.writeFile(src + "/sub/nested.txt", "nested content\n");
+    fs.symlink("nested.txt", src + "/sub/link.txt");
+
+    let archive: string = root + "/out.tar.gz";
+    let created = targz_create(archive, src, [], _fixed_opts());
+    match created {
+        Result.Ok { value }
+        : {
+            assert value.member_count >= 4;  // top.txt, sub/, sub/nested.txt, sub/link.txt
+        },
+        Result.Err { error }
+        : {
+            print("targz_create failed: " + error.message);
+            assert false;
+            return;
+        }
+    }
+
+    let dest: string = root + "/dest";
+    fs.createDirectory(dest, true);
+    let extract_opts = ExtractOptions {
+        copy_instead_of_link: false,
+        apply_modes: true,
+        max_total_bytes: 1048576,
+        max_members: 1024,
+        host_is_windows: false
+    };
+    let extracted = targz_extract(archive, dest, extract_opts);
+    match extracted {
+        Result.Ok { value }
+        : {
+            assert value.member_count >= 3;
+        },
+        Result.Err { error }
+        : {
+            print("targz_extract failed: " + error.message);
+            assert false;
+            return;
+        }
+    }
+
+    assert fs.readFile(dest + "/top.txt") == "top-level content\n";
+    assert fs.readFile(dest + "/sub/nested.txt") == "nested content\n";
+    assert fs.read_link(dest + "/sub/link.txt") == "nested.txt";
+}
+
+// The canonical-mode claim (SFEP-0071 §3.7): a path named in `exec_paths`
+// is stored `0755` regardless of the host's own executable bit, and an
+// ordinary file is stored `0644`.
+test "archive tar_write: exec_paths controls the stored mode independent of the host bit" ![io] {
+    let root: string = _test_root("tar-write-mode");
+    let src: string = root + "/src";
+    fs.createDirectory(src, true);
+    fs.writeFile(src + "/plain.txt", "plain\n");
+    fs.writeFile(src + "/should-be-exec.sh", "#!/bin/sh\necho hi\n");
+
+    let opts = CreateOptions {
+        exec_paths: ["should-be-exec.sh"],
+        link_policy: LinkPolicy.Preserve,
+        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+    };
+    let archive: string = root + "/out.tar.gz";
+    let created = targz_create(archive, src, [], opts);
+    match created {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            assert false;
+            return;
+        }
+    }
+
+    let dest: string = root + "/dest";
+    fs.createDirectory(dest, true);
+    let extract_opts = ExtractOptions {
+        copy_instead_of_link: false,
+        apply_modes: true,
+        max_total_bytes: 1048576,
+        max_members: 1024,
+        host_is_windows: false
+    };
+    let extracted = targz_extract(archive, dest, extract_opts);
+    match extracted {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            assert false;
+            return;
+        }
+    }
+
+    assert fs.is_executable(dest + "/should-be-exec.sh");
+    assert ! fs.is_executable(dest + "/plain.txt");
+}
+
+// The reproducibility claim (SFEP-0071 §2.2, §3.7): two `targz_create` runs
+// over the SAME tree produce byte-identical archives — no host mtime, uid,
+// gid, or gzip MTIME leaks through.
+test "archive tar_write: two creates over the same tree are byte-identical" ![io] {
+    let root: string = _test_root("tar-write-repro");
+    let src: string = root + "/src";
+    fs.createDirectory(src, true);
+    fs.createDirectory(src + "/dir", true);
+    fs.writeFile(src + "/a.txt", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+    fs.writeFile(src + "/dir/b.txt", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n");
+
+    let archive1: string = root + "/one.tar.gz";
+    let archive2: string = root + "/two.tar.gz";
+    let created1 = targz_create(archive1, src, [], _fixed_opts());
+    match created1 {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            assert false;
+            return;
+        }
+    }
+    let created2 = targz_create(archive2, src, [], _fixed_opts());
+    match created2 {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            assert false;
+            return;
+        }
+    }
+
+    let bytes1: ByteBuf = _read_whole_file(archive1);
+    let bytes2: ByteBuf = _read_whole_file(archive2);
+    assert _bytes_equal(bytes1, bytes2);
+    bytes_free(bytes1);
+    bytes_free(bytes2);
+}

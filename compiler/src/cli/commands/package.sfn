@@ -20,6 +20,13 @@
 // the v2 dispatch in `cli/main.sfn` returns the usage error (exit 2)
 // there — the parser owns argument validation.
 import {
+    CreateOptions,
+    DeflateOptions,
+    DeflateStrategy,
+    LinkPolicy,
+    targz_create
+} from "sfn/archive";
+import {
     Command,
     Matches,
     command,
@@ -30,7 +37,6 @@ import {
     has_flag,
     with_flag
 } from "sfn/cli";
-import { int_to_string } from "sfn/strings";
 
 import {
     _copy_file_preserving_mode,
@@ -80,11 +86,6 @@ import { _is_safe_capsule_version_cmd, _package_basename } from "./cmd_shared";
 // <path>`) first. Auto-rebuilding from inside a Sailfin-native
 // command shelling out to `make` is a bootstrapping smell (the
 // compiler would be rebuilding itself before packaging itself).
-//
-// SFN-495 de-shelled every `mkdir`/`rm`/`cp`/`wc` spawn onto `fs.*`
-// and `build/fs_tree.sfn`, but `sfn package` still cannot run on a
-// native Windows host: the three `tar -czf` sites remain unmigrated
-// pending in-process `.tar.gz` writing (SFN-753).
 fn handle_package_command(args: string[]) -> int ![io] {
     // Parse args.
     let mut target_arg: string = "";
@@ -256,12 +257,23 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 
     ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";
-    let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, "sailfin-native-"
-        + target,]);
-    if tar_rc != 0 {
-        print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
-        remove_tree(staging);
-        return 1;
+    let create_opts = CreateOptions {
+        exec_paths: ["sailfin-native-" + target + "/bin/sailfin", "sailfin-native-"
+            + target
+            + "/bin/sfn"],
+        link_policy: LinkPolicy.Preserve,
+        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+    };
+    let created = targz_create(tarball, staging, ["sailfin-native-" + target], create_opts);
+    match created {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            print("sfn package: archive creation failed: " + error.message);
+            remove_tree(staging);
+            return 1;
+        }
     }
 
     let digest = _sha256_of_file(tarball);
@@ -313,8 +325,9 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 // `DistManifest.kind = "installer"` for downstream tooling that
 // needs to disambiguate tarball flavours.
 //
-// Tarball contents (under top-level `<root>/`, no wrapping dir
-// — `tar -czf <out> -C <staging> .` mirrors the original):
+// Tarball contents (under top-level `<root>/`, no wrapping dir —
+// `targz_create(tarball, staging, [], ...)` walks the whole staging
+// tree, mirroring the historical `tar -czf <out> -C <staging> .`):
 //   - bin/sailfin, bin/sfn               — the compiler
 //   - runtime/capsule.toml               — runtime capsule manifest
 //   - runtime/prelude.sfn, runtime/sfn/  — the Sailfin runtime sources
@@ -583,11 +596,21 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
 
     ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";
-    let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, ".",]);
-    if tar_rc != 0 {
-        print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
-        remove_tree(staging);
-        return 1;
+    let create_opts = CreateOptions {
+        exec_paths: ["bin/sailfin", "bin/sfn"],
+        link_policy: LinkPolicy.Preserve,
+        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+    };
+    let created = targz_create(tarball, staging, [], create_opts);
+    match created {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            print("sfn package: archive creation failed: " + error.message);
+            remove_tree(staging);
+            return 1;
+        }
     }
 
     let digest = _sha256_of_file(tarball);
@@ -723,6 +746,12 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
 
     // Stage the artifact under bin/ or obj/ depending on kind.
     let mut artifact_dest: string = "";
+    // Populated for `kind == "binary"` only: the archive-relative path of
+    // the staged binary, so `targz_create` can store the canonical 0755
+    // mode without probing `access(X_OK)` (unreliable on Windows). A
+    // library's `.o` is never executable, so this stays empty for that
+    // branch.
+    let mut exec_rel_paths: string[] = [];
     if strings_equal(kind, "binary") {
         ensure_dir_p(staging_root + "/bin");
         // Use the artifact's basename for the tarball's bin entry.
@@ -734,6 +763,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
             return 1;
         }
         artifact_dest = staging_root + "/bin/" + bn;
+        exec_rel_paths = [safe_name + "-" + target + "/bin/" + bn];
     } else if strings_equal(kind, "library") {
         ensure_dir_p(staging_root + "/obj");
         artifact_dest = staging_root + "/obj/mod.o";
@@ -756,13 +786,21 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
 
     ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";
-    let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, safe_name
-        + "-"
-        + target,]);
-    if tar_rc != 0 {
-        print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
-        remove_tree(staging);
-        return 1;
+    let create_opts = CreateOptions {
+        exec_paths: exec_rel_paths,
+        link_policy: LinkPolicy.Preserve,
+        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+    };
+    let created = targz_create(tarball, staging, [safe_name + "-" + target], create_opts);
+    match created {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            print("sfn package: archive creation failed: " + error.message);
+            remove_tree(staging);
+            return 1;
+        }
     }
 
     let digest = _sha256_of_file(tarball);

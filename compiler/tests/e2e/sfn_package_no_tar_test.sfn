@@ -1,0 +1,229 @@
+// compiler/tests/e2e/sfn_package_no_tar_test.sfn
+//
+// The direct product claim behind SFN-899: `sfn package` never shells out
+// to `tar` (or `bsdtar`) any more — it produces its `.tar.gz` in-process via
+// `sfn/archive::targz_create` (SFEP-0071). This test proves it the only way
+// that is not self-certifying: run `sfn package` in a child whose `PATH`
+// carries `clang` (so a false failure can't be blamed on "no toolchain at
+// all") but through which neither `tar` nor `bsdtar` can possibly resolve,
+// then confirm the tarball still comes out — a valid gzip stream with the
+// sha256 sidecar it always produces.
+//
+// Filtering the real `PATH` down to a directory-per-directory shim (rather
+// than just unsetting `PATH`) is deliberate: `sfn package` in compiler mode
+// still shells `date -u ...` for the manifest's `build_date`
+// (`_shell_read_cmd`, SFN-973 — out of this issue's scope) and would spawn
+// `uname -m` for target autodetection were `--target` not passed explicitly
+// here. An empty `PATH` would make those best-effort reads fail silently
+// (harmless) but would not prove anything about `tar` specifically, since
+// EVERYTHING would be unresolvable. A shim carrying every real tool except
+// `tar`/`bsdtar` isolates the one thing this test is actually checking.
+import { char_code_at, find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], process.environ());
+    let root = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    let lines = _split_lines(root);
+    if lines.length == 0 { return bin; }
+    return lines[0] + "/" + bin;
+}
+
+fn _split_lines(text: string) -> string[] {
+    let mut out: string[] = [];
+    let mut cur: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch: string = text[i];
+        if ch == "\n" {
+            out.push(cur);
+            cur = "";
+        } else { cur = cur + ch; }
+        i += 1;
+    }
+    if cur.length > 0 { out.push(cur); }
+    return out;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// The host target string `sfn package --target` accepts, computed from the
+// TEST's own unrestricted environment (real `PATH`) so the child process
+// under test never needs `uname` at all.
+fn _host_target() -> string ![io] {
+    if fs.exists("/proc/self/status") {
+        let exit = process.run_capture(["uname", "-m"], process.environ());
+        let out = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        if exit != 0 { return ""; }
+        let arch = _first_line(out);
+        if arch == "x86_64" { return "linux-x86_64"; }
+        if arch == "aarch64" { return "linux-arm64"; }
+        return "";
+    }
+    if fs.exists("/System/Library/CoreServices") {
+        let exit = process.run_capture(["uname", "-m"], process.environ());
+        let out = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        if exit != 0 { return ""; }
+        let arch = _first_line(out);
+        if arch == "arm64" { return "macos-arm64"; }
+        if arch == "x86_64" { return "macos-x86_64"; }
+        return "";
+    }
+    return "";
+}
+
+fn _first_line(text: string) -> string {
+    let lines = _split_lines(text);
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// The directory on the real `PATH` containing an executable named `tool`,
+// or `""` if none does.
+fn _dir_containing(tool: string) -> string ![io] {
+    let path = env.get("PATH");
+    if path.length == 0 { return ""; }
+    let dirs = _split_on(path, ":");
+    let mut i: int = 0;
+    loop {
+        if i >= dirs.length { break; }
+        let candidate = dirs[i] + "/" + tool;
+        if fs.exists(candidate) && fs.is_executable(candidate) {
+            return dirs[i];
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _split_on(text: string, sep: string) -> string[] {
+    let mut out: string[] = [];
+    let mut cur: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch: string = text[i];
+        if ch == sep {
+            out.push(cur);
+            cur = "";
+        } else { cur = cur + ch; }
+        i += 1;
+    }
+    out.push(cur);
+    return out;
+}
+
+// Build a `PATH` whose only entry is a freshly created directory holding a
+// symlink to the real `clang` — carrying a real toolchain tool forward
+// while guaranteeing `tar`/`bsdtar` (wherever they actually live on this
+// host) cannot resolve, regardless of whether they happen to share a
+// directory with `clang`.
+fn _shim_path_with_clang_only() -> string ![io] {
+    let clang_dir = _dir_containing("clang");
+    if clang_dir.length == 0 { return ""; }
+    let shim = _scratch_dir() + "/sfnpkg-no-tar-shim";
+    fs.createDirectory(shim, true);
+    fs.symlink(clang_dir + "/clang", shim + "/clang");
+    return shim;
+}
+
+test "sfn package (no tar on PATH): still produces a valid gzip tarball" ![io] {
+    let target = _host_target();
+    if target.length == 0 {
+        assert true;
+        return;
+    }
+    let shim = _shim_path_with_clang_only();
+    if shim.length == 0 {
+        assert true;
+        return;
+    }
+
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    let root = _scratch_dir() + "/sfnpkg-no-tar";
+    fs.createDirectory(root, true);
+    let dist = root + "/dist";
+    let bin = _sfn_bin_abs();
+
+    let mut child_env: string[] = ["PATH=" + shim];
+    if scratch.length > 0 {
+        child_env.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    }
+
+    let exit = process.run_capture([bin, "package", "--target", target, "--out", dist, "--compiler-bin", bin], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 {
+        print("sfn package (no tar on PATH) failed, exit=" + _int_to_string(exit));
+        print("stdout: " + out);
+        print("stderr: " + err);
+    }
+    assert exit == 0;
+
+    // Discover the tarball the run just created.
+    let entries = fs.listDirectory(dist);
+    let mut tarball: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        if find(name, ".tar.gz", 0) >= 0 && find(name, ".sha256", 0) < 0 {
+            tarball = dist + "/" + name;
+            break;
+        }
+        i += 1;
+    }
+    assert tarball.length > 0;
+
+    // A valid gzip stream starts with magic bytes 0x1f 0x8b -- proof this is
+    // a real archive, not an empty or truncated file left by a silent
+    // failure.
+    let content = fs.readFile(tarball);
+    assert content.length > 0;
+    assert char_code_at(content, 0) == 31;
+    assert char_code_at(content, 1) == 139;
+
+    // The sha256 sidecar `sfn package` always writes alongside the tarball.
+    assert fs.exists(tarball + ".sha256");
+}
+
+fn _int_to_string(n: int) -> string {
+    if n == 0 { return "0"; }
+    let mut v = n;
+    let mut neg = false;
+    if v < 0 {
+        neg = true;
+        v = -v;
+    }
+    let mut digits = "";
+    loop {
+        if v <= 0 { break; }
+        let d = v % 10;
+        digits = _digit_char(d) + digits;
+        v = v / 10;
+    }
+    if neg { return "-" + digits; }
+    return digits;
+}
+
+fn _digit_char(d: int) -> string {
+    let table = "0123456789";
+    return table[d];
+}

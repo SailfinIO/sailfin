@@ -1,0 +1,639 @@
+// sfn/archive — the tree walk and archive creation (SFN-899, SFEP-0071
+// §3.4, §3.7, §3.8).
+//
+// Composes: sorted filesystem walk -> ustar header + body (`ustar.sfn`) ->
+// two zero blocks -> pad to the 10240-byte record boundary -> gzip
+// (`gzip.sfn`) -> filesystem write. This is the write-side symmetric
+// counterpart to `tar_read.sfn`'s extractor.
+//
+// Byte reproducibility is the entire point (SFEP-0071 §2.2, §3.7): every
+// member's mode is a *computed canonical* value (never observed), every
+// host-varying field is zeroed, and the walk order is deterministic
+// (sorted), so two `targz_create` runs over the same tree are
+// byte-identical on any host — including Windows, which has no executable
+// bit. `CreateOptions.exec_paths` is how a caller supplies the answer
+// `fs.is_executable` cannot give on that host.
+import { char_code_at } from "sfn/strings";
+
+import {
+    ByteBuf,
+    ByteCursor,
+    bytes_append_slice,
+    bytes_cursor,
+    bytes_free,
+    bytes_new
+} from "./bytes";
+import {
+    ArchiveError,
+    ArchiveErrorKind,
+    archive_error,
+    archive_error_member
+} from "./error";
+import { DeflateOptions, gzip_write_all } from "./gzip";
+import { archive_check_member_path } from "./path_guard";
+import {
+    UstarCanonicalModes,
+    UstarHeader,
+    UstarTypeflags,
+    ustar_canonical_modes,
+    ustar_encode_header,
+    ustar_encode_zero_block,
+    ustar_typeflags
+} from "./ustar";
+
+// libc file I/O, redeclared per-module per the #306 cross-module extern
+// limit (matching `bytes.sfn`, `tar_read.sfn`).
+extern fn fopen(path: *u8, mode: *u8) -> *File;
+
+extern fn fclose(f: *File) -> i32;
+
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn ferror(f: *File) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+let _BLOCK_SIZE: int = 512;
+let _RECORD_SIZE: int = 10240;  // 20 blocks — GNU tar's default record size (SFEP-0071 §3.8).
+
+// `Preserve` (default) emits a real symlink member for typeflag `2`, hard
+// rejecting one whose target is absolute or escapes (SFEP-0071 §3.5).
+// `Dereference` writes the pointed-to content as a regular file instead —
+// what a Windows staging tree naturally produces, since its "links" are
+// already copies. Hard links are never emitted under either policy; a
+// second path to the same inode becomes a second regular member.
+enum LinkPolicy {
+    Preserve,
+    Dereference
+}
+
+struct CreateOptions {
+    // Paths (relative to `root_dir`) to mark executable regardless of what
+    // the host reports — `sfn package` already knows which staged entries
+    // are binaries, so the Windows answer is supplied, not guessed
+    // (SFEP-0071 §3.7).
+    exec_paths: string[];
+    link_policy: LinkPolicy;
+    deflate: DeflateOptions;
+}
+
+struct CreateSummary {
+    member_count: int;
+    bytes_written: int;
+}
+
+fn _tw_padded_len(size: int) -> int {
+    if size <= 0 { return 0; }
+    return ((size + 511) / 512) * 512;
+}
+
+// Lexicographic byte-wise less-than over character codes — the same total
+// order `compiler/capsules/analyzer/src/symbols_index.sfn::_sym_string_lt`
+// uses for its own determinism sort, reproduced here rather than imported:
+// that module is compiler-internal and out of reach for capsule source.
+fn _tw_string_lt(a: string, b: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= a.length || i >= b.length { break; }
+        let ca: int = char_code_at(a, i);
+        let cb: int = char_code_at(b, i);
+        if ca < cb { return true; }
+        if ca > cb { return false; }
+        i += 1;
+    }
+    return a.length < b.length;
+}
+
+// Insertion sort — directory listings are small (a compiler tarball's
+// widest single directory is a few hundred entries), so O(n^2) here is a
+// non-issue, and it is the same shape `_sym_sort_strings` already
+// establishes as this codebase's convention for a small determinism sort.
+fn _tw_sort_strings(input: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= input.length { break; }
+        out.push(input[i]);
+        i += 1;
+    }
+    let mut k: int = 1;
+    loop {
+        if k >= out.length { break; }
+        let cur: string = out[k];
+        let mut j: int = k - 1;
+        loop {
+            if j < 0 { break; }
+            if !_tw_string_lt(cur, out[j]) { break; }
+            out[j + 1] = out[j];
+            j -= 1;
+        }
+        out[j + 1] = cur;
+        k += 1;
+    }
+    return out;
+}
+
+fn _tw_join_rel(rel_dir: string, name: string) -> string {
+    if rel_dir.length == 0 { return name; }
+    return rel_dir + "/" + name;
+}
+
+fn _tw_full_path(root_dir: string, rel_path: string) -> string {
+    if rel_path.length == 0 { return root_dir; }
+    return root_dir + "/" + rel_path;
+}
+
+// Recursively list every path beneath `root_dir/rel_dir`, sorted, a
+// directory always immediately followed by its own contents. `fs.read_link`
+// is the discriminator, not `fs.is_directory`: the latter follows symlinks,
+// so a symlink-to-directory must never be recursed into as if it were a
+// real directory (SFEP-0071 §3.5) — it is walked as the leaf symlink member
+// it is, by `_tw_write_member`.
+fn _tw_walk_dir(root_dir: string, rel_dir: string) -> Result<string[], ArchiveError> ![io] {
+    let full_dir: string = _tw_full_path(root_dir, rel_dir);
+    let names: string[] = fs.listDirectory(full_dir);
+    let sorted: string[] = _tw_sort_strings(names);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= sorted.length { break; }
+        let child_rel: string = _tw_join_rel(rel_dir, sorted[i]);
+        let child_full: string = _tw_full_path(root_dir, child_rel);
+        out.push(child_rel);
+        let link_target: string = fs.read_link(child_full);
+        if link_target.length == 0 && fs.is_directory(child_full) {
+            let nested = _tw_walk_dir(root_dir, child_rel)?;
+            let mut j: int = 0;
+            loop {
+                if j >= nested.length { break; }
+                out.push(nested[j]);
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    return Result.Ok { value: out };
+}
+
+// Resolve the ordered list of relative paths to emit. An empty `entries`
+// means the whole tree, walked in sorted order (SFEP-0071 §3.4); a
+// non-empty `entries` is emitted in the given top-level order, with each
+// directory entry's own subtree still walked in sorted order underneath it.
+fn _tw_collect_entries(root_dir: string, entries: string[]) -> Result<string[], ArchiveError> ![io] {
+    if entries.length == 0 { return _tw_walk_dir(root_dir, ""); }
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let rel: string = entries[i];
+        let full: string = _tw_full_path(root_dir, rel);
+        out.push(rel);
+        let link_target: string = fs.read_link(full);
+        if link_target.length == 0 && fs.is_directory(full) {
+            let nested = _tw_walk_dir(root_dir, rel)?;
+            let mut j: int = 0;
+            loop {
+                if j >= nested.length { break; }
+                out.push(nested[j]);
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    return Result.Ok { value: out };
+}
+
+// Validate a symlink target the same shape the extraction path guard
+// enforces on read (`archive_check_member_path`, SFEP-0071 §3.6): not
+// absolute, no `..` component. We refuse to write an archive our own
+// extractor would reject. `host_is_windows: false` here — this validates
+// OUR OWN build tree's link target, not a foreign one, so the
+// Windows-reserved-device-name rule (irrelevant to a target string) is not
+// in play.
+fn _tw_check_symlink_target(target: string, rel_path: string) -> Result<int, ArchiveError> {
+    let checked = archive_check_member_path(target, false);
+    match checked {
+        Result.Ok { value }
+        : {
+            return Result.Ok { value: 0 };
+        },
+        Result.Err { error }
+        : {
+            return Result.Err {
+                error: archive_error_member(ArchiveErrorKind.LinkRejected, "symlink target is absolute or escapes the tree ("
+                    + error.message
+                    + ")", rel_path)
+            };
+        }
+    }
+}
+
+// "Executable" per SFEP-0071 §3.7: membership in `exec_paths`, else
+// `fs.is_executable` on POSIX (a no-op-shaped `false` on Windows, where
+// `access(X_OK)` cannot answer meaningfully).
+fn _tw_is_executable(full_path: string, rel_path: string, exec_paths: string[]) -> boolean ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= exec_paths.length { break; }
+        if exec_paths[i] == rel_path { return true; }
+        i += 1;
+    }
+    return fs.is_executable(full_path);
+}
+
+// Append `n` zero bytes to `out`, freeing `out` and propagating on failure
+// — the same append-chain ownership contract `ustar_encode_header` and
+// `ustar_encode_zero_block` use. `bytes_new` zero-fills the fresh
+// allocation (`_buf_alloc`'s `memset`), so no explicit zeroing is needed.
+fn _tw_append_zero_padding(out: ByteBuf, n: int) -> Result<ByteBuf, ArchiveError> {
+    let allocated = bytes_new(n);
+    let mut zb: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match allocated {
+        Result.Ok { value }
+        : {
+            zb = value;
+        },
+        Result.Err { error }
+        : {
+            bytes_free(out);
+            return Result.Err { error: error };
+        }
+    }
+    let appended = bytes_append_slice(out, zb.addr, n);
+    bytes_free(zb);
+    match appended {
+        Result.Ok { value }
+        : {
+            return Result.Ok { value: value };
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+}
+
+// Read the whole file at `path` into a freshly owned `ByteBuf`. Mirrors
+// `tar_read.sfn`'s `_tr_read_whole_file` (redeclared, not imported, per the
+// #306 cross-module extern limit) minus the existence probe: the caller
+// just discovered `path` via a directory walk, so it exists.
+fn _tw_read_whole_file(path: string) -> Result<ByteBuf, ArchiveError> ![io] {
+    let read_mode: string = "rb";
+    let f: *File = fopen(path as *u8, read_mode as *u8);
+    if (f as i64) == 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "cannot open member file for reading: "
+                + path)
+        };
+    }
+    let opened: Result<ByteBuf, ArchiveError> = bytes_new(65536);
+    let mut out: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match opened {
+        Result.Ok { value }
+        : {
+            out = value;
+        },
+        Result.Err { error }
+        : {
+            fclose(f);
+            return Result.Err { error: error };
+        }
+    }
+
+    let chunk: int = 65536;
+    let chunk_buf: *u8 = malloc(chunk as usize);
+    if (chunk_buf as i64) == 0 {
+        bytes_free(out);
+        fclose(f);
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "out of memory reading member file: "
+                + path)
+        };
+    }
+
+    let mut ok: boolean = true;
+    let mut guard: int = 0;
+    let max_iters: int = 200000;
+    loop {
+        guard += 1;
+        if guard > max_iters {
+            ok = false;
+            break;
+        }
+        let got: int = fread(chunk_buf, 1 as usize, chunk as usize, f) as int;
+        if got <= 0 { break; }
+        let appended: Result<ByteBuf, ArchiveError> = bytes_append_slice(out, chunk_buf as i64, got);
+        match appended {
+            Result.Ok { value }
+            : {
+                out = value;
+            },
+            Result.Err { error }
+            : {
+                ok = false;
+                break;
+            }
+        }
+        if got < chunk { break; }
+    }
+
+    let had_error: boolean = ferror(f) != 0;
+    free(chunk_buf);
+    fclose(f);
+    if !ok || had_error {
+        bytes_free(out);
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "I/O error reading member file: "
+                + path)
+        };
+    }
+    return Result.Ok { value: out };
+}
+
+struct _TwMemberResult {
+    buf: ByteBuf;
+    bytes_written: int;
+}
+
+// Write one member (directory / symlink / regular file) beneath `buf`.
+// Owns `buf` end to end: every branch either returns the extended buffer or
+// frees it and propagates, so `targz_create`'s loop can thread it through a
+// flat sequence of `let bufN = _tw_write_member(bufN-1, ...)?;` calls.
+fn _tw_write_member(buf: ByteBuf, root_dir: string, rel_path: string, opts: CreateOptions) -> Result<_TwMemberResult, ArchiveError> ![io] {
+    let full_path: string = _tw_full_path(root_dir, rel_path);
+    let tf: UstarTypeflags = ustar_typeflags();
+    let modes: UstarCanonicalModes = ustar_canonical_modes();
+    let link_target: string = fs.read_link(full_path);
+    let is_symlink: boolean = link_target.length > 0;
+    let deref: boolean = opts.link_policy == LinkPolicy.Dereference;
+
+    if is_symlink && !deref {
+        let checked = _tw_check_symlink_target(link_target, rel_path);
+        match checked {
+            Result.Ok { value }
+            : { },
+            Result.Err { error }
+            : {
+                bytes_free(buf);
+                return Result.Err { error: error };
+            }
+        }
+        let h: UstarHeader = UstarHeader {
+            name: rel_path,
+            linkname: link_target,
+            typeflag: tf.symlink,
+            size: 0,
+            mode: modes.symlink,
+            is_zero_block: false
+        };
+        let with_header = ustar_encode_header(h, buf)?;
+        return Result.Ok {
+            value: _TwMemberResult { buf: with_header, bytes_written: 0 }
+        };
+    }
+
+    // A dereferenced symlink, or no symlink at all: `fs.is_directory`
+    // follows symlinks, which is exactly what `Dereference` wants for a
+    // symlink-to-directory too.
+    if fs.is_directory(full_path) {
+        let h: UstarHeader = UstarHeader {
+            name: rel_path + "/",
+            linkname: "",
+            typeflag: tf.directory,
+            size: 0,
+            mode: modes.directory,
+            is_zero_block: false
+        };
+        let with_header = ustar_encode_header(h, buf)?;
+        return Result.Ok {
+            value: _TwMemberResult { buf: with_header, bytes_written: 0 }
+        };
+    }
+
+    // Regular file (including a dereferenced symlink's target content).
+    let read = _tw_read_whole_file(full_path);
+    let mut file_bytes: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match read {
+        Result.Ok { value }
+        : {
+            file_bytes = value;
+        },
+        Result.Err { error }
+        : {
+            bytes_free(buf);
+            return Result.Err { error: error };
+        }
+    }
+    let size: int = file_bytes.len;
+    let is_exec: boolean = _tw_is_executable(full_path, rel_path, opts.exec_paths);
+    let mut mode: int = modes.file_plain;
+    if is_exec { mode = modes.file_exec; }
+    let h: UstarHeader = UstarHeader {
+        name: rel_path,
+        linkname: "",
+        typeflag: tf.regular,
+        size: size,
+        mode: mode,
+        is_zero_block: false
+    };
+    let header_result = ustar_encode_header(h, buf);
+    let mut with_header: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match header_result {
+        Result.Ok { value }
+        : {
+            with_header = value;
+        },
+        Result.Err { error }
+        : {
+            bytes_free(file_bytes);
+            return Result.Err { error: error };
+        }
+    }
+
+    let body_appended = bytes_append_slice(with_header, file_bytes.addr, file_bytes.len);
+    bytes_free(file_bytes);
+    let mut with_body: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match body_appended {
+        Result.Ok { value }
+        : {
+            with_body = value;
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+
+    let pad: int = _tw_padded_len(size) - size;
+    if pad == 0 {
+        return Result.Ok {
+            value: _TwMemberResult { buf: with_body, bytes_written: size }
+        };
+    }
+    let padded = _tw_append_zero_padding(with_body, pad);
+    match padded {
+        Result.Ok { value }
+        : {
+            return Result.Ok {
+                value: _TwMemberResult { buf: value, bytes_written: size }
+            };
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+}
+
+fn _tw_write_whole_file(path: string, src_addr: i64, n: int) -> Result<int, ArchiveError> ![io] {
+    let write_mode: string = "wb";
+    let f: *File = fopen(path as *u8, write_mode as *u8);
+    if (f as i64) == 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "cannot open archive file for writing: "
+                + path)
+        };
+    }
+    if n > 0 {
+        let written: int = fwrite(src_addr as *u8, 1 as usize, n as usize, f) as int;
+        if written != n {
+            fclose(f);
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.Io, "short write creating archive file: "
+                    + path)
+            };
+        }
+    }
+    fclose(f);
+    return Result.Ok { value: n };
+}
+
+// Create `archive_path` from `root_dir`. `entries` are paths relative to
+// `root_dir`; an empty list means the whole tree. Members are emitted in
+// sorted order (or the given top-level order for a non-empty `entries`),
+// so the output is reproducible (SFEP-0071 §3.4, §3.7).
+fn targz_create(archive_path: string, root_dir: string, entries: string[], opts: CreateOptions) -> Result<CreateSummary, ArchiveError> ![io] {
+    let collected = _tw_collect_entries(root_dir, entries);
+    let mut rel_paths: string[] = [];
+    match collected {
+        Result.Ok { value }
+        : {
+            rel_paths = value;
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+
+    let started: Result<ByteBuf, ArchiveError> = bytes_new(65536);
+    let mut tar_buf: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match started {
+        Result.Ok { value }
+        : {
+            tar_buf = value;
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+
+    let mut member_count: int = 0;
+    let mut bytes_written: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= rel_paths.length { break; }
+        let written = _tw_write_member(tar_buf, root_dir, rel_paths[i], opts);
+        match written {
+            Result.Ok { value }
+            : {
+                tar_buf = value.buf;
+                bytes_written += value.bytes_written;
+                member_count += 1;
+            },
+            Result.Err { error }
+            : {
+                return Result.Err { error: error };
+            }
+        }
+        i += 1;
+    }
+
+    // The ustar terminator: exactly two zero blocks (SFEP-0071 §3.8).
+    let after_zero1 = ustar_encode_zero_block(tar_buf);
+    match after_zero1 {
+        Result.Ok { value }
+        : {
+            tar_buf = value;
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+    let after_zero2 = ustar_encode_zero_block(tar_buf);
+    match after_zero2 {
+        Result.Ok { value }
+        : {
+            tar_buf = value;
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+
+    // Pad to the 10240-byte (20-block) record boundary GNU tar defaults to.
+    let remainder: int = tar_buf.len % _RECORD_SIZE;
+    if remainder != 0 {
+        let padded = _tw_append_zero_padding(tar_buf, _RECORD_SIZE - remainder);
+        match padded {
+            Result.Ok { value }
+            : {
+                tar_buf = value;
+            },
+            Result.Err { error }
+            : {
+                return Result.Err { error: error };
+            }
+        }
+    }
+
+    let tar_cursor: ByteCursor = bytes_cursor(tar_buf);
+    let compressed = gzip_write_all(tar_cursor, opts.deflate);
+    bytes_free(tar_buf);
+    let mut gz_buf: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match compressed {
+        Result.Ok { value }
+        : {
+            gz_buf = value;
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+
+    let write_result = _tw_write_whole_file(archive_path, gz_buf.addr, gz_buf.len);
+    bytes_free(gz_buf);
+    match write_result {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+
+    return Result.Ok {
+        value: CreateSummary {
+            member_count: member_count,
+            bytes_written: bytes_written
+        }
+    };
+}

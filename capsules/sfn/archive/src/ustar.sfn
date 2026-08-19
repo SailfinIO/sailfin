@@ -7,12 +7,23 @@
 // span *multiple* blocks (an extension header plus its data blocks, applied
 // to the header that follows), so gluing them together is `tar_read.sfn`'s
 // job — this module only ever looks at one block at a time.
-import { ByteCursor, _byte_at } from "./bytes";
+import { char_code_at, substring } from "sfn/strings";
+
+import {
+    ByteBuf,
+    ByteCursor,
+    _buf_store,
+    _byte_at,
+    bytes_append_slice,
+    bytes_free,
+    bytes_new
+} from "./bytes";
 import {
     ArchiveError,
     ArchiveErrorKind,
     archive_error,
-    archive_error_at
+    archive_error_at,
+    archive_error_member
 } from "./error";
 
 let _BLOCK_SIZE: int = 512;
@@ -263,4 +274,321 @@ fn ustar_decode_header(cursor: ByteCursor) -> Result<UstarHeader, ArchiveError> 
             is_zero_block: false
         }
     };
+}
+
+// ---------------------------------------------------------------------
+// Writing (SFN-899, SFEP-0071 §3.7, §3.8). ustar magic/version only,
+// typeflags `0`/`5`/`2` only, GNU `L`/`K` never emitted — a name too long
+// to split into `prefix`/`name` is a hard error rather than a silent
+// extension. `mode` is the caller's already-computed canonical value
+// (SFEP-0071 §3.7); `uid`/`gid`/`mtime`/`uname`/`gname` are not fields on
+// `UstarHeader` at all because they are always zero, so there is nothing
+// for a caller to vary — that omission is what makes two encodes of the
+// same `UstarHeader` byte-identical on every host.
+let _OFF_UID: int = 108;
+let _LEN_UID: int = 8;
+let _OFF_GID: int = 116;
+let _LEN_GID: int = 8;
+let _OFF_MTIME: int = 136;
+let _LEN_MTIME: int = 12;
+let _OFF_UNAME: int = 265;
+let _LEN_UNAME: int = 32;
+let _OFF_GNAME: int = 297;
+let _LEN_GNAME: int = 32;
+let _OFF_DEVMAJOR: int = 329;
+let _LEN_DEVMAJOR: int = 8;
+let _OFF_DEVMINOR: int = 337;
+let _LEN_DEVMINOR: int = 8;
+
+// A function returning fresh mode constants, not module-level `let` scalar
+// globals — the same check/build-agreement hazard `ustar_typeflags()`
+// documents above applies equally to any cross-module scalar constant.
+struct UstarCanonicalModes {
+    directory: int;
+    file_exec: int;
+    file_plain: int;
+    symlink: int;
+}
+
+fn ustar_canonical_modes() -> UstarCanonicalModes {
+    return UstarCanonicalModes {
+        directory: 493,  // 0755
+        file_exec: 493,  // 0755
+        file_plain: 420,  // 0644
+        symlink: 511  // 0777, what GNU tar stores
+    };
+}
+
+struct _UstarNameSplit {
+    prefix: string;
+    name: string;
+}
+
+// Split `full` into ustar `prefix`/`name` fields when it exceeds the
+// 100-byte `name` field alone. Scans from the right for the rightmost `/`
+// whose prefix half fits in 155 bytes and whose name half fits in 100 —
+// any valid split reconstructs `prefix + "/" + name == full`, which is all
+// `ustar_decode_header`'s POSIX join path requires. A name with no such
+// split point (no `/`, or every candidate too long on one side) cannot be
+// represented without a GNU `L` long-name extension, which SFEP-0071 §3.8
+// says we never emit — that case is a hard error, not a silent truncation.
+fn _ustar_split_name(full: string) -> Result<_UstarNameSplit, ArchiveError> {
+    if full.length <= _LEN_NAME {
+        return Result.Ok {
+            value: _UstarNameSplit { prefix: "", name: full }
+        };
+    }
+    let mut i: int = full.length - 1;
+    loop {
+        if i < 0 { break; }
+        if char_code_at(full, i) == 47 {
+            let prefix_len: int = i;
+            let name_len: int = full.length - i - 1;
+            if prefix_len <= _LEN_PREFIX && name_len > 0 && name_len <= _LEN_NAME {
+                return Result.Ok {
+                    value: _UstarNameSplit {
+                        prefix: substring(full, 0, i),
+                        name: substring(full, i + 1, full.length)
+                    }
+                };
+            }
+        }
+        i -= 1;
+    }
+    return Result.Err {
+        error: archive_error_member(ArchiveErrorKind.UnsupportedFeature, "member name is too long to split into ustar prefix/name fields (100/155 bytes) and GNU long-name extensions are never emitted", full)
+    };
+}
+
+// Write ASCII bytes of `text` at `off`, up to `field_len`. Any remaining
+// bytes in the field stay whatever the caller's block already holds —
+// callers here always start from a freshly zero-filled block
+// (`bytes_new`'s `_buf_alloc` zero-fills), so an unwritten tail is NUL, the
+// empty-string convention every ustar reader expects.
+fn _ustar_write_str(block_addr: i64, off: int, field_len: int, text: string) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length || i >= field_len { break; }
+        _buf_store(block_addr, off + i, char_code_at(text, i));
+        i += 1;
+    }
+}
+
+// Zero-padded octal digits filling `field_len - 1` bytes, then a trailing
+// NUL — matches `tests/ustar_test.sfn`'s `_set_octal` fixture shape exactly,
+// so a header this function writes and one the test suite hand-builds are
+// byte-for-byte the same shape. `field_name` only appears in the error
+// message on overflow.
+fn _ustar_write_octal(block_addr: i64, off: int, field_len: int, value: int, field_name: string) -> Result<int, ArchiveError> {
+    let digits: int = field_len - 1;
+    let mut max_value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= digits { break; }
+        max_value = (max_value * 8) + 7;
+        i += 1;
+    }
+    if value < 0 || value > max_value {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.UnsupportedFeature, "ustar "
+                + field_name
+                + " field exceeds this writer's octal ceiling (GNU base-256 is never emitted)")
+        };
+    }
+    let mut v: int = value;
+    let mut d: int = digits - 1;
+    loop {
+        if d < 0 { break; }
+        _buf_store(block_addr, off + d, 48 + (v % 8));
+        v = v / 8;
+        d -= 1;
+    }
+    return Result.Ok { value: 0 };
+}
+
+// Zero-padded octal digits for a field that is always zero (`uid`, `gid`,
+// `mtime`, `devmajor`, `devminor` — SFEP-0071 §3.7). Cannot fail, so it
+// skips `_ustar_write_octal`'s `Result` ceremony entirely.
+fn _ustar_write_octal_zero(block_addr: i64, off: int, field_len: int) -> void {
+    let digits: int = field_len - 1;
+    let mut d: int = 0;
+    loop {
+        if d >= digits { break; }
+        _buf_store(block_addr, off + d, 48);  // '0'
+        d += 1;
+    }
+}
+
+// Unsigned-byte checksum sum (SFEP-0071 §3.8: we write only the unsigned
+// convention), with the `chksum` field itself treated as eight ASCII
+// spaces regardless of what bytes are actually stored there — mirrors
+// `_ustar_verify_checksum`'s read-side treatment so a header this module
+// writes verifies against its own reader.
+fn _ustar_compute_checksum(block_addr: i64) -> int {
+    let mut sum: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= _BLOCK_SIZE { break; }
+        if i >= _OFF_CHKSUM && i < _OFF_CHKSUM + _LEN_CHKSUM { sum += 32; } else {
+            sum += _byte_at(block_addr + (i as i64));
+        }
+        i += 1;
+    }
+    return sum;
+}
+
+// Build one 512-byte header block for `h`, freshly allocated and owned by
+// the caller. Every byte this function does not explicitly write stays
+// NUL from the zero-filled allocation — that covers `uname`/`gname`
+// (SFEP-0071 §3.7's `uname = "", gname = ""`) with no code of their own.
+fn _ustar_build_block(h: UstarHeader) -> Result<ByteBuf, ArchiveError> {
+    let block: ByteBuf = bytes_new(_BLOCK_SIZE)?;
+    let addr: i64 = block.addr;
+
+    let split_result = _ustar_split_name(h.name);
+    let mut split: _UstarNameSplit = _UstarNameSplit { prefix: "", name: "" };
+    match split_result {
+        Result.Ok { value }
+        : {
+            split = value;
+        },
+        Result.Err { error }
+        : {
+            bytes_free(block);
+            return Result.Err { error: error };
+        }
+    }
+    _ustar_write_str(addr, _OFF_NAME, _LEN_NAME, split.name);
+    _ustar_write_str(addr, _OFF_PREFIX, _LEN_PREFIX, split.prefix);
+
+    if h.linkname.length > _LEN_LINKNAME {
+        bytes_free(block);
+        return Result.Err {
+            error: archive_error_member(ArchiveErrorKind.LinkRejected, "link target exceeds the ustar linkname field (100 bytes) and GNU long-link extensions are never emitted", h.name)
+        };
+    }
+    _ustar_write_str(addr, _OFF_LINKNAME, _LEN_LINKNAME, h.linkname);
+
+    let mode_result = _ustar_write_octal(addr, _OFF_MODE, _LEN_MODE, h.mode, "mode");
+    match mode_result {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            bytes_free(block);
+            return Result.Err { error: error };
+        }
+    }
+    let size_result = _ustar_write_octal(addr, _OFF_SIZE, _LEN_SIZE, h.size, "size");
+    match size_result {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            bytes_free(block);
+            return Result.Err { error: error };
+        }
+    }
+    _ustar_write_octal_zero(addr, _OFF_UID, _LEN_UID);
+    _ustar_write_octal_zero(addr, _OFF_GID, _LEN_GID);
+    _ustar_write_octal_zero(addr, _OFF_MTIME, _LEN_MTIME);
+    _ustar_write_octal_zero(addr, _OFF_DEVMAJOR, _LEN_DEVMAJOR);
+    _ustar_write_octal_zero(addr, _OFF_DEVMINOR, _LEN_DEVMINOR);
+
+    _buf_store(addr, _OFF_TYPEFLAG, h.typeflag);
+
+    let posix_magic: int[] = [117, 115, 116, 97, 114, 0];  // "ustar\0"
+    let mut mi: int = 0;
+    loop {
+        if mi >= 6 { break; }
+        _buf_store(addr, _OFF_MAGIC + mi, posix_magic[mi]);
+        mi += 1;
+    }
+    _buf_store(addr, _OFF_VERSION, 48);  // '0'
+    _buf_store(addr, _OFF_VERSION + 1, 48);  // '0'
+
+    // uname/gname stay NUL (the zero-filled block default) per SFEP-0071
+    // §3.7 — no write call needed; listed here only so a reader does not
+    // wonder whether they were forgotten.
+    let sum: int = _ustar_compute_checksum(addr);
+    let chksum_result = _ustar_write_octal(addr, _OFF_CHKSUM, _LEN_CHKSUM, sum, "chksum");
+    match chksum_result {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            bytes_free(block);
+            return Result.Err { error: error };
+        }
+    }
+
+    return Result.Ok {
+        value: ByteBuf { addr: addr, len: _BLOCK_SIZE, cap: block.cap }
+    };
+}
+
+// Encode `h` and append it to `out`. Owns `out` end to end: on any failure
+// (an unsplittable name, an oversized link target, a `size`/`mode` past
+// the octal ceiling, or an allocation failure) `out` is freed and the
+// error propagated, matching `gzip_write_all`'s append-chain discipline
+// (SFEP-0071 §3.3) so every call site here can thread `out` through a flat
+// sequence of `let outN = ustar_encode_header(h, outN-1)?;` calls.
+fn ustar_encode_header(h: UstarHeader, out: ByteBuf) -> Result<ByteBuf, ArchiveError> {
+    let built = _ustar_build_block(h);
+    let mut block: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match built {
+        Result.Ok { value }
+        : {
+            block = value;
+        },
+        Result.Err { error }
+        : {
+            bytes_free(out);
+            return Result.Err { error: error };
+        }
+    }
+    let appended = bytes_append_slice(out, block.addr, _BLOCK_SIZE);
+    bytes_free(block);
+    match appended {
+        Result.Ok { value }
+        : {
+            return Result.Ok { value: value };
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
+}
+
+// Append one 512-byte all-zero block to `out` — the ustar end-of-archive
+// marker, written twice per member call site (SFEP-0071 §3.8: "exactly two
+// zero blocks"). `bytes_new`'s zero-fill makes the freshly allocated block
+// already all-NUL; no field writes are needed.
+fn ustar_encode_zero_block(out: ByteBuf) -> Result<ByteBuf, ArchiveError> {
+    let allocated = bytes_new(_BLOCK_SIZE);
+    let mut zb: ByteBuf = ByteBuf { addr: 0, len: 0, cap: 0 };
+    match allocated {
+        Result.Ok { value }
+        : {
+            zb = value;
+        },
+        Result.Err { error }
+        : {
+            bytes_free(out);
+            return Result.Err { error: error };
+        }
+    }
+    let appended = bytes_append_slice(out, zb.addr, _BLOCK_SIZE);
+    bytes_free(zb);
+    match appended {
+        Result.Ok { value }
+        : {
+            return Result.Ok { value: value };
+        },
+        Result.Err { error }
+        : {
+            return Result.Err { error: error };
+        }
+    }
 }
