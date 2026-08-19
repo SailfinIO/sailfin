@@ -9,11 +9,17 @@
 // comes from the scratch dir itself and the fixed `run` name is
 // deliberately left untouched. This test locks the OTHER branch: the
 // unguarded default (`build/sailfin`, relative to CWD) that a plain-CLI or
-// nested invocation hits when no scratch is set. It drives the child in a
+// nested invocation hits when no scratch is set. It drives children in a
 // private, per-test CWD (so relative `build/sailfin` never touches the
 // repo's own or another test's) with `SAILFIN_TEST_SCRATCH` explicitly
 // absent from the child env.
-import { find, split } from "sfn/strings";
+//
+// Both tests spawn asynchronously (`process.spawn_with_env_cwd` +
+// `process.handle_wait`, not `process.run_capture`) so the fixture can be
+// probed WHILE still running — a blocking `run_capture` only ever sees
+// the directory after `sfn run`'s own post-exit cleanup has already run,
+// which would make the naming assertion vacuous.
+import { find, int_to_string, split } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
@@ -28,9 +34,9 @@ fn _first_line(text: string) -> string {
     return lines[0];
 }
 
-// `run_capture_cwd` resolves the child's argv[0] against the CHILD cwd, not
-// the parent's — an unqualified "build/bin/sfn" would not resolve once the
-// nested run's cwd is the private fixture dir (mirrors
+// `spawn_with_env_cwd` resolves the child's argv[0] against the CHILD cwd,
+// not the parent's — an unqualified "build/bin/sfn" would not resolve
+// once the child's cwd is the private fixture dir (mirrors
 // `run_cache_flags_test.sfn`'s `_sfn_bin_abs`).
 fn _sfn_bin_abs() -> string ![io] {
     let bin = _sfn_bin();
@@ -44,9 +50,11 @@ fn _sfn_bin_abs() -> string ![io] {
 
 // A self-contained fixture (no external capsule deps) written under a
 // private per-test directory, which also serves as the CHILD's cwd — so
-// its own `build/sailfin` is isolated from the repo's and from every other
-// test.
-fn _ensure_fixture(root: string) -> void ![io] {
+// its own `build/sailfin` is isolated from the repo's and from every
+// other test. `sleep_ms` gives an external observer a window to probe
+// `build/sailfin` (or spawn an overlapping second invocation) while the
+// built binary is still executing.
+fn _ensure_fixture(root: string, sleep_ms: int) -> void ![io] {
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
         + "name = \"sfn719/probe\"\n"
@@ -54,7 +62,10 @@ fn _ensure_fixture(root: string) -> void ![io] {
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"binary\"\n");
-    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![io] {\n"
+    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![clock, io] {\n"
+        + "    sleep("
+        + int_to_string(sleep_ms)
+        + ");\n"
         + "    print(\"7\");\n"
         + "    return 0;\n"
         + "}\n");
@@ -77,33 +88,75 @@ fn _count_run_exe_entries(dir: string) -> int ![io] {
     return count;
 }
 
-test "run: unguarded default path mints a per-invocation exe name and does not accumulate" ![io] {
-    let root = nested_runner_scratch("run-exe-isolation");
-    _ensure_fixture(root);
+// Poll `dir` for a "run-" entry up to `~deadline_ms`, sleeping between
+// probes. `sfn run` needs to compile+link before the fixture's own
+// `sleep()` even starts, so the exe doesn't appear the instant the
+// process is spawned.
+fn _wait_for_run_exe_entry(dir: string, deadline_ms: int) -> boolean ![clock, io] {
+    let mut waited: int = 0;
+    loop {
+        if _count_run_exe_entries(dir) > 0 { return true; }
+        if waited >= deadline_ms { return false; }
+        sleep(100);
+        waited += 100;
+    }
+}
+
+test "run: unguarded default path mints a per-invocation exe name and cleans up after itself" ![clock, io] {
+    let root = nested_runner_scratch("run-exe-isolation-single");
+    _ensure_fixture(root, 1500);
     // Deliberately no `SAILFIN_TEST_SCRATCH` in the child env: this
     // exercises the unguarded default (`build/sailfin`, relative to the
     // child's own cwd), not the already-isolated scratch-guarded branch.
     let child_env = clean_runner_env("");
     let sailfin_dir = root + "/build/sailfin";
 
-    let exit1 = process.run_capture_cwd([_sfn_bin_abs(), "run", "src/main.sfn"], child_env, root);
-    let out1 = process.capture_take_stdout();
-    let _err1 = process.capture_take_stderr();
-    assert exit1 == 0;
-    assert find(out1, "7", 0) >= 0;
-    // The fixed legacy name must be gone — a per-invocation name replaces
-    // it, never the shared `run`/`run.exe`.
+    let handle = process.spawn_with_env_cwd([_sfn_bin_abs(), "run", "src/main.sfn"], child_env, root);
+    assert handle != 0;
+    // While the fixture is still sleeping inside its own execution, its
+    // exe must be present under a per-invocation "run-" name — never the
+    // fixed legacy `run`/`run.exe`.
+    assert _wait_for_run_exe_entry(sailfin_dir, 60000);
     assert ! fs.exists(sailfin_dir + "/run");
     assert ! fs.exists(sailfin_dir + "/run.exe");
     assert _count_run_exe_entries(sailfin_dir) == 1;
 
-    let exit2 = process.run_capture_cwd([_sfn_bin_abs(), "run", "src/main.sfn"], child_env, root);
-    let out2 = process.capture_take_stdout();
-    let _err2 = process.capture_take_stderr();
-    assert exit2 == 0;
-    assert find(out2, "7", 0) >= 0;
-    // A second invocation swept the first invocation's leftover before
-    // minting its own — the per-invocation scheme stays bounded rather
-    // than accumulating a new binary on every `sfn run`.
-    assert _count_run_exe_entries(sailfin_dir) == 1;
+    let out = process.handle_read_stdout(handle);
+    let _err = process.handle_read_stderr(handle);
+    let exit = process.handle_wait(handle);
+    assert exit == 0;
+    assert find(out, "7", 0) >= 0;
+    // `sfn run` deletes its own exe once its child has exited — the
+    // per-invocation scheme stays bounded rather than accumulating a new
+    // binary on every `sfn run`.
+    assert _count_run_exe_entries(sailfin_dir) == 0;
+}
+
+test "run: two overlapping invocations in one directory both succeed" ![clock, io] {
+    let root = nested_runner_scratch("run-exe-isolation-overlap");
+    _ensure_fixture(root, 1500);
+    let child_env = clean_runner_env("");
+    let bin = _sfn_bin_abs();
+
+    // Start both before waiting on either, so their builds and their
+    // fixtures' own `sleep()` genuinely overlap in the same directory —
+    // the acceptance criterion in SFN-719 ("two concurrent `sfn run`
+    // invocations in one directory both succeed").
+    let handle_a = process.spawn_with_env_cwd([bin, "run", "src/main.sfn"], child_env, root);
+    let handle_b = process.spawn_with_env_cwd([bin, "run", "src/main.sfn"], child_env, root);
+    assert handle_a != 0;
+    assert handle_b != 0;
+
+    let out_a = process.handle_read_stdout(handle_a);
+    let _err_a = process.handle_read_stderr(handle_a);
+    let exit_a = process.handle_wait(handle_a);
+
+    let out_b = process.handle_read_stdout(handle_b);
+    let _err_b = process.handle_read_stderr(handle_b);
+    let exit_b = process.handle_wait(handle_b);
+
+    assert exit_a == 0;
+    assert exit_b == 0;
+    assert find(out_a, "7", 0) >= 0;
+    assert find(out_b, "7", 0) >= 0;
 }
