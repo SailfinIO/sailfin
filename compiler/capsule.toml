@@ -57,6 +57,12 @@ sfn = "0.10.0"
 # toolchain. Declared like `sfn/cli` — a normal source capsule staged +
 # linked into the self-hosted build (workspace member `capsules/sfn/crypto`).
 "sfn/crypto" = "*"
+# SFEP-0071 §5.2: `sfn toolchain install` extracts the downloaded seed
+# tarball in-process via `targz_extract` instead of shelling out to `tar`
+# (`cli/commands/toolchain.sfn`). A normal source capsule dependency, staged
+# and linked into the self-hosted build like `sfn/cli` and `sfn/crypto`
+# above (workspace member `capsules/sfn/archive`).
+"sfn/archive" = "*"
 # `sfn/http` is deliberately NOT declared here (SFN-496): its barrel exports a
 # client `get(url: string)` that collides on bare name with `sfn/cli`'s
 # `get(m: Matches, name: string)` across the whole compiler tree, and imported
