@@ -16,7 +16,8 @@
 //   inflate  — RFC 1951 decompression          (SFN-896)
 //   deflate  — RFC 1951 compression            (SFN-897)
 //   ustar    — POSIX.1-1988 header format      (SFN-898 read / SFN-899 write)
-//   tar_read — the extractor and its path guard (SFN-898)
+//   tar_read  — the extractor and its path guard (SFN-898)
+//   tar_write — the tree walk and archive creation (SFN-899)
 export { ArchiveError, ArchiveErrorKind } from "./error";
 
 // RFC 1952 §8 CRC-32 — one-shot plus the incremental update the gzip reader
@@ -47,16 +48,34 @@ export { inflate_all } from "./inflate";
 // today).
 export { DeflateOptions, DeflateStrategy, deflate_all } from "./deflate";
 
-// POSIX.1-1988 / GNU ustar header decode. Pure — one 512-byte block at a
-// time; `tar_read.sfn` glues GNU `L`/`K` and PAX `x`/`g` extensions across
-// blocks (SFEP-0071 §3.8).
-export { UstarHeader, ustar_decode_header } from "./ustar";
+// POSIX.1-1988 / GNU ustar header decode and encode. Pure — one 512-byte
+// block at a time; `tar_read.sfn` glues GNU `L`/`K` and PAX `x`/`g`
+// extensions across blocks on read (SFEP-0071 §3.8), and `tar_write.sfn`
+// assembles a full archive body on write (SFN-899).
+export {
+    UstarHeader,
+    ustar_decode_header,
+    ustar_encode_header,
+    ustar_encode_zero_block
+} from "./ustar";
 
 // The mandatory extraction path policy (SFEP-0071 §3.6). Pure — no
-// filesystem call, so the whole rejection table is a unit test.
+// filesystem call, so the whole rejection table is a unit test. Also the
+// writer's symlink-target validation (SFEP-0071 §3.5, SFN-899): we refuse
+// to write an archive our own extractor would reject.
 export { archive_check_beneath, archive_check_member_path } from "./path_guard";
 
 // The extractor: gzip -> inflate -> ustar -> path_guard -> filesystem
 // write, `![io]` (SFEP-0071 §3.4). `toolchain.sfn`'s `tar -xzf` cutover is
 // this export's first and only consumer today.
 export { ExtractOptions, ExtractSummary, targz_extract } from "./tar_read";
+
+// The creator: sorted filesystem walk -> ustar -> gzip -> filesystem write,
+// `![io]` (SFEP-0071 §3.4, §3.7, §3.8, SFN-899). Retires the three
+// `tar -czf` sites in `compiler/src/cli/commands/package.sfn`.
+export {
+    CreateOptions,
+    CreateSummary,
+    LinkPolicy,
+    targz_create
+} from "./tar_write";
