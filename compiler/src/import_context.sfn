@@ -1,6 +1,7 @@
 // Driver-owned staged import-context discovery and artifact loading.
 import { resolve_import_module_slug_for_module } from "sfn/codegen-llvm";
 import {
+    ImplicitSymbol,
     ImportModuleAlias,
     ImportedModuleContext,
     LayoutManifest,
@@ -89,16 +90,22 @@ fn import_module_aliases(imports: NativeImport[], current_module_slug: string, r
     return aliases;
 }
 
-fn imported_module_context_from_loaded_data(imports: NativeImport[], current_module_slug: string, root: string, manifests: LayoutManifest[], native_texts: string[], diagnostics: string[]) -> ImportedModuleContext ![io] {
+fn imported_module_context_from_loaded_data_with_implicit(imports: NativeImport[], current_module_slug: string, root: string, manifests: LayoutManifest[], native_texts: string[], diagnostics: string[], implicit_symbols: ImplicitSymbol[]) -> ImportedModuleContext ![io] {
     return ImportedModuleContext {
         manifests: manifests,
         native_texts: native_texts,
         diagnostics: diagnostics,
-        module_aliases: import_module_aliases(imports, current_module_slug, root)
+        module_aliases: import_module_aliases(imports, current_module_slug, root),
+        implicit_symbols: implicit_symbols
     };
 }
 
-fn load_imported_module_context(imports: NativeImport[], current_module_slug: string, root: string) -> ImportedModuleContext ![io] {
+fn imported_module_context_from_loaded_data(imports: NativeImport[], current_module_slug: string, root: string, manifests: LayoutManifest[], native_texts: string[], diagnostics: string[]) -> ImportedModuleContext ![io] {
+    let empty_implicit: ImplicitSymbol[] = [];
+    return imported_module_context_from_loaded_data_with_implicit(imports, current_module_slug, root, manifests, native_texts, diagnostics, empty_implicit);
+}
+
+fn load_imported_module_context_with_implicit(imports: NativeImport[], current_module_slug: string, root: string, implicit_symbols: ImplicitSymbol[]) -> ImportedModuleContext ![io] {
     let mut manifests: LayoutManifest[] = [];
     let mut native_texts: string[] = [];
     let mut diagnostics: string[] = [];
@@ -115,6 +122,17 @@ fn load_imported_module_context(imports: NativeImport[], current_module_slug: st
         queue_parent_slugs.push(current_module_slug);
         queue_depths.push(0);
         init_index += 1;
+    }
+    let mut implicit_index: int = 0;
+    loop {
+        if implicit_index >= implicit_symbols.length { break; }
+        let provider_module = implicit_symbols[implicit_index].provider_module;
+        if provider_module.length > 0 && !_context_contains(queue_paths, provider_module) {
+            queue_paths.push(provider_module);
+            queue_parent_slugs.push(current_module_slug);
+            queue_depths.push(0);
+        }
+        implicit_index += 1;
     }
 
     let max_transitive_depth: int = 3;
@@ -217,8 +235,14 @@ fn load_imported_module_context(imports: NativeImport[], current_module_slug: st
         manifests: manifests,
         native_texts: native_texts,
         diagnostics: diagnostics,
-        module_aliases: module_aliases
+        module_aliases: module_aliases,
+        implicit_symbols: implicit_symbols
     };
+}
+
+fn load_imported_module_context(imports: NativeImport[], current_module_slug: string, root: string) -> ImportedModuleContext ![io] {
+    let empty_implicit: ImplicitSymbol[] = [];
+    return load_imported_module_context_with_implicit(imports, current_module_slug, root, empty_implicit);
 }
 
 fn _context_has_slash(text: string) -> boolean {
@@ -236,12 +260,15 @@ fn empty_imported_module_context() -> ImportedModuleContext {
         manifests: [],
         native_texts: [],
         diagnostics: [],
-        module_aliases: []
+        module_aliases: [],
+        implicit_symbols: []
     };
 }
 
 export {
     empty_imported_module_context,
     import_context_root,
-    load_imported_module_context
+    imported_module_context_from_loaded_data_with_implicit,
+    load_imported_module_context,
+    load_imported_module_context_with_implicit
 };

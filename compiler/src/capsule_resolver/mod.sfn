@@ -188,6 +188,18 @@ import {
 } from "./types";
 import { discover_workspace_root, load_workspace_members } from "./workspace";
 
+fn _cr_implicit_provider_asm_paths(provider_slugs: string[], work_dir: string) -> string[] {
+    let context_root = _cr_import_context_root(work_dir);
+    let mut paths: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= provider_slugs.length { break; }
+        paths.push(context_root + "/" + provider_slugs[index] + ".sfn-asm");
+        index += 1;
+    }
+    return paths;
+}
+
 // Struct definitions and their constructors live in `./capsule_resolver/types`
 // and are NOT re-exported from here. Consumers import them from that module
 // directly. A re-export — bare or with a `from` clause — leaves this module's
@@ -320,6 +332,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             entry_import_asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             success: false,
             stats: empty_cache_stats(),
             module_events: empty_events,
@@ -350,6 +363,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             entry_import_asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             success: true,
             stats: empty_cache_stats(),
             module_events: empty_events,
@@ -414,6 +428,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             entry_import_asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             success: false,
             stats: empty_cache_stats(),
             module_events: empty_events,
@@ -465,6 +480,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
                 return ProjectCapsuleResult {
                     ll_paths: empty_paths,
                     entry_import_asm_paths: empty_paths,
+                    implicit_provider_asm_paths: empty_paths,
                     success: false,
                     stats: empty_cache_stats(),
                     module_events: empty_events,
@@ -493,7 +509,8 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         }
     }
 
-    let result = compile_capsule_modules(resolved.sources, slug_universe_extra, config, effective_exe, work_dir);
+    let implicit_provider_asm_paths = _cr_implicit_provider_asm_paths(resolved.implicit_provider_slugs, work_dir);
+    let result = compile_capsule_modules(resolved.sources, slug_universe_extra, config, effective_exe, work_dir, resolved.implicit_provider_slugs);
     if !result.success {
         // A per-module emit failed (e.g. an effect-gate `E0402`).
         // The helper has already printed the diagnostic; surface the
@@ -502,6 +519,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             entry_import_asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             success: false,
             stats: result.stats,
             module_events: result.module_events,
@@ -512,6 +530,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     return ProjectCapsuleResult {
         ll_paths: result.ll_paths,
         entry_import_asm_paths: entry_import_asm_paths,
+        implicit_provider_asm_paths: implicit_provider_asm_paths,
         success: true,
         stats: result.stats,
         module_events: result.module_events,
@@ -598,6 +617,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     if resolved.has_collision {
         return TestCapsuleResolution {
             asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             ll_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
@@ -608,6 +628,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     if resolved.sources.length == 0 {
         return TestCapsuleResolution {
             asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             ll_paths: empty_paths,
             capsule_count: 0,
             staging_failed: false,
@@ -641,6 +662,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return TestCapsuleResolution {
             asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             ll_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
@@ -661,7 +683,8 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // #984: `sfn test` resolves the entry as a normal source (no
     // walk-exclusion), so there is no extra slug universe to thread.
     let test_slug_universe_extra: CapsuleSource[] = [];
-    let result = compile_capsule_modules(resolved.sources, test_slug_universe_extra, test_config, effective_exe, work_dir);
+    let implicit_provider_asm_paths = _cr_implicit_provider_asm_paths(resolved.implicit_provider_slugs, work_dir);
+    let result = compile_capsule_modules(resolved.sources, test_slug_universe_extra, test_config, effective_exe, work_dir, resolved.implicit_provider_slugs);
     // Surface a compile failure as `staging_failed = true` so the
     // test runner exits 2 instead of trying to link against
     // missing helper objects. (The PR1c stats are dropped on this
@@ -670,6 +693,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     if !result.success {
         return TestCapsuleResolution {
             asm_paths: asm_paths,
+            implicit_provider_asm_paths: implicit_provider_asm_paths,
             ll_paths: empty_paths,
             capsule_count: resolved.sources.length as int,
             staging_failed: true,
@@ -680,6 +704,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
 
     return TestCapsuleResolution {
         asm_paths: asm_paths,
+        implicit_provider_asm_paths: implicit_provider_asm_paths,
         ll_paths: result.ll_paths,
         capsule_count: resolved.sources.length as int,
         staging_failed: false,

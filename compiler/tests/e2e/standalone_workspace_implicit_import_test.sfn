@@ -118,10 +118,14 @@ fn _write_implicit_provider(root: string, name: string, deps: string, implicit: 
     fs.writeFile(root + "/" + name + "/src/mod.sfn", "struct ImplicitLinkedMarker {\n"
         + "    value: int;\n"
         + "}\n\n"
+        + "let implicit_answer: int = 35;\n\n"
+        + "fn implicit_value() -> int {\n"
+        + "    return 7;\n"
+        + "}\n\n"
         + "fn latent_net() -> int ![net] {\n"
         + "    return 7;\n"
         + "}\n\n"
-        + "export { latent_net };\n");
+        + "export { implicit_value, latent_net };\n");
 }
 
 fn _write_consumer_workspace(root: string, explicit_dep: boolean) -> string ![io] {
@@ -218,6 +222,80 @@ test "workspace implicit: explicit dependency deduplicates the same provider" ![
     let result = with_tmp_dir(fn (root: string) -> int {
         return _build_with_bundled_implicit(root, true, "sfn-931-explicit");
     });
+    assert result == 0;
+}
+
+fn _build_implicit_provenance_fixture(root: string, label: string) -> int ![io] {
+    let toolchain = root + "/toolchain";
+    let consumer = root + "/consumer";
+    fs.createDirectory(toolchain, true);
+    fs.writeFile(toolchain + "/workspace.toml", "[workspace]\nmembers = [\"provider\"]\n");
+    _write_implicit_provider(toolchain, "provider", "", true);
+    let compiler = _copy_toolchain(toolchain);
+    if compiler.length == 0 { return 97; }
+    let entry = _write_consumer_workspace(consumer, false);
+    fs.writeFile(entry, "fn main() -> int {\n"
+        + "    if implicit_value() != 7 { return 1; }\n"
+        + "    let callback: fn() -> int = implicit_value;\n"
+        + "    if callback() != 7 { return 2; }\n"
+        + "    if implicit_answer != 35 { return 3; }\n"
+        + "    let marker = ImplicitLinkedMarker { value: 42 };\n"
+        + "    if marker.value != 42 { return 4; }\n"
+        + "    return 0;\n"
+        + "}\n");
+    let output = root + "/provenance-out";
+    let build_exit = process.run_capture([compiler, "build", "-o", output, entry], _implicit_build_env(label));
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    if build_exit != 0 {
+        print.err(build_out + build_err);
+        return 91;
+    }
+    let nm_exit = process.run_capture(["nm", output], _implicit_build_env(label
+        + "-nm"));
+    let symbols = process.capture_take_stdout();
+    let _nm_err = process.capture_take_stderr();
+    if nm_exit != 0 { return 95; }
+    if !contains(symbols, "implicit_value__demo__implicit__mod") { return 94; }
+    if contains(symbols, "implicit_value__demo__app") { return 93; }
+    if !contains(symbols, "__sfn_module_type_init__demoimplicitmod") {
+        return 90;
+    }
+    let ir_path = nested_runner_scratch(label) + "/program.ll";
+    if !fs.exists(ir_path) { return 89; }
+    let ir = fs.readFile(ir_path);
+    if !contains(ir, "@implicit_value__demo__implicit__mod") { return 88; }
+    if contains(ir, "@implicit_value__demo__app") { return 87; }
+    if !contains(ir, "@global.implicit_answer__demo__implicit__mod") {
+        return 86;
+    }
+    if contains(ir, "@global.implicit_answer__demo__app") { return 85; }
+    if !contains(ir, "%ImplicitLinkedMarker = type") { return 84; }
+    fs.writeFile(root + "/program.ll", ir);
+    fs.writeFile(root + "/symbols.txt", symbols);
+    if process.run([output]) != 0 { return 92; }
+    return 0;
+}
+
+test "workspace implicit provenance: arbitrary physical roots keep provider-qualified calls, types, values, and function values" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        let first = _build_implicit_provenance_fixture(root + "/checkout-a", "sfn-932-root-a");
+        if first != 0 { return first; }
+        let second = _build_implicit_provenance_fixture(root
+            + "/unrelated-root-b", "sfn-932-root-b");
+        if second != 0 { return second; }
+        let first_ir = fs.readFile(root + "/checkout-a/program.ll");
+        let second_ir = fs.readFile(root + "/unrelated-root-b/program.ll");
+        if first_ir != second_ir { return 83; }
+        let first_symbols = fs.readFile(root + "/checkout-a/symbols.txt");
+        let second_symbols = fs.readFile(root + "/unrelated-root-b/symbols.txt");
+        if first_symbols != second_symbols { return 82; }
+        return 0;
+    });
+    if result != 0 {
+        print.err("implicit provenance fixture failed with code "
+            + number_to_string(result));
+    }
     assert result == 0;
 }
 

@@ -29,13 +29,25 @@
 // export only structs/functions.
 import {
     ImportSymbolTable,
+    append_implicit_function_signature_from_module,
     append_import_function_signature_from_module,
     empty_import_symbols
 } from "sfn/analyzer/effect_imports";
 import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
 import { interfaces_from_native } from "sfn/analyzer/typecheck_imports";
-import { NativeFunction } from "sfn/ir";
-import { parse_native_artifact_for_import_context } from "sfn/ir";
+import {
+    ImplicitSymbol,
+    NativeBinding,
+    NativeEnum,
+    NativeFunction,
+    NativeInterface,
+    NativeStruct
+} from "sfn/ir";
+import {
+    parse_native_artifact_for_import_context,
+    parse_native_artifact_for_import_with_bindings
+} from "sfn/ir";
+import { char_code_at } from "sfn/strings";
 import { Statement } from "sfn/syntax";
 
 // Result of parsing a single `.sfn-asm` buffer. `diagnostics` is
@@ -78,6 +90,13 @@ struct ImportedInterfaceLoadResult {
     parse_failure_paths: string[];
     skipped_paths: string[];
     native_texts: string[];
+    implicit_symbols: ImplicitSymbol[];
+    implicit_diagnostics: string[];
+}
+
+struct ImplicitProviderSurfaceResult {
+    symbols: ImplicitSymbol[];
+    diagnostics: string[];
 }
 
 // Pure: parse a `.sfn-asm` text buffer and return its interface
@@ -144,6 +163,390 @@ fn _native_function_required_arity(function: NativeFunction) -> int {
         index += 1;
     }
     return function.parameters.length;
+}
+
+fn _implicit_bool(value: boolean) -> string {
+    if value { return "1"; }
+    return "0";
+}
+
+fn _implicit_join(values: string[], separator: string) -> string {
+    let mut out = "";
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if index > 0 { out = out + separator; }
+        out = out + values[index];
+        index += 1;
+    }
+    return out;
+}
+
+fn _implicit_function_signature(function: NativeFunction) -> string {
+    let mut parameters: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= function.parameters.length { break; }
+        let parameter = function.parameters[index];
+        parameters.push(parameter.name + ":" + parameter.type_annotation + ":"
+            + _implicit_bool(parameter.mutable)
+            + ":"
+            + _implicit_bool(parameter.default_value != null));
+        index += 1;
+    }
+    return "fn|" + _implicit_bool(function.is_async) + "|" + _implicit_bool(function.is_extern)
+        + "|"
+        + _implicit_join(parameters, ",")
+        + "|"
+        + function.return_type
+        + "|"
+        + _implicit_join(function.effects, ",")
+        + "|"
+        + _implicit_join(function.decorators, ",");
+}
+
+fn _implicit_struct_signature(definition: NativeStruct) -> string {
+    let mut fields: string[] = [];
+    let mut methods: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= definition.fields.length { break; }
+        let field = definition.fields[index];
+        fields.push(field.name + ":" + field.type_annotation + ":"
+            + _implicit_bool(field.mutable));
+        index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= definition.methods.length { break; }
+        methods.push(definition.methods[index].name + ":"
+            + _implicit_function_signature(definition.methods[index]));
+        index += 1;
+    }
+    let mut layout_signature = "none";
+    if definition.layout != null {
+        let layout = definition.layout;
+        let mut layout_fields: string[] = [];
+        index = 0;
+        loop {
+            if index >= layout.fields.length { break; }
+            let field = layout.fields[index];
+            layout_fields.push(field.name + ":" + field.type_annotation + ":"
+                + number_to_string(field.offset)
+                + ":"
+                + number_to_string(field.size)
+                + ":"
+                + number_to_string(field.align));
+            index += 1;
+        }
+        layout_signature = number_to_string(layout.size) + ":"
+            + number_to_string(layout.align)
+            + ":"
+            + _implicit_join(layout_fields, ",");
+    }
+    return "struct|" + _implicit_join(fields, ",") + "|" + _implicit_join(methods, ",")
+        + "|"
+        + _implicit_join(definition.implements, ",")
+        + "|"
+        + layout_signature;
+}
+
+fn _implicit_interface_signature(definition: NativeInterface) -> string {
+    let mut signatures: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= definition.signatures.length { break; }
+        let member = definition.signatures[index];
+        let mut parameters: string[] = [];
+        let mut parameter_index: int = 0;
+        loop {
+            if parameter_index >= member.parameters.length { break; }
+            let parameter = member.parameters[parameter_index];
+            parameters.push(parameter.name + ":" + parameter.type_annotation
+                + ":"
+                + _implicit_bool(parameter.mutable));
+            parameter_index += 1;
+        }
+        signatures.push(member.name + ":" + _implicit_bool(member.is_async)
+            + ":"
+            + _implicit_join(member.type_parameters, ",")
+            + ":"
+            + _implicit_join(parameters, ",")
+            + ":"
+            + member.return_type
+            + ":"
+            + _implicit_join(member.effects, ","));
+        index += 1;
+    }
+    return "interface|" + _implicit_join(definition.type_parameters, ",") + "|"
+        + _implicit_join(signatures, ",");
+}
+
+fn _implicit_enum_signature(definition: NativeEnum) -> string {
+    let mut variants: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= definition.variants.length { break; }
+        let variant = definition.variants[index];
+        let mut fields: string[] = [];
+        let mut field_index: int = 0;
+        loop {
+            if field_index >= variant.fields.length { break; }
+            let field = variant.fields[field_index];
+            fields.push(field.name + ":" + field.type_annotation + ":"
+                + _implicit_bool(field.mutable));
+            field_index += 1;
+        }
+        variants.push(variant.name + ":" + _implicit_join(fields, ","));
+        index += 1;
+    }
+    let mut layout_signature = "none";
+    if definition.layout != null {
+        let layout = definition.layout;
+        let mut layout_variants: string[] = [];
+        index = 0;
+        loop {
+            if index >= layout.variants.length { break; }
+            let variant = layout.variants[index];
+            let mut layout_fields: string[] = [];
+            let mut field_index: int = 0;
+            loop {
+                if field_index >= variant.fields.length { break; }
+                let field = variant.fields[field_index];
+                layout_fields.push(field.name + ":" + field.type_annotation
+                    + ":"
+                    + number_to_string(field.offset)
+                    + ":"
+                    + number_to_string(field.size)
+                    + ":"
+                    + number_to_string(field.align));
+                field_index += 1;
+            }
+            layout_variants.push(variant.name + ":" + number_to_string(variant.tag)
+                + ":"
+                + number_to_string(variant.offset)
+                + ":"
+                + number_to_string(variant.size)
+                + ":"
+                + number_to_string(variant.align)
+                + ":"
+                + _implicit_join(layout_fields, ","));
+            index += 1;
+        }
+        layout_signature = number_to_string(layout.size) + ":"
+            + number_to_string(layout.align)
+            + ":"
+            + layout.tag_type
+            + ":"
+            + number_to_string(layout.tag_size)
+            + ":"
+            + number_to_string(layout.tag_align)
+            + ":"
+            + _implicit_join(layout_variants, ",");
+    }
+    return "enum|" + _implicit_join(definition.type_parameters, ",") + "|"
+        + _implicit_join(variants, ",")
+        + "|"
+        + layout_signature;
+}
+
+fn _implicit_binding_signature(binding: NativeBinding) -> string {
+    return "value|" + binding.type_annotation + "|" + _implicit_bool(binding.mutable)
+        + "|"
+        + _implicit_bool(binding.is_thread_local)
+        + "|"
+        + _implicit_bool(binding.is_extern);
+}
+
+fn _implicit_function_symbol(function: NativeFunction, provider_module: string) -> ImplicitSymbol {
+    let mut parameter_types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= function.parameters.length { break; }
+        parameter_types.push(function.parameters[index].type_annotation);
+        index += 1;
+    }
+    return ImplicitSymbol {
+        name: function.name,
+        kind: "function",
+        provider_module: provider_module,
+        signature: _implicit_function_signature(function),
+        effects: function.effects,
+        parameter_types: parameter_types,
+        return_type: function.return_type,
+        parameter_count: function.parameters.length,
+        required_parameter_count: _native_function_required_arity(function),
+        declared_type: "",
+        is_async: function.is_async,
+        is_generic: false,
+        is_c_abi: function.is_extern
+    };
+}
+
+fn _implicit_non_function_symbol(name: string, kind: string, provider_module: string, signature: string, declared_type: string = "") -> ImplicitSymbol {
+    return ImplicitSymbol {
+        name: name,
+        kind: kind,
+        provider_module: provider_module,
+        signature: signature,
+        effects: [],
+        parameter_types: [],
+        return_type: "",
+        parameter_count: -1,
+        required_parameter_count: -1,
+        declared_type: declared_type,
+        is_async: false,
+        is_generic: false,
+        is_c_abi: false
+    };
+}
+
+fn _provider_module_from_native_text(text: string) -> string {
+    let marker = ".module ";
+    let marker_at = _find_text(text, marker);
+    if marker_at < 0 { return ""; }
+    let start = marker_at + marker.length;
+    let mut end = start;
+    loop {
+        if end >= text.length { break; }
+        let ch = substring(text, end, end + 1);
+        if ch == "\n" || ch == "\r" { break; }
+        end += 1;
+    }
+    return substring(text, start, end);
+}
+
+fn _implicit_symbol_key(symbol: ImplicitSymbol) -> string {
+    return symbol.name + "\n" + symbol.provider_module + "\n" + symbol.kind
+        + "\n"
+        + symbol.signature;
+}
+
+fn _implicit_text_lt(left: string, right: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= left.length || index >= right.length { break; }
+        let left_code = char_code_at(left, index);
+        let right_code = char_code_at(right, index);
+        if left_code < right_code { return true; }
+        if left_code > right_code { return false; }
+        index += 1;
+    }
+    return left.length < right.length;
+}
+
+fn _sort_implicit_symbols(input: ImplicitSymbol[]) -> ImplicitSymbol[] {
+    let mut out: ImplicitSymbol[] = [];
+    let mut copy_index: int = 0;
+    loop {
+        if copy_index >= input.length { break; }
+        out.push(input[copy_index]);
+        copy_index += 1;
+    }
+    let mut index: int = 1;
+    loop {
+        if index >= out.length { break; }
+        let current = out[index];
+        let current_key = _implicit_symbol_key(current);
+        let mut prior = index - 1;
+        loop {
+            if prior < 0 { break; }
+            if !_implicit_text_lt(current_key, _implicit_symbol_key(out[prior])) {
+                break;
+            }
+            out[prior + 1] = out[prior];
+            prior -= 1;
+        }
+        out[prior + 1] = current;
+        index += 1;
+    }
+    return out;
+}
+
+fn implicit_provider_surface_from_native_texts(texts: string[]) -> ImplicitProviderSurfaceResult {
+    let mut collected: ImplicitSymbol[] = [];
+    let mut diagnostics: string[] = [];
+    let mut text_index: int = 0;
+    loop {
+        if text_index >= texts.length { break; }
+        let text = texts[text_index];
+        let provider_module = _provider_module_from_native_text(text);
+        if provider_module.length == 0 {
+            diagnostics.push("implicit provider interface: staged artifact is missing canonical .module identity");
+            text_index += 1;
+            continue;
+        }
+        let parsed = parse_native_artifact_for_import_with_bindings(text);
+        let mut index: int = 0;
+        loop {
+            if index >= parsed.functions.length { break; }
+            collected.push(_implicit_function_symbol(parsed.functions[index], provider_module));
+            index += 1;
+        }
+        index = 0;
+        loop {
+            if index >= parsed.structs.length { break; }
+            let definition = parsed.structs[index];
+            collected.push(_implicit_non_function_symbol(definition.name, "struct", provider_module, _implicit_struct_signature(definition), definition.name));
+            index += 1;
+        }
+        index = 0;
+        loop {
+            if index >= parsed.enums.length { break; }
+            let definition = parsed.enums[index];
+            collected.push(_implicit_non_function_symbol(definition.name, "enum", provider_module, _implicit_enum_signature(definition), definition.name));
+            index += 1;
+        }
+        index = 0;
+        loop {
+            if index >= parsed.interfaces.length { break; }
+            let definition = parsed.interfaces[index];
+            collected.push(_implicit_non_function_symbol(definition.name, "interface", provider_module, _implicit_interface_signature(definition), definition.name));
+            index += 1;
+        }
+        index = 0;
+        loop {
+            if index >= parsed.bindings.length { break; }
+            let binding = parsed.bindings[index];
+            collected.push(_implicit_non_function_symbol(binding.name, "value", provider_module, _implicit_binding_signature(binding), binding.type_annotation));
+            index += 1;
+        }
+        text_index += 1;
+    }
+
+    let sorted = _sort_implicit_symbols(collected);
+    let mut symbols: ImplicitSymbol[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= sorted.length { break; }
+        let symbol = sorted[index];
+        if symbols.length > 0 {
+            let previous = symbols[symbols.length - 1];
+            if previous.name == symbol.name {
+                if previous.provider_module == symbol.provider_module
+                    && previous.kind == symbol.kind
+                    && previous.signature == symbol.signature {
+                    index += 1;
+                    continue;
+                }
+                diagnostics.push("implicit provider interface: incompatible duplicate declaration `"
+                    + symbol.name
+                    + "` from `"
+                    + previous.provider_module
+                    + "` and `"
+                    + symbol.provider_module
+                    + "`");
+                index += 1;
+                continue;
+            }
+        }
+        symbols.push(symbol);
+        index += 1;
+    }
+    return ImplicitProviderSurfaceResult {
+        symbols: symbols,
+        diagnostics: diagnostics
+    };
 }
 
 // SFEP-0023 §4.1/§4.2: a staged export is a well-formed Tier 1 decorator
@@ -298,18 +701,46 @@ fn build_closure_symbol_set(asm_paths: string[]) -> ClosureSymbolSet ![io] {
 // No condition aborts the load — `sfn check` should always run
 // analysis; the partitioning lets the CLI decide which slices warrant
 // a warning.
-fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoadResult ![io] {
+fn _interface_path_contains(paths: string[], target: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= paths.length { break; }
+        if paths[index] == target { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths: string[]) -> ImportedInterfaceLoadResult ![io] {
     let mut interfaces: Statement[] = [];
     let mut function_effects = empty_import_symbols();
     let mut missing: string[] = [];
     let mut parse_failures: string[] = [];
     let mut skipped: string[] = [];
     let mut native_texts: string[] = [];
+    let mut implicit_texts: string[] = [];
+    let mut ordered_paths: string[] = [];
+    let mut order_index: int = 0;
+    loop {
+        if order_index >= implicit_paths.length { break; }
+        if !_interface_path_contains(ordered_paths, implicit_paths[order_index]) {
+            ordered_paths.push(implicit_paths[order_index]);
+        }
+        order_index += 1;
+    }
+    order_index = 0;
+    loop {
+        if order_index >= paths.length { break; }
+        if !_interface_path_contains(ordered_paths, paths[order_index]) {
+            ordered_paths.push(paths[order_index]);
+        }
+        order_index += 1;
+    }
 
     let mut i: int = 0;
     loop {
-        if i >= paths.length { break; }
-        let path = paths[i];
+        if i >= ordered_paths.length { break; }
+        let path = ordered_paths[i];
         if !fs.exists(path) {
             missing.push(path);
             i += 1;
@@ -322,6 +753,8 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
         // `fs.readFile` round trip per dependency.
         let text = fs.readFile(path);
         native_texts.push(text);
+        let is_implicit = _interface_path_contains(implicit_paths, path);
+        if is_implicit { implicit_texts.push(text); }
         let parsed = interfaces_from_native_artifact(text);
         if parsed.diagnostics.length > 0 {
             parse_failures.push(path);
@@ -342,7 +775,11 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
             // per-batch merge — a plain `append_import_function` would reset
             // it to false, defeating the metadata channel before it reaches
             // `localize_import_symbols_for_program`.
-            function_effects = append_import_function_signature_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path), entry.return_type, entry.parameter_count, entry.required_parameter_count);
+            if is_implicit {
+                function_effects = append_implicit_function_signature_from_module(function_effects, entry.name, entry.effects, _provider_module_from_native_text(text), entry.return_type, entry.parameter_count, entry.required_parameter_count);
+            } else {
+                function_effects = append_import_function_signature_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path), entry.return_type, entry.parameter_count, entry.required_parameter_count);
+            }
             k += 1;
         }
         if parsed.interfaces.length == 0 { skipped.push(path); } else {
@@ -356,14 +793,22 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
         i += 1;
     }
 
+    let implicit_surface = implicit_provider_surface_from_native_texts(implicit_texts);
     return ImportedInterfaceLoadResult {
         interfaces: interfaces,
         function_effects: function_effects,
         missing_paths: missing,
         parse_failure_paths: parse_failures,
         skipped_paths: skipped,
-        native_texts: native_texts
+        native_texts: native_texts,
+        implicit_symbols: implicit_surface.symbols,
+        implicit_diagnostics: implicit_surface.diagnostics
     };
+}
+
+fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoadResult ![io] {
+    let empty_implicit: string[] = [];
+    return load_imported_interfaces_with_implicit_paths(paths, empty_implicit);
 }
 
 // Import-context paths end in `<logical-module>.sfn-asm`; preserving that
@@ -408,8 +853,11 @@ fn load_imported_native_texts_from_paths(paths: string[]) -> string[] ![io] {
 export {
     ArtifactInterfaceParse,
     ImportedInterfaceLoadResult,
+    ImplicitProviderSurfaceResult,
     build_closure_symbol_set,
     interfaces_from_native_artifact,
+    implicit_provider_surface_from_native_texts,
     load_imported_interfaces_from_paths,
+    load_imported_interfaces_with_implicit_paths,
     load_imported_native_texts_from_paths
 };

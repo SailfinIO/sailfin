@@ -1,0 +1,76 @@
+// SFN-932: imported constant materialization must follow lexical provider
+// selection, not the order in which dependency artifacts were staged.
+import { ImportedBinding } from "sfn/codegen-llvm/lowering/lowering_phase_imports";
+import { lower_imported_bindings_to_globals } from "sfn/codegen-llvm/lowering/module_globals";
+import { TypeContext } from "sfn/codegen-llvm/types";
+import {
+    ImportModuleAlias,
+    NativeBinding,
+    NativeImport,
+    NativeImportSpecifier
+} from "sfn/ir";
+import { contains } from "sfn/strings";
+
+fn _binding(value: string, provider_module: string, is_implicit: boolean) -> ImportedBinding {
+    return ImportedBinding {
+        binding: NativeBinding {
+            name: "answer",
+            mutable: false,
+            is_thread_local: false,
+            is_extern: false,
+            type_annotation: "int",
+            value: value
+        },
+        provider_module: provider_module,
+        is_implicit: is_implicit
+    };
+}
+
+fn _context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+fn _ordinary_import(name: string) -> NativeImport {
+    return NativeImport {
+        kind: "import",
+        module: "demo/ordinary",
+        specifiers: [NativeImportSpecifier { name: name, alias: null }]
+    };
+}
+
+fn _aliases() -> ImportModuleAlias[] {
+    return [ImportModuleAlias {
+        import_slug: "demo/ordinary", provider_slug: "demo/ordinary/mod"
+    }];
+}
+
+fn _has_line(lines: string[], needle: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        if contains(lines[index], needle) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+test "implicit binding precedence: an unrelated ordinary export cannot displace the provider value" {
+    let bindings = [_binding("11", "demo/ordinary/mod", false), _binding("35", "demo/implicit/mod", true)];
+    let result = lower_imported_bindings_to_globals(bindings, _context(), [], [_ordinary_import("other")], "demo/app/mod", _aliases());
+    assert result.locals.length == 1;
+    assert _has_line(result.preamble_lines, "@global.answer__demo__implicit__mod = internal global i64 35");
+    assert ! _has_line(result.preamble_lines, "global i64 11");
+}
+
+test "implicit binding precedence: a same-name explicit import selects its provider" {
+    let bindings = [_binding("11", "demo/ordinary/mod", false), _binding("35", "demo/implicit/mod", true)];
+    let result = lower_imported_bindings_to_globals(bindings, _context(), [], [_ordinary_import("answer")], "demo/app/mod", _aliases());
+    assert result.locals.length == 1;
+    assert _has_line(result.preamble_lines, "@global.answer = internal global i64 11");
+    assert ! _has_line(result.preamble_lines, "@global.answer__demo__implicit__mod");
+}

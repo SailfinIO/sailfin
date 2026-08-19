@@ -11,7 +11,7 @@ import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imp
 import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { runtime_helper_call_names } from "sfn/codegen-llvm";
-import { intrinsic_effect_table } from "sfn/ir";
+import { ImplicitSymbol, intrinsic_effect_table } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
@@ -47,7 +47,7 @@ fn effect_severity_for_check(file_path: string) -> string ![io] {
 // Driver-side constructor for the facade contract. Parsed syntax and staged
 // interfaces arrive from the caller; all remaining authority-bearing inputs
 // are resolved here before the pure `analyze_program` call.
-fn analyzer_input_for_check(program: Program, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean) -> AnalyzerInput ![io] {
+fn analyzer_input_for_check(program: Program, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean, implicit_symbols: ImplicitSymbol[] = []) -> AnalyzerInput ![io] {
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let import_context = resolve_import_context(program, file_path, closure_symbols);
     return AnalyzerInput {
@@ -60,7 +60,8 @@ fn analyzer_input_for_check(program: Program, file_path: string, imported_interf
         capabilities_required: capabilities_required,
         import_context: import_context,
         allow_bare_assert: allow_bare_assert,
-        effect_severity: effect_severity_for_check(file_path)
+        effect_severity: effect_severity_for_check(file_path),
+        implicit_symbols: implicit_symbols
     };
 }
 

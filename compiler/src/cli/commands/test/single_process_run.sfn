@@ -283,7 +283,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             if trace_runner { print.err("test runner: compile start"); }
             _clean_lowering_state(scratch_root);
             let empty_manifests: LayoutManifest[] = [];
-            let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
+            let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].implicit_symbols);
             if !_compiled {
                 // Stderr stays usable for compiler-internal diagnostics
                 // even in `--json` mode; the affected tests show up as

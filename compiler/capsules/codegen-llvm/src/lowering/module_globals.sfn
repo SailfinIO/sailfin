@@ -1,11 +1,18 @@
 // compiler/capsules/codegen-llvm/src/lowering/module_globals.sfn
 //
 // Module-global lowering: turns `let` bindings into LLVM globals plus optional init function.
-import { NativeBinding, NativeFunction, NativeInstruction } from "sfn/ir";
+import {
+    ImportModuleAlias,
+    NativeBinding,
+    NativeFunction,
+    NativeImport,
+    NativeInstruction
+} from "sfn/ir";
 
 import { unescape_string_literal } from "../expression_lowering/native/core_text";
 import { default_return_literal } from "../expressions_helpers";
 import { is_string_literal, normalise_number_literal } from "../expressions_literals";
+import { resolve_import_module_slug_for_module } from "../imports";
 import { format_root_scope_id } from "../lifetime";
 import { empty_string_constant_set, escape_string_for_llvm } from "../strings";
 import { sanitize_symbol } from "../symbols";
@@ -27,6 +34,8 @@ import {
     string_array_contains,
     trim_text
 } from "../utils";
+import { sanitize_module_suffix } from "./lowering_helpers";
+import { ImportedBinding } from "./lowering_phase_imports";
 
 fn module_global_symbol(name: string) -> string {
     return "@global." + sanitize_symbol(name);
@@ -148,7 +157,7 @@ fn _channel_global_annotation(explicit: string, init_value: string?) -> string {
 
 // Process a single module binding and return its lowered preamble lines,
 // a zero-or-one-element locals array, and whether it needs runtime init.
-fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string) -> BindingLoweringResult {
+fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string, provider_suffix: string = "") -> BindingLoweringResult {
     let empty_result = BindingLoweringResult {
         preamble_lines: [],
         locals: [],
@@ -180,7 +189,10 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
         effective_type_annotation = channel_annotation;
     }
     if type_annotation.length == 0 { return empty_result; }
-    let global_name = module_global_symbol(name);
+    let mut global_name = module_global_symbol(name);
+    if provider_suffix.length > 0 {
+        global_name = global_name + "__" + provider_suffix;
+    }
     let llvm_type = _binding_llvm_type(context, type_annotation);
 
     // `extern var NAME: TYPE;` (#1313): bind a C-ABI global symbol
@@ -256,7 +268,10 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
                 let str_content = unescape_string_literal(str_val);
                 let str_escaped = escape_string_for_llvm(str_content);
                 let str_len = str_content.length + 1;
-                let str_const_name = "@str.global." + sanitize_symbol(name);
+                let mut str_const_name = "@str.global." + sanitize_symbol(name);
+                if provider_suffix.length > 0 {
+                    str_const_name = str_const_name + "__" + provider_suffix;
+                }
                 let line1 = str_const_name + " = private constant ["
                     + number_to_string(str_len)
                     + " x i8] c\""
@@ -437,6 +452,81 @@ struct ImportedBindingLoweringResult {
     locals: LocalBinding[];
 }
 
+fn _imported_binding_provider_matches(actual: string, expected: string) -> boolean {
+    if actual == expected { return true; }
+    return actual == expected + "/mod";
+}
+
+fn _resolved_binding_import_provider(module: string, current_module_slug: string, module_aliases: ImportModuleAlias[]) -> string {
+    let base = resolve_import_module_slug_for_module(module, current_module_slug);
+    let mut index: int = 0;
+    loop {
+        if index >= module_aliases.length { break; }
+        if module_aliases[index].import_slug == base {
+            return module_aliases[index].provider_slug;
+        }
+        index += 1;
+    }
+    return base;
+}
+
+// Return the canonical provider selected by a source import for this same
+// bare local name. Imports of another symbol (or an alias to another local
+// name) must not displace the declaration supplied by the implicit namespace.
+fn _explicit_binding_provider(imports: NativeImport[], name: string, current_module_slug: string, module_aliases: ImportModuleAlias[]) -> string {
+    let mut import_index: int = 0;
+    loop {
+        if import_index >= imports.length { break; }
+        let entry = imports[import_index];
+        import_index += 1;
+        if entry.kind == "export" { continue; }
+        let mut specifier_index: int = 0;
+        loop {
+            if specifier_index >= entry.specifiers.length { break; }
+            let specifier = entry.specifiers[specifier_index];
+            specifier_index += 1;
+            if specifier.name != name { continue; }
+            let alias = specifier.alias;
+            if alias != null {
+                let local_name: string? = alias;
+                if local_name.length > 0 && local_name != name { continue; }
+            }
+            return _resolved_binding_import_provider(entry.module, current_module_slug, module_aliases);
+        }
+    }
+    return "";
+}
+
+fn _preferred_imported_binding_index(bindings: ImportedBinding[], name: string, imports: NativeImport[], current_module_slug: string, module_aliases: ImportModuleAlias[]) -> int {
+    let explicit_provider = _explicit_binding_provider(imports, name, current_module_slug, module_aliases);
+    let mut index: int = 0;
+    if explicit_provider.length > 0 {
+        loop {
+            if index >= bindings.length { break; }
+            if bindings[index].binding.name == name
+                && _imported_binding_provider_matches(bindings[index].provider_module, explicit_provider) {
+                return index;
+            }
+            index += 1;
+        }
+    }
+    index = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if bindings[index].binding.name == name && bindings[index].is_implicit {
+            return index;
+        }
+        index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if bindings[index].binding.name == name { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
 // Materialise the module-level `let` constants an imported capsule EXPORTS
 // as the importer's own value-carrying globals (#1368).
 //
@@ -460,7 +550,7 @@ struct ImportedBindingLoweringResult {
 // so both are skipped (out of scope for #1368, which is constants). Names
 // already present in the importing module's own globals (`existing_names`)
 // and duplicate imported names are materialised once.
-fn lower_imported_bindings_to_globals(bindings: NativeBinding[], context: TypeContext, existing_names: string[]) -> ImportedBindingLoweringResult {
+fn lower_imported_bindings_to_globals(bindings: ImportedBinding[], context: TypeContext, existing_names: string[], imports: NativeImport[] = [], current_module_slug: string = "", module_aliases: ImportModuleAlias[] = []) -> ImportedBindingLoweringResult {
     let scope_id = format_root_scope_id("module");
     let mut preamble_lines: string[] = [];
     let mut locals: LocalBinding[] = [];
@@ -480,19 +570,28 @@ fn lower_imported_bindings_to_globals(bindings: NativeBinding[], context: TypeCo
     let mut index: int = 0;
     loop {
         if index >= bindings.length { break; }
-        let binding = bindings[index];
+        let imported_binding = bindings[index];
         index += 1;
-        if binding == null { continue; }
+        if imported_binding == null { continue; }
+        let binding = imported_binding.binding;
         let name = binding.name;
         if name == null { continue; }
         if name.length == 0 { continue; }
+        if _preferred_imported_binding_index(bindings, name, imports, current_module_slug, module_aliases) != index - 1 {
+            continue;
+        }
         // `extern var` C-ABI globals already declare themselves through the
         // producer's own emission; only ordinary `let` constants flow here.
         if binding.is_extern { continue; }
         // Shared mutable state cannot be constant-propagated — skip it.
         if binding.mutable { continue; }
         if string_array_contains(seen, name) { continue; }
-        let result = _process_one_binding(binding, context, scope_id);
+        let mut provider_suffix = "";
+        if imported_binding.is_implicit && imported_binding.provider_module.length > 0
+            && !starts_with(imported_binding.provider_module, "runtime/") {
+            provider_suffix = sanitize_module_suffix(imported_binding.provider_module);
+        }
+        let result = _process_one_binding(binding, context, scope_id, provider_suffix);
         // A runtime-initialized binding would duplicate its init side effects
         // (and its init helpers may not be imported) — only inline constants.
         if result.needs_init { continue; }

@@ -56,6 +56,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
     if resolved.has_collision {
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
             capabilities_required: resolved.capabilities_required
@@ -68,6 +69,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         }
         return CheckCapsuleResolution {
             asm_paths: no_source_paths,
+            implicit_provider_asm_paths: empty_paths,
             capsule_count: 0,
             staging_failed: false,
             capabilities_required: resolved.capabilities_required
@@ -88,6 +90,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
+            implicit_provider_asm_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
             capabilities_required: resolved.capabilities_required
@@ -111,8 +114,17 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
     if project_entry_artifact.length > 0 && !project_entry_already_present {
         asm_paths.push(project_entry_artifact);
     }
+    let mut implicit_provider_asm_paths: string[] = [];
+    let mut implicit_index: int = 0;
+    loop {
+        if implicit_index >= resolved.implicit_provider_slugs.length { break; }
+        implicit_provider_asm_paths.push(context_root + "/" + resolved.implicit_provider_slugs[implicit_index]
+            + ".sfn-asm");
+        implicit_index += 1;
+    }
     return CheckCapsuleResolution {
         asm_paths: asm_paths,
+        implicit_provider_asm_paths: implicit_provider_asm_paths,
         capsule_count: resolved.sources.length as int,
         staging_failed: false,
         capabilities_required: resolved.capabilities_required

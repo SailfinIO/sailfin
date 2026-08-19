@@ -13,6 +13,8 @@
 // test links without the compiler binary's runtime exec object.
 import { prelude_global_names_from_source } from "sfn/analyzer/prelude_scan";
 
+import { implicit_provider_surface_from_native_texts } from "../../src/typecheck_import_loader";
+
 fn _contains_name(names: string[], target: string) -> boolean {
     let mut i: int = 0;
     loop {
@@ -92,4 +94,50 @@ test "prelude scanner: accepts runtime source line endings" {
 test "prelude scanner: empty source yields no names" {
     let names = prelude_global_names_from_source("");
     assert names.length == 0;
+}
+
+fn _implicit_provider_artifact(module_name: string, return_type: string) -> string {
+    return ".module " + module_name + "\n" + ".fn supplied(value: int) -> "
+        + return_type
+        + "\n"
+        + ".meta return "
+        + return_type
+        + "\n"
+        + ".param value: int\n"
+        + ".endfn\n"
+        + ".struct Token\n.field raw: int\n.endstruct\n"
+        + ".enum Choice\n.variant Some(value: int)\n.endenum\n"
+        + ".interface Measure\n.signature read() -> int\n.endinterface\n"
+        + ".let answer : int = 42\n";
+}
+
+test "implicit provider surface: preserves canonical module for functions, types, and values" {
+    let surface = implicit_provider_surface_from_native_texts([_implicit_provider_artifact("demo/implicit/mod", "int")]);
+    assert surface.diagnostics.length == 0;
+    assert surface.symbols.length == 5;
+    let mut index: int = 0;
+    loop {
+        if index >= surface.symbols.length { break; }
+        assert surface.symbols[index].provider_module == "demo/implicit/mod";
+        index += 1;
+    }
+}
+
+test "implicit provider surface: incompatible duplicate declarations are deterministic errors" {
+    let left = _implicit_provider_artifact("demo/alpha/mod", "int");
+    let right = _implicit_provider_artifact("demo/beta/mod", "string");
+    let surface = implicit_provider_surface_from_native_texts([right, left]);
+    assert surface.diagnostics.length > 0;
+    assert surface.diagnostics[0] == "implicit provider interface: incompatible duplicate declaration `Choice` from `demo/alpha/mod` and `demo/beta/mod`";
+}
+
+test "implicit provider surface: incompatible layouts from one canonical provider are rejected" {
+    let prefix = ".module demo/layout/mod\n.struct Token\n.field raw: int\n";
+    let left = prefix + ".layout struct name=Token size=4 align=4\n"
+        + ".layout field raw type=int offset=0 size=4 align=4\n.endstruct\n";
+    let right = prefix + ".layout struct name=Token size=8 align=8\n"
+        + ".layout field raw type=int offset=0 size=8 align=8\n.endstruct\n";
+    let surface = implicit_provider_surface_from_native_texts([right, left]);
+    assert surface.diagnostics.length == 1;
+    assert surface.diagnostics[0] == "implicit provider interface: incompatible duplicate declaration `Token` from `demo/layout/mod` and `demo/layout/mod`";
 }

@@ -4,6 +4,7 @@
 // collection helpers.  Split from lowering_helpers.sfn to keep both
 // files under 1000 lines.
 import {
+    ImplicitSymbol,
     ImportModuleAlias,
     LoweringDiagnostic,
     NativeFunction,
@@ -147,7 +148,31 @@ fn _collect_struct_method_symbols(native_text: string) -> string[] {
     return result;
 }
 
-fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], module_aliases: ImportModuleAlias[], native_text_path: string) -> MangledModuleResult {
+fn _implicit_substitution_index(olds: string[], news: string[], symbol: string) -> int {
+    let mut index: int = 0;
+    loop {
+        if index >= olds.length || index >= news.length { break; }
+        if olds[index] == symbol { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+fn _has_exact_defined_function(lines: string[], symbol: string) -> boolean {
+    let needle = "@" + symbol + "(";
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = trim_text(lines[index]);
+        if starts_with(line, "define ") && index_of(line, needle) >= 0 {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], module_aliases: ImportModuleAlias[], implicit_symbols: ImplicitSymbol[], native_text_path: string) -> MangledModuleResult {
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let debug_lowering = trace_lowering();
@@ -351,6 +376,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
             }
         }
     }
+    let explicit_import_substitution_count = import_olds.length;
 
     // 2b) #960: rewrite imported struct-method call sites to the home-module
     // symbol. `flatten_struct_methods` names methods `<Struct><Method>`, and a
@@ -407,6 +433,59 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
             import_news.push(target);
             imm_targets.push(target);
             imm_signatures.push(signature);
+        }
+    }
+
+    // Selected implicit providers share one bare namespace with the consumer,
+    // but retain the provider's canonical `.module` identity in LLVM. Add
+    // these substitutions after explicit imports so an explicit source-level
+    // binding keeps precedence. The existing token-wide rewrite covers calls,
+    // declarations, address-taken function values, and mirror references.
+    let mut safe_implicit_symbols = implicit_symbols;
+    if safe_implicit_symbols == null { safe_implicit_symbols = []; }
+    let mut implicit_symbol_index: int = 0;
+    loop {
+        if implicit_symbol_index >= safe_implicit_symbols.length { break; }
+        let entry = safe_implicit_symbols[implicit_symbol_index];
+        implicit_symbol_index += 1;
+        if entry.kind != "function" && entry.kind != "value" { continue; }
+        let bare = sanitize_symbol(entry.name);
+        if bare.length == 0 || entry.provider_module.length == 0 { continue; }
+        if should_keep_unmangled_abi_symbol(bare) { continue; }
+        if index_of(bare, "__") >= 0 { continue; }
+        if _has_exact_defined_function(lines, bare) { continue; }
+        let mut target = bare;
+        if !starts_with(entry.provider_module, "runtime/") {
+            target = bare + "__" + sanitize_module_suffix(entry.provider_module);
+        }
+        let bare_substitution_index = _implicit_substitution_index(import_olds, import_news, bare);
+        if bare_substitution_index >= 0 {
+            // A source-level explicit import owns its local spelling. Any
+            // later mapping came from provider discovery and may still carry
+            // the consumer-local fallback, so replace it with the canonical
+            // implicit provider target.
+            if bare_substitution_index < explicit_import_substitution_count {
+                continue;
+            }
+            import_news[bare_substitution_index] = target;
+        } else {
+            import_olds.push(bare);
+            import_news.push(target);
+        }
+        // Named-function adapters are requested before this final mangling
+        // pass and historically pre-qualified their target with the consumer
+        // module. Rewrite that provisional spelling through the same provider
+        // mapping so both the adapter body and its declaration retain the
+        // implicit provider identity.
+        if entry.kind == "function" && !is_runtime_module {
+            let provisional_consumer = bare + "__" + module_suffix;
+            let provisional_index = _implicit_substitution_index(import_olds, import_news, provisional_consumer);
+            if provisional_index >= 0 {
+                import_news[provisional_index] = target;
+            } else {
+                import_olds.push(provisional_consumer);
+                import_news.push(target);
+            }
         }
     }
 

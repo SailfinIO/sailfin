@@ -7,6 +7,7 @@
 // (parse_native_*_for_import, apply_layout_manifest_to_module,
 // extend_native_functions) from the orchestrator's import set.
 import {
+    ImplicitSymbol,
     LayoutManifest,
     NativeBinding,
     NativeEnum,
@@ -27,7 +28,8 @@ import {
     extend_native_enums,
     extend_native_functions,
     extend_native_interfaces,
-    extend_native_structs
+    extend_native_structs,
+    extract_module_name_from_native_text
 } from "./lowering_helpers";
 import { flatten_struct_methods } from "./lowering_helpers_structs";
 
@@ -38,13 +40,32 @@ import { flatten_struct_methods } from "./lowering_helpers_structs";
 // `ImportedModuleContext` in native_ir.sfn (manifests/native_texts/
 // diagnostics/module aliases); the two types serve different phases of the
 // pipeline.
+struct ImportedBinding {
+    binding: NativeBinding;
+    provider_module: string;
+    is_implicit: boolean;
+}
+
 struct ImportedModuleSymbols {
     structs: NativeStruct[];
     enums: NativeEnum[];
     interfaces: NativeInterface[];
     functions: NativeFunction[];
     struct_methods: NativeFunction[];
-    bindings: NativeBinding[];
+    bindings: ImportedBinding[];
+}
+
+fn _implicit_binding_provider(symbols: ImplicitSymbol[], name: string, provider_module: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= symbols.length { break; }
+        let symbol = symbols[index];
+        if symbol.kind == "value" && symbol.name == name && symbol.provider_module == provider_module {
+            return provider_module;
+        }
+        index += 1;
+    }
+    return "";
 }
 
 // Extract struct methods from applied structs.
@@ -118,19 +139,20 @@ fn build_import_alias_signatures(imports: NativeImport[], candidate_functions: N
 // preserved, including the intentional drop of apply_layout_manifest_to_module's
 // diagnostics field and the parse_native_imports_for_import fast-path scan for
 // export-name filtering.
-fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imported_manifests: LayoutManifest[]) -> ImportedModuleSymbols {
+fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imported_manifests: LayoutManifest[], implicit_symbols: ImplicitSymbol[]) -> ImportedModuleSymbols {
     let mut imported_structs: NativeStruct[] = [];
     let mut imported_enums: NativeEnum[] = [];
     let mut imported_interfaces: NativeInterface[] = [];
     let mut imported_functions: NativeFunction[] = [];
     let mut imported_struct_methods: NativeFunction[] = [];
-    let mut imported_bindings: NativeBinding[] = [];
+    let mut imported_bindings: ImportedBinding[] = [];
 
     let manifest_count = safe_imported_manifests.length;
     let mut text_index: int = 0;
     loop {
         if text_index >= safe_imported_native_texts.length { break; }
         let native_text = safe_imported_native_texts[text_index];
+        let provider_module = extract_module_name_from_native_text(native_text);
         let mut manifest_for_module: LayoutManifest? = null;
         if text_index < manifest_count {
             manifest_for_module = safe_imported_manifests[text_index];
@@ -174,8 +196,12 @@ fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imp
             bi += 1;
             if binding == null { continue; }
             if binding.name == null { continue; }
-            if string_array_contains(exported_names, binding.name) {
-                imported_bindings.push(binding);
+            let implicit_provider = _implicit_binding_provider(implicit_symbols, binding.name, provider_module);
+            if string_array_contains(exported_names, binding.name)
+                || implicit_provider.length > 0 {
+                imported_bindings.push(ImportedBinding {
+                    binding: binding, provider_module: provider_module, is_implicit: implicit_provider.length > 0
+                });
             }
         }
         text_index += 1;
@@ -201,3 +227,5 @@ fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imp
         bindings: imported_bindings
     };
 }
+
+export { ImportedBinding };
