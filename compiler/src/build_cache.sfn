@@ -1477,7 +1477,16 @@ fn test_bin_compiler_identity(compiler_version: string, compiler_binary_path: st
 // binary's SHA-256. The schema bump makes every v2 entry unreachable
 // once; afterward broad CI prefix restores may unpack foreign v3 entries,
 // but their compiler-specific key digests cannot match this binary's lookup.
-fn test_bin_cache_schema_version() -> string { return "v3"; }
+//
+// v3 -> v4 (SFN-676): the key gained a `target_triple` component. Before
+// this, a cross-target `sfn test` invocation (e.g. building for
+// `x86_64-pc-windows-msvc` from a Linux host) could serve a binary that
+// was linked for a DIFFERENT target, because nothing in the key
+// distinguished them — the same defect `cache_key_for` fixed for the
+// module `.ll` cache under SFN-677. The schema bump makes every v3
+// entry unreachable once, so a pre-fix entry linked for the wrong
+// target can never false-hit under the new key.
+fn test_bin_cache_schema_version() -> string { return "v4"; }
 
 // Root for the per-test binary cache: `<base>/test-bin/<schema>`,
 // where `<base>` is `$SAILFIN_BUILD_CACHE_DIR` (when set) or the
@@ -1524,6 +1533,7 @@ fn test_bin_cache_root() -> string ![io] {
 //       || runtime_identity             // runtime_link_inputs_identity(...)
 //       || canonical(clang_flags)
 //       || test_bin_cache_schema_version()
+//       || "tgt1:" || target_triple
 //   )
 //
 // Hashes are sorted before folding so the key is invariant under dep
@@ -1533,7 +1543,20 @@ fn test_bin_cache_root() -> string ![io] {
 // within one process, never across two processes hashing the same
 // file simultaneously (the module cache carries the identical
 // single-process precondition).
-fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, runtime_identity: string, flags_canonical: string, unique_suffix: string) -> CacheKey ![io] {
+//
+// SFN-676: `target_triple` folds in the build TARGET, mirroring
+// `cache_key_for`'s SFN-677 fix for the module `.ll` cache — without it
+// a cross-target `sfn test` run could restore a linked binary built for
+// a different OS/triple. It goes LAST with nothing appended after it
+// under its own `tgt1:` marker (independent of `cache_key_for`'s
+// `tgt3:`, which has been bumped twice for defects specific to that
+// key): the value may originate from an unvalidated
+// `SAILFIN_TARGET_TRIPLE`/`SAILFIN_TARGET_OS` env string and so may
+// contain any byte, including the separators used here. Appending
+// anything derived from it afterward would let a crafted value absorb
+// its own successor and alias a different tuple — the exact defect
+// `cache_key_for`'s docstring records for its own `target_triple` fold.
+fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, runtime_identity: string, flags_canonical: string, unique_suffix: string, target_triple: string) -> CacheKey ![io] {
     let s_hash = _sha256_of_file(test_source_path);
 
     let mut dep_hashes: string[] = [];
@@ -1567,7 +1590,9 @@ fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_t
         + "\n"
         + flags_canonical
         + "\n"
-        + test_bin_cache_schema_version();
+        + test_bin_cache_schema_version()
+        + "\ntgt1:"
+        + target_triple;
     let final_digest = _sha256_of_string(final_input, unique_suffix + "_final");
     return CacheKey { digest: final_digest };
 }

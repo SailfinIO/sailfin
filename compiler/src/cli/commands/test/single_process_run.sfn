@@ -5,7 +5,7 @@ import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
 import { _sanitize_filename_cmd, _write_text_cmd } from "../../../build/fs";
-import { build_target_os, target_exe_name } from "../../../build/target";
+import { build_target_os, build_target_triple, target_exe_name } from "../../../build/target";
 import {
     CacheKey,
     cache_copy_artifact_to,
@@ -204,6 +204,10 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
     }
     let mut tb_flags: string[] = ["-O0"];
     let tb_flags_canonical = canonicalize_flags(tb_flags);
+    // SFN-676: invocation-stable, resolved once like `tb_compiler_identity`
+    // above, so a cross-target `sfn test` run cannot restore a binary
+    // linked for a different OS/triple (see `test_bin_cache_key`).
+    let tb_target_triple = build_target_triple();
     let mut test_bin_hits: int = 0;
     let mut test_bin_misses: int = 0;
 
@@ -250,7 +254,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         if test_cache_enabled {
             tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_runtime_identity, tb_flags_canonical, _sanitize_filename_cmd(scratch_root
                 + "/"
-                + path));
+                + path), tb_target_triple);
             if cache_lookup_artifact(tb_cache_root, tb_key, "test-bin") {
                 if cache_copy_artifact_to(tb_cache_root, tb_key, "test-bin", exe_path) {
                     // The shared atomic-copy helper publishes through an
