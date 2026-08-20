@@ -192,6 +192,16 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(makefile, "clock:runtime/sfn/clock.sfn");
     assert contains(makefile, "SAILFIN_TARGET_OS=Windows");
 
+    // mkdtemp_windows.sfn (SFN-993): a pure addition like the other
+    // anchor-less Windows siblings (mkstemp_windows.sfn, opendir_windows.sfn,
+    // …) — `mkdtemp(3)` is a bare libc symbol on POSIX, not a manifest
+    // module, so there is no POSIX counterpart for it to diff against. Its
+    // absence from RUNTIME_MODS is exactly what left the mingw bridge
+    // undefined at `@mkdtemp` (`nm --defined-only libmingwex.a` carries
+    // `mkstemp` but not `mkdtemp`), so the membership check pins the fix.
+    assert contains(makefile, "runtime/sfn/platform/mkdtemp_windows.sfn");
+    assert ! contains(manifest, "mkdtemp_windows");
+
     // The prelude entry IS linked by the cross-windows bridge.
     assert contains(makefile, "runtime/prelude.sfn");
 }

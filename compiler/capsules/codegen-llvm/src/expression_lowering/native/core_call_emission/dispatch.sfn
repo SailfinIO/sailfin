@@ -333,9 +333,6 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         if filesystem_symbol == "sailfin_intrinsic_fs_read_link" {
             filesystem_min_args = 3;
         }
-        if filesystem_symbol == "sailfin_intrinsic_fs_mkdtemp" {
-            filesystem_min_args = 1;
-        }
         if filesystem_symbol == "sailfin_intrinsic_fs_exists" {
             filesystem_min_args = 1;
         }
@@ -356,11 +353,6 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
             }
             if filesystem_symbol == "sailfin_intrinsic_fs_read_link" {
                 let message = "sailfin_intrinsic_fs_read_link requires (path: i8*, buf: i8*, size: i64) operands";
-                result_diags.push(lowering_warning_diag("E1006", message, null));
-                result_diagnostics.push("llvm lowering: " + message);
-            }
-            if filesystem_symbol == "sailfin_intrinsic_fs_mkdtemp" {
-                let message = "sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand";
                 result_diags.push(lowering_warning_diag("E1006", message, null));
                 result_diagnostics.push("llvm lowering: " + message);
             }

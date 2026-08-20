@@ -548,10 +548,11 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
     }
     // `realpath_windows.sfn`, `clock_windows.sfn`, `pthread_windows.sfn`,
     // `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`,
-    // and `opendir_windows.sfn` have no POSIX `.sfn` counterpart to swap
-    // FROM (SFN-549, SFN-903): `realpath(3)`, `clock_gettime`/`nanosleep`,
-    // the `pthread_*`/`sysconf` surface, `popen`/`pclose`/`mkstemp`,
-    // `strcasestr(3)`, and `opendir`/`closedir` are bare libc/pthreads
+    // `opendir_windows.sfn`, and `mkdtemp_windows.sfn` have no POSIX
+    // `.sfn` counterpart to swap FROM (SFN-549, SFN-903, SFN-993):
+    // `realpath(3)`, `clock_gettime`/`nanosleep`, the `pthread_*`/
+    // `sysconf` surface, `popen`/`pclose`/`mkstemp`, `strcasestr(3)`,
+    // `opendir`/`closedir`, and `mkdtemp(3)` are bare libc/pthreads
     // symbols on POSIX, not Sailfin-authored runtime modules, so — unlike
     // the swaps above — these are pure ADDITIONS with nothing in `sources`
     // to replace. Each satisfies its `extern fn` declaration(s) elsewhere
@@ -567,6 +568,15 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
         out.push(_path_join(platform_dir, "mkstemp_windows.sfn"));
         out.push(_path_join(platform_dir, "strcasestr_windows.sfn"));
         out.push(_path_join(platform_dir, "opendir_windows.sfn"));
+        // The compiler that emits the Windows leg is always CURRENT-TREE,
+        // never the pinned seed: there is no released native Windows seed
+        // yet (`docs/runbooks/windows-native.md`), so this append carries
+        // no seed dependency (`.claude/rules/seed-dependency.md`). Once a
+        // real Windows seed ships, a change to Windows-leg codegen itself
+        // (as opposed to an ordinary runtime-source append like this one)
+        // acquires a genuine seed dependency and this reasoning stops
+        // holding — it must be re-evaluated at that point, not assumed.
+        out.push(_path_join(platform_dir, "mkdtemp_windows.sfn"));
     }
     return out;
 }

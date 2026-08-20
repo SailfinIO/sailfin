@@ -242,16 +242,16 @@ test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, fs_exec_mode.sfn,
     // (SFN-649). cert_roots.sfn swaps to cert_roots_windows.sfn: Windows
     // has no CA-bundle file anywhere, so the system `ROOT` certificate
     // store reached through Crypt32 is the only trust source there
-    // (SFN-808). The seven anchor-less siblings (realpath_windows.sfn,
+    // (SFN-808). The eight anchor-less siblings (realpath_windows.sfn,
     // clock_windows.sfn, pthread_windows.sfn, popen_windows.sfn,
-    // mkstemp_windows.sfn, strcasestr_windows.sfn, opendir_windows.sfn)
-    // have no POSIX .sfn
+    // mkstemp_windows.sfn, strcasestr_windows.sfn, opendir_windows.sfn,
+    // mkdtemp_windows.sfn) have no POSIX .sfn
     // counterpart to swap FROM (each backs a bare libc/pthreads symbol,
     // not a Sailfin module), so they are APPENDED at the end rather than
     // replacing a matched basename. Every other module is preserved in
     // order.
     let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/terminal.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/platform/cert_roots.sfn", "/rt/sfn/io.sfn",];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/terminal_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/platform/cert_roots_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/terminal_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/platform/cert_roots_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn", "/rt/sfn/platform/mkdtemp_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 
@@ -276,7 +276,7 @@ test "target: Windows append anchors on exec.sfn when rlimit.sfn/rand.sfn/tls.sf
     // The append doesn't require rlimit.sfn/rand.sfn/tls.sfn specifically —
     // any of the four platform/ modules anchors it, exec.sfn included.
     let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn"];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn", "/rt/sfn/platform/mkdtemp_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 

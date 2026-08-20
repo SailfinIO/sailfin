@@ -886,32 +886,44 @@ fn _fs_empty_string() -> *u8 {
     return empty;
 }
 
-// `sfn_fs_mkdtemp(prefix)` — create a unique directory (mode `0700`)
-// and return its malloc'd path, or an empty malloc'd string on error.
-// The `$TMPDIR` anchoring + `mkdtemp(3)` template construction is now
-// pure Sailfin (epic #1308 fs-runtime flip); the in-place mutation +
-// `#if defined(_WIN32)` stub live behind the per-target
-// `sailfin_intrinsic_fs_mkdtemp` sentinel (POSIX `mkdtemp(template)`,
-// `false` stub on Windows — no MinGW `mkdtemp` symbol). Layout matches
-// the retired C body byte-for-byte: `[<dir>/]<prefix>XXXXXX\0`, where
-// `<dir>` is `$TMPDIR` (or `/tmp`) only when `prefix` has no `/`.
-// POSIX-only (#366).
+// `sfn_fs_mkdtemp(prefix)` — create a unique directory (mode `0700` on
+// POSIX; Windows has no mode bits, the directory inherits the parent
+// ACL) and return its malloc'd path, or an empty malloc'd string on
+// error. The `$TMPDIR` anchoring + `mkdtemp` template construction is
+// pure Sailfin (epic #1308 fs-runtime flip); the in-place mutation is an
+// ordinary `extern fn mkdtemp` (declared above), satisfied at link time
+// by libc on POSIX and by `platform/mkdtemp_windows.sfn`'s
+// `CreateDirectoryA` retry loop on Windows (SFN-993) — there is no more
+// per-target codegen sentinel to route through. Layout matches the
+// retired C body byte-for-byte: `[<dir>/]<prefix>XXXXXX\0`, where `<dir>`
+// is the first non-empty of `$TMPDIR`, `$TMP`, `$TEMP`, or the literal
+// `/tmp`, only when `prefix` has no `/`. `$TMP`/`$TEMP` matter on
+// Windows, where `TMPDIR` is not the conventional variable and `/tmp` is
+// not a path on any drive.
 fn sfn_fs_mkdtemp(prefix: *u8) -> *u8 ![io] {
     let mut pfx: *u8 = "" as *u8;
     if (prefix as i64) != 0 { pfx = prefix; }
     let prefix_len: i64 = strlen(pfx) as i64;
 
     // `has_dir` iff `prefix` contains a `/` (byte 47). When absent,
-    // anchor under `$TMPDIR` (or `/tmp`); else `prefix` is itself a
-    // full template prefix.
+    // anchor under the first non-empty of `$TMPDIR`, `$TMP`, `$TEMP`, or
+    // `/tmp`; else `prefix` is itself a full template prefix.
     let has_dir: bool = (strchr(pfx, 47) as i64) != 0;
     let mut dir: *u8 = "" as *u8;
     let mut dir_len: i64 = 0;
     if !has_dir {
         let tmpdir_name: string = "TMPDIR";
-        let env_dir: *u8 = getenv(tmpdir_name as *u8);
-        if (env_dir as i64) != 0 && strlen(env_dir) > (0 as usize) {
-            dir = env_dir;
+        let tmp_name: string = "TMP";
+        let temp_name: string = "TEMP";
+        let env_tmpdir: *u8 = getenv(tmpdir_name as *u8);
+        let env_tmp: *u8 = getenv(tmp_name as *u8);
+        let env_temp: *u8 = getenv(temp_name as *u8);
+        if (env_tmpdir as i64) != 0 && strlen(env_tmpdir) > (0 as usize) {
+            dir = env_tmpdir;
+        } else if (env_tmp as i64) != 0 && strlen(env_tmp) > (0 as usize) {
+            dir = env_tmp;
+        } else if (env_temp as i64) != 0 && strlen(env_temp) > (0 as usize) {
+            dir = env_temp;
         } else { dir = "/tmp" as *u8; }
         dir_len = strlen(dir) as i64;
     }
@@ -940,9 +952,10 @@ fn sfn_fs_mkdtemp(prefix: *u8) -> *u8 ![io] {
     // Trailing NUL.
     memset(((buf as i64) + off) as *u8, 0, 1 as usize);
 
-    // The sentinel mutates `buf` in place to the created dir path on
-    // success.
-    if sailfin_intrinsic_fs_mkdtemp(buf) { return buf; }
+    // `mkdtemp` mutates `buf` in place to the created dir path on
+    // success, or returns null on failure.
+    let created: *u8 = mkdtemp(buf);
+    if (created as i64) != 0 { return buf; }
     return _fs_empty_string();
 }
 
