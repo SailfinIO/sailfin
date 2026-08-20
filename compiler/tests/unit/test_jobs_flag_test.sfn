@@ -105,8 +105,9 @@ test "jobs: Windows-plausible 16 GiB / 8-core host affords more than serial (SFN
 }
 
 test "jobs: Windows-plausible 128 GiB / 64-core host hits the global cap (SFN-980)" {
-    // 128 GiB * 80% = 102.4 GiB, less the parent, / 3 GiB = 32 — memory does
-    // not bind; 64 cores does, and the global cap then clamps to 16.
+    // 128 GiB * 80% = 102.4 GiB, less the 5 GiB parent, / 3 GiB = 32 jobs by
+    // memory — below the 64 cores, so memory binds; the global cap then
+    // clamps 32 to 16.
     assert _test_jobs_budget(137438953472, 64, false) == 16;
 }
 
