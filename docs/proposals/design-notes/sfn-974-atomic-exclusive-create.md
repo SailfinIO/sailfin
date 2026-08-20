@@ -287,8 +287,20 @@ extern fn close(fd: i32) -> i32;
 extern fn access(path: *u8, mode: i32) -> i32;
 ```
 
-- `open` is variadic in C; the fixed 3-arity extern is ABI-compatible on
-  x86-64 SysV and AArch64 AAPCS. `runtime/sfn/platform/rand.sfn:28` already
+- `open` is variadic in C. The fixed 3-arity extern is ABI-compatible on
+  x86-64 SysV and on *standard* AArch64 AAPCS64 — but **not on Apple's arm64
+  ABI**, which is a documented deviation: it passes named arguments in
+  registers and spills *all* variadic arguments to the stack. On Darwin arm64
+  the `mode` argument therefore lands in a register libc's variadic `open`
+  never reads, and the file is created with a garbage permission pattern.
+  The tri-state return contract still holds (the file *is* created
+  exclusively), so this is invisible to a return-code test — it surfaced only
+  on `macos-arm64` CI, through `create_exclusive_test.sfn`'s content and
+  permission assertions, after this note was written. `sfn_create_exclusive`
+  consequently sets the mode with a **non-variadic `fchmod`** on the fd it
+  just opened; `mode` is still passed to `open` (correct and load-bearing on
+  Linux), but nothing depends on it arriving.
+- `runtime/sfn/platform/rand.sfn:28` already
   declares a **2-arity** `open` for `O_RDONLY`, with the same note. The two
   declarations never share a module and the runtime is compiled to one object
   **per module** (`_compile_runtime_sfn_sources`,
