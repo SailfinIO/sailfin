@@ -5,7 +5,7 @@
 // manifest-prefixed, or runtime-provider-prefixed. The standalone fallback is
 // deliberately repository-agnostic so future source moves do not grow another
 // physical-path compatibility branch here.
-import { path_root_prefix_len, substring } from "./string_utils";
+import { is_path_separator, path_root_prefix_len, substring } from "./string_utils";
 
 struct SourceIdentityOwner {
     manifest_name: string;
@@ -267,9 +267,22 @@ fn module_name_from_path(source_path: string) -> string {
     // Strip a leading root (`/`, `C:/`, `C:\`, `\\server\share`), not just a
     // POSIX `/`. A POSIX-only strip left a Windows drive-absolute source
     // baking its `C:/` prefix into the emitted slug (SFN-704).
+    //
+    // `path_root_prefix_len` reports a UNC root as ending AT the separator
+    // that follows the share, not past it, so a UNC strip leaves that
+    // separator behind. `_source_identity_normalize_path` then joins the
+    // root to the remainder with `/` (:135-137), giving `/a` rather than
+    // `a` — and the slug becomes a `.sfn-asm` filename. POSIX and
+    // drive-absolute roots are unaffected: both are rewritten to a
+    // separator-terminated form (`/`, `C:/`) before this point, so the
+    // strip already consumes the separator. Drive-relative suppresses the
+    // join separator entirely.
     let root_len = path_root_prefix_len(stripped);
     if root_len > 0 {
         stripped = substring(stripped, root_len, stripped.length);
+        if is_path_separator(substring(stripped, 0, 1)) {
+            stripped = substring(stripped, 1, stripped.length);
+        }
     }
     if stripped.length == 0 { return "main"; }
     return stripped;

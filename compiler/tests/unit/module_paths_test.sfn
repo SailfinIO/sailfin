@@ -101,3 +101,22 @@ test "source identity: standalone drive-absolute fallback strips the drive root"
     assert expect_eq_str(module_name_from_path("C:/project/src/main.sfn"), "project/src/main").ok;
     assert expect_eq_str(module_name_from_path("C:\\project\\src\\main.sfn"), "project/src/main").ok;
 }
+
+// SFN-704: UNC coverage for the shared root predicate.
+//
+// The only test in this tree exercising `path_root_prefix_len`'s UNC branch
+// through a real consumer. It also pins the leading-separator strip above:
+// the predicate reports a UNC root as ending AT the separator following the
+// share, so without that strip this slug would be `/project/main` — and the
+// slug becomes a `.sfn-asm` filename.
+//
+// Deliberately NOT covered here: the doubled-separator form
+// (`\\srv\\share\...`). `_source_identity_normalize_path` rewrites the path
+// before this predicate sees it and collapses the doubled separator into the
+// root, so such a case would assert a normalize round-trip quirk that
+// predates this predicate rather than the predicate's own behavior. The
+// doubled-separator semantics are covered where they belong, against the
+// original, in `runtime_capsule_resolver_test.sfn`.
+test "source identity: standalone UNC fallback strips the whole share root" {
+    assert expect_eq_str(module_name_from_path("\\\\srv\\sh\\project\\main.sfn"), "project/main").ok;
+}
