@@ -4,9 +4,9 @@ title: Nested / Local Function Declarations (non-capturing static `fn` items)
 status: Implemented
 type: language
 created: 2026-07-05
-updated: 2026-07-24
+updated: 2026-08-20
 author: "agent:compiler-architect; human review"
-tracking: "#1609, #1922, #1935, #1940, #1950"
+tracking: "#1609, #1922, #1935, #1940, #1950, SFN-108"
 supersedes:
 superseded-by:
 graduates-to:
@@ -282,17 +282,32 @@ sfn_nested_<enclosing_chain>_<name>_<N>
 
 - **By-name calls: free.** A lifted nested fn is a top-level function; a
   rewritten call is an ordinary named `Call`. Nothing to add.
-- **Name-as-value: gated on #1609.** Using a nested fn's *bare name* as a
-  first-class `fn(...)` value (assigning it, passing it as an argument) is the
-  same problem as using a top-level function name as a value, which #1609 owns:
-  the target lowering is `{fnptr, null-env}` via the dispatch seam at
-  `llvm/expression_lowering/native/core_call_emission.sfn` and env-struct
-  emission in `llvm/closures.sfn`. #1609 lists "named fn → typed `fn(...)`
-  value, lowered to `{fnptr, null-env}`" as **unshipped** — the typed-value path
-  currently errors via the `#1147` `E0808` guard, and only `as *u8` referencing
-  works. Therefore **name-as-value for nested fns is explicitly deferred to
-  after #1609's named-fn-value item lands** (Sub-issue B, §Decomposition). The
-  by-name path (S1–S3 + S4-by-name) ships independently and first.
+- **Name-as-value: delivered (SFN-108, Sub-issue B).** Using a nested fn's
+  *bare name* as a first-class `fn(...)` value (call argument, typed `let`
+  initializer, assignment RHS, `return`, array/collection element, struct-field
+  initializer) now dispatches through the same `{fnptr, null-env}` seam
+  (`core_call_emission.sfn` / `llvm/closures.sfn`) that #1609's named-fn-value
+  item built for top-level functions — the nested fn's lifted
+  `sfn_nested_<name>_<N>` symbol fills the fnptr slot. The `E0808`/#1147 guard
+  is narrowed rather than removed: a nested fn with no expected `fn(...)` type,
+  or a generic nested fn, is still `E0808`; nested fns get the same `E0839`
+  (async/main/arity/type/effect-row mismatch) and `E0840` (non-pointer-width
+  aggregate signature) validation as top-level ones. Not yet shipped: calling
+  *through* a fn-typed struct field or collection element (a nested fn can be
+  stored into one, but not dispatched through it) — that is SFEP-0030 Item 3 /
+  SFN-674, tracked separately. Typecheck:
+  `compiler/capsules/analyzer/src/typecheck_types/symbol_table_and_raw_exprs.sfn`
+  (`SymbolEntry.is_nested_function`),
+  `compiler/capsules/analyzer/src/typecheck/function_scopes.sfn`
+  (`_hoist_nested_fn_names`),
+  `compiler/capsules/analyzer/src/typecheck/expression_walk.sfn`. Codegen:
+  `compiler/capsules/codegen/src/lambda_lowering.sfn`
+  (`_rename_nested_reference`, generalized from `_rename_call_callee`; a new
+  `Identifier` arm in `_rewrite_expression` uses the shadow-aware
+  `_lookup_nested_rename` so a shadowing `let`/parameter still wins). Tests:
+  `compiler/tests/unit/fn_reference_typecheck_test.sfn` (nested matrix),
+  `compiler/tests/e2e/nested_fn_value_test.sfn` + fixture
+  `compiler/tests/e2e/fixtures/higher_order_named_fn/apply_nested.sfn`.
 
 #### S5 — Tests, docs, graduation
 
@@ -468,8 +483,8 @@ Each stage self-hosts on its own:
   rejection (S2); effect-inline bug fix + nested-signature registration (S4/§4).
 - [ ] **Emits valid `.sfn-asm`** — lift to plain top-level fn; downstream
   `native_ir.sfn` unchanged (S3).
-- [ ] **Lowers to LLVM IR** — by-name path free; name-as-value gated on #1609
-  (S4).
+- [ ] **Lowers to LLVM IR** — by-name path free; name-as-value delivered
+  (SFN-108, S4).
 - [ ] **Regression coverage** — unit (parser/typecheck/effects) + integration +
   e2e (§8).
 - [ ] **Self-hosts** — additive syntax, no seed cut for Sub-issue A (§5,
@@ -559,18 +574,19 @@ seed, so nothing here forces a `/pin-seed`. Splitting S1 from S2/S3 would
 manufacture exactly the seed-cut gate the rule warns against — keep them
 bundled.
 
-### Sub-issue B — nested `fn` as a first-class value — Size: **S**
+### Sub-issue B — nested `fn` as a first-class value — Size: **S** — **Delivered (SFN-108)**
 
-Scope: allow a nested fn's bare name in value position (assignment, argument),
-lowering to `{fnptr, null-env}` via #1609's dispatch seam, and lifting the
-`E0808`/#1147 guard for this case.
+Scope: allow a nested fn's bare name in value position (call argument, typed
+`let` initializer, assignment RHS, `return`, array/collection element,
+struct-field initializer), lowering to `{fnptr, null-env}` via #1609's dispatch
+seam, and lifting the `E0808`/#1147 guard for this case.
 
-**Dependency.** `## Required in pinned seed:` — **blocked by #1609's named-fn →
-`{fnptr, null-env}` value item.** Carry `## Blocked by: #1609`. Because B's
-enabling capability is owned by #1609 (a separate, multi-consumer capability —
-top-level *and* nested fn names both use it), this is the legitimate split: B is
-not bundled into A, and the seed advance that B needs rides the next scheduled
-cadence bump once #1609's item lands, per the split branch of the
-seed-dependency tree. B is small once the lowering exists — mostly lifting the
-guard for the nested case and a resolution tweak so a nested fn name resolves in
-value position.
+**Dependency (resolved).** Was blocked by `## Required in pinned seed:`
+#1609's named-fn → `{fnptr, null-env}` value item (SFN-667); that item landed
+and reached the pinned seed, clearing the gate. SFN-108 delivered the nested-fn
+side: the value-position gate in `expression_walk.sfn` now admits nested fns
+into `check_named_fn_value_compatibility`, and the lift walker's rename map
+(`_rename_nested_reference` / `_lookup_nested_rename`) resolves a nested fn's
+bare name to its lifted `sfn_nested_<name>_<N>` symbol at the reference site,
+respecting a shadowing `let`/parameter. See §S4 above for the full
+implementation and boundary notes.
