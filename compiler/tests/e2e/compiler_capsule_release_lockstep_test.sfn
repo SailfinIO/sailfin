@@ -1,13 +1,10 @@
 // Release-version lockstep guard for private compiler implementation capsules
 // (SFEP-0020, established with sfn/syntax in SFN-741).
-import {
-    contains,
-    find,
-    split,
-    starts_with,
-    substring,
-    trim
-} from "sfn/strings";
+import { contains } from "sfn/strings";
+
+import { compiler_capsule_role } from "../../src/capsule_names";
+import { load_workspace_members, validate_unique_workspace_member_names } from "../../src/capsule_resolver/workspace";
+import { toml_get_publish, toml_get_version } from "../../src/toml_parser";
 
 fn _lockstep_repo_root() -> string ![io] {
     let root = env.get("SAILFIN_REPO_ROOT");
@@ -15,57 +12,61 @@ fn _lockstep_repo_root() -> string ![io] {
     return ".";
 }
 
-fn _manifest_version(text: string) -> string {
-    let lines = split(text, "\n");
-    let mut i = 0;
-    loop {
-        if i >= lines.length { break; }
-        let line = trim(lines[i]);
-        i += 1;
-        if !starts_with(line, "version") { continue; }
-        let first_quote = find(line, "\"", 0);
-        if first_quote < 0 { return ""; }
-        let second_quote = find(line, "\"", first_quote + 1);
-        if second_quote <= first_quote { return ""; }
-        return substring(line, first_quote + 1, second_quote);
-    }
-    return "";
-}
-
 test "compiler capsule release: every private manifest matches the compiler version" ![io] {
     let root = _lockstep_repo_root();
-    let compiler_version = _manifest_version(fs.readFile(root
-        + "/compiler/capsule.toml"));
+    let members = load_workspace_members(root);
+    assert validate_unique_workspace_member_names(members, root);
+    let mut compiler_version = "";
+    let mut ci: int = 0;
+    loop {
+        if ci >= members.length { break; }
+        if members[ci].name == "sfn/compiler" {
+            compiler_version = toml_get_version(fs.readFile(root + "/" + members[ci].member_path
+                + "/capsule.toml"));
+            break;
+        }
+        ci += 1;
+    }
     if compiler_version.length == 0 {
         throw "compiler manifest version is missing";
     }
 
-    let capsule_root = root + "/compiler/capsules";
-    let roles = fs.listDirectory(capsule_root);
-    if roles.length == 0 {
-        throw "compiler/capsules contains no implementation roles";
-    }
     let mut checked = 0;
     let mut i = 0;
     loop {
-        if i >= roles.length { break; }
-        let role = roles[i];
+        if i >= members.length { break; }
+        let member = members[i];
         i += 1;
-        if role == "." || role == ".." { continue; }
-        let manifest = capsule_root + "/" + role + "/capsule.toml";
-        if !fs.exists(manifest) { continue; }
-        let version = _manifest_version(fs.readFile(manifest));
+        if compiler_capsule_role(member.name).length == 0 { continue; }
+        let manifest = root + "/" + member.member_path + "/capsule.toml";
+        let text = fs.readFile(manifest);
+        let version = toml_get_version(text);
         if version != compiler_version {
-            throw manifest + " version " + version + " does not match compiler "
+            throw member.name + " at " + manifest + " has version " + version
+                + " which does not match compiler "
                 + compiler_version;
+        }
+        let publish = toml_get_publish(text);
+        if publish.error.length > 0 || publish.publish == null {
+            throw member.name + " has an invalid [capsule] publish policy";
+        }
+        if publish.publish != null {
+            let allowed: boolean = publish.publish;
+            if allowed {
+                throw member.name + " must set [capsule] publish = false";
+            }
         }
         checked += 1;
     }
-    if checked == 0 {
-        throw "no private compiler capsule manifests were checked";
+    if checked != 6 {
+        throw "expected six canonical compiler-role manifests, checked "
+            + checked.toString();
     }
 }
 
+// SFN-936 owns the workflow's physical discovery/staging migration. Keep this
+// guard path-based until that automation slice lands; the release-selection
+// policy above is already canonical-identity based.
 test "compiler capsule release: automation bumps and stages private manifests" ![io] {
     let workflow = fs.readFile(_lockstep_repo_root()
         + "/.github/workflows/release.yml");

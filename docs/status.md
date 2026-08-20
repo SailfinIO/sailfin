@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-20 (SFN-108). Seed pinned to `0.10.0` (`bootstrap.toml`
+Updated: 2026-08-20 (SFN-934). Seed pinned to `0.10.1` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -65,8 +65,8 @@ here.
   facade. The compiler and its tests import that facade; lexer, token, AST, and
   parser implementation files no longer live under `compiler/src`. The capsule
   declares `publish = false`, depends only on `sfn/strings`, and requires no
-  capabilities. The boundary ratchet classifies those files from their physical
-  capsule path with no syntax naming-convention fallback. The pinned 0.9.5 seed
+  capabilities. The boundary ratchet classifies those files from the resolved
+  `sfn/syntax` manifest identity. The pinned 0.9.5 seed
   resolves the capsule's transitive dependency closure, and the reusable move
   and rename-only determinism procedure is recorded in
   `docs/conventions/compiler-capsule-extractions.md`.
@@ -81,7 +81,7 @@ here.
   tensor link harness is driver-owned under `compiler/src/build/`. The capsule
   declares `publish = false`, depends only on `sfn/strings` plus the permitted
   implicit runtime prelude, and requires no capabilities. The boundary ratchet
-  classifies the moved files exclusively from their physical capsule path.
+  classifies the moved files exclusively from their canonical manifest identity.
 - **Compiler analyzer capsule** (SFN-746, SFEP-0020 §§3.2, 3.3, 3.5.6,
   3.7 step 4). `sfn/analyzer` owns type and effect checking, ownership,
   decorators, import/re-export validation, type models, and semantic diagnostic
@@ -92,7 +92,7 @@ here.
   `publish = false`, and requires no capabilities. The check engine, CLI/JSON
   rendering, filesystem-backed import loading, and build-path effect sink remain
   driver-owned. The boundary ratchet classifies analyzer sources exclusively
-  from their physical capsule path and walks the extracted check-analysis
+  from their canonical manifest identity and walks the extracted check-analysis
   closure while preserving the no-LLVM-lowering gate.
 - **Compiler codegen capsule** (SFN-748, SFEP-0020 §§3.2, 3.3, 3.5.4–5,
   3.5.7, 3.7 step 5). `sfn/codegen` owns target-neutral native emission,
@@ -105,7 +105,7 @@ here.
   analysis. The capsule depends only on `sfn/syntax`, `sfn/analyzer`, `sfn/ir`,
   and the narrow `sfn/strings` leaf, declares `publish = false`, and requires no
   capabilities. Diagnostic printing, artifact publication, subprocess retry,
-  and the tensor link harness remain driver-owned. The physical-path ratchet
+  and the tensor link harness remain driver-owned. The manifest-identity ratchet
   asserts this graph and has no codegen string-helper or authority exceptions.
 - **Compiler LLVM-provider capsule** (SFN-749, SFEP-0020 §§3.2–4, 3.7 step
   6; SFEP-0066 §3.2). `sfn/codegen-llvm` owns LLVM-specific lowering under
@@ -140,6 +140,16 @@ here.
   direct emit, relative traversal, runtime-object caching, and determinism all
   consume that identity, so a physical source-root move preserves symbols and
   cache keys while manifest identity changes invalidate them deliberately.
+- **Compiler ownership ratchets use capsule identity** (SFN-934, SFEP-0072
+  §§3.5–3.7 slice 4). Compiler-role dependency direction, private-manifest and
+  capability ceilings, release lockstep selection, import ownership, authority
+  scans, artifact roots, and cache/module namespaces resolve the workspace
+  member's canonical capsule name. Current `compiler/capsules/*` and target
+  `compiler/*` fixture roots therefore produce the same policy classification,
+  while a privileged-looking path with a non-compiler manifest gains no role.
+  Duplicate names fail through the shared workspace resolver. Physical member
+  discovery, source/entry containment, formatter/test inventory, and the
+  pending CI/release/package automation migration remain path-based.
 - **Implicit workspace capsule graph** (SFN-931, SFEP-0072 §§3.3, 3.7 slice
   2). Workspace libraries with `[build] implicit = true` enter the resolved
   graph and final link exactly once; an ordinary dependency on the same
