@@ -4,7 +4,7 @@ title: Unified Build Architecture
 status: Accepted
 type: tooling
 created: 2026-04-17
-updated: 2026-08-08
+updated: 2026-08-20
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -852,6 +852,21 @@ Resolution algorithm:
      (`~/.sfn/cache/capsules/...`), registry.
 4. If `rest` is empty, load the dep's `[build].entry`. If `rest` is
    given, resolve it as a submodule path under the dep's `src/`.
+
+Step 3's first bullet is deliberate and load-bearing: **workspace membership
+alone resolves a scoped import.** A member does not need to name a sibling in
+its own `[dependencies]` for the import to compile. `[dependencies]` is a
+version/fetch pin and the resolution set for capsules *outside* the workspace —
+it is not an allowlist gating in-workspace imports.
+
+This makes resolution deliberately asymmetric between the two contexts. Inside
+a workspace, the member list resolves the specifier. Outside one, there is no
+member list, so `[dependencies]` is the only set consulted. The same source can
+therefore compile as a workspace member and fail once published and consumed
+standalone; that is a known and accepted consequence, not a defect. The
+reasoning, the rejected alternative (enforcing declarations as an allowlist),
+and the manifest-field enforcement inventory are recorded in
+`docs/proposals/design-notes/sfn-986-workspace-member-import-resolution.md`.
 
 The compiler does **not** carry a stdlib allowlist. Instead, a shipped
 workspace file (installed alongside the binary) declares `sfn/*` as
