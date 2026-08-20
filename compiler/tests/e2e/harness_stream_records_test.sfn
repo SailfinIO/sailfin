@@ -18,13 +18,12 @@
 // with `sfn/strings`. The `sfn/test` `expect_*` matchers are `![pure]`
 // and cannot be called from this `![io]` test.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 // One passing test, one failing test, and all four lifecycle hooks
 // (all passing) so the harness exercises both `test` and `hook` SFTR
@@ -43,7 +42,7 @@ test "harness stream: pass/fail records reach the jsonl stream" ![io] {
         let fixture = dir + "/stream_records_test.sfn";
         fs.writeFile(fixture, _fixture_src());
         let scratch = nested_runner_scratch("stream-records");
-        let exit = process.run_capture([_sfn_bin(), "test", fixture, "--json"], clean_runner_env(scratch));
+        let exit = process.run_capture([sfn_bin_path(), "test", fixture, "--json"], clean_runner_env(scratch));
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let combined = out + err;

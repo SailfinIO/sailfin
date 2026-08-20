@@ -30,12 +30,7 @@
 // cannot be called from an `![io]` test (#842). The summary prints to
 // stderr (#915); `run_capture` splits stdout/stderr so we concatenate.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child env for a nested build: PATH (clang/linker), HOME, TMPDIR, the
 // inherited SAILFIN_TEST_SCRATCH, plus the dedicated shared cache root.
@@ -56,7 +51,7 @@ fn _build_env(cache_dir: string) -> string[] ![io] {
 // Build `src` into `work_dir`, sharing `cache_dir`. Returns combined
 // stdout+stderr (the `[cache]` summary prints to stderr).
 fn _do_build(src: string, work_dir: string, out_bin: string, cache_dir: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", src, "-o", out_bin, "--work-dir", work_dir], _build_env(cache_dir));
+    let exit = process.run_capture([sfn_bin_path(), "build", src, "-o", out_bin, "--work-dir", work_dir], _build_env(cache_dir));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let _ = exit;

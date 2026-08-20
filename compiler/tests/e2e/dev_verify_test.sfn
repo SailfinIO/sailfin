@@ -32,13 +32,7 @@
 // parent's private build cache, which passes a serial local run and fails
 // under CI's parallel `--jobs N`.
 import { contains, find, split } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 fn _child_env(label: string) -> string[] ![io] {
     return clean_runner_env(nested_runner_scratch(label));
@@ -100,8 +94,7 @@ test "dev verify: the leaf is registered and owns its own flag parsing" ![io] {
     // `dev` leaf (`clean`, `arena`, `determinism-sweep`) falls through to
     // the `bootstrap` usage string on `--help`, so a help assertion would
     // encode a pre-existing dispatch gap rather than this verb's contract.
-    let rc = process.run_capture([_sfn_bin(), "dev", "verify", "--test-timeout", "0"],
-        _child_env("dv-registered"));
+    let rc = process.run_capture([sfn_bin_path(), "dev", "verify", "--test-timeout", "0"], _child_env("dv-registered"));
     let out = process.capture_take_stdout() + process.capture_take_stderr();
     assert rc == 2;
     assert contains(out, "[verify] --test-timeout must be >= 1");
@@ -110,22 +103,21 @@ test "dev verify: the leaf is registered and owns its own flag parsing" ![io] {
 test "dev verify: stays out of the public sfn --help" ![io] {
     // Maintainer-only, like `dev clean` and `sfn selfhost`: reachable for
     // anyone who types it, simply undocumented in the user-facing help.
-    let rc = process.run_capture([_sfn_bin(), "--help"], _child_env("dv-roothelp"));
+    let rc = process.run_capture([sfn_bin_path(), "--help"], _child_env("dv-roothelp"));
     let out = process.capture_take_stdout() + process.capture_take_stderr();
     assert rc == 0;
-    assert !contains(out, "dev verify");
+    assert ! contains(out, "dev verify");
 }
 
 test "dev verify: a bad --jobs is a setup error before any phase runs" ![io] {
-    let rc = process.run_capture([_sfn_bin(), "dev", "verify", "--jobs", "0"],
-        _child_env("dv-jobs"));
+    let rc = process.run_capture([sfn_bin_path(), "dev", "verify", "--jobs", "0"], _child_env("dv-jobs"));
     let out = process.capture_take_stdout() + process.capture_take_stderr();
     // Exit 2 is the SFEP-0003 §3.3 point 6 "the tool never ran" code, and a
     // pre-flight arg error deliberately emits NO verdict envelope — the
     // same contract `sfn bench` and `sfn selfhost` already keep.
     assert rc == 2;
     assert contains(out, "--jobs must be >= 1");
-    assert !contains(out, "===SAILFIN-RESULT===");
+    assert ! contains(out, "===SAILFIN-RESULT===");
 }
 
 // ------------------------------------------------------------------
@@ -138,9 +130,7 @@ test "selfhost json: an early exit emits a structured envelope naming the sub-ph
     // supervisor had no way to learn which sub-phase died.
     let dir = _scratch("dv-selfhost-json");
     let missing = dir + "/definitely-not-a-compiler";
-    let rc = process.run_capture(
-        [_sfn_bin(), "selfhost", "--json", "--no-promote", "--first-pass", missing],
-        _child_env("dv-selfhost-json"));
+    let rc = process.run_capture([sfn_bin_path(), "selfhost", "--json", "--no-promote", "--first-pass", missing], _child_env("dv-selfhost-json"));
     let out = process.capture_take_stdout();
     assert rc == 1;
     assert contains(out, "\"schema_version\":\"sailfin-selfhost/1\"");
@@ -157,12 +147,10 @@ test "selfhost json: human mode emits no envelope" ![io] {
     // byte-for-byte by SFN-725.
     let dir = _scratch("dv-selfhost-human");
     let missing = dir + "/definitely-not-a-compiler";
-    let rc = process.run_capture(
-        [_sfn_bin(), "selfhost", "--no-promote", "--first-pass", missing],
-        _child_env("dv-selfhost-human"));
+    let rc = process.run_capture([sfn_bin_path(), "selfhost", "--no-promote", "--first-pass", missing], _child_env("dv-selfhost-human"));
     let out = process.capture_take_stdout() + process.capture_take_stderr();
     assert rc == 1;
-    assert !contains(out, "sailfin-selfhost/1");
+    assert ! contains(out, "sailfin-selfhost/1");
     assert contains(out, "first-pass binary missing");
 }
 
@@ -176,7 +164,7 @@ test "dev verify: a failing compile phase names itself in the verdict block" ![i
     // injected phase-1 failure that costs milliseconds.
     let dir = _scratch("dv-compile-fail");
     let bin = dir + "/sfn";
-    let copied = process.run(["cp", _sfn_bin(), bin]);
+    let copied = process.run(["cp", sfn_bin_path(), bin]);
     assert copied == 0;
 
     let rc = process.run_capture_cwd([bin, "dev", "verify"], _child_env("dv-compile-fail"), dir);
@@ -203,7 +191,7 @@ test "dev verify: the report file is written and names the phase ledger" ![io] {
     // the mid-run shape differs only in `complete`/`in_flight`.
     let dir = _scratch("dv-report");
     let bin = dir + "/sfn";
-    let copied = process.run(["cp", _sfn_bin(), bin]);
+    let copied = process.run(["cp", sfn_bin_path(), bin]);
     assert copied == 0;
 
     let _rc = process.run_capture_cwd([bin, "dev", "verify"], _child_env("dv-report"), dir);

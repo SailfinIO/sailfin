@@ -40,7 +40,12 @@
 // text with `sfn/strings::contains` instead.
 import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
-import { Background, wait_until, with_background } from "sfn/test";
+import {
+    Background,
+    sfn_bin_path,
+    wait_until,
+    with_background
+} from "sfn/test";
 
 // ── libc memory + string + socket surface (test-local raw client) ──
 // Prefixed `_lb_` so the file-local helpers never collide with the
@@ -82,12 +87,6 @@ fn _lb_port() -> i64 { return 18790; }
 // (int-to-string in the generated-source path is avoided). Must match
 // `_lb_port()`.
 fn _lb_port_str() -> string { return "18790"; }
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // Child environment for the build + server subprocesses. The build LINKS
 // a binary (clang + ld), which on macOS needs the full toolchain
@@ -375,7 +374,7 @@ fn _write_fetch_client(port_str: string) -> string ![io] {
 // stage is atomic-rename published, #1333). Returns the binary path, or
 // "" on a build failure.
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }

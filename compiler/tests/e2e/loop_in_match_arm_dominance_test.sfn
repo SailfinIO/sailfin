@@ -30,11 +30,7 @@
 // emitting child inherits the full parent environment via `process.environ()`
 // so `PATH` (the `llvm-as` lookup) and `SAILFIN_TEST_SCRATCH` (build-cache
 // isolation under the parallel pool, #1333) both flow through.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -140,7 +136,7 @@ test "loop in match arm: loop nested in a match arm lowers to verifier-clean IR"
 
     // `emit --validate llvm` runs the emitted IR through the `llvm-as`
     // verifier; a dominance violation makes it exit non-zero.
-    let exit = process.run_capture([_sfn_bin(), "emit", "--validate", "-o", out, "llvm", src], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "--validate", "-o", out, "llvm", src], process.environ());
     let _sout = process.capture_take_stdout();
     let _serr = process.capture_take_stderr();
 

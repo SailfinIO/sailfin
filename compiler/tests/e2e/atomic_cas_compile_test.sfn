@@ -13,12 +13,7 @@
 // cannot be called from an `![io]` test like these. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
 import { contains, split } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn emit`. `process.run_capture` treats
 // an empty array as the *empty* environment (not "inherit"), so the relevant
@@ -93,7 +88,7 @@ fn _emit_llvm(path: string, tag: string) -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/sfn-atomic-cas-" + tag + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -144,7 +139,7 @@ test "atomic-cas: non-pointer first argument reports E0806" ![io] {
     let ll = dir + "/sfn-cas-bad-ptr.ll";
     fs.writeFile(src, "fn bad() -> boolean {\n    return atomic_cas(42, 0, 1);\n}\n");
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(err, "E0806");
@@ -163,7 +158,7 @@ test "atomic-cas: non-int expected (arg 1) reports E0806" ![io] {
     let ll = dir + "/sfn-cas-bad-expected.ll";
     fs.writeFile(src, "fn bad(p: * int) -> boolean {\n    return atomic_cas(p, \"hello\", 1);\n}\n");
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(err, "E0806");
@@ -182,7 +177,7 @@ test "atomic-cas: non-int new (arg 2) reports E0806" ![io] {
     let ll = dir + "/sfn-cas-bad-new.ll";
     fs.writeFile(src, "fn bad(p: * int) -> boolean {\n    return atomic_cas(p, 0, \"hello\");\n}\n");
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(err, "E0806");

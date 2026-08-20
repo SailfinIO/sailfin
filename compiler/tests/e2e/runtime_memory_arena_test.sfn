@@ -61,17 +61,12 @@
 // they cannot be called from an `![io]` test. For subprocess/IR-output
 // assertions use `sfn/strings` predicates, as the rc/mark exemplars do.
 import {
-    find,
     contains,
+    find,
     split,
     starts_with
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. The roundtrip legs spawn `clang` (and a
@@ -113,7 +108,7 @@ fn _emit_arena_ll() -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/arena.ll";
     if !fs.exists(ll) {
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _arena_path()], _child_env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _arena_path()], _child_env());
         let _o = process.capture_take_stdout();
         let _e = process.capture_take_stderr();
         assert exit == 0;
@@ -167,7 +162,7 @@ fn _has_define_named(ir: string, sym: string) -> boolean {
 
 // ---- Phase 1: typecheck ----
 test "runtime/sfn/memory/arena.sfn typechecks cleanly" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", _arena_path()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", _arena_path()], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -176,7 +171,7 @@ test "runtime/sfn/memory/arena.sfn typechecks cleanly" ![io] {
 
 // ---- Phase 2: fmt ----
 test "runtime/sfn/memory/arena.sfn is fmt-canonical" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _arena_path()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", _arena_path()], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

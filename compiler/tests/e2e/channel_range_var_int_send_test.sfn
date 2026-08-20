@@ -16,13 +16,7 @@
 // does not interpolate the fixture before it is written (see the note in
 // channel_runtime_roundtrip_test.sfn).
 import { contains } from "sfn/strings";
-import { report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { report_child_failure, sfn_bin_path } from "sfn/test";
 
 // `process.run_capture`'s empty array is the *empty* environment, not
 // "inherit". `sfn run` spawns a nested clang + linker, so the child needs
@@ -57,7 +51,7 @@ fn _run_and_capture(label: string, source: string) -> string ![io] {
     let dir = _scratch_dir();
     let src = dir + "/" + label + ".sfn";
     fs.writeFile(src, source);
-    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("channel-range-var-int-send " + label, exit, out, err);

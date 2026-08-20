@@ -6,13 +6,8 @@
 // NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -46,13 +41,13 @@ test "runtime/sfn/string.sfn + libc.sfn typecheck cleanly" ![io] {
     let string_mod = _repo_root() + "/runtime/sfn/string.sfn";
     let libc_mod = _repo_root() + "/runtime/sfn/platform/libc.sfn";
 
-    let exit1 = process.run_capture([_sfn_bin(), "check", string_mod], _env());
+    let exit1 = process.run_capture([sfn_bin_path(), "check", string_mod], _env());
     let out1 = process.capture_take_stdout();
     let err1 = process.capture_take_stderr();
     assert exit1 == 0;
     assert find(out1 + err1, "ok", 0) >= 0;
 
-    let exit2 = process.run_capture([_sfn_bin(), "check", libc_mod], _env());
+    let exit2 = process.run_capture([sfn_bin_path(), "check", libc_mod], _env());
     let out2 = process.capture_take_stdout();
     let err2 = process.capture_take_stderr();
     assert exit2 == 0;
@@ -63,12 +58,12 @@ test "runtime/sfn/string.sfn + libc.sfn are fmt-canonical" ![io] {
     let string_mod = _repo_root() + "/runtime/sfn/string.sfn";
     let libc_mod = _repo_root() + "/runtime/sfn/platform/libc.sfn";
 
-    let exit1 = process.run_capture([_sfn_bin(), "fmt", "--check", string_mod], _env());
+    let exit1 = process.run_capture([sfn_bin_path(), "fmt", "--check", string_mod], _env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit1 == 0;
 
-    let exit2 = process.run_capture([_sfn_bin(), "fmt", "--check", libc_mod], _env());
+    let exit2 = process.run_capture([sfn_bin_path(), "fmt", "--check", libc_mod], _env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit2 == 0;
@@ -79,7 +74,7 @@ test "sfn emit llvm defines wave-2 sfn_str_* grapheme/numeric exports" ![io] {
     let dir = _scratch("emit");
     let module = _repo_root() + "/runtime/sfn/string.sfn";
     let out_ll = dir + "/string.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", module], _env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", module], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -109,7 +104,7 @@ test "sfn emit llvm bare-defines read_byte / grapheme_byte (#1308)" ![io] {
     // Re-emit if not present
     if !fs.exists(out_ll) {
         let module = _repo_root() + "/runtime/sfn/string.sfn";
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", module], _env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", module], _env());
         let _ = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
         assert exit == 0;
@@ -125,7 +120,7 @@ test "sfn emit llvm declares strtod in string.sfn" ![io] {
     let out_ll = dir + "/string.ll";
     if !fs.exists(out_ll) {
         let module = _repo_root() + "/runtime/sfn/string.sfn";
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", module], _env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", module], _env());
         let _ = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
         assert exit == 0;
@@ -140,7 +135,7 @@ test "user emission does not call legacy sailfin_runtime_grapheme_* C symbols" !
     let dir = _scratch("hello");
     let hello = _repo_root() + "/examples/basics/hello-world.sfn";
     let out_ll = dir + "/hello.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", hello], _env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", hello], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -156,7 +151,7 @@ test "user emission does not call legacy sailfin_runtime_grapheme_* C symbols" !
 
 // ---- Test 7: compiler binary exports defined wave-2 symbols ----
 test "compiler binary exports sfn_str_* wave-2 symbols" ![io] {
-    let binary = _sfn_bin();
+    let binary = sfn_bin_path();
     let exit = process.run_capture(["nm", binary], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -193,7 +188,7 @@ test "number_to_string round-trips: 42, 0, -7, 3.14" ![io] {
         + "    print.info(\"neg:\" + number_to_string(-7));\n"
         + "    print.info(\"frac:\" + number_to_string(3.14));\n"
         + "}\n");
-    let exit = process.run_capture([_sfn_bin(), "run", prog], _env());
+    let exit = process.run_capture([sfn_bin_path(), "run", prog], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -210,7 +205,7 @@ test "user IR does not reference legacy immediate-codepoint entrypoints" ![io] {
     let out_ll = dir + "/hello.ll";
     if !fs.exists(out_ll) {
         let hello = _repo_root() + "/examples/basics/hello-world.sfn";
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", hello], _env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", hello], _env());
         let _ = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
         assert exit == 0;

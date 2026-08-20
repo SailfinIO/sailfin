@@ -15,16 +15,11 @@ import {
     expect_contains_str,
     expect_eq_bool,
     nested_runner_scratch,
-    report_child_failure
+    report_child_failure,
+    sfn_bin_path
 } from "sfn/test";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -42,7 +37,7 @@ fn _write_source(name: string, source: string) -> string ![io] {
 
 fn _assert_emit_fails(name: string, source: string, diagnostic: string) ![io] {
     let src = _write_source(name, source);
-    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], process.environ());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if fs.exists(src) { fs.deleteFile(src); }
@@ -54,7 +49,7 @@ fn _assert_emit_fails(name: string, source: string, diagnostic: string) ![io] {
 
 fn _assert_emit_succeeds(name: string, source: string) ![io] {
     let src = _write_source(name, source);
-    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], process.environ());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if fs.exists(src) { fs.deleteFile(src); }
@@ -89,7 +84,7 @@ test "range for: the zero-stride diagnostic reports a source location" ![io] {
         + "    for i in 0..10..0 { n += 1; }\n"
         + "    return n;\n"
         + "}\n");
-    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], clean_runner_env(scratch));
+    let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], clean_runner_env(scratch));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if fs.exists(src) { fs.deleteFile(src); }

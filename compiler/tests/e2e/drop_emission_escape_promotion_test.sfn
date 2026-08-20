@@ -19,13 +19,8 @@
 // from an `![io]` test; #842). The emitting child inherits the full parent
 // environment via `process.environ()` so its build-cache routes under the
 // runner's `SAILFIN_TEST_SCRATCH` (#1333) for parallel-pool isolation.
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // Count non-overlapping occurrences of `needle` in `haystack`.
 fn _count(haystack: string, needle: string) -> int {
@@ -74,7 +69,7 @@ fn _ll_path(tag: string) -> string ![io] {
 // Returns "" when the emit failed.
 fn _emit_ir(out_path: string) -> string ![io] {
     let fixture = "compiler/tests/e2e/fixtures/escape_promotion_basic.sfn";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", fixture], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_path, "llvm", fixture], process.environ());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     if exit != 0 { return ""; }

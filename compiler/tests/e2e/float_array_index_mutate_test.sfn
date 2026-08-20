@@ -6,12 +6,7 @@
 // Drives the compiler-under-test as a subprocess (see
 // `.claude/rules/no-bash-e2e.md`, `array_filter_closure_test.sfn`).
 import { trim_right } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
@@ -21,7 +16,7 @@ struct RunOut {
 }
 
 fn _run_fixture(path: string) -> RunOut ![io] {
-    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", path], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     return RunOut { exit: exit, out: trim_right(out) };

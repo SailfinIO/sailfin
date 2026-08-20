@@ -30,13 +30,12 @@
 // survived the unlink would sit under `work + "/sailfin"` with a
 // `.sfn_stage.` prefix.
 import { contains, starts_with } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -76,7 +75,7 @@ test "build: a short write never leaves main-less IR on disk" ![io] {
 
     // Control: an uncapped build populates the work dir and cache, and
     // pins that the fixture emits a complete module in the first place.
-    let rc = process.run_capture([_sfn_bin(), "build", main_path, "--work-dir", work, "-o", out_bin], _child_env());
+    let rc = process.run_capture([sfn_bin_path(), "build", main_path, "--work-dir", work, "-o", out_bin], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("short-write control build", rc, out, err);
@@ -110,7 +109,7 @@ test "build: a short write never leaves main-less IR on disk" ![io] {
     // module truncated at `cap` bytes with its trailing `@main` gone,
     // while the build reported the write as successful (SFN-542).
     let _ = fs.deleteFile(ll_path);
-    let _brc = _run_shell("ulimit -f 8; trap '' XFSZ; \"" + _sfn_bin()
+    let _brc = _run_shell("ulimit -f 8; trap '' XFSZ; \"" + sfn_bin_path()
         + "\" build \""
         + main_path
         + "\" --work-dir \""

@@ -23,13 +23,8 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
 // cannot be called from an `![io]` test like these. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
-import { contains, starts_with, split } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, split, starts_with } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn emit`. `process.run_capture` treats
 // an empty array as the *empty* environment (not "inherit"), so the relevant
@@ -96,7 +91,7 @@ fn _emit_llvm(source: string, tag: string) -> string ![io] {
     let ll = dir + "/sfn-numeric-int-float-" + tag + ".ll";
     fs.writeFile(src, source);
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }

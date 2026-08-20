@@ -4,13 +4,7 @@
 // .claude/rules/no-bash-e2e.md. Skips when the import-context tree is not
 // staged (bench requires `make compile` to have produced it).
 import { find } from "sfn/strings";
-import { nested_runner_scratch, report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { nested_runner_scratch, report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -34,7 +28,7 @@ test "bench: --compiler on a single module reports a summary" ![io] {
     let work = nested_runner_scratch("bench-compiler-summary");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("bench --compiler summary", exit, out, err);
@@ -59,13 +53,13 @@ test "bench: --compiler honors an isolated work dir per invocation" ![io] {
     let mut shared_len_before = 0;
     if shared_existed { shared_len_before = fs.readFile(shared).length; }
 
-    let exit_a = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work_a], _child_env());
+    let exit_a = process.run_capture([sfn_bin_path(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work_a], _child_env());
     let out_a = process.capture_take_stdout();
     let err_a = process.capture_take_stderr();
     report_child_failure("bench --compiler isolation a", exit_a, out_a, err_a);
     assert exit_a == 0;
 
-    let exit_b = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work_b], _child_env());
+    let exit_b = process.run_capture([sfn_bin_path(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work_b], _child_env());
     let out_b = process.capture_take_stdout();
     let err_b = process.capture_take_stderr();
     report_child_failure("bench --compiler isolation b", exit_b, out_b, err_b);
@@ -99,7 +93,7 @@ test "bench: --compiler honors an isolated work dir per invocation" ![io] {
 // no workloads, which the runtime runner reports as an error (exit 1) rather
 // than the old "only --compiler is implemented" exit 2.
 test "bench: default (no --compiler) dispatches to runtime mode" ![io, clock] {
-    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/does-not-exist"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", "benchmarks/does-not-exist"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 1;

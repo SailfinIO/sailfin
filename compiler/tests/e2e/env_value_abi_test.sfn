@@ -18,13 +18,7 @@
 // invocation under the parallel pool, #1333). The fixture's own env (the var
 // under test) is passed to the *run*, not the build.
 import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
@@ -51,7 +45,7 @@ fn _build_and_run(src: string, run_env: string[], out_marker: string) -> int ![i
         let srcpath = dir + "/probe.sfn";
         fs.writeFile(srcpath, src);
         let binpath = dir + "/probe";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
         if build_exit != 0 { return -100; }

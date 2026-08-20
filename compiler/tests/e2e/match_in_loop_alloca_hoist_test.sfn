@@ -18,13 +18,7 @@
 // exit 139), confirmed by reverting the fix locally and observing the crash
 // before writing this test.
 import { count, find, substring } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -74,7 +68,7 @@ test "match in loop: nested sfn test at -O0 runs 2,000,000 taken-arm iterations 
     // 0 + 1 + ... + 1,999,999 = 1,999,999,000,000 (asserted inside the
     // fixture itself). A reintroduced leak crashes this nested run with
     // SIGSEGV (child exit 139) well before the assertion is reached.
-    let test_exit = process.run_capture([_sfn_bin(), "test", src], child_env);
+    let test_exit = process.run_capture([sfn_bin_path(), "test", src], child_env);
     let _to = process.capture_take_stdout();
     let _te = process.capture_take_stderr();
     assert test_exit == 0;
@@ -94,7 +88,7 @@ test "match in loop: emitted IR has zero alloca inside matchbody blocks" ![io] {
     fs.writeFile(src, _fixture_source());
 
     let child_env = clean_runner_env(nested_runner_scratch("sfn967-emit"));
-    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", src], child_env);
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", src], child_env);
     let _eo = process.capture_take_stdout();
     let _ee = process.capture_take_stderr();
     assert emit_exit == 0;

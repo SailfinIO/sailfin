@@ -28,19 +28,14 @@
 // they cannot be called from an `![io]` test. For subprocess/IR-output
 // assertions use `sfn/strings`, as the runtime_string_basic exemplar does.
 import {
-    find,
-    split,
-    starts_with,
+    char_at_index,
     contains,
     ends_with,
-    char_at_index
+    find,
+    split,
+    starts_with
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. The `sfn run` round-trips spawn a full
@@ -71,7 +66,7 @@ fn _scratch_dir() -> string ![io] {
 fn _emit_module(tag: string, module_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let outpath = dir + "/" + tag + ".ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return "EMIT_FAILED"; }
@@ -79,7 +74,7 @@ fn _emit_module(tag: string, module_path: string) -> string ![io] {
 }
 
 fn _check_ok(module_path: string) -> boolean ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", module_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", module_path], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if exit != 0 { return false; }
@@ -87,7 +82,7 @@ fn _check_ok(module_path: string) -> boolean ![io] {
 }
 
 fn _fmt_ok(module_path: string) -> boolean ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", module_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", module_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return exit == 0;
@@ -265,7 +260,7 @@ test "probe routes fs.{listDirectory,deleteFile,createDirectory} through @sfn_fs
 }
 
 test "compiler binary exports the defined sfn_fs_* family" ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     assert _nm_has_defined(bin, "sfn_fs_read_file");
     assert _nm_has_defined(bin, "sfn_fs_write_file");
     assert _nm_has_defined(bin, "sfn_fs_append_file");
@@ -312,7 +307,7 @@ test "fs.writeFile / readFile / appendFile round-trip end-to-end" ![io] {
     // `sfn run` spawns a full build; thread PATH + SAILFIN_TEST_SCRATCH
     // (via _child_env) so the linker resolves and program.ll stays
     // per-invocation under the parallel pool.
-    let run_exit = process.run_capture([_sfn_bin(), "run", probe], _child_env());
+    let run_exit = process.run_capture([sfn_bin_path(), "run", probe], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert run_exit == 0;
@@ -373,7 +368,7 @@ test "fs.createDirectory / listDirectory / deleteFile round-trip end-to-end" ![i
         + "    }\n"
         + "    return 0;\n"
         + "}\n");
-    let run_exit = process.run_capture([_sfn_bin(), "run", probe], _child_env());
+    let run_exit = process.run_capture([sfn_bin_path(), "run", probe], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert run_exit == 0;
@@ -422,7 +417,7 @@ test "large-file round-trip exercises the chunked-read grow path" ![io] {
         + "    print(round_tripped);\n"
         + "    return 0;\n"
         + "}\n");
-    let run_exit = process.run_capture([_sfn_bin(), "run", probe], _child_env());
+    let run_exit = process.run_capture([sfn_bin_path(), "run", probe], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert run_exit == 0;

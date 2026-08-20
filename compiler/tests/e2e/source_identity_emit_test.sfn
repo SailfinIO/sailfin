@@ -1,12 +1,7 @@
 // SFN-930: direct emit must resolve the same manifest-owned identity as build
 // and relative traversal, without a `--module-name` override.
 import { contains, trim_right } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut out: string[] = [];
@@ -28,7 +23,7 @@ fn _cwd() -> string ![io] {
 }
 
 fn _emit_native(source: string, output: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", output, "native", source], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", output, "native", source], _child_env());
     let _stdout = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();
     if exit != 0 || !fs.exists(output) { return ""; }
@@ -74,7 +69,7 @@ test "absolute standalone entry converges with relative imports" ![io] {
     fs.writeFile(root + "/dep.sfn", "fn answer() -> int { return 42; }\n\nexport { answer };\n");
     let main_source = root + "/main.sfn";
     fs.writeFile(main_source, "import { answer } from \"./dep\";\n\nfn main() -> int { return answer() - 42; }\n");
-    let exit = process.run_capture([_sfn_bin(), "run", main_source], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", main_source], _child_env());
     let _stdout = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();
     assert exit == 0;
@@ -111,7 +106,7 @@ test "relative traversal: absolute-path library test converges on provider ident
     fs.writeFile(ws + "/lib/src/mod.sfn", "fn answer() -> int { return 42; }\n");
     let test_source = ws + "/lib/tests/mod_test.sfn";
     fs.writeFile(test_source, "import { answer } from \"../src/mod\";\n\ntest \"provider identity\" { assert answer() == 42; }\n");
-    let exit = process.run_capture([_sfn_bin(), "test", test_source], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", test_source], _child_env());
     let _stdout = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();
     assert exit == 0;

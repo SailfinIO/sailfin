@@ -21,12 +21,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from an
 // `![io]` test, so output is asserted with `sfn/strings`.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -66,7 +61,7 @@ test "emit-llvm: unresolved-callee return path fails closed (-o file)" ![io] {
     // and refuses to write (lowering_core/file_emission.sfn), so downstream tooling
     // that only stats `out` cannot mistake a stale file for fresh IR.
     fs.writeFile(out, "; stale IR from a prior successful build\n");
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, "llvm", src], process.environ());
     let sout = process.capture_take_stdout();
     let serr = process.capture_take_stderr();
     // Fail-closed: a return-path `[fatal]` must produce a non-zero exit.
@@ -78,7 +73,7 @@ test "emit-llvm: unresolved-callee return path fails closed (-o file)" ![io] {
 
 test "emit-llvm: unresolved-callee return path fails closed (stdout)" ![io] {
     let src = _write_source("emit_llvm_1954_unresolved_stdout.sfn", _unresolved_source());
-    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], process.environ());
     let sout = process.capture_take_stdout();
     let serr = process.capture_take_stderr();
     assert exit != 0;
@@ -92,7 +87,7 @@ test "emit-llvm: unresolved-callee return path fails closed (stdout)" ![io] {
 // diagnostic that lacks one, so it renders with `file:line:col`.
 test "emit-llvm: expression-lowering fatal carries the statement span" ![io] {
     let src = _write_source("emit_llvm_539_span.sfn", _unresolved_source());
-    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], process.environ());
     let sout = process.capture_take_stdout();
     let serr = process.capture_take_stderr();
     let combined = sout + serr;
@@ -108,7 +103,7 @@ test "emit-llvm: valid return-path file still emits and exits 0" ![io] {
     let src = _write_source("emit_llvm_1954_valid.sfn", _valid_source());
     let out = _scratch_dir() + "/emit_llvm_1954_valid.ll";
     if fs.exists(out) { fs.deleteFile(out); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, "llvm", src], process.environ());
     let _sout = process.capture_take_stdout();
     let _serr = process.capture_take_stderr();
     assert exit == 0;

@@ -5,14 +5,9 @@ import {
     clean_runner_env,
     expect_eq_int,
     nested_runner_scratch,
+    sfn_bin_path,
     with_tmp_dir
 } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 fn _first_line(text: string) -> string {
     let lines = split(text, "\n");
@@ -21,7 +16,7 @@ fn _first_line(text: string) -> string {
 }
 
 fn _sfn_bin_abs() -> string ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     if bin.length > 0 && bin[0] == "/" { return bin; }
     let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("init-project-pwd")));
     let out = process.capture_take_stdout();

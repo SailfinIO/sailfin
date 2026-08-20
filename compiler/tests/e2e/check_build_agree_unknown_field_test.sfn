@@ -11,13 +11,7 @@
 // replacement — it strips the pool-managed keys and re-points
 // `SAILFIN_TEST_SCRATCH` at an isolated per-invocation scratch dir.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -39,7 +33,7 @@ test "check/build agree: unknown field on a struct receiver is rejected by check
     let srcpath = _write_scratch("sfn-543-e0015-struct.sfn", source);
 
     let child_env = clean_runner_env(nested_runner_scratch("sfn543-e0015-struct"));
-    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], child_env);
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], child_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 
@@ -57,7 +51,7 @@ test "check/build agree: unknown field on a string receiver is rejected by check
     let srcpath = _write_scratch("sfn-543-e0015-string.sfn", source);
 
     let child_env = clean_runner_env(nested_runner_scratch("sfn543-e0015-string"));
-    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], child_env);
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], child_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 
@@ -76,7 +70,7 @@ test "check/build agree: real struct and string fields are accepted by check" ![
     let srcpath = _write_scratch("sfn-543-e0015-valid.sfn", source);
 
     let child_env = clean_runner_env(nested_runner_scratch("sfn543-e0015-valid"));
-    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], child_env);
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], child_env);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
 

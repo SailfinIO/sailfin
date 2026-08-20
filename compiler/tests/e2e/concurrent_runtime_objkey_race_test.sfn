@@ -25,13 +25,7 @@
 // `run.ll`/`.o`/binary stay isolated per child), asserting every child
 // builds and prints its own marker with no cross-contamination.
 import { contains } from "sfn/strings";
-import { report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _scratch_base() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -48,7 +42,7 @@ fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
     // Build the `bash -c` vehicle: launch N `sfn run`s in the background,
     // each with a distinct SAILFIN_TEST_SCRATCH, then `wait`. Concurrent
     // cold runtime compiles are what this stresses.
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     let mut script = "";
     let mut k = 0;
     loop {

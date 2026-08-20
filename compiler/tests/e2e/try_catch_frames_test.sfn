@@ -29,13 +29,8 @@
 //
 // IR assertions use `sfn/strings` predicates — the `sfn/test` `expect_*`
 // matchers are `![pure]` and cannot be called from an `![io]` test (#842).
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. `emit` does not link, but `build` spawns
@@ -128,7 +123,7 @@ fn _emit_ir(tag: string, src_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let out_path = dir + "/" + tag + ".ll";
     if fs.exists(out_path) { fs.deleteFile(out_path); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", src_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_path, "llvm", src_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -199,7 +194,7 @@ test "try-catch: throw boom is caught, prints boom, exits 0" ![io] {
     let dir = _scratch_dir();
     let out_bin = dir + "/runtime.out";
     if fs.exists(out_bin) { fs.deleteFile(out_bin); }
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", out_bin, src], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;
@@ -225,7 +220,7 @@ test "try-catch-finally: finally runs after the catch handler" ![io] {
         + "}\n");
     let out_bin = dir + "/try_catch_finally.out";
     if fs.exists(out_bin) { fs.deleteFile(out_bin); }
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", out_bin, src], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;
@@ -250,7 +245,7 @@ test "try-finally (no catch): finally runs before the uncaught throw propagates"
         + "}\n");
     let out_bin = dir + "/try_finally_no_catch.out";
     if fs.exists(out_bin) { fs.deleteFile(out_bin); }
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", out_bin, src], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;

@@ -22,13 +22,7 @@
 // absent"). Drives the compiler-under-test as a subprocess per
 // `.claude/rules/no-bash-e2e.md`.
 import { contains } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -111,7 +105,7 @@ fn _emit_windows_ll(dir: string, tag: string, source: string) -> string ![io] {
     if fs.exists(ll) { fs.deleteFile(ll); }
     let mut e = clean_runner_env(nested_runner_scratch("coff-" + tag));
     e.push("SAILFIN_TARGET_OS=Windows");
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], e);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], e);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -182,7 +176,7 @@ test "coff comdat link: Mach-O target never receives the comdat clause" ![io] {
     if fs.exists(ll) { fs.deleteFile(ll); }
     let mut e = clean_runner_env(nested_runner_scratch("coff-darwin-guard"));
     e.push("SAILFIN_TARGET_OS=Darwin");
-    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], e);
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], e);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert emit_exit == 0;

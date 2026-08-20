@@ -21,12 +21,7 @@
 // `![io]` test). The original grepped the combined log; we do the same
 // over captured stdout+stderr.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child env: PATH/HOME/TMPDIR (the nested compile runs clang + linker),
 // a fresh per-invocation SAILFIN_TEST_SCRATCH, plus any extra entries
@@ -79,7 +74,7 @@ test "runner state: sfn test does not create .test_runner_active marker" ![io] {
         + "}\n");
     let scratch = _fresh_dir();
 
-    let r = _run([_sfn_bin(), "test", proj], scratch, []);
+    let r = _run([sfn_bin_path(), "test", proj], scratch, []);
     assert r.exit == 0;
     // The test ran successfully.
     assert find(r.log, "PASS", 0) >= 0;
@@ -104,7 +99,7 @@ test "runner state: SAILFIN_TRACE_TEST_RUNNER=1 propagates to lowering" ![io] {
         + "}\n");
     let scratch = _fresh_dir();
 
-    let r = _run([_sfn_bin(), "test", proj], scratch, ["SAILFIN_TRACE_TEST_RUNNER=1"]);
+    let r = _run([sfn_bin_path(), "test", proj], scratch, ["SAILFIN_TRACE_TEST_RUNNER=1"]);
     assert r.exit == 0;
     // Orchestrator-side trace (cli_commands.sfn).
     assert find(r.log, "test runner: compile start", 0) >= 0;
@@ -140,7 +135,7 @@ test "runner state: in-process flag defaults to false outside sfn test" ![io] {
         + "}\n");
     let scratch = _fresh_dir();
 
-    let r = _run([_sfn_bin(), "emit", "-o", proj + "/main.ll", "llvm", proj
+    let r = _run([sfn_bin_path(), "emit", "-o", proj + "/main.ll", "llvm", proj
         + "/main.sfn"], scratch, ["SAILFIN_TRACE_LOWERING=1"]);
     let _ = r.exit;
 

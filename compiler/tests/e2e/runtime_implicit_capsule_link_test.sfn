@@ -31,12 +31,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
 // an `![io]` test. (#842.)
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // The build spawns a nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
@@ -97,7 +92,7 @@ fn _write_prog() -> string ![io] {
 test "implicit capsule: build links via the implicit runtime capsule" ![io] {
     let prog = _write_prog();
     let exe = _scratch_dir() + "/implicit_link_prog";
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", exe, prog], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", exe, prog], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     // `sfn build` has no seed fallback, so a real link failure is fatal.
@@ -108,7 +103,7 @@ test "implicit capsule: build links via the implicit runtime capsule" ![io] {
 test "implicit capsule: built binary runs and prints the marker" ![io] {
     let prog = _write_prog();
     let exe = _scratch_dir() + "/implicit_link_prog";
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", exe, prog], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", exe, prog], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;

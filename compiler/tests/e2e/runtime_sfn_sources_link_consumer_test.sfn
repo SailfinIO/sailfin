@@ -37,14 +37,9 @@
 // predicates — the `sfn/test` `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test (#842).
 import { contains } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 import { build_target_triple, target_artifact_tag } from "../../src/build/target";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // The build spawns a nested clang + linker, so the child needs PATH (an
 // empty `run_capture` env is the *empty* environment, not "inherit").
@@ -233,7 +228,7 @@ test "runtime sfn-source consumer fires and produces a cached .o/.ll (#308)" ![i
     let cache = ws + "/shared-cache";
 
     let no_extra: string[] = [];
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", ws
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
@@ -276,7 +271,7 @@ test "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES skips the consumer (no .o produced) (#
     // undefined runtime sfn_* symbol (which one depends on dead-code
     // stripping — assert on any undefined sfn_* reference).
     let extra: string[] = ["SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1"];
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", ws
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, extra));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -308,7 +303,7 @@ test "source edit busts the runtime sfn-source object cache (#969)" ![io] {
     let marker_o = _marker_obj(build_dir);
 
     let no_extra: string[] = [];
-    let exit1 = process.run_capture([_sfn_bin(), "build", "-p", ws
+    let exit1 = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
     let _o1 = process.capture_take_stdout();
     let _e1 = process.capture_take_stderr();
@@ -324,7 +319,7 @@ test "source edit busts the runtime sfn-source object cache (#969)" ![io] {
     // thing under test, not a cold miss).
     _write_marker(ws, true);
 
-    let exit2 = process.run_capture([_sfn_bin(), "build", "-p", ws
+    let exit2 = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
     let _o2 = process.capture_take_stdout();
     let _e2 = process.capture_take_stderr();

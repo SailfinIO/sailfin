@@ -17,13 +17,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
 // an `![io]` test (#842).
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // A clean top-level child environment for the nested `sfn test`: the
 // ambient environment (PATH/HOME/TMPDIR + clang/linker vars) minus the
@@ -55,7 +49,7 @@ struct TestRun {
 fn _run_test_dir(args: string[]) -> TestRun ![io] {
     let dir = fs.mkdtemp("sfn-lifecycle-");
     fs.writeFile(dir + "/lifecycle_test.sfn", _fixture_src());
-    let mut argv: string[] = [_sfn_bin(), "test"];
+    let mut argv: string[] = [sfn_bin_path(), "test"];
     let mut i = 0;
     loop {
         if i >= args.length { break; }

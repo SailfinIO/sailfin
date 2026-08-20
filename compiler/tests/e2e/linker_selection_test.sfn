@@ -27,13 +27,7 @@
 // not auto-discover `runtime/native/capsule.toml`. See
 // `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
@@ -74,7 +68,7 @@ fn _build(tag: string, linker: string) -> int ![io] {
     let mut e = _child_env();
     e.push("SAILFIN_TRACE_LINK=1");
     if linker.length > 0 { e.push("SAILFIN_LINKER=" + linker); }
-    let rc = process.run_capture([_sfn_bin(), "build", "-o", _bin(tag), src], e);
+    let rc = process.run_capture([sfn_bin_path(), "build", "-o", _bin(tag), src], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.writeFile(dir + "/build.out", out);

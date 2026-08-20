@@ -38,14 +38,9 @@
 // `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 import { build_target_triple, target_artifact_tag } from "../../src/build/target";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // The build spawns a nested clang + linker, so the child needs PATH (an
 // empty `run_capture` env is the *empty* environment, not "inherit").
@@ -196,7 +191,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     let bin = build_dir + "/native/sailfin-app";
 
     let no_extra: string[] = [];
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", ws
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir, "-o", bin], _child_env_with(no_extra));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -243,7 +238,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     assert fs.exists(use_obj);
     let ctx = build_dir + "/sailfin/rt-import-context";
     let use_ll = build_dir + "/sailfin/structuse-reemit.ll";
-    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", use_ll, "--import-context", ctx, "llvm", ws
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", use_ll, "--import-context", ctx, "llvm", ws
         + "/runtime/sfn/structuse.sfn"], _child_env_with(no_extra));
     let _eo = process.capture_take_stdout();
     let _ee = process.capture_take_stderr();
@@ -271,7 +266,7 @@ test "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES skips import-context staging (#1288)" 
     // sfn-source symbols). This test only pins that the gate also
     // short-circuits the #1288 staging pass — no rt-import-context tree.
     let extra: string[] = ["SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1"];
-    let _exit = process.run_capture([_sfn_bin(), "build", "-p", ws
+    let _exit = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(extra));
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();

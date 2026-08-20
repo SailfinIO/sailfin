@@ -25,13 +25,7 @@
 // SAILFIN_TEST_SCRATCH) mirrors module_global_runtime_init_test.sfn —
 // see `.claude/rules/no-bash-e2e.md` for the why. `check` emits no IR,
 // so it needs no build-cache isolation and runs outside `with_tmp_dir`.
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // The representative module-global program: an empty-array-literal global
 // (the #1386/#1389 repro) plus a runtime mutation in `main`. Before the
@@ -64,7 +58,7 @@ test "check/build agree: runtime-initialized module global is not a false green 
 
     // `sfn check`: parse + typecheck + effect-check, no codegen. Safe to
     // run anywhere — it writes no `program.ll`.
-    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], _child_env());
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
 
@@ -73,7 +67,7 @@ test "check/build agree: runtime-initialized module global is not a false green 
     // failure while check stayed green. Isolated in a temp dir.
     let build_exit = with_tmp_dir(fn (dir: string) -> int {
         let binpath = dir + "/repro";
-        let be = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let be = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
         return be;

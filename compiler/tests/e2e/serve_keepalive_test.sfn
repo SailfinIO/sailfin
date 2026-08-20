@@ -29,7 +29,7 @@
 // `expect_*` are `![pure]` and cannot be called from an `![io]` test; assert
 // on captured text with `sfn/strings`.
 import { contains, find } from "sfn/strings";
-import { first_present_tool } from "sfn/test";
+import { first_present_tool, sfn_bin_path } from "sfn/test";
 
 // ── libc memory + socket surface (test-local raw client) ──
 extern fn malloc(size: usize) -> *u8;
@@ -58,12 +58,6 @@ extern fn close(fd: i32) -> i32;
 fn _kp_port() -> i64 { return 18792; }
 
 fn _kp_port_str() -> string { return "18792"; }
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // Full parent environment for the build + server/client subprocesses (the
 // nested build links a binary — clang + ld + SDK paths — and the routed
@@ -371,7 +365,7 @@ fn _write_reuse_client(port_str: string) -> string ![io] {
 }
 
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }

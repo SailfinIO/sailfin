@@ -43,13 +43,7 @@
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
 import { find, split } from "sfn/strings";
-import { report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _first_line(text: string) -> string {
     let lines = split(text, "\n");
@@ -62,7 +56,7 @@ fn _first_line(text: string) -> string {
 // nested run's cwd is the private fixture dir. Mirrors
 // `target_flag_cache_key_test.sfn`'s `_sfn_bin_abs`.
 fn _sfn_bin_abs() -> string ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     if bin.length > 0 && bin[0] == "/" { return bin; }
     let exit = process.run_capture(["pwd"], []);
     let out = process.capture_take_stdout();
@@ -123,7 +117,7 @@ fn _ensure_fixture() -> string ![io] {
 // scratch and cache dirs. Returns the combined stdout+stderr and exit code.
 fn _run_with(main_sfn: string, test_scratch: string, cache_dir: string, extra_flags: string[]) -> string ![io] {
     let e = _make_env(test_scratch, cache_dir);
-    let mut argv: string[] = [_sfn_bin(), "run"];
+    let mut argv: string[] = [sfn_bin_path(), "run"];
     let mut i = 0;
     loop {
         if i >= extra_flags.length { break; }
@@ -201,7 +195,7 @@ test "sfn run <file> still works (no flags)" ![io] {
     let main_sfn = _ensure_fixture();
 
     let e = _make_env(test_scratch, cache_dir);
-    let exit = process.run_capture([_sfn_bin(), "run", main_sfn], e);
+    let exit = process.run_capture([sfn_bin_path(), "run", main_sfn], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let log = out + err;

@@ -42,18 +42,14 @@
 // NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
 // an `![io]` test; assertions use plain `assert` per
 // `.claude/rules/no-bash-e2e.md`. Shape follows `runtime_identity_stamp_test.sfn`.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
-
 // `run_capture`'s empty-array env is the FULL empty environment, not
 // "inherit", so a nested build cannot reach clang or its linker without an
 // explicit PATH. SAILFIN_TEST_SCRATCH is pinned per call so a concurrent pool
 // peer cannot overwrite this build's `program.ll` (see
 // `.claude/rules/no-bash-e2e.md`).
 // env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak.
+import { sfn_bin_path } from "sfn/test";
+
 fn _child_env(scratch: string) -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
@@ -71,7 +67,9 @@ fn _contains_text(haystack: string, needle: string) -> boolean {
     let mut pos: int = 0;
     loop {
         if pos + needle.length > haystack.length { return false; }
-        if substring(haystack, pos, pos + needle.length) == needle { return true; }
+        if substring(haystack, pos, pos + needle.length) == needle {
+            return true;
+        }
         pos += 1;
     }
 }
@@ -126,7 +124,7 @@ fn _build_against_runtime(scratch: string, runtime_copy: string) -> int ![io] {
     let mut build_env = _child_env(scratch);
     build_env.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy);
     let out_bin = scratch + "/prog-out";
-    let build_exit = process.run_capture([_sfn_bin(), "build", prog, "-o", out_bin], build_env);
+    let build_exit = process.run_capture([sfn_bin_path(), "build", prog, "-o", out_bin], build_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if build_exit != 0 {
@@ -179,7 +177,8 @@ test "runtime capsule dep: a re-exported provider symbol records its defining mo
     // The staged import-context tree lives beside the build's runtime objects
     // (`_runtime_sfn_ctx_root`), and the probe stages at the SFN-146-derived
     // `runtime/sfn/...` slug even though the root is named `runtime-copy`.
-    let deps_path = scratch + "/rt-import-context/runtime/sfn/rtcapdep_reexport_probe.import-deps";
+    let deps_path = scratch
+        + "/rt-import-context/runtime/sfn/rtcapdep_reexport_probe.import-deps";
     assert fs.exists(deps_path);
     let deps = fs.readFile(deps_path);
 

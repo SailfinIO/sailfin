@@ -15,13 +15,8 @@
 // NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -55,7 +50,7 @@ test "sfn emit llvm defines sfn_arena_sfn_mark and sfn_arena_sfn_rewind" ![io] {
     let dir = _scratch("emit");
     let skeleton = _repo_root() + "/runtime/sfn/memory/arena.sfn";
     let out_ll = dir + "/arena.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", skeleton], _env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", skeleton], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -71,7 +66,7 @@ test "arena.ll defines sfn_arena_enabled and sfn_arena_global (Sailfin-owned, #1
     let out_ll = dir + "/arena.ll";
     if !fs.exists(out_ll) {
         let skeleton = _repo_root() + "/runtime/sfn/memory/arena.sfn";
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", skeleton], _env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", skeleton], _env());
         let _ = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
         assert exit == 0;
@@ -90,7 +85,7 @@ test "arena.ll does not define bare sfn_arena_mark / sfn_arena_rewind (deleted i
     let out_ll = dir + "/arena.ll";
     if !fs.exists(out_ll) {
         let skeleton = _repo_root() + "/runtime/sfn/memory/arena.sfn";
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", skeleton], _env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", skeleton], _env());
         let _ = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
         assert exit == 0;
@@ -115,7 +110,7 @@ test "mark → alloc → rewind reclaims post-mark bump (C harness via clang)" !
     // Emit arena.ll (self-contained as of #1309)
     let arena_ll = dir + "/arena.ll";
     let skeleton = _repo_root() + "/runtime/sfn/memory/arena.sfn";
-    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", arena_ll, "llvm", skeleton], _env());
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", arena_ll, "llvm", skeleton], _env());
     let emit_out = process.capture_take_stdout();
     let emit_err = process.capture_take_stderr();
     assert emit_exit == 0;

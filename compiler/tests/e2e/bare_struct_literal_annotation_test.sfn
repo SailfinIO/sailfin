@@ -7,12 +7,7 @@
 // cannot be called from an `![io]` test like this. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
 import { contains, split, trim } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn` invocations. `process.run_capture`
 // treats an empty array as the *empty* environment (not "inherit"), so PATH
@@ -43,7 +38,7 @@ fn _emit_llvm() -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/bare_struct_literal_annotation.ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _fixture()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _fixture()], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -76,7 +71,7 @@ test "bare-struct-annotation: field literal populates %Person (no zeroinitialize
 // 2 — Runtime round-trip: the populated field prints its assigned value, not
 // a zeroed/empty default.
 test "bare-struct-annotation: runtime prints populated field" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "run", _fixture()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", _fixture()], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

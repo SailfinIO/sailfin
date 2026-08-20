@@ -10,14 +10,9 @@
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
 import { contains, find, to_lower_all } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 import { host_is_windows } from "../../src/build/target";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 struct LoginRun {
     exit: int,
@@ -53,7 +48,7 @@ fn _env(home: string) -> string[] ![io] {
 // Run `sfn <args...>` with HOME threaded to the child, returning the exit
 // code and combined stdout+stderr.
 fn _run(home: string, args: string[]) -> LoginRun ![io] {
-    let mut argv: string[] = [_sfn_bin()];
+    let mut argv: string[] = [sfn_bin_path()];
     let mut i = 0;
     loop {
         if i >= args.length { break; }
@@ -125,7 +120,7 @@ test "login: output confirms credentials saved" ![io] {
 // the read sees EOF, then wait for exit.
 test "login: interactive reads token from stdin" ![io] {
     let home = _home("interactive");
-    let id = process.spawn_with_env([_sfn_bin(), "login"], _env(home));
+    let id = process.spawn_with_env([sfn_bin_path(), "login"], _env(home));
     assert id != 0;
     let _written = process.handle_write(id, "stdin-token-999\n");
     process.handle_close_stdin(id);
@@ -168,7 +163,7 @@ test "login: windows host discloses the unrestricted credential file" ![io] {
     let home = _home("windows-notice");
     let mut child_env = _env(home);
     child_env.push("SAILFIN_HOST_OS=Windows");
-    let exit = process.run_capture([_sfn_bin(), "login", "win-token"], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "login", "win-token"], child_env);
     let out = process.capture_take_stdout() + process.capture_take_stderr();
 
     assert exit == 0;
@@ -184,7 +179,7 @@ test "login: windows host discloses the unrestricted credential file" ![io] {
 // production consumer).
 test "login: immediate stdin EOF fails cleanly" ![io] {
     let home = _home("eof");
-    let id = process.spawn_with_env([_sfn_bin(), "login"], _env(home));
+    let id = process.spawn_with_env([sfn_bin_path(), "login"], _env(home));
     assert id != 0;
     process.handle_close_stdin(id);
     let _out = process.handle_read_stdout(id);

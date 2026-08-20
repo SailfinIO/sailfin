@@ -32,14 +32,9 @@
 // NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test; assertions use `sfn/strings::find` per the
 // `.claude/rules/no-bash-e2e.md` pattern. See `guillermo_test.sfn` for
-// the canonical _sfn_bin() / child-env shape.
+// the canonical sfn_bin_path() / child-env shape.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Thread PATH/HOME/TMPDIR through to the nested `sfn test` child with an
 // explicit SAILFIN_TEST_SCRATCH override. `run_capture`'s empty-array env
@@ -114,7 +109,7 @@ fn _stamp_field(stamp: string, key: string) -> string {
 test "stamp: multi-file run writes a nonce-scoped stamp into the warm objdir" ![io] {
     let scratch = fs.mkdtemp("sfn-stamp-t1-");
     let dirs = _make_fixture_dirs(scratch, "t1");
-    let exit = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
+    let exit = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
@@ -153,7 +148,7 @@ test "stamp: rerun mints a fresh nonce and both runs pass" ![io] {
     let dirs = _make_fixture_dirs(scratch, "t2");
 
     // First run.
-    let exit1 = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
+    let exit1 = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit1 == 0;
@@ -161,7 +156,7 @@ test "stamp: rerun mints a fresh nonce and both runs pass" ![io] {
     assert nonce1.length > 0;
 
     // Second run (same scratch, same fixture dirs).
-    let exit2 = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
+    let exit2 = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit2 == 0;
@@ -190,7 +185,7 @@ test "stamp: garbage nonce falls back to full hashing — no crash, tests pass" 
     let dirs = _make_fixture_dirs(scratch, "t3");
 
     // Warm: multi-file run to materialize the stamp.
-    let warm_exit = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
+    let warm_exit = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert warm_exit == 0;
@@ -202,7 +197,7 @@ test "stamp: garbage nonce falls back to full hashing — no crash, tests pass" 
     let mut bogus_env = _child_env_with_scratch(scratch);
     bogus_env.push("SAILFIN_TEST_RUNTIME_OBJDIR=" + scratch);
     bogus_env.push("SAILFIN_TEST_RUNTIME_STAMP=totally-bogus");
-    let single_exit = process.run_capture([_sfn_bin(), "test", dirs[0]
+    let single_exit = process.run_capture([sfn_bin_path(), "test", dirs[0]
         + "/alpha_test.sfn"], bogus_env);
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
@@ -274,7 +269,7 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     // during the runtime warm; the fix keeps the slug `runtime/...`.
     let mut env1 = _child_env_with_scratch(scratch);
     env1.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy);
-    let exit1 = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], env1);
+    let exit1 = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], env1);
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit1 == 0;
@@ -296,7 +291,7 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     // back to the full path and the warm fails exactly as pre-fix.
     let mut env2 = _child_env_with_scratch(scratch);
     env2.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy + "/");
-    let exit2 = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], env2);
+    let exit2 = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], env2);
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit2 == 0;

@@ -7,13 +7,7 @@
 // bench requires `make compile` to have produced it), matching
 // bench_compiler_test.sfn.
 import { find } from "sfn/strings";
-import { nested_runner_scratch, report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { nested_runner_scratch, report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -36,7 +30,7 @@ test "bench json: --compiler emits sailfin.bench/v1 envelope" ![io] {
     let work = nested_runner_scratch("bench-json-compiler");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--json", "--work-dir", work], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", "--compiler", "--module", "build_flags", "--json", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("bench --compiler --json", exit, out, err);
@@ -82,7 +76,7 @@ test "bench json: runtime mode emits sailfin.bench/v1 envelope" ![io, clock] {
     let work = nested_runner_scratch("bench-json-runtime");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", workload, "--iterations", "2", "--json", "--work-dir", work], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", workload, "--iterations", "2", "--json", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("bench runtime --json", exit, out, err);
@@ -117,7 +111,7 @@ test "bench json: stdout is a single JSON object, no human table" ![io] {
     let work = nested_runner_scratch("bench-json-stdout");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--json", "--work-dir", work], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", "--compiler", "--module", "build_flags", "--json", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("bench --json stdout shape", exit, out, err);

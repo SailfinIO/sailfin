@@ -55,13 +55,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test (`.claude/rules/no-bash-e2e.md`).
 import { contains, ends_with, split } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // In-tree fixture root (CWD-relative = repo root).
 fn _capsule_root() -> string { return "build/sfn-reachability-filter-test"; }
@@ -237,7 +231,7 @@ fn _build_consumer(out_bin: string, extra_env: string[]) -> BuildOut ![io] {
         i += 1;
     }
     let consumer_dir = _capsule_root() + "/consumer";
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", consumer_dir, "-o", out_bin], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", consumer_dir, "-o", out_bin], child_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return BuildOut { exit: exit, out: out, err: err };
@@ -257,7 +251,7 @@ fn _check_consumer(extra_env: string[]) -> BuildOut ![io] {
         i += 1;
     }
     let entry = _capsule_root() + "/consumer/src/main.sfn";
-    let exit = process.run_capture([_sfn_bin(), "check", entry], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "check", entry], child_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return BuildOut { exit: exit, out: out, err: err };
@@ -279,7 +273,7 @@ test "capsule reachability: check excludes unreachable dependency sources" ![io]
 test "capsule reachability: dependency-free check retains no capsule sources" ![io] {
     let mut child_env = clean_runner_env(nested_runner_scratch("capsule_reachability_filter"));
     child_env.push("SAILFIN_TRACE_CAPSULE_FILTER=1");
-    let exit = process.run_capture([_sfn_bin(), "check", "compiler/tests/fixtures/cli/clean_effect.sfn"], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "check", "compiler/tests/fixtures/cli/clean_effect.sfn"], child_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;

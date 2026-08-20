@@ -16,13 +16,7 @@
 // text, the exact exit code, and that neither an ICE nor a "failing IR"
 // note is emitted. See `.claude/rules/no-bash-e2e.md`.
 import { contains } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -41,7 +35,7 @@ test "test-missing-path: sfn test on an absent .sfn path fails without an ICE" !
     let absent = dir + "/absent_test.sfn";
     if fs.exists(absent) { fs.deleteFile(absent); }
 
-    let rc = process.run_capture([_sfn_bin(), "test", absent], _child_env());
+    let rc = process.run_capture([sfn_bin_path(), "test", absent], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 
@@ -66,7 +60,7 @@ test "test-missing-path: sfn test on an absent .sfn path fails without an ICE" !
 test "test-missing-path: an absent directory is named, not reported as empty" ![io] {
     let dir = _scratch_dir();
     let absent = dir + "/absent-suite-dir";
-    let rc = process.run_capture([_sfn_bin(), "test", absent], _child_env());
+    let rc = process.run_capture([sfn_bin_path(), "test", absent], _child_env());
     let out = process.capture_take_stdout();
 
     assert rc == 2;
@@ -83,7 +77,7 @@ test "test-missing-path: every absent suite path is reported, not just the first
     let dir = _scratch_dir();
     let absent_a = dir + "/absent-a";
     let absent_b = dir + "/absent-b";
-    let rc = process.run_capture([_sfn_bin(), "test", absent_a, "compiler/tests/unit", absent_b], _child_env());
+    let rc = process.run_capture([sfn_bin_path(), "test", absent_a, "compiler/tests/unit", absent_b], _child_env());
     let out = process.capture_take_stdout();
 
     assert rc == 2;

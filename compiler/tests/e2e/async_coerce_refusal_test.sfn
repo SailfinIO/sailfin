@@ -25,17 +25,7 @@
 // The `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test, so output is asserted with `sfn/strings::find`.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point
-// the test at any compiler without editing it.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // `sfn test <fixture>` compiles AND runs the fixture, so the spawned
 // compiler needs a real environment. `process.run_capture` treats an
@@ -65,7 +55,7 @@ let WIDEN_FIXTURE: string = "compiler/tests/e2e/fixtures/async_coerce_widen_basi
 // NEVER run — if "assertion failed" appears, the gate was bypassed, IR
 // was written, and the corrupted call site executed.
 test "async coerce: number→int across await refuses with #556 fix-it" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "test", REFUSE_FIXTURE], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", REFUSE_FIXTURE], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let combined = out + err;
@@ -84,7 +74,7 @@ test "async coerce: number→int across await refuses with #556 fix-it" ![io] {
 // The widening direction stays silent (sitofp): it must compile, run,
 // exit 0, report PASS, and NOT surface the ABI mismatch (no over-refusal).
 test "async coerce: int→number across await keeps silent widening" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "test", WIDEN_FIXTURE], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", WIDEN_FIXTURE], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let combined = out + err;

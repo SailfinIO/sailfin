@@ -19,15 +19,7 @@
 // unusable from an `![io]` test (#842); assert on captured output with
 // `sfn/strings::find` / `.length` instead.
 import { find } from "sfn/strings";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // True when the test runner is a Windows binary (the only platform whose
 // `run_capture` comes from `process_windows.sfn`).
@@ -86,7 +78,7 @@ fn _big_source() -> string {
 // ── Acceptance: sentinel + exit code round-trip ──────────────────────
 test "run_capture (windows): captures a child's stdout sentinel + exit code" ![io] {
     if _is_windows() {
-        let exit = process.run_capture([_sfn_bin(), "guillermo"], _child_env());
+        let exit = process.run_capture([sfn_bin_path(), "guillermo"], _child_env());
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         // The mascot greeting is the sentinel; it may land on stdout or
@@ -105,7 +97,7 @@ test "run_capture (windows): drains > 64KiB child output without deadlock" ![io]
     if _is_windows() {
         let src = _scratch_dir() + "/pw_run_capture_big.sfn";
         fs.writeFile(src, _big_source());
-        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], _child_env());
         let out = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
         if fs.exists(src) { fs.deleteFile(src); }

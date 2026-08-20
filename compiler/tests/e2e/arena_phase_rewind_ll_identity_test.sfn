@@ -10,12 +10,7 @@
 // import-context directory. Drives the compiler-under-test as a subprocess
 // per `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -64,13 +59,13 @@ test "arena phase rewind: LLVM IR output is byte-identical with rewind on vs off
     fs.writeFile(fixture, _fixture_source());
 
     // Rewind ON (default: env var absent).
-    let on_exit = process.run_capture([_sfn_bin(), "emit", "-o", on_ll, "llvm", fixture], _child_env());
+    let on_exit = process.run_capture([sfn_bin_path(), "emit", "-o", on_ll, "llvm", fixture], _child_env());
     let _on_out = process.capture_take_stdout();
     let _on_err = process.capture_take_stderr();
     assert on_exit == 0;
 
     // Rewind OFF (SAILFIN_ARENA_PHASE_REWIND=0).
-    let off_exit = process.run_capture([_sfn_bin(), "emit", "-o", off_ll, "llvm", fixture], _child_env_rewind_off());
+    let off_exit = process.run_capture([sfn_bin_path(), "emit", "-o", off_ll, "llvm", fixture], _child_env_rewind_off());
     let _off_out = process.capture_take_stdout();
     let _off_err = process.capture_take_stderr();
     assert off_exit == 0;
@@ -90,7 +85,7 @@ test "arena phase rewind: emitted IR contains fixture symbols" ![io] {
 
     fs.writeFile(fixture, _fixture_source());
 
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", fixture], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", fixture], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

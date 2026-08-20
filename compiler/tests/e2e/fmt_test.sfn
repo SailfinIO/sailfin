@@ -13,13 +13,8 @@
 // `$()` stripping it). The `sfn/test` `expect_*` matchers are `![pure]`
 // and cannot be called from an `![io]` test, so equality is asserted
 // directly. See `.claude/rules/no-bash-e2e.md` and `guillermo_test.sfn`.
-import { trim_right, find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { find, trim_right } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // Per-test scratch dir: the runner's per-file `SAILFIN_TEST_SCRATCH` when
 // set (keeps fixtures off the repo tree and unique under the parallel
@@ -42,7 +37,7 @@ fn _write_fixture(name: string, input: string) -> string ![io] {
 // normalized formatted output.
 fn _fmt(name: string, input: string) -> string ![io] {
     let path = _write_fixture(name, input);
-    let _exit = process.run_capture([_sfn_bin(), "fmt", path], []);
+    let _exit = process.run_capture([sfn_bin_path(), "fmt", path], []);
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if fs.exists(path) { fs.deleteFile(path); }
@@ -129,7 +124,7 @@ test "fmt: idempotency on effect checker collector" ![io] {
 
 test "fmt: --check detects unformatted file" ![io] {
     let path = _write_fixture("check_diff", "fn   foo( )  ->   string  {  return \"bar\" ;  }");
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", path], []);
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", path], []);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if fs.exists(path) { fs.deleteFile(path); }
@@ -138,11 +133,11 @@ test "fmt: --check detects unformatted file" ![io] {
 
 test "fmt: --check passes on formatted file" ![io] {
     let path = _write_fixture("check_pass", "fn foo() -> string { return \"bar\"; }");
-    let w = process.run_capture([_sfn_bin(), "fmt", "--write", path], []);
+    let w = process.run_capture([sfn_bin_path(), "fmt", "--write", path], []);
     let _wo = process.capture_take_stdout();
     let _we = process.capture_take_stderr();
     assert w == 0;
-    let c = process.run_capture([_sfn_bin(), "fmt", "--check", path], []);
+    let c = process.run_capture([sfn_bin_path(), "fmt", "--check", path], []);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if fs.exists(path) { fs.deleteFile(path); }
@@ -151,11 +146,11 @@ test "fmt: --check passes on formatted file" ![io] {
 
 test "fmt: --write modifies file in place" ![io] {
     let path = _write_fixture("write_mode", "fn   foo( )  ->   string  {  return \"bar\" ;  }");
-    let w = process.run_capture([_sfn_bin(), "fmt", "--write", path], []);
+    let w = process.run_capture([sfn_bin_path(), "fmt", "--write", path], []);
     let _wo = process.capture_take_stdout();
     let _we = process.capture_take_stderr();
     assert w == 0;
-    let c = process.run_capture([_sfn_bin(), "fmt", "--check", path], []);
+    let c = process.run_capture([sfn_bin_path(), "fmt", "--check", path], []);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if fs.exists(path) { fs.deleteFile(path); }
@@ -192,7 +187,7 @@ test "fmt: --check over a directory flags only unformatted files" ![io] {
     fs.writeFile(dir + "/b.sfn", formatted);
     fs.writeFile(dir + "/c.sfn", unformatted);
     fs.writeFile(dir + "/d.sfn", formatted);
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", dir], []);
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", dir], []);
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     // Two files would change → non-zero, and only those are listed.
@@ -209,12 +204,12 @@ test "fmt: --write over a directory formats every file, then --check is clean" !
     fs.writeFile(dir + "/a.sfn", unformatted);
     fs.writeFile(dir + "/b.sfn", unformatted);
     fs.writeFile(dir + "/c.sfn", unformatted);
-    let w = process.run_capture([_sfn_bin(), "fmt", "--write", dir], []);
+    let w = process.run_capture([sfn_bin_path(), "fmt", "--write", dir], []);
     let _wo = process.capture_take_stdout();
     let _we = process.capture_take_stderr();
     assert w == 0;
     // Every file in the directory is now canonical → --check exits 0.
-    let c = process.run_capture([_sfn_bin(), "fmt", "--check", dir], []);
+    let c = process.run_capture([sfn_bin_path(), "fmt", "--check", dir], []);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if fs.exists(dir + "/a.sfn") { fs.deleteFile(dir + "/a.sfn"); }

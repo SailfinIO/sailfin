@@ -10,13 +10,12 @@
 // inherits the full environment (PATH for clang/linker,
 // SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation). Captured
 // output is stashed outside the temporary capsule so it survives teardown.
-import { expect_contains_str, expect_eq_bool, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    sfn_bin_path,
+    expect_contains_str,
+    expect_eq_bool,
+    with_tmp_dir
+} from "sfn/test";
 
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
@@ -44,7 +43,7 @@ fn _build_shadowing_capsule(out_marker: string) -> int ![io] {
             + "fn helper() -> i32 { return 222; }\n"
             + "fn main() -> i32 { return helper(); }\n");
 
-        let build_exit = process.run_capture([_sfn_bin(), "build", "-p", dir], _child_env(),);
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-p", dir], _child_env(),);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         fs.writeFile(out_marker, out + err);

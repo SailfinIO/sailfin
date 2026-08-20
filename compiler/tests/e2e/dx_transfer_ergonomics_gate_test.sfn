@@ -25,12 +25,7 @@
 // scratch dir and driven through real `sfn check` / `sfn build` subprocesses;
 // the `![io]` tests assert on captured stdout+stderr with `sfn/strings`.
 import { contains, find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `process.run_capture`'s empty array is the *empty* environment; thread the
 // variables a nested `sfn build` (clang + linker via PATH) needs, and route its
@@ -198,7 +193,7 @@ struct CheckResult {
 // `output`; a crash surfaces either as an ICE banner or as a non-1 exit.
 fn _check_json(tag: string, src: string) -> CheckResult ![io] {
     let path = _write_fixture(tag, src);
-    let exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "--json", path], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return CheckResult { exit: exit, output: out + err };
@@ -235,7 +230,7 @@ fn _span_in_event(json: string, code: string, span: string) -> boolean {
 // stage that fails and naming the divergence.
 fn _run_corrected(tag: string, src: string) -> Pipeline ![io] {
     let path = _write_fixture(tag, src);
-    let cexit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let cexit = process.run_capture([sfn_bin_path(), "check", "--json", path], _child_env());
     let cout = process.capture_take_stdout();
     let cerr = process.capture_take_stderr();
     if cexit != 0 {
@@ -249,7 +244,7 @@ fn _run_corrected(tag: string, src: string) -> Pipeline ![io] {
     }
     let dir = _scratch_dir();
     let bin = dir + "/" + tag + ".bin";
-    let bexit = process.run_capture([_sfn_bin(), "build", "-o", bin, path], _child_env());
+    let bexit = process.run_capture([sfn_bin_path(), "build", "-o", bin, path], _child_env());
     let bout = process.capture_take_stdout();
     let berr = process.capture_take_stderr();
     if bexit != 0 {

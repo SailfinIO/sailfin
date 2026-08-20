@@ -23,17 +23,12 @@
 // cross-module stubs satisfy the linker for the rest of `string.sfn`; main calls
 // only the three boundary helpers.
 import {
-    find,
     contains,
+    find,
     split,
     starts_with
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -69,7 +64,7 @@ fn _string_path() -> string ![io] {
 fn _emit_string_ll() -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/string.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _string_path()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _string_path()], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -137,7 +132,7 @@ fn _harness_c() -> string {
 
 // ---- typecheck ----
 test "runtime/sfn/string.sfn typechecks cleanly" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", _string_path()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", _string_path()], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

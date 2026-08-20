@@ -8,13 +8,12 @@
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 // alpha: 2 passing tests. beta: 1 passing, 1 failing. Aggregate over
 // both files: total 4, passed 3, failed 1.
@@ -41,7 +40,7 @@ test "subframe aggregation: multi-file --json aggregates from the stream, single
     let code = with_tmp_dir(fn (dir: string) -> int {
         _write_fixtures(dir);
         let scratch = nested_runner_scratch("subframe");
-        let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], clean_runner_env(scratch));
+        let exit = process.run_capture([sfn_bin_path(), "test", dir, "--json"], clean_runner_env(scratch));
         let out = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
 
@@ -90,7 +89,7 @@ test "subframe aggregation: --jobs 2 aggregates match the serial totals, no side
         // side-channel file is ABSENT — a shared scratch cannot mask a
         // stray write, it can only carry one in (SFN-877 precedent).
         let scratch = nested_runner_scratch("subframe");
-        let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "2", "--json"], clean_runner_env(scratch));
+        let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "2", "--json"], clean_runner_env(scratch));
         let out = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
 

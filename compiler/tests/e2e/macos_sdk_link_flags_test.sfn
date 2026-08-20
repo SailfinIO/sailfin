@@ -19,12 +19,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text directly.
 import { contains, find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -83,7 +78,7 @@ test "macos-sdk-link: build carries explicit -isysroot and links under a strippe
     let dir = _scratch_dir();
     let main_path = _write_fixture(dir);
     let bin = dir + "/prog.bin";
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _stripped_traced_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _stripped_traced_env());
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 

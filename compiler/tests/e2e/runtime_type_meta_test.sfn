@@ -16,19 +16,14 @@
 //   6. exports     — the compiler binary carries the defined `sfn_*` symbols.
 //   7. manifest    — runtime/capsule.toml `sfn-sources` lists the module.
 import {
-    find,
-    split,
-    starts_with,
+    char_at_index,
     contains,
     ends_with,
-    char_at_index
+    find,
+    split,
+    starts_with
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. PATH is required for the `nm`
@@ -58,7 +53,7 @@ fn _scratch_dir() -> string ![io] {
 fn _emit_module(tag: string, module_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let outpath = dir + "/" + tag + ".ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return "EMIT_FAILED"; }
@@ -151,7 +146,7 @@ fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
 }
 
 test "runtime/sfn/type_meta.sfn typechecks cleanly" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/type_meta.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "runtime/sfn/type_meta.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -159,7 +154,7 @@ test "runtime/sfn/type_meta.sfn typechecks cleanly" ![io] {
 }
 
 test "runtime/sfn/type_meta.sfn is fmt-canonical" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/type_meta.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", "runtime/sfn/type_meta.sfn"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -225,7 +220,7 @@ test "prelude emission routes type-meta calls through the sfn_* symbols" ![io] {
 }
 
 test "compiler binary exports the defined sfn_* type-meta symbols" ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     assert _nm_has_defined(bin, "sfn_type_register");
     assert _nm_has_defined(bin, "sfn_resolve_type");
     assert _nm_has_defined(bin, "sfn_instance_of");

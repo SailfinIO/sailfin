@@ -4,12 +4,7 @@
 // command tree, not a hand-maintained fixture. This test pins discoverability,
 // top-level command coverage, and deterministic output across runs.
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -27,13 +22,13 @@ fn _assert_top_command(out: string, name: string) {
 }
 
 test "cli help json: stable envelope includes registered top-level commands" ![io] {
-    let exit1 = process.run_capture([_sfn_bin(), "--help", "--json"], _child_env());
+    let exit1 = process.run_capture([sfn_bin_path(), "--help", "--json"], _child_env());
     let out1 = process.capture_take_stdout();
     let err1 = process.capture_take_stderr();
     assert exit1 == 0;
     assert err1.length == 0;
 
-    let exit2 = process.run_capture([_sfn_bin(), "--help", "--json"], _child_env());
+    let exit2 = process.run_capture([sfn_bin_path(), "--help", "--json"], _child_env());
     let out2 = process.capture_take_stdout();
     let err2 = process.capture_take_stderr();
     assert exit2 == 0;

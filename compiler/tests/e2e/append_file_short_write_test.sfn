@@ -1,13 +1,12 @@
 // Regression guard for SFN-577: append reports a short write while
 // preserving the file and all content that preceded the append.
 import { starts_with } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     return clean_runner_env(nested_runner_scratch("append-short-write"));
@@ -34,7 +33,7 @@ test "fs.appendFile reports a short write without deleting existing content" ![i
         + "    return 0;\n"
         + "}\n");
 
-    let build_rc = process.run_capture([_sfn_bin(), "build", probe, "-o", bin], _child_env());
+    let build_rc = process.run_capture([sfn_bin_path(), "build", probe, "-o", bin], _child_env());
     let build_out = process.capture_take_stdout();
     let build_err = process.capture_take_stderr();
     report_child_failure("append short-write probe build", build_rc, build_out, build_err);

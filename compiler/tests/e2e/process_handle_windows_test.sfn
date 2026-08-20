@@ -18,15 +18,7 @@
 // unusable from an `![io]` test (#842); assert on captured output with
 // `sfn/strings::find` / `.length` instead.
 import { find } from "sfn/strings";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // True when the test runner is a Windows binary (the only platform whose
 // process-handle family comes from `process_windows.sfn`).
@@ -95,7 +87,7 @@ test "process handle (windows): spawn failure returns a zero handle" ![io] {
 // ── Acceptance: spawn, read both streams, clean exit ──────────────────
 test "process handle (windows): spawn drains stdout/stderr and waits clean" ![io] {
     if _is_windows() {
-        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
         assert id != 0;
         let out = process.handle_read_stdout(id);
         let err = process.handle_read_stderr(id);
@@ -112,7 +104,7 @@ test "process handle (windows): a live handle with non-zero wait differs from a 
     if _is_windows() {
         let src = _scratch_dir() + "/pw_handle_bad.sfn";
         fs.writeFile(src, "fn broken( {\n");
-        let id = process.spawn_with_env([_sfn_bin(), "check", src], _child_env());
+        let id = process.spawn_with_env([sfn_bin_path(), "check", src], _child_env());
         // Spawn itself succeeds — the child process starts even though its
         // own exit will be non-zero. That is the distinction under test:
         // a live (non-zero) handle whose wait fails, versus a zero handle
@@ -129,7 +121,7 @@ test "process handle (windows): a live handle with non-zero wait differs from a 
 // ── Acceptance: stdin pipe is live, not the old -1 stub ───────────────
 test "process handle (windows): write to child stdin succeeds on a live pipe" ![io] {
     if _is_windows() {
-        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
         assert id != 0;
         // The child ignores stdin entirely; what matters is that the pipe
         // is real (a positive byte count) rather than the degraded -1 stub.
@@ -152,7 +144,7 @@ test "process handle (windows): write to child stdin succeeds on a live pipe" ![
 // ── Acceptance: framed reads assemble the full stream ──────────────────
 test "process handle (windows): framed reads accumulate to a full stdout drain" ![io] {
     if _is_windows() {
-        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
         assert id != 0;
         let mut acc: string = "";
         let mut guard: int = 0;
@@ -179,9 +171,9 @@ test "process handle (windows): several children run concurrently before any wai
         // Spawn all three before waiting on any — this is the acceptance
         // criterion that the handle family supports independent concurrent
         // children rather than serializing them.
-        let id1 = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
-        let id2 = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
-        let id3 = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id1 = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
+        let id2 = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
+        let id3 = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
         assert id1 != 0;
         assert id2 != 0;
         assert id3 != 0;
@@ -225,7 +217,7 @@ test "process handle (windows): drains > 64KiB stdout without wedging stderr" ![
     if _is_windows() {
         let src = _scratch_dir() + "/pw_handle_big.sfn";
         fs.writeFile(src, _big_source());
-        let id = process.spawn_with_env([_sfn_bin(), "emit", "llvm", src], _child_env());
+        let id = process.spawn_with_env([sfn_bin_path(), "emit", "llvm", src], _child_env());
         assert id != 0;
         // The child writes far more than the 64 KiB default pipe buffer to
         // stdout. A reader that pumped only the requested pipe would let the
@@ -246,7 +238,7 @@ test "process handle (windows): drains > 64KiB stdout without wedging stderr" ![
 // ── Acceptance: stdin write after close is refused ────────────────────
 test "process handle (windows): write after close_stdin reports the dead-pipe sentinel" ![io] {
     if _is_windows() {
-        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
         assert id != 0;
         process.handle_close_stdin(id);
         // The zeroed stdin slot is what stops `handle_wait` from
@@ -263,7 +255,7 @@ test "process handle (windows): write after close_stdin reports the dead-pipe se
 // ── Acceptance: kill terminates a live child ──────────────────────────
 test "process handle (windows): kill terminates a live child" ![io] {
     if _is_windows() {
-        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
         assert id != 0;
         let killed = process.handle_kill(id);
         assert killed == 0;
@@ -278,7 +270,7 @@ test "process handle (windows): kill terminates a live child" ![io] {
 // ── Acceptance: Windows fds deliberately stay -1, not a stub ─────────
 test "process handle (windows): stdout/stderr fd accessors stay -1 by design" ![io] {
     if _is_windows() {
-        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id = process.spawn_with_env([sfn_bin_path(), "guillermo"], _child_env());
         assert id != 0;
         // Windows HANDLEs are not POSIX fds; the fd accessors are
         // documented to stay -1 forever on this platform, not a stub

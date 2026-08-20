@@ -13,12 +13,7 @@
 // the mtime-on-hit test drives a real `sfn build` twice because the
 // touch only fires on a genuine cache hit.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch() -> string ![io] {
     let base = env.get("SAILFIN_TEST_SCRATCH");
@@ -49,7 +44,7 @@ fn _run_cache(cache_base: string, args: string[]) -> Run ![io] {
     if path.length > 0 { e.push("PATH=" + path); }
     let home = env.get("HOME");
     if home.length > 0 { e.push("HOME=" + home); }
-    let mut argv: string[] = [_sfn_bin(), "cache"];
+    let mut argv: string[] = [sfn_bin_path(), "cache"];
     let mut i = 0;
     loop {
         if i >= args.length { break; }
@@ -97,7 +92,7 @@ fn _build(cache_base: string, work: string, src: string, out: string) -> Run ![i
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
     e.push("SAILFIN_TEST_SCRATCH=" + work);
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", out, src], e);
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", out, src], e);
     let so = process.capture_take_stdout();
     let se = process.capture_take_stderr();
     return Run { exit: exit, out: so + se };

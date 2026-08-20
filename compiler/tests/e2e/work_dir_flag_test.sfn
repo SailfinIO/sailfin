@@ -18,14 +18,9 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
 // an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 import { build_target_os, target_exe_name } from "../../src/build/target";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // The build spawns a nested clang + linker, so the child needs PATH
 // (+ HOME, TMPDIR). SAILFIN_TEST_SCRATCH routes the program.ll
@@ -74,7 +69,7 @@ fn _make_proj(tag: string) -> string ![io] {
 
 // ---- Test 1: --help lists --work-dir ----
 test "work-dir-flag: sfn build --help lists --work-dir" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "--help"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "--help"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let _ = exit;
@@ -86,7 +81,7 @@ test "work-dir-flag: --work-dir writes default-binary + sailfin/" ![io] {
     let src = _make_proj("layout");
     let work = _scratch_base() + "/sfn-work-dir-flag-layout/wd1";
 
-    let exit = process.run_capture([_sfn_bin(), "build", "--work-dir", work, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "--work-dir", work, src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -112,7 +107,7 @@ test "work-dir-flag: two builds produce byte-identical binaries" ![io] {
         // macOS arm64 Mach-O builds embed non-reproducible data, so the
         // byte-identity AC does not hold there; assert only that the build
         // succeeds (the determinism claim is pinned on Linux below).
-        let exit = process.run_capture([_sfn_bin(), "build", src], _child_env());
+        let exit = process.run_capture([sfn_bin_path(), "build", src], _child_env());
         let _o = process.capture_take_stdout();
         let _e = process.capture_take_stderr();
         assert exit == 0;
@@ -120,7 +115,7 @@ test "work-dir-flag: two builds produce byte-identical binaries" ![io] {
         // The driver's own NUL-safe `--check-determinism` builds twice into
         // sibling work-dirs and compares the binary sha256 internally; it
         // reports `[determinism] match:` and exits 0 when byte-identical.
-        let exit = process.run_capture([_sfn_bin(), "build", "--check-determinism", src], _child_env());
+        let exit = process.run_capture([sfn_bin_path(), "build", "--check-determinism", src], _child_env());
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         assert exit == 0;
@@ -133,7 +128,7 @@ test "work-dir-flag: explicit -o build produces the binary" ![io] {
     let src = _make_proj("default");
     let out_bin = _scratch_base() + "/sfn-work-dir-flag-default/program";
 
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", out_bin, src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

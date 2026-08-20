@@ -25,12 +25,7 @@
 // cannot be called from an `![io]` test like these. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
 import { split, starts_with } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned compiler. `process.run_capture` treats an
 // empty array as the *empty* environment (not "inherit"), so the relevant
@@ -62,7 +57,7 @@ fn _scratch_dir() -> string ![io] {
 // emitted IR text, or "" on emit failure.
 fn _emit_prelude_ir(ll: string) -> string ![io] {
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/prelude", "-o", ll, "llvm", "runtime/prelude.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "--module-name", "runtime/prelude", "-o", ll, "llvm", "runtime/prelude.sfn"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }

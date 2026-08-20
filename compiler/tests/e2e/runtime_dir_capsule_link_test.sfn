@@ -18,12 +18,7 @@
 // with sfn/strings predicates — the sfn/test expect_* matchers are ![pure] and
 // cannot be used from an ![io] test.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Inherit the full parent environment: the nested build links `-lm` (the
 // probe imports sfn/math), and a minimal PATH/HOME/TMPDIR set links on Linux
@@ -61,7 +56,7 @@ fn _ensure_fixture() ![io] {
 test "runtime dir: bare file under a nested runtime/ dir links its capsule dep" ![io] {
     _ensure_fixture();
     let bin = _out_bin();
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, _probe_path()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, _probe_path()], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     // The SFN-215 regression is a link failure whose signature is
@@ -76,7 +71,7 @@ test "runtime dir: bare file under a nested runtime/ dir links its capsule dep" 
 test "runtime dir: the linked binary runs and reaches its capsule dep" ![io] {
     _ensure_fixture();
     let bin = _out_bin();
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, _probe_path()], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, _probe_path()], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;

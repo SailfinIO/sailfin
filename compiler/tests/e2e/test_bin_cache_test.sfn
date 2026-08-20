@@ -40,12 +40,7 @@
 // cache contract. The four legs below fully cover the hit/miss/store/bust
 // behavior.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child env for the nested `sfn test`: PATH (clang/linker for any lower),
 // HOME, TMPDIR, the inherited SAILFIN_TEST_SCRATCH, plus the dedicated
@@ -72,7 +67,7 @@ fn _suite_env(cache_dir: string) -> string[] ![io] {
 // no per-file subprocess fan-out) so the cache read/write and the `cache`
 // summary object are exercised directly.
 fn _run_suite(test_dir: string, cache_dir: string, extra: string[]) -> string ![io] {
-    let mut argv: string[] = [_sfn_bin(), "test", test_dir, "--json"];
+    let mut argv: string[] = [sfn_bin_path(), "test", test_dir, "--json"];
     let mut i = 0;
     loop {
         if i >= extra.length { break; }

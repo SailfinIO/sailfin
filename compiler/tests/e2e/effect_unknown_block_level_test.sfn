@@ -10,13 +10,8 @@
 // asserted with `sfn/strings` predicates, matching
 // `check_json_schema_test.sfn`. The `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from this `![io]` test.
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // Pure-frontend `sfn check` needs no clang, but thread PATH/HOME so a
 // constrained CI shell still resolves anything the frontend touches.
@@ -62,7 +57,7 @@ fn _write(root: string, name: string, source: string) -> string ![io] {
 }
 
 fn _check(path: string) -> CheckRun ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "--json", path], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return CheckRun { exit: exit, out: out, err: err };

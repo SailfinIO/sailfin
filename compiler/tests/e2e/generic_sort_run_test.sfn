@@ -21,12 +21,7 @@
 // for clang/ld, SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation
 // under the parallel pool).
 import { contains, find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
@@ -42,7 +37,7 @@ fn _emit_ir(fixture: string, tag: string) -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/sfn-sort-" + tag + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", fixture], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -58,7 +53,7 @@ fn _build_and_run(fixture: string, tag: string, marker: string) -> int ![io] {
     let dir = _scratch_dir();
     let bin = dir + "/sfn-sort-bin-" + tag;
     if fs.exists(bin) { fs.deleteFile(bin); }
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, fixture], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, fixture], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     if build_exit != 0 { return -100; }

@@ -28,13 +28,7 @@ import {
     parse_int,
     trim
 } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // Full ambient environment — used ONLY for the clang/bash relink steps and
 // for running the produced native binaries below. Neither is a nested `sfn`
@@ -100,7 +94,7 @@ fn _build_churn(dir: string, label: string, iters: int, work_dir: string) -> str
     let bin = dir + "/" + label + "_bin";
     let build_env = clean_runner_env(nested_runner_scratch("channel-nursery-"
         + label));
-    let exit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", bin, src], build_env);
+    let exit = process.run_capture([sfn_bin_path(), "build", "--work-dir", work_dir, "-o", bin, src], build_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if exit != 0 {

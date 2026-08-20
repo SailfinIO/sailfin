@@ -8,17 +8,12 @@
 // `sfn dev bootstrap fingerprint` subcommand; this file now drives that
 // subcommand directly instead of shelling out to the script.
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `sfn dev bootstrap fingerprint <root>` prints ONLY the hex digest on
 // stdout.
 fn _fingerprint(root: string) -> string ![io] {
-    let _exit = process.run_capture([_sfn_bin(), "dev", "bootstrap", "fingerprint", root], []);
+    let _exit = process.run_capture([sfn_bin_path(), "dev", "bootstrap", "fingerprint", root], []);
     let output = process.capture_take_stdout();
     let _error = process.capture_take_stderr();
     return output;

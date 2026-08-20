@@ -14,20 +14,12 @@ import {
     substring,
     trim_right
 } from "sfn/strings";
-import { clean_runner_env, with_tmp_dir } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _run(path: string) -> string ![io] {
     let mut output: string = "";
     let outcome = with_tmp_dir(fn (dir: string) -> int {
-        let exit = process.run_capture([_sfn_bin(), "run", path], clean_runner_env(dir));
+        let exit = process.run_capture([sfn_bin_path(), "run", path], clean_runner_env(dir));
         output = trim_right(process.capture_take_stdout());
         let _err = process.capture_take_stderr();
         return exit;
@@ -60,7 +52,7 @@ test "hof: named function values pass, return, deduplicate, and dispatch" ![io] 
 test "hof: named function value IR has one tail-call adapter and preserves direct calls" ![io] {
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         let raw_ll = dir + "/named-fn-value.ll";
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", raw_ll, "llvm", "compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn"], clean_runner_env(dir));
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", raw_ll, "llvm", "compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn"], clean_runner_env(dir));
         let _out = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
         assert exit == 0;
@@ -97,7 +89,7 @@ test "hof: direct-only named call emits no function-value adapter or pair" ![io]
         let source_path = dir + "/direct-only.sfn";
         let raw_ll = dir + "/direct-only.ll";
         fs.writeFile(source_path, "fn worker(x: int) -> int { return x + 1; } fn main() -> int { return worker(5); }");
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", raw_ll, "llvm", source_path], clean_runner_env(dir));
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", raw_ll, "llvm", source_path], clean_runner_env(dir));
         let _out = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
         assert exit == 0;
@@ -120,7 +112,7 @@ test "hof: named function value adapter is frame-free at O2" ![io] {
     }
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         let raw_ll = dir + "/named-fn-value.ll";
-        let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", raw_ll, "llvm", "compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn"], clean_runner_env(dir));
+        let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", raw_ll, "llvm", "compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn"], clean_runner_env(dir));
         let _emit_out = process.capture_take_stdout();
         let _emit_err = process.capture_take_stderr();
         assert emit_exit == 0;

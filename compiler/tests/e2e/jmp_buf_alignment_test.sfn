@@ -44,13 +44,7 @@
 // `clean_runner_env(nested_runner_scratch(...))` so the child cannot bind
 // to the parent pool's state (SFN-401).
 import { contains, split } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // A `try`/`catch` inside `main` exercises both the `@main` wrapper's own
 // exception frame and the try block's own frame + jmp_buf, so a single
@@ -81,7 +75,7 @@ fn _emit_try_fixture(target_os: string, label: string) -> string ![io] {
         child_env.push("SAILFIN_TARGET_OS=" + target_os);
     }
     let ll = scratch + "/out.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], child_env);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -128,7 +122,7 @@ fn _emit_harness_ir(label: string) -> string ![io] {
     fs.writeFile(src, _harness_fixture_source());
     let mut child_env = clean_runner_env(scratch);
     child_env.push("SAILFIN_TEST_KEEP_SCRATCH=1");
-    let exit = process.run_capture([_sfn_bin(), "test", "--no-test-cache", src], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "test", "--no-test-cache", src], child_env);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }

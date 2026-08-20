@@ -10,13 +10,12 @@
 // phase so the seam is scoped to that fixture and never affects the test
 // runner or compiler allocations.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _fixture_source() -> string {
     return "fn _drain() -> string ![io] {\n"
@@ -79,7 +78,7 @@ test "framed consume: allocation failures terminate and never expose uncompacted
     fs.writeFile(source, _fixture_source());
 
     let build_env = clean_runner_env(scratch);
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binary, source], build_env);
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binary, source], build_env);
     let build_out = process.capture_take_stdout();
     let build_err = process.capture_take_stderr();
     report_child_failure("SFN-505 fixture build", build_exit, build_out, build_err);

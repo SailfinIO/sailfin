@@ -31,12 +31,7 @@
 // and the build cache routes per-invocation (#1333). Mirrors
 // check_build_agree_module_global_test.sfn.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Inherit the full parent environment so the nested clang/ld the build
 // spawns find their toolchain (#1410), and SAILFIN_TEST_SCRATCH routes
@@ -104,7 +99,7 @@ test "push in struct method body lowers under per-module emit and runs (#1700)" 
     // lowered with the others' `.sfn-asm` as import context. This is where
     // the `cannot resolve return type for call to 'args.push'` abort used
     // to surface on the `builder` module.
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", dir, "-o", binpath], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-p", dir, "-o", binpath], _child_env());
     let build_out = process.capture_take_stdout();
     let build_err = process.capture_take_stderr();
 

@@ -12,12 +12,7 @@
 // Mirrors check_build_agree_module_global_test.sfn's process/env/scratch
 // hygiene for the parallel test pool (`.claude/rules/no-bash-e2e.md`).
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Inherit the full parent environment so the nested `sfn check` toolchain
 // resolves normally under the parallel pool.
@@ -41,7 +36,7 @@ test "check/build agree: unknown method on primitive is rejected by check (E0012
         + "fn main() -> int { let _ = u(\"h\"); return 0; }";
     let srcpath = _write_scratch("sfn-385-e0012.sfn", source);
 
-    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], _child_env());
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
 
@@ -55,7 +50,7 @@ test "check/build agree: malformed array type is rejected by check (E0830, SFN-3
     let source = "fn main() -> int { let xs: []string = []; return 0; }";
     let srcpath = _write_scratch("sfn-385-e0830.sfn", source);
 
-    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], _child_env());
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
 
@@ -69,7 +64,7 @@ test "check/build agree: int+float arithmetic mix is rejected by check (E0306, S
     let source = "fn main() -> int { let a: int = 3; let b: float = 2.0; let c = a + b; return 0; }";
     let srcpath = _write_scratch("sfn-385-e0306.sfn", source);
 
-    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], _child_env());
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
 
@@ -89,7 +84,7 @@ test "check/build agree: uninferable generic static constructor is rejected by c
         + "fn main() -> int { let n = List.new(); return 0; }";
     let srcpath = _write_scratch("sfn-404-e0833.sfn", source);
 
-    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 

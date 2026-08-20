@@ -18,13 +18,7 @@
 // executable, no ICE noise). The `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from these `![io]` tests.
 import { contains } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // Pure-frontend `sfn check` needs no clang, but thread PATH/HOME so a
 // constrained CI shell still resolves anything the frontend touches.
@@ -75,7 +69,7 @@ fn _write(root: string, name: string, source: string) -> string ![io] {
 }
 
 fn _check(path: string) -> CheckRun ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "--json", path], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return CheckRun { exit: exit, out: out, err: err };
@@ -103,7 +97,7 @@ fn _build_broken(marker: string) -> int ![io] {
         let source = "fn parse_int(token: string) -> int {\n    let mut idx = 0;\n    let mut neg = false;\n\n    if token.length > 0 {\n        let{\n";
         fs.writeFile(srcpath, source);
         let binpath = dir + "/out.bin";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _build_child_env());
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _build_child_env());
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let bin_marker = "no";

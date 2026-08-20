@@ -16,13 +16,8 @@
 // NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -54,7 +49,7 @@ fn _repo_root() -> string ![io] {
 // ---- Test 1: typecheck ----
 test "runtime/sfn/memory/ownedbuf.sfn typechecks cleanly" ![io] {
     let skeleton = _repo_root() + "/runtime/sfn/memory/ownedbuf.sfn";
-    let exit = process.run_capture([_sfn_bin(), "check", skeleton], _env());
+    let exit = process.run_capture([sfn_bin_path(), "check", skeleton], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -64,7 +59,7 @@ test "runtime/sfn/memory/ownedbuf.sfn typechecks cleanly" ![io] {
 // ---- Test 2: fmt ----
 test "runtime/sfn/memory/ownedbuf.sfn is fmt-canonical" ![io] {
     let skeleton = _repo_root() + "/runtime/sfn/memory/ownedbuf.sfn";
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", skeleton], _env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", skeleton], _env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
@@ -75,7 +70,7 @@ test "sfn emit llvm pins OwnedBuf/Slice aggregate layouts and nine function defi
     let dir = _scratch("emit");
     let skeleton = _repo_root() + "/runtime/sfn/memory/ownedbuf.sfn";
     let out_ll = dir + "/ownedbuf.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", skeleton], _env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", skeleton], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -103,7 +98,7 @@ test "ownedbuf.ll declares malloc / memcpy / sfn_arena_sfn_alloc / sfn_arena_sfn
     let out_ll = dir + "/ownedbuf.ll";
     if !fs.exists(out_ll) {
         let skeleton = _repo_root() + "/runtime/sfn/memory/ownedbuf.sfn";
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", skeleton], _env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", skeleton], _env());
         let _ = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
         assert exit == 0;
@@ -123,13 +118,13 @@ test "new → append → byte_at → grow → slice roundtrip (C harness via cla
     let ownedbuf_ll = dir + "/ownedbuf.ll";
     let arena_ll = dir + "/arena.ll";
 
-    let e1 = process.run_capture([_sfn_bin(), "emit", "-o", ownedbuf_ll, "llvm", _repo_root()
+    let e1 = process.run_capture([sfn_bin_path(), "emit", "-o", ownedbuf_ll, "llvm", _repo_root()
         + "/runtime/sfn/memory/ownedbuf.sfn"], _env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert e1 == 0;
 
-    let e2 = process.run_capture([_sfn_bin(), "emit", "-o", arena_ll, "llvm", _repo_root()
+    let e2 = process.run_capture([sfn_bin_path(), "emit", "-o", arena_ll, "llvm", _repo_root()
         + "/runtime/sfn/memory/arena.sfn"], _env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();

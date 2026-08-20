@@ -43,13 +43,8 @@
 //
 // NOTE on matchers: `sfn/test`'s `expect_*` are `![pure]` and cannot be
 // called from an `![io]` test; assert on captured output with `sfn/strings`.
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment, not "inherit".
 // Thread the toolchain variables: the legs spawn clang + its linker (PATH),
@@ -102,7 +97,7 @@ fn _emit_serve_ll() -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/serve.ll";
     if !fs.exists(ll) {
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _serve_path()], _child_env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _serve_path()], _child_env());
         let _o = process.capture_take_stdout();
         let _e = process.capture_take_stderr();
         assert exit == 0;

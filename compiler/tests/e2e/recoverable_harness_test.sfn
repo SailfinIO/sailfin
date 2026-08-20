@@ -24,13 +24,7 @@
 // `nested_runner_scratch` (`sfn/test`) build that clean env; the shared key
 // set and its rationale live in `fixtures.sfn` (SFN-401).
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 struct TestRun {
     exit: int,
@@ -42,7 +36,7 @@ struct TestRun {
 fn _run_json(src: string) -> TestRun ![io] {
     let dir = fs.mkdtemp("sfn-recoverable-");
     fs.writeFile(dir + "/recoverable_test.sfn", src);
-    let argv: string[] = [_sfn_bin(), "test", dir, "--json", "--no-test-cache"];
+    let argv: string[] = [sfn_bin_path(), "test", dir, "--json", "--no-test-cache"];
     let exit = process.run_capture(argv, clean_runner_env(nested_runner_scratch("nested-runner")));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();

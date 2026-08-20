@@ -38,12 +38,7 @@
 // compound operand falls back to the signed form (SFEP-0058 §3.3, SFN-501).
 // `==`/`!=`, `<<`, `&`, `|`, `^` are sign-independent and unchanged.
 import { contains, split, starts_with } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn emit`. `process.run_capture` treats
 // an empty array as the *empty* environment (not "inherit"), so the relevant
@@ -109,7 +104,7 @@ fn _emit_body(source: string, header_prefix: string, tag: string) -> string ![io
     let ll = dir + "/sfn-cast-" + tag + ".ll";
     fs.writeFile(src, source);
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -128,7 +123,7 @@ fn _build_and_run_source(source: string, tag: string) -> int ![io] {
     let bin = dir + "/sfn-cast-" + tag;
     fs.writeFile(src, source);
     if fs.exists(bin) { fs.deleteFile(bin); }
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, src], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, src], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     if build_exit != 0 {
@@ -361,7 +356,7 @@ test "numeric-cast: ptr → bool is rejected (not ptrtoint)" ![io] {
     let ll = dir + "/sfn-cast-ptr_to_bool.ll";
     fs.writeFile(src, "fn isset(x: *u8) -> bool { return x as bool; }");
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);

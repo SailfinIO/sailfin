@@ -19,13 +19,8 @@
 //
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak (the outer SAILFIN_TEST_SCRATCH is threaded through deliberately).
 fn _child_env() -> string[] ![io] {
@@ -92,11 +87,11 @@ fn _count_occurrences(haystack: string, needle: string) -> int {
 test "human mode: --jobs 4 banner tally matches --jobs 1 (#1236)" ![io] {
     let dir = _make_pass_dir("t1");
 
-    let serial_exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
+    let serial_exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
     let serial_out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
-    let pool_exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "4"], _child_env());
+    let pool_exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "4"], _child_env());
     let pool_out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -119,11 +114,11 @@ test "human mode: --jobs 4 banner tally matches --jobs 1 (#1236)" ![io] {
 test "--json: --jobs 4 aggregates match --jobs 1 (single frame) (#1236)" ![io] {
     let dir = _make_pass_dir("t2");
 
-    let serial_exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1", "--json"], _child_env());
+    let serial_exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1", "--json"], _child_env());
     let serial_out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
-    let pool_exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "4", "--json"], _child_env());
+    let pool_exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "4", "--json"], _child_env());
     let pool_out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -153,7 +148,7 @@ test "--json: --jobs 4 aggregates match --jobs 1 (single frame) (#1236)" ![io] {
 test "--jobs 2: failing file propagates non-zero, single frame (#1236)" ![io] {
     let dir = _make_fail_dir("t3");
 
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "2", "--json"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "2", "--json"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -179,25 +174,25 @@ test "invalid --jobs values are usage errors (exit 2) (#1236)" ![io] {
     fs.writeFile(dir + "/dummy_test.sfn", "test \"dummy\" { assert 1 == 1; }\n");
 
     // 0 is out of range [1, 256].
-    let rc0 = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "0"], _child_env());
+    let rc0 = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "0"], _child_env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert rc0 == 2;
 
     // Garbage string.
-    let rcg = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "garbage"], _child_env());
+    let rcg = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "garbage"], _child_env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert rcg == 2;
 
     // 257 is out of range [1, 256].
-    let rc257 = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "257"], _child_env());
+    let rc257 = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "257"], _child_env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert rc257 == 2;
 
     // Missing value after --jobs.
-    let rcm = process.run_capture([_sfn_bin(), "test", dir, "--jobs"], _child_env());
+    let rcm = process.run_capture([sfn_bin_path(), "test", dir, "--jobs"], _child_env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert rcm == 2;

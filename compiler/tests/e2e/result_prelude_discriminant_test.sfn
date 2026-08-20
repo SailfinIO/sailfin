@@ -19,16 +19,7 @@
 // over the captured `.ll` text. (Making the matchers usable from `![io]`
 // tests is tracked against #842.)
 import { contains, split } from "sfn/strings";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point the
-// test at any compiler without editing it.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _fixture() -> string {
     return "compiler/tests/e2e/fixtures/result_prelude_discriminant.sfn";
@@ -66,7 +57,7 @@ fn _emit_llvm(fixture: string, tag: string) -> string ![io] {
     fs.createDirectory(dir, true);
     let ll = dir + "/sfn-result-prelude-" + tag + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", fixture], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }

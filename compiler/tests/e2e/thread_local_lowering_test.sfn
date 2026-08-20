@@ -25,13 +25,8 @@
 // matchers are `![pure]` and cannot be called from an `![io]` test (#842).
 // The pthread roundtrips skip (not fail) when clang/pthread is
 // unavailable; the IR-shape pins still carry the contract.
-import { find, contains, starts_with } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find, starts_with } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -101,7 +96,7 @@ fn _emit_ir(tag: string, src_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let out_path = dir + "/" + tag + ".ll";
     if fs.exists(out_path) { fs.deleteFile(out_path); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", src_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_path, "llvm", src_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -135,7 +130,7 @@ test "thread_local let without mut reports E0807 with a missing-mut hint" ![io] 
     let dir = _scratch_dir();
     let src = dir + "/immutable_tls.sfn";
     fs.writeFile(src, "thread_local let frame: i64 = 0;\n\nfn main() -> i32 {\n    return 0;\n}\n");
-    let exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let combined = out + err;
@@ -148,7 +143,7 @@ test "thread_local let mut is accepted by typecheck" ![io] {
     let dir = _scratch_dir();
     let src = dir + "/mutable_tls.sfn";
     fs.writeFile(src, "thread_local let mut frame: i64 = 0;\n\nfn main() -> i32 {\n    return 0;\n}\n");
-    let exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -289,7 +284,7 @@ test "two pthreads pushing exception.sfn frames see isolated chain heads" ![io] 
     // can't be built (IR pins still hold).
     let tm_ll = dir + "/type_meta.ll";
     if fs.exists(tm_ll) { fs.deleteFile(tm_ll); }
-    let tm_emit = process.run_capture([_sfn_bin(), "emit", "-o", tm_ll, "llvm", "runtime/sfn/type_meta.sfn"], _child_env());
+    let tm_emit = process.run_capture([sfn_bin_path(), "emit", "-o", tm_ll, "llvm", "runtime/sfn/type_meta.sfn"], _child_env());
     let _t1 = process.capture_take_stdout();
     let _t2 = process.capture_take_stderr();
     if tm_emit != 0 { return; }

@@ -7,13 +7,7 @@
 // via a nested `sfn build`, so the child env carries PATH (clang + linker) and
 // SAILFIN_TEST_SCRATCH (build-cache isolation under the parallel pool).
 import { find } from "sfn/strings";
-import { nested_runner_scratch, report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { nested_runner_scratch, report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -42,7 +36,7 @@ test "bench: runtime mode builds a benchmarks/runtime workload and reports a tab
     let work = nested_runner_scratch("bench-runtime-table");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--work-dir", work], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("bench runtime table", exit, out, err);
@@ -66,7 +60,7 @@ test "bench: --csv writes the perf-history schema header and a workload row" ![i
     let work = nested_runner_scratch("bench-runtime-csv");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--csv", csv, "--work-dir", work], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--csv", csv, "--work-dir", work], _child_env());
     let o = process.capture_take_stdout();
     let e = process.capture_take_stderr();
     report_child_failure("bench runtime --csv", exit, o, e);
@@ -87,7 +81,7 @@ test "bench: an unmeetable memory budget exits 2" ![io, clock] {
     let work = nested_runner_scratch("bench-runtime-budget");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--budget-mem", "1", "--work-dir", work], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--budget-mem", "1", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 2;
@@ -95,7 +89,7 @@ test "bench: an unmeetable memory budget exits 2" ![io, clock] {
 }
 
 test "bench: a path with no workloads exits 1" ![io, clock] {
-    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/does-not-exist"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "bench", "benchmarks/does-not-exist"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 1;

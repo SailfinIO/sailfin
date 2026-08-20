@@ -17,12 +17,7 @@
 // cannot be called from an `![io]` test like these. Assert on the captured
 // `.ll` text with `sfn/strings::contains` instead (#842).
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn` invocations. `process.run_capture`
 // treats an empty array as the *empty* environment (not "inherit"), so the
@@ -56,7 +51,7 @@ fn _emit_llvm(path: string, tag: string) -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/sfn-runtime-array-" + tag + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -67,7 +62,7 @@ fn _emit_llvm(path: string, tag: string) -> string ![io] {
 }
 
 test "runtime-array: sfn check runtime/sfn/array.sfn is clean" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/array.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "runtime/sfn/array.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -75,7 +70,7 @@ test "runtime-array: sfn check runtime/sfn/array.sfn is clean" ![io] {
 }
 
 test "runtime-array: sfn fmt --check runtime/sfn/array.sfn is canonical" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/array.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", "runtime/sfn/array.sfn"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

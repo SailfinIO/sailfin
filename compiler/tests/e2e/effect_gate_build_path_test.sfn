@@ -20,12 +20,7 @@
 // the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test. (#842.)
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // A private scratch dir under the runner's scratch (or /tmp), keyed by
 // `tag` so concurrent tests in the parallel pool never collide.
@@ -46,7 +41,7 @@ struct EmitRun {
 // stops at the textual `.ll` output (no clang/linker), so the empty child
 // env is sufficient.
 fn _emit(args: string[]) -> EmitRun ![io] {
-    let mut argv: string[] = [_sfn_bin()];
+    let mut argv: string[] = [sfn_bin_path()];
     let mut i = 0;
     loop {
         if i >= args.length { break; }

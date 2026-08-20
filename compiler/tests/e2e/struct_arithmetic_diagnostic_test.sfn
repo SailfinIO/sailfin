@@ -3,13 +3,7 @@
 // SFN-584: proven struct arithmetic must fail in the frontend with a
 // diagnostic anchored on the operator in both `check` and `build`.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 fn _source() -> string {
     return "struct Point {\n" + "    x: int;\n" + "}\n\n" + "fn main() {\n"
@@ -24,7 +18,7 @@ fn _run(command: string) -> string ![io] {
     let source_path = dir + "/struct-arithmetic.sfn";
     let binary_path = dir + "/program";
     fs.writeFile(source_path, _source());
-    let mut args = [_sfn_bin(), command];
+    let mut args = [sfn_bin_path(), command];
     if command == "build" {
         args.push("-o");
         args.push(binary_path);

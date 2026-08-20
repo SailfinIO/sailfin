@@ -28,12 +28,7 @@
 // unusable from an `![io]` test, so output is asserted with
 // `sfn/strings::find`.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Base child env for the spawned `sfn run`: PATH/HOME/TMPDIR so the
 // nested build finds clang + linker, SAILFIN_TEST_SCRATCH so the cache
@@ -57,7 +52,7 @@ fn _base_env() -> string[] ![io] {
 // return the captured stderr (where the arena-stats line lands; the
 // example's own output goes to stdout).
 fn _arena_stats(child_env: string[]) -> string ![io] {
-    let _exit = process.run_capture([_sfn_bin(), "run", "examples/basics/hello-world.sfn"], child_env);
+    let _exit = process.run_capture([sfn_bin_path(), "run", "examples/basics/hello-world.sfn"], child_env);
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return err;

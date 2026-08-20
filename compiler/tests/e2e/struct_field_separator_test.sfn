@@ -21,13 +21,7 @@
 // cannot be called from an `![io]` test like these. Assert on the captured
 // text with `sfn/strings` predicates instead. (#842.)
 import { contains } from "sfn/strings";
-import { report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
@@ -54,7 +48,7 @@ fn _emit(source: string, tag: string, kind: string, ext: string) -> string ![io]
     let out = dir + "/sfn-struct-sep-" + tag + ext;
     fs.writeFile(src, source);
     if fs.exists(out) { fs.deleteFile(out); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, kind, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, kind, src], _child_env());
     let o = process.capture_take_stdout();
     let e = process.capture_take_stderr();
     fs.deleteFile(src);
@@ -76,7 +70,7 @@ fn _run(source: string, tag: string) -> string ![io] {
     let dir = _scratch_dir();
     let src = dir + "/sfn-struct-sep-run-" + tag + ".sfn";
     fs.writeFile(src, source);
-    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);

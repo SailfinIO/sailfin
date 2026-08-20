@@ -23,16 +23,7 @@
 //      when `python3`/`timeout` are unavailable (the tool-probe SKIP
 //      pattern the e2e rules establish).
 import { contains } from "sfn/strings";
-import { first_present_tool, tool_present } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from (mirrors
-// `sfn/test`'s own `_resolve_sfn_bin`).
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { first_present_tool, sfn_bin_path, tool_present } from "sfn/test";
 
 // A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
 // under the parallel pool; `/tmp` is the standalone fallback.
@@ -69,7 +60,7 @@ fn _installed(store: string, ver: string) -> boolean ![io] {
 }
 
 test "toolchain install: missing version is a usage error" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "toolchain", "install"], _env_with([]));
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install"], _env_with([]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     // The `sfn/cli` parser owns arg validation: a missing required
@@ -82,7 +73,7 @@ test "toolchain install: missing version is a usage error" ![io] {
 test "toolchain install: a non-version string is rejected with no store entry" ![io] {
     let store = _scratch_root() + "/reject-store";
     process.run(["rm", "-rf", store]);
-    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", "not-a-version"], _env_with(["INSTALL_BASE="
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", "not-a-version"], _env_with(["INSTALL_BASE="
         + store]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -100,7 +91,7 @@ test "toolchain install: a path-traversal version cannot escape the store" ![io]
     process.run(["rm", "-rf", sentinel]);
     // `../` components would let a naive `<base>/<ver>` join write outside
     // the store; the semver validity gate must reject the version first.
-    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", "../traversal-sentinel/pwned"], _env_with(["INSTALL_BASE="
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", "../traversal-sentinel/pwned"], _env_with(["INSTALL_BASE="
         + store]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -117,7 +108,7 @@ test "toolchain install: an unfetchable version fails closed with nothing stored
     // command must abort non-zero and write nothing — no network guard
     // needed because the asserted invariant holds in both cases.
     let ver = "0.0.0-nonexistent-e2e.1";
-    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
         + store]));
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
@@ -187,7 +178,7 @@ test "toolchain install: a bad signature is refused before extraction" ![io] {
         return;
     }
 
-    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
         + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
         + base]));
     let out = process.capture_take_stdout();
@@ -251,7 +242,7 @@ test "toolchain install: a signed manifest refuses an asset digest mismatch" ![i
         return;
     }
 
-    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
         + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
         + base]));
     let out = process.capture_take_stdout();

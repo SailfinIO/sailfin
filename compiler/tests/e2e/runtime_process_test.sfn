@@ -23,13 +23,8 @@
 // NOTE: assert on captured output / emitted IR with `sfn/strings`
 // predicates (the `sfn/test` `expect_*` matchers are `![pure]` and cannot
 // be called from an `![io]` test). (#842.)
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // The Sailfin-native process runtime module, relative to the repo root the
 // runner starts from.
@@ -47,7 +42,7 @@ fn _scratch() -> string ![io] {
 
 // ---- Test 1: `sfn check` passes on the process runtime module ----
 test "runtime/process: sfn check reports ok" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", _skeleton()], []);
+    let exit = process.run_capture([sfn_bin_path(), "check", _skeleton()], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -59,7 +54,7 @@ test "runtime/process: sfn check reports ok" ![io] {
 
 // ---- Test 2: `sfn fmt --check` is canonical ----
 test "runtime/process: sfn fmt --check is canonical" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _skeleton()], []);
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", _skeleton()], []);
     let _ = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -68,7 +63,7 @@ test "runtime/process: sfn fmt --check is canonical" ![io] {
 // ---- Test 3: emit shape — sfn_process_run define + posix_spawnp/waitpid ----
 test "runtime/process: emit produces sfn_process_run define + posix calls" ![io] {
     let ll = _scratch() + "/process.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _skeleton()], []);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _skeleton()], []);
     let _ = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -90,7 +85,7 @@ test "runtime/process: emit declares libc + posix externs" ![io] {
     let ll = _scratch() + "/process.ll";
     // Reuse the IR from test 3 if present; otherwise emit it.
     if !fs.exists(ll) {
-        let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _skeleton()], []);
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _skeleton()], []);
         let _ = process.capture_take_stdout();
         let _e = process.capture_take_stderr();
         assert exit == 0;
@@ -108,7 +103,7 @@ test "runtime/process: user emission calls @sfn_process_run" ![io] {
     let driver = dir + "/driver.sfn";
     fs.writeFile(driver, "fn main() -> int ![io] {\n    let rc = process.run([\"echo\", \"hello\"]);\n    return rc;\n}\n");
     let ll = dir + "/driver.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", driver], []);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", driver], []);
     let _ = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

@@ -26,12 +26,7 @@
 // from an `![io]` test (#842). The summary prints to stderr (#915);
 // `run_capture` splits the streams so we concatenate stdout+stderr.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child env for a nested build: PATH (clang/linker), HOME, TMPDIR, the
 // inherited SAILFIN_TEST_SCRATCH, plus a dedicated shared cache root so the
@@ -88,7 +83,7 @@ test "build --clean recompiles the work-dir runtime object cache (SFN-14)" ![io]
     let objdir = work + "/sailfin";
 
     // A: cold build populates the work-dir-local runtime object cache.
-    let exit_a = process.run_capture([_sfn_bin(), "build", src, "-o", out, "--work-dir", work], _build_env(cache));
+    let exit_a = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--work-dir", work], _build_env(cache));
     let _out_a = process.capture_take_stdout();
     let _err_a = process.capture_take_stderr();
     assert exit_a == 0;
@@ -97,7 +92,7 @@ test "build --clean recompiles the work-dir runtime object cache (SFN-14)" ![io]
 
     // B: warm rebuild, SAME work-dir, no `--clean` -> local cache hits,
     // so the runtime objects are NOT recompiled: misses=0.
-    let exit_b = process.run_capture([_sfn_bin(), "build", src, "-o", out, "--work-dir", work], _build_env(cache));
+    let exit_b = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--work-dir", work], _build_env(cache));
     let out_b = process.capture_take_stdout();
     let err_b = process.capture_take_stderr();
     assert exit_b == 0;
@@ -108,7 +103,7 @@ test "build --clean recompiles the work-dir runtime object cache (SFN-14)" ![io]
     // C: `--clean` rebuild, SAME work-dir -> SFN-14 wipes the local
     // `.o`/`.key`, so the runtime objects recompile from scratch. The
     // build must still succeed AND the summary must NOT report misses=0.
-    let exit_c = process.run_capture([_sfn_bin(), "build", src, "-o", out, "--work-dir", work, "--clean"], _build_env(cache));
+    let exit_c = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--work-dir", work, "--clean"], _build_env(cache));
     let out_c = process.capture_take_stdout();
     let err_c = process.capture_take_stderr();
     assert exit_c == 0;

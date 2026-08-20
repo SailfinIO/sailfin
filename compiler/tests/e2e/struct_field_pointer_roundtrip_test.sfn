@@ -27,12 +27,7 @@ import {
     split,
     trim
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn` invocations. `process.run_capture`
 // treats an empty array as the *empty* environment (not "inherit"), so PATH
@@ -63,7 +58,7 @@ fn _emit_llvm() -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/struct_field_pointer_roundtrip.ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _fixture()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _fixture()], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -165,7 +160,7 @@ test "struct-ptr-field: raw *u8 field assignment emits a store into slot-2 GEP" 
 // every field survived the store/load; non-zero pinpoints which read-back
 // diverged (1=self-ref *Node, 2=int, 3=raw *u8).
 test "struct-ptr-field: pointer/int field round-trip runs to exit 0" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "run", _fixture()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", _fixture()], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
