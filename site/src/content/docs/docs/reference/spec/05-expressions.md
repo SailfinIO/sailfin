@@ -71,6 +71,13 @@ fn wrap() -> fn (int) -> int {
     fn triple(x: int) -> int { return x * 3; }
     return triple;   // a nested fn's bare name is equally eligible
 }
+
+struct Router {
+    handler: fn (int) -> int;
+}
+
+let router = Router { handler: double };
+let routed = router.handler(5);  // loads the pair and dispatches through it
 ```
 
 Expected function types are supplied by typed variable initializers and
@@ -91,9 +98,14 @@ and pointer parameter/return types only; aggregate signatures such as
 `fn(string) -> string` are rejected with `E0840`. Using a bare function name
 without an expected `fn(...)` type remains `E0808`. Imported/prelude function
 names are not yet eligible because their full callable signature proof does not
-cross the module boundary. A nested fn may be *stored* into a fn-typed struct
-field or collection element, but dispatch *through* such a field/element is not
-yet shipped.
+cross the module boundary. A named function or lambda may be stored in a
+fn-typed struct field, and a member call such as `router.handler(5)` loads the
+two-word pair from that field and dispatches through the same closure-call seam.
+The pair is stored inline rather than heap-boxed separately. Fn-typed fields are
+recognized before ordinary struct-method fan-out, so a struct may carry both
+callable fields and methods without changing method resolution. A function
+value may also be stored in a collection element, but dispatch through that
+element is not yet shipped.
 
 ## Anonymous functions (lambdas)
 

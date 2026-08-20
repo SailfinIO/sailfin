@@ -1,21 +1,25 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_resolution/closure_callee.sfn
 //
 // Closure-callee parsing and operand resolution.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { find, substring } from "sfn/strings";
 
-import { is_simple_identifier } from "../../../expressions_helpers";
+import { format_temp_name, is_simple_identifier } from "../../../expressions_helpers";
 import { find_function_by_name } from "../../../rendering_helpers";
+import { find_struct_field_info, find_struct_info_by_llvm_type } from "../../../type_context_queries";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../../type_mapping";
 import {
     LLVMOperand,
     LocalBinding,
     ParameterBinding,
+    StringConstant,
     TypeContext
 } from "../../../types";
-import { starts_with, trim_text } from "../../../utils";
-import { lower_closure_pair_marker } from "../core";
+import { number_to_string, starts_with, trim_text } from "../../../utils";
+import { lower_closure_pair_marker, lower_expression } from "../core";
 import { collect_parameter_types } from "../core_helpers";
 import { load_local_operand } from "../core_operands/comparisons";
+import { parse_member_access } from "../core_parse";
 import { find_local_binding, find_parameter_binding } from "../core_scopes";
 import { map_parameter_type, map_return_type } from "../core_type_mapping";
 
@@ -39,6 +43,9 @@ struct _ClosureCalleeInfo {
     temp_index: int;
     return_type: string;
     parameter_types: string[];
+    diagnostics: string[];
+    diags: LoweringDiagnostic[];
+    string_constants: StringConstant[];
 }
 
 fn _parse_fn_pointer_annotation(context: TypeContext, annotation: string) -> _ClosureSignatureParse {
@@ -256,8 +263,125 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                     lines: pair.lines,
                     temp_index: pair.temp_index,
                     return_type: effective_return,
-                    parameter_types: user_params
+                    parameter_types: user_params,
+                    diagnostics: pair.diagnostics,
+                    diags: [],
+                    string_constants: []
                 };
+            }
+        }
+        return null;
+    }
+
+    // SFN-674: a fn-typed struct field is already stored as the closure pair;
+    // resolve `<base>.<field>(...)` by loading that pair before the ordinary
+    // struct-method fan-out gets a chance to reinterpret the member name. The
+    // existing closure-dispatch seam consumes the returned operand unchanged.
+    let member = parse_member_access(name);
+    if member.success {
+        // `lower_expression` appends to its line array in place. Probe on a
+        // copy so a non-fn member (the overwhelmingly common method case)
+        // cannot leak speculative receiver IR and duplicate SSA names before
+        // normal method lowering runs.
+        let mut probe_lines: string[] = [];
+        let mut probe_line_index: int = 0;
+        loop {
+            if probe_line_index >= lines.length { break; }
+            probe_lines.push(lines[probe_line_index]);
+            probe_line_index += 1;
+        }
+        let base = lower_expression(member.base, bindings, locals, temp_index, probe_lines, functions, context, "");
+        if base.operand == null { return null; }
+
+        let base_operand: LLVMOperand = base.operand;
+        let mut struct_type = trim_text(base_operand.llvm_type);
+        let mut pointer_available: boolean = false;
+        if ends_with_pointer_suffix(struct_type) {
+            struct_type = trim_text(strip_pointer_suffix(struct_type));
+            pointer_available = true;
+        }
+
+        let struct_info = find_struct_info_by_llvm_type(context, struct_type);
+        if struct_info != null {
+            let field_info = find_struct_field_info(struct_info, member.field);
+            if field_info != null {
+                if field_info.llvm_type == "{i8*, i8*}" {
+                    if _looks_like_fn_pointer_annotation(field_info.type_annotation) {
+                        let signature = _parse_fn_pointer_annotation(context, field_info.type_annotation);
+                        if signature.ok {
+                            // Call lowering owns and mutates the caller's line
+                            // buffer. Commit only the successful probe's delta
+                            // so its receiver load and the closure dispatch it
+                            // enables remain visible to the enclosing call.
+                            let mut current_lines = lines;
+                            let mut base_line_index: int = lines.length;
+                            loop {
+                                if base_line_index >= base.lines.length {
+                                    break;
+                                }
+                                current_lines.push(base.lines[base_line_index]);
+                                base_line_index += 1;
+                            }
+                            let mut current_temp = base.temp_index;
+                            let pair_name = format_temp_name(current_temp);
+                            if pointer_available {
+                                let field_pointer = pair_name;
+                                current_lines.push("  " + field_pointer
+                                    + " = getelementptr "
+                                    + struct_info.llvm_name
+                                    + ", "
+                                    + struct_info.llvm_name
+                                    + "* "
+                                    + base_operand.value
+                                    + ", i32 0, i32 "
+                                    + number_to_string(field_info.index));
+                                current_temp += 1;
+                                let loaded_pair = format_temp_name(current_temp);
+                                current_lines.push("  " + loaded_pair
+                                    + " = load {i8*, i8*}, {i8*, i8*}* "
+                                    + field_pointer);
+                                current_temp += 1;
+                                let operand = LLVMOperand {
+                                    llvm_type: "{i8*, i8*}",
+                                    value: loaded_pair
+                                };
+                                return _ClosureCalleeInfo {
+                                    operand: operand,
+                                    lines: current_lines,
+                                    temp_index: current_temp,
+                                    return_type: signature.return_type,
+                                    parameter_types: signature.parameter_types,
+                                    diagnostics: base.diagnostics,
+                                    diags: base.diags,
+                                    string_constants: base.string_constants
+                                };
+                            }
+
+                            current_lines.push("  " + pair_name
+                                + " = extractvalue "
+                                + struct_info.llvm_name
+                                + " "
+                                + base_operand.value
+                                + ", "
+                                + number_to_string(field_info.index));
+                            current_temp += 1;
+                            let operand = LLVMOperand {
+                                llvm_type: "{i8*, i8*}",
+                                value: pair_name
+                            };
+                            return _ClosureCalleeInfo {
+                                operand: operand,
+                                lines: current_lines,
+                                temp_index: current_temp,
+                                return_type: signature.return_type,
+                                parameter_types: signature.parameter_types,
+                                diagnostics: base.diagnostics,
+                                diags: base.diags,
+                                string_constants: base.string_constants
+                            };
+                        }
+                    }
+                }
             }
         }
         return null;
@@ -291,7 +415,10 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                     lines: load.lines,
                     temp_index: load.temp_index,
                     return_type: effective_return,
-                    parameter_types: user_params
+                    parameter_types: user_params,
+                    diagnostics: load.diagnostics,
+                    diags: [],
+                    string_constants: []
                 };
             }
         }
@@ -304,7 +431,10 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                     lines: load.lines,
                     temp_index: load.temp_index,
                     return_type: parsed.return_type,
-                    parameter_types: parsed.parameter_types
+                    parameter_types: parsed.parameter_types,
+                    diagnostics: load.diagnostics,
+                    diags: [],
+                    string_constants: []
                 };
             }
         }
@@ -324,7 +454,10 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                     lines: lines,
                     temp_index: temp_index,
                     return_type: parsed.return_type,
-                    parameter_types: parsed.parameter_types
+                    parameter_types: parsed.parameter_types,
+                    diagnostics: [],
+                    diags: [],
+                    string_constants: []
                 };
             }
         }

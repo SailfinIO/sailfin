@@ -316,9 +316,13 @@ because the adapter has the extra hidden-env parameter; the `tail` hint and the
 compiler's `-O2` code-quality gate ensure the forwarding frame is eliminated.
 The materialized pair contains the adapter pointer and `null`. A normal direct
 call to the same named function is unchanged, and raw `as * u8` address-taking
-still names the original C-ABI symbol rather than the adapter. Generic, async,
-nested, entry-point, and non-pointer-width aggregate signatures are not admitted
-by this v0 path.
+still names the original C-ABI symbol rather than the adapter. Concrete nested
+functions use the same materialized form. Generic, async, entry-point, and
+non-pointer-width aggregate signatures are not admitted by this v0 path.
+
+A fn-typed struct field stores this pair inline. Calling the field GEP-loads the
+pair and feeds it to the same hidden-env-first dispatch below; it does not box
+the pair or introduce a second indirect-call convention.
 
 **Env-struct allocation.** Captures are packed into a per-lambda env
 struct in first-use order (deterministic across runs). The helper

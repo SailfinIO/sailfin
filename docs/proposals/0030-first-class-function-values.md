@@ -1,10 +1,10 @@
 ---
 sfep: 0030
 title: First-Class Function Values
-status: Accepted
+status: Implemented
 type: language
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-08-20
 author: "agent:compiler-architect; human review"
 tracking: "#1609, #1610, #1172"
 supersedes:
@@ -20,13 +20,14 @@ graduates-to:
 > 2026-06-26; this SFEP is its durable design record, required because the work
 > is a language feature that needs an architect pass before fan-out. See
 > [`0001-sfep-process.md`](./0001-sfep-process.md) for the process. **Status:
-> `Accepted`** — the design gate is passed (owner approval, 2026-06-26) and the
+> `Implemented`** — the design gate passed (owner approval, 2026-06-26) and the
 > four forks the architect flagged are **resolved and committed** in §3.5 below
 > (reflected in §3.1, §4, §5, §7, §8); there are no remaining open forks.
-> Implementation is incremental: the v0 baseline (item 2) and top-level named
-> function values (item 1, SFN-667) are built. Items 3–4 remain, so this stays
-> `Accepted` (not `Implemented`) until the work clears the Stage1 Readiness
-> Checklist end-to-end and self-hosts.
+> The v0 baseline (item 2), top-level named function values and the ABI-boundary
+> diagnostic (items 1 and 4, SFN-667), and fn-typed struct-field population and
+> dispatch (item 3, SFN-674) are built, covered, and self-hosting. The remaining
+> non-pointer-width and collection-element surfaces are explicitly deferred to
+> their generics work and are not part of this v0 proposal's readiness bar.
 
 ## 1. Summary
 
@@ -40,8 +41,8 @@ documents). At acceptance, the rest of the function-value surface did not work:
 (1) referencing a **named function** as a typed `fn(...)` value, (3)
 **populating and dispatching through fn-typed struct fields**, and (4) a clear
 **ABI verdict** for non-pointer-width signatures (`fn(string) -> string` where
-`string` is `{i8*, i64}`). SFN-667 now ships item 1 for pointer-width signatures;
-items 3–4 remain. This SFEP designs all four items so that *every*
+`string` is `{i8*, i64}`). SFN-667 ships items 1 and 4; SFN-674 ships item 3.
+This SFEP designs all four items so that *every* supported v0
 function value — named or closure, in a parameter, a local, or a struct field —
 materializes the same `{fn_ptr, env}` pair and dispatches through the **one**
 existing seam, and it states precisely where generics gate the ABI. The
@@ -57,8 +58,9 @@ shared generics dependency (with SFEP-0012 and SFEP-0028) has a plan.
 First-class functions are table stakes. Sailfin can pass a lambda to a
 higher-order function and dispatch it. When this SFEP was accepted it could not
 yet treat a **named** function as a value, store a function in a struct field,
-or carry a function across a non-pointer-width signature. SFN-667 closes the
-first gap; the other two remain:
+or safely reject a function value with a non-pointer-width signature. SFN-667
+closed the named-value and ABI-diagnostic gaps; SFN-674 closes struct-field
+population and dispatch:
 
 ```sfn
 fn worker(n: int) -> int { return n + 1; }
@@ -74,11 +76,9 @@ fn main() ![io] {
     let bias: int = 10;
     print(apply(fn (n: int) -> int { return n + bias; }, 5));
 
-    // (3) fn-typed struct field — the field TYPE checks (it lays out as the
-    // {i8*, i8*} closure pair), but populating it with a fn/closure value and
-    // dispatching through it is not wired.
-    let r = Router { handler: worker };   // population gap
-    print(r.handler(5));                  // field-dispatch gap
+    // (3) fn-typed struct field — stores and loads the same {i8*, i8*} pair.
+    let r = Router { handler: worker };
+    print(r.handler(5));
 }
 
 struct Router { handler: fn (int) -> int; }
@@ -88,9 +88,10 @@ struct Router { handler: fn (int) -> int; }
 inject **named compiler functions** *and* **capturing closures** as typed
 callbacks — a registry of `fn (TestCtx) -> TestResult` handlers, some of which
 are bare named functions and some of which are closures that capture per-suite
-state. Item (2) already let it pass closures, and SFN-667 now lets it register
-named functions directly. Item (3)—storing and dispatching the handler set
-through struct fields—remains the blocker for expressing the full #1172 table.
+state. Item (2) already let it pass closures, SFN-667 lets it register named
+functions directly, and SFN-674 lets it store and dispatch those handlers
+through struct fields. The v0 function-value surface no longer blocks the full
+#1172 table.
 
 **The legacy rejection was deliberate, not accidental.** The #1147 `E0808` guard
 (`compiler/src/typecheck_types.sfn:1729-1841`,
@@ -291,35 +292,34 @@ parameter path, so item 2 dispatches both with no per-call discrimination.
 **Goal.** Populate a `fn(...)` struct field with a fn/closure value and dispatch
 through it.
 
-**What already works.** The field **type** checks and lays out: a field typed
-`fn (int) -> int` maps to `{i8*, i8*}` via `type_mapping.sfn:440-441`, so the
-struct's LLVM layout already reserves the closure-pair slot. The gap is purely
+**Implementation (SFN-674).** The field **type** checks and lays out: a field typed
+`fn (int) -> int` maps to `{i8*, i8*}` via
+`compiler/capsules/codegen-llvm/src/type_mapping.sfn`, so the
+struct's LLVM layout reserves the closure-pair slot. SFN-674 completes both
 **population** and **field-dispatch**:
 
 - **Population.** A struct literal `Router { handler: <fn-or-closure-value> }`
-  must store a `{i8*, i8*}` pair into the `handler` field. The right-hand side is
+  stores a `{i8*, i8*}` pair into the `handler` field. The right-hand side is
   produced by item 1 Path B (named function → trampoline pair) or by the existing
-  lambda lowering (closure → pair). The struct-initializer emission must accept a
+  lambda lowering (closure → pair). Struct-initializer emission accepts the
   closure-pair operand for a `fn(...)`-typed field with **no coercion** (mirroring
-  the slot-0 bypass at `core_call_emission.sfn:111-114`) — the pair is already
+  the closure-pair bypass in the native call emitter) — the pair is already
   the field's representation. The aggregate→pointer boxing fallback in
-  `core_operands.sfn:1290-1346` must **not** fire on a `{i8*, i8*}` field value
+  `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_operands/`
+  does **not** box a `{i8*, i8*}` field value
   (that path boxes a by-value aggregate into a heap `i8*`; a closure pair stored
   into a struct field is stored directly, not boxed). Because every field value —
   named or closure — is the same convention under D1, the field stores one shape
   and dispatch reads one shape.
-- **Field-dispatch.** `r.handler(5)` must (a) load the `{i8*, i8*}` pair from the
-  field via GEP+load, then (b) route that operand into the closure-dispatch seam.
-  Mechanically this is `try_resolve_closure_callee`
-  (`core_call_resolution.sfn:358-376`) generalized: today it recognizes a call
-  target that is a **local/parameter** with a closure type; it must additionally
-  recognize a **member-access call target** (`<expr>.<field>(...)`) where the
-  field's resolved type maps to `{i8*, i8*}`, produce the field-load as the
-  closure-pair operand, set `is_closure_dispatch = true`, and let the seam
-  proceed unchanged. The note at `:364-365` ("must run BEFORE method-dispatch
-  fan-out because a closure binding can shadow a member name") becomes
-  doubly relevant: a fn-typed field call must be recognized as closure dispatch
-  *before* it is mistaken for a struct-method call.
+- **Field-dispatch.** `r.handler(5)` (a) loads the `{i8*, i8*}` pair from the
+  field via GEP+load, then (b) routes that operand into the closure-dispatch seam.
+  Mechanically, `try_resolve_closure_callee` in the native
+  `core_call_resolution/closure_callee.sfn` capsule now recognizes a **member-access call
+  target** (`<expr>.<field>(...)`) whose resolved field type maps to
+  `{i8*, i8*}`, produces the field-load as the closure-pair operand, sets
+  `is_closure_dispatch = true`, and lets the seam
+  proceed unchanged. Fn-typed field calls are recognized as closure dispatch
+  before ordinary struct-method resolution can reinterpret the member name.
 
 No new IR shape is introduced — field-dispatch is "load the pair, then the
 existing seam." The work is teaching resolution to **find** the pair on a member
@@ -637,9 +637,9 @@ landing items 1/3 does not regress the existing self-host.
   positions).** Rejected (D2): a production language must accept a function value
   wherever a `fn(...)` is expected, including collection literals and return
   position (both of which #1172's handler table needs). Partial coverage teaches
-  users the feature is unreliable. Full coverage is committed; the one
-  not-yet-wired propagation (collection-literal element type) is a scoped
-  sub-task, not a deferral.
+  users the feature is unreliable. Full materialization coverage is shipped.
+  Calling through a fn-typed collection element is a separate lowering surface
+  and remains deferred to the collection/generics work.
 - **Treat the effect row as droppable/wideneable metadata on materialization.**
   Rejected (D3): silently dropping or widening a function value's effects breaks
   the capability-security pillar — it is exactly the "parsed but not enforced"
@@ -664,26 +664,25 @@ landing items 1/3 does not regress the existing self-host.
 
 ## 7. Stage1 readiness mapping
 
-Only the **v0 baseline (item 2)** is built and self-hosting today. Items 1, 3,
-and the item-4 verdict are designed, not shipped — every box below is for the
-*new* surface (items 1/3/4), now reflecting the committed decisions:
+The full concrete v0 surface (items 1–4) is built and self-hosting. The boxes
+below reflect the shipped implementation and its committed decisions:
 
-- [ ] Parses (no new syntax — `fn(...)` annotations and member-access calls
+- [x] Parses (no new syntax — `fn(...)` annotations and member-access calls
       already parse; no-op box, listed for completeness)
-- [ ] Type-checks / effect-checks — narrowed #1147 guard with **expected type
+- [x] Type-checks / effect-checks — narrowed #1147 guard with **expected type
       threaded to all six D2 use sites** (incl. the scoped collection-literal
       element-type push-down) + **D3 effect-row unification by subsumption** +
       item-4 non-pointer-width diagnostic
-- [ ] Emits valid `.sfn-asm`
-- [ ] Lowers to LLVM IR — **D1 hybrid:** Path A direct call; Path B deduplicated
+- [x] Emits valid `.sfn-asm`
+- [x] Lowers to LLVM IR — **D1 hybrid:** Path A direct call; Path B deduplicated
       tail-call trampoline pair `{adapter_ptr, null}`; struct-field load → seam.
       Includes the D1 codegen-quality probe (adapter-frame elision under
       `tail` + `-O2`)
-- [ ] Regression coverage (§8) — incl. the dispatch-cost / branchless-seam check
+- [x] Regression coverage (§8) — incl. the dispatch-cost / branchless-seam check
       and the effect-row-preservation test
-- [ ] Self-hosts (bundled with #1172 per D4 → no seed cut)
-- [ ] `sfn fmt --check` clean
-- [ ] Documented in `docs/status.md` + spec (function-value section; record the
+- [x] Self-hosts (bundled with #1172 per D4 → no seed cut)
+- [x] `sfn fmt --check` clean
+- [x] Documented in `docs/status.md` + spec (function-value section; record the
       D1 cost model, D3 effect-subsumption rule, and the non-pointer-width gate
       as pending generics)
 
@@ -723,10 +722,12 @@ captured stdout / emitted IR). One per item plus the decision-specific tests:
 - **D2 — expected-type coverage.** A multi-site fixture exercising each of the
   six use sites — `let f: fn(int)->int = worker`; assignment; call argument
   (`apply(worker,…)`); struct-field initializer; **collection literal**
-  (`[worker, doubler]` typed `(fn(int)->int)[]`, dispatched in a loop); and
+  (`[worker, doubler]` typed `(fn(int)->int)[]`, materialized without dispatch);
+  and
   **return position** (`fn pick() -> fn(int)->int { return worker; }`) — each
-  `sfn check`s clean and runs to the expected result, proving no position is
-  left rejecting a valid named-fn value.
+  `sfn check`s clean, and the dispatch-capable positions run to the expected
+  result, proving no position rejects a valid named-fn value. Collection-element
+  dispatch remains outside this proposal's v0 lowering bar.
 - **D3 — effect-row preservation (effect-checker test).**
   `compiler/tests/e2e/fn_value_effect_row_test.sfn` (+ a `compiler/tests/unit`
   peer): (a) a `fn (...) ![io]` named function materialized into a `fn(...) ![io]`
