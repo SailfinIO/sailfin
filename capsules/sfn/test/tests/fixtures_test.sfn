@@ -31,24 +31,16 @@ import { find } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
+    scratch_root,
     with_cwd,
     with_env,
     with_tmp_dir
 } from "../src/mod";
 
-// Scratch root for marker files. Prefer the runner's
-// `SAILFIN_TEST_SCRATCH`; fall back to `/tmp` for a direct
-// `sfn test <file>` invocation that did not export it.
-fn _scratch() -> string ![io] {
-    let s = env.get("SAILFIN_TEST_SCRATCH");
-    if s.length > 0 { return s; }
-    return "/tmp";
-}
-
 // A fresh marker-file path for `name`, with any stale value from a prior
 // run removed so each test starts clean.
 fn _marker(name: string) -> string ![io] {
-    let dir = _scratch();
+    let dir = scratch_root();
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-fixture-" + name + ".path";
     if fs.exists(path) { fs.deleteFile(path); }

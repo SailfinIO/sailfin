@@ -1,5 +1,6 @@
 // Regrowth guard for SFN-978: a fresh copy-paste of the retired POSIX-only
-// `"/tmp"` scratch-dir fallback must not reappear under `compiler/tests/`.
+// `"/tmp"` scratch-dir fallback must not reappear under `compiler/tests/` or
+// `capsules/`.
 //
 // SFN-977's `sfn_bin_path()` sweep and the `.sh` sprawl in #842/#840 both
 // show the same failure mode: a convenient one-off copy of a hand-rolled
@@ -7,14 +8,46 @@
 // / `scratch_root()` (`capsules/sfn/test/src/scratch.sfn`) are the only
 // sanctioned source of this fallback now, so this test fails the build the
 // moment a new call site reintroduces the literal directly instead of
-// importing the resolver.
+// importing the resolver. `capsules/` is in scope alongside
+// `compiler/tests/`: `sfn_bin_path()` itself is consumed from
+// `capsules/sfn/test/tests/` and `capsules/sfn/bench/tests/`, so a test
+// author copying a scratch-dir fallback from inside `sfn/test`'s own test
+// suite — the most canonical-looking place to copy from — must be caught
+// too, not just the compiler's own tests.
 //
 // The exact quoted literal `"/tmp"` is the signal: every fallback shape this
 // sweep replaced (a plain assignment, an early return, and a ternary) always
 // spells the sentinel bare — the per-test subdirectory is appended by code
 // afterward, never baked into the literal itself. A legitimate path fixture
-// like `"/tmp/sfn_probe"` does not match, so no allowlist is needed.
-import { ends_with } from "sfn/strings";
+// like `"/tmp/sfn_probe"` does not match, so almost no allowlist is needed —
+// the handful below are the resolver's own canonical definition/doc/tests
+// (which necessarily quote the literal they implement) plus one unrelated
+// hit that is not a scratch-dir fallback at all.
+import { ends_with, find } from "sfn/strings";
+
+fn _allowed_paths() -> string[] {
+    return [
+    // The resolver's own canonical implementation and its doc comment
+    // — this IS the sanctioned definition of the fallback, not a copy
+    // of it.
+    "capsules/sfn/test/src/scratch.sfn", "capsules/sfn/test/src/mod.sfn",
+    // Asserts the resolver's own documented return value; not a
+    // hand-rolled fallback.
+    "capsules/sfn/test/tests/scratch_test.sfn",
+    // Unrelated: "/tmp" here is a well-known POSIX directory used as a
+    // symlink target fixture, not a scratch-dir fallback.
+    "capsules/sfn/fs/tests/fs_test.sfn"];
+}
+
+fn _is_allowed(path: string, allowed: string[]) -> boolean {
+    let mut i = 0;
+    loop {
+        if i >= allowed.length { break; }
+        if allowed[i] == path { return true; }
+        i += 1;
+    }
+    return false;
+}
 
 fn _collect_sfn_files(root: string, acc: string[]) -> string[] ![io] {
     let mut out = acc;
@@ -35,12 +68,14 @@ fn _collect_sfn_files(root: string, acc: string[]) -> string[] ![io] {
     return out;
 }
 
-test "scratch-dir regrowth guard: no bare \"/tmp\" literal under compiler/tests" ![io] {
+test "scratch-dir regrowth guard: no bare \"/tmp\" literal under compiler/tests or capsules" ![io] {
     // Skip this file's own path: its guarding logic and doc comments quote
     // the literal it hunts for, which would otherwise flag itself.
     let self_path = "compiler/tests/unit/test_scratch_dir_regrowth_guard_test.sfn";
+    let allowed = _allowed_paths();
     let mut files: string[] = [];
     files = _collect_sfn_files("compiler/tests", files);
+    files = _collect_sfn_files("capsules", files);
     assert files.length > 200;
 
     let needle = "\"/tmp\"";
@@ -51,14 +86,9 @@ test "scratch-dir regrowth guard: no bare \"/tmp\" literal under compiler/tests"
         let path = files[fi];
         fi += 1;
         if path == self_path { continue; }
+        if _is_allowed(path, allowed) { continue; }
         let source = fs.readFile(path);
-        let mut pos = 0;
-        loop {
-            let found = _find_in(source, needle, pos);
-            if found < 0 { break; }
-            failures.push(path);
-            pos = found + needle.length;
-        }
+        if find(source, needle, 0) >= 0 { failures.push(path); }
     }
     let mut i = 0;
     loop {
@@ -68,23 +98,4 @@ test "scratch-dir regrowth guard: no bare \"/tmp\" literal under compiler/tests"
         i += 1;
     }
     assert failures.length == 0;
-}
-
-fn _find_in(text: string, needle: string, start: int) -> int {
-    let mut i = start;
-    loop {
-        if i + needle.length > text.length { return -1; }
-        let mut j = 0;
-        let mut matched = true;
-        loop {
-            if j >= needle.length { break; }
-            if text[i + j] != needle[j] {
-                matched = false;
-                break;
-            }
-            j += 1;
-        }
-        if matched { return i; }
-        i += 1;
-    }
 }

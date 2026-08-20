@@ -7,6 +7,7 @@
 // this phase (SFEP-0071 §2.2): two `targz_create` runs over the same tree
 // produce byte-identical archives.
 import { char_code_at } from "sfn/strings";
+import { default_scratch_dir } from "sfn/test";
 
 import {
     ByteBuf,
@@ -40,7 +41,7 @@ extern fn free(ptr: *u8) -> void;
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
 }
