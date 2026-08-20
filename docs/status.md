@@ -403,9 +403,10 @@ here.
   (`prepare_project_capsules*`): relative imports, manifest `[dependencies]`,
   and workspace-implicit `sfn/X` imports in one pass. Workspace membership is
   sufficient on its own — a scoped import naming a workspace member resolves
-  with no `[dependencies]` entry (SFEP-0006 §4.5 step 3). Outside a workspace
-  that leg is skipped and only `[dependencies]` is walked, so the two contexts
-  deliberately differ; see
+  with no `[dependencies]` entry (SFEP-0006 §4.5 step 3). A capsule that has a
+  manifest but is outside any workspace walks only `[dependencies]`, while a
+  manifest-less entry falls back to the user capsule cache, so the three
+  contexts deliberately differ; see
   `docs/proposals/design-notes/sfn-986-workspace-member-import-resolution.md`.
   Textual import inlining
   is gone (Stages A–B). Standalone files resolve bundled workspace imports

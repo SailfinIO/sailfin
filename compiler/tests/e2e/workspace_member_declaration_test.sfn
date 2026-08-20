@@ -1,0 +1,162 @@
+// Regressions for SFN-986: workspace membership alone resolves a scoped
+// import. A member does not need to name a sibling in its own `[dependencies]`
+// for the import to compile, and the same import fails once the consumer is
+// outside the workspace. That asymmetry is intended (SFEP-0006 §4.5 step 3);
+// these tests pin it so it stops being incidental. Design note:
+// docs/proposals/design-notes/sfn-986-workspace-member-import-resolution.md
+//
+// The provider here is a fixture-local capsule, never a bundled stdlib one.
+// A bundled capsule would resolve from the compiler's own binary_dir even
+// outside a workspace (SFN-352), which would test the wrong mechanism.
+//
+// The provider is deliberately NOT marked `[build] implicit = true`. That flag
+// selects a different resolver leg (SFEP-0072 §3.3, the no-import-needed
+// prelude mechanism); this file covers the written-import leg, which ignores
+// the flag entirely.
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _build_env(label: string) -> string[] ![io] {
+    let mut child = clean_runner_env(nested_runner_scratch(label));
+    let repo = env.get("PWD");
+    child.push("SAILFIN_RUNTIME_ROOT=" + repo + "/runtime");
+    return child;
+}
+
+// `with_tmp_dir` removes its root on both the normal and the throwing path, so
+// anything written there is gone by the time a CI failure is read. Land build
+// output under the runner scratch instead, where it survives the assert.
+fn _log_failure(label: string, body: string) -> void ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/sfn-986-" + label + ".out", body);
+}
+
+// The `implicit` key is omitted deliberately: this provider must be reachable
+// through plain membership, not through the SFEP-0072 provider mechanism.
+fn _write_provider(dir: string) -> void ![io] {
+    fs.createDirectory(dir + "/src", true);
+    fs.writeFile(dir + "/capsule.toml", "[capsule]\n" + "name = \"demo/lib\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[dependencies]\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "kind = \"library\"\n"
+        + "entry = \"src/mod.sfn\"\n");
+    fs.writeFile(dir + "/src/mod.sfn", "fn lib_value() -> int {\n"
+        + "    return 41;\n"
+        + "}\n\n"
+        + "export { lib_value };\n");
+}
+
+// A binary consumer that imports the provider by name while declaring an
+// entirely empty `[dependencies]`. This is the shape under test.
+fn _write_undeclaring_consumer(dir: string) -> string ![io] {
+    fs.createDirectory(dir + "/src", true);
+    fs.writeFile(dir + "/capsule.toml", "[capsule]\n" + "name = \"demo/app\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[dependencies]\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(dir + "/src/main.sfn", "import { lib_value } from \"demo/lib\";\n\n"
+        + "fn main() -> int {\n"
+        + "    return lib_value() - 41;\n"
+        + "}\n");
+    return dir + "/src/main.sfn";
+}
+
+test "workspace resolution: a member imports a sibling with an empty [dependencies]" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        fs.writeFile(root + "/workspace.toml", "[workspace]\n"
+            + "members = [\"lib\", \"app\"]\n");
+        _write_provider(root + "/lib");
+        let entry = _write_undeclaring_consumer(root + "/app");
+
+        let output = root + "/app-out";
+        let exit = process.run_capture([_sfn_bin(), "build", "-o", output, entry], _build_env("sfn-986-member"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        if exit != 0 {
+            _log_failure("member", out + err);
+            return exit;
+        }
+        // A green build only proves the import resolved to *something*. Run the
+        // binary: `main` returns `lib_value() - 41`, so a zero exit is a
+        // value-carrying check that the call reached the provider's definition
+        // rather than some other symbol that happened to link.
+        return process.run([output]);
+    });
+    assert result == 0;
+}
+
+test "workspace resolution: the same undeclared import fails outside the workspace" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        // The provider and its workspace live under `ws/`. The consumer sits in
+        // a sibling directory with no `workspace.toml` in any ancestor, so it
+        // is not a member of anything and `demo/lib` is unreachable.
+        //
+        // `ws/` is never built. It exists so the provider is present on disk
+        // and only membership distinguishes this case from the test above —
+        // without it, a resolver that had simply lost the provider would look
+        // identical. Do not delete it as unused setup.
+        fs.createDirectory(root + "/ws", true);
+        fs.writeFile(root + "/ws/workspace.toml", "[workspace]\n"
+            + "members = [\"lib\"]\n");
+        _write_provider(root + "/ws/lib");
+
+        // Positive control. Same directory, same env, same plumbing, but no
+        // scoped import. If this does not build, the harness is broken and the
+        // negative result below would be unattributable — a broken PWD, an
+        // unresolvable compiler path, or a fixture that never landed all
+        // produce "non-zero exit and no artifact" just as an unresolved import
+        // does.
+        fs.createDirectory(root + "/control/src", true);
+        fs.writeFile(root + "/control/capsule.toml", "[capsule]\n"
+            + "name = \"demo/control\"\n"
+            + "version = \"0.1.0\"\n\n"
+            + "[dependencies]\n\n"
+            + "[capabilities]\n"
+            + "required = []\n\n"
+            + "[build]\n"
+            + "kind = \"binary\"\n"
+            + "entry = \"src/main.sfn\"\n");
+        fs.writeFile(root + "/control/src/main.sfn", "fn main() -> int {\n"
+            + "    return 0;\n"
+            + "}\n");
+        let control_out = root + "/control-out";
+        let control_exit = process.run_capture([_sfn_bin(), "build", "-o", control_out, root
+            + "/control/src/main.sfn"], _build_env("sfn-986-control"));
+        let control_out_text = process.capture_take_stdout();
+        let control_err = process.capture_take_stderr();
+        if control_exit != 0 {
+            _log_failure("control", control_out_text + control_err);
+            return 2;
+        }
+
+        let entry = _write_undeclaring_consumer(root + "/solo");
+        let output = root + "/solo-out";
+        let exit = process.run_capture([_sfn_bin(), "build", "-o", output, entry], _build_env("sfn-986-solo"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        _log_failure("solo", out + err);
+        if exit == 0 { return 0; }
+        // Assert on the artifact, not on the message. Today this failure
+        // surfaces as an ICE from the linker rather than a resolver
+        // diagnostic (SFN-990) — pinning the current text would make this
+        // regression fail the day that is fixed, which is the wrong signal.
+        // "No binary was produced" stays true under either behaviour.
+        if fs.exists(output) { return 0; }
+        return 1;
+    });
+    assert result == 1;
+}

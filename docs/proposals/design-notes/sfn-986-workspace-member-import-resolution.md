@@ -25,7 +25,7 @@ all. It carried a three-way fork — (A) enforce declarations as an allowlist,
 (B) wire `[dev-dependencies]` only, (C) retract the promise and delete the
 field — and asked for A-vs-C to be settled first.
 
-**The fork is a false trichotomy.** The report bundles three findings of three
+**The fork is a false trichotomy.** The report bundles four findings of four
 different genres. Separated, each has an unambiguous disposition, and none of
 them is A.
 
@@ -58,8 +58,10 @@ that sets the flag is `capsules/sfn/prelude/capsule.toml`, which sets it to
 (`compiler/src/capsule_resolver/implicit.sfn`) resolves a **written** scoped
 import specifier against any workspace member, via `workspace_member_for_spec`
 (`compiler/src/capsule_resolver/capability.sfn`) — bare name equality, with no
-`.implicit` check and no `[dependencies]` check. Its single call site in
-`dedupe.sfn` sits under an `if workspace_root.length > 0` guard.
+`.implicit` check and no `[dependencies]` **allowlist** check. Declared specs do
+feed this leg, but only as an *exclusion* set that stops the same capsule being
+staged twice; see §7. Its single call site in `dedupe.sfn` sits under an
+`if workspace_root.length > 0` guard.
 
 SFN-986 is entirely about **(b)**. Mechanism (a) neither causes nor cures it.
 
@@ -106,11 +108,19 @@ elsewhere:
 - Inside a workspace, the workspace root **already** enumerates the member graph
   in one place. Per-member `[dependencies]` restates it N times.
 - The Reach pillar's actual claim is capability completeness, and that is proven
-  per-function by E0400/E0402 propagation plus the E0403 cross-check
-  **regardless of import path**. A adds no Reach. See
-  `compiler/tests/e2e/standalone_workspace_implicit_import_test.sfn`, which
-  demonstrates that calling an effectful function from an *undeclared* workspace
-  sibling still fails without the caller's own declaration.
+  per-function by E0400/E0402 propagation plus the E0403 cross-check. Those
+  checks run on the consumer's own source and key off the *callee's declared
+  effects*, not off how the callee's capsule was located, so a declaration
+  requirement adds nothing to them. A adds no Reach.
+
+  Cite this carefully. `compiler/tests/e2e/standalone_workspace_implicit_import_test.sfn`
+  proves effect propagation from a workspace sibling, but its
+  effect-propagation case declares the provider (`explicit_dep = true`); its
+  *undeclared* case covers resolution and linking, not effects. **No test
+  currently exercises effect propagation through an undeclared sibling**, so
+  the claim above rests on reading the checker, not on coverage. It is a cheap
+  gap to close — the fixture is one boolean away — and worth closing before
+  anyone leans harder on this argument.
 
 Payer (every monorepo user, forever, plus a tree-wide migration) is not
 beneficiary. It fails as a headline.
@@ -125,8 +135,19 @@ A's underlying insight survives its rejection. Resolution genuinely differs
 between contexts:
 
 - **Inside a workspace** — the member list resolves the specifier.
-- **Outside one** — no member list exists, so `[dependencies]` is the only set
-  consulted.
+- **Outside one, with a `capsule.toml`** — no member list exists, so
+  `[dependencies]` is the only set consulted.
+- **Outside one, with no manifest at all** (a bare `sfn build main.sfn`) — a
+  third leg applies: `enumerate_cache_implicit_sources`
+  (`compiler/src/capsule_resolver/implicit.sfn`) resolves scoped imports
+  straight against the user capsule cache, again with no declaration required.
+  Its guard in `dedupe.sfn` requires both no project root and no workspace root.
+
+So the "declaration required" case is narrower than it first looks: it is
+specifically *a capsule with a manifest, outside any workspace*. Both the
+workspace leg and the manifest-less cache leg resolve without declarations. Any
+tooling that reasons about manifest completeness — SFN-989's advisory in
+particular — has to account for all three.
 
 So a capsule developed in a monorepo can be published with an incomplete
 manifest and fail for its first standalone consumer. This is a "works on my
@@ -143,6 +164,15 @@ capsule importing a capsule declared only under `[dev-dependencies]` produces
 output byte-identical to declaring it nowhere, while the same import under
 `[dependencies]` is queued and its absence reported. Inside a workspace the same
 import resolves silently with both tables empty.
+
+**The trap is currently worse than a failed build.** When the standalone
+consumer's import resolves to nothing, the compiler emits no diagnostic at all:
+the import parses, type-checks, and lowers, then dies at link with an
+`undefined symbol` and an ICE that tells the user to file a compiler bug. So the
+divergence's failure mode is not "your manifest is incomplete" but "you have
+found a compiler bug." That defect is tracked separately as SFN-990; it raises
+the value of the SFN-989 advisory, since catching this at publish time avoids
+the misleading failure entirely.
 
 ## 6. The general rule
 
@@ -167,7 +197,24 @@ expected to resolve to "docs plus a negative test", not "enforce it".
 
 ## 7. Manifest-field enforcement inventory
 
-<!-- GATE-INVENTORY -->
+Verified 2026-08-20. "Enforced" means a build, check, or command path rejects or
+reports on the field's content — not merely that it parses.
+
+| Field | Enforced? | By what |
+|---|---|---|
+| `[capabilities] required` | **Yes, when non-empty** | E0403 cross-check via `validate_capsule_capabilities`. An **empty list skips the check entirely** — deliberate, so standalone `.sfn` files outside any capsule have no phantom surface to compare against (rationale recorded in `capsule_resolver/dedupe.sfn`, echoed in `effect_gate.sfn` and `main.sfn`). Empty is *not* an assertion of "no effects". Also downgradable to warn/off via `SAILFIN_EFFECT_ENFORCE` (`effect_gate.sfn`). |
+| `[workspace.capabilities]` `allow`/`deny` | **Yes, when the envelope is active** | E0405 (a member's declared effect exceeds the workspace envelope) and E0406 (malformed entry — non-canonical effect name, or a list not in canonical alphabetical order), in `capsule_resolver/capability.sfn`. Two caveats matching the `required` row's shape: the gate returns immediately when `allow` is **empty**, so a `deny`-only envelope never reaches E0406; and `mode = "warn"` reports without failing. |
+| `[toolchain]` floor | **Yes** | `toolchain_decide` + `semver_satisfies_floor`, gated by `toolchain_gate_or_dispatch`. Floor semantics (running ≥ pin). Note it reports a plain `error: toolchain mismatch` string, **not** an `Exxxx` diagnostic, and is downgradable via `--skip-toolchain-check` / `SAILFIN_SKIP_TOOLCHAIN_CHECK` / `SAILFIN_TOOLCHAIN=off`. |
+| `publish = false` | **Yes, on `sfn publish`** | E0612 — refuses to package, read credentials, or upload a private capsule. |
+| `publish = false` (consumer side) | **Yes, on resolve** | E0613 — refuses a private capsule resolved from a **fetched** origin, before its sources are staged. A local workspace member may legitimately be private; only a fetched one is rejected. |
+| `[dependencies]` | **Barely** | No semver-range satisfaction check: the declared version string is used verbatim as a cache-path segment. The only report is advisory and has no E-code — a direct dependency declared in `capsule.toml` but absent from `capsule.lock`. Otherwise declared specs only populate the exclusion set that stops the workspace and cache legs double-collecting. **Not an allowlist** — see §3. |
+| `[dev-dependencies]` | **No** | Parsed, round-tripped, and written by `sfn add --dev`. Zero readers in resolution. This is the one unambiguous "parsed but not enforced" violation in the family → SFN-988. |
+| `[build] implicit` | **Yes, as a selector** | Read by `toml_get_build_implicit` into `WorkspaceMember.implicit`, which is the sole selector for `select_workspace_implicit_members` — mechanism (a) in §2. Currently no non-fixture capsule sets it `true`. |
+| SFEP-0020 role layering | **Test-enforced only** | `compiler/tests/unit/compiler_capsule_boundary_test.sfn` is a static ratchet over `compiler/src/*` imports. Nothing in the compiler rejects a layering violation at build or check time — it is a regression test, not a diagnostic-producing pass. Worth knowing before citing it as a compiler guarantee. |
+
+Deliberately excluded: E0614 (target triple), E0615 (archive extraction), E0616
+(home directory unresolvable), E0617 (emit-target precedence). All four gate
+CLI-flag or environment inputs, not manifest fields.
 
 ## 8. What this note does not decide
 
