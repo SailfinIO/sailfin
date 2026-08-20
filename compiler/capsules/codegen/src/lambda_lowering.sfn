@@ -596,8 +596,11 @@ fn _rename_signature(sig: FunctionSignature, name: string) -> FunctionSignature 
 // DEFINITION rename in `_rewrite_block`, where the lifted symbol is needed
 // regardless of a later shadow.
 //
-// Idempotent: an already-mangled name resolves to no rename, so the Call arm
-// re-applying this after the generic walk is a no-op.
+// Applied exactly ONCE per reference, from the `Identifier` arm of
+// `_rewrite_expression`. Do not re-apply it to an already-walked expression: a
+// nested fn may legally be named `sfn_nested_<name>_<N>`, in which case a
+// second lookup renames the lifted symbol again and lands on the wrong
+// function with no diagnostic.
 fn _rename_nested_reference(reference: Expression, renames: NestedRename[]) -> Expression {
     if reference.variant != "Identifier" { return reference; }
     let mangled = _lookup_nested_rename(renames, reference.name);
@@ -755,9 +758,13 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
         };
     }
     if expression.variant == "Call" {
+        // The callee walk already routes a bare-identifier target through the
+        // `Identifier` arm's `_rename_nested_reference` (SFEP-0042, SFN-108).
+        // Renaming again here would be a second lookup on an already-lifted
+        // name — harmless for ordinary code but a silent miscompile if a user
+        // declares a nested fn literally named `sfn_nested_<name>_<N>`.
         let callee = _rewrite_expression(ctx, expression.callee);
-        // Rewrite a nested-fn call target to its lifted symbol (SFEP-0042).
-        let renamed_callee = _rename_nested_reference(callee.expression, ctx.renames);
+        let renamed_callee = callee.expression;
         let mut current_ctx: LiftContext = callee.ctx;
         let mut new_args: Expression[] = [];
         let mut index: int = 0;
@@ -1268,8 +1275,28 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
         loop {
             if case_index >= statement.cases.length { break; }
             let original_case = statement.cases[case_index];
-            let pattern_result = _rewrite_expression(current_ctx, original_case.pattern);
-            current_ctx = pattern_result.ctx;
+            let incoming_case_renames = current_ctx.renames;
+            let mut new_pattern: Expression = original_case.pattern;
+            if original_case.pattern.variant == "Identifier" {
+                // SFN-108: a bare-identifier match pattern BINDS a name (or is
+                // `_`); it is never a read of the surrounding scope — typecheck
+                // says so explicitly in `walk_match_pattern`, and
+                // `register_match_pattern_bindings` registers it as a variable.
+                // So it must NOT be rewritten to a lifted nested-fn symbol: the
+                // binder is rendered verbatim into `.sfn-asm` by
+                // `format_match_case_head`, and renaming it both collides with
+                // the module-scope definition and silently stops the arm from
+                // matching. Shadow the bound name for the guard and body
+                // instead, exactly as a `let` shadow does (#1940), so a
+                // same-named nested fn resolves to the binding inside the arm.
+                if _lookup_nested_rename(current_ctx.renames, original_case.pattern.name).length > 0 {
+                    current_ctx = _with_renames(current_ctx, _shadow_nested_rename(current_ctx.renames, original_case.pattern.name));
+                }
+            } else {
+                let pattern_result = _rewrite_expression(current_ctx, original_case.pattern);
+                current_ctx = pattern_result.ctx;
+                new_pattern = pattern_result.expression;
+            }
             let mut new_guard: Expression? = original_case.guard;
             if original_case.guard != null {
                 let guard_result = _rewrite_expression(current_ctx, original_case.guard);
@@ -1277,9 +1304,11 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
                 new_guard = guard_result.expression;
             }
             let body_result = _rewrite_block(current_ctx, original_case.body);
-            current_ctx = body_result.ctx;
+            // Keep the accumulated counter/lifted fns but drop this arm's
+            // binder shadow, so it does not leak into a sibling arm.
+            current_ctx = _with_renames(body_result.ctx, incoming_case_renames);
             new_cases.push(MatchCase {
-                pattern: pattern_result.expression, guard: new_guard, body: body_result.block, span: original_case.span
+                pattern: new_pattern, guard: new_guard, body: body_result.block, span: original_case.span
             });
             case_index += 1;
         }

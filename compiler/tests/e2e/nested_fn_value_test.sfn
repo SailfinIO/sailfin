@@ -15,12 +15,7 @@ import {
     substring,
     trim_right
 } from "sfn/strings";
-import {
-    clean_runner_env,
-    nested_runner_scratch,
-    sfn_bin_path,
-    with_tmp_dir
-} from "sfn/test";
+import { clean_runner_env, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _run(path: string) -> string ![io] {
     let mut output: string = "";
@@ -74,8 +69,8 @@ fn _lifted_nested_symbol(ir: string) -> string {
 
 test "nested fn value: argument, typed let, reassignment, array/struct population, and direct call all compile and dispatch" ![io] {
     let out = _run("compiler/tests/e2e/fixtures/higher_order_named_fn/apply_nested.sfn");
-    // apply(5)=10 + picked(5)=10 + reassigned(1)=2 + double(1)=2.
-    assert out == "24";
+    // apply(5)=10 + picked(5)=10 + reassigned(1)=2 + double(1)=2 + chosen(2)=6.
+    assert out == "30";
 }
 
 test "nested fn value: IR has one deduplicated tail-call adapter targeting the lifted symbol" ![io] {
@@ -110,14 +105,67 @@ test "nested fn value: IR has one deduplicated tail-call adapter targeting the l
     assert outcome == 0;
 }
 
+test "nested fn value: a directly-called nested fn emits no adapter and no closure pair" ![io] {
+    // The counterpart to the SFN-667 direct-only test. This is the guard against
+    // the value-position `Identifier` rewrite over-firing: a nested fn that is
+    // only ever CALLED must stay on the plain direct-call path, with no adapter
+    // and no `{code, env}` pair anywhere in the module.
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let source_path = dir + "/direct-only-nested.sfn";
+        let raw_ll = dir + "/direct-only-nested.ll";
+        fs.writeFile(source_path, "fn main() -> int { fn worker(x: int) -> int { return x + 1; } return worker(5); }");
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", raw_ll, "llvm", source_path], clean_runner_env(dir));
+        let _out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        assert exit == 0;
+        let ir = fs.readFile(raw_ll);
+        assert contains(ir, "@sfn_nested_worker_");
+        assert ! contains(ir, ".__fnval_adapter");
+        assert ! contains(ir, "insertvalue {i8*, i8*}");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+test "nested fn value: a bare-identifier match pattern is not rewritten to the lifted symbol" ![io] {
+    // SFN-108 regression. A bare-identifier match arm BINDS its name; it is a
+    // binding site, not a reference, so the value-position rewrite must leave
+    // it alone (typecheck agrees — `walk_match_pattern` never treats it as a
+    // read).
+    //
+    // The assertion is "still rejected", not a run result, and that is the
+    // point: an identifier-binder match arm does not lower today for an
+    // unrelated pre-existing reason (E1002, the assignment inside the arm is
+    // dropped) — it is rejected with or without a nested fn in scope. The bug
+    // this pins is that renaming the binder to `sfn_nested_<name>_<N>` turned
+    // it into a function ADDRESS, which sidestepped that rejection and emitted
+    // a binary that compiled clean and silently computed the wrong answer. If
+    // the rewrite is ever reintroduced, this build starts succeeding and the
+    // assertion fires.
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let source_path = dir + "/match-binder.sfn";
+        let binpath = dir + "/match-binder";
+        let source = "fn outer(v: int) -> int { fn value(x: int) -> int { return x * 10; } let mut out: int = 0; match v { 1 => { out = value(1); } value => { out = value + 7; } } return out; } fn main() -> int { return outer(5); }";
+        fs.writeFile(source_path, source);
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, source_path], clean_runner_env(dir));
+        let _bo = process.capture_take_stdout();
+        let build_err = process.capture_take_stderr();
+        assert build_exit != 0;
+        // Rejected by the ordinary lowering guard, not by a fabricated symbol.
+        assert contains(build_err, "E1002");
+        assert ! contains(build_err, "sfn_nested_value_");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
 test "nested fn value: a let shadowing a nested fn wins at a value-position reference" ![io] {
     let outcome = with_tmp_dir(fn (dir: string) -> int {
-        let scratch = nested_runner_scratch("nested-fn-value-shadow");
         let source_path = dir + "/shadow.sfn";
         let source = "fn main() -> int { fn helper(n: int) -> int { return n * 10; } let helper = fn (n: int) -> int { return n + 1; }; let f: fn (int) -> int = helper; return f(5); }";
         fs.writeFile(source_path, source);
         let binpath = dir + "/shadow";
-        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, source_path], clean_runner_env(scratch));
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, source_path], clean_runner_env(dir));
         let build_out = process.capture_take_stdout();
         let build_err = process.capture_take_stderr();
         if build_exit != 0 {

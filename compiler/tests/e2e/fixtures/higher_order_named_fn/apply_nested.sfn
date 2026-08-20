@@ -10,6 +10,13 @@ struct Handler {
     call: fn (int) -> int
 }
 
+// Return position: a nested fn's name is returned as a `fn(...)` value from the
+// function that declares it.
+fn choose() -> fn (int) -> int {
+    fn tripled(x: int) -> int { return x * 3; }
+    return tripled;
+}
+
 fn main() ![io] {
     fn double(x: int) -> int { return x * 2; }
 
@@ -26,5 +33,6 @@ fn main() ![io] {
     // through a fn-typed collection element / struct field is SFEP-0030
     // Item 3 (SFN-674), still unshipped — `apply_named.sfn` populates the
     // same two sites without calling them, for the identical reason.
-    print(apply(5, double) + picked(5) + reassigned(1) + double(1));
+    let chosen: fn (int) -> int = choose();
+    print(apply(5, double) + picked(5) + reassigned(1) + double(1) + chosen(2));
 }

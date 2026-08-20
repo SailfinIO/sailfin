@@ -884,9 +884,10 @@ here.
   the `tail` hint plus the `-O2` code-quality gate keeps the adapter frame-free.
   Source effects must be subsumed
   by the expected row and calls through a stored value impose that row. Generic,
-  nested, async, entry-point, signature-mismatched, or otherwise unsupported
+  async, entry-point, signature-mismatched, or otherwise unsupported
   values remain rejected (`E0808`/`E0839`); non-pointer-width aggregate
-  signatures fail closed with `E0840`. General fn-typed struct-field storage and
+  signatures fail closed with `E0840`. Nested / local fns are eligible too as of
+  SFN-108 — see the nested-function row below for that path and its limits. General fn-typed struct-field storage and
   member dispatch remain SFEP-0030 item 3 (SFN-674). Imported/prelude names also
   fail closed in a typed fn-value slot until the import table carries the full
   parameter/generic/async/ABI proof required for safe materialization. Raw C-ABI address-taking
