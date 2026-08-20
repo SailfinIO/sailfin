@@ -5,12 +5,30 @@
 // multi-emit harness driven by `make check-determinism`) out of the suite
 // while still covering the logic most likely to regress.
 import {
+    _det_abspath,
     _det_all_sizes_zero,
     _det_distinct_count,
     _det_parse_row,
     _det_safe_of,
     _det_slug_of
 } from "../../src/cli/commands/dev_det_sweep";
+
+// `_det_abspath` backs the module-path, `--seed`, and `--out` absolutization
+// sites. It was POSIX-only (`starts_with(x, "/")`), so a Windows
+// drive-absolute path was misread as relative and got a `repo_root + "/"`
+// prefix baked onto it (SFN-704).
+test "det-sweep: abspath leaves a drive-absolute path untouched" {
+    assert _det_abspath("/home/dev/repo", "C:/sweep/out") == "C:/sweep/out";
+    assert _det_abspath("/home/dev/repo", "C:\\sweep\\out") == "C:\\sweep\\out";
+}
+
+test "det-sweep: abspath leaves a POSIX-absolute path untouched" {
+    assert _det_abspath("/home/dev/repo", "/tmp/sweep/out") == "/tmp/sweep/out";
+}
+
+test "det-sweep: abspath prefixes the repo root onto a relative path" {
+    assert _det_abspath("/home/dev/repo", "build/bin/sfn") == "/home/dev/repo/build/bin/sfn";
+}
 
 test "det-sweep: slug strips compiler/src prefix" ![io] {
     assert _det_slug_of("compiler/src/main.sfn") == "main";

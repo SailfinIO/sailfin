@@ -121,6 +121,101 @@ fn contains_string(values: string[], target: string) -> boolean {
     return false;
 }
 
+// ---- Cross-host path rootedness (SFN-704) ----
+//
+// Promoted from `runtime_capsule_resolver.sfn::_rcr_root_prefix_len`, the
+// most complete of three near-duplicate implementations that had
+// accumulated (the others: `module_paths.sfn::_source_identity_root_length`,
+// `cli/commands/dev.sfn::_bootstrap_is_absolute`). This is the shared home
+// named as deferred follow-up by `dev.sfn`'s header comment and by
+// `docs/proposals/design-notes/sfn-495-deshell-local-fs-cli-commands.md`
+// §9 item 4. `runtime_capsule_resolver.sfn` and `module_paths.sfn` keep
+// their own already-correct copies for now — migrating their internal call
+// sites onto this shared form is pure refactor risk with no correctness
+// gain and is tracked as follow-up, not done here.
+//
+// True iff `ch` is a path separator. Windows accepts `/` and `\`
+// interchangeably in every Win32 file API, and both `GetModuleFileNameA`
+// and `_fullpath` hand back `\` — so a path reaching this module on
+// Windows routinely carries either, or both in one string (SFN-642).
+fn is_path_separator(ch: string) -> boolean { return ch == "/" || ch == "\\"; }
+
+// True iff `ch` is an ASCII letter, i.e. a candidate drive letter.
+fn _su_is_drive_letter(ch: string) -> boolean {
+    let code = char_code(ch);
+    if code >= 65 && code <= 90 { return true; }
+    return code >= 97 && code <= 122;
+}
+
+// Length of the leading ROOT of `path`, or 0 when `path` is relative. The
+// root is the prefix `..` may never climb past.
+//
+// Recognized roots:
+//   `/`               POSIX                      -> 1
+//   `C:/` or `C:\`    drive-absolute             -> 3
+//   `C:`              drive-RELATIVE             -> 2
+//   `\\server\share`  UNC                        -> through the share
+//
+// UNC is detected ONLY in its backslash form. `//foo/bar` is a legal POSIX
+// path that must keep collapsing to `/foo/bar`, and no Windows tool emits
+// a forward-slash UNC — so treating `//` as a UNC root would break POSIX
+// byte-identity to buy nothing.
+fn path_root_prefix_len(path: string) -> int {
+    if path.length == 0 { return 0; }
+    if path.length >= 2 && substring(path, 0, 2) == "\\\\" {
+        // Scan the server component, then the share component. Both
+        // belong to the root: `\\server\share\..` clamps to
+        // `\\server\share` and never climbs to `\\server`.
+        let mut i: int = 2;
+        loop {
+            if i >= path.length { break; }
+            if is_path_separator(substring(path, i, i + 1)) { break; }
+            i += 1;
+        }
+        if i >= path.length { return path.length; }
+        // Consume exactly ONE separator, never a run. On a doubled
+        // separator (`\\srv\\a`) the share scan then starts on the
+        // second separator and matches an EMPTY share, so the root is
+        // `\\srv\` and `a` is an ordinary poppable segment. That looks
+        // like an off-by-one but it is precisely what Win32 does —
+        // verified, because the intuitive reading is wrong:
+        //   GetFullPath("//srv//a/../../b")   -> "\\srv\b"    (a popped)
+        //   GetFullPath("//srv/sh/a/../../b") -> "\\srv\sh\b" (sh kept)
+        // Skipping the run instead would keep `a` as the share and
+        // diverge from the platform.
+        i += 1;
+        loop {
+            if i >= path.length { break; }
+            if is_path_separator(substring(path, i, i + 1)) { break; }
+            i += 1;
+        }
+        return i;
+    }
+    if path.length >= 2 && substring(path, 1, 2) == ":" && _su_is_drive_letter(substring(path, 0, 1)) {
+        if path.length >= 3 && is_path_separator(substring(path, 2, 3)) {
+            return 3;
+        }
+        return 2;
+    }
+    if is_path_separator(substring(path, 0, 1)) { return 1; }
+    return 0;
+}
+
+// True iff `path` is rooted (POSIX-absolute, drive-absolute, or UNC).
+// Drive-RELATIVE (`C:foo`) is NOT absolute — it still resolves against the
+// current directory of drive C.
+fn is_absolute_path(path: string) -> boolean {
+    let root_len = path_root_prefix_len(path);
+    if root_len == 0 { return false; }
+    if root_len == 2 && path.length >= 2 && substring(path, 1, 2) == ":" {
+        // Bare drive-relative root (`C:`) or `C:foo`: root length 2 without
+        // a trailing separator is exactly the drive-relative case, not
+        // absolute.
+        return false;
+    }
+    return true;
+}
+
 export {
     clamp,
     substring,
@@ -137,5 +232,8 @@ export {
     starts_with,
     ends_with,
     strip_prefix,
-    contains_string
+    contains_string,
+    is_path_separator,
+    path_root_prefix_len,
+    is_absolute_path
 };
