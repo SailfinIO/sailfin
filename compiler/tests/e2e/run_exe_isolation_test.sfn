@@ -45,10 +45,22 @@ fn _ensure_fixture(root: string, sleep_ms: int) -> void ![io] {
         + "}\n");
 }
 
-// Count entries directly under `dir` whose name starts with "run-" — the
-// per-invocation exe naming scheme (`_unique_run_exe_path` in
-// `compiler/src/cli/commands/run.sfn`). `run.ll` starts with "run." and is
-// never counted.
+fn _ends_with(text: string, suffix: string) -> boolean {
+    if suffix.length > text.length { return false; }
+    return substring(text, text.length - suffix.length, text.length) == suffix;
+}
+
+// Count EXECUTABLE entries directly under `dir` whose name starts with
+// "run-" — the per-invocation naming scheme (`_unique_run_stem` in
+// `compiler/src/cli/commands/run.sfn`).
+//
+// The `.ll` exclusion is load-bearing, not tidiness. It used to be free:
+// the IR was the fixed `run.ll`, which starts with "run." and so never
+// matched the "run-" prefix. SFN-1004 moved the IR onto the same
+// per-invocation stem as the exe, so `run-<millis>.ll` now sits beside
+// `run-<millis>[.exe]` and WOULD match. Without this filter every count
+// here doubles and the assertions below silently stop meaning what they
+// say.
 fn _count_run_exe_entries(dir: string) -> int ![io] {
     if !fs.exists(dir) { return 0; }
     let entries = fs.listDirectory(dir);
@@ -56,7 +68,8 @@ fn _count_run_exe_entries(dir: string) -> int ![io] {
     let mut i: int = 0;
     loop {
         if i >= entries.length { break; }
-        if find(entries[i], "run-", 0) == 0 { count += 1; }
+        let name = entries[i];
+        if find(name, "run-", 0) == 0 && !_ends_with(name, ".ll") { count += 1; }
         i += 1;
     }
     return count;
@@ -122,12 +135,27 @@ test "run: two overlapping invocations in one directory both succeed" ![clock, i
     assert handle_b != 0;
 
     let out_a = process.handle_read_stdout(handle_a);
-    let _err_a = process.handle_read_stderr(handle_a);
+    let err_a = process.handle_read_stderr(handle_a);
     let exit_a = process.handle_wait(handle_a);
 
     let out_b = process.handle_read_stdout(handle_b);
-    let _err_b = process.handle_read_stderr(handle_b);
+    let err_b = process.handle_read_stderr(handle_b);
     let exit_b = process.handle_wait(handle_b);
+
+    // SFN-1004: surface the child's own stderr before asserting. This test
+    // failed once in a nightly `make check` and the log carried nothing but
+    // the bare assertion line, because both children's stderr was read and
+    // discarded — so the one artifact that would have named the cause (an
+    // `sfn run: no binary at <path>` from the exec, or a link diagnostic)
+    // was thrown away. A concurrency failure here is rare and timing-bound;
+    // when it does happen the run has to be self-explaining, because it may
+    // not reproduce on the next one.
+    if exit_a != 0 {
+        print.error("run A failed, exit " + int_to_string(exit_a) + ": " + err_a);
+    }
+    if exit_b != 0 {
+        print.error("run B failed, exit " + int_to_string(exit_b) + ": " + err_b);
+    }
 
     assert exit_a == 0;
     assert exit_b == 0;
