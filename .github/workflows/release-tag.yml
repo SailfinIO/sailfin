@@ -840,6 +840,19 @@ jobs:
             bash .release-gates/scripts/verify-payload-dep-closure.sh \
               "dist/sailfin_${version}_${label}.tar.gz"
           done
+          # The native MSVC asset is optional presence (native-windows-build
+          # is best-effort while it stabilizes — see `upload`'s `if:` above),
+          # but never an optional check: skip only when the payload is
+          # absent, verify unconditionally when it is present. It is the one
+          # release payload produced by a code path that has barely executed
+          # anywhere, making it the most likely to have an incomplete
+          # runtime closure — and a payload that is present but incomplete
+          # link-fails every user program on a fresh install, exactly what
+          # this loop exists to catch for every other platform.
+          msvc_payload="dist/sailfin_${version}_windows_x86_64-msvc.tar.gz"
+          if [ -f "$msvc_payload" ]; then
+            bash .release-gates/scripts/verify-payload-dep-closure.sh "$msvc_payload"
+          fi
 
       # Supply-chain root: publish a signed SHA256SUMS manifest over the release
       # assets so `sfn` can verify a fetched toolchain against the public key
