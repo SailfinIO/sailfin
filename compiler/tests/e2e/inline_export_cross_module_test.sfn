@@ -11,7 +11,7 @@
 // Native replacement style per `.claude/rules/no-bash-e2e.md`: assert on the
 // subprocess result, thread PATH + SAILFIN_TEST_SCRATCH into the nested build.
 import { contains } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { scratch_root, sfn_bin_path } from "sfn/test";
 
 // The nested `sfn build` spawns clang + a linker, so the child needs PATH;
 // SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation so
@@ -29,14 +29,8 @@ fn _child_env() -> string[] ![io] {
     return e;
 }
 
-fn _scratch_base() -> string ![io] {
-    let base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length > 0 { return base; }
-    return "/tmp";
-}
-
 fn _capsule_root() -> string ![io] {
-    return _scratch_base() + "/sfn-inline-export-xmod";
+    return scratch_root() + "/sfn-inline-export-xmod";
 }
 
 // Materialize a 2-module capsule whose producer uses the inline export form
@@ -90,7 +84,7 @@ fn _ensure_fixture() ![io] {
 }
 
 fn _bin_path() -> string ![io] {
-    return _scratch_base() + "/sfn-inline-export-xmod-prog";
+    return scratch_root() + "/sfn-inline-export-xmod-prog";
 }
 
 test "inline export xmod: producer using only inline `export` builds across modules" ![io] {

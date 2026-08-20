@@ -13,7 +13,7 @@
 //   2. exec of a nonexistent path: the image is NOT replaced, so
 //      `process.exec` returns and the fixture's fallback path runs.
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { scratch_root, sfn_bin_path } from "sfn/test";
 
 // Child env for the nested `sfn build`: `run_capture`'s empty env is the
 // EMPTY environment (not "inherit"), so a build-spawning test must thread
@@ -33,14 +33,6 @@ fn _child_env() -> string[] ![io] {
     return e;
 }
 
-fn _scratch_root() -> string ![io] {
-    let s = env.get("SAILFIN_TEST_SCRATCH");
-    if s.length > 0 { return s; }
-    let t = env.get("TMPDIR");
-    if t.length > 0 { return t; }
-    return "/tmp";
-}
-
 // Build `src` to `binpath` with the compiler-under-test; returns the build
 // exit code. Threads the child env so the nested clang/link finds its tools.
 fn _build_fixture(src: string, binpath: string) -> int ![io] {
@@ -51,7 +43,7 @@ fn _build_fixture(src: string, binpath: string) -> int ![io] {
 }
 
 test "process.exec: replaces the image with /bin/echo" ![io] {
-    let root = _scratch_root() + "/sfn-process-exec-ok";
+    let root = scratch_root() + "/sfn-process-exec-ok";
     fs.createDirectory(root, true);
     let src = root + "/main.sfn";
     let bin = root + "/main";
@@ -79,7 +71,7 @@ test "process.exec: replaces the image with /bin/echo" ![io] {
 }
 
 test "process.exec: returns on a failed exec (image not replaced)" ![io] {
-    let root = _scratch_root() + "/sfn-process-exec-fail";
+    let root = scratch_root() + "/sfn-process-exec-fail";
     fs.createDirectory(root, true);
     let src = root + "/main.sfn";
     let bin = root + "/main";

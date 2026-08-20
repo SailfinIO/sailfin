@@ -38,7 +38,7 @@
 // `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { scratch_root, sfn_bin_path } from "sfn/test";
 
 import { build_target_triple, target_artifact_tag } from "../../src/build/target";
 
@@ -63,12 +63,6 @@ fn _child_env_with(extra: string[]) -> string[] ![io] {
         i = i + 1;
     }
     return e;
-}
-
-fn _scratch_base() -> string ![io] {
-    let s = env.get("SAILFIN_TEST_SCRATCH");
-    if s.length > 0 { return s; }
-    return "/tmp";
 }
 
 // Copy a repo file to `dst` (the `.sfn` runtime modules are text, so
@@ -185,7 +179,7 @@ fn _setup_workspace(ws: string) ![io] {
 
 // ---- Test 1: build, stage private context, resolve %Pair, round-trip ----
 test "runtime sfn-source struct import builds, stages context, and round-trips (#1288)" ![io] {
-    let ws = _scratch_base() + "/sfn-rtsrc-struct-positive";
+    let ws = scratch_root() + "/sfn-rtsrc-struct-positive";
     _setup_workspace(ws);
     let build_dir = ws + "/build";
     let bin = build_dir + "/native/sailfin-app";
@@ -258,7 +252,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
 
 // ---- Test 2: the disable gate short-circuits the staging pass ----
 test "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES skips import-context staging (#1288)" ![io] {
-    let ws = _scratch_base() + "/sfn-rtsrc-struct-disabled";
+    let ws = scratch_root() + "/sfn-rtsrc-struct-disabled";
     _setup_workspace(ws);
     let build_dir = ws + "/build";
 

@@ -18,7 +18,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
 // an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { scratch_root, sfn_bin_path } from "sfn/test";
 
 import { build_target_os, target_exe_name } from "../../src/build/target";
 
@@ -39,12 +39,6 @@ fn _child_env() -> string[] ![io] {
     return e;
 }
 
-fn _scratch_base() -> string ![io] {
-    let s = env.get("SAILFIN_TEST_SCRATCH");
-    if s.length > 0 { return s; }
-    return "/tmp";
-}
-
 // Host-OS probe (via `uname -s`). Reproducible-build byte-identity is a
 // Linux x86_64 guarantee; macOS arm64 Mach-O objects embed non-reproducible
 // data (LC_UUID and friends), so `--check-determinism` legitimately reports
@@ -60,7 +54,7 @@ fn _host_is_darwin() -> boolean ![io] {
 // scratch dir keyed by `tag`. Returns the absolute path to hello.sfn so
 // CWD never matters for input resolution.
 fn _make_proj(tag: string) -> string ![io] {
-    let root = _scratch_base() + "/sfn-work-dir-flag-" + tag;
+    let root = scratch_root() + "/sfn-work-dir-flag-" + tag;
     fs.createDirectory(root, true);
     let src = root + "/hello.sfn";
     fs.writeFile(src, "fn main() ![io] {\n    print(\"OK\");\n}\n");
@@ -79,7 +73,7 @@ test "work-dir-flag: sfn build --help lists --work-dir" ![io] {
 // ---- Test 2: --work-dir creates the virtualized layout ----
 test "work-dir-flag: --work-dir writes default-binary + sailfin/" ![io] {
     let src = _make_proj("layout");
-    let work = _scratch_base() + "/sfn-work-dir-flag-layout/wd1";
+    let work = scratch_root() + "/sfn-work-dir-flag-layout/wd1";
 
     let exit = process.run_capture([sfn_bin_path(), "build", "--work-dir", work, src], _child_env());
     let _o = process.capture_take_stdout();
@@ -126,7 +120,7 @@ test "work-dir-flag: two builds produce byte-identical binaries" ![io] {
 // ---- Test 4: explicit -o build lands the binary ----
 test "work-dir-flag: explicit -o build produces the binary" ![io] {
     let src = _make_proj("default");
-    let out_bin = _scratch_base() + "/sfn-work-dir-flag-default/program";
+    let out_bin = scratch_root() + "/sfn-work-dir-flag-default/program";
 
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", out_bin, src], _child_env());
     let _o = process.capture_take_stdout();
