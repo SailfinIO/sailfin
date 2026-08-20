@@ -286,6 +286,28 @@ test "workspace implicit: bundled true member is selected" {
     assert selected[0].implicit;
 }
 
+test "workspace: a non-implicit member still resolves a written import" {
+    // SFN-986: the two mechanisms named "implicit" are distinct legs.
+    // `select_workspace_implicit_members` (SFEP-0072 §3.3) selects providers
+    // whose names are available with no import statement, and requires
+    // `implicit = true`. `workspace_member_for_spec` resolves a *written*
+    // scoped import and ignores the flag entirely — membership is the only
+    // condition. Conflating them is the error SFN-986 was filed on, so assert
+    // the divergence on one and the same member rather than separately.
+    // Hold the member identical except for the flag: the written-import leg
+    // must return the same src_dir either way, while the provider-selection
+    // leg must disagree. Asserting the two legs separately would restate
+    // neighbouring tests; asserting they *diverge on the same input* is the
+    // property, and it breaks if an `.implicit` guard is ever added to
+    // `workspace_member_for_spec`.
+    let off = _workspace_member("demo/lib", "lib", false);
+    let on = _workspace_member("demo/lib", "lib", true);
+    assert _str_eq(workspace_member_for_spec([off], "demo/lib"), workspace_member_for_spec([on], "demo/lib"));
+    assert _str_eq(workspace_member_for_spec([off], "demo/lib"), "/workspace/lib/src");
+    assert select_workspace_implicit_members([off], []).length == 0;
+    assert select_workspace_implicit_members([on], []).length == 1;
+}
+
 test "workspace implicit: source member overrides bundled provider by canonical name" {
     let source = [_workspace_member("demo/provider", "local/provider", false)];
     let bundled = [_workspace_member("demo/provider", "bundled/provider", true)];

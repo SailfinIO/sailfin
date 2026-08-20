@@ -17,8 +17,10 @@ export { helper as publicHelper } from "./internal";
 ```
 
 - **Relative paths** (`"./module"`) — same capsule
-- **Registry capsules** (`"sfn/log"`) — from the capsule registry
-- **Workspace capsules** (`"core"`) — sibling capsules in a workspace
+- **Registry capsules** (`"sfn/log"`) — from the capsule registry; the capsule
+  must be declared in the importer's `[dependencies]`
+- **Workspace capsules** (`"core"`) — sibling capsules in a workspace;
+  membership alone resolves the import, with no `[dependencies]` entry required
 
 Modules may re-export items from other modules. Specifiers support aliasing with `as`.
 

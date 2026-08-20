@@ -288,6 +288,11 @@ fn fetch_data(url: string) -> string ![net, io] {
 
 The capsule name (`"sfn/log"`) must appear in your `[dependencies]` table.
 
+This requirement applies when your capsule has its own `capsule.toml` and is
+not a member of a workspace that already ships the capsule. Inside a workspace,
+membership alone resolves the import; see
+[Workspace Imports](#workspace-imports) below.
+
 ### Workspace Imports
 
 When capsules live in the same workspace, one capsule can import from another using the target capsule's name:
@@ -302,14 +307,23 @@ fn handle_login(req, res) ![io, net] {
 }
 ```
 
-The importing capsule must list the dependency in its own `capsule.toml`:
+Workspace membership is what resolves this import. The importing capsule does
+**not** need to declare `"core"` in its own `[dependencies]` for the import to
+compile — the resolver matches the specifier against the workspace's member
+list directly.
+
+Declaring it anyway is still worth doing:
 
 ```toml
 [dependencies]
-"core" = { path = "../core" }
+"core" = "*"
 ```
 
-The `path` key tells the resolver to use the local directory rather than fetching from the registry.
+Declare a workspace sibling when you want the dependency pinned explicitly, or
+when the capsule may later be **published and consumed outside this
+workspace**. A capsule that has its own `capsule.toml` but is not a workspace
+member resolves scoped imports only through `[dependencies]` — so an
+undeclared import that compiles for you will fail for that consumer.
 
 ## Exporting a Public API
 
