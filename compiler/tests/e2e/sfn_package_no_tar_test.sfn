@@ -19,19 +19,7 @@
 // EVERYTHING would be unresolvable. A shim carrying every real tool except
 // `tar`/`bsdtar` isolates the one thing this test is actually checking.
 import { char_code_at, find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
-
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], process.environ());
-    let root = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    let lines = _split_lines(root);
-    if lines.length == 0 { return bin; }
-    return lines[0] + "/" + bin;
-}
+import { default_scratch_dir, sfn_bin_abs_path } from "sfn/test";
 
 fn _split_lines(text: string) -> string[] {
     let mut out: string[] = [];
@@ -155,7 +143,7 @@ test "sfn package (no tar on PATH): still produces a valid gzip tarball" ![io] {
     let root = _scratch_dir() + "/sfnpkg-no-tar";
     fs.createDirectory(root, true);
     let dist = root + "/dist";
-    let bin = _sfn_bin_abs();
+    let bin = sfn_bin_abs_path();
 
     let mut child_env: string[] = ["PATH=" + shim];
     if scratch.length > 0 {

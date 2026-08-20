@@ -42,28 +42,13 @@
 //
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
-import { find, split } from "sfn/strings";
-import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
-
-// `run_capture_cwd` resolves the child's argv[0] against the CHILD cwd, not
-// the parent's — an unqualified "build/bin/sfn" would not resolve once the
-// nested run's cwd is the private fixture dir. Mirrors
-// `target_flag_cache_key_test.sfn`'s `_sfn_bin_abs`.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], []);
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
+import { find } from "sfn/strings";
+import {
+    default_scratch_dir,
+    report_child_failure,
+    sfn_bin_abs_path,
+    sfn_bin_path
+} from "sfn/test";
 
 // Build env for sfn run: PATH (clang/linker), HOME, TMPDIR,
 // and per-test SAILFIN_TEST_SCRATCH + SAILFIN_BUILD_CACHE_DIR.
@@ -170,7 +155,7 @@ struct Run {
 // the exit code and combined stdout+stderr.
 fn _run_with_cwd(dir: string, test_scratch: string, cache_dir: string, extra_flags: string[]) -> Run ![io] {
     let e = _make_env(test_scratch, cache_dir);
-    let mut argv: string[] = [_sfn_bin_abs(), "run"];
+    let mut argv: string[] = [sfn_bin_abs_path(), "run"];
     let mut i = 0;
     loop {
         if i >= extra_flags.length { break; }

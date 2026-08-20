@@ -16,31 +16,13 @@
 // controls (SFN-923's presenting failure was a Windows COFF link dying on
 // duplicate `__sfn_type_desc.*` symbols precisely because a child emitted
 // them WITHOUT this comdat group).
-import { contains, split } from "sfn/strings";
+import { contains } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
-    sfn_bin_path,
+    sfn_bin_abs_path,
     with_tmp_dir
 } from "sfn/test";
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
-
-// `run_capture_cwd` resolves the child's argv[0] against the CHILD cwd,
-// not the parent's. Mirrors `target_flag_cache_key_test.sfn::_sfn_bin_abs`.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("cross-target-emit-pwd")));
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
 
 // A struct forces `__sfn_type_desc` emission (`comdat any` under a Windows
 // target), which is the observable signal this file asserts on.
@@ -56,7 +38,7 @@ fn _write_fixture(dir: string) -> void ![io] {
 // contrast is what pins the SFN-923 bug (the child previously resolved
 // the host target even when told to cross-build).
 test "cross-target emit: --target reaches sfn emit and flips the comdat gate" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
         let host_out = dir + "/host.ll";
@@ -99,7 +81,7 @@ test "cross-target emit: --target reaches sfn emit and flips the comdat gate" ![
 // rather than fabricating a way to trigger it; it is a future-precedence
 // guard, not a reachable-today path.
 test "cross-target emit: an unsupported --target triple is rejected with E0614, and E0617 never fires" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
         let out = dir + "/bogus.ll";

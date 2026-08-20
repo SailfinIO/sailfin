@@ -78,3 +78,77 @@ fn sfn_bin_path() -> string ![io] {
     if _host_is_windows() { return "build/bin/sfn.exe"; }
     return "build/bin/sfn";
 }
+
+// `realpath(path, resolved)` with `resolved = null` has libc allocate the
+// resolved buffer; `_cwd` below calls it as `realpath(".", null)`. On a
+// native Windows host this resolves against
+// `runtime/sfn/platform/realpath_windows.sfn` (over `_fullpath`), appended
+// for the Windows target by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`) — the same sibling-module treatment
+// `compiler/src/build/fs.sfn:57` documents for its own inline copy of this
+// extern. This is the sanctioned way to get the cwd without a shell; do not
+// "fix" `_cwd` below into a `pwd` shellout.
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+// The current working directory, mirroring `_cwd_cmd` in
+// `compiler/src/build/fs.sfn:184-190`: `realpath(".", null)` first, `PWD`
+// only as a fallback (it is shell-maintained, so it is absent under a
+// non-shell parent and on native Windows), and `"."` as the terminus rather
+// than fabricating a root. Duplicated rather than imported — `sfn/test` is
+// a narrow-stdlib library and cannot depend on the `sfn/compiler` binary
+// capsule, the same capsule-boundary constraint documented above this file
+// at lines 41-46.
+fn _cwd() -> string ![io] {
+    let resolved: *u8 = realpath("." as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    let pwd = env.get("PWD");
+    if pwd.length > 0 { return pwd; }
+    return ".";
+}
+
+// True iff `path` is already absolute and needs no cwd prefix.
+//
+// Structural, not host-conditioned: this asks what `path` looks like, not
+// what host we are running on, because `SAILFIN_BIN` may name a path in
+// either shape regardless of the host `sfn_bin_abs_path` itself runs on
+// (for example a Linux-hosted CI leg pointing at a Windows build artifact).
+// Deliberately does NOT route through `_host_is_windows()`.
+//
+// Recognizes a leading `/` or `\`, a drive prefix (`C:\...` or `C:/...`),
+// and a UNC prefix (`\\server\share\...`). Semantics should agree with
+// `path_root_prefix_len`/`is_absolute_path` in
+// `compiler/src/string_utils.sfn` (SFN-704) — that module is this one's
+// driver-side twin, duplicated here rather than imported for the same
+// capsule-boundary reason as `_cwd` above.
+fn _is_absolute_bin_path(path: string) -> boolean {
+    if path.length == 0 { return false; }
+    // A leading `\` already covers UNC (`\\server\share\...`) — its
+    // second `\` never needs its own check.
+    if path[0] == "/" || path[0] == "\\" { return true; }
+    if path.length >= 2 && path[1] == ":" {
+        let code = char_code(path[0]);
+        let is_letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+        if is_letter { return true; }
+    }
+    return false;
+}
+
+// `sfn_bin_path()`, absolutized against the cwd when it is relative.
+//
+// Every test that drives the compiler under test as a child of a DIFFERENT
+// cwd (a scratch repo, a nested `sfn` invocation) needs the binary path
+// absolutized first — a relative `sfn_bin_path()` would not resolve there.
+// This is the single definition of a resolver that 15 e2e tests under
+// `compiler/tests/e2e/` had each hand-copied as a private `_sfn_bin_abs()`,
+// every copy guarding absoluteness with a POSIX-only `bin[0] == "/"` check
+// that misclassifies a Windows drive path (`C:\...`) as relative (SFN-995).
+//
+// Joins with `/`, never `\`, to keep POSIX output byte-identical to the 15
+// copies being replaced — Win32 accepts both separators in every file API,
+// the argument `runtime/sfn/platform/realpath_windows.sfn:43-49` makes at
+// length.
+fn sfn_bin_abs_path() -> string ![io] {
+    let bin = sfn_bin_path();
+    if _is_absolute_bin_path(bin) { return bin; }
+    return _cwd() + "/" + bin;
+}

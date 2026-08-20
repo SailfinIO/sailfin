@@ -2,29 +2,13 @@
 // Bare `sfn build` and `sfn test` invocations run with the fixture workspace
 // as their child cwd, selecting `[workspace].default-members` without passing
 // a positional path or `-p`.
-import { find, split } from "sfn/strings";
+import { find } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
-    sfn_bin_path,
+    sfn_bin_abs_path,
     with_tmp_dir
 } from "sfn/test";
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
-
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("workspace-default-pwd")));
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
 
 fn _member(root: string, dir: string, name: string, main_source: string, test_source: string) -> void ![io] {
     fs.createDirectory(root + "/" + dir + "/src", true);
@@ -65,7 +49,7 @@ fn _runner_env(label: string) -> string[] ![io] {
 }
 
 test "workspace defaults: bare build and test select only default members" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_fixture(dir, "[\"good\"]");
         let build_rc = process.run_capture_cwd([sfn, "build"], _runner_env("workspace-default-build"), dir);
@@ -88,7 +72,7 @@ test "workspace defaults: bare build and test select only default members" ![io]
 }
 
 test "workspace defaults: build and test aggregate failures and continue" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_fixture(dir, "[\"bad-build\", \"late\"]");
         let build_rc = process.run_capture_cwd([sfn, "build"], _runner_env("workspace-aggregate-build"), dir);
@@ -112,7 +96,7 @@ test "workspace defaults: build and test aggregate failures and continue" ![io] 
 }
 
 test "workspace defaults: undeclared selects all and empty glob stays empty" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_fixture(dir, "");
         let all_rc = process.run_capture_cwd([sfn, "test", "--jobs", "1", "--no-test-cache"], _runner_env("workspace-all-test"), dir);
@@ -138,7 +122,7 @@ test "workspace defaults: undeclared selects all and empty glob stays empty" ![i
 }
 
 test "workspace defaults: build and test help describe bare-root selection" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let build_rc = process.run_capture([sfn, "build", "--help"], _runner_env("workspace-help-build"));
     let build_out = process.capture_take_stdout();
     let build_err = process.capture_take_stderr();

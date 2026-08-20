@@ -19,28 +19,8 @@
 // probed WHILE still running — a blocking `run_capture` only ever sees
 // the directory after `sfn run`'s own post-exit cleanup has already run,
 // which would make the naming assertion vacuous.
-import { find, int_to_string, split } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
-
-// `spawn_with_env_cwd` resolves the child's argv[0] against the CHILD cwd,
-// not the parent's — an unqualified "build/bin/sfn" would not resolve
-// once the child's cwd is the private fixture dir (mirrors
-// `run_cache_flags_test.sfn`'s `_sfn_bin_abs`).
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], []);
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
+import { find, int_to_string } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, sfn_bin_abs_path } from "sfn/test";
 
 // A self-contained fixture (no external capsule deps) written under a
 // private per-test directory, which also serves as the CHILD's cwd — so
@@ -105,7 +85,7 @@ test "run: unguarded default path mints a per-invocation exe name and cleans up 
     let child_env = clean_runner_env("");
     let sailfin_dir = root + "/build/sailfin";
 
-    let handle = process.spawn_with_env_cwd([_sfn_bin_abs(), "run", "src/main.sfn"], child_env, root);
+    let handle = process.spawn_with_env_cwd([sfn_bin_abs_path(), "run", "src/main.sfn"], child_env, root);
     assert handle != 0;
     // While the fixture is still sleeping inside its own execution, its
     // exe must be present under a per-invocation "run-" name — never the
@@ -130,7 +110,7 @@ test "run: two overlapping invocations in one directory both succeed" ![clock, i
     let root = nested_runner_scratch("run-exe-isolation-overlap");
     _ensure_fixture(root, 1500);
     let child_env = clean_runner_env("");
-    let bin = _sfn_bin_abs();
+    let bin = sfn_bin_abs_path();
 
     // Start both before waiting on either, so their builds and their
     // fixtures' own `sleep()` genuinely overlap in the same directory —

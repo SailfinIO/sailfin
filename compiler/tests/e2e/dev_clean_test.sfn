@@ -4,33 +4,15 @@
 // it builds a fully synthetic repo in a scratch dir and drives the
 // compiler-under-test against it as cwd — no real build tree is ever
 // touched.
-import { find, split } from "sfn/strings";
+import { find } from "sfn/strings";
 import {
     clean_runner_env,
     default_scratch_dir,
     nested_runner_scratch,
-    sfn_bin_path
+    sfn_bin_abs_path
 } from "sfn/test";
 
 import { _clean_abs_with, _clean_guard_cache_root_from, _clean_target_ok } from "../../src/cli/commands/dev_clean";
-
-// The child's cwd is a scratch repo, which differs from this test's own
-// cwd — a relative `sfn_bin_path()` would not resolve there, so absolutize it.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], []);
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
 
 // A per-invocation scratch root for a synthetic repo. `SAILFIN_TEST_SCRATCH`
 // keeps it unique under the parallel pool; `/tmp` is the standalone fallback.
@@ -116,7 +98,7 @@ test "dev clean: cache-root guard leaves a genuinely relative root unguarded" {
 test "dev clean: dry-run removes nothing" ![io] {
     let repo = _scratch_repo("dev-clean-dry-run");
     _seed_repo(repo);
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_dry_run"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build", "--dry-run"], child_env, repo);
@@ -140,7 +122,7 @@ test "dev clean: dry-run removes nothing" ![io] {
 test "dev clean: preserves the seed store" ![io] {
     let repo = _scratch_repo("dev-clean-preserve-seed");
     _seed_repo(repo);
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_preserve_seed"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
@@ -158,7 +140,7 @@ test "dev clean: preserves the seed store" ![io] {
 test "dev clean: --include-seed removes the seed store" ![io] {
     let repo = _scratch_repo("dev-clean-include-seed");
     _seed_repo(repo);
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_include_seed"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build", "--include-seed"], child_env, repo);
@@ -173,7 +155,7 @@ test "dev clean: --include-seed removes the seed store" ![io] {
 test "dev clean: env opt-out removes the seed store" ![io] {
     let repo = _scratch_repo("dev-clean-keep-seed-env");
     _seed_repo(repo);
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let mut child_env = clean_runner_env(nested_runner_scratch("dev_clean_keep_seed_env"));
     child_env.push("SAILFIN_CLEAN_KEEP_SEED=0");
 
@@ -189,7 +171,7 @@ test "dev clean: env opt-out removes the seed store" ![io] {
 test "dev clean: dist clean removes dist" ![io] {
     let repo = _scratch_repo("dev-clean-dist");
     _seed_repo(repo);
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_dist"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "dist"], child_env, repo);
@@ -206,7 +188,7 @@ test "dev clean: absent build tree is a no-op" ![io] {
     let repo = _scratch_repo("dev-clean-absent-tree");
     _seed_repo(repo);
     process.run(["rm", "-rf", repo + "/build"]);
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_absent_tree"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
@@ -238,7 +220,7 @@ test "dev clean: preserved store name comes from the bootstrap manifest" ![io] {
     fs.writeFile(repo + "/build/toolchains/marker.txt", "toolchains\n");
     fs.createDirectory(repo + "/build/native", true);
     fs.writeFile(repo + "/build/native/marker.txt", "native\n");
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_custom_store"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
@@ -263,7 +245,7 @@ test "dev clean: a symlinked build child is unlinked, not followed" ![io] {
     fs.createDirectory(outside, true);
     fs.writeFile(outside + "/treasure.txt", "treasure\n");
     process.run(["ln", "-s", outside, repo + "/build/link"]);
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_symlink"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
@@ -287,7 +269,7 @@ test "dev clean: a symlinked build child is unlinked, not followed" ![io] {
 test "dev clean: all removes both trees" ![io] {
     let repo = _scratch_repo("dev-clean-all");
     _seed_repo(repo);
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_all"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "all"], child_env, repo);
@@ -307,7 +289,7 @@ test "dev clean: refuses to run outside a compiler checkout" ![io] {
     fs.createDirectory(repo, true);
     fs.createDirectory(repo + "/build", true);
     fs.writeFile(repo + "/build/marker.txt", "marker\n");
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_outside_checkout"));
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);

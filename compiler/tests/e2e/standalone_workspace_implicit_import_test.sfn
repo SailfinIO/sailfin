@@ -13,21 +13,11 @@ import {
     clean_runner_env,
     default_scratch_dir,
     nested_runner_scratch,
-    sfn_bin_path,
+    sfn_bin_abs_path,
     with_tmp_dir
 } from "sfn/test";
 
 import { _copy_file_preserving_mode } from "../../src/build/fs";
-
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 {
-        if find(bin, "/", 0) == 0 { return bin; }
-    }
-    let root = env.get("PWD");
-    if root.length > 0 { return root + "/" + bin; }
-    return bin;
-}
 
 fn _child_env() -> string[] ![io] {
     let parent = process.environ();
@@ -64,7 +54,7 @@ fn _run_standalone_program_from_entry_cwd(marker: string) -> int ![io] {
             + "    print(join(parts, \"-\"));\n"
             + "}\n");
 
-        let sfn = _sfn_bin_abs();
+        let sfn = sfn_bin_abs_path();
         let check_exit = process.run_capture_cwd([sfn, "check", "repro.sfn"], _child_env(), dir);
         let check_out = process.capture_take_stdout();
         let check_err = process.capture_take_stderr();
@@ -154,7 +144,7 @@ fn _write_consumer_workspace(root: string, explicit_dep: boolean) -> string ![io
 fn _copy_toolchain(root: string) -> string ![io] {
     fs.createDirectory(root + "/bin", true);
     let dst = root + "/bin/sfn";
-    if !_copy_file_preserving_mode(_sfn_bin_abs(), dst) { return ""; }
+    if !_copy_file_preserving_mode(sfn_bin_abs_path(), dst) { return ""; }
     if !fs.set_perms(dst, 493) { return ""; }
     return dst;
 }

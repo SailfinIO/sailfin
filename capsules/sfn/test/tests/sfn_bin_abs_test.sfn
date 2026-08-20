@@ -1,0 +1,146 @@
+// Tests for `sfn_bin_abs_path` (SFN-995).
+//
+// Same constraint as `sfn_bin_test.sfn`: the helper reads process env
+// (through `sfn_bin_path()`) and the cwd it resolves against, and there is
+// no in-process env/cwd mutation in the prelude, so each case writes a tiny
+// fixture that prints `sfn_bin_abs_path()`, builds it, then runs the
+// compiled binary as a real subprocess under a scoped `os::Env` and cwd via
+// `with_cwd`, and asserts on the captured stdout.
+//
+// The fixture is written under `build/sailfin` (inside the repo tree),
+// deliberately NOT `_scratch_dir()`'s usual `SAILFIN_TEST_SCRATCH` override:
+// `sfn_bin_test.sfn`'s `_scratch_dir` doc comment already states the reason
+// — a fixture inside the tree resolves `import { ... } from "sfn/test"`
+// against `capsule.toml`/`workspace.toml` discovered by walking up from the
+// source file, which stays correct however the compiler under test locates
+// its stdlib/registry fallback for a source file outside any workspace.
+// `_abs_path` then absolutizes the directory so the built binary is a valid
+// `args[0]` under a DIFFERENT `with_cwd` cwd too.
+import { ProcessOutput, env_from_current, env_set } from "sfn/os";
+import { trim } from "sfn/strings";
+
+import { sfn_bin_path, with_cwd } from "../src/mod";
+
+// Unlike `sfn_bin_test.sfn`'s `_scratch_dir`, this does not honor
+// `SAILFIN_TEST_SCRATCH` — see the file header for why the fixture must
+// stay inside the repo tree regardless of the ambient scratch override.
+fn _scratch_dir() -> string ![io] {
+    let dir = "build/sailfin";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// The test process's own cwd, needed here (and only here, for test setup)
+// to predict what a child that inherits it will resolve `.` to, and to
+// absolutize `_scratch_dir()` when it falls back to the relative literal.
+// Not a stand-in for `sfn_bin_abs_path` under test — that function is
+// exercised exclusively through the compiled fixture below.
+fn _repo_root() -> string ![io] {
+    let exit = process.run_capture(["pwd"], process.environ());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    return trim(out);
+}
+
+fn _abs_path(path: string) -> string ![io] {
+    if path.length > 0 && path[0] == "/" { return path; }
+    return _repo_root() + "/" + path;
+}
+
+// A fresh marker-file path for `tag`, used to ferry the child's stdout out
+// of the `with_cwd` body closure — the closure returns `int`, not a string
+// (same idiom `sfn_bin_test.sfn` uses).
+fn _marker(tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/sfn-bin-abs-marker-" + tag + ".txt";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Source for a fixture that prints `sfn_bin_abs_path()` on one line.
+fn _fixture_src() -> string {
+    return "import { sfn_bin_abs_path } from \"sfn/test\";\n\nfn main() ![io] {\n"
+        + "    print(sfn_bin_abs_path());\n"
+        + "}\n";
+}
+
+// Build the fixture, then run the compiled binary under `host_os` /
+// `bin_override` with `run_cwd` as the child's working directory (empty
+// inherits the parent's, matching `with_cwd`'s own contract), and return
+// the trimmed stdout the child printed.
+fn _probe_bin_abs_path(tag: string, host_os: string, bin_override: string, run_cwd: string) -> string ![io] {
+    let abs_dir = _abs_path(_scratch_dir());
+    let src = abs_dir + "/sfn-bin-abs-probe-" + tag + ".sfn";
+    let binpath = abs_dir + "/sfn-bin-abs-probe-" + tag;
+    let marker = _marker(tag);
+    fs.writeFile(src, _fixture_src());
+
+    // Build under the AMBIENT environment, never the scoped one below —
+    // see `sfn_bin_test.sfn` for why the build and run steps use two
+    // different environments.
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, src], process.environ());
+    let _build_stdout = process.capture_take_stdout();
+    let _build_stderr = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let scoped = env_set(env_set(env_from_current(), "SAILFIN_HOST_OS", host_os), "SAILFIN_BIN", bin_override);
+    let run_exit = with_cwd([binpath], scoped, run_cwd, fn (out: ProcessOutput) -> int {
+        fs.writeFile(marker, out.stdout);
+        return out.exit;
+    });
+    fs.deleteFile(src);
+    fs.deleteFile(binpath);
+    assert run_exit == 0;
+    let result = trim(fs.readFile(marker));
+    fs.deleteFile(marker);
+    return result;
+}
+
+// 1. A POSIX-absolute `SAILFIN_BIN` passes through unchanged — no cwd
+//    prefix, even though the child ran with the ambient (inherited) cwd.
+test "sfn_bin_abs: an absolute POSIX SAILFIN_BIN passes through unchanged" ![io] {
+    let out = _probe_bin_abs_path("posix-abs", "Linux", "/custom/path/to/sfn", "");
+    assert out == "/custom/path/to/sfn";
+}
+
+// 2. A Windows drive-absolute path with backslashes passes through
+//    unchanged — the bug this module fixes: the 15 hand-copied
+//    `_sfn_bin_abs()` resolvers checked only `bin[0] == "/"` and would have
+//    misclassified this as relative and prefixed it with the POSIX cwd.
+test "sfn_bin_abs: a Windows drive-absolute path with backslashes passes through unchanged" ![io] {
+    let out = _probe_bin_abs_path("win-backslash", "Linux", "C:\\custom\\path\\sfn.exe", "");
+    assert out == "C:\\custom\\path\\sfn.exe";
+}
+
+// 3. A Windows drive-absolute path with forward slashes passes through
+//    unchanged.
+test "sfn_bin_abs: a Windows drive-absolute path with forward slashes passes through unchanged" ![io] {
+    let out = _probe_bin_abs_path("win-forwardslash", "Linux", "C:/custom/path/sfn.exe", "");
+    assert out == "C:/custom/path/sfn.exe";
+}
+
+// 4. A UNC path passes through unchanged.
+test "sfn_bin_abs: a UNC path passes through unchanged" ![io] {
+    let out = _probe_bin_abs_path("unc", "Linux", "\\\\srv\\share\\sfn.exe", "");
+    assert out == "\\\\srv\\share\\sfn.exe";
+}
+
+// 5. No `SAILFIN_BIN` override, so `sfn_bin_path()` falls back to the
+//    relative POSIX literal `build/bin/sfn`, which gets prefixed with the
+//    cwd the child actually ran in — here the inherited cwd, i.e. this test
+//    process's own `_repo_root()`.
+test "sfn_bin_abs: a relative bin path is prefixed with the cwd it resolves in" ![io] {
+    let repo_root = _repo_root();
+    let out = _probe_bin_abs_path("relative-cwd", "Linux", "", "");
+    assert out == repo_root + "/build/bin/sfn";
+}
+
+// 6. `SAILFIN_BIN` set to an absolute Windows path passes through unchanged
+//    regardless of which cwd the child actually ran in — proving the
+//    absoluteness check, not the cwd, gates the prefix.
+test "sfn_bin_abs: SAILFIN_BIN set to an absolute Windows path passes through unchanged regardless of cwd" ![io] {
+    let different_cwd = _abs_path(_scratch_dir());
+    let out = _probe_bin_abs_path("win-abs-separate-cwd", "Linux", "C:\\other\\sfn.exe", different_cwd);
+    assert out == "C:\\other\\sfn.exe";
+}
