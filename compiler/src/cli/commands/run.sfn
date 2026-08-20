@@ -89,16 +89,23 @@ fn command_def() -> Command {
 // `sfn_fs_mkdir` discards `mkdir`'s return and treats a later existence
 // probe as authoritative, and `_mktemp_from_template_cmd` returns "" on
 // a Windows host by design. SFN-974 adds that primitive; this probe and
-// this comment are deleted when `_unique_run_exe_path` moves onto it.
+// this comment are deleted when `_unique_run_stem` moves onto it.
 // Bounded so the probe loop can't run forever.
-fn _unique_run_exe_path(run_cache_dir: string) -> string ![clock, io] {
+//
+// Returns an extensionless STEM, not a path. Both this invocation's
+// executable and its `.ll` are derived from it, so the two cannot disagree
+// about which invocation they belong to (SFN-1004). The staleness probe
+// checks both derived names: either one surviving from an earlier
+// invocation means the stem is not free.
+fn _unique_run_stem(run_cache_dir: string) -> string ![clock, io] {
     let base = run_cache_dir + "/run-" + int_to_string(monotonic_millis());
-    let mut candidate = target_exe_name(base, build_target_os());
+    let mut candidate = base;
     let mut attempt = 1;
     loop {
-        if !fs.exists(candidate) { return candidate; }
+        if !fs.exists(target_exe_name(candidate, build_target_os())) && !fs.exists(candidate
+            + ".ll") { return candidate; }
         if attempt > 1000 { return candidate; }
-        candidate = target_exe_name(base + "-" + int_to_string(attempt), build_target_os());
+        candidate = base + "-" + int_to_string(attempt);
         attempt += 1;
     }
 }
@@ -172,7 +179,6 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let run_cache_dir = _resolve_sailfin_cache_dir_for_work("");
     _ensure_dir(run_cache_dir);
 
-    let ll_path = run_cache_dir + "/run.ll";
     // Derived name (never an explicit `-o`), so it carries Windows' `.exe`
     // suffix from birth: `CreateProcessA` below and the link's `-o` must
     // agree by construction (SFN-693).
@@ -184,9 +190,24 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // per-invocation unique name — that's the path where a still-running
     // `.exe` (locked on Windows) or a concurrent invocation can collide
     // with a fixed name.
+    //
+    // SFN-1004: the `.ll` is derived from the SAME stem, because SFN-719
+    // isolated only the executable. A fixed `run.ll` under the unguarded
+    // default meant two concurrent invocations still wrote one IR file:
+    // each got its own exe, and the second compile clobbered the first's
+    // IR mid-flight, so the loser linked corrupted or mismatched input.
+    // That is the hazard `.claude/rules/no-bash-e2e.md` records for the
+    // pooled path, and it applied here too. Both names now come from one
+    // stem so they cannot drift apart.
+    //
+    // The guarded branch keeps the literal `run`/`run.ll` names it has
+    // always had: that path is already per-invocation isolated, and
+    // renaming it would churn cache keys for no gain.
     let run_exe_unguarded = env.get("SAILFIN_TEST_SCRATCH").length == 0;
-    let mut exe_path = target_exe_name(run_cache_dir + "/run", build_target_os());
-    if run_exe_unguarded { exe_path = _unique_run_exe_path(run_cache_dir); }
+    let mut run_stem = run_cache_dir + "/run";
+    if run_exe_unguarded { run_stem = _unique_run_stem(run_cache_dir); }
+    let exe_path = target_exe_name(run_stem, build_target_os());
+    let ll_path = run_stem + ".ll";
 
     // Resolve and compile capsule deps before lowering the main file. The
     // unified resolver covers relative imports, manifest-declared capsule
@@ -295,6 +316,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // doesn't accumulate across repeated `sfn run` calls without ever
     // touching an artifact another live invocation owns.
     if run_exe_unguarded && fs.exists(exe_path) { fs.deleteFile(exe_path); }
+    // SFN-1004: the `.ll` is per-invocation now, so leaving it behind would
+    // grow the shared directory without bound on every `sfn run` — the same
+    // accumulation the exe cleanup above exists to prevent. Only on the
+    // success path: a link failure returns earlier and deliberately leaves
+    // the IR in place, because the backend-failure banner names it.
+    if run_exe_unguarded && fs.exists(ll_path) { fs.deleteFile(ll_path); }
     return run_rc;
 }
 
