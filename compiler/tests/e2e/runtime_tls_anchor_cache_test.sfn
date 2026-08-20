@@ -197,31 +197,30 @@ fn _write_three_conn_client(dir: string, port_a: string, port_b: string) -> stri
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
+    // SFN-1001: `dir` travels through argv[1], never spliced into source
+    // text — a Windows scratch dir is a backslash path, and a literal
+    // `+ dir +` here would turn `\...` into escape sequences the parser
+    // trips on before this fixture's own capsule even builds.
     fs.writeFile(root + "/src/main.sfn", "fn _ok(path: string) -> boolean ![io] {\n"
         + "    if !fs.exists(path) { return false; }\n"
         + "    return fs.readFile(path).length > 0;\n"
         + "}\n"
-        + "fn main() -> int ![io, net] {\n"
-        + "    let o1 = \""
-        + dir
-        + "/out1.body\";\n"
+        + "fn main(argv: string[]) -> int ![io, net] {\n"
+        + "    let dir = argv[1];\n"
+        + "    let o1 = dir + \"/out1.body\";\n"
         + "    if fs.exists(o1) { let _ = fs.deleteFile(o1); }\n"
         + "    let _d1 = http.download(\"https://localhost:"
         + port_a
         + "/\", o1);\n"
         + "    print.info(\"c1:ok=\" + (_ok(o1) as string));\n"
-        + "    let o2 = \""
-        + dir
-        + "/out2.body\";\n"
+        + "    let o2 = dir + \"/out2.body\";\n"
         + "    if fs.exists(o2) { let _ = fs.deleteFile(o2); }\n"
         + "    let _d2 = http.download(\"https://localhost:"
         + port_b
         + "/\", o2);\n"
         + "    print.info(\"c2:ok=\" + (_ok(o2) as string));\n"
         + "    print.info(\"c2:err=\" + tls.last_error());\n"
-        + "    let o3 = \""
-        + dir
-        + "/out3.body\";\n"
+        + "    let o3 = dir + \"/out3.body\";\n"
         + "    if fs.exists(o3) { let _ = fs.deleteFile(o3); }\n"
         + "    let _d3 = http.download(\"https://localhost:"
         + port_a
@@ -252,18 +251,17 @@ fn _write_two_conn_client(dir: string, port_a: string) -> string ![io] {
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
-    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![io, net] {\n"
-        + "    let o1 = \""
-        + dir
-        + "/bad1.body\";\n"
+    // SFN-1001: same rationale as `_write_three_conn_client` above —
+    // argv[1] carries `dir`, never the source text.
+    fs.writeFile(root + "/src/main.sfn", "fn main(argv: string[]) -> int ![io, net] {\n"
+        + "    let dir = argv[1];\n"
+        + "    let o1 = dir + \"/bad1.body\";\n"
         + "    if fs.exists(o1) { let _ = fs.deleteFile(o1); }\n"
         + "    let _d1 = http.download(\"https://localhost:"
         + port_a
         + "/\", o1);\n"
         + "    print.info(\"n1:err=\" + tls.last_error());\n"
-        + "    let o2 = \""
-        + dir
-        + "/bad2.body\";\n"
+        + "    let o2 = dir + \"/bad2.body\";\n"
         + "    if fs.exists(o2) { let _ = fs.deleteFile(o2); }\n"
         + "    let _d2 = http.download(\"https://localhost:"
         + port_a
@@ -282,8 +280,10 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
     return bin;
 }
 
-fn _run_stdout(client_bin: string, run_env: string[]) -> string ![io] {
-    let _exit = process.run_capture([client_bin], run_env);
+// SFN-1001: `dir` is passed as argv[1] — the fixture reads it back at
+// runtime instead of it being spliced into the fixture's own source text.
+fn _run_stdout(client_bin: string, dir: string, run_env: string[]) -> string ![io] {
+    let _exit = process.run_capture([client_bin, dir], run_env);
     let out = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     return out;
@@ -334,7 +334,7 @@ test "runtime tls: anchor cache survives an intervening verify failure in-proces
 
     // CAFILE trusts ONLY A's cert; B's cert is a different self-signed
     // chain and stays untrusted for the whole process.
-    let out = _run_stdout(client_bin, _trusted_env(dir_a + "/cert.pem"));
+    let out = _run_stdout(client_bin, dir, _trusted_env(dir_a + "/cert.pem"));
 
     assert contains(out, "c1:ok=true");
     assert contains(out, "c2:ok=false");
@@ -378,7 +378,8 @@ test "runtime tls: a trust-store load failure is never cached (SFN-816 stays fix
     // in a bare `timeout` with no kill, so a shared port would silently let
     // this test's `_await_listening` succeed against the OTHER test's
     // still-running server instead of its own.
-    let out = _run_stdout(client_bin, _trusted_env(dir + "/does-not-exist.pem"));
+    let out = _run_stdout(client_bin, dir, _trusted_env(dir
+        + "/does-not-exist.pem"));
 
     assert contains(out, "n1:err=trust-store");
     assert contains(out, "n2:err=trust-store");
