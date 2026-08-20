@@ -41,17 +41,12 @@
 // actually built for, matching `sfn_package_test.sfn`'s existing shape
 // (`--compiler-bin` pointed at the host binary regardless of `--target`).
 import { contains, split } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path, tool_present } from "sfn/test";
-
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], _child_env());
-    let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
+import {
+    default_scratch_dir,
+    sfn_bin_abs_path,
+    sfn_bin_path,
+    tool_present
+} from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -77,12 +72,6 @@ fn _child_env() -> string[] ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
     return e;
-}
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
 }
 
 // `tar -tvzf <tarball>` -> full verbose listing text (permission bits +
@@ -173,7 +162,7 @@ test "sfn package (compiler mode): windows target stages .exe members with exec 
 
     let root = _test_root("compiler-win");
     let dist = root + "/dist";
-    let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
+    let bin = _nonexec_compiler_bin(root, sfn_bin_abs_path());
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
@@ -208,7 +197,7 @@ test "sfn package (compiler mode): linux target keeps today's suffixless members
 
     let root = _test_root("compiler-linux");
     let dist = root + "/dist";
-    let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
+    let bin = _nonexec_compiler_bin(root, sfn_bin_abs_path());
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
@@ -241,7 +230,7 @@ test "sfn package --installer: windows target stages .exe members with exec bit"
 
     let root = _test_root("installer-win");
     let dist = root + "/dist";
-    let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
+    let bin = _nonexec_compiler_bin(root, sfn_bin_abs_path());
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
@@ -273,7 +262,7 @@ test "sfn package --installer: linux target keeps today's suffixless members" ![
 
     let root = _test_root("installer-linux");
     let dist = root + "/dist";
-    let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
+    let bin = _nonexec_compiler_bin(root, sfn_bin_abs_path());
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());

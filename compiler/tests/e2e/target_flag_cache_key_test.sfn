@@ -19,33 +19,13 @@
 // that needs on-disk artifacts is redirected with `--work-dir`, since that
 // beats `SAILFIN_TEST_SCRATCH` (`compiler/src/build/cache.sfn:185-190`) and
 // keeps output paths deterministic.
-import { contains, split } from "sfn/strings";
+import { contains } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
-    sfn_bin_path,
+    sfn_bin_abs_path,
     with_tmp_dir
 } from "sfn/test";
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
-
-// `run_capture_cwd` resolves the child's argv[0] against the CHILD cwd, not
-// the parent's — an unqualified "build/bin/sfn" would not resolve once the
-// nested build's cwd is the fixture scratch dir. Mirrors
-// `windows_exe_suffix_test.sfn`'s `_sfn_bin_abs`.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("target-flag-cache-key-pwd")));
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
 
 fn _write_fixture(dir: string) -> void ![io] {
     fs.writeFile(dir + "/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
@@ -54,7 +34,7 @@ fn _write_fixture(dir: string) -> void ![io] {
 // E0614 rejects an unsupported `--target` triple before any compilation
 // happens, so this needs no `--work-dir` and is fast.
 test "target flag: an unsupported --target triple is rejected with E0614" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
         let child_env = clean_runner_env(nested_runner_scratch("target-flag-e0614"));
@@ -81,7 +61,7 @@ test "target flag: an unsupported --target triple is rejected with E0614" ![io] 
 // link subprocess actually runs, so this asserts on stderr, never on the
 // exit code.
 test "target flag: the legacy SAILFIN_TARGET_OS alias still resolves to the msvc triple" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
         let mut child_env = clean_runner_env(nested_runner_scratch("target-flag-legacy-os"));
@@ -114,7 +94,7 @@ test "target flag: the legacy SAILFIN_TARGET_OS alias still resolves to the msvc
 // both spawns on the clang-driver path, isolating the assertion to the
 // triple resolver's precedence — the thing this test exists to pin.
 test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
 
@@ -157,7 +137,7 @@ test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS"
 // stopped tracing anything, and asserting a specific host-probed triple for
 // the unrecognized case would make the test host-dependent.
 test "target flag: an unrecognized SAILFIN_TARGET_OS diverges from the triple resolver" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
 
@@ -197,7 +177,7 @@ test "target flag: an unrecognized SAILFIN_TARGET_OS diverges from the triple re
 // (no MSVC/mingw import libs), so both exit codes are ignored — the cache
 // key and artifact are written before the link is attempted.
 test "target flag: the two Windows triples occupy distinct cache-key and artifact buckets" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
         let work_dir = dir + "/wd";

@@ -20,21 +20,12 @@
 // cannot be called from an `![io]` test like this. Assert on captured
 // stdout / parsed `jq` output with `sfn/strings` predicates instead. (#842.)
 import { contains, find, split } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path, tool_present } from "sfn/test";
-
-// Absolute path to the compiler binary (needed for --compiler-bin, which the
-// .sh resolved via realpath). If sfn_bin_path() is already absolute, return it;
-// otherwise join it onto cwd via `pwd`.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], _child_env());
-    let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    let root = _first_line(out);
-    return root + "/" + bin;
-}
+import {
+    default_scratch_dir,
+    sfn_bin_abs_path,
+    sfn_bin_path,
+    tool_present
+} from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -213,7 +204,7 @@ test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
 
     let root = _test_root("compiler");
     let dist = root + "/dist-compiler";
-    let bin = _sfn_bin_abs();
+    let bin = sfn_bin_abs_path();
     let version = _compiler_version();
     assert version.length > 0;
 
@@ -316,7 +307,7 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
     // cache + sidecar and the package lookup share one cwd. `run_capture`
     // cannot chdir, so reproduce that with a `cd <widget> && ...` bash vehicle
     // and an absolute compiler path.
-    let sfn_abs = _sfn_bin_abs();
+    let sfn_abs = sfn_bin_abs_path();
     let build_exit = process.run_capture(["bash", "-c", "cd \"" + widget
         + "\" && \""
         + sfn_abs
@@ -379,7 +370,7 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
 
     let root = _test_root("installer");
     let inst = root + "/dist-installer";
-    let bin = _sfn_bin_abs();
+    let bin = sfn_bin_abs_path();
     let version = _compiler_version();
     assert version.length > 0;
 

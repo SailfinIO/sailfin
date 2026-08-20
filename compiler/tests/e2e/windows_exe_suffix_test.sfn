@@ -34,29 +34,9 @@ import { contains, ends_with, split } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
-    sfn_bin_path,
+    sfn_bin_abs_path,
     with_tmp_dir
 } from "sfn/test";
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
-
-// `run_capture_cwd` resolves the child's argv[0] against the CHILD cwd, not
-// the parent's — an unqualified "build/bin/sfn" would not resolve once the
-// nested build's cwd is the fixture scratch dir. Mirrors
-// `workspace_default_members_cli_test.sfn`'s `_sfn_bin_abs`.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("windows-exe-suffix-pwd")));
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
 
 fn _write_fixture(dir: string) -> void ![io] {
     fs.writeFile(dir + "/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
@@ -95,7 +75,7 @@ fn _trace_out_arg(err: string) -> string {
 }
 
 test "exe suffix: a bare Windows-target build traces a .exe output path" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
         let err = _traced_build_stderr(dir, sfn, "Windows", "exe-suffix-windows");
@@ -116,7 +96,7 @@ test "exe suffix: a bare Windows-target build traces a .exe output path" ![io] {
 // survive. Pinning the target keeps this a test of the target gate, which
 // is the thing `target_exe_name` actually keys on.
 test "exe suffix: a bare non-Windows-target build traces a non-.exe output path" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         _write_fixture(dir);
         let err = _traced_build_stderr(dir, sfn, "Linux", "exe-suffix-nonwindows");
@@ -162,7 +142,7 @@ test "exe suffix: a bare non-Windows-target build traces a non-.exe output path"
 // than asserting `host_exe_name(x) == target_exe_name(x, build_host_os())`,
 // which holds on every host but would also hold if both were broken.
 test "exe suffix: the selfhost first-pass default is host-gated" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         let mut child_env = clean_runner_env(nested_runner_scratch("exe-suffix-hostgate"));
         child_env.push("SAILFIN_HOST_OS=Windows");

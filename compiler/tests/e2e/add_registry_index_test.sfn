@@ -25,6 +25,7 @@ import { contains, split } from "sfn/strings";
 import {
     Background,
     default_scratch_dir,
+    sfn_bin_abs_path,
     sfn_bin_path,
     wait_until,
     with_background
@@ -37,16 +38,6 @@ fn _pwd() -> string ![io] {
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
     return _first_line(out);
-}
-
-// Absolute compiler path: the tests `cd` into a temp dir before running,
-// so a repo-relative `build/bin/sfn` would not resolve.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let root = _pwd();
-    if root.length == 0 { return bin; }
-    return root + "/" + bin;
 }
 
 fn _child_env() -> string[] ![io] {
@@ -110,7 +101,7 @@ fn _env_for(home: string) -> string[] ![io] {
 
 // Run `sfn add <capsule>` in `workdir` (cd vehicle) with `home`.
 fn _run_add(workdir: string, home: string, capsule: string) -> string ![io] {
-    let sfn_abs = _sfn_bin_abs();
+    let sfn_abs = sfn_bin_abs_path();
     let e = _env_for(home);
     let cmd = "cd \"" + workdir + "\" && exec \"" + sfn_abs + "\" add "
         + capsule;

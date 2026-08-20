@@ -1,32 +1,16 @@
 // End-to-end coverage for the zero-argument capsule workflow scaffolded by
 // `sfn init`: the generated `[build].entry` drives both build and run.
-import { find, split } from "sfn/strings";
+import { find } from "sfn/strings";
 import {
     clean_runner_env,
     expect_eq_int,
     nested_runner_scratch,
-    sfn_bin_path,
+    sfn_bin_abs_path,
     with_tmp_dir
 } from "sfn/test";
 
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
-
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("init-project-pwd")));
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
-
 test "sfn init: bare build uses the generated capsule entry" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         let child_env = clean_runner_env(nested_runner_scratch("init-project-build"));
         let init_rc = process.run_capture_cwd([sfn, "init"], child_env, dir);
@@ -49,7 +33,7 @@ test "sfn init: bare build uses the generated capsule entry" ![io] {
 }
 
 test "sfn init: bare run uses the generated capsule entry" ![io] {
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         let child_env = clean_runner_env(nested_runner_scratch("init-project-run"));
         let init_rc = process.run_capture_cwd([sfn, "init"], child_env, dir);

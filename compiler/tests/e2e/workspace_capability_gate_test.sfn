@@ -17,11 +17,19 @@
 //
 // `mode = "warn"` turns the same drift into a report that does not fail.
 import { find, split } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
+import {
+    default_scratch_dir,
+    sfn_bin_abs_path,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 import { _copy_file_preserving_mode } from "../../src/build/fs";
 
-// First line of a captured stdout, trailing newline dropped.
+// First line of a captured stdout, trailing newline dropped. Still needed
+// by `_implicit_override_env` below, which resolves `SAILFIN_RUNTIME_ROOT`
+// via its own `pwd` call — a distinct concern from the compiler-binary path
+// `sfn_bin_abs_path()` now owns.
 fn _first_line(text: string) -> string {
     let lines = split(text, "\n");
     if lines.length == 0 { return text; }
@@ -37,18 +45,6 @@ fn _child_env() -> string[] ![io] {
     let home = env.get("HOME");
     if home.length > 0 { e.push("HOME=" + home); }
     return e;
-}
-
-// Absolute path to the compiler binary, for the `cd <root> && <sfn>` vehicle.
-// If `sfn_bin_path()` is already absolute, return it; else join onto cwd via `pwd`.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], _child_env());
-    let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
 }
 
 // Build a two-member fixture workspace under `root`. `clean` stays within the
@@ -106,7 +102,7 @@ test "capability gate: declared-surface drift fails sfn build (enforce)" ![io] {
 test "capabilities audit: prints table and exits non-zero on drift (enforce)" ![io] {
     let out_marker = _scratch_marker("t3-out");
     let err_marker = _scratch_marker("t3-err");
-    let sfn_abs = _sfn_bin_abs();
+    let sfn_abs = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, false);
         let rc = process.run_capture(["bash", "-c", "cd \"" + dir + "\" && \""
@@ -152,7 +148,7 @@ test "capability gate: mode = warn reports drift without failing sfn check" ![io
 // ---- Test 5: `sfn capabilities audit` under warn exits 0 ----
 test "capabilities audit: mode = warn reports drift and exits zero" ![io] {
     let out_marker = _scratch_marker("t5");
-    let sfn_abs = _sfn_bin_abs();
+    let sfn_abs = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, true);
         let rc = process.run_capture(["bash", "-c", "cd \"" + dir + "\" && \""
@@ -178,7 +174,7 @@ test "capability gate: no [workspace.capabilities] is a no-op" ![io] {
     let check_marker = _scratch_marker("t6-check");
     let audit_code_marker = _scratch_marker("t6-audit-code");
     let audit_out_marker = _scratch_marker("t6-audit-out");
-    let sfn_abs = _sfn_bin_abs();
+    let sfn_abs = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws_bare(dir);
         let check_rc = process.run_capture([sfn_bin_path(), "check", dir], []);
@@ -316,7 +312,7 @@ fn _make_implicit_override_toolchain(root: string) -> string ![io] {
         + "[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\nimplicit = true\n");
     fs.writeFile(toolchain + "/provider/src/mod.sfn", "fn latent_net() -> int ![net] { return 9; }\n");
     let compiler = toolchain + "/bin/sfn";
-    if !_copy_file_preserving_mode(_sfn_bin_abs(), compiler) { return ""; }
+    if !_copy_file_preserving_mode(sfn_bin_abs_path(), compiler) { return ""; }
     if !fs.set_perms(compiler, 493) { return ""; }
     return compiler;
 }

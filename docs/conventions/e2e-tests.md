@@ -39,10 +39,16 @@ host-conditioned resolver for the compiler-under-test: `$SAILFIN_BIN` wins
 verbatim when set, else `build/bin/sfn` on POSIX or `build/bin/sfn.exe` on a
 Windows host — a payoff a hand-copied POSIX literal never had. A test must
 **not** define its own binary-path helper; SFN-977 deleted 317 hand-copied
-`_sfn_bin()` twins in favor of this one shared import. A test that spawns the
-compiler from a shifted `cwd` still absolutizes on top of `sfn_bin_path()`
-(the `_sfn_bin_abs()` shape in a handful of e2e files) — that's fine, it's a
-different job from resolving the path in the first place.
+`_sfn_bin()` twins in favor of this one shared import.
+
+`sfn_bin_abs_path() -> string ![io]` (`sfn/test`, `sfn_bin.sfn`, SFN-995) is
+the same idea for a test that spawns the compiler from a shifted `cwd` (a
+scratch repo, a nested `sfn` invocation): `sfn_bin_path()` absolutized
+against the cwd via `realpath` when it isn't already absolute. A test must
+**not** hand-roll its own `_sfn_bin_abs()` — SFN-995 deleted 15 hand-copied
+twins, every one of them a POSIX-only `bin[0] == "/"` absoluteness check
+(misclassifying a Windows drive path such as `C:\...` as relative) that
+mostly shelled out to `pwd` besides. Use `sfn_bin_abs_path()` outright.
 
 `scratch_root() -> string ![io]` (`sfn/test`, `scratch.sfn`, SFN-978) is the
 same shape for a test's own scratch directory: `$SAILFIN_TEST_SCRATCH` wins

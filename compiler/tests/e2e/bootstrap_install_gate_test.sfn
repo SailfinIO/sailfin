@@ -32,26 +32,8 @@ import {
     clean_runner_env,
     default_scratch_dir,
     nested_runner_scratch,
-    sfn_bin_path
+    sfn_bin_abs_path
 } from "sfn/test";
-
-// The child's cwd is the scratch repo, which differs from this test's own
-// cwd — a relative `sfn_bin_path()` would not resolve there, so absolutize it.
-fn _sfn_bin_abs() -> string ![io] {
-    let bin = sfn_bin_path();
-    if bin.length > 0 && bin[0] == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], []);
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return bin; }
-    return _first_line(out) + "/" + bin;
-}
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
 
 // A per-invocation scratch root for the synthetic repo. `SAILFIN_TEST_SCRATCH`
 // keeps it unique under the parallel pool; `/tmp` is the standalone fallback.
@@ -184,7 +166,7 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     fs.writeFile(repo + "/compiler/capsules/syntax/src/mod.sfn", "fn syntax_value() -> int { return 3; }\n");
     fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
 
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate"));
 
     // 1. First build: installs a working binary from the stub seed.
@@ -280,7 +262,7 @@ test "bootstrap install gate: a malformed .pending is treated as no snapshot, no
         + "/build/capsules/sfn/compiler/bin/compiler"]);
     fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", "usage: sfn dev bootstrap <fetch|build|check|pin>");
 
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_malformed_pending"));
 
     let install_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install"], child_env, repo);
@@ -307,7 +289,7 @@ test "bootstrap install gate: a failed build leaves the installed binary and fin
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
 
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_failed_build"));
 
     // Establish a real installed binary and recorded fingerprint first, so
@@ -348,7 +330,7 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
 
-    let sfn = _sfn_bin_abs();
+    let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_unrunnable"));
 
     // Establish a real installed binary and recorded fingerprint first, so

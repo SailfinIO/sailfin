@@ -466,6 +466,17 @@ export { first_present_tool, tool_present } from "./tool_probe";
 // instead of imported.
 export { sfn_bin_path } from "./sfn_bin";
 
+// `sfn_bin_abs_path()` is `sfn_bin_path()` absolutized against the cwd via
+// `realpath`, for a test that drives the compiler under test from a
+// DIFFERENT cwd (a scratch repo, a nested `sfn` invocation). It is the
+// single definition of a resolver that 15 e2e tests under
+// `compiler/tests/e2e/` had each hand-copied as a private `_sfn_bin_abs()`,
+// every copy guarding absoluteness with a POSIX-only `bin[0] == "/"` check
+// that misclassifies a Windows drive path (`C:\...`) as relative, and most
+// shelling out to `pwd` besides (SFN-995). See `sfn_bin.sfn` for the
+// `realpath`-over-shellout rationale.
+export { sfn_bin_abs_path } from "./sfn_bin";
+
 // ---------------------------------------------------------------------------
 // The scratch directory a test should use (SFN-978)
 // ---------------------------------------------------------------------------
