@@ -21,7 +21,14 @@ import { _host_is_windows } from "./sfn_bin";
 // hardcoded system path such as `C:\Windows\Temp`, which is frequently not
 // writable by a non-elevated process. `"."` is the existing in-repo
 // precedent (`compiler/tests/e2e/process_handle_windows_test.sfn`, which
-// falls back to `TEMP` then `.`).
+// falls back to `TEMP` then `.`). `"."` resolves to the process cwd, which
+// for a test binary is the repo root — so on a Windows host with neither
+// `TEMP` nor `TMP` set, scratch artifacts land inside the repo tree rather
+// than outside it. Rare in practice (Windows effectively always sets
+// `TEMP`), but a test whose isolation depends on writing outside the repo
+// tree (for example so `sfn build` does not auto-discover a stray
+// `capsule.toml`, as `compiler/tests/e2e/linker_selection_test.sfn`
+// requires) is not protected by this terminus alone on that host.
 //
 // On POSIX this probes `TMPDIR` first, falling back to the historical
 // `"/tmp"` literal. Byte-identical to the fallback it replaces only when
