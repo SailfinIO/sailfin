@@ -469,7 +469,16 @@ fn _connect_tcp(host: *u8, port: i64) -> i32 ![net] {
 // `_send_all(fd, ssl, buf, total)` — write `total` bytes, retrying on
 // short sends. When `ssl` is non-null the bytes go through `tls_write`
 // (TLS record layer); otherwise raw `send` on `fd`. Returns false if a
-// write ever fails.
+// write ever fails fatally.
+//
+// A non-positive return is genuinely fatal here — the one resumable case,
+// a signal interrupting the syscall (-1/`EINTR`), is resumed beneath this
+// loop and never reaches it (SFN-984). On the raw path
+// `../platform/socket_ops.sfn::sfn_socket_send` retries; on the TLS path
+// `tls_write` does the same through `../platform/tls.sfn::_tls_send_all`.
+// Reading `errno` to make that distinction *here* is what this module cannot
+// do: `http.sfn` is compiled for Windows as well, where the glibc
+// `__errno_location` the sentinel lowers to has no symbol to link against.
 fn _send_all(fd: i32, ssl: *u8, buf: *u8, total: i64) -> bool ![net] {
     let mut sent: i64 = 0;
     loop {

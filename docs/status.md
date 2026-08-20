@@ -763,7 +763,11 @@ here.
   RSA/ECDSA signing is out of scope for that section; ECDSA-P256 signing is
   the tracked follow-on that closes the gap. Windows gets a working native
   handshake and honors `SAILFIN_TLS_CAFILE`, but has no system
-  certificate-store binding yet.
+  certificate-store binding yet. Application writes larger than one record's
+  2^14-byte plaintext limit (RFC 8446 §5.1) are fragmented across records by
+  `tls_write`, so payload size is not a ceiling on the native stack the way it
+  was until SFN-984 — which capped every TLS request body at 16384 bytes and
+  so blocked `sfn publish` for any capsule above ~12 KB of source.
 - **Effect enforcement is a build gate** (Phases A–F, shipped 2026-04-26):
   `validate_effects()` runs from every `compile_to_*` entry and fails the
   build on undeclared effects. `SAILFIN_EFFECT_ENFORCE=warning|off` are the

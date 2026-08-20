@@ -262,6 +262,11 @@ fn _tls_fail_if_unset(reason: i64, detail: string) -> void ![io] {
 // 5-byte header — the largest wire record the driver will buffer.
 fn _tls_max_record_wire() -> i64 { return 16645; }
 
+// Maximum TLSInnerPlaintext content in one record, 2^14 (§5.1). A caller
+// buffer longer than this is fragmented across records by `tls_write`;
+// `_tls_seal_record` fail-closes above it.
+fn _tls_max_record_plaintext() -> i64 { return 16384; }
+
 // Session roles.
 fn _tls_role_client() -> i64 { return 0; }
 
@@ -384,6 +389,14 @@ fn _tls_buf_to_bytes(src: *u8, off: i64, n: i64) -> int[] {
 // Write every byte of `buf[0..n)` to the socket. Returns false on any
 // short/failed write, which the caller turns into a failed session —
 // a partial record on the wire is unrecoverable.
+//
+// A non-positive return is genuinely fatal here: the one resumable case, a
+// signal interrupting the syscall (-1/`EINTR`), is retried inside
+// `./socket_ops.sfn::sfn_socket_send` and never surfaces (SFN-984). That
+// matters more since `tls_write` began fragmenting, because a multi-record
+// buffer issues one `_tls_send_all` per record and the chance of catching a
+// signal mid-transfer scales with the syscall count — and an interrupt
+// mistaken for an error would leave a partial record on the wire.
 fn _tls_send_all(fd: i64, buf: *u8, n: i64) -> bool ![net] {
     let mut off: i64 = 0;
     let mut guard: i64 = 0;
@@ -590,7 +603,7 @@ fn _tls_suite_key_len(suite: i64) -> i64 {
 // `5 + content_len + 1 + tag`, which is what both callers allocate.
 fn _tls_seal_record(s: *TlsSession, content_type: i64, content: *u8, content_len: i64, out: *u8) -> i64 {
     if content_len < 0 { return 0 - 1; }
-    if content_len > 16384 { return 0 - 1; }
+    if content_len > _tls_max_record_plaintext() { return 0 - 1; }
     let alg: int = _tls_suite_aead(s.suite);
     if alg == 0 { return 0 - 1; }
     return sfn_tls_record_seal(alg, s.write_key_addr as *u8, s.write_key_len, s.write_iv_addr as *u8, 12, s.write_seq, content_type, content, content_len, 0, out);
@@ -606,6 +619,12 @@ fn _tls_open_record(s: *TlsSession, base: *u8, total: i64) -> i64 {
     return sfn_tls_record_open(alg, s.read_key_addr as *u8, s.read_key_len, s.read_iv_addr as *u8, 12, s.read_seq, base, total);
 }
 
+// Unlike `tls_write`, this seals exactly one record and so inherits
+// `_tls_seal_record`'s fail-closed rejection above 2^14 content bytes. §5.1
+// requires handshake flights to be fragmented too, so a certificate chain
+// over that size fails the handshake rather than splitting — SFN-985. Not
+// reachable from the shipped server config, whose Ed25519 chains (SFN-341)
+// are far under the limit.
 fn _tls_write_encrypted(s: *TlsSession, content_type: i64, body: int[]) -> bool ![net] {
     let n: i64 = body.length;
     let content: *u8 = _tls_bytes_to_buf(body);
@@ -1609,22 +1628,74 @@ fn tls_accept_fd(ctx: *u8, fd: i32) -> *u8 ![net, rand] {
 // ── Application data ─────────────────────────────────────────────
 // `tls_write(ssl, buf, n)` — encrypt and send. Returns bytes accepted or
 // -1, matching the raw `send` contract.
+//
+// A buffer longer than one record's 2^14-byte plaintext limit (§5.1) is
+// fragmented across successive records. Fragmentation belongs here because
+// §5.1 assigns it to the record layer, and because no caller can see the
+// limit: `../adapters/http.sfn::_send_all`,
+// `../adapters/websocket.sfn::_ws_send_all`, and
+// `../concurrency/serve.sfn::_serve_conn_send` all hand over a whole buffer.
+// Before SFN-984 this sealed exactly one record, so `_tls_seal_record`'s
+// fail-closed `content_len > 16384` guard turned any larger write into -1 —
+// which surfaced as `sfn publish` being unable to POST a capsule above ~12 KB
+// of source, base64 inflating 4/3 so that 12 KiB of source is exactly 16384
+// body bytes.
+//
+// The return stays all-or-nothing (`n`, never a short count). Every caller
+// does resume from a short write, so a partial count would be *handled* —
+// but neither `../concurrency/serve.sfn::_serve_send_all` nor
+// `../adapters/websocket.sfn::_ws_send_all` guards its input-driven loop the
+// way `_send_all` does, and an all-or-nothing return is what keeps those two
+// unguarded loops to a single iteration on the TLS path.
+//
+// Failing a fragmented write POISONS the session (`s.failed`), which a
+// single-record write never needed to. Once record k of n is on the wire the
+// peer has consumed and authenticated it, and TLS 1.3 offers no resume point
+// short of a KeyUpdate this stack does not implement — so a caller that
+// ignores the -1 and writes again would seal at a `write_seq` the peer's
+// `read_seq` no longer agrees with, turning a dropped message into
+// `bad_record_mac` on every subsequent record. That caller exists:
+// `../adapters/websocket.sfn`'s frame loop discards
+// `_ws_server_frame_send`'s result and continues. Fail-closed here matches
+// what `tls_read` already does and what the handshake paths do on every
+// error.
+//
+// `span` is always >= 1 while `sent < n`, so the loop advances strictly and
+// terminates in ceil(n / 16384) iterations — bounded by the caller's buffer,
+// not by anything a peer controls, hence no trip guard.
 fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
     if ssl as i64 == 0 { return 0 - 1; }
     let s: *TlsSession = ssl as *TlsSession;
+    if s.failed != 0 { return 0 - 1; }
     if s.state != _tls_state_connected() { return 0 - 1; }
     if n <= 0 { return 0; }
-    let out: *u8 = malloc((5 + n + 1 + 16) as usize);
-    if out as i64 == 0 { return 0 - 1; }
-    let wrote: i64 = _tls_seal_record(s, _tls_ct_application_data(), buf, n, out);
-    if wrote < 0 {
+    let mut sent: i64 = 0;
+    loop {
+        if sent >= n { break; }
+        let mut span: i64 = n - sent;
+        if span > _tls_max_record_plaintext() {
+            span = _tls_max_record_plaintext();
+        }
+        let out: *u8 = malloc((5 + span + 1 + 16) as usize);
+        if out as i64 == 0 {
+            s.failed = 1;
+            return 0 - 1;
+        }
+        let wrote: i64 = _tls_seal_record(s, _tls_ct_application_data(), _tls_ptr_off(buf, sent), span, out);
+        if wrote < 0 {
+            free(out);
+            s.failed = 1;
+            return 0 - 1;
+        }
+        s.write_seq = s.write_seq + 1;
+        let ok: bool = _tls_send_all(s.fd, out, wrote);
         free(out);
-        return 0 - 1;
+        if !ok {
+            s.failed = 1;
+            return 0 - 1;
+        }
+        sent = sent + span;
     }
-    s.write_seq = s.write_seq + 1;
-    let ok: bool = _tls_send_all(s.fd, out, wrote);
-    free(out);
-    if !ok { return 0 - 1; }
     return n;
 }
 
