@@ -1,12 +1,7 @@
 // End-to-end coverage for the structured lowering diagnostic sidecar
 // (SFEP-0061 S2, SFN-535).
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 test "direct lowering failure renders code and source coordinates" ![io] {
     let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
@@ -26,7 +21,7 @@ test "direct lowering failure renders code and source coordinates" ![io] {
         + "}\n"
         + "fn main() -> i32 { return 0; }\n");
 
-    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", source_path], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", source_path], process.environ());
     let stdout = process.capture_take_stdout();
     let stderr = process.capture_take_stderr();
     let combined = stdout + stderr;

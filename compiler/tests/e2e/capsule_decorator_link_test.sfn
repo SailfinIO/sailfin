@@ -17,12 +17,7 @@
 // `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are `![pure]`
 // and cannot be used from an `![io]` test (#842).
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // The build spawns a nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation so
@@ -81,7 +76,7 @@ test "capsule decorator: user @decorator entry hook runs before the fn body" ![i
         + "}\n");
 
     let out_bin = _bin_path("user");
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "-o", out_bin], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;
@@ -113,7 +108,7 @@ test "capsule decorator: imported @logExecution routes through sfn/log ([INFO])"
         + "}\n");
 
     let out_bin = _bin_path("log");
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "-o", out_bin], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;
@@ -144,7 +139,7 @@ test "capsule decorator: @trace emits a distinct [TRACE] entry line" ![io] {
         + "}\n");
 
     let out_bin = _bin_path("trace");
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "-o", out_bin], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;
@@ -174,7 +169,7 @@ test "capsule decorator: un-imported @logExecution emits the W0211 deprecated-ap
         + "    return 0;\n"
         + "}\n");
 
-    let check_exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let check_exit = process.run_capture([sfn_bin_path(), "check", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     // A lint warning is non-fatal — check still succeeds.
@@ -199,7 +194,7 @@ test "capsule decorator: un-imported @logExecution still runs via the fallback h
         + "}\n");
 
     let out_bin = _bin_path("fallback");
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", out_bin, src], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;
@@ -237,7 +232,7 @@ test "capsule decorator: imported non-@decorator applied as @name is inert (no m
         + "}\n");
 
     let out_bin = _bin_path("nonmarked");
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "-o", out_bin], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;

@@ -23,7 +23,12 @@
 // as the path arg; the cwd-discovery nuance is exercised equivalently.
 import { Env, env_from_current, env_set } from "sfn/os";
 import { contains, find, split } from "sfn/strings";
-import { Background, wait_until, with_background } from "sfn/test";
+import {
+    Background,
+    sfn_bin_path,
+    wait_until,
+    with_background
+} from "sfn/test";
 
 // True iff `ch` (a 1-char string) is a lowercase-hex digit. String indexing
 // + `>=`/`<=` does not compare 1-char strings lexicographically, so route
@@ -33,12 +38,6 @@ fn _is_hex_char(ch: string) -> boolean {
     if code >= 48 && code <= 57 { return true; }
     if code >= 97 && code <= 102 { return true; }
     return false;
-}
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
 }
 
 fn _scratch_dir() -> string ![io] {
@@ -134,7 +133,7 @@ fn _first_line(text: string) -> string {
 // exec ..."` cwd-discovery test, since a relative binary path would not
 // resolve after the shell changes directory.
 fn _abs_sfn_bin() -> string ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     if substring(bin, 0, 1) == "/" { return bin; }
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
@@ -215,7 +214,7 @@ fn _write_fixture_server() -> string ![io] {
 fn _fixture_build_env() -> string[] ![io] { return process.environ(); }
 
 fn _build_fixture_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _fixture_build_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _fixture_build_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -251,7 +250,7 @@ test "publish: too many args shows usage" ![io] {
     let home = root + "/home";
     fs.createDirectory(home, true);
     let e = _env_for(home, []);
-    let _exit = process.run_capture([_sfn_bin(), "publish", "a", "b"], e);
+    let _exit = process.run_capture([sfn_bin_path(), "publish", "a", "b"], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert _contains_usage(out + err);
@@ -267,7 +266,7 @@ test "publish: no capsule.toml fails" ![io] {
     let e = _env_for(home, []);
     // run_capture cannot chdir; pass the empty workdir as the path arg so
     // discovery looks there and finds no capsule.toml.
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(out + err, "no capsule.toml found");
@@ -281,7 +280,7 @@ test "publish: path arg finds capsule" ![io] {
     _write_credentials(home);
     _make_capsule(workdir + "/my/capsule", "test/pkg", "1.0.0");
     let e = _env_for(home, []);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir
+    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
         + "/my/capsule"], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -296,7 +295,8 @@ test "publish: trailing-slash path works" ![io] {
     _write_credentials(home);
     _make_capsule(workdir + "/cap", "test/pkg", "1.0.0");
     let e = _env_for(home, []);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir + "/cap/"], e);
+    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
+        + "/cap/"], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(out + err, "packaging test/pkg@1.0.0");
@@ -312,7 +312,7 @@ test "publish: discovers capsule (cwd semantics)" ![io] {
     _write_credentials(home);
     _make_capsule(workdir, "my/cap", "2.0.0");
     let e = _env_for(home, []);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(out + err, "packaging my/cap@2.0.0");
@@ -328,7 +328,7 @@ test "publish: no token fails" ![io] {
     // No credentials written, and SFN_TOKEN/SFN_REGISTRY omitted from env
     // (run_capture env is complete, so omission = unset).
     let e = _env_for(home, []);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(out + err, "no auth token found");
@@ -349,7 +349,7 @@ test "publish: digest has sha256: prefix" ![clock, io, net] {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let _o = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
         return 0;
@@ -397,7 +397,7 @@ test "publish: payload carries content_b64 with relative packaging" ![clock, io,
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
             + "/nested/cap"], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
@@ -427,7 +427,7 @@ test "publish: surfaces HTTP error details" ![clock, io, net] {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let all = out + err;
@@ -465,7 +465,7 @@ test "publish: config-file registry URL" ![clock, io, net] {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, []);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let _o = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
         return 0;
@@ -491,7 +491,7 @@ test "publish: SFN_REGISTRY env overrides config" ![clock, io, net] {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let _o = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
         return 0;
@@ -519,7 +519,7 @@ test "publish: SFN_REGISTRY strips trailing slash" ![clock, io, net] {
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()
             + "/"]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let _o = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
         return 0;
@@ -546,7 +546,7 @@ test "publish: private capsule is rejected before credential discovery" ![io] {
     // rejection. Asserting the token message's absence is the ordering proof.
     _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
     let e = _env_for(home, []);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let all = out + err;
@@ -573,7 +573,7 @@ test "publish: private capsule makes no network call" ![clock, io, net] {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let all = out + err;
@@ -603,7 +603,7 @@ test "publish: registry override cannot bypass the private gate" ![clock, io, ne
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let all = out + err;
@@ -658,7 +658,7 @@ test "publish: explicit publish = true preserves publishing" ![clock, io, net] {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         assert contains(out + err, "packaging test/pkg@1.0.0");
@@ -682,7 +682,7 @@ test "publish: omitted publish preserves publishing" ![clock, io, net] {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         assert contains(out + err, "packaging test/pkg@1.0.0");
@@ -707,7 +707,7 @@ test "publish: invalid publish value is a manifest error" ![clock, io, net] {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
-        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let all = out + err;
@@ -727,7 +727,7 @@ test "publish: compiler capsule is rejected before credential discovery" ![io] {
     // The real compiler manifest must reach E0612 before an empty HOME can
     // trigger credential discovery or packaging.
     let e = _env_for(home, []);
-    let _exit = process.run_capture([_sfn_bin(), "publish", "compiler"], e);
+    let _exit = process.run_capture([sfn_bin_path(), "publish", "compiler"], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let all = out + err;

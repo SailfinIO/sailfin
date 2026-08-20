@@ -32,17 +32,12 @@
 // they cannot be called from an `![io]` test. Assert on the captured
 // output with `sfn/strings` predicates and `==` instead. (#842.)
 import {
-    find,
-    split,
     contains,
-    ends_with
+    ends_with,
+    find,
+    split
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs.
@@ -123,7 +118,7 @@ fn _reported_file_count(text: string) -> int {
 // (the full-tree check is ~2-3 min). The .sh original kept this to ONE
 // invocation; we honor that by folding all assertions into one test.
 test "sfn check compiler/src: completes (no SIGSEGV) and walks every file" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", "compiler/src"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "compiler/src"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let combined = out + err;

@@ -24,15 +24,7 @@
 // called from an `![io]` test; assert on captured output with
 // `sfn/strings::contains`.
 import { contains } from "sfn/strings";
-import { first_present_tool, tool_present } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { first_present_tool, sfn_bin_path, tool_present } from "sfn/test";
 
 // Full parent environment for the build + client subprocesses. The build
 // LINKS a binary (clang + ld), needing the toolchain
@@ -122,7 +114,7 @@ fn _write_server(dir: string, cert: string, key: string) -> string ![io] {
 // cold compile is NOT inside the readiness poll window. Threads the full
 // parent environment (the nested build links via clang + ld).
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }

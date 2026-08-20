@@ -28,17 +28,12 @@
 // they cannot be called from an `![io]` test. For subprocess/IR-output
 // assertions use `sfn/strings`, as the runtime_string_basic exemplar does.
 import {
+    contains,
     find,
     split,
-    starts_with,
-    contains
+    starts_with
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. The roundtrip leg spawns `clang` (and a
@@ -67,7 +62,7 @@ fn _scratch_dir() -> string ![io] {
 fn _emit_module(tag: string, module_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let outpath = dir + "/" + tag + ".ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return "EMIT_FAILED"; }
@@ -157,7 +152,7 @@ fn _count_occurrences(haystack: string, needle: string) -> int {
 }
 
 test "runtime/sfn/memory/rc.sfn typechecks cleanly" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/memory/rc.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "runtime/sfn/memory/rc.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -165,7 +160,7 @@ test "runtime/sfn/memory/rc.sfn typechecks cleanly" ![io] {
 }
 
 test "runtime/sfn/memory/rc.sfn is fmt-canonical" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/memory/rc.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", "runtime/sfn/memory/rc.sfn"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -250,14 +245,14 @@ fn _rc_harness_c() -> string {
 test "rc roundtrip: alloc -> retain -> release -> release frees exactly once" ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/rc.ll";
-    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", "runtime/sfn/memory/rc.sfn"], _child_env());
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", "runtime/sfn/memory/rc.sfn"], _child_env());
     let _eo = process.capture_take_stdout();
     let _ee = process.capture_take_stderr();
     assert emit_exit == 0;
 
     let tm_ll = dir + "/type_meta.ll";
     let tm_o = dir + "/type_meta.o";
-    let tm_emit = process.run_capture([_sfn_bin(), "emit", "-o", tm_ll, "llvm", "runtime/sfn/type_meta.sfn"], _child_env());
+    let tm_emit = process.run_capture([sfn_bin_path(), "emit", "-o", tm_ll, "llvm", "runtime/sfn/type_meta.sfn"], _child_env());
     let _to = process.capture_take_stdout();
     let _te = process.capture_take_stderr();
     assert tm_emit == 0;

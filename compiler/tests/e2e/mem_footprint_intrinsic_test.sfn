@@ -4,12 +4,7 @@
 // intrinsic. Each target leg is emitted in a fresh compiler process so the
 // target override exercises the same resolver used by cross-compilation.
 import { contains, split } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -69,7 +64,7 @@ fn _fixture_path() -> string ![io] {
 fn _emit(source: string, child_env: string[], tag: string) -> string ![io] {
     let output = _scratch_dir() + "/sfn-mem-footprint-" + tag + ".ll";
     if fs.exists(output) { fs.deleteFile(output); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", output, "llvm", source], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", output, "llvm", source], child_env);
     let _stdout = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -81,7 +76,7 @@ fn _emit(source: string, child_env: string[], tag: string) -> string ![io] {
 
 test "mem-footprint: fixture passes effect and type checking" ![io] {
     let source = _fixture_path();
-    let exit = process.run_capture([_sfn_bin(), "check", source], _base_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", source], _base_env());
     let _stdout = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();
     fs.deleteFile(source);
@@ -91,7 +86,7 @@ test "mem-footprint: fixture passes effect and type checking" ![io] {
 test "mem-footprint: registry requires the io effect" ![io] {
     let source = _scratch_dir() + "/sfn-mem-footprint-missing-effect.sfn";
     fs.writeFile(source, _missing_effect_fixture_source());
-    let exit = process.run_capture([_sfn_bin(), "check", source], _base_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", source], _base_env());
     let _stdout = process.capture_take_stdout();
     let stderr = process.capture_take_stderr();
     fs.deleteFile(source);

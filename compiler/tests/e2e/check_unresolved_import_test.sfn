@@ -5,20 +5,14 @@
 //
 // Native `*_test.sfn` per `.claude/rules/no-bash-e2e.md` — drives the
 // compiler subprocess via `process.run_capture`, mirroring the
-// `_sfn_bin`/subprocess pattern in `guillermo_test.sfn` and the
+// `sfn_bin_path`/subprocess pattern in `guillermo_test.sfn` and the
 // `_child_env`/`with_tmp_dir` fixture layout in `check_compiler_src_test.sfn`.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test. Assertions here use
 // `sfn/strings::find` on the captured combined stdout+stderr instead.
 import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs.
@@ -50,7 +44,7 @@ fn _marker(name: string) -> string ![io] {
 // Run `sfn check <path>` and stash the combined stdout+stderr to
 // `out_marker`. Returns the process exit code.
 fn _check(path: string, out_marker: string) -> int ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", path], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.writeFile(out_marker, out + err);

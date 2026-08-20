@@ -45,15 +45,9 @@
 // NOTE: `sfn/test`'s `expect_*` matchers are `![pure]` and unusable from
 // an `![io]` test; assert directly on captured values instead.
 import { contains } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 import { _copy_file_preserving_mode } from "../../src/build/fs";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // Known-answer: sha256("abc"), matching `capsule_byname_import_link_test.sfn`.
 fn _expected_digest() -> string {
@@ -93,7 +87,7 @@ fn _copy_renamed_compiler(root: string, name: string) -> string ![io] {
     let bin_dir = root + "/bin";
     fs.createDirectory(bin_dir, true);
     let dst = bin_dir + "/" + name;
-    if !_copy_file_preserving_mode(_sfn_bin(), dst) { return ""; }
+    if !_copy_file_preserving_mode(sfn_bin_path(), dst) { return ""; }
     // `_copy_file_preserving_mode` already carries the source's mode over,
     // so this is a post-condition check rather than the thing that makes
     // the copy runnable — a copy that is not executable would fail later
@@ -110,7 +104,8 @@ test "self-exe isolation: a renamed compiler builds a large-closure positional s
     assert renamed.length > 0;
 
     let out_bin = root + "/out";
-    let exit = process.run_capture([renamed, "build", "-o", out_bin, root + "/src/main.sfn"], clean_runner_env(nested_runner_scratch("sfn-904-self-exe-run-1")));
+    let exit = process.run_capture([renamed, "build", "-o", out_bin, root
+        + "/src/main.sfn"], clean_runner_env(nested_runner_scratch("sfn-904-self-exe-run-1")));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 
@@ -119,7 +114,7 @@ test "self-exe isolation: a renamed compiler builds a large-closure positional s
     // named `program`), so every isolated-emit child failed to spawn and
     // the build died non-zero.
     assert exit == 0;
-    assert !contains(out + err, "emit failed");
+    assert ! contains(out + err, "emit failed");
     assert fs.exists(out_bin);
 }
 
@@ -132,7 +127,8 @@ test "self-exe isolation: the binary built through a renamed compiler runs corre
     assert renamed.length > 0;
 
     let out_bin = root + "/out";
-    let build_exit = process.run_capture([renamed, "build", "-o", out_bin, root + "/src/main.sfn"], clean_runner_env(nested_runner_scratch("sfn-904-self-exe-run-2")));
+    let build_exit = process.run_capture([renamed, "build", "-o", out_bin, root
+        + "/src/main.sfn"], clean_runner_env(nested_runner_scratch("sfn-904-self-exe-run-2")));
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;

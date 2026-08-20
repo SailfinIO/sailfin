@@ -24,12 +24,7 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn emit`. `process.run_capture` treats
 // an empty array as the *empty* environment (not "inherit"), so the relevant
@@ -120,7 +115,7 @@ fn _emit_llvm(source: string, tag: string) -> string ![io] {
     let ll = dir + "/sfn-bitwise-" + tag + ".ll";
     fs.writeFile(src, source);
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -201,7 +196,7 @@ test "numeric-bitwise: bitwise on float is rejected and writes no IR" ![io] {
     let ll = dir + "/sfn-bitwise-bitwise_float.ll";
     fs.writeFile(src, "fn bad(x: float, y: float) -> float {\n    return x & y;\n}\n");
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);

@@ -5,16 +5,10 @@
 // every representative artifact class the build hashes in production: the
 // compiler binary, a compressed tar archive, and generated LLVM IR larger than
 // the retired 64 KiB threshold.
-import { tool_present } from "sfn/test";
+import { sfn_bin_path, tool_present } from "sfn/test";
 
 import { _sha256_of_file } from "../../src/build/fs";
 import { sha256_hex_of_string } from "../../src/build/hash";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 fn _capture_digest(argv: string[]) -> string ![io] {
     let rc = process.run_capture(argv, process.environ());
@@ -69,7 +63,7 @@ test "build_hash: string entry point matches the system digest" ![io] {
 }
 
 test "build_hash: compiled binary matches the system digest" ![io] {
-    let path = _sfn_bin();
+    let path = sfn_bin_path();
     let expected = _system_sha256(path);
     if expected.length == 0 {
         assert true;
@@ -101,7 +95,7 @@ test "build_hash: tar.gz archive matches the system digest" ![io] {
 
 test "build_hash: generated LLVM IR above 64 KiB matches the system digest" ![io] {
     let path = _tmp_path("large.ll");
-    let emit_rc = process.run_capture([_sfn_bin(), "emit", "-o", path, "llvm", "compiler/src/build/fs.sfn"], process.environ());
+    let emit_rc = process.run_capture([sfn_bin_path(), "emit", "-o", path, "llvm", "compiler/src/build/fs.sfn"], process.environ());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     if emit_rc != 0 || !fs.exists(path) {

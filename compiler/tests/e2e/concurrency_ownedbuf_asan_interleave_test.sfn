@@ -53,13 +53,7 @@
 // cannot be called from an `![io]` test; assert on captured output with
 // `sfn/strings` predicates instead.
 import { contains, find } from "sfn/strings";
-import { first_present_tool } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { first_present_tool, sfn_bin_path } from "sfn/test";
 
 // The build + relink LINK a binary (clang/gcc + ld), needing the full
 // toolchain environment; `run_capture`'s empty array is the EMPTY
@@ -207,7 +201,7 @@ test "asan: concurrent channel producer/consumer over the moved-OwnedBuf seam is
 
     let work_dir = dir + "/chanwd";
     let plain_bin = dir + "/chan_plain";
-    let bexit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", plain_bin, src], _child_env());
+    let bexit = process.run_capture([sfn_bin_path(), "build", "--work-dir", work_dir, "-o", plain_bin, src], _child_env());
     let bo = process.capture_take_stdout();
     let be = process.capture_take_stderr();
     if bexit != 0 {
@@ -528,7 +522,7 @@ test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-
 
     let work_dir = dir + "/srvwd";
     let plain_bin = dir + "/server_plain";
-    let bexit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", plain_bin, main_path], _child_env());
+    let bexit = process.run_capture([sfn_bin_path(), "build", "--work-dir", work_dir, "-o", plain_bin, main_path], _child_env());
     let bo = process.capture_take_stdout();
     let be = process.capture_take_stderr();
     if bexit != 0 {

@@ -20,16 +20,7 @@
 // the closure returns — the `sfn/test` idiom (see
 // `compiler/tests/e2e/sailfin_main_entry_test.sfn`).
 import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // A fresh marker-file path under the runner's scratch dir (or `/tmp`), with
 // any stale value removed so each run starts clean. Lives outside the
@@ -55,7 +46,7 @@ fn _make_workspace(root: string) -> void ![io] {
 // Run `sfn lock --work-dir <start>`, discarding captured output. Returns the
 // command's exit code.
 fn _run_lock(start: string) -> int ![io] {
-    let exit = process.run_capture([_sfn_bin(), "lock", "--work-dir", start], []);
+    let exit = process.run_capture([sfn_bin_path(), "lock", "--work-dir", start], []);
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     return exit;
@@ -139,7 +130,7 @@ test "lock: outside a workspace errors cleanly" ![io] {
     let lockfile_marker = _marker("t4-lockfile");
     let exit = with_tmp_dir(fn (dir: string) -> int {
         // No workspace.toml anywhere under `dir`.
-        let rc = process.run_capture([_sfn_bin(), "lock", "--work-dir", dir], []);
+        let rc = process.run_capture([sfn_bin_path(), "lock", "--work-dir", dir], []);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         fs.writeFile(err_marker, out + err);

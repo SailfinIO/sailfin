@@ -22,12 +22,7 @@
 // `number_to_string`, NOT `{{ }}` interpolation, so the host compiler does
 // not interpolate the fixture before it is written.
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `process.run_capture`'s empty array is the *empty* environment, not
 // "inherit". `sfn run` spawns a nested clang + linker, so the child needs
@@ -70,7 +65,7 @@ test "routine await-receive: typed receive returns the value, no SIGSEGV (SFN-39
         + "    }\n"
         + "    ch.close();\n"
         + "}");
-    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     // Exit 0 and the correct total — a regression to the old lowering would
@@ -94,7 +89,7 @@ test "routine await-receive: untyped channel receive-await fails closed, not gar
         + "    }\n"
         + "    ch.close();\n"
         + "}");
-    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     // Must be a compile-time rejection: non-zero exit that is NOT the 139

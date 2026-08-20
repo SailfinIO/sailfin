@@ -4,13 +4,12 @@
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 struct TestRun {
     exit: int,
@@ -31,7 +30,7 @@ fn _write_fixture(test_name: string) -> string ![io] {
 // Run `sfn test <args...>` with a dedicated scratch env, returning the exit
 // code and combined stdout+stderr.
 fn _run_sfn_test(args: string[], label: string) -> TestRun ![io] {
-    let mut argv: string[] = [_sfn_bin(), "test"];
+    let mut argv: string[] = [sfn_bin_path(), "test"];
     let mut i = 0;
     loop {
         if i >= args.length { break; }
@@ -45,7 +44,7 @@ fn _run_sfn_test(args: string[], label: string) -> TestRun ![io] {
 }
 
 test "test filter: an unmatched -k exits non-zero with a zero-match diagnostic" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "test", "compiler/tests/unit", "-k", "definitely_missing_selector",], clean_runner_env(nested_runner_scratch("unmatched-k")));
+    let exit = process.run_capture([sfn_bin_path(), "test", "compiler/tests/unit", "-k", "definitely_missing_selector",], clean_runner_env(nested_runner_scratch("unmatched-k")));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let combined = out + err;
@@ -58,7 +57,7 @@ test "test filter: an unmatched -k exits non-zero with a zero-match diagnostic" 
 
 test "test filter: an unfiltered empty suite still exits 0" ![io] {
     let code = with_tmp_dir(fn (dir: string) -> int {
-        let exit = process.run_capture([_sfn_bin(), "test", dir], clean_runner_env(nested_runner_scratch("empty-suite")));
+        let exit = process.run_capture([sfn_bin_path(), "test", dir], clean_runner_env(nested_runner_scratch("empty-suite")));
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let combined = out + err;

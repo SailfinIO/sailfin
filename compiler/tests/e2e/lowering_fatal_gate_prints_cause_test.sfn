@@ -11,13 +11,7 @@
 // stderr — it fails if the print loop is removed and only the bare
 // "compile failed" refusal marker remains.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // A clean top-level child environment for the nested `sfn test` (SFN-401):
 // the ambient PATH/HOME/TMPDIR/toolchain vars minus the parallel pool's
@@ -59,7 +53,7 @@ test "lowering fatal gate: sfn test prints the [fatal] cause to stderr (SFN-529)
     if fs.exists(src) { fs.deleteFile(src); }
     fs.writeFile(src, _fixture_source());
 
-    let exit = process.run_capture([_sfn_bin(), "test", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 

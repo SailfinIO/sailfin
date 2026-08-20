@@ -75,8 +75,8 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
     // spawn below must all agree by construction (SFN-693).
     let exe_path = target_exe_name(scratch_root + "/test", build_target_os());
     // SFN-693: threaded into every `_run_test_binary` call below as the
-    // `SAILFIN_BIN` seed, so the compiled test binaries' `_sfn_bin()`
-    // e2e fixtures resolve the compiler actually running them. Unlike
+    // `SAILFIN_BIN` seed, so the compiled test binaries' `sfn_bin_path()`
+    // (`sfn/test`) resolves the compiler actually running them. Unlike
     // the pooled path's `self_exe` (`_pool_child_env`, `./pool.sfn`),
     // which resolves `_resolve_test_self_path(binary_dir)` because there
     // `self_exe` genuinely IS the pooled child's own argv[0]

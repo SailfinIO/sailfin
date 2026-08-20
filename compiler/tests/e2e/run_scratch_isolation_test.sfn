@@ -13,12 +13,7 @@
 // regression reverts the fix, `<scratch>/run` is never written and the
 // fixed `build/sailfin/run` collision path returns.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child env = the full parent environment (PATH/HOME/TMPDIR + macOS
 // toolchain vars the nested clang/linker need), but with
@@ -49,7 +44,7 @@ test "run: executable is routed under SAILFIN_TEST_SCRATCH, not build/sailfin" !
     let exe = scratch + "/run";
     if fs.exists(exe) { fs.deleteFile(exe); }
 
-    let exit = process.run_capture([_sfn_bin(), "run", "examples/advanced/lambda-closure.sfn"], _child_env(scratch));
+    let exit = process.run_capture([sfn_bin_path(), "run", "examples/advanced/lambda-closure.sfn"], _child_env(scratch));
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
 

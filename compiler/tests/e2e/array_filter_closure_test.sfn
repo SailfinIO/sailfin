@@ -12,15 +12,7 @@
 // `process.*` builtins and asserts on captured stdout — the canonical
 // e2e pattern (see `.claude/rules/no-bash-e2e.md`, `array_map_closure_test.sfn`).
 import { trim_right } from "sfn/strings";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `sfn run` compiles+links+executes the fixture, so the spawned compiler
 // needs a real environment (PATH for the linker, plus SAILFIN_TEST_SCRATCH
@@ -36,7 +28,7 @@ struct RunOut {
 // Compile+run a fixture and return its exit code plus the trailing-
 // newline-normalized stdout.
 fn _run_fixture(path: string) -> RunOut ![io] {
-    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", path], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     return RunOut { exit: exit, out: trim_right(out) };

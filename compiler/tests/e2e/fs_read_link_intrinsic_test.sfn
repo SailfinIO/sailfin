@@ -33,13 +33,7 @@
 // cannot be called from an `![io]` test like this. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead (#842).
 import { contains, split } from "sfn/strings";
-import { report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -98,7 +92,7 @@ fn _emit(src: string, child_env: string[], tag: string) -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/sfn-fs-read-link-" + tag + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], child_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("fs-read-link-intrinsic emit " + tag, exit, out, err);
@@ -111,7 +105,7 @@ fn _emit(src: string, child_env: string[], tag: string) -> string ![io] {
 
 test "fs-read-link: sfn check passes on the fixture" ![io] {
     let src = _fixture_path();
-    let exit = process.run_capture([_sfn_bin(), "check", src], _base_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _base_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);

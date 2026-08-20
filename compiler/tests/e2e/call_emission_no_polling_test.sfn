@@ -24,14 +24,9 @@
 // cannot be called from an `![io]` test like this. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
 import { contains, split } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 let _SYMBOL: string = "@sailfin_runtime_has_exception";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment so the emit subprocess sees PATH
@@ -52,7 +47,7 @@ fn _emit_path(label: string, source_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/nopoll-" + label + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", source_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", source_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }

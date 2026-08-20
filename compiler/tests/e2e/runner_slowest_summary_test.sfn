@@ -26,12 +26,7 @@ import {
     parse_int,
     substring
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // env-safe (SFN-401): hand-built minimal child env — no raw
 // process.environ() pool-key leak. The build spawns nested clang +
@@ -96,7 +91,7 @@ fn _parse_rank_cs(out: string, rank: int) -> int {
 // ---- Test 1: per-file PASS lines carry an elapsed time ----
 test "test runner: per-file PASS lines carry an elapsed time" ![io] {
     let dir = _make_pass_dir("t1");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -113,7 +108,7 @@ test "test runner: per-file PASS lines carry an elapsed time" ![io] {
 // ---- Test 2: multi-file run ends with a slowest summary ----
 test "test runner: multi-file run ends with a slowest summary" ![io] {
     let dir = _make_pass_dir("t2");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -125,7 +120,7 @@ test "test runner: multi-file run ends with a slowest summary" ![io] {
 // ---- Test 3: slowest summary is ordered descending ----
 test "test runner: slowest summary is ordered descending" ![io] {
     let dir = _make_pass_dir("t3");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -140,7 +135,7 @@ test "test runner: slowest summary is ordered descending" ![io] {
 // ---- Test 4: slowest summary is suppressed with --slowest 0 ----
 test "test runner: slowest summary is suppressed with --slowest 0" ![io] {
     let dir = _make_pass_dir("t4");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--slowest", "0", "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--slowest", "0", "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -151,7 +146,7 @@ test "test runner: slowest summary is suppressed with --slowest 0" ![io] {
 // ---- Test 5: slowest summary survives a pooled run ----
 test "test runner: slowest summary survives a pooled run" ![io] {
     let dir = _make_pass_dir("t5");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "2"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "2"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -172,7 +167,7 @@ test "test runner: a directory resolving to one test file runs cleanly" ![io] {
     let dir = base + "/sfn-runner-slowest-t6";
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/solo_test.sfn", "test \"solo: one\" { assert 1 == 1; }\n");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 

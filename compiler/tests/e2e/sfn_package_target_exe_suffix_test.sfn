@@ -41,16 +41,10 @@
 // actually built for, matching `sfn_package_test.sfn`'s existing shape
 // (`--compiler-bin` pointed at the host binary regardless of `--target`).
 import { contains, split } from "sfn/strings";
-import { tool_present } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, tool_present } from "sfn/test";
 
 fn _sfn_bin_abs() -> string ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     if bin.length > 0 && bin[0] == "/" { return bin; }
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
@@ -182,7 +176,7 @@ test "sfn package (compiler mode): windows target stages .exe members with exec 
     let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
     assert bin.length > 0;
 
-    let exit = process.run_capture([_sfn_bin(), "package", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -217,7 +211,7 @@ test "sfn package (compiler mode): linux target keeps today's suffixless members
     let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
     assert bin.length > 0;
 
-    let exit = process.run_capture([_sfn_bin(), "package", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -250,7 +244,7 @@ test "sfn package --installer: windows target stages .exe members with exec bit"
     let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
     assert bin.length > 0;
 
-    let exit = process.run_capture([_sfn_bin(), "package", "--installer", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -282,7 +276,7 @@ test "sfn package --installer: linux target keeps today's suffixless members" ![
     let bin = _nonexec_compiler_bin(root, _sfn_bin_abs());
     assert bin.length > 0;
 
-    let exit = process.run_capture([_sfn_bin(), "package", "--installer", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

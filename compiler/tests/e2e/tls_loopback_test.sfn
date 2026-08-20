@@ -42,7 +42,7 @@
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` / `sfn/strings::find` instead.
 import { contains, find } from "sfn/strings";
-import { first_present_tool, tool_present } from "sfn/test";
+import { first_present_tool, sfn_bin_path, tool_present } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tll_` so these never collide with the external-linkage
@@ -116,12 +116,6 @@ fn _tls_port_str() -> string { return "18894"; }
 fn _plain_port() -> i64 { return 18895; }
 
 fn _plain_port_str() -> string { return "18895"; }
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // Full parent environment for the build + server + client subprocesses
 // (`run_capture`/`spawn_with_env`'s empty env is EMPTY, not "inherit"):
@@ -304,7 +298,7 @@ fn _write_client(dir: string, url: string, out_path: string) -> string ![io] {
 // cold compile is NOT inside the readiness poll window. Threads the full
 // parent environment (the nested build links via clang + ld).
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }

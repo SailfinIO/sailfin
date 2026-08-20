@@ -10,14 +10,7 @@
 // link succeeds and the formatted status reaches the framed output — a
 // build-only proof, no server/socket path, so it holds on every platform.
 import { find } from "sfn/strings";
-
-// The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted
-// binary relative to the repo root the runner starts from.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Full parent environment for the nested build (PATH for clang/linker,
 // SAILFIN_TEST_SCRATCH for per-invocation `program.ll` isolation under the
@@ -55,7 +48,7 @@ test "capsule resolver: transitive dep of a declared capsule links and runs" ![i
         + "}\n");
 
     let bin = root + "/app-bin";
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, root
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, root
         + "/src/main.sfn"], _child_env());
     let build_out = process.capture_take_stdout();
     let build_err = process.capture_take_stderr();

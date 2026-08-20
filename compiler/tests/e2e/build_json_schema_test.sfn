@@ -22,13 +22,8 @@
 // `![io]` test). No JSON parser — the original jq field reads become
 // substring checks against the emitted JSON, which is what the schema
 // lock cares about.
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // The build spawns a nested clang + linker, so the child needs PATH.
 //
@@ -135,7 +130,7 @@ fn _shared_shape_iso() -> Iso ![io] {
 // scratch dirs threaded, returning exit + captured streams.
 fn _build(root: string, iso: Iso, tag: string, extra: string[]) -> BuildRun ![io] {
     let out_bin = root + "/build/" + tag;
-    let mut argv: string[] = [_sfn_bin(), "build", "--json"];
+    let mut argv: string[] = [sfn_bin_path(), "build", "--json"];
     let mut i = 0;
     loop {
         if i >= extra.length { break; }

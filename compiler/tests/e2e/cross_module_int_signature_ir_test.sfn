@@ -23,13 +23,8 @@
 // NOTE: assert on captured IR text with `sfn/strings` predicates — the
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test. (#842.)
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -79,7 +74,7 @@ fn _ensure_shared_asm_staged() -> string ![io] {
     if fs.exists(out) { return out; }
     // Ensure the directory exists.
     fs.createDirectory("build/compiler/import-context/fixtures", true);
-    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "fixtures/cross_module_int_signature_shared", "-o", out, "native", _shared_fixture()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "--module-name", "fixtures/cross_module_int_signature_shared", "-o", out, "native", _shared_fixture()], _child_env());
     let _stdout = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -92,7 +87,7 @@ fn _ensure_shared_asm_staged() -> string ![io] {
 fn _emit_importer_ll(tag: string) -> string ![io] {
     let out = _ll_path(tag);
     if fs.exists(out) { return out; }
-    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "cross_module_int_signature_test", "-o", out, "llvm", _importer_fixture()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "--module-name", "cross_module_int_signature_test", "-o", out, "llvm", _importer_fixture()], _child_env());
     let _stdout = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();
     if exit != 0 { return ""; }

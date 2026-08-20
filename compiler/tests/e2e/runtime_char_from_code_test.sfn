@@ -21,13 +21,7 @@
 // are `![pure]` and unusable from an `![io]` test, so output is asserted
 // with `sfn/strings::find`.
 import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
@@ -74,7 +68,7 @@ fn _build_and_run3(out_marker: string) -> int ![io] {
         let srcpath = dir + "/char_from_code.sfn";
         fs.writeFile(srcpath, _fixture_src());
         let binpath = dir + "/char_from_code";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
         if build_exit != 0 { return -100; }

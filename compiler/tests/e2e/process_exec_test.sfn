@@ -13,15 +13,7 @@
 //   2. exec of a nonexistent path: the image is NOT replaced, so
 //      `process.exec` returns and the fixture's fallback path runs.
 import { find } from "sfn/strings";
-
-// The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted binary
-// relative to the repo root the runner starts from (mirrors sfn/test's own
-// `_resolve_sfn_bin`).
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child env for the nested `sfn build`: `run_capture`'s empty env is the
 // EMPTY environment (not "inherit"), so a build-spawning test must thread
@@ -52,7 +44,7 @@ fn _scratch_root() -> string ![io] {
 // Build `src` to `binpath` with the compiler-under-test; returns the build
 // exit code. Threads the child env so the nested clang/link finds its tools.
 fn _build_fixture(src: string, binpath: string) -> int ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, src], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     return exit;

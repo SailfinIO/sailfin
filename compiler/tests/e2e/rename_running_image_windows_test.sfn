@@ -23,7 +23,7 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
 // unusable from an `![io]` test (#842); assert directly on values instead.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // Declared directly rather than resolved through the compiler under
 // test: calling the runtime symbol as an extern lets this test prove the
@@ -32,12 +32,6 @@ import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 // `compiler/src/build/fs.sfn` declares the identical `extern fn` rather
 // than importing it, the SFN-635 cross-module workaround.
 extern fn sfn_rename_replace(src: *u8, dst: *u8) -> i32;
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // True when the test runner is a Windows binary (the only platform whose
 // `rename_ops_windows.sfn` fallback is reachable).
@@ -112,7 +106,7 @@ fn _build_fixture(dir: string, name: string, src_text: string, label: string) ->
     let src = dir + "/" + name + ".sfn";
     let bin = dir + "/" + name + ".exe";
     fs.writeFile(src, src_text);
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch(label)));
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch(label)));
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }

@@ -17,18 +17,9 @@
 //
 // `mode = "warn"` turns the same drift into a report that does not fail.
 import { find, split } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 import { _copy_file_preserving_mode } from "../../src/build/fs";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted binary
-// relative to the repo root the runner starts from (mirrors `sfn/test`'s
-// `_resolve_sfn_bin`).
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // First line of a captured stdout, trailing newline dropped.
 fn _first_line(text: string) -> string {
@@ -49,9 +40,9 @@ fn _child_env() -> string[] ![io] {
 }
 
 // Absolute path to the compiler binary, for the `cd <root> && <sfn>` vehicle.
-// If `_sfn_bin()` is already absolute, return it; else join onto cwd via `pwd`.
+// If `sfn_bin_path()` is already absolute, return it; else join onto cwd via `pwd`.
 fn _sfn_bin_abs() -> string ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     if bin.length > 0 && bin[0] == "/" { return bin; }
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
@@ -80,7 +71,7 @@ test "capability gate: declared-surface drift fails sfn check (enforce)" ![io] {
     let out_marker = _scratch_marker("t1");
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, false);
-        let rc = process.run_capture([_sfn_bin(), "check", dir], []);
+        let rc = process.run_capture([sfn_bin_path(), "check", dir], []);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         fs.writeFile(out_marker, out + err);
@@ -98,7 +89,7 @@ test "capability gate: declared-surface drift fails sfn build (enforce)" ![io] {
     let out_marker = _scratch_marker("t2");
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, false);
-        let rc = process.run_capture([_sfn_bin(), "build", dir
+        let rc = process.run_capture([sfn_bin_path(), "build", dir
             + "/drifter/main.sfn"], []);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
@@ -145,7 +136,7 @@ test "capability gate: mode = warn reports drift without failing sfn check" ![io
     let err_marker = _scratch_marker("t4");
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, true);
-        let rc = process.run_capture([_sfn_bin(), "check", dir], []);
+        let rc = process.run_capture([sfn_bin_path(), "check", dir], []);
         let _out = process.capture_take_stdout();
         fs.writeFile(err_marker, process.capture_take_stderr());
         return rc;
@@ -190,7 +181,7 @@ test "capability gate: no [workspace.capabilities] is a no-op" ![io] {
     let sfn_abs = _sfn_bin_abs();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws_bare(dir);
-        let check_rc = process.run_capture([_sfn_bin(), "check", dir], []);
+        let check_rc = process.run_capture([sfn_bin_path(), "check", dir], []);
         let _co = process.capture_take_stdout();
         let _ce = process.capture_take_stderr();
         fs.writeFile(check_marker, _rc_marker(check_rc));
@@ -227,7 +218,7 @@ test "capability gate: inferred-surface drift fails sfn check where declared pas
     let out_marker = _scratch_marker("t7");
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws_inferred(dir);
-        let rc = process.run_capture([_sfn_bin(), "check", dir], []);
+        let rc = process.run_capture([sfn_bin_path(), "check", dir], []);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         fs.writeFile(out_marker, out + err);

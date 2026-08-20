@@ -21,13 +21,8 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and so cannot be called
 // from an `![io]` test; assert on the IR text with `sfn/strings`
 // predicates instead (#842).
-import { contains, split, ends_with } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, ends_with, split } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -56,7 +51,7 @@ fn _emit_ir(tag: string) -> string ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/sfn-arrayagg-" + tag + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", "compiler/tests/e2e/fixtures/array_aggregate_shape.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", "compiler/tests/e2e/fixtures/array_aggregate_shape.sfn"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }

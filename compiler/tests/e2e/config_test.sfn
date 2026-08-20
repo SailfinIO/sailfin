@@ -10,14 +10,9 @@
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // called from an `![io]` test). (#842.)
 import { contains, find, to_lower_all } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 import { host_is_windows } from "../../src/build/target";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 struct CfgRun {
     exit: int,
@@ -50,7 +45,7 @@ fn _run(home: string, args: string[], extra_env: string[]) -> CfgRun ![io] {
         e.push(extra_env[i]);
         i += 1;
     }
-    let mut argv: string[] = [_sfn_bin()];
+    let mut argv: string[] = [sfn_bin_path()];
     let mut j = 0;
     loop {
         if j >= args.length { break; }

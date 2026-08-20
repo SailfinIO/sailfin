@@ -18,13 +18,7 @@
 // See `.claude/rules/no-bash-e2e.md` for the `*_test.sfn` e2e pattern
 // this follows (mirrors `guillermo_test.sfn` / `sailfin_main_entry_test.sfn`).
 import { split } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // Two compiler unit tests that each pull in a large dep closure and
 // resolve under the same group (both plain files under
@@ -121,7 +115,7 @@ test "dep-closure pre-warm: no dep module is emitted more than once under --jobs
         let ledger = dir + "/emit.ledger";
         let scratch_dir = dir + "/scratch";
         let env_vec = _child_env(cache_dir, ledger, scratch_dir);
-        let exit = process.run_capture([_sfn_bin(), "test", _fixture_a(), _fixture_b(), "--jobs", "4", "--no-test-cache"], env_vec);
+        let exit = process.run_capture([sfn_bin_path(), "test", _fixture_a(), _fixture_b(), "--jobs", "4", "--no-test-cache"], env_vec);
         let _out = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
         // Toolchain is present, so a non-zero exit is a real failure of the

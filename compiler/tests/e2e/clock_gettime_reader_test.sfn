@@ -36,12 +36,7 @@
 // cannot be called from an `![io]` test like this. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
 import { contains, find, split } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
@@ -74,7 +69,7 @@ fn _emit_clock_for(target_os: string, target_arch: string, tag: string) -> strin
     if target_arch.length > 0 {
         child_env.push("SAILFIN_TARGET_ARCH=" + target_arch);
     }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _CLOCK_SFN], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _CLOCK_SFN], child_env);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -146,7 +141,7 @@ fn _any_line_with(text: string, a: string, b: string) -> bool {
 }
 
 test "clock-reader: sfn check passes on runtime/sfn/clock.sfn" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", _CLOCK_SFN], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", _CLOCK_SFN], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -315,7 +310,7 @@ test "clock-reader: internal unix adapter cannot bypass clock effect" ![io] {
     let dir = _scratch_dir();
     let src = dir + "/sfn-clock-effectless-unix.sfn";
     fs.writeFile(src, "fn effectless_probe() {\n    let mut value: i64 = 0;\n    let out: *i64 = & value;\n    runtime_unix_millis_fn(out);\n}\n");
-    let exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _child_env());
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);
@@ -332,7 +327,7 @@ test "clock-reader: adapter returns a monotonic, non-zero reading" ![io] {
     let dir = _scratch_dir();
     let src = dir + "/sfn-clock-mono.sfn";
     fs.writeFile(src, "extern fn sfn_clock_monotonic_nanos() -> i64;\n\nfn main() ![io] {\n    let a: i64 = sfn_clock_monotonic_nanos();\n    let b: i64 = sfn_clock_monotonic_nanos();\n    if b >= a {\n        print(\"MONO_OK\");\n    } else {\n        print(\"MONO_FAIL\");\n    }\n    if a > 0 {\n        print(\"NONZERO_OK\");\n    } else {\n        print(\"NONZERO_FAIL\");\n    }\n}\n");
-    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);
@@ -345,7 +340,7 @@ test "clock-reader: timespec conversion floors POSIX and wrapped mingw values" !
     let dir = _scratch_dir();
     let src = dir + "/sfn-clock-convert.sfn";
     fs.writeFile(src, "extern fn sfn_clock_timespec_to_unix_millis(sec: i64, nsec: i64) -> i64;\n\nfn main() ![io] {\n    if sfn_clock_timespec_to_unix_millis(-1, 999500000) == -1 {\n        print(\"POSIX_NEGATIVE_OK\");\n    }\n    if sfn_clock_timespec_to_unix_millis(1844674407370, 954661600) == -1 {\n        print(\"MINGW_NEGATIVE_OK\");\n    }\n    if sfn_clock_timespec_to_unix_millis(1, 234567800) == 1234 {\n        print(\"POSITIVE_OK\");\n    }\n}\n");
-    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);

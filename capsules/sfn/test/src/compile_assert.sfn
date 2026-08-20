@@ -26,10 +26,11 @@
 // running a child process and writing the temp source file both require
 // `io`.
 //
-// Hermeticity: the `sfn` binary is resolved from `$SAILFIN_BIN` with a
-// documented fallback of `build/bin/sfn` (the self-hosted binary,
-// relative to the repo root the test runs from), so CI can point the
-// assertions at any compiler without editing the test. The child is
+// Hermeticity: the `sfn` binary is resolved by `sfn_bin_path()`
+// (`./sfn_bin.sfn`) — `$SAILFIN_BIN` when set, else the self-hosted binary
+// relative to the repo root the test runs from, host-conditioned for the
+// executable suffix — so CI can point the assertions at any compiler
+// without editing the test. The child is
 // spawned with an empty environment — `sfn check` on an import-free
 // snippet reads no environment variables — so the result does not depend
 // on the parent process's ambient env.
@@ -40,6 +41,7 @@
 import { find } from "sfn/strings";
 
 import { MatchResult, match_fail, match_ok } from "./matcher";
+import { sfn_bin_path } from "./sfn_bin";
 
 // ---------------------------------------------------------------------------
 // CompileExpect
@@ -85,14 +87,8 @@ fn _outcome_failed(raw: string) -> _CheckOutcome {
 }
 
 // ---------------------------------------------------------------------------
-// Binary resolution + program assembly
+// Program assembly
 // ---------------------------------------------------------------------------
-fn _resolve_sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
-
 fn _join_effects(effects: string[]) -> string {
     let mut out: string = "";
     let mut i: int = 0;
@@ -267,7 +263,7 @@ fn _run_compile_check(source: string, effects: string[]) -> _CheckOutcome ![io] 
     let path = dir + "/probe.sfn";
     fs.writeFile(path, program);
 
-    let bin = _resolve_sfn_bin();
+    let bin = sfn_bin_path();
     let argv: string[] = [bin, "check", "--json", path];
     let child_env: string[] = [];
     let _exit = process.run_capture(argv, child_env);

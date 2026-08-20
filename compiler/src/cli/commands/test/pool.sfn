@@ -100,8 +100,8 @@ fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
         // native Windows the compiler on disk is `sfn.exe`, so a
         // suffixless-only list resolves to "" and every caller silently
         // degrades — the pooled child would get an empty argv[0], and
-        // the `SAILFIN_BIN` seed below would be skipped, leaving the
-        // e2e `_sfn_bin()` helpers on their POSIX default on the exact
+        // the `SAILFIN_BIN` seed below would be skipped, leaving
+        // `sfn_bin_path()` (`sfn/test`) on its POSIX default on the exact
         // platform that seed exists to fix (SFN-693). This list must
         // stay in step with `_resolve_self_path` (`build/paths.sfn`);
         // it drifted from it once already.
@@ -186,9 +186,9 @@ fn _pool_env_snapshot() -> string[] ![io] { return process.environ(); }
 // would shadow the per-child one without this filter.
 //
 // SFN-693: also seeds `SAILFIN_BIN=<self_exe>` — `_resolve_test_self_path`,
-// already computed once by the caller into `self_exe` — so the 285 e2e
-// fixtures' identical `_sfn_bin()` helper resolves correctly instead of
-// falling through to its hardcoded `build/bin/sfn` POSIX default; correct
+// already computed once by the caller into `self_exe` — so every test's
+// `sfn_bin_path()` (`sfn/test`, `sfn_bin.sfn`) resolves correctly instead
+// of falling through to its `build/bin/sfn` default; correct
 // on every OS, and specifically `.exe`-correct on Windows. `self_exe` here
 // IS precisely the compiler running each pooled child: it is that child's
 // own argv[0] (`_pool_child_argv`), so seeding it back into that same

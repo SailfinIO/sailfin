@@ -31,17 +31,12 @@
 // The `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test, so output is asserted with `sfn/strings`.
 import { find, starts_with, trim } from "sfn/strings";
-import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point
-// the test at any compiler without editing it.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    expect_eq_bool,
+    expect_eq_int,
+    expect_eq_str,
+    sfn_bin_path
+} from "sfn/test";
 
 // The version-printing legs do not compile anything (no linker, no
 // build-cache), so they need no child environment. These are pure CLI
@@ -50,7 +45,7 @@ fn _sfn_bin() -> string ![io] {
 // Shared assertion for the version-printing legs: exit 0 and a stdout
 // line of the form `sfn <non-empty version>`.
 test "cli-v2: version subcommand routes through v2 exit zero prints version" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "version"], []);
+    let exit = process.run_capture([sfn_bin_path(), "version"], []);
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;
@@ -61,7 +56,7 @@ test "cli-v2: version subcommand routes through v2 exit zero prints version" ![i
 }
 
 test "cli-v2: version long flag routes through v2 exit zero prints version" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "--version"], []);
+    let exit = process.run_capture([sfn_bin_path(), "--version"], []);
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;
@@ -71,7 +66,7 @@ test "cli-v2: version long flag routes through v2 exit zero prints version" ![io
 }
 
 test "cli-v2: version short flag routes through v2 exit zero prints version" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "-V"], []);
+    let exit = process.run_capture([sfn_bin_path(), "-V"], []);
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;
@@ -81,7 +76,7 @@ test "cli-v2: version short flag routes through v2 exit zero prints version" ![i
 }
 
 test "cli-v2: root color flag is accepted before a subcommand" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "--color", "never", "version"], []);
+    let exit = process.run_capture([sfn_bin_path(), "--color", "never", "version"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     expect_eq_int(exit, 0);
@@ -97,7 +92,7 @@ test "cli-v2: root color flag is accepted before a subcommand" ![io] {
 // code is OBSERVED by the caller, proving `parse()` never fired a
 // `process.exit` out from under the `int`-returning contract (Risk R2).
 test "cli-v2: fallthrough exit code is observed by the caller (no process.exit)" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "not-a-known-subcommand"], []);
+    let exit = process.run_capture([sfn_bin_path(), "not-a-known-subcommand"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 2;

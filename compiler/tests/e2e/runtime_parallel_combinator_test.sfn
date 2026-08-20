@@ -14,13 +14,8 @@
 // NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -52,7 +47,7 @@ fn _repo_root() -> string ![io] {
 // ---- Test 1: sfn check passes cleanly ----
 test "runtime/sfn/concurrency/parallel.sfn typechecks cleanly" ![io] {
     let module = _repo_root() + "/runtime/sfn/concurrency/parallel.sfn";
-    let exit = process.run_capture([_sfn_bin(), "check", module], _env());
+    let exit = process.run_capture([sfn_bin_path(), "check", module], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -62,7 +57,7 @@ test "runtime/sfn/concurrency/parallel.sfn typechecks cleanly" ![io] {
 // ---- Test 2: sfn fmt --check is clean ----
 test "runtime/sfn/concurrency/parallel.sfn is fmt-canonical" ![io] {
     let module = _repo_root() + "/runtime/sfn/concurrency/parallel.sfn";
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", module], _env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", module], _env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
@@ -73,7 +68,7 @@ test "sfn emit llvm: @sfn_parallel drives spawn+await, no new descriptor" ![io] 
     let dir = _scratch("emit");
     let module = _repo_root() + "/runtime/sfn/concurrency/parallel.sfn";
     let out_ll = dir + "/parallel.ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", module], _env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", module], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -125,25 +120,25 @@ test "linked fan-out/join: all tasks run, results in input order, empty returns 
             let sll = dir + "/scheduler.ll";
             let nll = dir + "/nursery.ll";
 
-            let e1 = process.run_capture([_sfn_bin(), "emit", "-o", pll, "llvm", conc_dir
+            let e1 = process.run_capture([sfn_bin_path(), "emit", "-o", pll, "llvm", conc_dir
                 + "/parallel.sfn"], _env());
             let _ = process.capture_take_stdout();
             let _ = process.capture_take_stderr();
             assert e1 == 0;
 
-            let e2 = process.run_capture([_sfn_bin(), "emit", "-o", fll, "llvm", conc_dir
+            let e2 = process.run_capture([sfn_bin_path(), "emit", "-o", fll, "llvm", conc_dir
                 + "/future.sfn"], _env());
             let _ = process.capture_take_stdout();
             let _ = process.capture_take_stderr();
             assert e2 == 0;
 
-            let e3 = process.run_capture([_sfn_bin(), "emit", "-o", sll, "llvm", conc_dir
+            let e3 = process.run_capture([sfn_bin_path(), "emit", "-o", sll, "llvm", conc_dir
                 + "/scheduler.sfn"], _env());
             let _ = process.capture_take_stdout();
             let _ = process.capture_take_stderr();
             assert e3 == 0;
 
-            let e4 = process.run_capture([_sfn_bin(), "emit", "-o", nll, "llvm", conc_dir
+            let e4 = process.run_capture([sfn_bin_path(), "emit", "-o", nll, "llvm", conc_dir
                 + "/nursery.sfn"], _env());
             let _ = process.capture_take_stdout();
             let _ = process.capture_take_stderr();

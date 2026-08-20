@@ -22,13 +22,8 @@
 // NOTE: assert on captured stderr with `sfn/strings` predicates — the
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
 // an `![io]` test. (#842.)
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env_base() -> string[] ![io] {
     let mut e: string[] = [];
@@ -148,10 +143,10 @@ fn _make_fixture(root: string) -> string ![io] {
     return root;
 }
 
-// Build the arg list: [_sfn_bin(), "check", entry_00, entry_01, ...]
+// Build the arg list: [sfn_bin_path(), "check", entry_00, entry_01, ...]
 // for entries 0..count-1.
 fn _entry_args(root: string, count: int) -> string[] ![io] {
-    let mut args: string[] = [_sfn_bin(), "check"];
+    let mut args: string[] = [sfn_bin_path(), "check"];
     let mut i = 0;
     loop {
         if i >= count { break; }
@@ -199,7 +194,7 @@ fn _measure_pages(args: string[]) -> int ![io] {
 test "scan memo: prime run checks cleanly" ![io] {
     let root = _make_fixture(_scratch_root());
 
-    let args = [_sfn_bin(), "check", root + "/src/entry_00.sfn"];
+    let args = [sfn_bin_path(), "check", root + "/src/entry_00.sfn"];
     let exit = process.run_capture(args, _child_env_base());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -212,7 +207,7 @@ test "scan memo: 5-entry check reports ok" ![io] {
     let root = _make_fixture(_scratch_root());
 
     // Prime first.
-    let prime_args = [_sfn_bin(), "check", root + "/src/entry_00.sfn"];
+    let prime_args = [sfn_bin_path(), "check", root + "/src/entry_00.sfn"];
     let _p = process.run_capture(prime_args, _child_env_base());
     let _po = process.capture_take_stdout();
     let _pe = process.capture_take_stderr();
@@ -230,7 +225,7 @@ test "scan memo: 40-entry check reports ok" ![io] {
     let root = _make_fixture(_scratch_root());
 
     // Prime first.
-    let prime_args = [_sfn_bin(), "check", root + "/src/entry_00.sfn"];
+    let prime_args = [sfn_bin_path(), "check", root + "/src/entry_00.sfn"];
     let _p = process.run_capture(prime_args, _child_env_base());
     let _po = process.capture_take_stdout();
     let _pe = process.capture_take_stderr();
@@ -253,7 +248,7 @@ test "scan memo: warm check arena pages grow sub-linearly with entry count (#124
     let root = _make_fixture(_scratch_root());
 
     // Prime: stage the chain's import-context so both measured runs are warm.
-    let prime_args = [_sfn_bin(), "check", root + "/src/entry_00.sfn"];
+    let prime_args = [sfn_bin_path(), "check", root + "/src/entry_00.sfn"];
     let prime_exit = process.run_capture(prime_args, _child_env_base());
     let _po = process.capture_take_stdout();
     let _pe = process.capture_take_stderr();

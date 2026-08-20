@@ -27,13 +27,7 @@
 // `process.environ()` for the nested clang/ld toolchain + per-invocation
 // SAILFIN_TEST_SCRATCH cache routing) mirrors
 // check_build_agree_module_global_test.sfn — see `.claude/rules/no-bash-e2e.md`.
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // Inherit the full parent environment so the nested clang/ld the build
 // spawns find their toolchain, and SAILFIN_TEST_SCRATCH routes the build
@@ -72,7 +66,7 @@ fn _build_consumer(dir: string, consumer_name: string, method_call: string) -> i
     let consumer_path = dir + "/" + consumer_name + ".sfn";
     fs.writeFile(consumer_path, _consumer_src(method_call));
     let binpath = dir + "/" + consumer_name + ".out";
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, consumer_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, consumer_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return exit;

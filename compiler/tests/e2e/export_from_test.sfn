@@ -29,13 +29,7 @@
 // linker) through to its nested `sfn build` — see `_child_env` and
 // `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // The fixture's entry module. Relative imports (`./middle`, `./origin`)
 // resolve from this path, and the fixture carries its own `capsule.toml`,
@@ -79,7 +73,7 @@ fn _marker(name: string) -> string ![io] {
 fn _build_and_run(out_marker: string) -> int ![io] {
     return with_tmp_dir(fn (dir: string) -> int {
         let binpath = dir + "/export_from_main";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, _fixture_main()], _child_env());
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, _fixture_main()], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
         if build_exit != 0 { return -100; }

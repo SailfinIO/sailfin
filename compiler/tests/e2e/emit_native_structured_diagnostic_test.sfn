@@ -29,13 +29,7 @@
 // `process.run_capture` with an EXPLICIT env array (never raw
 // `process.environ()`) and asserts on captured stderr with `sfn/strings`.
 import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // `match g()?` — the `?` sits in a match subject, a position
 // `emit_native_desugar_try.sfn` does not hoist or recurse into, so it
@@ -81,7 +75,7 @@ test "emit-native: structured diagnostic reaches stderr under SAILFIN_DEBUG_LOWE
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/e1017_probe.sfn";
         fs.writeFile(src, _trigger_src());
-        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env(true));
+        let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], _child_env(true));
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         // Exit status first: if the probe ever stops compiling, this reports
@@ -106,7 +100,7 @@ test "emit-native: structured diagnostic is silent without SAILFIN_DEBUG_LOWERIN
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/e1017_probe.sfn";
         fs.writeFile(src, _trigger_src());
-        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env(false));
+        let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], _child_env(false));
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         assert exit == 0;

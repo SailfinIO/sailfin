@@ -20,7 +20,7 @@
 // `sfn/test`'s `expect_*` are `![pure]`, so an `![io]` test asserts on the
 // captured response text with `sfn/strings::contains` instead.
 import { contains } from "sfn/strings";
-import { first_present_tool } from "sfn/test";
+import { first_present_tool, sfn_bin_path } from "sfn/test";
 
 // ── libc memory + string + socket surface (test-local raw client) ──
 extern fn malloc(size: usize) -> *u8;
@@ -50,12 +50,6 @@ extern fn close(fd: i32) -> i32;
 fn _rr_port() -> i64 { return 18791; }
 
 fn _rr_port_str() -> string { return "18791"; }
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // The nested build LINKS a binary (clang + ld), so thread the parent's
 // full environment (`run_capture`/`spawn_with_env`'s empty env is the
@@ -226,7 +220,7 @@ fn _write_server(port_str: string) -> string ![io] {
 // contention #1789 addressed came from a sibling test's destructive
 // `rm -rf`, now removed. Returns the binary path, or "" on a build failure.
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }

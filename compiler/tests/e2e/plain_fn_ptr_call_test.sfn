@@ -22,12 +22,7 @@
 // cannot be called from an `![io]` test like this. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
 import { contains, split } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn` invocations. `process.run_capture`
 // treats an empty array as the *empty* environment (not "inherit"), so the
@@ -102,7 +97,7 @@ fn _any_line_with(text: string, a: string, b: string) -> bool {
 
 test "plain-fn-ptr: sfn check passes on the fixture" ![io] {
     let src = _fixture_copy();
-    let exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);
@@ -111,7 +106,7 @@ test "plain-fn-ptr: sfn check passes on the fixture" ![io] {
 }
 
 test "plain-fn-ptr: fixture is canonically formatted" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _fixture_src()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", _fixture_src()], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -122,7 +117,7 @@ test "plain-fn-ptr: emit llvm produces an env-less indirect call" ![io] {
     let dir = _scratch_dir();
     let ll = dir + "/plain.ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     fs.deleteFile(src);
@@ -143,7 +138,7 @@ test "plain-fn-ptr: emit llvm produces an env-less indirect call" ![io] {
 
 test "plain-fn-ptr: linked program runs the indirect call and exits 42" ![io] {
     let src = _fixture_copy();
-    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     fs.deleteFile(src);

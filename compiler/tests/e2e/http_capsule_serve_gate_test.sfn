@@ -25,12 +25,7 @@
 // cannot be called from an `![io]` test; assert on the captured `.ll`
 // text with `sfn/strings` predicates instead.
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -105,7 +100,7 @@ test "http serve gate: emit staging lowers imported serve to the capsule fn, not
     let ll = _app_root() + "/main.ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
 
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", main_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;

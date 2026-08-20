@@ -39,13 +39,8 @@
 //
 // NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test; assert on captured stdout / IR with `sfn/strings`.
-import { find, contains, split } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find, split } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the EMPTY environment, not "inherit".
 // Thread the toolchain vars: nested emit/run/clang resolve through PATH;
@@ -86,7 +81,7 @@ fn _emit_llvm(tag: string, source: string) -> string ![io] {
     let src = dir + "/" + tag + ".sfn";
     let out = dir + "/" + tag + ".ll";
     fs.writeFile(src, source);
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return "EMIT_FAILED"; }
@@ -99,7 +94,7 @@ fn _run(tag: string, source: string) -> string ![io] {
     let dir = _scratch_dir();
     let src = dir + "/" + tag + ".sfn";
     fs.writeFile(src, source);
-    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if exit != 0 { return "RUN_FAILED:" + out + err; }
@@ -266,7 +261,7 @@ test "asan: capturing-spawn env alloc/free is balanced under ASAN+LSAN (#1475)" 
         + "    let f = spawn fn() -> int { return base + 35; };\n"
         + "    let _r: int = await f;\n"
         + "}");
-    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], _child_env());
     let _eo = process.capture_take_stdout();
     let _ee = process.capture_take_stderr();
     assert emit_exit == 0;

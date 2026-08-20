@@ -26,16 +26,7 @@
 // on Windows this exercises `sfn_process_run` at two levels and a failure
 // does not localize to one of them on its own.
 import { contains, find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn); see `guillermo_test.sfn`.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // Sentinels distinct enough not to collide with ordinary build chatter
 // (diagnostics, clang/linker noise) that might also land on the nested
@@ -86,7 +77,7 @@ test "process.run: passes a nested child's stdout/stderr through to the caller (
     let src = scratch + "/passthrough_fixture.sfn";
     fs.writeFile(src, _generated_program_src());
 
-    let exit = process.run_capture([_sfn_bin(), "run", src], clean_runner_env(scratch));
+    let exit = process.run_capture([sfn_bin_path(), "run", src], clean_runner_env(scratch));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 

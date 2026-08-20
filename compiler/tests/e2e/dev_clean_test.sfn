@@ -5,20 +5,12 @@
 // compiler-under-test against it as cwd — no real build tree is ever
 // touched.
 import { find, split } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // The child's cwd is a scratch repo, which differs from this test's own
-// cwd — a relative `_sfn_bin()` would not resolve there, so absolutize it.
+// cwd — a relative `sfn_bin_path()` would not resolve there, so absolutize it.
 fn _sfn_bin_abs() -> string ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     if bin.length > 0 && bin[0] == "/" { return bin; }
     let exit = process.run_capture(["pwd"], []);
     let out = process.capture_take_stdout();

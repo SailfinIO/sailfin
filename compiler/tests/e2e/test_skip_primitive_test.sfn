@@ -15,13 +15,12 @@
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 // pass / declared skip / pass — the middle test is the primitive under
 // test; the third proves a skip does not unwind the whole file.
@@ -45,7 +44,7 @@ test "skip primitive: declared skip reports skip_kind, reason, and does not fail
     fs.createDirectory(scratch, true);
     fs.writeFile(fixture_path, _fixture_src());
 
-    let exit = process.run_capture([_sfn_bin(), "test", fixture_path, "--json"], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "test", fixture_path, "--json"], child_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("skip primitive nested run", exit, out, err);

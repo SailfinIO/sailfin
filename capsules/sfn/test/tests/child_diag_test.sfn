@@ -9,13 +9,7 @@
 // only print.
 import { find } from "sfn/strings";
 
-import { report_child_failure } from "../src/mod";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { report_child_failure, sfn_bin_path } from "../src/mod";
 
 // Falls back to the test runner's own default scratch root
 // (`_test_scratch_root` in `cli/commands/test/cache_scratch.sfn`) rather
@@ -48,7 +42,7 @@ fn _run_probe(tag: string, body: string) -> ProbeResult ![io] {
         + body
         + "\n}\n";
     fs.writeFile(src, source);
-    let exit = process.run_capture([_sfn_bin(), "run", src], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], process.environ());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);

@@ -22,12 +22,7 @@
 // NOTE: assert with `sfn/strings` predicates — the `sfn/test` `expect_*`
 // matchers are `![pure]` and cannot be used from an `![io]` test (#842).
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _exec_sfn() -> string { return "runtime/sfn/platform/exec.sfn"; }
 
@@ -59,7 +54,7 @@ fn _emit_for_target_os(target_os: string, tag: string) -> string ![io] {
     let out = dir + "/exec-" + tag + ".ll";
     let mut e = _base_env();
     e.push("SAILFIN_TARGET_OS=" + target_os);
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", _exec_sfn()], e);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, "llvm", _exec_sfn()], e);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -68,7 +63,7 @@ fn _emit_for_target_os(target_os: string, tag: string) -> string ![io] {
 
 // ---- Typecheck: sfn check passes on the real exec.sfn ----
 test "exe-path-reader: sfn check passes on exec.sfn" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", _exec_sfn()], _base_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", _exec_sfn()], _base_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

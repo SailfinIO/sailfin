@@ -16,16 +16,7 @@
 // `![pure]` and cannot be called from an `![io]` test, so output is
 // asserted with `sfn/strings::find`.
 import { find } from "sfn/strings";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point
-// the test at any compiler without editing it.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Bare dispatch compiles+runs the file, so the spawned compiler needs a
 // real environment. `process.run_capture` treats an empty array as the
@@ -48,14 +39,14 @@ fn _child_env() -> string[] ![io] {
 // exiting 0. The path is relative to the runner's working directory
 // (the repo root), matching the legacy script's `cd "$REPO_ROOT"`.
 test "bare-file: 'sailfin <file.sfn>' compiles, runs, and exits 0" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "examples/basics/hello-world.sfn"], _child_env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
 }
 
 test "bare-file: 'sailfin <file.sfn>' prints the program's output" ![io] {
-    let _exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], _child_env());
+    let _exit = process.run_capture([sfn_bin_path(), "examples/basics/hello-world.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert find(out, "Hello, Sailfin!", 0) >= 0;
@@ -66,7 +57,7 @@ test "bare-file: 'sailfin <file.sfn>' prints the program's output" ![io] {
 // branch and exit non-zero — NOT silently invoke `run` on a non-Sailfin
 // path.
 test "bare-file: non-.sfn positional falls through to 'unknown command'" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "not-a-known-subcommand"], []);
+    let exit = process.run_capture([sfn_bin_path(), "not-a-known-subcommand"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;

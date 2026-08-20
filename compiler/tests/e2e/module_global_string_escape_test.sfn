@@ -33,13 +33,12 @@
 // temp-dir build and an out-of-tree marker. See
 // `.claude/rules/no-bash-e2e.md` and `docs/conventions/e2e-tests.md`.
 import { find, starts_with } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 fn _fixture_path() -> string {
     return "compiler/tests/e2e/fixtures/module_global_string_escape_probe.sfn";
@@ -83,7 +82,7 @@ fn _line_starting_with(ir: string, prefix: string) -> string {
 fn _emit_ir() -> string ![io] {
     let out_path = _scratch_dir() + "/module_global_string_escape.ll";
     if fs.exists(out_path) { fs.deleteFile(out_path); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", _fixture_path()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_path, "llvm", _fixture_path()], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -99,7 +98,7 @@ fn _build_and_run(out_marker: string) -> int ![io] {
         let srcpath = dir + "/probe.sfn";
         fs.writeFile(srcpath, _fixture_src());
         let binpath = dir + "/probe";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
         if build_exit != 0 { return -100; }

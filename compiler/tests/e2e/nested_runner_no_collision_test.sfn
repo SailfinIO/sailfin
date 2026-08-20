@@ -19,13 +19,12 @@
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 // Two passing tests — the innermost level of the nest.
 fn _inner_fixture_src() -> string {
@@ -41,14 +40,9 @@ fn _inner_fixture_src() -> string {
 // in this suite use to embed source text) — this fixture does not itself
 // need to parse JSON, so no double-escaping is required.
 fn _outer_fixture_src(inner_path: string) -> string {
-    return "import { clean_runner_env, nested_runner_scratch } from \"sfn/test\";\n\n"
-        + "fn _sfn_bin() -> string ![io] {\n"
-        + "    let configured = env.get(\"SAILFIN_BIN\");\n"
-        + "    if configured.length > 0 { return configured; }\n"
-        + "    return \"build/bin/sfn\";\n"
-        + "}\n\n"
+    return "import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from \"sfn/test\";\n\n"
         + "test \"outer: nested sfn test run exits cleanly\" ![io] {\n"
-        + "    let exit = process.run_capture([_sfn_bin(), \"test\", \""
+        + "    let exit = process.run_capture([sfn_bin_path(), \"test\", \""
         + inner_path
         + "\", \"--json\"], clean_runner_env(nested_runner_scratch(\"inner\")));\n"
         + "    let _ = process.capture_take_stdout();\n"
@@ -63,7 +57,7 @@ test "nested runner: inner sfn test reports correct counts on its own" ![io] {
         fs.writeFile(inner_path, _inner_fixture_src());
         // Run the inner fixture directly (not nested) to independently pin
         // that it reports its own correct counts.
-        let exit = process.run_capture([_sfn_bin(), "test", inner_path, "--json"], clean_runner_env(nested_runner_scratch("inner-direct")));
+        let exit = process.run_capture([sfn_bin_path(), "test", inner_path, "--json"], clean_runner_env(nested_runner_scratch("inner-direct")));
         let out = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
         assert exit == 0;
@@ -81,7 +75,7 @@ test "nested runner: outer sfn test whose body spawns a nested sfn test reports 
         fs.writeFile(inner_path, _inner_fixture_src());
         fs.writeFile(outer_path, _outer_fixture_src(inner_path));
 
-        let exit = process.run_capture([_sfn_bin(), "test", outer_path, "--json"], clean_runner_env(nested_runner_scratch("outer-top")));
+        let exit = process.run_capture([sfn_bin_path(), "test", outer_path, "--json"], clean_runner_env(nested_runner_scratch("outer-top")));
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let combined = out + err;

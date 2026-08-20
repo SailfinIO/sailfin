@@ -1,0 +1,116 @@
+// Tests for `sfn_bin_path` (SFN-977).
+//
+// The helper reads process env, and there is no in-process env mutation in
+// the prelude, so it cannot be exercised by calling it directly in-process:
+// the parent test process may itself already carry `SAILFIN_BIN` from the
+// runner, and the host branch can only be forced on the current (Linux)
+// host via the `SAILFIN_HOST_OS` override. Each case instead writes a tiny
+// fixture that prints `sfn_bin_path()`, builds it, then runs the compiled
+// binary as a real subprocess under a scoped `os::Env` via `with_env`, and
+// asserts on the captured stdout — the same subprocess pattern
+// `compile_assert_test.sfn` and `child_diag_test.sfn` use to exercise
+// `![io]` helpers.
+import { ProcessOutput, env_from_current, env_set } from "sfn/os";
+import { trim } from "sfn/strings";
+
+import { sfn_bin_path, with_env } from "../src/mod";
+
+// Mirrors `_scratch_dir` in `child_diag_test.sfn`: `SAILFIN_TEST_SCRATCH`
+// when the pool set it, else `build/sailfin`, which stays inside the repo
+// tree so the fixture's own `import { sfn_bin_path } from "sfn/test"` can
+// resolve `discover_project_root` upward to a `capsule.toml`/`workspace.toml`.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// A fresh marker-file path for `tag`, used to ferry the child's stdout out
+// of the `with_env` body closure — the closure returns `int`, not a string
+// (same idiom `fixtures_test.sfn`'s `with_cwd` "pwd" tests use).
+fn _marker(tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/sfn-bin-marker-" + tag + ".txt";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Source for a fixture that prints `sfn_bin_path()` on one line.
+fn _fixture_src() -> string {
+    return "import { sfn_bin_path } from \"sfn/test\";\n\nfn main() ![io] {\n"
+        + "    print(sfn_bin_path());\n"
+        + "}\n";
+}
+
+// Build the fixture, then run the compiled binary under `host_os` /
+// `bin_override` (an empty `bin_override` leaves `SAILFIN_BIN` effectively
+// unset — `sfn_bin_path` only branches on `configured.length > 0`, so
+// setting it to the empty string is functionally identical to omitting it),
+// and return the trimmed stdout the child printed.
+fn _probe_bin_path(tag: string, host_os: string, bin_override: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-bin-probe-" + tag + ".sfn";
+    let binpath = dir + "/sfn-bin-probe-" + tag;
+    let marker = _marker(tag);
+    fs.writeFile(src, _fixture_src());
+
+    // Build under the AMBIENT environment, never the scoped one below.
+    // `SAILFIN_HOST_OS` is not a runtime-only knob — the compiler's own
+    // `build_host_os()` reads it for target-selection during the build
+    // itself, so compiling this probe under `SAILFIN_HOST_OS=Windows` makes
+    // the nested `sfn build` link as Windows and fail with a duplicate-
+    // symbol linker error rather than produce a runnable Linux binary. The
+    // override must apply only once the already-built binary *runs*, which
+    // is why the build and run steps use two different environments below.
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, src], process.environ());
+    let _build_stdout = process.capture_take_stdout();
+    let _build_stderr = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    // `env_from_current()` snapshots the full ambient environment, including
+    // the parallel pool's per-child orchestration keys — the trap
+    // `.claude/rules/no-bash-e2e.md` normally has `clean_runner_env` guard
+    // against. Accepted here because `with_env` wants a typed `os::Env`
+    // while `clean_runner_env` returns a flat `string[]`, and because this
+    // spawns the already-built probe binary directly (not a nested `sfn
+    // test`), so the pool keys are inert either way — `child_diag_test.sfn`
+    // sets the same precedent for a plain subprocess probe.
+    let scoped = env_set(env_set(env_from_current(), "SAILFIN_HOST_OS", host_os), "SAILFIN_BIN", bin_override);
+    let run_exit = with_env([binpath], scoped, fn (out: ProcessOutput) -> int {
+        fs.writeFile(marker, out.stdout);
+        return out.exit;
+    });
+    fs.deleteFile(src);
+    fs.deleteFile(binpath);
+    assert run_exit == 0;
+    let result = trim(fs.readFile(marker));
+    fs.deleteFile(marker);
+    return result;
+}
+
+// 1. Linux host, no `SAILFIN_BIN` override, falls back to the POSIX literal.
+test "sfn_bin: Linux host with no SAILFIN_BIN falls back to build/bin/sfn" ![io] {
+    let out = _probe_bin_path("linux-default", "Linux", "");
+    assert out == "build/bin/sfn";
+}
+
+// 2. Windows host (forced via `SAILFIN_HOST_OS`, which wins ahead of the
+//    filesystem probes), no `SAILFIN_BIN` override, falls back to the
+//    `.exe`-suffixed literal.
+test "sfn_bin: Windows host with no SAILFIN_BIN falls back to build/bin/sfn.exe" ![io] {
+    let out = _probe_bin_path("windows-default", "Windows", "");
+    assert out == "build/bin/sfn.exe";
+}
+
+// 3. `SAILFIN_BIN` wins verbatim over a Windows host — never `.exe`-suffixed.
+test "sfn_bin: SAILFIN_BIN override wins verbatim on a Windows host" ![io] {
+    let out = _probe_bin_path("windows-override", "Windows", "/custom/path/to/sfn");
+    assert out == "/custom/path/to/sfn";
+}
+
+// 4. `SAILFIN_BIN` wins verbatim over a Linux host too.
+test "sfn_bin: SAILFIN_BIN override wins verbatim on a Linux host" ![io] {
+    let out = _probe_bin_path("linux-override", "Linux", "/custom/path/to/sfn");
+    assert out == "/custom/path/to/sfn";
+}

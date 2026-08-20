@@ -19,7 +19,7 @@ import { clean_runner_env, nested_runner_scratch, report_child_failure } from "s
 // The pinned seed binary, resolved relative to the repo root this test
 // runner starts from (mirrors the seed-store layout `bootstrap.toml`
 // describes; there is no `sfn/test` accessor for it, so this is resolved by
-// hand as the other e2e fixtures resolve `_sfn_bin`).
+// hand as the other e2e fixtures resolve `sfn_bin_path`).
 fn _seed_bin_relative() -> string { return "build/toolchains/seed/bin/sfn"; }
 
 // Absolutize a repo-relative path against the test runner's own cwd (the

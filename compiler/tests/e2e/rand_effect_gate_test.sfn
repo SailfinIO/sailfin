@@ -16,12 +16,7 @@
 // capsule search path rooted at the runner's cwd (the repo root), the same way
 // this test's own `import ... from "sfn/strings"` resolves.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // A caller that declares `![rand]` and calls the public wrapper — must check.
 fn _ok_source() -> string {
@@ -50,7 +45,7 @@ fn _run_check(source: string) -> _CheckRun ![io] {
     let dir = fs.mkdtemp("sfn-rand-effect-");
     let path = dir + "/fixture.sfn";
     fs.writeFile(path, source);
-    let exit = process.run_capture([_sfn_bin(), "check", path], []);
+    let exit = process.run_capture([sfn_bin_path(), "check", path], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(path);

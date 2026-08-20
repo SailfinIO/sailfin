@@ -32,12 +32,7 @@
 // `sfn/strings::find` (the `sfn/test` `expect_*` matchers are `![pure]`
 // and cannot be called from an `![io]` test). (#842.)
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned compiles. `process.run_capture`
 // treats an empty array as the *empty* environment (not "inherit"), so
@@ -71,7 +66,7 @@ fn _build_rejected(label: string, source: string, symbol: string) -> bool ![io] 
     let out = dir + "/" + label + ".out";
     fs.writeFile(src, source);
     if fs.exists(out) { fs.deleteFile(out); }
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", out, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", out, src], _child_env());
     let _o = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let produced = fs.exists(out);
@@ -93,7 +88,7 @@ fn _build_fails_closed(label: string, source: string) -> bool ![io] {
     let out = dir + "/" + label + ".out";
     fs.writeFile(src, source);
     if fs.exists(out) { fs.deleteFile(out); }
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", out, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", out, src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     let produced = fs.exists(out);
@@ -111,7 +106,7 @@ fn _build_succeeds(label: string, source: string) -> bool ![io] {
     let out = dir + "/" + label + ".out";
     fs.writeFile(src, source);
     if fs.exists(out) { fs.deleteFile(out); }
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", out, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", out, src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     let produced = fs.exists(out);
@@ -130,7 +125,7 @@ fn _emit_rejected(label: string, source: string, mode: string, ext: string, symb
     let out = dir + "/" + label + ext;
     fs.writeFile(src, source);
     if fs.exists(out) { fs.deleteFile(out); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, mode, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, mode, src], _child_env());
     let _o = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let produced = fs.exists(out);
@@ -153,7 +148,7 @@ fn _emit_fails_closed(label: string, source: string, mode: string, ext: string) 
     let out = dir + "/" + label + ext;
     fs.writeFile(src, source);
     if fs.exists(out) { fs.deleteFile(out); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, mode, src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, mode, src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     let produced = fs.exists(out);
@@ -171,7 +166,7 @@ fn _emit_native_succeeds(label: string, source: string, needle: string) -> bool 
     let out = dir + "/" + label + ".sfn-asm";
     fs.writeFile(src, source);
     if fs.exists(out) { fs.deleteFile(out); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "native", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, "native", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 {

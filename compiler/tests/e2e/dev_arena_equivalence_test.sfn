@@ -11,12 +11,7 @@
 // land on stdout; the `expect_*` matchers are `![pure]` and unusable from an
 // `![io]` test, so output is asserted with `sfn/strings::find`.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _arena_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -32,7 +27,7 @@ fn _arena_env() -> string[] ![io] {
 }
 
 test "dev arena: default coverage passes on hello-world" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "dev", "arena"], _arena_env());
+    let exit = process.run_capture([sfn_bin_path(), "dev", "arena"], _arena_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;
@@ -41,7 +36,7 @@ test "dev arena: default coverage passes on hello-world" ![io] {
 }
 
 test "dev arena: --all covers the examples/basics set with identical IR" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "dev", "arena", "--all"], _arena_env());
+    let exit = process.run_capture([sfn_bin_path(), "dev", "arena", "--all"], _arena_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;
@@ -52,7 +47,7 @@ test "dev arena: --all covers the examples/basics set with identical IR" ![io] {
 }
 
 test "dev arena: an explicit module argument is checked" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "dev", "arena", "examples/basics/hello-world.sfn"], _arena_env());
+    let exit = process.run_capture([sfn_bin_path(), "dev", "arena", "examples/basics/hello-world.sfn"], _arena_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;

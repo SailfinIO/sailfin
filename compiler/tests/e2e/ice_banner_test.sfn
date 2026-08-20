@@ -12,13 +12,7 @@
 // Native e2e per `.claude/rules/no-bash-e2e.md`: drives the compiler via
 // `process.run_capture` and asserts on captured stderr with `sfn/strings`.
 import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // A trivially valid program: it clears every pipeline stage on a clean run,
 // so a forced panic in any stage (parse … lower_llvm) is deterministically
@@ -59,7 +53,7 @@ test "ICE #1807: forced parse-stage panic prints the banner on stderr" ![io] {
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/ice_probe.sfn";
         fs.writeFile(src, _valid_src());
-        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", "--timing", src], _env_with_panic("parse"));
+        let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", "--timing", src], _env_with_panic("parse"));
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         // Uniform banner, version line, correct stage, and the issue URL. The
@@ -80,7 +74,7 @@ test "ICE #1807: the banner names the stage that raised (lower_llvm)" ![io] {
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/ice_probe.sfn";
         fs.writeFile(src, _valid_src());
-        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", "--timing", src], _env_with_panic("lower_llvm"));
+        let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", "--timing", src], _env_with_panic("lower_llvm"));
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         assert find(err, "internal compiler error (ICE)", 0) >= 0;
@@ -95,7 +89,7 @@ test "ICE #1807: a clean compile prints no banner and exits 0" ![io] {
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/ice_probe.sfn";
         fs.writeFile(src, _valid_src());
-        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", "--timing", src], _base_env());
+        let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", "--timing", src], _base_env());
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         // No panic banner on the ordinary path — the filtered base env cannot

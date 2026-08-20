@@ -22,13 +22,7 @@
 // full JSON parser (sfn/json::parse hangs on complex input when imported
 // transitively via the workspace resolver in the compiler test context).
 import { contains, find, split } from "sfn/strings";
-import { report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -126,14 +120,14 @@ fn _json_str_field(json: string, key: string) -> string {
 
 // ---- Test 1: sfn build -p writes build/capsules/<scope>/<name>/manifest.json ----
 test "sidecar: sfn build -p writes manifest.json" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
     assert fs.exists(_lib_sidecar());
 }
 
 // ---- Test 2: sidecar schema_version is "1" ----
 test "sidecar: schema_version is '1'" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
     let content = fs.readFile(_lib_sidecar());
     assert _json_str_field(content, "schema_version") == "1";
@@ -141,7 +135,7 @@ test "sidecar: schema_version is '1'" ![io] {
 
 // ---- Test 3: capsule / version / kind round-trip from capsule.toml ----
 test "sidecar: capsule / version / kind round-trip" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -152,7 +146,7 @@ test "sidecar: capsule / version / kind round-trip" ![io] {
 
 // ---- Test 4: entry path is relative ----
 test "sidecar: entry is relative to capsule.toml's dir" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -163,7 +157,7 @@ test "sidecar: entry is relative to capsule.toml's dir" ![io] {
 // Stage C2b: sfn build -p (no explicit -o) for a library writes to
 // build/capsules/<scope>/<name>/obj/mod.o.
 test "sidecar: out points at build/capsules/<scope>/<name>/obj/mod.o (library)" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -173,7 +167,7 @@ test "sidecar: out points at build/capsules/<scope>/<name>/obj/mod.o (library)" 
 
 // ---- Test 6: compiler_version is non-empty ----
 test "sidecar: compiler_version is non-empty" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -183,7 +177,7 @@ test "sidecar: compiler_version is non-empty" ![io] {
 // ---- Test 7: deps.count >= 1 ----
 // We check that count is not "0" (the library has sfn/math as a dep).
 test "sidecar: deps.count >= 1" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -194,7 +188,7 @@ test "sidecar: deps.count >= 1" ![io] {
 
 // ---- Test 8: deps.ll_paths contains at least one .ll entry ----
 test "sidecar: deps.ll_paths contains at least one .ll entry" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -204,7 +198,7 @@ test "sidecar: deps.ll_paths contains at least one .ll entry" ![io] {
 
 // ---- Test 9: dep .ll routes under build/capsules/sfn/math/ir/ (Stage C2b2) ----
 test "sidecar: dep .ll routes under build/capsules/sfn/math/ir/" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -213,7 +207,7 @@ test "sidecar: dep .ll routes under build/capsules/sfn/math/ir/" ![io] {
 
 // ---- Test 10: dep .ll file exists on disk ----
 test "sidecar: every deps.ll_paths entry points to a real .ll file" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     // The library has exactly 1 dep (sfn/math); verify the specific path.
@@ -222,7 +216,7 @@ test "sidecar: every deps.ll_paths entry points to a real .ll file" ![io] {
 
 // ---- Test 11: modules array present + has slug, ir_path, cache_key ----
 test "sidecar: modules array has locked {slug, ir_path, cache_key} fields" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -234,7 +228,7 @@ test "sidecar: modules array has locked {slug, ir_path, cache_key} fields" ![io]
 
 // ---- Test 12: modules ir_path values exist on disk ----
 test "sidecar: modules ir_path points to a real .ll file" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     // There is exactly 1 module (sfn/math/mod); verify the specific path.
@@ -243,7 +237,7 @@ test "sidecar: modules ir_path points to a real .ll file" ![io] {
 
 // ---- Test 13: modules cache_key is non-empty after a default build ----
 test "sidecar: modules cache_key is non-empty after a default build" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root()]);
     assert exit == 0;
 
     let content = fs.readFile(_lib_sidecar());
@@ -253,7 +247,7 @@ test "sidecar: modules cache_key is non-empty after a default build" ![io] {
 
 // ---- Test 14: kind=binary lands at build/capsules/<scope>/<name>/bin/<bin-name> ----
 test "sidecar: kind=binary lands at build/capsules/<scope>/<name>/bin/<bin-name>" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _bin_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _bin_root()]);
     assert exit == 0;
     assert fs.exists(_binc_sidecar());
 
@@ -265,7 +259,7 @@ test "sidecar: kind=binary lands at build/capsules/<scope>/<name>/bin/<bin-name>
 
 // ---- Test 15: binary at canonical path runs and prints expected marker ----
 test "sidecar: binary at canonical path runs and prints expected marker" ![io] {
-    let exit = _run_build([_sfn_bin(), "build", "-p", _bin_root()]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _bin_root()]);
     assert exit == 0;
 
     let bin = "build/capsules/demo/widgetcli/bin/widgetcli";
@@ -285,7 +279,7 @@ test "sidecar: -o EXPLICIT overrides the canonical default" ![io] {
     if scratch.length == 0 { scratch = "/tmp"; }
     let explicit = scratch + "/sfn-sidecar-explicit.o";
 
-    let exit = _run_build([_sfn_bin(), "build", "-p", _lib_root(), "-o", explicit]);
+    let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root(), "-o", explicit]);
     assert exit == 0;
 
     // The artifact exists at the explicit path.
@@ -305,7 +299,7 @@ test "sidecar: positional sfn build produces the output artifact" ![io] {
     let out_o = scratch + "/sfn-sidecar-positional.o";
 
     let src = _lib_root() + "/src/mod.sfn";
-    let exit = _run_build([_sfn_bin(), "build", src, "-o", out_o]);
+    let exit = _run_build([sfn_bin_path(), "build", src, "-o", out_o]);
     // Build may fail if sfn/math deps aren't fully resolved from the
     // positional context; what matters is the positional path is taken.
     // Success OR failure of the positional build is acceptable — we only
@@ -349,7 +343,7 @@ fn _ensure_bare_fixture() ![io] {
 // `scope/name form` warning and skips the sidecar silently (#1395) ----
 test "sidecar: bare capsule name builds without scope/name-form warning" ![io] {
     _ensure_bare_fixture();
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", _bare_root()], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", _bare_root()], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("capsule-artifact-sidecar bare-name build", exit, out, err);

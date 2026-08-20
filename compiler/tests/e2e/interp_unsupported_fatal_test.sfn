@@ -7,13 +7,7 @@
 // the build is rejected with the fatal E0832 diagnostic rather than succeeding
 // with empty output.
 import { find } from "sfn/strings";
-import { expect_eq_bool, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { expect_eq_bool, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _fixture_src() -> string ![io] {
     return fs.readFile("compiler/tests/e2e/fixtures/interp_unsupported_fatal.sfn");
@@ -26,7 +20,7 @@ test "interpolation fatal floor: an unsupported operand fails the build with E08
         let srcpath = dir + "/probe.sfn";
         fs.writeFile(srcpath, _fixture_src());
         let binpath = dir + "/probe";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env());
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let diag = out + err;

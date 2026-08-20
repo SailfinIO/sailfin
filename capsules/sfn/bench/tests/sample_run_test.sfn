@@ -4,12 +4,7 @@
 // `bench-record/1` line lands on stdout — the shape the `sfn bench` runner
 // (SFN-63) parses.
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // Inherit the full parent environment for the nested `sfn run` via
 // `process.environ()`. That carries the vars the nested compile needs: PATH
@@ -19,7 +14,7 @@ fn _sfn_bin() -> string ![io] {
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
 test "bench: sample bench compiles, runs, and prints the structured record" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "run", "capsules/sfn/bench/examples/sample_bench.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", "capsules/sfn/bench/examples/sample_bench.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;

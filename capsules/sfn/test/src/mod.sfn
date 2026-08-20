@@ -449,6 +449,24 @@ export { report_child_failure } from "./child_diag";
 export { first_present_tool, tool_present } from "./tool_probe";
 
 // ---------------------------------------------------------------------------
+// The binary under test (SFN-977)
+// ---------------------------------------------------------------------------
+// `sfn_bin_path()` is the `sfn` binary a test should spawn: `SAILFIN_BIN`
+// verbatim when set, else the self-host output path conditioned on the host's
+// executable suffix. It is the single definition of a resolver that 315 test
+// files under `compiler/tests/` had each hand-copied as a private
+// `_sfn_bin()`, none of them `.exe`-aware, and that `compile_assert.sfn` also
+// carried privately as `_resolve_sfn_bin` — the helper those copies' comments
+// claimed to mirror but which was never exported.
+//
+// It lives in its own module rather than joining `tool_probe.sfn` because that
+// module answers "is some external tool on `PATH`" by executing it, while this
+// one names a specific file this repo builds and never spawns anything. See
+// `sfn_bin.sfn` for why the host-suffix logic is duplicated from the driver
+// instead of imported.
+export { sfn_bin_path } from "./sfn_bin";
+
+// ---------------------------------------------------------------------------
 // Voluntary test skips (SFN-815)
 // ---------------------------------------------------------------------------
 // `skip(reason)` records the running test as skipped rather than passed, and

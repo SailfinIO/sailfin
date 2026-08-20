@@ -27,13 +27,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test (`.claude/rules/no-bash-e2e.md`).
 import { contains, ends_with } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // Recursively collect every leaf path under `dir`, bounding recursion so a
 // pathological or cyclic tree cannot run away. `fs.listDirectory` has no
@@ -107,7 +101,7 @@ fn _build_in_scratch(label: string, src: string, extra_env: string[]) -> _BuildR
         k += 1;
     }
     let out_bin = scratch + "/bin/prog";
-    let exit = process.run_capture_cwd([_sfn_bin(), "build", "-o", out_bin, src], runner_env, scratch);
+    let exit = process.run_capture_cwd([sfn_bin_path(), "build", "-o", out_bin, src], runner_env, scratch);
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     return _BuildRun { exit: exit, scratch: scratch };
@@ -272,7 +266,7 @@ test "runtime gates: manifest [capabilities] required opens the gate" ![io] {
     let out_bin = scratch + "/bin/prog";
     fs.createDirectory(scratch + "/bin", true);
     let runner_env = clean_runner_env(scratch);
-    let exit = process.run_capture_cwd([_sfn_bin(), "build", "-p", proj, "-o", out_bin], runner_env, scratch);
+    let exit = process.run_capture_cwd([sfn_bin_path(), "build", "-p", proj, "-o", out_bin], runner_env, scratch);
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;
@@ -315,7 +309,7 @@ test "runtime gates: bare serve() with no net effect fails sfn check with E0400"
     fs.writeFile(src, _bare_serve_source());
 
     let runner_env = clean_runner_env(scratch);
-    let exit = process.run_capture_cwd([_sfn_bin(), "check", src], runner_env, scratch);
+    let exit = process.run_capture_cwd([sfn_bin_path(), "check", src], runner_env, scratch);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let output = out + err;

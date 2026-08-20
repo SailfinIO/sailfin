@@ -3,12 +3,7 @@
 // Runs the SFN-472 native bring-up probe on every supported host so its
 // aggregate-return, try/throw, and permission checks cannot silently rot.
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 test "aarch64 bootstrap: self path skips sibling sailfin directory (SFN-579)" ![io] {
     let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
@@ -16,7 +11,7 @@ test "aarch64 bootstrap: self path skips sibling sailfin directory (SFN-579)" ![
     let root = scratch + "/sfn579-self-path";
     process.run(["rm", "-rf", root]);
     fs.createDirectory(root + "/sailfin", true);
-    let copy_exit = process.run(["cp", _sfn_bin(), root + "/sfn"]);
+    let copy_exit = process.run(["cp", sfn_bin_path(), root + "/sfn"]);
     assert copy_exit == 0;
     let exit = process.run_capture([root + "/sfn", "run", "compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn"], process.environ());
     let stdout = process.capture_take_stdout();
@@ -31,7 +26,7 @@ test "aarch64 bootstrap: native hazard probe round-trips" ![io] {
     let path = scratch + "/aarch64-bootstrap-mode-probe";
     let mut child_env = process.environ();
     child_env.push("SAILFIN_BOOTSTRAP_PROBE_PATH=" + path);
-    let exit = process.run_capture([_sfn_bin(), "run", "compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn"], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "run", "compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn"], child_env);
     let stdout = process.capture_take_stdout();
     let stderr = process.capture_take_stderr();
     assert exit == 0;

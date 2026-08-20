@@ -34,16 +34,11 @@
 // (#842; see capsule_artifact_sidecar_test.sfn for the same workaround.)
 import {
     contains,
+    ends_with,
     find,
-    starts_with,
-    ends_with
+    starts_with
 } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // The build spawns a nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
@@ -106,7 +101,7 @@ fn _ensure_fixture() ![io] {
 // Run `sfn build -p <root> --json -o <report>`, drain stderr, return exit.
 fn _run_build_json(report: string) -> int ![io] {
     _ensure_fixture();
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "--json"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", _capsule_root(), "--json"], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit == 0 { fs.writeFile(report, out); }

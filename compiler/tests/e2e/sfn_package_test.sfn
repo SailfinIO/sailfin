@@ -20,19 +20,13 @@
 // cannot be called from an `![io]` test like this. Assert on captured
 // stdout / parsed `jq` output with `sfn/strings` predicates instead. (#842.)
 import { contains, find, split } from "sfn/strings";
-import { tool_present } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path, tool_present } from "sfn/test";
 
 // Absolute path to the compiler binary (needed for --compiler-bin, which the
-// .sh resolved via realpath). If _sfn_bin() is already absolute, return it;
+// .sh resolved via realpath). If sfn_bin_path() is already absolute, return it;
 // otherwise join it onto cwd via `pwd`.
 fn _sfn_bin_abs() -> string ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     if bin.length > 0 && bin[0] == "/" { return bin; }
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
@@ -224,7 +218,7 @@ test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
     assert version.length > 0;
 
     // Run from repo root (the runner's cwd) so compiler/capsule.toml is found.
-    let exit = process.run_capture([_sfn_bin(), "package", "--out", dist, "--compiler-bin", bin], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "--out", dist, "--compiler-bin", bin], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -389,7 +383,7 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     let version = _compiler_version();
     assert version.length > 0;
 
-    let exit = process.run_capture([_sfn_bin(), "package", "--installer", "--out", inst, "--compiler-bin", bin], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--out", inst, "--compiler-bin", bin], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -433,7 +427,7 @@ test "sfn package --installer -p errors (mutual exclusion)" ![io] {
     let root = _test_root("installer-p");
     let bad = root + "/dist-bad";
     // `--installer` and `-p` are mutually exclusive.
-    let exit = process.run_capture([_sfn_bin(), "package", "--installer", "-p", ".", "--out", bad], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "-p", ".", "--out", bad], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
@@ -447,7 +441,7 @@ test "sfn package: missing --compiler-bin errors" ![io] {
     let root = _test_root("missing-bin");
     let dist = root + "/dist-missing";
     let missing = root + "/does-not-exist";
-    let exit = process.run_capture([_sfn_bin(), "package", "--out", dist, "--compiler-bin", missing], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "--out", dist, "--compiler-bin", missing], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
@@ -463,7 +457,7 @@ test "sfn package -p without prior build errors (no sidecar)" ![io] {
     fs.writeFile(fresh + "/src/mod.sfn", "import { abs } from \"sfn/math\";\nfn widget_abs(n: number) -> number { return abs(n); }\n");
 
     let dist = root + "/dist-nobuild";
-    let exit = process.run_capture([_sfn_bin(), "package", "-p", fresh, "--out", dist], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "package", "-p", fresh, "--out", dist], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;

@@ -25,15 +25,9 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test (#842).
 import { contains } from "sfn/strings";
-import { report_child_failure, tool_present } from "sfn/test";
+import { report_child_failure, sfn_bin_path, tool_present } from "sfn/test";
 
 import { build_target_os, target_exe_name } from "../../src/build/target";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // The self-host build spawns nested clang + linker, so the child needs
 // PATH (+ HOME, TMPDIR). SAILFIN_TEST_SCRATCH routes the program.ll
@@ -93,7 +87,7 @@ fn _build_compiler_into(work_dir: string) -> int ![io] {
     if fs.exists(target_exe_name(work_dir + "/native/sailfin", build_target_os())) {
         return 0;
     }
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", "compiler", "--work-dir", work_dir], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", "compiler", "--work-dir", work_dir], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("work-dir-parity build " + work_dir, exit, out, err);

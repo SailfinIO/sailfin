@@ -23,22 +23,14 @@
 // assertions use `sfn/strings` (`find` / `split` / `starts_with` /
 // `contains` / `ends_with`), as the guillermo exemplar does.
 import {
-    find,
-    split,
-    starts_with,
+    char_at_index,
     contains,
     ends_with,
-    char_at_index
+    find,
+    split,
+    starts_with
 } from "sfn/strings";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. `emit` / `check` neither link nor spawn
@@ -74,7 +66,7 @@ fn _scratch_dir() -> string ![io] {
 fn _emit_module(tag: string, module_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let outpath = dir + "/" + tag + ".ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return "EMIT_FAILED"; }
@@ -157,7 +149,7 @@ fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
 }
 
 test "runtime/sfn/string.sfn typechecks cleanly" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/string.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "runtime/sfn/string.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -165,7 +157,7 @@ test "runtime/sfn/string.sfn typechecks cleanly" ![io] {
 }
 
 test "runtime/sfn/string.sfn is fmt-canonical" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/string.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", "runtime/sfn/string.sfn"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;
@@ -201,7 +193,7 @@ test "user emission no longer references the legacy C string entrypoints" ![io] 
 }
 
 test "compiler binary exports the defined sfn_str_* / sfn_str_sfn_* symbols" ![io] {
-    let bin = _sfn_bin();
+    let bin = sfn_bin_path();
     assert _nm_has_defined(bin, "sfn_str_len");
     assert _nm_has_defined(bin, "sfn_str_eq");
     assert _nm_has_defined(bin, "sfn_str_slice");

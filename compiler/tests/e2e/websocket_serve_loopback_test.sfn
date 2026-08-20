@@ -21,7 +21,7 @@
 // cannot be called from an `![io]` test; assert on captured bytes with
 // `sfn/strings::contains`/`find` instead.
 import { contains, find } from "sfn/strings";
-import { first_present_tool } from "sfn/test";
+import { first_present_tool, sfn_bin_path } from "sfn/test";
 
 // ── libc memory + string + socket surface (test-local raw client) ──
 // Prefixed `_lb_` so the file-local helpers never collide with the
@@ -60,12 +60,6 @@ fn _lb_port_str() -> string { return "18884"; }
 fn _lb_port2() -> i64 { return 18885; }
 
 fn _lb_port2_str() -> string { return "18885"; }
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // `run_capture`/`spawn_with_env`'s empty env is the EMPTY environment, not
 // "inherit" — snapshot the parent's full environment (the nested build
@@ -433,7 +427,7 @@ fn _write_server2(port_str: string) -> string ![io] {
 // the build happens ONCE outside the readiness poll window. Threads the
 // full parent environment (the build links, needing the toolchain surface).
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }

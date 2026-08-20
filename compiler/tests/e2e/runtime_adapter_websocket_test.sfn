@@ -29,20 +29,13 @@
 // assertions use `sfn/strings` (`find` / `split` / `starts_with` /
 // `contains` / `char_at_index`).
 import {
+    char_at_index,
+    contains,
     find,
     split,
-    starts_with,
-    contains,
-    char_at_index
+    starts_with
 } from "sfn/strings";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. `emit` / `check` neither link nor spawn
@@ -75,7 +68,7 @@ fn _scratch_dir() -> string ![io] {
 fn _emit_module(tag: string, module_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let outpath = dir + "/" + tag + ".ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return "EMIT_FAILED"; }
@@ -136,7 +129,7 @@ fn _calls(ir: string, sym: string) -> boolean {
 }
 
 test "runtime/sfn/adapters/websocket.sfn typechecks cleanly" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/adapters/websocket.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "check", "runtime/sfn/adapters/websocket.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
@@ -144,7 +137,7 @@ test "runtime/sfn/adapters/websocket.sfn typechecks cleanly" ![io] {
 }
 
 test "runtime/sfn/adapters/websocket.sfn is fmt-canonical" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/adapters/websocket.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", "runtime/sfn/adapters/websocket.sfn"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert exit == 0;

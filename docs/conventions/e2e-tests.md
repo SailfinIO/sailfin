@@ -17,31 +17,32 @@ exemplar. The shape:
 ```sfn
 // compiler/tests/e2e/guillermo_test.sfn
 import { find } from "sfn/strings";
-
-// The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted
-// binary relative to the repo root the runner starts from. This mirrors
-// sfn/test's own `_resolve_sfn_bin` (compile_assert.sfn) so CI can point
-// the test at any compiler without editing it.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 test "guillermo: command exits 0" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "guillermo"], []);
+    let exit = process.run_capture([sfn_bin_path(), "guillermo"], []);
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
 }
 
 test "guillermo: output contains the mascot greeting" ![io] {
-    let _exit = process.run_capture([_sfn_bin(), "guillermo"], []);
+    let _exit = process.run_capture([sfn_bin_path(), "guillermo"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert find(out + err, "Guillermo", 0) >= 0;
 }
 ```
+
+`sfn_bin_path() -> string ![io]` (`sfn/test`, `sfn_bin.sfn`) is the single,
+host-conditioned resolver for the compiler-under-test: `$SAILFIN_BIN` wins
+verbatim when set, else `build/bin/sfn` on POSIX or `build/bin/sfn.exe` on a
+Windows host — a payoff a hand-copied POSIX literal never had. A test must
+**not** define its own binary-path helper; SFN-977 deleted 317 hand-copied
+`_sfn_bin()` twins in favor of this one shared import. A test that spawns the
+compiler from a shifted `cwd` still absolutizes on top of `sfn_bin_path()`
+(the `_sfn_bin_abs()` shape in a handful of e2e files) — that's fine, it's a
+different job from resolving the path in the first place.
 
 The supported building blocks (all already shipped):
 
@@ -164,7 +165,7 @@ fn _child_env() -> string[] ![io] {
 }
 // ...
 let exit = process.run_capture(
-    [_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+    [sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env());
 ```
 
 This works for `sfn build`, `sfn run`, and bare dispatch alike (it is the

@@ -6,24 +6,17 @@
 // stay offline and deterministic: help discoverability, usage on a bare
 // invocation, and a `pin` round-trip against a fixture manifest.
 import { find } from "sfn/strings";
-
-// The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted binary
-// relative to the repo root the runner starts from.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 test "dev bootstrap: sfn --help advertises the developer commands" ![io] {
-    let _exit = process.run_capture([_sfn_bin(), "--help"], []);
+    let _exit = process.run_capture([sfn_bin_path(), "--help"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert find(out + err, "sfn dev", 0) >= 0;
 }
 
 test "dev bootstrap: bare sfn dev prints usage and exits non-zero" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "dev"], []);
+    let exit = process.run_capture([sfn_bin_path(), "dev"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
@@ -34,7 +27,7 @@ test "dev bootstrap: sfn dev bootstrap in the compiler checkout is recognized" !
     // Run from the repo root (a real compiler checkout with bootstrap.toml).
     // A bare `dev bootstrap` prints the leaf usage — proving the nested
     // command tree is wired, without any network fetch.
-    let exit = process.run_capture([_sfn_bin(), "dev", "bootstrap"], []);
+    let exit = process.run_capture([sfn_bin_path(), "dev", "bootstrap"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
@@ -48,7 +41,7 @@ test "dev bootstrap: the pin leaf is reached three levels deep" ![io] {
     // rather than the generic fall-through. No version arg means no file is
     // written, so this stays offline and does not touch the real
     // bootstrap.toml.
-    let exit = process.run_capture([_sfn_bin(), "dev", "bootstrap", "pin"], []);
+    let exit = process.run_capture([sfn_bin_path(), "dev", "bootstrap", "pin"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;

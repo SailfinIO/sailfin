@@ -28,13 +28,8 @@
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
 // JSON structure is validated by scanning for the known field patterns
 // rather than full jq-style parsing.
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // The build spawns nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll cache per invocation so
@@ -95,7 +90,7 @@ fn _count_occurrences(haystack: string, needle: string) -> int {
 // text crash output, no empty lines, no partial lines.
 test "multi-file 'sfn test <dir> --json' exits 0 with valid jsonl (#1121)" ![io] {
     let dir = _make_pass_dir("t1");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--json"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -123,7 +118,7 @@ test "multi-file 'sfn test <dir> --json' exits 0 with valid jsonl (#1121)" ![io]
 // ---- Test 2: schema_version 2 is present on the start event ----
 test "stream carries schema_version 2 events (#1121)" ![io] {
     let dir = _make_pass_dir("t2");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--json"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -136,7 +131,7 @@ test "stream carries schema_version 2 events (#1121)" ![io] {
 // `start` and one `summary` for the whole run (not one pair per file).
 test "single-frame: exactly 1 start + 1 summary for multi-file run (#1121)" ![io] {
     let dir = _make_pass_dir("t3");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--json"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -150,7 +145,7 @@ test "single-frame: exactly 1 start + 1 summary for multi-file run (#1121)" ![io
 // Check for "total":3 in the start event and "passed":3 in the summary.
 test "single start.total and summary.passed are run-level aggregates (3) (#1121)" ![io] {
     let dir = _make_pass_dir("t4");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--json"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -164,7 +159,7 @@ test "single start.total and summary.passed are run-level aggregates (3) (#1121)
 // ---- Test 5: a failing test propagates non-zero AND stays valid jsonl ----
 test "failing test: non-zero exit, stream stays valid jsonl (#1121)" ![io] {
     let dir = _make_fail_dir("t5");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--json"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 

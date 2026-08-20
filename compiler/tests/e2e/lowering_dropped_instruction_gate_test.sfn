@@ -7,13 +7,12 @@
 // `sfn emit llvm` exited 0. These subprocess tests pin the non-zero exit and
 // stderr diagnostic at both reachable consumption sites.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 // The location half is SFN-536: the `NativeInstruction` for `break`/`continue`
 // now carries the statement's span, so `render_lowering_error_diag` can append
@@ -32,7 +31,7 @@ fn _assert_emit_fails_closed(label: string, name: string, source: string, diagno
     let path = scratch + "/" + name;
     fs.writeFile(path, source);
 
-    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", path], clean_runner_env(scratch));
+    let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", path], clean_runner_env(scratch));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 

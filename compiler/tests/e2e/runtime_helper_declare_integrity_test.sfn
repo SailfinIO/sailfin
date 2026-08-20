@@ -33,6 +33,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
 // an `![io]` test (#842).
 import { find, split, starts_with } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // Sweeps: the bash used 30, but each `emit llvm` of these heavy compiler
 // modules costs ~6.5s, so 30 sweeps (~400s) overruns the per-test budget
@@ -41,12 +42,6 @@ import { find, split, starts_with } from "sfn/strings";
 // odds, not correctness — 6 keeps detection meaningful while staying
 // well within the shard's per-test budget.
 fn _sweeps() -> int { return 6; }
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
 
 // `emit llvm` neither links nor spawns clang, so no PATH is required; thread
 // SAILFIN_TEST_SCRATCH so any per-invocation scratch the compiler keeps does
@@ -76,7 +71,7 @@ fn _scratch_dir() -> string ![io] {
 // (or "EMIT_FAILED" on a non-zero exit).
 fn _emit_one(tag: string, src: string) -> string ![io] {
     let out = _scratch_dir() + "/" + tag + ".ll";
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, "llvm", src], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return "EMIT_FAILED"; }

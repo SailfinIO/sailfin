@@ -8,16 +8,11 @@ import {
     trace_log
 } from "sfn/codegen-llvm/lowering_debug_state";
 import { find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 struct TraceRun {
     exit_code: int;
     stderr: string;
-}
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
 }
 
 fn _trace_source(name: string, source: string) -> string ![io] {
@@ -31,7 +26,7 @@ fn _trace_source(name: string, source: string) -> string ![io] {
 }
 
 fn _run_emit_path(input: string, args: string[], child_env: string[]) -> TraceRun ![io] {
-    let mut command: string[] = [_sfn_bin(), "emit"];
+    let mut command: string[] = [sfn_bin_path(), "emit"];
     let mut arg_index: int = 0;
     loop {
         if arg_index >= args.length { break; }

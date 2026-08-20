@@ -33,7 +33,7 @@
 // cannot be called from an `![io]` test; assert on captured state with
 // direct comparisons instead.
 import { contains, find } from "sfn/strings";
-import { first_present_tool, tool_present } from "sfn/test";
+import { first_present_tool, sfn_bin_path, tool_present } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tvf_` so these never collide with the external-linkage
@@ -92,12 +92,6 @@ fn _tvf_connect(port: i64) -> i32 {
         attempt = attempt + 1;
     }
     return 0 - 1;
-}
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
 }
 
 // Full parent environment for the build + server subprocesses
@@ -242,7 +236,7 @@ fn _write_client(dir: string, port_str: string, out_path: string) -> string ![io
 }
 
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }

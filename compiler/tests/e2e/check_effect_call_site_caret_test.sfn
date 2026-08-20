@@ -18,12 +18,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
 // an `![io]` test (#842).
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `noisy_helper` is declared at line 4, but the offending `print.info`
 // is at line 8. Pre-B1 the diagnostic would caret at line 4; post-B1
@@ -58,7 +53,7 @@ fn _run_check() -> _CheckRun ![io] {
     let dir = fs.mkdtemp("sfn-check-callsite-");
     let path = dir + "/leak.sfn";
     fs.writeFile(path, _fixture_source());
-    let exit = process.run_capture([_sfn_bin(), "check", path], []);
+    let exit = process.run_capture([sfn_bin_path(), "check", path], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(path);

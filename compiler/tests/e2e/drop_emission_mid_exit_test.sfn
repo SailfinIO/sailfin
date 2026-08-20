@@ -19,13 +19,8 @@
 // from an `![io]` test; #842). The emitting child inherits the full parent
 // environment via `process.environ()` so its build-cache routes under the
 // runner's `SAILFIN_TEST_SCRATCH` (#1333) for parallel-pool isolation.
-import { find, contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { contains, find } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
 
 // True iff `ll` contains a bare drop temp: a `.drop` slot followed (after
 // optional spaces/tabs) by `=` with NO `.<n>` counter suffix. Mirrors the
@@ -75,7 +70,7 @@ fn _ll_path(tag: string) -> string ![io] {
 // Emit LLVM IR for `source` to `out_path` and return it as a string.
 // Returns "" when the emit failed.
 fn _emit_ir(out_path: string, source: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", source], process.environ());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_path, "llvm", source], process.environ());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     if exit != 0 { return ""; }

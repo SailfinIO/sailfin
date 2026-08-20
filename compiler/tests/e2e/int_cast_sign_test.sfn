@@ -11,16 +11,7 @@
 // opcode choice or its lowering is caught; `numeric_cast_test.sfn` covers
 // the emitted-IR spelling.
 import { trim_right } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 struct RunOut {
     exit: int;
@@ -33,7 +24,7 @@ struct RunOut {
 // private state (`.claude/rules/no-bash-e2e.md`, SFN-401).
 fn _run_fixture(path: string) -> RunOut ![io] {
     let child_env = clean_runner_env(nested_runner_scratch("int_cast_sign"));
-    let exit = process.run_capture([_sfn_bin(), "run", path], child_env);
+    let exit = process.run_capture([sfn_bin_path(), "run", path], child_env);
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     return RunOut { exit: exit, out: trim_right(out) };

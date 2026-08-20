@@ -39,12 +39,7 @@
 // they cannot be called from an `![io]` test. Assert on the captured
 // stderr with `sfn/strings` predicates instead. (#842.)
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. PATH is kept so a bare `SAILFIN_BIN`
@@ -96,7 +91,7 @@ fn _run_direct(extra: string[]) -> string ![io] {
         e.push(extra[i]);
         i += 1;
     }
-    let _exit = process.run_capture([_sfn_bin(), "version"], e);
+    let _exit = process.run_capture([sfn_bin_path(), "version"], e);
     let _o = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return err;
@@ -117,7 +112,7 @@ fn _run_under_cap(extra: string[]) -> string ![io] {
         e.push(extra[i]);
         i += 1;
     }
-    let _exit = process.run_capture_rlimit_as([_sfn_bin(), "version"], e, 4294967296);
+    let _exit = process.run_capture_rlimit_as([sfn_bin_path(), "version"], e, 4294967296);
     let _o = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return err;
@@ -179,7 +174,7 @@ test "mem-limit: invalid SAILFIN_MEM_LIMIT does not block the run" ![io] {
     }
     let mut e = _child_env();
     e.push("SAILFIN_MEM_LIMIT=4G");
-    let exit = process.run_capture([_sfn_bin(), "version"], e);
+    let exit = process.run_capture([sfn_bin_path(), "version"], e);
     let _o = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;

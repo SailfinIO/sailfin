@@ -11,12 +11,7 @@
 // Native replacement style per `.claude/rules/no-bash-e2e.md`: assert on the
 // subprocess result, thread PATH + SAILFIN_TEST_SCRATCH into the nested build.
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 // The nested `sfn build` spawns clang + a linker, so the child needs PATH;
 // SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation so
@@ -101,7 +96,7 @@ fn _bin_path() -> string ![io] {
 test "inline export xmod: producer using only inline `export` builds across modules" ![io] {
     _ensure_fixture();
     let out_bin = _bin_path();
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 
@@ -114,7 +109,7 @@ test "inline export xmod: producer using only inline `export` builds across modu
 test "inline export xmod: the linked binary runs and computes the right result" ![io] {
     _ensure_fixture();
     let out_bin = _bin_path();
-    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;

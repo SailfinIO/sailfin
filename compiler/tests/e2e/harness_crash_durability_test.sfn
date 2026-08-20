@@ -20,13 +20,12 @@
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 fn _crash_fixture_src() -> string {
     return "fn _deep(n: int) -> int {\n" + "    let x = _deep(n + 1);\n"
@@ -63,7 +62,7 @@ test "harness crash durability: a crash mid-suite is never reported as an all-pa
     let code = with_tmp_dir(fn (dir: string) -> int {
         let fixture = dir + "/crash_durability_test.sfn";
         fs.writeFile(fixture, _crash_fixture_src());
-        let exit = process.run_capture([_sfn_bin(), "test", fixture, "--json"], _child_env());
+        let exit = process.run_capture([sfn_bin_path(), "test", fixture, "--json"], _child_env());
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let combined = out + err;

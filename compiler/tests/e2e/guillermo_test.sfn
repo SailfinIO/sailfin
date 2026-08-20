@@ -14,26 +14,17 @@
 // `assert_compiles` / `assert_does_not_compile`. (Making the matchers
 // usable from `![io]` tests is tracked against #842.)
 import { find } from "sfn/strings";
-
-// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
-// binary relative to the repo root the runner starts from. Mirrors
-// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point the
-// test at any compiler without editing it.
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 test "guillermo: command exits 0" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "guillermo"], []);
+    let exit = process.run_capture([sfn_bin_path(), "guillermo"], []);
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
 }
 
 test "guillermo: output contains the mascot greeting" ![io] {
-    let _exit = process.run_capture([_sfn_bin(), "guillermo"], []);
+    let _exit = process.run_capture([sfn_bin_path(), "guillermo"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     // The greeting may land on stdout or stderr; assert against both.

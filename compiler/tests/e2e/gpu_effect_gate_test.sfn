@@ -27,12 +27,7 @@
 // the `imported \`` requirement prefix), while a hop through a same-module
 // callee is E0400 (`local \`` prefix).
 import { find } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _ok_source() -> string {
     return "import { matmul_f64 } from \"sfn/device\";\n"
@@ -92,7 +87,7 @@ fn _run_check(source: string) -> _CheckRun ![io] {
     let dir = fs.mkdtemp("sfn-effect-gate-");
     let path = dir + "/fixture.sfn";
     fs.writeFile(path, source);
-    let exit = process.run_capture([_sfn_bin(), "check", path], []);
+    let exit = process.run_capture([sfn_bin_path(), "check", path], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(path);

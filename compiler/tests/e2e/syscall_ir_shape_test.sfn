@@ -1,10 +1,5 @@
 import { contains } from "sfn/strings";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import { sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -49,7 +44,7 @@ fn _emit(os: string, arch: string, tag: string) -> string ![io] {
     let output = dir + "/fixture-" + tag + ".ll";
     fs.writeFile(source, _fixture_source());
     if fs.exists(output) { fs.deleteFile(output); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "llvm", source], _target_env(os, arch));
+    let exit = process.run_capture([sfn_bin_path(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "llvm", source], _target_env(os, arch));
     let stdout = process.capture_take_stdout();
     let stderr = process.capture_take_stderr();
     if exit != 0 || !fs.exists(output) {
@@ -65,7 +60,7 @@ fn _rejection(os: string, arch: string, tag: string) -> string ![io] {
     let output = dir + "/reject-" + tag + ".ll";
     fs.writeFile(source, _fixture_source());
     if fs.exists(output) { fs.deleteFile(output); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "llvm", source], _target_env(os, arch));
+    let exit = process.run_capture([sfn_bin_path(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "llvm", source], _target_env(os, arch));
     let _stdout = process.capture_take_stdout();
     let stderr = process.capture_take_stderr();
     assert exit != 0;
@@ -79,7 +74,7 @@ fn _native_file_rejection(os: string, arch: string, tag: string) -> string ![io]
     let output = dir + "/native-file-reject-" + tag + ".sfn-asm";
     fs.writeFile(source, _fixture_source());
     if fs.exists(output) { fs.deleteFile(output); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "native", source], _target_env(os, arch));
+    let exit = process.run_capture([sfn_bin_path(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "native", source], _target_env(os, arch));
     let _stdout = process.capture_take_stdout();
     let stderr = process.capture_take_stderr();
     assert exit != 0;
@@ -91,7 +86,7 @@ fn _native_stdout_rejection(os: string, arch: string, tag: string) -> string ![i
     let dir = _scratch_dir();
     let source = dir + "/native-stdout-reject-" + tag + ".sfn";
     fs.writeFile(source, _fixture_source());
-    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "native", source], _target_env(os, arch));
+    let exit = process.run_capture([sfn_bin_path(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "native", source], _target_env(os, arch));
     let stdout = process.capture_take_stdout();
     let stderr = process.capture_take_stderr();
     assert exit != 0;
