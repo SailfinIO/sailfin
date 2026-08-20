@@ -116,9 +116,84 @@ test "fn-value: generic named function stays rejected under fn expectation" ![io
     assert _count_code(source, "E0808") == 1;
 }
 
-test "fn-value: nested function stays rejected under fn expectation" ![io] {
+// ── SFN-108 (SFEP-0042 Sub-issue B): a nested fn's bare name is legal in
+// `fn(...)` value position — the guard now routes a nested fn down the same
+// `check_named_fn_value_compatibility` path as a top-level fn. ──
+test "fn-value: typed let accepts a nested function" ![io] {
     let source = "fn main() { fn local(x: int) -> int { return x; } let f: fn (int) -> int = local; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+    assert _count_code(source, "E0840") == 0;
+}
+
+test "fn-value: function-typed call argument accepts a nested function" ![io] {
+    let source = "fn apply(f: fn (int) -> int, x: int) -> int { return f(x); } fn main() { fn local(x: int) -> int { return x + 1; } apply(local, 4); }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed return accepts a nested function" ![io] {
+    let source = "fn choose() -> fn (int) -> int { fn local(x: int) -> int { return x + 1; } return local; } fn main() { choose(); }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed struct initializer accepts a nested function" ![io] {
+    let source = "struct Handler { call: fn (int) -> int } fn main() { fn local(x: int) -> int { return x + 1; } let h = Handler { call: local }; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed array element accepts a nested function" ![io] {
+    let source = "fn main() { fn local(x: int) -> int { return x + 1; } let fs: (fn (int) -> int)[] = [local]; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed assignment accepts a nested function" ![io] {
+    let source = "fn main() { fn one(x: int) -> int { return x + 1; } fn two(x: int) -> int { return x + 2; } let mut f: fn (int) -> int = one; f = two; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: bare nested function with no expected type stays E0808" ![io] {
+    let source = "fn main() { fn local() { } let f = local; }";
     assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: generic nested function stays rejected under fn expectation" ![io] {
+    let source = "fn main() { fn ident<T>(x: T) -> T { return x; } let f: fn (int) -> int = ident; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: nested function parameter mismatch is E0839" ![io] {
+    let source = "fn main() { fn local(x: i64) -> int { return 1; } let f: fn (int) -> int = local; }";
+    assert _count_code(source, "E0839") == 1;
+}
+
+test "fn-value: nested function return mismatch is E0839" ![io] {
+    let source = "fn main() { fn local(x: int) -> i64 { return 1; } let f: fn (int) -> int = local; }";
+    assert _count_code(source, "E0839") == 1;
+}
+
+test "fn-value: nested function broader expected effect row accepts a narrower source row" ![io] {
+    let source = "fn main() { fn local(x: int) -> int ![io.fs] { return x; } let f: fn (int) -> int ![io] = local; }";
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: nested function narrower expected effect row rejects a broader source row" ![io] {
+    let source = "fn main() { fn local(x: int) -> int ![io] { return x; } let f: fn (int) -> int ![io.fs] = local; }";
+    assert _count_code(source, "E0839") == 1;
+}
+
+test "fn-value: nested function aggregate parameter signature is E0840" ![io] {
+    let source = "fn main() { fn local(x: string) -> int { return x.length; } let f: fn (string) -> int = local; }";
+    assert _count_code(source, "E0840") == 1;
+}
+
+test "fn-value: nested function aggregate return signature is E0840" ![io] {
+    let source = "struct Point { x: int } fn main() { fn local(x: int) -> Point { return Point { x: x }; } let f: fn (int) -> Point = local; }";
+    assert _count_code(source, "E0840") == 1;
 }
 
 test "fn-value: async function is E0839 under synchronous fn expectation" ![io] {

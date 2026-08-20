@@ -1,0 +1,136 @@
+// End-to-end coverage for SFN-108 (SFEP-0042 Sub-issue B): a nested / local
+// `fn`'s bare name is legal in `fn(...)` value position, exactly like a
+// top-level named function (`higher_order_named_fn_callback_test.sfn`). The
+// nested fn's lifted symbol (`sfn_nested_<name>_<N>`) acquires the same
+// `{code, env}` closure-pair representation as a top-level fn, dedups its
+// adapter across several materializations, and keeps a plain direct call on
+// the ordinary direct-call lowering path.
+//
+// Drives the compiler-under-test as a subprocess and asserts on captured
+// stdout / emitted IR — the canonical e2e pattern
+// (`.claude/rules/no-bash-e2e.md`).
+import {
+    contains,
+    find,
+    substring,
+    trim_right
+} from "sfn/strings";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
+
+fn _run(path: string) -> string ![io] {
+    let mut output: string = "";
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let exit = process.run_capture([sfn_bin_path(), "run", path], clean_runner_env(dir));
+        output = trim_right(process.capture_take_stdout());
+        let _err = process.capture_take_stderr();
+        return exit;
+    });
+    assert outcome == 0;
+    return output;
+}
+
+fn _count_occurrences(text: string, needle: string) -> int {
+    let mut count: int = 0;
+    let mut offset: int = 0;
+    loop {
+        let position = find(text, needle, offset);
+        if position < 0 { break; }
+        count += 1;
+        offset = position + needle.length;
+    }
+    return count;
+}
+
+// Reads the alnum/underscore token beginning at `start` — used to recover the
+// module-monotonic `sfn_nested_double_<N>` symbol without hardcoding `<N>`.
+fn _read_token(text: string, start: int) -> string {
+    let mut end: int = start;
+    loop {
+        if end >= text.length { break; }
+        let ch = text[end];
+        let is_word = (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0"
+            && ch <= "9")
+            || ch == "_";
+        if !is_word { break; }
+        end += 1;
+    }
+    return substring(text, start, end);
+}
+
+// Recovers the lifted nested-fn symbol (`sfn_nested_double_<N>`) from emitted
+// IR by locating its first `@sfn_nested_double_` occurrence and reading the
+// trailing numeric-id token.
+fn _lifted_nested_symbol(ir: string) -> string {
+    let marker = "@sfn_nested_double_";
+    let at = find(ir, marker, 0);
+    assert at >= 0;
+    return _read_token(ir, at + 1);
+}
+
+test "nested fn value: argument, typed let, reassignment, array/struct population, and direct call all compile and dispatch" ![io] {
+    let out = _run("compiler/tests/e2e/fixtures/higher_order_named_fn/apply_nested.sfn");
+    // apply(5)=10 + picked(5)=10 + reassigned(1)=2 + double(1)=2.
+    assert out == "24";
+}
+
+test "nested fn value: IR has one deduplicated tail-call adapter targeting the lifted symbol" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let raw_ll = dir + "/nested-fn-value.ll";
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", raw_ll, "llvm", "compiler/tests/e2e/fixtures/higher_order_named_fn/apply_nested.sfn"], clean_runner_env(dir));
+        let _out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        assert exit == 0;
+        assert fs.exists(raw_ll);
+        let ir = fs.readFile(raw_ll);
+
+        let nested_symbol = _lifted_nested_symbol(ir);
+        let adapter_symbol = nested_symbol + ".__fnval_adapter";
+
+        // Exactly one adapter definition even though `double` is materialized
+        // several times (typed let, reassignment, array element, struct field).
+        assert _count_occurrences(ir, "define internal i64 @" + adapter_symbol) == 1;
+        // The adapter tail-calls the lifted nested-fn symbol, not a raw name.
+        assert contains(ir, "tail call i64 @" + nested_symbol + "(");
+        // The closure pair is `{code, env}` with a null environment.
+        assert contains(ir, "bitcast i64 (i8*, i64)* @" + adapter_symbol
+            + " to i8*");
+        assert contains(ir, "insertvalue {i8*, i8*}");
+        assert contains(ir, "i8* null, 1");
+        // Direct call to `double` still lowers as an ordinary direct call.
+        assert contains(ir, "call i64 @" + nested_symbol + "(i64 1)");
+        // The compiler-internal hint must be consumed by the hoist pass.
+        assert ! contains(ir, "fnval_adapter_decl");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+test "nested fn value: a let shadowing a nested fn wins at a value-position reference" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let scratch = nested_runner_scratch("nested-fn-value-shadow");
+        let source_path = dir + "/shadow.sfn";
+        let source = "fn main() -> int { fn helper(n: int) -> int { return n * 10; } let helper = fn (n: int) -> int { return n + 1; }; let f: fn (int) -> int = helper; return f(5); }";
+        fs.writeFile(source_path, source);
+        let binpath = dir + "/shadow";
+        let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, source_path], clean_runner_env(scratch));
+        let build_out = process.capture_take_stdout();
+        let build_err = process.capture_take_stderr();
+        if build_exit != 0 {
+            print.error(build_out + build_err);
+            assert false;
+        }
+        let run_exit = process.run_capture([binpath], []);
+        let _ro = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        // The shadowing `let` binding (`n + 1`) must win, not the lifted
+        // nested fn (`n * 10`): f(5) == 6, not 50.
+        assert run_exit == 6;
+        return 0;
+    });
+    assert outcome == 0;
+}

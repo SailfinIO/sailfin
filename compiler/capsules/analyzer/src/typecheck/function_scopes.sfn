@@ -128,7 +128,13 @@ fn _hoist_nested_fn_names(statements: Statement[], bindings: SymbolEntry[], scop
         if _i >= statements.length { break; }
         let statement = statements[_i];
         if statement.variant == "FunctionDeclaration" {
-            let registration = register_local_function_symbol(scope, statement.signature, "function", scope_start);
+            let mut registration = register_local_function_symbol(scope, statement.signature, "function", scope_start);
+            // SFN-108: tag the hoisted entry as nested so a later reference in
+            // `fn(...)` value position can be admitted (SFEP-0042 Sub-issue B).
+            // Mirrors how `statement_checks.sfn` tags the top-level registration.
+            if registration.diagnostics.length == 0 {
+                registration.bindings[registration.bindings.length - 1].is_nested_function = true;
+            }
             scope = registration.bindings;
             let mut _ci: int = 0;
             loop {
@@ -161,7 +167,7 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
         if !has_symbol(ctx.top_level, entry.name) {
             if !is_function_kind(entry.kind) {
                 scope.push(SymbolEntry {
-                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: entry.declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false
+                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: entry.declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false, is_nested_function: false
                 });
             }
         }

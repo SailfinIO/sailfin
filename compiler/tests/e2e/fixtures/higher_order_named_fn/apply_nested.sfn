@@ -1,0 +1,30 @@
+// SFN-108 (SFEP-0042 Sub-issue B) — a nested (local) function's bare name is
+// legal in `fn(...)` value position, exactly like a top-level named function
+// (`apply_named.sfn`). The nested fn is materialized several times, plus one
+// plain direct call to prove that path still works unchanged.
+fn apply(value: int, transformer: fn (int) -> int) -> int {
+    return transformer(value);
+}
+
+struct Handler {
+    call: fn (int) -> int
+}
+
+fn main() ![io] {
+    fn double(x: int) -> int { return x * 2; }
+
+    let picked: fn (int) -> int = double;
+    let mut reassigned: fn (int) -> int = double;
+    reassigned = double;
+    let callbacks: (fn (int) -> int)[] = [double];
+    let handler = Handler { call: double };
+    // The several value materializations of `double` deduplicate their
+    // adapter; the direct call stays on the ordinary direct-call path.
+    //
+    // `callbacks` and `handler` are populated but deliberately NOT dispatched
+    // through: this issue ships nested-fn names in value POSITION. Calling
+    // through a fn-typed collection element / struct field is SFEP-0030
+    // Item 3 (SFN-674), still unshipped — `apply_named.sfn` populates the
+    // same two sites without calling them, for the identical reason.
+    print(apply(5, double) + picked(5) + reassigned(1) + double(1));
+}

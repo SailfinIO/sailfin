@@ -543,7 +543,14 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             }
             if is_function_kind(entry.kind) {
                 if strings_equal(entry.kind, "function") {
-                    if entry.is_top_level_function {
+                    // SFN-108: a nested / local `fn` lifts to a real top-level
+                    // symbol and carries the same signature metadata as a
+                    // top-level one, so it is materializable as a value on the
+                    // identical path (SFEP-0042 Sub-issue B). Every remaining
+                    // rejection below — generic, async, arity/type/effect
+                    // mismatch, aggregate ABI — is enforced by
+                    // `check_named_fn_value_compatibility` for both kinds.
+                    if entry.is_top_level_function || entry.is_nested_function {
                         if ctx.expected_type != null {
                             let expected = parse_fn_type_text(ctx.expected_type.text);
                             if expected.ok {

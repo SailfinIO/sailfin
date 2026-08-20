@@ -54,8 +54,10 @@ fn main() {
 
 ## Named function values
 
-A concrete synchronous module-local top-level function may be used without a wrapper where
-the surrounding expression supplies an exact `fn(...)` type:
+A concrete synchronous top-level function, or a concrete synchronous **nested /
+local** function (a statement-position `fn name(...) { ... }` declared inside
+another function or lambda body), may be used without a wrapper where the
+surrounding expression supplies an exact `fn(...)` type:
 
 ```sfn
 fn double(x: int) -> int { return x * 2; }
@@ -64,6 +66,11 @@ fn choose() -> fn (int) -> int { return double; }
 
 let callback: fn (int) -> int = double;
 let result = apply(double, 5);
+
+fn wrap() -> fn (int) -> int {
+    fn triple(x: int) -> int { return x * 3; }
+    return triple;   // a nested fn's bare name is equally eligible
+}
 ```
 
 Expected function types are supplied by typed variable initializers and
@@ -71,17 +78,22 @@ assignments, call arguments, return positions, typed collection elements, and
 struct initializers. The parameter and return types must match exactly. A
 source effect row must be no broader than the expected row: for example,
 `![io.fs]` may fill a `![io]` slot, but the reverse is rejected. Calling the
-stored value imposes the effect row written in its `fn(...)` type.
+stored value imposes the effect row written in its `fn(...)` type. When a local
+`let`/parameter shadows a same-named nested fn, the shadowing binding wins at a
+value-position reference.
 
 A normal `double(5)` call remains direct. A materialized value uses the uniform
 two-word closure representation described in the runtime ABI reference, with a
-null environment. Generic, nested, `async`, and entry-point functions are not
-eligible. This v0 path admits scalar and pointer parameter/return types only;
-aggregate signatures such as `fn(string) -> string` are rejected with `E0840`.
-Using a bare function name without an expected `fn(...)` type remains `E0808`.
-Imported/prelude function names are not yet eligible because their full callable
-signature proof does not cross the module boundary. Fn-typed struct member
-dispatch is not yet shipped.
+null environment. Generic functions, `async` functions, and entry-point
+functions are not eligible — this applies equally to a top-level or a nested
+function (a generic nested fn is still rejected). This v0 path admits scalar
+and pointer parameter/return types only; aggregate signatures such as
+`fn(string) -> string` are rejected with `E0840`. Using a bare function name
+without an expected `fn(...)` type remains `E0808`. Imported/prelude function
+names are not yet eligible because their full callable signature proof does not
+cross the module boundary. A nested fn may be *stored* into a fn-typed struct
+field or collection element, but dispatch *through* such a field/element is not
+yet shipped.
 
 ## Anonymous functions (lambdas)
 

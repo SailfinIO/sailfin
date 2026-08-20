@@ -58,6 +58,12 @@ struct SymbolEntry {
     function_effects: string[];
     function_is_async: boolean;
     is_top_level_function: boolean;
+    // SFN-108: set only for a statement-position (nested / local) `fn`
+    // block-hoisted by `_hoist_nested_fn_names`. Such an entry carries the
+    // same complete signature metadata as a top-level one and lifts to a real
+    // top-level symbol, so it is admissible in `fn(...)` value position
+    // (SFEP-0042 Sub-issue B) even though `is_top_level_function` is false.
+    is_nested_function: boolean;
 }
 
 struct SymbolCollectionResult {
@@ -111,7 +117,7 @@ fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: Symb
 fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "", declared_type: string = "") -> SymbolEntry[] {
     let mut updated: SymbolEntry[] = clone_bindings(symbols);
     updated.push(SymbolEntry {
-        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim, declared_struct: declared_struct, declared_type: declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false
+        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim, declared_struct: declared_struct, declared_type: declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false, is_nested_function: false
     });
     return updated;
 }
