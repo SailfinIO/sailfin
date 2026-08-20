@@ -1,8 +1,10 @@
 // sfn/test — the path to the `sfn` binary under test (SFN-977).
 //
 // Every test that drives the compiler as a subprocess has to name the
-// binary to spawn. Before this module, 315 test files under
-// `compiler/tests/` each carried a byte-identical private copy:
+// binary to spawn. Before this module there were 318 places that decided
+// how — 317 byte-identical private `_sfn_bin()` copies (315 under
+// `compiler/tests/`, plus `capsules/sfn/test/tests/child_diag_test.sfn` and
+// `capsules/sfn/bench/tests/sample_run_test.sfn`), each of them this:
 //
 //     fn _sfn_bin() -> string ![io] {
 //         let configured = env.get("SAILFIN_BIN");
@@ -10,11 +12,13 @@
 //         return "build/bin/sfn";
 //     }
 //
-// plus a 316th private twin inside this very capsule (`_resolve_sfn_bin` in
-// `compile_assert.sfn`), which many of those files' doc comments cited as
-// the original they were "mirroring" — a shared helper that had in fact
-// never been exported. This module is that export, and `sfn_bin_path` is
-// now the only definition of it in the tree.
+// and the 318th, a differently-named twin inside this very capsule
+// (`_resolve_sfn_bin` in `compile_assert.sfn`), which many of those copies'
+// doc comments cited as the original they were "mirroring" — a shared
+// helper that had in fact never been exported. This module is that export,
+// and `sfn_bin_path` is now the only definition of it in the tree. Counts
+// are stated here and nowhere else; other sites refer to this module rather
+// than restating them.
 //
 // WHY THE DUPLICATION MATTERED, beyond tidiness: the fallback literal is
 // POSIX-only. On a Windows host the self-host writes `build/bin/sfn.exe`
@@ -22,6 +26,7 @@
 // copies looked for a file the build never produced. The suite was
 // unrunnable on Windows one hand-copied line at a time, which is the slice
 // of SFN-938 this closes.
+// ---------------------------------------------------------------------------
 // True when the *host* we are running on names executables with `.exe`.
 //
 // This deliberately mirrors `build_host_os()` in
@@ -39,8 +44,6 @@
 // narrow-stdlib library that the compiler's own tests consume, so importing
 // the driver here would invert the dependency and trip the role split
 // `compiler/tests/unit/compiler_capsule_boundary_test.sfn` ratchets.
-// Promoting the pair into a shared capsule is the real fix and wants its own
-// issue; it is out of scope for a mechanical de-duplication.
 fn _host_is_windows() -> boolean ![io] {
     let host_override = env.get("SAILFIN_HOST_OS");
     if host_override.length > 0 { return host_override == "Windows"; }
@@ -57,7 +60,15 @@ fn _host_is_windows() -> boolean ![io] {
 // set it are expected to name the file that exists.
 //
 // Only the fallback is host-conditioned, so on POSIX this returns
-// `"build/bin/sfn"` — byte-identical to the 316 copies it replaces.
+// `"build/bin/sfn"` — byte-identical to the copies it replaces.
+//
+// The override-first ORDER is load-bearing, not just tidy. `.github/`'s
+// Linux leg that sets `SAILFIN_HOST_OS: Windows` to exercise the
+// Windows-host seam runs tests that call this, and they stay green only
+// because the pool seeds `SAILFIN_BIN` (`_pool_child_env` in
+// `cli/commands/test/pool.sfn`, `_test_exec_env` in `.../exec.sfn`) so this
+// returns before `_host_is_windows()` is ever consulted. Stop seeding it and
+// that leg starts hunting `build/bin/sfn.exe` on a Linux runner.
 fn sfn_bin_path() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }

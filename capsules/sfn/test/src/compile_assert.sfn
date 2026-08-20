@@ -26,10 +26,11 @@
 // running a child process and writing the temp source file both require
 // `io`.
 //
-// Hermeticity: the `sfn` binary is resolved from `$SAILFIN_BIN` with a
-// documented fallback of `build/bin/sfn` (the self-hosted binary,
-// relative to the repo root the test runs from), so CI can point the
-// assertions at any compiler without editing the test. The child is
+// Hermeticity: the `sfn` binary is resolved by `sfn_bin_path()`
+// (`./sfn_bin.sfn`) — `$SAILFIN_BIN` when set, else the self-hosted binary
+// relative to the repo root the test runs from, host-conditioned for the
+// executable suffix — so CI can point the assertions at any compiler
+// without editing the test. The child is
 // spawned with an empty environment — `sfn check` on an import-free
 // snippet reads no environment variables — so the result does not depend
 // on the parent process's ambient env.

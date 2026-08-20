@@ -46,7 +46,7 @@ output, file an issue against the formatter rather than overriding it.
 | Functions | `snake_case` | `parse_program`, `collect_direct_function_effects` |
 | Types (struct/enum/interface) | `PascalCase` | `Program`, `SourceSpan`, `EffectViolation` |
 | Enum variants | `PascalCase` | `Identifier`, `NumberLiteral`, `TryOperator` |
-| Module-private helpers | leading underscore | `_count_newlines`, `_sfn_bin` |
+| Module-private helpers | leading underscore | `_count_newlines`, `_host_is_windows` |
 | Module-level constants | `SCREAMING_SNAKE_CASE` | `let STDOUT_FD: i32 = 1;` |
 | Locals and parameters | `snake_case` | `let mut entries: Entry[] = [];` |
 | Files | `snake_case.sfn` | `effect_checker.sfn` |

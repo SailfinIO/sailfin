@@ -14,7 +14,7 @@
 // capsule's other module tests in `capsules/sfn/test/tests/` because its
 // "known present" fixture is the built compiler itself, reached by a path
 // relative to the repo root the e2e runner starts from.
-import { sfn_bin_path, first_present_tool, tool_present } from "sfn/test";
+import { first_present_tool, sfn_bin_path, tool_present } from "sfn/test";
 
 // A name no host has on `PATH`. Deliberately not a plausible tool name.
 fn _absent_name() -> string { return "sfn840_definitely_absent_probe_target"; }

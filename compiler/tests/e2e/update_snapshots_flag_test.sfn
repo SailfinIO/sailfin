@@ -23,9 +23,9 @@
 // (so the parallel pool does not collide on the fixed `build/sailfin`
 // program.ll cache — #1333). See `.claude/rules/no-bash-e2e.md`.
 import {
-    sfn_bin_path,
     clean_runner_env,
     nested_runner_scratch,
+    sfn_bin_path,
     with_tmp_dir
 } from "sfn/test";
 
