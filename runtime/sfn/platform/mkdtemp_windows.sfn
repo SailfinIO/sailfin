@@ -1,0 +1,113 @@
+// runtime/sfn/platform/mkdtemp_windows.sfn
+//
+// Windows sibling providing `mkdtemp` (SFN-993), APPENDED by
+// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
+// for a Windows target — like `mkstemp_windows.sfn` / `opendir_windows.sfn`,
+// `mkdtemp(3)` is a bare libc symbol on POSIX, not a Sailfin-authored
+// module, so there is no POSIX `.sfn` module to swap FROM.
+// `runtime/sfn/adapters/filesystem.sfn:194` declares
+// `extern fn mkdtemp(template: *u8) -> *u8;`, called from
+// `sfn_fs_mkdtemp` (`filesystem.sfn:945`) after it builds the
+// `[<dir>/]<prefix>XXXXXX\0` template in place; this module satisfies
+// that symbol at the Windows link and mutates `template`'s trailing six
+// `X` bytes in place, exactly like the POSIX `mkdtemp(3)` contract it
+// stands in for.
+//
+// NOT `GetTempFileNameA` (the earlier candidate, rejected): it creates a
+// FILE, not a directory, so using it here means create-file, delete-file,
+// create-dir — a TOCTOU window between the delete and the create-dir that
+// defeats the exclusivity `mkdtemp` promises. It also truncates the
+// prefix to 3 characters, silently discarding the caller's request.
+//
+// NOT `_mktemp_s` either (unlike `mkstemp_windows.sfn`, which uses it):
+// MSDN caps `_mktemp_s` at 26 unique names per template per process, far
+// too few for a temp-dir mint that a long-running process (a test suite)
+// calls repeatedly. Instead this generates its own six-character
+// `[A-Za-z0-9]` suffix from `GetCurrentProcessId()` mixed with
+// `GetTickCount()` and a module-local call counter, and retries on
+// `CreateDirectoryA` failing `ERROR_ALREADY_EXISTS` (183) — precisely
+// what glibc's `mkdtemp` loops on internally, just against `mkdir(2)`
+// instead of `CreateDirectoryA`.
+//
+// Decimal-only constants: hex integer literals silently fold to 0 on the
+// pinned seed (`runtime/sfn/process.sfn:38`; see `mkstemp_windows.sfn`'s
+// header for the same note), so `ERROR_ALREADY_EXISTS` is spelled `183`
+// rather than `0xB7`.
+extern fn strlen(s: *u8) -> usize;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+// `BOOL CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes)`
+// — implicitly linked by mingw (kernel32), like the rest of the Win32
+// family declared across this platform/ directory. `null` security
+// attributes gives the directory the default ACL, mirroring `mkdir`'s
+// process-default permissions.
+extern fn CreateDirectoryA(path: *u8, security_attributes: *u8) -> i32;
+
+extern fn GetLastError() -> i32;
+
+extern fn GetCurrentProcessId() -> i32;
+
+extern fn GetTickCount() -> i32;
+
+// Module-local counter mixed into the name seed so two calls within the
+// same millisecond of `GetTickCount()` still diverge.
+let mut _mkdtemp_windows_counter: i64 = 0;
+
+// Render one `[A-Za-z0-9]` character (62-symbol alphabet) from `seed`,
+// folding a negative `seed % 62` back into range.
+fn _mkdtemp_windows_char(seed: i64) -> i64 {
+    let alphabet: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let alphabet_ptr: *u8 = alphabet as *u8;
+    let mut idx: i64 = seed % 62;
+    if idx < 0 { idx = idx + 62; }
+    return load_byte((alphabet_ptr as i64) + idx);
+}
+
+// Overwrite the trailing six bytes at `template + suffix_off` with a
+// pseudo-unique `[A-Za-z0-9]` run derived from `seed`, mixing in a
+// distinct multiplier per slot so adjacent slots do not repeat the same
+// character for a slowly-changing seed.
+fn _mkdtemp_windows_fill_suffix(template: *u8, suffix_off: i64, seed: i64) {
+    let mut i: i64 = 0;
+    while i < 6 {
+        let slot_seed: i64 = seed + (i * 40503) + ((seed >> (i * 5)) & 4095);
+        let ch: i64 = _mkdtemp_windows_char(slot_seed);
+        memset(((template as i64) + suffix_off + i) as *u8, ch as i32, 1 as usize);
+        i = i + 1;
+    }
+}
+
+// `mkdtemp(template)` — mutate the trailing six `X` bytes of `template`
+// into a fresh, non-colliding name and `CreateDirectoryA` it. Returns
+// `template` on success (mirroring the POSIX in-place-rewrite contract
+// `sfn_fs_mkdtemp` relies on), or `0 as *u8` on failure — a null
+// `template`, a template shorter than the six-byte suffix, or exhausting
+// the retry budget.
+fn mkdtemp(template: *u8) -> *u8 ![io] {
+    if (template as i64) == 0 { return 0 as *u8; }
+    let len: i64 = strlen(template) as i64;
+    if len < 6 { return 0 as *u8; }
+    let suffix_off: i64 = len - 6;
+
+    let pid: i64 = GetCurrentProcessId() as i64;
+    let ticks: i64 = GetTickCount() as i64;
+
+    // Guard counter: bounded retry against `ERROR_ALREADY_EXISTS`
+    // collisions. 62^6 possible suffixes makes repeated collision within
+    // this budget effectively impossible for a live seed.
+    let max_attempts: i64 = 100;
+    let mut attempt: i64 = 0;
+    while attempt < max_attempts {
+        _mkdtemp_windows_counter = _mkdtemp_windows_counter + 1;
+        let seed: i64 = pid + (ticks * 2654435) + (_mkdtemp_windows_counter * 40503)
+            + attempt;
+        _mkdtemp_windows_fill_suffix(template, suffix_off, seed);
+
+        let ok: i32 = CreateDirectoryA(template, 0 as *u8);
+        if ok != 0 { return template; }
+        if GetLastError() != 183 { return 0 as *u8; }
+        attempt = attempt + 1;
+    }
+    return 0 as *u8;
+}

@@ -67,6 +67,45 @@ If a `windows-fixed-point` regression does not reproduce, check SFN-920
 first (`/Brepro` threaded through `lld-link`): its absence makes the byte
 compare flaky at PE byte 129 regardless of genuine compiler determinism.
 
+### 1a. Validating ordinary Windows codegen/runtime changes without a Windows host
+
+§1's fixed point and the native MSVC build genuinely need a `windows-2025`
+host — but that is not the only way to validate a change to Windows-leg
+codegen or a `platform/*_windows.sfn` runtime sibling. An ordinary MSVC
+**cross-build + interop** run works from this Linux host whenever a Visual
+Studio Build Tools + Windows SDK layout is mounted (as it is here), and WSL's
+`binfmt_misc` execs the resulting PE directly — no `cmd.exe` wrapper, no
+Windows host at all:
+
+```bash
+VC="/mnt/c/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.51.36231"
+SDK="/mnt/c/Program Files (x86)/Windows Kits/10"; SDKVER="10.0.26100.0"
+export LIB="$VC/lib/x64;$SDK/Lib/$SDKVER/ucrt/x64;$SDK/Lib/$SDKVER/um/x64"
+export INCLUDE="$VC/include;$SDK/Include/$SDKVER/ucrt;$SDK/Include/$SDKVER/um;$SDK/Include/$SDKVER/shared"
+export SAILFIN_TARGET_TRIPLE=x86_64-pc-windows-msvc
+export CC=clang-18          # NOT bare `clang` — that resolves to a different, older clang
+build/bin/sfn build probe.sfn -o probe.exe
+./probe.exe                 # WSL binfmt_misc execs PE directly
+```
+
+This proves the codegen emits correct IR for the target, that MSVC/`lld-link`
+accept it, and that the compiled behavior is right — the same class of bug
+(a per-target sentinel silently stubbed `false`) that this exact recipe
+caught for SFN-993's `fs.mkdtemp`. It is genuinely useful signal, not a
+placebo.
+
+**What it does NOT cover**, and where those still require the real thing:
+
+- **The mingw cross-bridge link** (`make ci-cross-windows`) — a separate
+  toolchain (mingw-w64, not MSVC) and a separate, hand-maintained
+  `RUNTIME_MODS` module list (`Makefile`). A symbol present in one bridge can
+  be absent from the other (e.g. `libmingwex.a` lacks `mkdtemp` even though
+  MSVC's UCRT link has no such gap) — always also run `make ci-cross-windows`
+  when a change touches `platform/*_windows.sfn`.
+- **The native-MSVC self-host fixed point** (§1 above) — the pass-1/pass-2
+  byte-identity proof only exists on the real `windows-2025` host, since it
+  needs a compiler binary that itself already runs on Windows.
+
 ---
 
 ## 2. Cancelled vs. failed

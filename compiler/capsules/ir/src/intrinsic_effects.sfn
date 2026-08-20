@@ -47,7 +47,6 @@ fn intrinsic_effect_table() -> IntrinsicEffectTable {
     table = append_intrinsic_effects(table, "fs.exists", ["io.fs"]);
     table = append_intrinsic_effects(table, "sailfin_intrinsic_exe_path", ["io"]);
     table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_symlink", ["io"]);
-    table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_mkdtemp", ["io"]);
     table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_exists", ["io"]);
     table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_get_perms", ["io"]);
     table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_list_dir", ["io"]);

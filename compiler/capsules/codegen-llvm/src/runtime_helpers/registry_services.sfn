@@ -28,8 +28,10 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `runtime/sfn/adapters/filesystem.sfn`. The bodies trampoline to
     // the legacy C `sailfin_adapter_fs_*` adapters, which carry the
     // `#if _WIN32` stubs the single cross-platform `filesystem.ll`
-    // needs to link (`symlink` / `mkdtemp` / raw `stat` have no MinGW
-    // symbol); pure-Sailfin inlining is a follow-up wave. The C
+    // needs to link (`symlink` / raw `stat` have no MinGW symbol;
+    // `mkdtemp` joined that list too until SFN-993 gave it a genuine
+    // Windows definition via `platform/mkdtemp_windows.sfn`);
+    // pure-Sailfin inlining is a follow-up wave. The C
     // symbols stay exported through the M3 window for seed-link
     // compat; fresh emission routes through `native_signature`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {

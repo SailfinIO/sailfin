@@ -9,21 +9,35 @@
 // races between parallel test invocations. Cleanup uses
 // `process.run(["rm", "-rf", …])` since the capsule doesn't ship a
 // recursive remove yet (Out-of-scope per the issue).
+import { find } from "sfn/strings";
+import { skip } from "sfn/test";
+
 import {
-    set_perms,
-    get_perms,
-    mkdtemp,
-    is_executable,
-    is_directory,
-    mkdir,
-    symlink,
-    read_link,
     exists,
-    write,
+    get_perms,
+    is_directory,
+    is_executable,
+    mkdir,
+    mkdtemp,
     read,
     read_dir,
-    remove
+    read_link,
+    remove,
+    set_perms,
+    symlink,
+    write
 } from "../src/mod";
+
+// True when the test runner is a Windows binary. Mirrors the detection
+// idiom in `compiler/tests/e2e/rename_running_image_windows_test.sfn`: the
+// `OS` / `SYSTEMROOT` / `windir` environment variables Windows always sets.
+fn _is_windows() -> bool ![io] {
+    let os = env.get("OS");
+    if find(os, "Windows", 0) >= 0 { return true; }
+    if env.get("SYSTEMROOT").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    return false;
+}
 
 // ---------------------------------------------------------------------
 // Permission constants. The seed parser doesn't yet accept octal
@@ -73,6 +87,16 @@ test "fs: mkdtemp creates a unique directory with mode 0700" ![io] {
     let path = mkdtemp("sfn-fs-test-mkd-");
     assert path.length > 0;
     assert exists(path);
+    if _is_windows() {
+        // Windows has no mode bits — the directory inherits the parent
+        // ACL instead of a POSIX permission mode, and `get_perms`'
+        // Windows leg is a pre-existing `-1` stub (predates SFN-993,
+        // which only adds this skip — mkdtemp itself is fixed there,
+        // not get_perms), so the POSIX 0700 assertion below cannot
+        // hold here. Skip loudly rather than silently pass or weaken
+        // the POSIX assertion.
+        skip("Windows has no mode bits (ACL, not 0700); get_perms is a -1 stub there");
+    }
     // 448 = 0o700 — `mkdtemp(3)` is documented to create the dir
     // with this mode regardless of umask.
     assert get_perms(path) == 448;
@@ -80,15 +104,21 @@ test "fs: mkdtemp creates a unique directory with mode 0700" ![io] {
     process.run(["rmdir", path]);
 }
 
-test "fs: mkdtemp returns distinct paths across calls" ![io] {
+test "fs: mkdtemp returns distinct, existing directories across calls" ![io] {
     // Kernel-side uniqueness — two calls in quick succession must
     // never collide. This is the whole reason for using
-    // `mkdtemp(3)` instead of generate-then-mkdir.
+    // `mkdtemp(3)` (or, on Windows, the `CreateDirectoryA` retry loop
+    // in `runtime/sfn/platform/mkdtemp_windows.sfn`, SFN-993) instead
+    // of generate-then-mkdir.
     let a = mkdtemp("sfn-fs-test-uniq-");
     let b = mkdtemp("sfn-fs-test-uniq-");
     assert a.length > 0;
     assert b.length > 0;
     assert strings_equal(a, b) == false;
+    assert exists(a);
+    assert exists(b);
+    assert is_directory(a);
+    assert is_directory(b);
 
     process.run(["rmdir", a]);
     process.run(["rmdir", b]);
