@@ -38,7 +38,7 @@ test "guillermo: output contains the mascot greeting" ![io] {
 host-conditioned resolver for the compiler-under-test: `$SAILFIN_BIN` wins
 verbatim when set, else `build/bin/sfn` on POSIX or `build/bin/sfn.exe` on a
 Windows host — a payoff a hand-copied POSIX literal never had. A test must
-**not** define its own binary-path helper; SFN-977 deleted 315 hand-copied
+**not** define its own binary-path helper; SFN-977 deleted 317 hand-copied
 `_sfn_bin()` twins in favor of this one shared import. A test that spawns the
 compiler from a shifted `cwd` still absolutizes on top of `sfn_bin_path()`
 (the `_sfn_bin_abs()` shape in a handful of e2e files) — that's fine, it's a
