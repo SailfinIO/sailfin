@@ -115,11 +115,19 @@ fn _cwd() -> string ![io] {
 // Deliberately does NOT route through `_host_is_windows()`.
 //
 // Recognizes a leading `/` or `\`, a drive prefix (`C:\...` or `C:/...`),
-// and a UNC prefix (`\\server\share\...`). Semantics should agree with
-// `path_root_prefix_len`/`is_absolute_path` in
-// `compiler/src/string_utils.sfn` (SFN-704) — that module is this one's
-// driver-side twin, duplicated here rather than imported for the same
-// capsule-boundary reason as `_cwd` above.
+// and a UNC prefix (`\\server\share\...`).
+//
+// This asks a NARROWER question than `is_absolute_path` in
+// `compiler/src/string_utils.sfn` (SFN-704), its driver-side twin, and the
+// two deliberately DISAGREE on one input. That twin answers "is this
+// rooted?" and returns false for a drive-RELATIVE path (`C:foo`), which
+// resolves against drive C's own current directory
+// (`string_utils.sfn:207-216`). This function instead answers "should a cwd
+// be prefixed?", and for `C:foo` the answer is no: prefixing yields
+// nonsense like `C:\repo/C:foo`, while passing it through preserves exactly
+// the drive-relative meaning the child process will honor. So `C:foo` needs
+// no prefix here and is not rooted there. Both are correct for their own
+// question; do not "align" them.
 fn _is_absolute_bin_path(path: string) -> boolean {
     if path.length == 0 { return false; }
     // A leading `\` already covers UNC (`\\server\share\...`) — its

@@ -74,12 +74,6 @@ fn _child_env() -> string[] ![io] {
     return e;
 }
 
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
-
 // `tar -tvzf <tarball>` -> full verbose listing text (permission bits +
 // member path per line), the only `tar` listing form that carries mode.
 fn _tar_list_verbose(tarball: string) -> string ![io] {

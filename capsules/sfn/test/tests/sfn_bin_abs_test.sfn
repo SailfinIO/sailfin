@@ -8,14 +8,20 @@
 // `with_cwd`, and asserts on the captured stdout.
 //
 // The fixture is written under `build/sailfin` (inside the repo tree),
-// deliberately NOT `_scratch_dir()`'s usual `SAILFIN_TEST_SCRATCH` override:
-// `sfn_bin_test.sfn`'s `_scratch_dir` doc comment already states the reason
-// — a fixture inside the tree resolves `import { ... } from "sfn/test"`
-// against `capsule.toml`/`workspace.toml` discovered by walking up from the
-// source file, which stays correct however the compiler under test locates
-// its stdlib/registry fallback for a source file outside any workspace.
-// `_abs_path` then absolutizes the directory so the built binary is a valid
-// `args[0]` under a DIFFERENT `with_cwd` cwd too.
+// deliberately NOT honoring `SAILFIN_TEST_SCRATCH`. Stated first-hand
+// rather than by citing `sfn_bin_test.sfn`, which makes the OPPOSITE
+// choice: that sibling honors the override and its comment justifies only
+// its in-tree *fallback*. The reason here is resolution, not scratch
+// hygiene — a fixture inside the tree resolves
+// `import { ... } from "sfn/test"` against the `capsule.toml` found by
+// walking up from the source file, so it always sees the working tree's
+// own copy of this capsule. A fixture under an out-of-tree scratch dir has
+// no manifest above it and falls back to whatever stdlib copy the compiler
+// under test carries bundled, which for a newly added export is not
+// necessarily this one.
+//
+// `_abs_path` then absolutizes the directory so the built binary is a
+// valid `args[0]` under a DIFFERENT `with_cwd` cwd too.
 import { ProcessOutput, env_from_current, env_set } from "sfn/os";
 import { trim } from "sfn/strings";
 
@@ -43,8 +49,11 @@ fn _repo_root() -> string ![io] {
     return trim(out);
 }
 
+// `_scratch_dir()` always returns the relative in-tree literal, so this is
+// unconditional. Deliberately carries no `path[0] == "/"` branch: that is
+// the POSIX-only check `sfn_bin_abs_path` exists to retire, and a dead copy
+// of it here would be the first step of exactly the regrowth SFN-977 saw.
 fn _abs_path(path: string) -> string ![io] {
-    if path.length > 0 && path[0] == "/" { return path; }
     return _repo_root() + "/" + path;
 }
 
@@ -137,10 +146,35 @@ test "sfn_bin_abs: a relative bin path is prefixed with the cwd it resolves in" 
 }
 
 // 6. `SAILFIN_BIN` set to an absolute Windows path passes through unchanged
-//    regardless of which cwd the child actually ran in — proving the
-//    absoluteness check, not the cwd, gates the prefix.
+//    regardless of which cwd the child actually ran in. Test 2 already
+//    covers the passthrough itself under the inherited cwd; this adds only
+//    that a shifted cwd does not change it. Test 7 below is the case that
+//    actually discriminates between candidate `_cwd()` implementations.
 test "sfn_bin_abs: SAILFIN_BIN set to an absolute Windows path passes through unchanged regardless of cwd" ![io] {
     let different_cwd = _abs_path(_scratch_dir());
     let out = _probe_bin_abs_path("win-abs-separate-cwd", "Linux", "C:\\other\\sfn.exe", different_cwd);
     assert out == "C:\\other\\sfn.exe";
+}
+
+// 7. The discriminating case: a RELATIVE bin under a SHIFTED cwd.
+//
+//    This is what pins `_cwd()`'s `realpath(".")`-before-`PWD` order, which
+//    `sfn_bin.sfn` calls load-bearing and which nothing else here exercises.
+//    Test 5 runs with the inherited cwd, where the parent's `PWD` and
+//    `realpath(".")` necessarily agree, so it cannot tell the two apart.
+//    Here they diverge: `with_cwd` scopes the child's env from
+//    `env_from_current()` (`capsules/sfn/test/src/fixtures.sfn:133-136`),
+//    which carries the PARENT's `PWD`, while the child actually runs in
+//    `different_cwd`. A `PWD`-first `_cwd()` would answer with the repo
+//    root and fail this assertion; a `realpath(".")`-first one answers with
+//    the directory the child is really in.
+//
+//    (`_repo_root()` is logical `pwd` while `_cwd()` is physical `realpath`,
+//    so this and test 5 would diverge under a symlinked checkout — not the
+//    case on any supported runner, but the reason to reach for
+//    `realpath`-based setup first if that ever changes.)
+test "sfn_bin_abs: a relative bin path resolves against the child's real cwd, not the inherited PWD" ![io] {
+    let different_cwd = _abs_path(_scratch_dir());
+    let out = _probe_bin_abs_path("relative-different-cwd", "Linux", "", different_cwd);
+    assert out == different_cwd + "/build/bin/sfn";
 }
