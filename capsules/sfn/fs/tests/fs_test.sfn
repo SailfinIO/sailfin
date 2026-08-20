@@ -90,9 +90,11 @@ test "fs: mkdtemp creates a unique directory with mode 0700" ![io] {
     if _is_windows() {
         // Windows has no mode bits — the directory inherits the parent
         // ACL instead of a POSIX permission mode, and `get_perms`'
-        // Windows leg is a `-1` stub (SFN-993), so the POSIX 0700
-        // assertion below cannot hold here. Skip loudly rather than
-        // silently pass or weaken the POSIX assertion.
+        // Windows leg is a pre-existing `-1` stub (predates SFN-993,
+        // which only adds this skip — mkdtemp itself is fixed there,
+        // not get_perms), so the POSIX 0700 assertion below cannot
+        // hold here. Skip loudly rather than silently pass or weaken
+        // the POSIX assertion.
         skip("Windows has no mode bits (ACL, not 0700); get_perms is a -1 stub there");
     }
     // 448 = 0o700 — `mkdtemp(3)` is documented to create the dir

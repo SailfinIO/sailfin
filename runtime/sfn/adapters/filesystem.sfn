@@ -106,20 +106,26 @@
 //     Sailfin over the portable libc `chmod` / `access` externs —
 //     both link and behave identically on Linux / macOS / Windows.
 //
-//   - **`sfn_fs_get_perms` / `sfn_fs_mkdtemp` / `sfn_fs_symlink` /
-//     `sfn_fs_exists`** (epic #1308, fs-runtime flip): route through
-//     the per-target `sailfin_intrinsic_fs_*` sentinels the compiler
-//     lowers in `runtime_helpers.sfn` — a POSIX libc `call` on
-//     Linux/macOS (`stat` / `mkdtemp` / `symlink`), a bare stub on
-//     Windows — so the single `filesystem.ll` links on every target
-//     without a C trampoline. The sentinel calls carry no `extern`
-//     (the registry-by-name match attaches the descriptor, exactly
-//     like `exec.sfn`'s `sailfin_intrinsic_exe_path`); the libc
-//     symbols the dispatcher emits `call`s against (`symlink` /
-//     `mkdtemp` / `stat` / `GetFileAttributesA`) are `declare`d via
-//     the inlined `extern fn`s below. `get_perms`'s per-platform
-//     `st_mode` offset and `mkdtemp`'s `#if _WIN32` stub now live
-//     inside the sentinel lowering, not a fixed-offset Sailfin read.
+//   - **`sfn_fs_get_perms` / `sfn_fs_symlink` / `sfn_fs_exists`**
+//     (epic #1308, fs-runtime flip): route through the per-target
+//     `sailfin_intrinsic_fs_*` sentinels the compiler lowers in
+//     `runtime_helpers.sfn` — a POSIX libc `call` on Linux/macOS
+//     (`stat` / `symlink`), a bare stub on Windows — so the single
+//     `filesystem.ll` links on every target without a C trampoline.
+//     The sentinel calls carry no `extern` (the registry-by-name
+//     match attaches the descriptor, exactly like `exec.sfn`'s
+//     `sailfin_intrinsic_exe_path`); the libc symbols the dispatcher
+//     emits `call`s against (`symlink` / `stat` /
+//     `GetFileAttributesA`) are `declare`d via the inlined
+//     `extern fn`s below. `get_perms`'s per-platform `st_mode` offset
+//     lives inside the sentinel lowering, not a fixed-offset Sailfin
+//     read.
+//
+//   - **`sfn_fs_mkdtemp`** (SFN-993): no longer a sentinel — it calls
+//     the ordinary `extern fn mkdtemp` declared below directly, with
+//     `platform/mkdtemp_windows.sfn` supplying that symbol's
+//     `CreateDirectoryA` retry-loop definition on a Windows target,
+//     exactly as libc supplies `mkdtemp(3)` on Linux/macOS.
 //   `read_bytes` is pure Sailfin (#1317, epic #1308 C8). `list_dir`
 //   routes through the `sailfin_intrinsic_fs_list_dir` sentinel (SFN-51,
 //   epic #1485); its `dirent` offset is runtime-selected per platform
@@ -184,11 +190,15 @@ extern fn access(path: *u8, mode: i32) -> i32;
 // WITHOUT an `extern` (like `exec.sfn`'s `sailfin_intrinsic_exe_path`)
 // — but the libc `declare`s they lower to come from `extern fn` in
 // THIS firing module (there are no registry concrete rows for them,
-// by design, to avoid colliding with same-named capsule funcs). All
-// five are inlined unconditionally: an unused `declare` on a platform
+// by design, to avoid colliding with same-named capsule funcs). Four
+// are inlined unconditionally: an unused `declare` on a platform
 // that never `call`s it is link-safe (no relocation), so the Windows
 // cross-build (which lowers `GetFileAttributesA` for both `fs_exists`
 // and `fs_is_directory`, and stubs the rest) links cleanly too.
+// `mkdtemp` below is the fifth of this block's externs but is NOT a
+// sentinel target (SFN-993): it backs `sfn_fs_mkdtemp`'s direct call,
+// resolved by libc on POSIX and by `platform/mkdtemp_windows.sfn` on
+// Windows.
 extern fn symlink(target: *u8, link: *u8) -> i32;
 
 extern fn mkdtemp(template: *u8) -> *u8;
@@ -896,34 +906,38 @@ fn _fs_empty_string() -> *u8 {
 // `CreateDirectoryA` retry loop on Windows (SFN-993) — there is no more
 // per-target codegen sentinel to route through. Layout matches the
 // retired C body byte-for-byte: `[<dir>/]<prefix>XXXXXX\0`, where `<dir>`
-// is the first non-empty of `$TMPDIR`, `$TMP`, `$TEMP`, or the literal
-// `/tmp`, only when `prefix` has no `/`. `$TMP`/`$TEMP` matter on
+// is the first non-empty of `$TMPDIR`, `$TEMP`, `$TMP`, or the literal
+// `/tmp`, only when `prefix` has no `/`. `$TEMP`/`$TMP` matter on
 // Windows, where `TMPDIR` is not the conventional variable and `/tmp` is
-// not a path on any drive.
+// not a path on any drive; the precedence matches Python's
+// `tempfile.gettempdir()`. SFN-993 behavior change on POSIX too: a host
+// with `$TEMP`/`$TMP` set (e.g. imported into WSL via `WSLENV`) and no
+// `$TMPDIR` now anchors there instead of unconditionally `/tmp` — see
+// the PR that shipped this for the tradeoff.
 fn sfn_fs_mkdtemp(prefix: *u8) -> *u8 ![io] {
     let mut pfx: *u8 = "" as *u8;
     if (prefix as i64) != 0 { pfx = prefix; }
     let prefix_len: i64 = strlen(pfx) as i64;
 
     // `has_dir` iff `prefix` contains a `/` (byte 47). When absent,
-    // anchor under the first non-empty of `$TMPDIR`, `$TMP`, `$TEMP`, or
+    // anchor under the first non-empty of `$TMPDIR`, `$TEMP`, `$TMP`, or
     // `/tmp`; else `prefix` is itself a full template prefix.
     let has_dir: bool = (strchr(pfx, 47) as i64) != 0;
     let mut dir: *u8 = "" as *u8;
     let mut dir_len: i64 = 0;
     if !has_dir {
         let tmpdir_name: string = "TMPDIR";
-        let tmp_name: string = "TMP";
         let temp_name: string = "TEMP";
+        let tmp_name: string = "TMP";
         let env_tmpdir: *u8 = getenv(tmpdir_name as *u8);
-        let env_tmp: *u8 = getenv(tmp_name as *u8);
         let env_temp: *u8 = getenv(temp_name as *u8);
+        let env_tmp: *u8 = getenv(tmp_name as *u8);
         if (env_tmpdir as i64) != 0 && strlen(env_tmpdir) > (0 as usize) {
             dir = env_tmpdir;
-        } else if (env_tmp as i64) != 0 && strlen(env_tmp) > (0 as usize) {
-            dir = env_tmp;
         } else if (env_temp as i64) != 0 && strlen(env_temp) > (0 as usize) {
             dir = env_temp;
+        } else if (env_tmp as i64) != 0 && strlen(env_tmp) > (0 as usize) {
+            dir = env_tmp;
         } else { dir = "/tmp" as *u8; }
         dir_len = strlen(dir) as i64;
     }

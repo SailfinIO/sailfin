@@ -558,7 +558,7 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
     // to replace. Each satisfies its `extern fn` declaration(s) elsewhere
     // in the runtime via ordinary link-time symbol resolution; see each
     // module's own header for the full rationale. Skipped (rather than
-    // guessing a path) if none of the seven platform/ modules above were
+    // guessing a path) if none of the eight platform/ modules above were
     // present to anchor on.
     if platform_dir.length > 0 {
         out.push(_path_join(platform_dir, "realpath_windows.sfn"));
