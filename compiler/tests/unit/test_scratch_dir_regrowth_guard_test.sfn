@@ -1,0 +1,90 @@
+// Regrowth guard for SFN-978: a fresh copy-paste of the retired POSIX-only
+// `"/tmp"` scratch-dir fallback must not reappear under `compiler/tests/`.
+//
+// SFN-977's `sfn_bin_path()` sweep and the `.sh` sprawl in #842/#840 both
+// show the same failure mode: a convenient one-off copy of a hand-rolled
+// helper regrows silently once nothing greps for it. `default_scratch_dir()`
+// / `scratch_root()` (`capsules/sfn/test/src/scratch.sfn`) are the only
+// sanctioned source of this fallback now, so this test fails the build the
+// moment a new call site reintroduces the literal directly instead of
+// importing the resolver.
+//
+// The exact quoted literal `"/tmp"` is the signal: every fallback shape this
+// sweep replaced (a plain assignment, an early return, and a ternary) always
+// spells the sentinel bare — the per-test subdirectory is appended by code
+// afterward, never baked into the literal itself. A legitimate path fixture
+// like `"/tmp/sfn_probe"` does not match, so no allowlist is needed.
+import { ends_with } from "sfn/strings";
+
+fn _collect_sfn_files(root: string, acc: string[]) -> string[] ![io] {
+    let mut out = acc;
+    if !fs.exists(root) { return out; }
+    let entries = fs.listDirectory(root);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if name == "." || name == ".." { continue; }
+        let full = root + "/" + name;
+        let children = fs.listDirectory(full);
+        if children.length > 0 { out = _collect_sfn_files(full, out); } else if ends_with(name, ".sfn") {
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+test "scratch-dir regrowth guard: no bare \"/tmp\" literal under compiler/tests" ![io] {
+    // Skip this file's own path: its guarding logic and doc comments quote
+    // the literal it hunts for, which would otherwise flag itself.
+    let self_path = "compiler/tests/unit/test_scratch_dir_regrowth_guard_test.sfn";
+    let mut files: string[] = [];
+    files = _collect_sfn_files("compiler/tests", files);
+    assert files.length > 200;
+
+    let needle = "\"/tmp\"";
+    let mut failures: string[] = [];
+    let mut fi: int = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        fi += 1;
+        if path == self_path { continue; }
+        let source = fs.readFile(path);
+        let mut pos = 0;
+        loop {
+            let found = _find_in(source, needle, pos);
+            if found < 0 { break; }
+            failures.push(path);
+            pos = found + needle.length;
+        }
+    }
+    let mut i = 0;
+    loop {
+        if i >= failures.length { break; }
+        print.error("scratch-dir regrowth guard: " + failures[i]
+            + " reintroduces the bare \"/tmp\" fallback literal; call default_scratch_dir() / scratch_root() from sfn/test instead");
+        i += 1;
+    }
+    assert failures.length == 0;
+}
+
+fn _find_in(text: string, needle: string, start: int) -> int {
+    let mut i = start;
+    loop {
+        if i + needle.length > text.length { return -1; }
+        let mut j = 0;
+        let mut matched = true;
+        loop {
+            if j >= needle.length { break; }
+            if text[i + j] != needle[j] {
+                matched = false;
+                break;
+            }
+            j += 1;
+        }
+        if matched { return i; }
+        i += 1;
+    }
+}
