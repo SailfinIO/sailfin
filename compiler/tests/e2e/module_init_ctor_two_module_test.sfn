@@ -1,0 +1,166 @@
+// End-to-end regression for SFN-1005.
+//
+// `@sailfin_module_init__<module>` is emitted correctly for every
+// module, but before the fix its ONLY call site was inside `fn main`'s
+// body (gated on `emission.sfn`'s `emit_main_wrapper`, true only for
+// `fn main`). A module with no `fn main` — this test file's `fn main`
+// lives in a different module, neither fixture below defines one — had
+// nothing to call its init function, so its runtime-computed globals
+// stayed at `default_return_literal`'s zero value (scalars) or a null
+// pointer (composites, segfaulting on first field/length access).
+// Existing single-module regressions
+// (`check_build_agree_module_global_test.sfn`,
+// `module_global_runtime_init_probe.sfn`) put the globals in the same
+// file as `fn main` and so are structurally blind to this class.
+//
+// The fix registers the fixture module's init function through
+// `@llvm.global_ctors` instead. LLVM permits exactly one
+// `@llvm.global_ctors` definition per module, so the two fixtures below
+// exercise both branches of that constraint:
+// `module_init_ctor_two_module_shared` carries a named `struct`, so its
+// module-init ctor MERGES into the same array as the type-descriptor
+// ctor; `module_init_ctor_two_module_notype_shared` carries no named
+// type, so `emit_type_descriptors` emits no array at all and the
+// module-init ctor is the sole, standalone entry
+// (`lowering_core/mod.sfn`'s fallback). Ctors run at process start
+// regardless of which module defines `main`, so by the time this test
+// calls an accessor, each fixture module's globals are already
+// initialized.
+import { contains, split, starts_with } from "sfn/strings";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+
+import { get_notype_called, get_notype_scalar } from "./fixtures/module_init_ctor_two_module_notype_shared";
+import {
+    get_arith,
+    get_arr_len,
+    get_called,
+    get_flag,
+    get_lit,
+    get_neg_lit,
+    get_pair_x,
+    get_pair_y,
+    get_scalar,
+    get_text
+} from "./fixtures/module_init_ctor_two_module_shared";
+
+test "module-init ctor: literal and unary-literal globals in a non-entry module still work" {
+    assert get_lit() == 42;
+    assert get_neg_lit() == -1;
+}
+
+test "module-init ctor: computed-scalar global in a non-entry module initializes" {
+    // Pre-fix this read the zero default, not -1.
+    assert get_scalar() == -1;
+}
+
+test "module-init ctor: arithmetic global in a non-entry module initializes" {
+    assert get_arith() == 5;
+}
+
+test "module-init ctor: string-concat global in a non-entry module initializes" {
+    assert get_text() == "xy";
+}
+
+test "module-init ctor: boolean-comparison global in a non-entry module initializes" {
+    assert get_flag() == true;
+}
+
+test "module-init ctor: function-call-initializer global in a non-entry module initializes" {
+    assert get_called() == 7;
+}
+
+test "module-init ctor: array-literal global in a non-entry module initializes without segfaulting" {
+    // Pre-fix `arr` lowered to a null pointer and `.length` was an
+    // unguarded load — this crashed the whole test binary (exit 139)
+    // rather than failing an assertion.
+    assert get_arr_len() == 3;
+}
+
+test "module-init ctor: struct-literal global in a non-entry module initializes without segfaulting" {
+    assert get_pair_x() == 10;
+    assert get_pair_y() == 20;
+}
+
+// `module_init_ctor_two_module_notype_shared` declares no named type, so
+// `emit_type_descriptors` emits no `@llvm.global_ctors` array at all
+// (`type_descriptors.sfn`'s zero-preamble early return) and
+// `lowering_core/mod.sfn`'s standalone fallback is the sole producer.
+// These two tests are this fallback's only coverage — the sibling
+// fixture's `struct` always routes it through the merged branch instead.
+test "module-init ctor (standalone branch, no named types): computed-scalar global initializes" {
+    assert get_notype_scalar() == -1;
+}
+
+test "module-init ctor (standalone branch, no named types): function-call-initializer global initializes" {
+    assert get_notype_called() == 3;
+}
+
+// ---- IR-shape assertions: the one-`@llvm.global_ctors`-per-module
+// invariant the whole SFN-1005 design rests on. `merged_module_init`
+// (`type_descriptors.sfn`) and the standalone fallback
+// (`lowering_core/mod.sfn`) are handshake logic asserted only by comments
+// elsewhere — pin the emitted IR shape directly so a regression that
+// breaks the handshake (either a missing merge, producing two array
+// definitions LLVM rejects at link, or a dropped ctor) fails here instead
+// of at nightly self-host link.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-1005-module-init-ctor";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for the module at `module_path` (or "EMIT_FAILED").
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// Count of lines starting with `prefix`.
+fn _count_line_prefix(ir: string, prefix: string) -> int {
+    let lines = split(ir, "\n");
+    let mut count = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if starts_with(lines[i], prefix) { count = count + 1; }
+        i = i + 1;
+    }
+    return count;
+}
+
+test "module-init ctor (merged branch): exactly one @llvm.global_ctors, [2 x ...]" ![io] {
+    let ir = _emit_module("merged", "compiler/tests/e2e/fixtures/module_init_ctor_two_module_shared.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _count_line_prefix(ir, "@llvm.global_ctors = ") == 1;
+    assert contains(ir, "@llvm.global_ctors = appending global [2 x");
+    assert contains(ir, "i32 65534, void ()* @__sfn_module_type_init__");
+    assert contains(ir, "i32 65535, void ()* @sailfin_module_init__");
+}
+
+test "module-init ctor (standalone branch): exactly one @llvm.global_ctors, [1 x ...]" ![io] {
+    let ir = _emit_module("notype", "compiler/tests/e2e/fixtures/module_init_ctor_two_module_notype_shared.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _count_line_prefix(ir, "@llvm.global_ctors = ") == 1;
+    assert contains(ir, "@llvm.global_ctors = appending global [1 x");
+    assert contains(ir, "i32 65535, void ()* @sailfin_module_init__");
+}

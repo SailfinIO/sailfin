@@ -106,6 +106,23 @@ import {
     hoist_named_fn_value_adapters
 } from "./finalization";
 
+// True when `functions` defines a non-extern `fn main` — matches the
+// `emit_main_wrapper` gate in `emission.sfn` that plants the sole
+// `@sailfin_module_init__<module>` call site (SFN-1005: modules without
+// `fn main` need a `@llvm.global_ctors` entry instead, since nothing else
+// ever calls their module-init function).
+fn _module_defines_main(functions: NativeFunction[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= functions.length { return false; }
+        let f = functions[i];
+        i += 1;
+        if f == null { continue; }
+        if f.is_extern { continue; }
+        if f.name == "main" { return true; }
+    }
+}
+
 fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, import_context: ImportedModuleContext, mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult {
     set_syscall_lowering_module(native_module.module_name);
     let imported_manifests = import_context.manifests;
@@ -496,6 +513,26 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // does not recursively call itself. Its `@sfn_*` helper calls ride the
     // post-lowering `collect_runtime_helper_targets_from_lines` scan via
     // `module_init_lines`; its string constants are merged so they render.
+    // SFN-1005: a module with no `fn main` has no call site for the
+    // init function above (planted only at user-main entry, gated on
+    // `emission.sfn`'s `emit_main_wrapper`, true only for `fn main`), so
+    // its runtime-computed globals never run past `default_return_literal`'s
+    // zero value. Register the init function through `@llvm.global_ctors`
+    // instead for exactly that case — the entry module keeps its existing
+    // user-main call site unchanged. A ctor there would double-run
+    // initializers, and there is a sharper reason to keep it out: ctors
+    // run strictly before `@main`, deterministically (no race), but a
+    // throwing initializer that runs as a ctor throws with an empty
+    // exception chain and `sfn_throw` `abort()`s (`runtime/sfn/exception.sfn`)
+    // with no diagnostic, whereas the identical initializer running at the
+    // planted user-main call site executes inside the top-level exception
+    // frame `emission.sfn`'s `@main` wrapper installs, and gets the
+    // top-level catch with exit 1 instead of a bare SIGABRT.
+    //
+    // Known gap, not solved here: a `thread_local` global with a computed
+    // initializer only runs its ctor on the initial thread. None exist in
+    // the tree today; SFN-1005's follow-up covers per-thread init.
+    let module_needs_ctor = module_init_function != null && !_module_defines_main(local_functions);
     if module_init_function != null {
         let init_lowered = emit_llvm_function(module_init_function, context_functions, [], type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, false, decorator_import_names);
         module_init_lines = init_lowered.lines;
@@ -521,7 +558,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // lines participate in the post-lowering helper scan and the
     // descriptor globals + name strings ride along in the preamble
     // section we hand to the renderer below.
-    let type_descriptor_emission = emit_type_descriptors(type_context, native_module.module_name, injected_prelude_type_names);
+    let mut module_init_ctor_symbol: string = "";
+    if module_needs_ctor { module_init_ctor_symbol = module_init_symbol; }
+    let type_descriptor_emission = emit_type_descriptors(type_context, native_module.module_name, injected_prelude_type_names, module_init_ctor_symbol);
 
     // ── Assemble the body before rendering the preamble so the
     // helper-target scan covers every `call @<sym>(` emitted by the
@@ -540,6 +579,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     if type_descriptor_emission.has_descriptors {
         body_lines = extend_string_lines(body_lines, [""]);
         body_lines = extend_string_lines(body_lines, type_descriptor_emission.body_lines);
+    }
+    // SFN-1005: `emit_type_descriptors` merges this ctor into its own
+    // `@llvm.global_ctors` array when it emits one (`merged_module_init`);
+    // otherwise (no named types, or the type-meta module which owns
+    // `sfn_type_register` and suppresses its own ctor) this is the only
+    // `@llvm.global_ctors` definition in the module, so it's safe to emit
+    // standalone.
+    if module_needs_ctor {
+        if !type_descriptor_emission.merged_module_init {
+            body_lines = extend_string_lines(body_lines, [""]);
+            body_lines = extend_string_lines(body_lines, ["@llvm.global_ctors = appending global [1 x { i32, void ()*, i8* }] [{ i32, void ()*, i8* } { i32 65535, void ()* "
+                + module_init_symbol
+                + ", i8* null }]"]);
+        }
     }
 
     // ── Phase 4: Augment helpers with post-lowering observations and

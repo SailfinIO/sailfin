@@ -1,0 +1,77 @@
+// Non-entry-module fixture for SFN-1005.
+//
+// Pairs with `compiler/tests/e2e/module_init_ctor_two_module_test.sfn`.
+// This module deliberately defines no `fn main` — every existing
+// module-global regression (`check_build_agree_module_global_test.sfn`,
+// `module_global_runtime_init_probe.sfn`) puts its globals in the same
+// file as `fn main`, so none of them exercise the call site gate:
+// `@sailfin_module_init__<module>` is defined correctly for every module
+// but only ever CALLED from inside `fn main`'s body, gated on
+// `emission.sfn`'s `emit_main_wrapper`. A module with no `fn main` had a
+// fully-formed init function nothing called, so its runtime-computed
+// globals kept `default_return_literal`'s zero value (scalars) or a null
+// pointer (composites, segfaulting on first field/length access).
+//
+// This fixture also carries a named `struct` (`Pair`), so its module-init
+// ctor exercises the MERGED `@llvm.global_ctors` branch in
+// `type_descriptors.sfn` — see the paired
+// `module_init_ctor_two_module_notype_shared.sfn` for the standalone-ctor
+// branch (no named types).
+//
+// Every accessor below reads its global from a function DEFINED IN THIS
+// MODULE, not via a raw cross-module value import — cross-module import
+// of a runtime-computed global is a separate, pre-existing limitation
+// (`lower_imported_bindings_to_globals` skips `needs_init` bindings in
+// `module_globals.sfn`) unrelated to SFN-1005. `@llvm.global_ctors`
+// entries run at process start regardless of which module defines
+// `main`, so by the time the test module below calls these accessors,
+// this module's own ctor has already run.
+struct Pair {
+    x: int;
+    y: int;
+}
+
+fn _compute() -> int { return 7; }
+
+let lit: int = 42;
+let neg_lit: int = -1;
+let scalar: int = 0 - 1;
+let arith: int = 2 + 3;
+let text: string = "x" + "y";
+let flag: boolean = 1 > 0;
+let called: int = _compute();
+let arr: int[] = [1, 2, 3];
+let pair: Pair = Pair { x: 10, y: 20 };
+
+fn get_lit() -> int { return lit; }
+
+fn get_neg_lit() -> int { return neg_lit; }
+
+fn get_scalar() -> int { return scalar; }
+
+fn get_arith() -> int { return arith; }
+
+fn get_text() -> string { return text; }
+
+fn get_flag() -> boolean { return flag; }
+
+fn get_called() -> int { return called; }
+
+fn get_arr_len() -> int { return arr.length; }
+
+fn get_pair_x() -> int { return pair.x; }
+
+fn get_pair_y() -> int { return pair.y; }
+
+export {
+    get_arith,
+    get_arr_len,
+    get_called,
+    get_flag,
+    get_lit,
+    get_neg_lit,
+    get_pair_x,
+    get_pair_y,
+    get_scalar,
+    get_text
+};

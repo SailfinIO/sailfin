@@ -65,17 +65,24 @@ fn _kind_interface() -> int { return 3; }
 // existing struct/enum/interface type definitions; `body_lines`
 // (constructor + `@llvm.global_ctors`) trail the user function
 // bodies.
+// `merged_module_init` is true when the caller's module-init ctor
+// (SFN-1005) was folded into this function's own `@llvm.global_ctors`
+// array. The caller must fall back to emitting its own single-entry
+// array when this is false but a module-init ctor is still needed —
+// LLVM permits exactly one `@llvm.global_ctors` definition per module.
 struct TypeDescriptorEmission {
     preamble_lines: string[];
     body_lines: string[];
     has_descriptors: boolean;
+    merged_module_init: boolean;
 }
 
 fn _empty_emission() -> TypeDescriptorEmission {
     return TypeDescriptorEmission {
         preamble_lines: [],
         body_lines: [],
-        has_descriptors: false
+        has_descriptors: false,
+        merged_module_init: false
     };
 }
 
@@ -255,7 +262,13 @@ fn _already_seen(seen: string[], name: string) -> boolean {
 // linkage handles cross-module duplicates at link time but
 // llvm-as still rejects within-module duplicates. We dedupe by
 // type name before emission so the IR is always self-consistent.
-fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_names: string[]) -> TypeDescriptorEmission {
+// `module_init_ctor_symbol` (SFN-1005): non-empty when the caller's
+// `@sailfin_module_init__<module>` also needs a `@llvm.global_ctors`
+// entry (module has runtime-computed globals and defines no `fn main`,
+// so nothing else calls it). Already `@`-prefixed by the caller
+// (`module_globals.sfn::module_init_symbol`). Empty string means no
+// merge is needed.
+fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_names: string[], module_init_ctor_symbol: string) -> TypeDescriptorEmission {
     // Resolved once per module compile — `_emit_one_type` runs once per
     // named type and must not re-probe the cached resolver on that hot
     // path (SFN-549).
@@ -389,7 +402,8 @@ fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_na
         return TypeDescriptorEmission {
             preamble_lines: full_preamble,
             body_lines: [],
-            has_descriptors: true
+            has_descriptors: true,
+            merged_module_init: false
         };
     }
 
@@ -406,15 +420,47 @@ fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_na
     body.push("  ret void");
     body.push("}");
     body.push("");
-    body.push("@llvm.global_ctors = appending global [1 x { i32, void ()*, i8* }] [{ i32, void ()*, i8* } { i32 65535, void ()* @"
-        + init_sym
-        + ", i8* null }]");
+
+    // SFN-1005: a module without `fn main` has no call site for
+    // `@sailfin_module_init__<module>` (planted only at user-main entry —
+    // see `emission.sfn`'s `emit_main_wrapper` gate), so its
+    // runtime-computed globals never run past their zero default. LLVM
+    // permits exactly one `@llvm.global_ctors` definition per module, so
+    // when the caller needs one too, both entries share this single
+    // appending array — type descriptors first (65534) since a
+    // module-global's struct-literal initializer may call
+    // `sfn_resolve_type`, which needs a populated type registry.
+    //
+    // The 65534/65535 split is a GLOBAL ordering across every module in
+    // the link, not just within one: `@llvm.global_ctors` entries at the
+    // same priority land in the same `.init_array.<N>` section from every
+    // contributing TU, and ELF leaves same-priority, cross-TU ordering
+    // link-order dependent. A descriptor-only module (this `else`
+    // branch) and a module-init-only module (the standalone array in
+    // `mod.sfn`) must therefore both use 65534/65535 respectively too, or
+    // a descriptor-only module could run after a module-init-only one
+    // whose initializer resolves a type the descriptor hasn't registered
+    // yet.
+    let mut merged_module_init = false;
+    if module_init_ctor_symbol.length > 0 {
+        merged_module_init = true;
+        body.push("@llvm.global_ctors = appending global [2 x { i32, void ()*, i8* }] [{ i32, void ()*, i8* } { i32 65534, void ()* @"
+            + init_sym
+            + ", i8* null }, { i32, void ()*, i8* } { i32 65535, void ()* "
+            + module_init_ctor_symbol
+            + ", i8* null }]");
+    } else {
+        body.push("@llvm.global_ctors = appending global [1 x { i32, void ()*, i8* }] [{ i32, void ()*, i8* } { i32 65534, void ()* @"
+            + init_sym
+            + ", i8* null }]");
+    }
     body.push("");
 
     return TypeDescriptorEmission {
         preamble_lines: full_preamble,
         body_lines: body,
-        has_descriptors: true
+        has_descriptors: true,
+        merged_module_init: merged_module_init
     };
 }
 
