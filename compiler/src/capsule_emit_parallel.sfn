@@ -14,6 +14,18 @@ import { build_host_os } from "./build/target";
 import { validate_llvm_ir } from "./llvm_validation";
 import { substring } from "./string_utils";
 
+// Windows physical-RAM primitive (SFN-980), defined once per target in the
+// already target-conditioned `rlimit` pair
+// (`runtime/sfn/platform/rlimit_windows.sfn` via `GlobalMemoryStatusEx`;
+// `runtime/sfn/platform/rlimit.sfn`'s POSIX leg always 0) and linked into
+// this same compiler binary exactly as `cli/entry.sfn` reaches
+// `apply_default_mem_limit` from the same module pair — an `extern fn`
+// declaration resolved at link time, not a cross-module import (a raw
+// kernel32 extern declared directly in compiler source, which compiles
+// into one binary per host with no per-target conditioning, fails to link
+// on a non-Windows host).
+extern fn windows_physical_ram_bytes() -> i64;
+
 // Resolve the per-build job count for parallel subprocess emits.
 // Reads `SAILFIN_BUILD_JOBS` first, then a per-host probe ladder
 // (`_cr_host_cpu_count` / `_cr_host_memsize_bytes`), clamped to [1, 8]
@@ -97,18 +109,15 @@ fn _cr_host_cpu_count(host: string) -> int ![io] {
 
 // Per-host RAM-size probe ladder feeding `_cr_ram_budget_jobs`.
 //
-// Windows reports a conservative ASSUMED figure rather than a probed
-// one. There is no Win32-free way to read physical RAM
-// (`GlobalMemoryStatusEx` needs a runtime extern), and Windows is the
-// one host with no other backpressure at all: `RLIMIT_AS` is a Linux-only
-// no-op elsewhere (`runtime/sfn/platform/rlimit.sfn`), so an unclamped
-// fan-out there would be ~1.55 GiB per emit child against nothing (the
-// measured worst worker; SFN-626). A fail-open 0 would hand an 8-core
-// box 8 concurrent children (~12 GiB).
-// 16 GiB matches the `windows-latest` runner and yields 4 jobs on a
-// 4-core host — the same count a comparably-sized Linux box resolves to.
-// It under-fans a large Windows workstation; `SAILFIN_BUILD_JOBS` is the
-// lever, and a real probe retires the assumption.
+// Windows probes `GlobalMemoryStatusEx` (SFN-980) via
+// `windows_physical_ram_bytes`, falling back to a conservative 16 GiB
+// ASSUMED figure — matching the `windows-latest` runner — when the probe
+// fails, since Windows is the one host with no other backpressure at all:
+// `RLIMIT_AS` is a Linux-only no-op elsewhere
+// (`runtime/sfn/platform/rlimit.sfn`), so an unclamped fan-out there would
+// be ~1.55 GiB per emit child against nothing (the measured worst worker;
+// SFN-626). A fail-open 0 would hand an 8-core box 8 concurrent children
+// (~12 GiB).
 //
 // Darwin execs `sysctl -n hw.memsize` by argv (no shell). This is the
 // ONLY emit backpressure on Darwin, since `RLIMIT_AS` is a no-op there:
@@ -119,7 +128,11 @@ fn _cr_host_cpu_count(host: string) -> int ![io] {
 // inside a memory-limited container it over-reports and the clamp would
 // not bind, which is the #1245 OOM class.
 fn _cr_host_memsize_bytes(host: string) -> int ![io] {
-    if host == "Windows" { return 17179869184; }
+    if host == "Windows" {
+        let probed: int = windows_physical_ram_bytes() as int;
+        if probed > 0 { return probed; }
+        return 17179869184;
+    }
     if host == "Darwin" {
         return _cr_capture_int(["/usr/sbin/sysctl", "-n", "hw.memsize"]);
     }

@@ -1,6 +1,7 @@
 import { Matches, get_int, has } from "sfn/cli";
 
 import { _shell_read_cmd } from "../../../build/fs";
+import { build_host_os } from "../../../build/target";
 import { _get_env_cmd } from "../../../build_flags";
 import { _has_prefix_cmd } from "../../../string_cmd_utils";
 import {
@@ -124,8 +125,30 @@ fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int 
 // Native host probe for test-runner parallelism. This reuses the compiler's
 // popen-backed `_shell_read_cmd` primitive (also used by the emit fan-out
 // clamp) rather than depending on the Makefile or a helper script. Linux and
-// Darwin have reliable probes; unknown/Windows shells stay serial.
+// Darwin have reliable probes.
+//
+// Windows is checked FIRST, ahead of the `uname` shell probe below: native
+// Windows has no POSIX shell, so `_shell_read_cmd("uname -s ...")` degrades
+// to empty output and would otherwise fall through to the unknown-host
+// serial floor (SFN-980). `build_host_os()` is the de-shelled host
+// resolver already used by the emit fan-out
+// (`compiler/src/capsule_emit_parallel.sfn`). The CPU count comes from
+// `NUMBER_OF_PROCESSORS`, mirroring `_cr_host_cpu_count`'s Windows arm; the
+// RAM probe is `windows_physical_ram_bytes`, an `extern fn` resolved at
+// link time against the target-conditioned `rlimit`/`rlimit_windows`
+// runtime pair (see `capsule_emit_parallel.sfn`'s matching declaration for
+// why this cannot be a plain cross-module import). It returns 0 on any
+// failure — `_test_jobs_budget` floors that to 1, preserving this
+// function's fail-closed policy exactly as an unmeasurable Linux/Darwin
+// host does.
+extern fn windows_physical_ram_bytes() -> i64;
+
 fn _resolve_auto_test_jobs() -> int ![io] {
+    if build_host_os() == "Windows" {
+        let cores = _parse_positive_decimal_cmd(_get_env_cmd("NUMBER_OF_PROCESSORS"));
+        let memory = windows_physical_ram_bytes() as int;
+        return _test_jobs_budget(memory, cores, false);
+    }
     let host = _shell_read_cmd("uname -s 2>/dev/null");
     let mut is_darwin: boolean = false;
     let mut cores_text: string = "";

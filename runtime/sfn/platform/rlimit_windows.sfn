@@ -52,6 +52,8 @@ extern fn AssignProcessToJobObject(job: i64, process: i64) -> i32;
 
 extern fn GetCurrentProcess() -> i64;
 
+extern fn GlobalMemoryStatusEx(buffer: *u8) -> i32;
+
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
@@ -214,4 +216,50 @@ fn apply_default_mem_limit() -> i32 ![io] {
         _win_mem_limit_trace(m_def);
     }
     return 0;
+}
+
+// Physical RAM in bytes via `GlobalMemoryStatusEx` (SFN-980), or 0 on any
+// allocation/API failure. Compiler-source callers (`capsule_emit_parallel.sfn`,
+// `cli/commands/test/arg_and_jobs.sfn`) each apply their own fail policy on
+// 0 — the emit fan-out falls open to an assumed 16 GiB, the test pool falls
+// closed to serial via `_test_jobs_budget`'s own `<= 0` floor.
+//
+// Reuses the `_win_apply_job_memory_limit` idiom above: `malloc` a
+// caller-allocated `MEMORYSTATUSEX` buffer, `memset` it to zero, write the
+// DWORD-width `dwLength` field through the same 4-byte pointer-cast overlay
+// struct, and read back the ULONGLONG field via a computed byte offset.
+// `free` runs on every path.
+//
+// `MEMORYSTATUSEX` is 64 bytes on x86_64:
+//
+//   0    dwLength                    (4)
+//   4    dwMemoryLoad                (4)
+//   8    ullTotalPhys                (8)
+//   16   ullAvailPhys                (8)
+//   24   ullTotalPageFile            (8)
+//   32   ullAvailPageFile            (8)
+//   40   ullTotalVirtual             (8)
+//   48   ullAvailVirtual             (8)
+//   56   ullAvailExtendedVirtual     (8)
+//
+// `dwLength` MUST be pre-set to 64 before the call or the API fails; only
+// `ullTotalPhys` @8 is read back.
+fn windows_physical_ram_bytes() -> i64 ![io] {
+    let buf: *u8 = malloc(64 as usize);
+    if buf as i64 == 0 { return 0; }
+    memset(buf, 0, 64 as usize);
+
+    let length_view: *RwDword = buf as *RwDword;
+    length_view.v = 64;
+
+    let rc = GlobalMemoryStatusEx(buf);
+    if rc == 0 {
+        free(buf);
+        return 0;
+    }
+
+    let total_phys: i64 = atomic_load((buf as i64 + 8) as *i64);
+    free(buf);
+    if total_phys < 0 { return 0; }
+    return total_phys;
 }

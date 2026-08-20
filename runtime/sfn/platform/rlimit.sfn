@@ -252,3 +252,12 @@ fn _apply_linux_rlimit_as(target: i64, explicit: bool) -> i32 ![io] {
     }
     return 0;
 }
+
+// POSIX leg of `windows_physical_ram_bytes` (SFN-980). Always 0: there is no
+// `GlobalMemoryStatusEx` equivalent to query on POSIX, and this
+// deliberately does not stand in for the richer POSIX probes
+// (`/proc/meminfo` + cgroup v2 intersection, `sysctl hw.memsize`) already
+// used on Linux/Darwin. Exists purely so the symbol resolves on every
+// target — the two Windows-gated call sites (`capsule_emit_parallel.sfn`,
+// `cli/commands/test/arg_and_jobs.sfn`) never reach this leg in practice.
+fn windows_physical_ram_bytes() -> i64 ![io] { return 0; }
