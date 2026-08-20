@@ -442,6 +442,17 @@ jobs:
   # shared `sailfin-build-windows` composite, then packages the result with
   # `sfn package --installer --target windows-x86_64-msvc`.
   #
+  # Deliberately self-contained rather than reusing the `linux-x86_64` leg's
+  # own `make ci-cross-windows` output: `upload` now gates on this leg (see
+  # its `needs` below), so this pair runs in PARALLEL with the `build`
+  # matrix — `native-windows-cross-seed` (~15m) then `native-windows-build`
+  # (~60m), ~75m total. Threading the matrix leg's artifact through instead
+  # would make this leg `needs: build`, which waits for the full matrix
+  # including the slow arm64 leg (~40m) before its own ~60m even starts —
+  # ~100m instead of ~75m. The duplicated ~15m cross-compile buys back ~25m
+  # on the release critical path; it is not about the artifact name (that
+  # part is a 6-line fix either way).
+  #
   # `continue-on-error: true` on both: this is the asset's first-ever
   # release run, and a failure here must not withhold or fail the release —
   # the mingw-cross asset (`installer-windows-x86_64.tar.gz`, published as
@@ -740,6 +751,21 @@ jobs:
             bash .release-gates/scripts/verify-payload-dep-closure.sh \
               "dist/sailfin_${version}_${label}.tar.gz"
           done
+          # SFN-57: the native MSVC asset is optional this cycle (the leg
+          # carries `continue-on-error: true`), so it is deliberately absent
+          # from the required `label` loop above -- an unconditional entry
+          # would fail the release whenever the native leg itself failed,
+          # reintroducing the hard blocker that flag exists to avoid. But
+          # when the asset IS present, it is the one payload in this release
+          # produced by a brand-new, never-before-executed code path (the
+          # first native-Windows run of `_package_installer`), so its
+          # dependency closure is exactly the thing most likely to be wrong
+          # and least acceptable to skip checking. Verify it whenever it
+          # exists; only its absence is optional, not its correctness.
+          msvc_payload="dist/sailfin_${version}_windows_x86_64_msvc.tar.gz"
+          if [ -f "$msvc_payload" ]; then
+            bash .release-gates/scripts/verify-payload-dep-closure.sh "$msvc_payload"
+          fi
 
       # Supply-chain root: publish a signed SHA256SUMS manifest over the release
       # assets so `sfn` can verify a fetched toolchain against the public key
