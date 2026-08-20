@@ -482,10 +482,35 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz' -exec mv -f {} dist/ \;
-          find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz.sha256' -exec mv -f {} dist/ \;
-          find . -maxdepth 3 -type f -name 'sailfin-native-*.manifest.json' -exec mv -f {} dist/ \;
-          find . -maxdepth 3 -type f -name 'installer-*.tar.gz' -exec mv -f {} dist/ \;
+
+          # `mv -f` on a basename collision silently overwrites — last file
+          # wins, no error. This guard converts that to a hard failure.
+          #
+          # Scope, stated honestly: the prior "Download build artifacts" step
+          # downloads with `merge-multiple: true` into `path: .`, which
+          # already collapses two uploaded artifacts that share the exact
+          # same relative path — that collision is silently resolved before
+          # this step ever runs, and this guard cannot see or catch it. What
+          # it DOES catch is a collision arising at this `mv -f` layer: two
+          # files that survive the download merge at different paths under
+          # `.` (maxdepth 3) but share a basename, which `mv -f` into the
+          # flat `dist/` would otherwise silently collapse the same way.
+          move_unique() {
+            local pattern="$1"
+            local dupes
+            dupes="$(find . -maxdepth 3 -type f -name "$pattern" -printf '%f\n' | sort | uniq -d)"
+            if [ -n "$dupes" ]; then
+              echo "[normalize][error] duplicate basename(s) found for pattern '$pattern':" >&2
+              echo "$dupes" >&2
+              exit 1
+            fi
+            find . -maxdepth 3 -type f -name "$pattern" -exec mv -f {} dist/ \;
+          }
+
+          move_unique 'sailfin-native-*.tar.gz'
+          move_unique 'sailfin-native-*.tar.gz.sha256'
+          move_unique 'sailfin-native-*.manifest.json'
+          move_unique 'installer-*.tar.gz'
 
       - name: Prepare installer assets
         shell: bash

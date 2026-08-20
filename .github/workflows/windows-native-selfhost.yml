@@ -244,11 +244,46 @@ jobs:
           fi
           echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
 
+      # SFN-57 / SFEP-0021 M11: package the fixed-point-proven binary as a
+      # native MSVC installer archive every night, so the release-tag.yml
+      # native leg has a continuously-exercised sequence to model rather than
+      # a first-of-its-kind one. This is deliberately downstream of the
+      # fixed-point gate above, not the build step: the mandate is publishing
+      # a *proven* seed, and the fixed point is what proves this binary
+      # self-hosts deterministically before anything gets packaged from it.
+      #
+      # `--compiler-bin` is required: `sfn package` defaults to
+      # `build/bin/sfn`, but the Stage 2 build step above lands the native
+      # binary under `build/capsules/sfn/compiler/bin/compiler.exe`
+      # (`sailfin-build-windows/action.yml`'s locate step) and exports that
+      # path as `$NATIVE_SFN`.
+      - name: Package native MSVC installer
+        id: package_installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NATIVE_SFN" package --installer --target windows-x86_64-msvc --compiler-bin "$NATIVE_SFN"
+          ls -la dist/installer-windows-x86_64-msvc.tar.gz
+
+      # Named to NOT match the `release-*` pattern release-tag.yml's
+      # "Download build artifacts" step filters on — this nightly artifact
+      # must never be picked up by a release run; only release-tag.yml's own
+      # native leg produces the asset that actually ships.
+      - name: Upload native MSVC installer (nightly, not a release asset)
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-native-msvc-installer-nightly
+          path: dist/installer-windows-x86_64-msvc.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
       # SFN-55 review A2: `notify-failure` needs a gate name to file the
-      # regression issue under. Two values only — the fixed-point step's own
+      # regression issue under. Three values now — the fixed-point step's own
       # outcome distinguishes a determinism break from everything upstream of
       # it (seed staging, the ladder, the Stage 2 build, or an ABI gate),
-      # which all collapse to "the native build itself is broken".
+      # which all collapse to "the native build itself is broken"; the
+      # packaging step's outcome (SFN-57) is attributed separately so a
+      # packaging regression doesn't misreport as a fixed-point break.
       - name: Identify failed gate
         id: identify_gate
         if: always()
@@ -257,6 +292,8 @@ jobs:
           set -euo pipefail
           if [ "${{ steps.fixed_point.outcome }}" = "failure" ]; then
             gate=windows-fixed-point
+          elif [ "${{ steps.package_installer.outcome }}" = "failure" ]; then
+            gate=windows-native-package
           else
             gate=windows-native-build
           fi
