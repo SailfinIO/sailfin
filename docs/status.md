@@ -512,16 +512,19 @@ here.
   fixed for `sfn toolchain install`). `copy_tree` copies what a symlink
   resolves to rather than preserving it — a stated divergence from `cp -R`,
   not a bug, since neither `is_symlink` nor `lstat` exists yet and no tree in
-  scope contains one. **`sfn package --installer` now runs end-to-end on a
-  native Windows host**: SFN-753's in-process `.tar.gz` writer retired the
-  `tar -czf` shell spawns, and an ISO-8601 epoch→civil formatter retired the
-  `date -u` ones, so no `process.run`/shell read remains on the Windows
-  packaging path. The one surviving `uname -m` arch probe is unreachable on
-  Windows — `_package_detect_target` returns `"windows-x86_64"` before
-  control reaches it. SFN-57 (SFEP-0021 M11) builds on this to publish a
-  native MSVC-built Windows seed from `release-tag.yml`, packaged with `sfn
-  package --installer --target windows-x86_64-msvc` and staged first through
-  the `windows-native-selfhost.yml` nightly.
+  scope contains one. **`sfn package --installer` should now run end-to-end
+  on a native Windows host**: SFN-753's in-process `.tar.gz` writer retired
+  the `tar -czf` shell spawns, and an ISO-8601 epoch→civil formatter retired
+  the `date -u` ones, so no `process.run`/shell read remains on the Windows
+  packaging path by code reading. The one surviving `uname -m` arch probe is
+  unreachable on Windows — `_package_detect_target` returns
+  `"windows-x86_64"` before control reaches it. This is not yet an observed
+  fact: `windows-native-selfhost.yml`'s nightly `native-build` job (SFN-57 /
+  SFEP-0021 M11) now packages the fixed-point-proven binary every night to
+  exercise exactly this path, but no run has gone green yet. Per SFEP-0021
+  §4.3's staging order, a native MSVC release asset (`sfn package --installer
+  --target windows-x86_64-msvc` from `release-tag.yml`) is planned once that
+  nightly is green, not shipped yet.
 - **Structured output.** `sfn build --json` emits a schema-versioned
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP
@@ -1256,7 +1259,7 @@ the former with zero work toward the latter.
 |---|---|---|
 | Linux x86-64 | Shipped; primary CI host (`ci.yml`); release asset published | In progress — direct `ld.lld` link path exists (`build/direct_link.sfn::resolve_direct_ld_lld`); owned syscall layer not started — the raw-syscall primitive ships (`compiler/capsules/codegen-llvm/src/syscall.sfn`, SFEP-0060), its sole permitted consumer `runtime/sfn/platform/syscall_linux.sfn` is unwritten |
 | macOS arm64 (Apple Silicon) | Shipped; CI host; release asset published; effect enforcement partial (#613) | Not a target — mediated vendor-library shim (SFEP-0016 §3.1; no stable raw-syscall ABI) |
-| Windows x86-64 | **Tier 3 — best effort** (`docs/conventions/target-tiers.md`). Cross-compiled from Linux (`ci-cross-windows`); release asset published. `smoke-windows` (frontend-only: boots, `sfn check` on one example) blocks every source PR. SFN-55 (SFEP-0021 M9) adds native MSVC coverage: `build-compiler-windows` in `ci.yml` is a path-filtered `windows-2025` merge-blocking gate (fires only on PRs matching the Windows-relevant path filter, always on `merge_group`) that runs the SFN-53 diagnostic ladder plus boot/check/run/R1(try-throw)/R3(struct-channel) ABI gates; `windows-native-selfhost.yml` is the unconditional nightly backstop (push:main + 08:00 UTC cron), adding the M8/SFN-54 self-host fixed point (pass-2 byte-identical to pass-1). Neither leg runs the test suite — `sfn test` has never executed on a native Windows host (four independent blockers, see the SFN-55 design note §10) — so the target stays Tier 3 pending that successor. | Not a target — mediated vendor-library shim (SFEP-0016 §3.1) |
+| Windows x86-64 | **Tier 3 — best effort** (`docs/conventions/target-tiers.md`). Cross-compiled from Linux (`ci-cross-windows`); release asset published. `smoke-windows` (frontend-only: boots, `sfn check` on one example) blocks every source PR. SFN-55 (SFEP-0021 M9) adds native MSVC coverage: `build-compiler-windows` in `ci.yml` is a path-filtered `windows-2025` merge-blocking gate (fires only on PRs matching the Windows-relevant path filter, always on `merge_group`) that runs the SFN-53 diagnostic ladder plus boot/check/run/R1(try-throw)/R3(struct-channel) ABI gates; `windows-native-selfhost.yml` is the unconditional nightly backstop (push:main + 08:00 UTC cron), adding the M8/SFN-54 self-host fixed point (pass-2 byte-identical to pass-1). Neither leg runs the full test suite, but `sfn test` has executed on a native Windows host: the shared `sailfin-build-windows` composite's Gate R4 runs one deliberately Windows-portable e2e test (`compiler/tests/e2e/socket_ops_timeout_readback_test.sfn`, chosen for importing nothing from `sfn/test` and touching no `/tmp` or `/bin/sh`) on both legs, verifying SFN-927's Winsock fixes natively for the first time. The full-suite blockers the SFN-55 design note §10 catalogued (`.exe`-less hardcoded paths across 328 files, `/tmp`/`/bin/sh` literals in 221 e2e files, a serial-only `_resolve_auto_test_jobs` budget) are untouched by this one gate, so the target stays Tier 3 pending that successor. | Not a target — mediated vendor-library shim (SFEP-0016 §3.1) |
 | Linux aarch64 | **Tier 2** (`docs/conventions/target-tiers.md`). Source PRs and merge queues require the `aarch64-linux-result` aggregate, which covers cross-emission, the native pass-1/pass-2 fixed point and smoke probe, shard-cover, and all eight cached test shards (SFN-826, SFN-476). The daily scheduled workflow adds a cold unsharded `--no-test-cache` suite under the native 16-GiB job budget. v0.9.3 publishes the native and installer ARM64 assets; release publication and seed pinning require both (SFN-581, SFN-799). Host-layout support and the direct `ld.lld` fast path are shipped (SFN-471, SFN-473, SFEP-0056). | Not a target |
 
 **Base support is never a claim that the seal holds on that platform** — the
