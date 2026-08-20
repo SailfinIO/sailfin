@@ -66,7 +66,12 @@ import {
     source_fingerprint_path,
     write_fingerprint
 } from "../../build/source_fingerprint";
-import { starts_with, strings_equal, substring } from "../../string_utils";
+import {
+    is_absolute_path,
+    starts_with,
+    strings_equal,
+    substring
+} from "../../string_utils";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 import { arena_command_def, arena_run } from "./dev_arena";
@@ -92,23 +97,8 @@ fn _bootstrap_work_root() -> string ![io] {
 // Without the drive-letter arm a `C:\...` install base read from
 // `bootstrap.toml` is treated as relative and gets a cwd prefix, producing
 // an alias target that resolves nowhere.
-//
-// Both separators are accepted because this path is not `\`->`/` normalized
-// first, unlike the two existing inlined copies of this check at
-// `module_paths.sfn:73-84` and `main.sfn:325-338`; like those, the drive
-// character itself is not validated as a letter. Folding all three into one
-// shared `is_absolute_path` helper is a named follow-up in the SFN-495
-// design note (§9), not scope here.
 fn _bootstrap_is_absolute(path: string) -> boolean {
-    if path.length == 0 { return false; }
-    if path[0] == "/" { return true; }
-    if path.length >= 3 {
-        if path[1] == ":" {
-            if path[2] == "/" { return true; }
-            if path[2] == "\\" { return true; }
-        }
-    }
-    return false;
+    return is_absolute_path(path);
 }
 
 // Absolute path to `path` (relative paths are resolved against the current

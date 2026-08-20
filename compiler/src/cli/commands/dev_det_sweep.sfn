@@ -41,7 +41,7 @@ import { _sort_strings_cmd } from "../../string_cmd_utils";
 import {
     char_code_at_text,
     ends_with,
-    starts_with,
+    is_absolute_path,
     strings_equal,
     substring
 } from "../../string_utils";
@@ -50,6 +50,17 @@ import { _resolve_test_self_path } from "./test/pool";
 
 fn _det_slug_of(src: string) -> string ![io] {
     return module_name_for_source(src);
+}
+
+// Absolutize `path` against `repo_root` when it is not already rooted.
+// `is_absolute_path` (not a POSIX-only `/` check) so a Windows drive-absolute
+// `--seed`/`--out`/module path is recognized as already-rooted instead of
+// getting a `repo_root + "/"` prefix baked onto it (SFN-704). Pure so the
+// three call sites (module path, seed path, `--out`) are unit-testable
+// directly against a fixed `repo_root`.
+fn _det_abspath(repo_root: string, path: string) -> string {
+    if is_absolute_path(path) { return path; }
+    return repo_root + "/" + path;
 }
 
 // Filesystem-safe form of a slug: every `/` flattened to `_` (bash line 48).
@@ -146,13 +157,11 @@ fn _det_worker(src: string, seed: string, iters: int, out: string) -> int ![io] 
     let safe = _det_safe_of(src);
 
     let repo_root = _shell_read_cmd("pwd");
-    let mut abs_src = src;
-    if !starts_with(abs_src, "/") { abs_src = repo_root + "/" + src; }
+    let abs_src = _det_abspath(repo_root, src);
     // `emit` runs with cwd = mod_cwd, so a relative seed path (the default
     // `build/bin/sfn`) would resolve against the module dir and fail to exec.
     // Absolutize it against the repo root the orchestrator was launched from.
-    let mut abs_seed = seed;
-    if !starts_with(abs_seed, "/") { abs_seed = repo_root + "/" + seed; }
+    let abs_seed = _det_abspath(repo_root, seed);
 
     let mod_cwd = out + "/cwd/" + safe;
     process.run(["rm", "-rf", mod_cwd]);
@@ -334,8 +343,7 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     let modules = _det_enumerate_modules(roots);
 
     let repo_root = _shell_read_cmd("pwd");
-    let mut out = out_in;
-    if !starts_with(out, "/") { out = repo_root + "/" + out; }
+    let out = _det_abspath(repo_root, out_in);
 
     // The sweep `rm -rf`s its `--out` dir to start clean; refuse paths whose
     // deletion would be catastrophic (filesystem root, or the repo checkout the
@@ -520,6 +528,7 @@ fn det_sweep_run(matches: Matches, ctx: CliContext) -> int ![io] {
 export {
     det_sweep_command_def,
     det_sweep_run,
+    _det_abspath,
     _det_slug_of,
     _det_safe_of,
     _det_distinct_count,

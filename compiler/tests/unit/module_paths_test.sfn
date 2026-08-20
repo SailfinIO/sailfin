@@ -93,3 +93,11 @@ test "source identity: standalone fallback has no repository special cases" {
 test "source identity: standalone absolute fallback strips the root separator" {
     assert expect_eq_str(module_name_from_path("/tmp/project/src/main.sfn"), "tmp/project/src/main").ok;
 }
+
+// SFN-704: the strip only recognized a leading POSIX `/`, so a
+// drive-absolute source baked its `C:/` root into the emitted slug instead
+// of stripping it like the POSIX case above.
+test "source identity: standalone drive-absolute fallback strips the drive root" {
+    assert expect_eq_str(module_name_from_path("C:/project/src/main.sfn"), "project/src/main").ok;
+    assert expect_eq_str(module_name_from_path("C:\\project\\src\\main.sfn"), "project/src/main").ok;
+}

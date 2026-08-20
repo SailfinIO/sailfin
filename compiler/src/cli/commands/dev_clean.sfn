@@ -32,6 +32,7 @@ import { _selfhost_remove_tree } from "../../cli_selfhost";
 import {
     ends_with,
     index_of,
+    is_absolute_path,
     starts_with,
     strings_equal,
     substring
@@ -107,7 +108,7 @@ fn _preserved_build_children() -> string[] ![io] {
 // this pins it to the intended tree before anything is unlinked.
 fn _clean_target_ok(rel: string) -> boolean {
     if rel.length == 0 { return false; }
-    if starts_with(rel, "/") { return false; }
+    if is_absolute_path(rel) { return false; }
     if strings_equal(rel, "..") { return false; }
     if starts_with(rel, "../") { return false; }
     if index_of(rel, "/../") >= 0 { return false; }
@@ -122,7 +123,7 @@ fn _clean_target_ok(rel: string) -> boolean {
 // once (mirrors dev.sfn::_bootstrap_abspath, minus the `pwd` fork — this runs
 // per target, and forking a shell for each one is pure waste).
 fn _clean_abs_with(cwd: string, path: string) -> string {
-    if starts_with(path, "/") { return path; }
+    if is_absolute_path(path) { return path; }
     if cwd.length == 0 { return path; }
     return cwd + "/" + path;
 }
@@ -139,10 +140,26 @@ fn _clean_abs_with(cwd: string, path: string) -> string {
 // exists to remove; guarding it would silently leave `build/cache` behind on
 // those hosts while reporting success, which is the opposite of what
 // `make clean-build` is run for before a structural rebuild.
-fn _clean_guard_cache_root(cwd: string) -> string ![io] {
-    let raw = cache_root("");
-    if !starts_with(raw, "/") { return ""; }
+//
+// `is_absolute_path` (not a POSIX-only `/` check) so a drive-absolute
+// `cache_root("")` from `HOME` on a native Windows host (`build_cache.sfn:692`)
+// is recognized as the global cache and guarded too — a POSIX-only check
+// misread it as the relative repo-local case, returned `""`, and left the
+// global cache unguarded against the build-tree wipe (SFN-704).
+//
+// Split into a pure decision (`_clean_guard_cache_root_from`) over an
+// explicit `raw` root, matching `build_cache.sfn`'s `cache_root`/
+// `cache_root_from` split: the io-effectful `cache_root("")` read is
+// isolated to this one-line wrapper, so the POSIX/drive-absolute/relative
+// matrix is unit-testable directly against a raw string, without depending
+// on the process environment.
+fn _clean_guard_cache_root_from(cwd: string, raw: string) -> string {
+    if !is_absolute_path(raw) { return ""; }
     return _clean_abs_with(cwd, raw);
+}
+
+fn _clean_guard_cache_root(cwd: string) -> string ![io] {
+    return _clean_guard_cache_root_from(cwd, cache_root(""));
 }
 
 fn _clean_would_hit_cache_root(abs_target: string, abs_cache_root: string) -> boolean {
@@ -328,4 +345,10 @@ fn clean_command_def() -> Command {
     return clean;
 }
 
-export { clean_command_def, clean_run };
+export {
+    clean_command_def,
+    clean_run,
+    _clean_target_ok,
+    _clean_abs_with,
+    _clean_guard_cache_root_from
+};

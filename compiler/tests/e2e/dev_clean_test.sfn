@@ -7,6 +7,8 @@
 import { find, split } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
+import { _clean_abs_with, _clean_guard_cache_root_from, _clean_target_ok } from "../../src/cli/commands/dev_clean";
+
 // The child's cwd is a scratch repo, which differs from this test's own
 // cwd — a relative `sfn_bin_path()` would not resolve there, so absolutize it.
 fn _sfn_bin_abs() -> string ![io] {
@@ -59,6 +61,51 @@ fn _seed_repo(repo: string) -> void ![io] {
     fs.writeFile(repo + "/build/toolchains/seed/bin/marker.txt", "seed\n");
     fs.createDirectory(repo + "/dist", true);
     fs.writeFile(repo + "/dist/marker.txt", "dist\n");
+}
+
+// --------------------------------------------------------------
+// Pure absoluteness-check coverage (SFN-704). `_clean_target_ok`,
+// `_clean_abs_with`, and `_clean_guard_cache_root_from` were POSIX-only
+// (`starts_with(x, "/")`), so a Windows drive-absolute path was
+// misclassified as relative. Exercised directly rather than through the
+// subprocess-driven tests below, since these are pure string logic with
+// no host dependency.
+// --------------------------------------------------------------
+test "dev clean: _clean_target_ok rejects a drive-absolute target" {
+    assert ! _clean_target_ok("C:/repo/build/native");
+    assert ! _clean_target_ok("C:\\repo\\build\\native");
+    assert _clean_target_ok("build/native");
+}
+
+test "dev clean: _clean_abs_with treats a drive-absolute path as already absolute" {
+    // A POSIX-only check would have prefixed the cwd onto this, producing
+    // a nonsense joined path instead of leaving the drive-absolute path
+    // untouched.
+    assert _clean_abs_with("/home/dev/repo", "C:/Users/foo/build") == "C:/Users/foo/build";
+    assert _clean_abs_with("/home/dev/repo", "build/native") == "/home/dev/repo/build/native";
+}
+
+test "dev clean: cache-root guard recognizes a drive-absolute root" {
+    // The highest-stakes site: on a native Windows host, `cache_root("")`
+    // can legitimately be drive-absolute via HOME (build_cache.sfn:692). A
+    // POSIX-only check misread it as the relative repo-local case and
+    // disabled the guard entirely.
+    let guarded = _clean_guard_cache_root_from("/home/dev/repo", "C:/Users/foo/.cache/sailfin/v2");
+    assert guarded == "C:/Users/foo/.cache/sailfin/v2";
+}
+
+test "dev clean: cache-root guard recognizes a POSIX-absolute root" {
+    let guarded = _clean_guard_cache_root_from("/home/dev/repo", "/home/dev/.cache/sailfin/v2");
+    assert guarded == "/home/dev/.cache/sailfin/v2";
+}
+
+// Verified negative: a genuinely relative root (containers, `env -i`,
+// systemd units — build_cache.sfn:637-666, no XDG_CACHE_HOME/HOME) must
+// keep returning "" so the guard stays off and `build/cache` is still
+// wiped on those hosts. A regression here silently leaves stale cache
+// content behind while reporting success.
+test "dev clean: cache-root guard leaves a genuinely relative root unguarded" {
+    assert _clean_guard_cache_root_from("/home/dev/repo", "build/cache/v2") == "";
 }
 
 test "dev clean: dry-run removes nothing" ![io] {

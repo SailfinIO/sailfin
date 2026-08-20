@@ -5,7 +5,7 @@
 // manifest-prefixed, or runtime-provider-prefixed. The standalone fallback is
 // deliberately repository-agnostic so future source moves do not grow another
 // physical-path compatibility branch here.
-import { substring } from "./string_utils";
+import { path_root_prefix_len, substring } from "./string_utils";
 
 struct SourceIdentityOwner {
     manifest_name: string;
@@ -264,8 +264,12 @@ fn module_name_from_path(source_path: string) -> string {
     let normalized = _source_identity_normalize_path(source_path);
     let mut stripped = _source_identity_strip_extension(normalized);
     if stripped.length == 0 { return "main"; }
-    if substring(stripped, 0, 1) == "/" {
-        stripped = substring(stripped, 1, stripped.length);
+    // Strip a leading root (`/`, `C:/`, `C:\`, `\\server\share`), not just a
+    // POSIX `/`. A POSIX-only strip left a Windows drive-absolute source
+    // baking its `C:/` prefix into the emitted slug (SFN-704).
+    let root_len = path_root_prefix_len(stripped);
+    if root_len > 0 {
+        stripped = substring(stripped, root_len, stripped.length);
     }
     if stripped.length == 0 { return "main"; }
     return stripped;
