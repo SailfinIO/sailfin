@@ -22,7 +22,8 @@
 //   7. manifest    — runtime/capsule.toml sfn-sources lists the adapter.
 //   8. round-trips — write/read/append (incl. a multi-MB grow path) and
 //                    createDirectory/listDirectory/deleteFile, exercised
-//                    through the real `sfn run` link path.
+//                    through a real `sfn build` + direct-exec link path
+//                    (`sfn run` takes no fixture argv — `run.sfn:117-121`).
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
 // they cannot be called from an `![io]` test. For subprocess/IR-output
@@ -305,6 +306,7 @@ test "fs.writeFile / readFile / appendFile round-trip end-to-end" ![io] {
     // `path` itself so no path is spliced into source text (a Windows
     // scratch dir is a backslash path — see the probe tests above).
     fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    if argv.length < 2 { print.error(\"missing-arg\"); return 2; }\n"
         + "    let path = argv[1] + \"/round_trip.txt\";\n"
         + "    fs.writeFile(path, \"first chunk\");\n"
         + "    let after_write = fs.readFile(path);\n"
@@ -319,7 +321,13 @@ test "fs.writeFile / readFile / appendFile round-trip end-to-end" ![io] {
     // as argv[1]. Thread PATH + SAILFIN_TEST_SCRATCH (via _child_env) so
     // the linker resolves and program.ll stays per-invocation under the
     // parallel pool.
-    let binpath = dir + "/round_trip_probe";
+    // SFN-693: `-o` is honored verbatim on every target
+    // (`compiler/src/build/target.sfn:248-253`), so the compiler never
+    // adds the suffix here. Windows spawn sites call `CreateProcessA`
+    // with `lpApplicationName = null`, which appends `.exe` when the
+    // parsed name has none — an extensionless PE is unlaunchable. Named
+    // `.exe` on every host: a POSIX ELF does not care about the suffix.
+    let binpath = dir + "/round_trip_probe.exe";
     let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, probe], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
@@ -345,6 +353,7 @@ test "fs.createDirectory / listDirectory / deleteFile round-trip end-to-end" ![i
     // SFN-1001: argv[1] carries the scratch dir; the fixture derives
     // base/listing/listing2 itself so no path is spliced into source text.
     fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    if argv.length < 2 { print.error(\"missing-arg\"); return 2; }\n"
         + "    let dir = argv[1];\n"
         + "    let base = dir + \"/m31b\";\n"
         + "    let listing = dir + \"/listing.txt\";\n"
@@ -373,7 +382,13 @@ test "fs.createDirectory / listDirectory / deleteFile round-trip end-to-end" ![i
         + "}\n");
     // Build then exec directly so the scratch dir reaches the fixture as
     // argv[1] (`sfn run` has no argv-passthrough surface).
-    let binpath = dir + "/m31b_probe";
+    // SFN-693: `-o` is honored verbatim on every target
+    // (`compiler/src/build/target.sfn:248-253`), so the compiler never
+    // adds the suffix here. Windows spawn sites call `CreateProcessA`
+    // with `lpApplicationName = null`, which appends `.exe` when the
+    // parsed name has none — an extensionless PE is unlaunchable. Named
+    // `.exe` on every host: a POSIX ELF does not care about the suffix.
+    let binpath = dir + "/m31b_probe.exe";
     let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, probe], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
@@ -418,6 +433,7 @@ test "large-file round-trip exercises the chunked-read grow path" ![io] {
     // SFN-1001: argv[1] carries the scratch dir; src/dst are derived
     // inside the fixture so no path is spliced into source text.
     fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    if argv.length < 2 { print.error(\"missing-arg\"); return 2; }\n"
         + "    let dir = argv[1];\n"
         + "    let src = dir + \"/large.bin.expected\";\n"
         + "    let dst = dir + \"/large.bin\";\n"
@@ -429,7 +445,13 @@ test "large-file round-trip exercises the chunked-read grow path" ![io] {
         + "}\n");
     // Build then exec directly so the scratch dir reaches the fixture as
     // argv[1] (`sfn run` has no argv-passthrough surface).
-    let binpath = dir + "/large_probe";
+    // SFN-693: `-o` is honored verbatim on every target
+    // (`compiler/src/build/target.sfn:248-253`), so the compiler never
+    // adds the suffix here. Windows spawn sites call `CreateProcessA`
+    // with `lpApplicationName = null`, which appends `.exe` when the
+    // parsed name has none — an extensionless PE is unlaunchable. Named
+    // `.exe` on every host: a POSIX ELF does not care about the suffix.
+    let binpath = dir + "/large_probe.exe";
     let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, probe], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
