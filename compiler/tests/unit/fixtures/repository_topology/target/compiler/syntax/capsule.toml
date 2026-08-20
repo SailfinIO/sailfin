@@ -1,6 +1,10 @@
 [capsule]
 name = "sfn/syntax"
 version = "0.0.0"
+publish = false
+
+[capabilities]
+required = []
 
 [build]
 kind = "library"

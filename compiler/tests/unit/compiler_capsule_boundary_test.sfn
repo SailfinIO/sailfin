@@ -13,7 +13,19 @@ import {
     trim
 } from "sfn/strings";
 
+import { capsule_artifact_dir, parse_scope_name } from "../../src/capsule_artifact";
 import { collect_scoped_import_specs } from "../../src/capsule_import_scan";
+import { compiler_capsule_role, compiler_module_role } from "../../src/capsule_names";
+import { module_name_for_source_with_members } from "../../src/capsule_resolver/identity";
+import { WorkspaceMember } from "../../src/capsule_resolver/types";
+import { load_workspace_members, validate_unique_workspace_member_names } from "../../src/capsule_resolver/workspace";
+import {
+    toml_get_capabilities_required,
+    toml_get_dependencies,
+    toml_get_publish,
+    toml_get_string,
+    toml_get_version
+} from "../../src/toml_parser";
 
 let ROLE_SYNTAX: string = "syntax";
 let ROLE_ANALYZER: string = "analyzer";
@@ -80,22 +92,11 @@ fn _spec_is_capsule(spec: string, capsule: string) -> boolean {
 fn _role_from_internal_spec(spec: string) -> string {
     if spec == "runtime/prelude" { return ROLE_RUNTIME_PRELUDE; }
     if starts_with(spec, "runtime/") { return ROLE_RUNTIME_INTERNAL; }
-    if spec == "sfn/syntax" || starts_with(spec, "sfn/syntax/") {
-        return ROLE_SYNTAX;
+    if _spec_is_capsule(spec, "sfn/runtime-native") {
+        return ROLE_RUNTIME_INTERNAL;
     }
-    if spec == "sfn/analyzer" || starts_with(spec, "sfn/analyzer/") {
-        return ROLE_ANALYZER;
-    }
-    if spec == "sfn/ir" || starts_with(spec, "sfn/ir/") { return ROLE_IR; }
-    if spec == "sfn/codegen" || starts_with(spec, "sfn/codegen/") {
-        return ROLE_CODEGEN;
-    }
-    if spec == "sfn/codegen-llvm" || starts_with(spec, "sfn/codegen-llvm/") {
-        return ROLE_LLVM;
-    }
-    if spec == "sfn/compiler" || starts_with(spec, "sfn/compiler/") {
-        return ROLE_DRIVER;
-    }
+    let compiler_role = compiler_module_role(spec);
+    if compiler_role.length > 0 { return compiler_role; }
     if _spec_is_capsule(spec, "sfn/archive") || _spec_is_capsule(spec, "sfn/bench")
         || _spec_is_capsule(spec, "sfn/cli")
         || _spec_is_capsule(spec, "sfn/device")
@@ -122,73 +123,53 @@ fn _role_from_internal_spec(spec: string) -> string {
     return "";
 }
 
-fn _physical_capsule_role(path: string) -> string {
-    if starts_with(path, "compiler/capsules/syntax/src/") { return ROLE_SYNTAX; }
-    if starts_with(path, "compiler/capsules/analyzer/src/") {
-        return ROLE_ANALYZER;
-    }
-    if starts_with(path, "compiler/capsules/ir/src/") { return ROLE_IR; }
-    if starts_with(path, "compiler/capsules/codegen/src/") {
-        return ROLE_CODEGEN;
-    }
-    if starts_with(path, "compiler/capsules/codegen-llvm/src/") {
-        return ROLE_LLVM;
-    }
-    return "";
+fn _manifest_dependency_role(name: string) -> string {
+    let role = _role_from_internal_spec(name);
+    if role.length > 0 { return role; }
+    return ROLE_UNKNOWN;
 }
 
-fn _is_driver_module_id(id: string) -> boolean {
-    if starts_with(id, "build/") || starts_with(id, "capsule_resolver/")
-        || starts_with(id, "check/")
-        || starts_with(id, "cli/")
-        || starts_with(id, "tools/") { return true; }
-    return id == "arena_relocate" || id == "assert_failure" || id == "backend"
-        || id == "bootstrap_manifest"
-        || id == "build_cache"
-        || id == "build_flags"
-        || id == "build_report"
-        || id == "build_stamp"
-        || id == "capsule_artifact"
-        || id == "capsule_emit_parallel"
-        || id == "capsule_import_scan"
-        || id == "capsule_names"
-        || id == "cli_selfhost"
-        || id == "codegen_driver"
-        || id == "diagnostics_json"
-        || id == "diagnostics_render"
-        || id == "dist_manifest"
-        || id == "effect_gate"
-        || id == "emit_helpers"
-        || id == "ice"
-        || id == "lock"
-        || id == "llvm_validation"
-        || id == "main"
-        || id == "import_context"
-        || id == "module_paths"
-        || id == "native_artifact_writer"
-        || id == "native_emit_subprocess"
-        || id == "prelude_globals"
-        || id == "release_trust"
-        || id == "runtime_capsule_resolver"
-        || id == "semver"
-        || id == "string_cmd_utils"
-        || id == "string_utils"
-        || id == "terminal_output"
-        || id == "test_results"
-        || id == "test_runner_json"
-        || id == "test_runner_state"
-        || id == "toml_parser"
-        || id == "typecheck_import_loader"
-        || id == "version";
+fn _member(name: string, member_path: string, src_dir: string, build_kind: string) -> WorkspaceMember {
+    return WorkspaceMember {
+        name: name,
+        member_path: member_path,
+        src_dir: src_dir,
+        build_kind: build_kind,
+        module_prefix: "",
+        implicit: false
+    };
 }
 
-fn _module_role(path: string) -> string {
-    let physical = _physical_capsule_role(path);
-    if physical.length > 0 { return physical; }
-    let id = _monolith_module_id(path);
-    if id.length == 0 { return ""; }
+fn _source_member_index(path: string, members: WorkspaceMember[]) -> int {
+    let normalized = _normalize_path(path);
+    let mut best: int = -1;
+    let mut best_len: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let root = _normalize_path(members[i].src_dir);
+        if (normalized == root || starts_with(normalized, root + "/")) && root.length > best_len {
+            best = i;
+            best_len = root.length;
+        }
+        i += 1;
+    }
+    return best;
+}
 
-    if _is_driver_module_id(id) { return ROLE_DRIVER; }
+fn _module_role(path: string, members: WorkspaceMember[]) -> string {
+    let index = _source_member_index(path, members);
+    if index < 0 { return ""; }
+    return compiler_capsule_role(members[index].name);
+}
+
+fn _member_src_dir(members: WorkspaceMember[], name: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        if members[i].name == name { return members[i].src_dir; }
+        i += 1;
+    }
     return "";
 }
 
@@ -337,18 +318,43 @@ fn _collect_sfn_files(root: string, acc: string[]) -> string[] ![io] {
     return out;
 }
 
-fn _collect_stdlib_sources() -> string[] ![io] {
+fn _collect_compiler_sources(members: WorkspaceMember[]) -> string[] ![io] {
     let mut out: string[] = [];
-    let root = "capsules/sfn";
-    let capsules = fs.listDirectory(root);
     let mut i: int = 0;
     loop {
-        if i >= capsules.length { break; }
-        let name = capsules[i];
+        if i >= members.length { break; }
+        let member = members[i];
         i += 1;
-        out = _collect_sfn_files(root + "/" + name + "/src", out);
+        if compiler_capsule_role(member.name).length == 0 { continue; }
+        out = _collect_sfn_files(member.src_dir, out);
     }
     return out;
+}
+
+fn _is_stdlib_reverse_edge_member(member: WorkspaceMember) -> boolean {
+    if member.build_kind == "runtime" { return false; }
+    if compiler_capsule_role(member.name).length > 0 { return false; }
+    return starts_with(member.name, "sfn/");
+}
+
+fn _collect_stdlib_sources(members: WorkspaceMember[]) -> string[] ![io] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let member = members[i];
+        i += 1;
+        if !_is_stdlib_reverse_edge_member(member) { continue; }
+        out = _collect_sfn_files(member.src_dir, out);
+    }
+    return out;
+}
+
+fn _has_empty_capability_ceiling(manifest: string) -> boolean {
+    if trim(toml_get_string(manifest, "capabilities", "required")) != "[]" {
+        return false;
+    }
+    return toml_get_capabilities_required(manifest).length == 0;
 }
 
 // The production scoped scanner deliberately excludes runtime/* because the
@@ -560,41 +566,33 @@ fn _importee_path(importer: string, spec: string) -> string ![io] {
     return spec;
 }
 
-fn _importee_role(path_or_spec: string) -> string {
+fn _importee_role(path_or_spec: string, members: WorkspaceMember[]) -> string {
     let scoped = _role_from_internal_spec(path_or_spec);
     if scoped.length > 0 { return scoped; }
+    let module_role = _module_role(path_or_spec, members);
+    if module_role.length > 0 { return module_role; }
     // These monolith-local helpers are driver-owned compatibility leaves, but
     // imports to their pure contracts stand in for the narrow standard-library
     // dependencies allowed by SFEP-0020 §3.5.7. They are not a common capsule.
     let id = _monolith_module_id(path_or_spec);
     if id == "string_utils" { return ROLE_COMPAT_LEAF; }
-    let module_role = _module_role(path_or_spec);
-    if module_role.length > 0 { return module_role; }
     return ROLE_UNKNOWN;
 }
 
-fn _edge_module_id(path_or_spec: string) -> string {
-    let monolith = _monolith_module_id(path_or_spec);
-    if monolith.length > 0 { return monolith; }
-    let syntax = "compiler/capsules/syntax/src/";
-    if starts_with(path_or_spec, syntax) {
-        return _strip_sfn(substring(path_or_spec, syntax.length, path_or_spec.length));
-    }
-    let analyzer = "compiler/capsules/analyzer/src/";
-    if starts_with(path_or_spec, analyzer) {
-        return _strip_sfn(substring(path_or_spec, analyzer.length, path_or_spec.length));
-    }
-    let ir = "compiler/capsules/ir/src/";
-    if starts_with(path_or_spec, ir) {
-        return _strip_sfn(substring(path_or_spec, ir.length, path_or_spec.length));
-    }
-    let codegen = "compiler/capsules/codegen/src/";
-    if starts_with(path_or_spec, codegen) {
-        return _strip_sfn(substring(path_or_spec, codegen.length, path_or_spec.length));
-    }
-    let llvm = "compiler/capsules/codegen-llvm/src/";
-    if starts_with(path_or_spec, llvm) {
-        return "llvm/" + _strip_sfn(substring(path_or_spec, llvm.length, path_or_spec.length));
+fn _edge_module_id(path_or_spec: string, members: WorkspaceMember[]) -> string {
+    let member_index = _source_member_index(path_or_spec, members);
+    if member_index >= 0 {
+        let member = members[member_index];
+        let module_name = module_name_for_source_with_members(path_or_spec, members);
+        let prefix = member.name + "/";
+        let mut relative = module_name;
+        if starts_with(module_name, prefix) {
+            relative = substring(module_name, prefix.length, module_name.length);
+        }
+        if compiler_capsule_role(member.name) == ROLE_LLVM {
+            return "llvm/" + _strip_sfn(relative);
+        }
+        return _strip_sfn(relative);
     }
     let scoped_syntax = "sfn/syntax/";
     if starts_with(path_or_spec, scoped_syntax) {
@@ -1108,25 +1106,23 @@ test "capsule roles: encode every SFEP-0020 dependency invariant" {
 }
 
 test "capsule roles: classification survives physical compiler capsule moves" {
-    assert _module_role("compiler/capsules/syntax/src/parser/mod.sfn") == ROLE_SYNTAX;
-    assert _module_role("compiler/src/parser/mod.sfn") == "";
-    assert _module_role("compiler/src/ast.sfn") == "";
-    assert _module_role("compiler/capsules/analyzer/src/mod.sfn") == ROLE_ANALYZER;
-    assert _module_role("compiler/capsules/ir/src/native_ir.sfn") == ROLE_IR;
-    assert _module_role("compiler/capsules/ir/src/lowering_diagnostic.sfn") == ROLE_IR;
-    assert _module_role("compiler/src/native_ir.sfn") == "";
-    assert _module_role("compiler/src/intrinsic_effects.sfn") == "";
-    assert _module_role("compiler/capsules/codegen/src/emit_native.sfn") == ROLE_CODEGEN;
-    assert _module_role("compiler/src/emit_native.sfn") == "";
-    assert _module_role("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == ROLE_LLVM;
-    assert _module_role("compiler/src/llvm/lowering/mod.sfn") == "";
-    assert _edge_module_id("compiler/capsules/analyzer/src/type_interner.sfn") == "type_interner";
-    assert _edge_module_id("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == "llvm/lowering/mod";
-    assert _edge_module_id("sfn/analyzer/diagnostic") == "diagnostic";
-    assert _edge_module_id("sfn/ir/lowering_diagnostic") == "lowering_diagnostic";
-    assert _edge_module_id("sfn/codegen/emit_native") == "emit_native";
-    assert _edge_module_id("sfn/codegen-llvm/lowering/mod") == "llvm/lowering/mod";
-    let moved_authority = _edge_module_id("compiler/capsules/codegen-llvm/src/atomics.sfn");
+    let current: WorkspaceMember[] = [_member("sfn/compiler", "compiler", "compiler/src", "binary"), _member("sfn/syntax", "compiler/capsules/syntax", "compiler/capsules/syntax/src", "library"), _member("sfn/analyzer", "compiler/capsules/analyzer", "compiler/capsules/analyzer/src", "library"), _member("sfn/ir", "compiler/capsules/ir", "compiler/capsules/ir/src", "library"), _member("sfn/codegen", "compiler/capsules/codegen", "compiler/capsules/codegen/src", "library"), _member("sfn/codegen-llvm", "compiler/capsules/codegen-llvm", "compiler/capsules/codegen-llvm/src", "library")];
+    let moved: WorkspaceMember[] = [_member("sfn/compiler", "compiler/driver", "compiler/driver/src", "binary"), _member("sfn/syntax", "compiler/syntax", "compiler/syntax/src", "library"), _member("sfn/analyzer", "compiler/analyzer", "compiler/analyzer/src", "library"), _member("sfn/ir", "compiler/ir", "compiler/ir/src", "library"), _member("sfn/codegen", "compiler/codegen", "compiler/codegen/src", "library"), _member("sfn/codegen-llvm", "compiler/codegen-llvm", "compiler/codegen-llvm/src", "library")];
+    assert _module_role("compiler/capsules/syntax/src/parser/mod.sfn", current) == ROLE_SYNTAX;
+    assert _module_role("compiler/syntax/src/parser/mod.sfn", moved) == ROLE_SYNTAX;
+    assert _module_role("compiler/capsules/analyzer/src/mod.sfn", current) == ROLE_ANALYZER;
+    assert _module_role("compiler/analyzer/src/mod.sfn", moved) == ROLE_ANALYZER;
+    assert _module_role("compiler/capsules/ir/src/native_ir.sfn", current) == ROLE_IR;
+    assert _module_role("compiler/ir/src/native_ir.sfn", moved) == ROLE_IR;
+    assert _module_role("compiler/capsules/codegen/src/emit_native.sfn", current) == ROLE_CODEGEN;
+    assert _module_role("compiler/codegen/src/emit_native.sfn", moved) == ROLE_CODEGEN;
+    assert _module_role("compiler/capsules/codegen-llvm/src/lowering/mod.sfn", current) == ROLE_LLVM;
+    assert _module_role("compiler/codegen-llvm/src/lowering/mod.sfn", moved) == ROLE_LLVM;
+    assert _edge_module_id("compiler/capsules/analyzer/src/type_interner.sfn", current) == "type_interner";
+    assert _edge_module_id("compiler/analyzer/src/type_interner.sfn", moved) == "type_interner";
+    assert _edge_module_id("compiler/capsules/codegen-llvm/src/lowering/mod.sfn", current) == "llvm/lowering/mod";
+    assert _edge_module_id("compiler/codegen-llvm/src/lowering/mod.sfn", moved) == "llvm/lowering/mod";
+    let moved_authority = _edge_module_id("compiler/codegen-llvm/src/atomics.sfn", moved);
     assert _find_authority_exception(_authority_exceptions(), moved_authority, "effect:io") < 0;
     assert _role_from_internal_spec("sfn/compiler/build") == ROLE_DRIVER;
     assert _role_from_internal_spec("sfn/fs/private") == ROLE_AUTHORITY;
@@ -1134,48 +1130,145 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _role_from_internal_spec("sfn/future-pure") == ROLE_UNKNOWN;
     assert _role_from_internal_spec("runtime/prelude") == ROLE_RUNTIME_PRELUDE;
     assert _role_from_internal_spec("runtime/sfn/filesystem") == ROLE_RUNTIME_INTERNAL;
-    assert _module_role("compiler/src/analyzer.sfn") == "";
-    assert _module_role("compiler/src/diagnostic.sfn") == "";
-    assert _module_role("compiler/src/typecheck/expression_walk.sfn") == "";
-    assert _module_role("compiler/src/new_unclassified_role.sfn") == "";
+    let impostor: WorkspaceMember[] = [_member("vendor/not-syntax", "compiler/syntax", "compiler/syntax/src", "library")];
+    assert _module_role("compiler/syntax/src/parser/mod.sfn", impostor) == "";
+}
+
+test "capsule roles: current and target fixture roots keep one policy identity" ![io] {
+    let current_root = "compiler/tests/unit/fixtures/repository_topology/transitional";
+    let target_root = "compiler/tests/unit/fixtures/repository_topology/target";
+    let current = load_workspace_members(current_root);
+    let target = load_workspace_members(target_root);
+    assert validate_unique_workspace_member_names(current, current_root);
+    assert validate_unique_workspace_member_names(target, target_root);
+    let current_source = _member_src_dir(current, "sfn/syntax") + "/mod.sfn";
+    let target_source = _member_src_dir(target, "sfn/syntax") + "/mod.sfn";
+    assert _module_role(current_source, current) == ROLE_SYNTAX;
+    assert _module_role(target_source, target) == ROLE_SYNTAX;
+    assert module_name_for_source_with_members(current_source, current) == "sfn/syntax/mod";
+    assert module_name_for_source_with_members(target_source, target) == "sfn/syntax/mod";
+    assert _edge_module_id(current_source, current) == _edge_module_id(target_source, target);
+    let identity = parse_scope_name("sfn/syntax");
+    assert capsule_artifact_dir(identity.scope, identity.name) == "build/capsules/sfn/syntax";
+    let current_manifest = fs.readFile(current_root
+        + "/compiler/capsules/syntax/capsule.toml");
+    let target_manifest = fs.readFile(target_root
+        + "/compiler/syntax/capsule.toml");
+    assert toml_get_version(current_manifest) == toml_get_version(target_manifest);
+    assert _has_empty_capability_ceiling(current_manifest);
+    assert _has_empty_capability_ceiling(target_manifest);
+    let current_publish = toml_get_publish(current_manifest);
+    let target_publish = toml_get_publish(target_manifest);
+    assert current_publish.publish != null;
+    assert target_publish.publish != null;
+    if current_publish.publish != null {
+        let allowed: boolean = current_publish.publish;
+        assert ! allowed;
+    }
+    if target_publish.publish != null {
+        let allowed: boolean = target_publish.publish;
+        assert ! allowed;
+    }
+}
+
+test "capsule roles: duplicate canonical fixture names fail through workspace identity" ![io] {
+    let root = "compiler/tests/unit/fixtures/repository_topology/duplicate_name";
+    let members = load_workspace_members(root);
+    assert members.length == 2;
+    assert ! validate_unique_workspace_member_names(members, root);
 }
 
 test "compiler driver: orchestration and terminal-output owners classify as driver" {
-    assert _module_role("compiler/src/capsule_resolver/mod.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/build/fs.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/backend.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/build/link.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/build/direct_link.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/build/tensor_ir_link_harness.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/cli/commands/build.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/typecheck_import_loader.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/emit_helpers.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/codegen_driver.sfn") == ROLE_DRIVER;
-    assert _module_role("compiler/src/terminal_output.sfn") == ROLE_DRIVER;
+    let members: WorkspaceMember[] = [_member("sfn/compiler", "compiler", "compiler/src", "binary")];
+    assert _module_role("compiler/src/capsule_resolver/mod.sfn", members) == ROLE_DRIVER;
+    assert _module_role("compiler/src/build/fs.sfn", members) == ROLE_DRIVER;
+    assert _module_role("compiler/src/backend.sfn", members) == ROLE_DRIVER;
+    assert _module_role("compiler/src/cli/commands/build.sfn", members) == ROLE_DRIVER;
+    assert _module_role("compiler/src/terminal_output.sfn", members) == ROLE_DRIVER;
 }
 
-test "codegen capsule: manifest is private, capability-free, and role-bounded" ![io] {
-    let manifest = fs.readFile("compiler/capsules/codegen/capsule.toml");
-    assert contains(manifest, "name = \"sfn/codegen\"");
-    assert contains(manifest, "publish = false");
-    let manifest_sections = split(manifest, "[dependencies]");
-    assert manifest_sections.length == 2;
-    let dependency_and_rest = split(manifest_sections[1], "[capabilities]");
-    assert dependency_and_rest.length == 2;
-    assert trim(dependency_and_rest[0]) == "\"sfn/syntax\" = \"*\"\n\"sfn/analyzer\" = \"*\"\n\"sfn/ir\" = \"*\"\n\"sfn/strings\" = \"*\"";
-    assert contains(manifest, "required = []");
+test "compiler capsule manifests: identity owns privacy, capability, dependency, and artifact policy" ![io] {
+    let members = load_workspace_members(".");
+    let mut checked: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let member = members[i];
+        i += 1;
+        let importer_role = compiler_capsule_role(member.name);
+        if importer_role.length == 0 { continue; }
+        let manifest_path = member.member_path + "/capsule.toml";
+        let manifest = fs.readFile(manifest_path);
+        let publish = toml_get_publish(manifest);
+        assert publish.error.length == 0;
+        assert publish.publish != null;
+        if publish.publish != null {
+            let allowed: boolean = publish.publish;
+            assert ! allowed;
+        }
+        if importer_role != ROLE_DRIVER {
+            assert _has_empty_capability_ceiling(manifest);
+        }
+        let dependencies = split(toml_get_dependencies(manifest), "\n");
+        let mut di: int = 0;
+        loop {
+            if di >= dependencies.length { break; }
+            let dependency = split(dependencies[di], "=");
+            di += 1;
+            if dependency.length == 0 || dependency[0].length == 0 { continue; }
+            let importee_role = _manifest_dependency_role(dependency[0]);
+            if !_role_import_allowed(importer_role, importee_role) {
+                throw member.name + " (" + importer_role
+                    + ") declares disallowed dependency "
+                    + dependency[0]
+                    + " ("
+                    + importee_role
+                    + ")";
+            }
+        }
+        let identity = parse_scope_name(member.name);
+        assert capsule_artifact_dir(identity.scope, identity.name) == "build/capsules/"
+            + member.name;
+        checked += 1;
+    }
+    assert checked == 6;
 }
 
-test "codegen-llvm capsule: manifest is private, capability-free, and IR-bounded" ![io] {
-    let manifest = fs.readFile("compiler/capsules/codegen-llvm/capsule.toml");
-    assert contains(manifest, "name = \"sfn/codegen-llvm\"");
-    assert contains(manifest, "publish = false");
-    let manifest_sections = split(manifest, "[dependencies]");
-    assert manifest_sections.length == 2;
-    let dependency_and_rest = split(manifest_sections[1], "[capabilities]");
-    assert dependency_and_rest.length == 2;
-    assert trim(dependency_and_rest[0]) == "\"sfn/ir\" = \"*\"\n\"sfn/strings\" = \"*\"";
-    assert contains(manifest, "required = []");
+test "compiler capsule manifests: unknown dependencies fail closed" {
+    let role = _manifest_dependency_role("vendor/capability");
+    assert role == ROLE_UNKNOWN;
+    assert ! _role_import_allowed(ROLE_CODEGEN, role);
+    assert ! _role_import_allowed(ROLE_DRIVER, role);
+}
+
+test "compiler capsule manifests: capability ceilings must be explicitly empty" {
+    assert _has_empty_capability_ceiling("[capabilities]\nrequired = []\n");
+    assert ! _has_empty_capability_ceiling("[capsule]\nname = \"sfn/syntax\"\n");
+    assert ! _has_empty_capability_ceiling("[capabilities]\nrequired = [\"io\"]\n");
+}
+
+test "stdlib reverse edges: future canonical libraries stay in the audit" {
+    let future = _member("sfn/future-pure", "capsules/sfn/future-pure", "capsules/sfn/future-pure/src", "library");
+    let compiler = _member("sfn/syntax", "compiler/syntax", "compiler/syntax/src", "library");
+    let runtime = _member("sfn/runtime-native", "runtime", "runtime", "runtime");
+    let vendor = _member("vendor/other", "vendor/other", "vendor/other/src", "library");
+    assert _is_stdlib_reverse_edge_member(future);
+    assert ! _is_stdlib_reverse_edge_member(compiler);
+    assert ! _is_stdlib_reverse_edge_member(runtime);
+    assert ! _is_stdlib_reverse_edge_member(vendor);
+}
+
+test "stdlib reverse edges: driver leaves stay internal across root moves" {
+    let current: WorkspaceMember[] = [_member("sfn/compiler", "compiler", "compiler/src", "binary")];
+    let moved: WorkspaceMember[] = [_member("sfn/compiler", "compiler/driver", "compiler/driver/src", "binary")];
+    let current_role = _importee_role("compiler/src/string_utils.sfn", current);
+    let moved_role = _importee_role("compiler/driver/src/string_utils.sfn", moved);
+    assert current_role == ROLE_DRIVER;
+    assert moved_role == ROLE_DRIVER;
+    assert _is_internal_compiler_role(current_role);
+    assert _is_internal_compiler_role(moved_role);
+    let no_members: WorkspaceMember[] = [];
+    assert _importee_role("compiler/src/string_utils.sfn", no_members) == ROLE_COMPAT_LEAF;
 }
 
 test "capsule diagnostics: new reverse edge identifies importer, importee, and role rule" {
@@ -1256,6 +1349,7 @@ test "capsule authority: scanner counts every unquoted token kind exactly" {
 }
 
 test "capsule imports: runtime audit sees prelude and rejects hidden implementation specs" {
+    let members: WorkspaceMember[] = [];
     let source = "import { char_code } from \"runtime/prelude\";\n"
         + "// import { hidden } from \"runtime/sfn/filesystem\";\n"
         + "import { read_secret } from \"runtime/sfn/filesystem\";\n";
@@ -1263,11 +1357,12 @@ test "capsule imports: runtime audit sees prelude and rejects hidden implementat
     assert specs.length == 2;
     assert specs[0] == "runtime/prelude";
     assert specs[1] == "runtime/sfn/filesystem";
-    assert _role_import_allowed(ROLE_IR, _importee_role(specs[0]));
-    assert ! _role_import_allowed(ROLE_LLVM, _importee_role(specs[1]));
+    assert _role_import_allowed(ROLE_IR, _importee_role(specs[0], members));
+    assert ! _role_import_allowed(ROLE_LLVM, _importee_role(specs[1], members));
 }
 
 test "capsule imports: scanner audits scoped and bare unknown dependencies" {
+    let members: WorkspaceMember[] = [];
     let source = "import { strings_equal } from \"sfn/strings\";\n"
         + "// import { hidden } from \"vendor/hidden\";\n"
         + "import { reverse } from /* parser trivia */ \"../../typecheck/foo\";\n"
@@ -1287,11 +1382,11 @@ test "capsule imports: scanner audits scoped and bare unknown dependencies" {
     assert specs[4] == "sfn/syntax";
     assert specs[5] == "sfn/analyzer";
     assert specs[6] == "sfn/ir";
-    assert _importee_role(specs[0]) == ROLE_STDLIB;
-    assert _importee_role(specs[2]) == ROLE_UNKNOWN;
-    assert _importee_role(specs[3]) == ROLE_UNKNOWN;
-    assert ! _role_import_allowed(ROLE_ANALYZER, _importee_role(specs[2]));
-    assert ! _role_import_allowed(ROLE_DRIVER, _importee_role(specs[3]));
+    assert _importee_role(specs[0], members) == ROLE_STDLIB;
+    assert _importee_role(specs[2], members) == ROLE_UNKNOWN;
+    assert _importee_role(specs[3], members) == ROLE_UNKNOWN;
+    assert ! _role_import_allowed(ROLE_ANALYZER, _importee_role(specs[2], members));
+    assert ! _role_import_allowed(ROLE_DRIVER, _importee_role(specs[3], members));
     assert _decode_import_string("..\\/diagnostic.sfn") == "../diagnostic.sfn";
 }
 
@@ -1303,9 +1398,9 @@ test "capsule imports: explicit Sailfin extension resolves to the imported modul
 }
 
 test "capsule boundaries: compiler imports obey the role graph and exact exception inventory" ![io] {
-    let mut files: string[] = [];
-    files = _collect_sfn_files("compiler/src", files);
-    files = _collect_sfn_files("compiler/capsules", files);
+    let members = load_workspace_members(".");
+    assert validate_unique_workspace_member_names(members, ".");
+    let files = _collect_compiler_sources(members);
     let exceptions = _boundary_exceptions();
     let authority_exceptions = _authority_exceptions();
     let mut seen: boolean[] = [];
@@ -1335,7 +1430,7 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
         if fi >= files.length { break; }
         let importer = files[fi];
         fi += 1;
-        let importer_role = _module_role(importer);
+        let importer_role = _module_role(importer, members);
         if importer_role.length == 0 {
             failures.push("unclassified compiler module: '" + importer
                 + "'; assign one SFEP-0020 semantic role before adding dependencies");
@@ -1419,7 +1514,7 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
                 let effect_count = _declared_authority_effect_count(source, effect);
                 if effect_count <= 0 { continue; }
                 let effect_token = "effect:" + effect;
-                let authority_module = _edge_module_id(importer);
+                let authority_module = _edge_module_id(importer, members);
                 let authority_index = _find_authority_exception(authority_exceptions, authority_module, effect_token);
                 if authority_index >= 0 {
                     authority_seen[authority_index] = true;
@@ -1467,11 +1562,11 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
                         + "'; violated rule: capture analysis and parsing finish before the IR boundary");
                 }
             }
-            let importee_role = _importee_role(importee);
+            let importee_role = _importee_role(importee, members);
             if importee_role.length == 0 { continue; }
             if _role_import_allowed(importer_role, importee_role) { continue; }
-            let importer_id = _edge_module_id(importer);
-            let importee_id = _edge_module_id(importee);
+            let importer_id = _edge_module_id(importer, members);
+            let importee_id = _edge_module_id(importee, members);
             let exception_index = _find_exception(exceptions, importer_id, importee_id);
             if exception_index >= 0 {
                 seen[exception_index] = true;
@@ -1523,7 +1618,12 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
 }
 
 test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![io] {
-    let mut queue: string[] = ["compiler/src/check/engine.sfn"];
+    let members = load_workspace_members(".");
+    let driver_src = _member_src_dir(members, "sfn/compiler");
+    let analyzer_src = _member_src_dir(members, "sfn/analyzer");
+    assert driver_src.length > 0;
+    assert analyzer_src.length > 0;
+    let mut queue: string[] = [driver_src + "/check/engine.sfn"];
     let mut seen: string[] = [];
     let mut analyzer_seen: int = 0;
     let mut index: int = 0;
@@ -1541,20 +1641,18 @@ test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![
             let mut imported = _importee_path(path, specs[spec_index]);
             spec_index += 1;
             if imported == "sfn/analyzer" {
-                imported = "compiler/capsules/analyzer/src/mod.sfn";
+                imported = analyzer_src + "/mod.sfn";
             } else if starts_with(imported, "sfn/analyzer/") {
                 let analyzer_prefix = "sfn/analyzer/";
                 let suffix = substring(imported, analyzer_prefix.length, imported.length);
-                let file_candidate = "compiler/capsules/analyzer/src/" + suffix
-                    + ".sfn";
-                let module_candidate = "compiler/capsules/analyzer/src/"
-                    + suffix
-                    + "/mod.sfn";
+                let file_candidate = analyzer_src + "/" + suffix + ".sfn";
+                let module_candidate = analyzer_src + "/" + suffix + "/mod.sfn";
                 if fs.exists(file_candidate) { imported = file_candidate; } else if fs.exists(module_candidate) {
                     imported = module_candidate;
                 }
             }
-            if starts_with(imported, "compiler/src/") || starts_with(imported, "compiler/capsules/analyzer/src/") {
+            let imported_role = _module_role(imported, members);
+            if imported_role == ROLE_DRIVER || imported_role == ROLE_ANALYZER {
                 queue.push(imported);
             }
         }
@@ -1563,12 +1661,10 @@ test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![
     loop {
         if closure_index >= seen.length { break; }
         let module_path = seen[closure_index];
-        if starts_with(module_path, "compiler/capsules/analyzer/src/") {
-            assert _module_role(module_path) == ROLE_ANALYZER;
-            analyzer_seen += 1;
-        }
-        assert ! starts_with(module_path, "compiler/capsules/codegen-llvm/src/lowering/");
-        assert module_path != "compiler/src/main.sfn";
+        let module_role = _module_role(module_path, members);
+        if module_role == ROLE_ANALYZER { analyzer_seen += 1; }
+        assert module_role != ROLE_LLVM;
+        assert module_path != driver_src + "/main.sfn";
         closure_index += 1;
     }
     assert seen.length > 20;
@@ -1576,7 +1672,8 @@ test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![
 }
 
 test "capsule boundaries: top-level standard-library capsules do not import compiler internals" ![io] {
-    let files = _collect_stdlib_sources();
+    let members = load_workspace_members(".");
+    let files = _collect_stdlib_sources(members);
     let mut failures: string[] = [];
     let mut fi: int = 0;
     loop {
@@ -1590,12 +1687,8 @@ test "capsule boundaries: top-level standard-library capsules do not import comp
             let importee = _importee_path(importer, specs[si]);
             si += 1;
             if importee.length == 0 { continue; }
-            let importee_role = _importee_role(importee);
-            let relative_internal = starts_with(importee, "compiler/src/")
-                || starts_with(importee, "compiler/capsules/");
-            if !relative_internal && !_is_internal_compiler_role(importee_role) {
-                continue;
-            }
+            let importee_role = _importee_role(importee, members);
+            if !_is_internal_compiler_role(importee_role) { continue; }
             failures.push(_violation_diagnostic(importer, importee, ROLE_STDLIB, importee_role));
         }
     }

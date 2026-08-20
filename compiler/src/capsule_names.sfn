@@ -2,7 +2,37 @@
 //
 // Capsule-name resolution/display helpers relocated from
 // `cli_commands_utils` (SFEP-0027 §3.5).
-import { find_char_local, substring } from "./string_utils";
+import { find_char_local, starts_with, substring } from "./string_utils";
+
+// Canonical compiler-role identity. Architectural policy must key off these
+// manifest names, never the member path that happened to provide them. The
+// returned labels intentionally match SFEP-0020's boundary diagnostics.
+fn compiler_capsule_role(name: string) -> string {
+    if name == "sfn/syntax" { return "syntax"; }
+    if name == "sfn/analyzer" { return "analyzer"; }
+    if name == "sfn/ir" { return "ir"; }
+    if name == "sfn/codegen" { return "codegen"; }
+    if name == "sfn/codegen-llvm" { return "codegen-llvm"; }
+    if name == "sfn/compiler" { return "compiler-driver"; }
+    return "";
+}
+
+// Classify a resolved module identity by its owning compiler capsule. This is
+// for logical import identities such as `sfn/analyzer/typecheck`; physical
+// source paths deliberately do not match.
+fn compiler_module_role(module_name: string) -> string {
+    let names: string[] = ["sfn/syntax", "sfn/analyzer", "sfn/ir", "sfn/codegen", "sfn/codegen-llvm", "sfn/compiler"];
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        let name = names[i];
+        i += 1;
+        if module_name == name || starts_with(module_name, name + "/") {
+            return compiler_capsule_role(name);
+        }
+    }
+    return "";
+}
 
 fn _is_stdlib_capsule_cmd(name: string) -> boolean {
     if name == "cli" { return true; }
@@ -49,6 +79,8 @@ fn _display_capsule_name_cmd(name: string) -> string {
 }
 
 export {
+    compiler_capsule_role,
+    compiler_module_role,
     _is_stdlib_capsule_cmd,
     _has_slash_cmd,
     _resolve_capsule_name_cmd,

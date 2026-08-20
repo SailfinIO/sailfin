@@ -6,11 +6,22 @@ member, manifest, bootstrap, boundary, and determinism checks.
 
 ## Workspace and manifest template
 
-Compiler implementation capsules live at `compiler/capsules/<role>/`, are
-members of the `compiler/capsules/*` workspace glob, and expose a
-`src/mod.sfn` facade. Their manifests use the compiler release version,
-`publish = false`, `kind = "library"`, and `required = []`. Consumers import
-the facade by capsule name rather than reaching into its physical source tree.
+Compiler implementation capsules currently live at
+`compiler/capsules/<role>/`, are members of the `compiler/capsules/*`
+workspace glob, and expose a `src/mod.sfn` facade. SFEP-0072 later relocates
+them to `compiler/<role>/`; architectural authority does not follow either
+path. Their canonical manifest names (`sfn/syntax`, `sfn/analyzer`, `sfn/ir`,
+`sfn/codegen`, and `sfn/codegen-llvm`) select the SFEP-0020 role, privacy,
+capability, dependency, release, artifact, and cache policy. Their manifests
+use the compiler release version, `publish = false`, `kind = "library"`, and
+`required = []`. Consumers import the facade by capsule name rather than
+reaching into its physical source tree.
+
+Keep physical member discovery, source/entry containment, formatter and test
+enumeration, and retired-root checks path-based. A directory named like a
+compiler role must never gain authority unless its resolved manifest carries
+the corresponding canonical name; conversely, moving that manifest between an
+allowed current or target root must not change its authority.
 
 The compiler freshness fingerprint, fast-check roots, formatter roots,
 determinism-sweep roots, release safety paths, and CI cache hashes must all
