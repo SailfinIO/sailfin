@@ -63,6 +63,39 @@ extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 // (SFN-720). Returns 0 on success, like `rename(2)`.
 extern fn sfn_rename_replace(src: *u8, dst: *u8) -> i32;
 
+// Atomically claim `path`, creating it as an empty regular file iff it
+// does not already exist. Defined by
+// `runtime/sfn/platform/exclusive_create.sfn` and swapped for its
+// Windows sibling per target — declared as an extern here rather than
+// imported, matching the SFN-635 cross-module workaround the runtime
+// modules use (SFN-720). Returns `CREATE_EXCLUSIVE_CREATED`,
+// `CREATE_EXCLUSIVE_EXISTS`, or `CREATE_EXCLUSIVE_ERROR` below — never
+// retry a new name on the error outcome, since the fault is not about
+// the name (SFN-974).
+extern fn sfn_create_exclusive(path: *u8, mode: i32) -> i32;
+
+let CREATE_EXCLUSIVE_CREATED: i32 = 0;
+
+let CREATE_EXCLUSIVE_EXISTS: i32 = 1;
+
+let CREATE_EXCLUSIVE_ERROR: i32 = -1;
+
+// POSIX creation modes. Decimal because Sailfin has no octal literal
+// (`runtime/sfn/adapters/filesystem.sfn:632` spells 0o777 as 511):
+// 384 = 0o600, 448 = 0o700. Ignored on a Windows target.
+let CREATE_EXCLUSIVE_MODE_FILE: i32 = 384;
+
+// GNU `ld` preserves an existing output file's mode across `-o` (LLD
+// and mold both discard/recreate it), so an exclusive-create placeholder
+// claimed with `CREATE_EXCLUSIVE_MODE_FILE` would leave the linked
+// binary non-executable under GNU `ld`. The executable claim uses 448
+// (0o700) so every linker path produces a runnable file.
+let CREATE_EXCLUSIVE_MODE_EXE: i32 = 448;
+
+fn _create_exclusive_cmd(path: string, mode: i32) -> i32 ![io] {
+    return sfn_create_exclusive(path as *u8, mode);
+}
+
 extern fn ferror(f: *File) -> i32;
 
 extern fn fopen(path: *u8, mode: *u8) -> *File;
@@ -877,6 +910,12 @@ export {
     _sanitize_filename_cmd,
     _mktemp_sibling_cmd,
     _mktemp_from_template_cmd,
+    _create_exclusive_cmd,
+    CREATE_EXCLUSIVE_CREATED,
+    CREATE_EXCLUSIVE_EXISTS,
+    CREATE_EXCLUSIVE_ERROR,
+    CREATE_EXCLUSIVE_MODE_FILE,
+    CREATE_EXCLUSIVE_MODE_EXE,
     _cwd_cmd,
     _set_perms_or_skip,
     _atomic_rename_into_place,

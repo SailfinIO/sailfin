@@ -524,6 +524,19 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING` (SFN-720).
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "rename_ops_windows.sfn"));
+        } else if base == "exclusive_create.sfn" {
+            // Already in platform/ — same as the six above. `open`'s
+            // `O_CREAT`/`O_EXCL` flag words are POSIX-only and the
+            // Windows leg claims via `CreateFileA`/`CREATE_NEW` instead —
+            // an entirely different syscall family, not a flag
+            // substitution (SFN-974). The compiler that emits this leg is
+            // always CURRENT-TREE, never the pinned seed (no released
+            // native Windows seed yet, `docs/runbooks/windows-native.md`),
+            // so this swap carries no seed dependency today
+            // (`.claude/rules/seed-dependency.md`) — re-derive the day a
+            // native Windows seed ships.
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "exclusive_create_windows.sfn"));
         } else if base == "cert_roots.sfn" {
             // Already in platform/ — same as the five above. POSIX has no
             // enumerable trust store to swap in for: the CA bundle is a

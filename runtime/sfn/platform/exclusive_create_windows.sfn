@@ -1,0 +1,76 @@
+// runtime/sfn/platform/exclusive_create_windows.sfn
+//
+// Windows sibling of `exclusive_create.sfn`, swapped in for a Windows
+// target by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`). See that module's header for the
+// return contract (SFN-974); the short version is 0 = created, 1 =
+// already existed, -1 = a real filesystem fault.
+//
+// `CreateFileA`, not `CreateFileW`: every Win32 call in this runtime is
+// the ANSI variant (`MoveFileExA`, `CreateDirectoryA`, `CreateProcessA`,
+// `GetFileAttributesA`) because Sailfin `string` is a NUL-terminated byte
+// buffer with no UTF-8->UTF-16 layer anywhere in the runtime. `CREATE_NEW`
+// is the direct Win32 equivalent of `O_CREAT|O_EXCL`: it fails rather than
+// truncating an existing destination.
+//
+// Share mode is `FILE_SHARE_READ|WRITE|DELETE` (7), not 0: the handle is
+// held for microseconds, but with share mode 0 a concurrent peer's
+// `CreateFileA` on the same name fails `ERROR_SHARING_VIOLATION` (32)
+// instead of `ERROR_FILE_EXISTS` (80) — a lost race misreported as a real
+// error rather than classified as EXISTS.
+//
+// `mode` is accepted (for parity with the POSIX signature) and ignored:
+// Windows has no execute permission bit, so a POSIX creation mode is
+// inexpressible there (`fs_exec_mode_windows.sfn` makes the same call for
+// the same reason).
+extern fn CreateFileA(path: *u8, desired_access: i32, share_mode: i32, security: *u8, creation: i32, flags: i32, template_file: i64) -> i64;
+
+extern fn CloseHandle(handle: i64) -> i32;
+
+extern fn GetLastError() -> i32;
+
+extern fn GetFileAttributesA(path: *u8) -> i32;
+
+// Decimal-only constants: hex integer literals silently fold to 0 on the
+// pinned seed (`runtime/sfn/process.sfn:38`, restated at
+// `mkstemp_windows.sfn`'s header).
+let GENERIC_WRITE: i32 = 1073741824;
+
+let FILE_SHARE_ALL: i32 = 7;
+
+let CREATE_NEW: i32 = 1;
+
+let FILE_ATTRIBUTE_NORMAL: i32 = 128;
+
+let INVALID_HANDLE_VALUE: i64 = -1;
+
+let ERROR_FILE_EXISTS: i32 = 80;
+
+let ERROR_ALREADY_EXISTS: i32 = 183;
+
+let INVALID_FILE_ATTRIBUTES: i32 = -1;
+
+fn sfn_create_exclusive(path: *u8, mode: i32) -> i32 ![io] {
+    let handle: i64 = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_ALL, 0 as *u8, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+    if handle != INVALID_HANDLE_VALUE {
+        CloseHandle(handle);
+        return 0;
+    }
+    let err: i32 = GetLastError();
+    if err == ERROR_FILE_EXISTS { return 1; }
+    if err == ERROR_ALREADY_EXISTS { return 1; }
+    // `CreateFileA` with `CREATE_NEW` against an existing DIRECTORY
+    // returns `ERROR_ACCESS_DENIED` (5), not 80/183, where POSIX
+    // `open(O_CREAT|O_EXCL)` returns `EEXIST` for the same case. This
+    // probe classifies that disagreement rather than reintroducing a
+    // TOCTOU window: it runs only where the atomic create has already
+    // failed, so it can only turn a failure into a correct
+    // classification — it never weakens a call that succeeded today
+    // (the same argument `rename_ops_windows.sfn`'s fallback makes for
+    // itself).
+    let attrs: i32 = GetFileAttributesA(path);
+    if attrs != INVALID_FILE_ATTRIBUTES { return 1; }
+    return -1;
+}
+
+export { sfn_create_exclusive };

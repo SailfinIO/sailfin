@@ -1,0 +1,65 @@
+// compiler/tests/unit/create_exclusive_race_test.sfn
+//
+// The atomic property (SFN-974): 7.1's tests only exercise
+// `_create_exclusive_cmd` sequentially, which proves the tri-state
+// contract but not exclusivity under real concurrency. This fans 16
+// `spawn`s at the SAME path and asserts exactly one wins.
+//
+// Shape note (design feasibility probe, not assumed): the module-global +
+// NAMED-FUNCTION `spawn _fn()` form the design proposed does not lower —
+// `spawn _claim_once()` (a bare call to a top-level function, no lambda)
+// reproducibly ICEs at the LLVM backend with "invalid cast opcode for cast
+// from 'i64' to 'ptr'" when its handle feeds `Task<int>[]`/`join_all`,
+// independent of the function's body. The INLINE non-capturing lambda form
+// `spawn fn() -> int ![io] { ... }` is the one `docs/status.md` documents
+// as shipped (#1474) and is what `task_join_all_test.sfn` /
+// `spawn_await_concurrent_execution_test.sfn` exercise throughout — used
+// here instead. It still proves real concurrency: nurseries are backed by
+// real pthreads (`runtime/sfn/concurrency/nursery.sfn`), and every spawned
+// lambda body reads the same module-global `_race_path` (not a captured
+// local), so this is not a sequential loop dressed up as a race test.
+import { scratch_root } from "sfn/test";
+
+import {
+    CREATE_EXCLUSIVE_CREATED,
+    CREATE_EXCLUSIVE_ERROR,
+    CREATE_EXCLUSIVE_EXISTS,
+    CREATE_EXCLUSIVE_MODE_FILE,
+    _create_exclusive_cmd
+} from "../../src/build/fs";
+
+let mut _race_path: string = "";
+
+test "fs: exclusive create — exactly one of 16 concurrent claims wins" ![io] {
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    let dir = fs.mkdtemp(base + "/sfn-974-race-");
+    _race_path = dir + "/contested";
+
+    let mut hs: Task<int>[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        hs.push(spawn fn () -> int ![io] {
+            return _create_exclusive_cmd(_race_path, CREATE_EXCLUSIVE_MODE_FILE);
+        });
+        i += 1;
+    }
+    let results: int[] = join_all(hs);
+
+    let mut created: int = 0;
+    let mut exists: int = 0;
+    let mut errs: int = 0;
+    let mut j: int = 0;
+    loop {
+        if j >= results.length { break; }
+        if results[j] == CREATE_EXCLUSIVE_CREATED { created += 1; }
+        if results[j] == CREATE_EXCLUSIVE_EXISTS { exists += 1; }
+        if results[j] == CREATE_EXCLUSIVE_ERROR { errs += 1; }
+        j += 1;
+    }
+    assert results.length == 16;
+    assert created == 1;
+    assert exists == 15;
+    assert errs == 0;
+}

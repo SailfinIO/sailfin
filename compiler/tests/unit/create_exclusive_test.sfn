@@ -1,0 +1,82 @@
+// compiler/tests/unit/create_exclusive_test.sfn
+//
+// Tri-state contract for `_create_exclusive_cmd` / `sfn_create_exclusive`
+// (SFN-974): fresh-path CREATED, occupied-path EXISTS, and a real
+// filesystem fault ERROR must stay distinguishable, and EXISTS must never
+// touch the occupied path's bytes — the assertion that would catch a wrong
+// `O_CREAT`/`O_EXCL` flag encoding (design §3.3), which is otherwise
+// invisible from this test's vantage point.
+import { scratch_root } from "sfn/test";
+
+import {
+    CREATE_EXCLUSIVE_CREATED,
+    CREATE_EXCLUSIVE_ERROR,
+    CREATE_EXCLUSIVE_EXISTS,
+    CREATE_EXCLUSIVE_MODE_EXE,
+    CREATE_EXCLUSIVE_MODE_FILE,
+    _create_exclusive_cmd
+} from "../../src/build/fs";
+import { host_is_windows } from "../../src/build/target";
+
+fn _fresh_dir(tag: string) -> string ![io] {
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-974-" + tag + "-");
+}
+
+test "fs: exclusive create claims a free path" ![io] {
+    let dir = _fresh_dir("claim");
+    let path = dir + "/claimed";
+    assert ! fs.exists(path);
+    assert _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE) == CREATE_EXCLUSIVE_CREATED;
+    assert fs.exists(path);
+}
+
+test "fs: exclusive create reports an occupied path as existing" ![io] {
+    let dir = _fresh_dir("occupied");
+    let path = dir + "/claimed";
+    assert _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE) == CREATE_EXCLUSIVE_CREATED;
+    assert _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE) == CREATE_EXCLUSIVE_EXISTS;
+}
+
+// The load-bearing assertion: a wrong `O_CREAT`/`O_EXCL` word on either
+// POSIX target either opens-without-create (silent no-op) or opens with
+// `O_TRUNC` (destroys the peer's bytes). Either wrong encoding would still
+// leave `_create_exclusive_cmd` returning something other than CREATED on
+// the second call — but only the `O_TRUNC` case is invisible without this
+// content check.
+test "fs: exclusive create never truncates an occupied path" ![io] {
+    let dir = _fresh_dir("no-trunc");
+    let path = dir + "/claimed";
+    assert _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE) == CREATE_EXCLUSIVE_CREATED;
+    fs.writeFile(path, "keep");
+    assert _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE) == CREATE_EXCLUSIVE_EXISTS;
+    assert fs.readFile(path) == "keep";
+}
+
+test "fs: exclusive create distinguishes a real error from an occupied path" ![io] {
+    let dir = _fresh_dir("error");
+    let path = dir + "/does-not-exist/claimed";
+    assert _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE) == CREATE_EXCLUSIVE_ERROR;
+}
+
+test "fs: exclusive create reports an existing directory as occupied" ![io] {
+    let dir = _fresh_dir("dir-occupied");
+    let path = dir + "/a-directory";
+    fs.createDirectory(path, true);
+    assert _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE) == CREATE_EXCLUSIVE_EXISTS;
+}
+
+// `mode` is ignored on Windows (`fs.get_perms` is a `-1` stub there, per
+// `fs_tree_test.sfn`'s precedent), so this assertion only means something
+// on a POSIX host.
+test "fs: exclusive create honours the POSIX creation mode" ![io] {
+    if host_is_windows() { return; }
+    let dir = _fresh_dir("mode");
+    let exe_path = dir + "/claimed-exe";
+    let file_path = dir + "/claimed-file";
+    assert _create_exclusive_cmd(exe_path, CREATE_EXCLUSIVE_MODE_EXE) == CREATE_EXCLUSIVE_CREATED;
+    assert _create_exclusive_cmd(file_path, CREATE_EXCLUSIVE_MODE_FILE) == CREATE_EXCLUSIVE_CREATED;
+    assert fs.get_perms(exe_path) == 448;
+    assert fs.get_perms(file_path) == 384;
+}
