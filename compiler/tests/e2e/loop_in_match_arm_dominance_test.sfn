@@ -30,11 +30,11 @@
 // emitting child inherits the full parent environment via `process.environ()`
 // so `PATH` (the `llvm-as` lookup) and `SAILFIN_TEST_SCRATCH` (build-cache
 // isolation under the parallel pool, #1333) both flow through.
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
 }

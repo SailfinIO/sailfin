@@ -35,7 +35,8 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
 // they cannot be called from an `![io]` test. Assert on the captured
 // output text with `sfn/strings` predicates instead. (#842.)
-import { find, contains, split } from "sfn/strings";
+import { contains, find, split } from "sfn/strings";
+import { default_scratch_dir } from "sfn/test";
 
 fn _repo_root() -> string ![io] {
     let root = env.get("SAILFIN_REPO_ROOT");
@@ -63,7 +64,7 @@ fn _child_env() -> string[] ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-make-result";
     fs.createDirectory(dir, true);
     return dir;

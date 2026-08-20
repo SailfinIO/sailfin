@@ -46,6 +46,7 @@ import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
     Background,
+    default_scratch_dir,
     first_present_tool,
     sfn_bin_path,
     tool_present,
@@ -143,7 +144,7 @@ fn _timeout_cmd() -> string ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-tls-aes-gcm-e2e";
     fs.createDirectory(dir, true);
     return dir;

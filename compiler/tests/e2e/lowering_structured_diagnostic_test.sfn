@@ -1,11 +1,11 @@
 // End-to-end coverage for the structured lowering diagnostic sidecar
 // (SFEP-0061 S2, SFN-535).
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 test "direct lowering failure renders code and source coordinates" ![io] {
     let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length == 0 { scratch = "/tmp"; }
+    if scratch.length == 0 { scratch = default_scratch_dir(); }
     fs.createDirectory(scratch, true);
     let source_path = scratch + "/sfn535_spanned_lowering_diag.sfn";
     if fs.exists(source_path) { fs.deleteFile(source_path); }

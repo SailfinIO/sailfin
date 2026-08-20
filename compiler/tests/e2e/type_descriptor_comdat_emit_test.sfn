@@ -14,11 +14,16 @@
 // `.claude/rules/no-bash-e2e.md`; `sfn emit` is cache-free so this cannot
 // poison the shared build tree the way a nested `sfn build` would.
 import { contains, split } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-comdat-emit";
     fs.createDirectory(dir, true);
     return dir;

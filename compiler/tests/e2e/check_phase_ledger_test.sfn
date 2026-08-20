@@ -60,7 +60,8 @@
 // not reproduced — the top-level + ordered-names path is the jq-less contract
 // the original falls back to. The `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from this `![io]` test. (#842.)
-import { find, contains, split } from "sfn/strings";
+import { contains, find, split } from "sfn/strings";
+import { default_scratch_dir } from "sfn/test";
 
 // Absolute repo root. The vehicle `cd`s into the per-run subdir before
 // invoking the wrapper, so a relative `./scripts/agent_report.sh` would not
@@ -101,7 +102,7 @@ fn _child_env() -> string[] ![io] {
 
 fn _scratch_base() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-check-ledger";
     fs.createDirectory(dir, true);
     return dir;

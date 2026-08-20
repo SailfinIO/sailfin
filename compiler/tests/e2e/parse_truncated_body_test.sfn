@@ -18,7 +18,7 @@
 // executable, no ICE noise). The `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from these `![io]` tests.
 import { contains } from "sfn/strings";
-import { sfn_bin_path, with_tmp_dir } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // Pure-frontend `sfn check` needs no clang, but thread PATH/HOME so a
 // constrained CI shell still resolves anything the frontend touches.
@@ -47,7 +47,7 @@ struct CheckRun {
 // per-case fixture under it.
 fn _fixture_dir(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-truncated-body-" + tag;
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");
@@ -109,7 +109,7 @@ fn _build_broken(marker: string) -> int ![io] {
 
 test "parse truncated: build rejects a cut-off body before lowering" ![io] {
     let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length == 0 { scratch = "/tmp"; }
+    if scratch.length == 0 { scratch = default_scratch_dir(); }
     fs.createDirectory(scratch, true);
     let marker = scratch + "/sfn-truncated-body-build.out";
     if fs.exists(marker) { fs.deleteFile(marker); }

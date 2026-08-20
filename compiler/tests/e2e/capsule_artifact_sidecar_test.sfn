@@ -22,7 +22,7 @@
 // full JSON parser (sfn/json::parse hangs on complex input when imported
 // transitively via the workspace resolver in the compiler test context).
 import { contains, find, split } from "sfn/strings";
-import { report_child_failure, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -276,7 +276,7 @@ test "sidecar: binary at canonical path runs and prints expected marker" ![io] {
 // ---- Test 16: -o EXPLICIT overrides the canonical default ----
 test "sidecar: -o EXPLICIT overrides the canonical default" ![io] {
     let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length == 0 { scratch = "/tmp"; }
+    if scratch.length == 0 { scratch = default_scratch_dir(); }
     let explicit = scratch + "/sfn-sidecar-explicit.o";
 
     let exit = _run_build([sfn_bin_path(), "build", "-p", _lib_root(), "-o", explicit]);
@@ -295,7 +295,7 @@ test "sidecar: -o EXPLICIT overrides the canonical default" ![io] {
 // the requested output — this validates the positional path works.
 test "sidecar: positional sfn build produces the output artifact" ![io] {
     let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length == 0 { scratch = "/tmp"; }
+    if scratch.length == 0 { scratch = default_scratch_dir(); }
     let out_o = scratch + "/sfn-sidecar-positional.o";
 
     let src = _lib_root() + "/src/mod.sfn";

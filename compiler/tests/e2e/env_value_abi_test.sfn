@@ -18,7 +18,7 @@
 // invocation under the parallel pool, #1333). The fixture's own env (the var
 // under test) is passed to the *run*, not the build.
 import { find } from "sfn/strings";
-import { sfn_bin_path, with_tmp_dir } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
@@ -31,7 +31,7 @@ fn _child_env() -> string[] ![io] {
 
 fn _marker(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-env-abi-" + name + ".out";
     if fs.exists(path) { fs.deleteFile(path); }

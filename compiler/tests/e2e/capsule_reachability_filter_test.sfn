@@ -55,7 +55,12 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test (`.claude/rules/no-bash-e2e.md`).
 import { contains, ends_with, split } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
 
 // In-tree fixture root (CWD-relative = repo root).
 fn _capsule_root() -> string { return "build/sfn-reachability-filter-test"; }
@@ -63,7 +68,7 @@ fn _capsule_root() -> string { return "build/sfn-reachability-filter-test"; }
 // Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
 fn _bin_path(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     return base + "/sfn-reachability-filter-" + tag + "-prog";
 }
 

@@ -44,7 +44,7 @@
 // NOTE on matchers: `sfn/test`'s `expect_*` are `![pure]` and cannot be
 // called from an `![io]` test; assert on captured output with `sfn/strings`.
 import { contains, find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment, not "inherit".
 // Thread the toolchain variables: the legs spawn clang + its linker (PATH),
@@ -76,7 +76,7 @@ fn _asan_env() -> string[] ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     base = base + "/sfn-serve-request-leak";
     fs.createDirectory(base, true);
     return base;

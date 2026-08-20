@@ -23,13 +23,13 @@
 //   5. `off` (and `--skip-toolchain-check`) skips the gate and proceeds.
 //   6. an explicit `<version>` knob forces that version as the target.
 import { contains } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
 // under the parallel pool; `/tmp` is the standalone fallback.
 fn _scratch_root() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     return dir + "/sfn-toolchain-dispatch-e2e";
 }
 

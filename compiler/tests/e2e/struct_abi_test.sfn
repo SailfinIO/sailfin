@@ -40,7 +40,12 @@
 // assumed in the meantime: it was obtained by hand and recorded in
 // SFEP-0021 Risk R3.
 import { find } from "sfn/strings";
-import { expect_eq_bool, expect_eq_int, sfn_bin_path } from "sfn/test";
+import {
+    default_scratch_dir,
+    expect_eq_bool,
+    expect_eq_int,
+    sfn_bin_path
+} from "sfn/test";
 
 // Sizes chosen to straddle the Microsoft x64 register/memory boundary:
 // 4 and 8 bytes are register-eligible there, 16 and 24 are not. Under
@@ -239,7 +244,7 @@ fn _emit_fixture_ir() -> string ![io] {
     // `--module-name`/`--import-context` runs capsule-import staging, which
     // can spawn a child under this deliberately empty-PATH environment.
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-struct-abi";
     fs.createDirectory(dir, true);
     let src = dir + "/fixture.sfn";

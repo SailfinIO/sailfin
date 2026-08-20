@@ -31,7 +31,7 @@
 // interpolation) so the host compiler does not interpolate the fixture
 // before it is written — same discipline as the companion test.
 import { contains } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // Empty `run_capture` env is the EMPTY environment, not "inherit"; a nested
 // `sailfin run` spawns clang + linker (needs PATH) and routes its program.ll
@@ -52,7 +52,7 @@ fn _child_env() -> string[] ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     fs.createDirectory(base, true);
     return fs.mkdtemp(base + "/sfn-channel-owned-");
 }

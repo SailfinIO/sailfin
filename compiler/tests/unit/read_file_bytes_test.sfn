@@ -4,7 +4,9 @@
 // Fixtures containing embedded NUL bytes are written with `malloc` +
 // `memset` + `fwrite` since a Sailfin `string` cannot hold byte 0x00
 // (`char_from_code(0)` yields `""`, so `fs.writeFile` cannot carry it).
-import { _read_file_bytes, _free_file_bytes } from "../../src/build/fs";
+import { default_scratch_dir } from "sfn/test";
+
+import { _free_file_bytes, _read_file_bytes } from "../../src/build/fs";
 
 extern fn fopen(path: *u8, mode: *u8) -> *File;
 
@@ -20,7 +22,7 @@ extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-read-file-bytes-unit";
     fs.createDirectory(dir, true);
     return dir;

@@ -20,7 +20,7 @@
 //
 // Each test uses its own scratch namespace so parallel runs don't
 // collide, and cleans up on exit.
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 import { _stage_one_runtime_sfn_import_context, runtime_asm_cache_key } from "../../src/build/runtime_objs";
 import {
@@ -48,7 +48,7 @@ fn _rsc_identity() -> string { return "sfn-861-review-identity"; }
 
 fn _rsc_tmp_root(label: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn_runtime_stage_shared_cache_test_" + label;
     process.run(["rm", "-rf", dir]);
     process.run(["mkdir", "-p", dir]);

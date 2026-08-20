@@ -20,7 +20,7 @@
 // environment via `process.environ()` so its build-cache routes under the
 // runner's `SAILFIN_TEST_SCRATCH` (#1333) for parallel-pool isolation.
 import { contains, find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // True iff `ll` contains a bare drop temp: a `.drop` slot followed (after
 // optional spaces/tabs) by `=` with NO `.<n>` counter suffix. Mirrors the
@@ -60,7 +60,7 @@ fn _has_bare_drop(ll: string) -> boolean {
 
 fn _ll_path(tag: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-mid-exit-" + tag + ".ll";
     if fs.exists(path) { fs.deleteFile(path); }

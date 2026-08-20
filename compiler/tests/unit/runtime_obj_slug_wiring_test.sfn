@@ -22,6 +22,8 @@
 // fold were removed from `_prepare_runtime_sfn_object`, `beta`'s key would
 // collapse onto `alpha`'s stored entry and this leg would wrongly hit
 // instead.
+import { default_scratch_dir } from "sfn/test";
+
 import {
     RuntimeSfnObjectPlan,
     _prepare_runtime_sfn_object,
@@ -47,7 +49,7 @@ fn _ros_identity() -> string { return "sfn-870-wiring-identity"; }
 
 fn _ros_tmp_root(label: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn_runtime_obj_slug_wiring_test_" + label;
     process.run(["rm", "-rf", dir]);
     process.run(["mkdir", "-p", dir]);

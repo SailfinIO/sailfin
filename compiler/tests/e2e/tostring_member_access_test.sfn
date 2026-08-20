@@ -24,7 +24,7 @@
 // is per-invocation under `sfn test --jobs N`), and captured stdout is
 // stashed to an out-of-tree marker so it survives the temp-dir teardown.
 import { find } from "sfn/strings";
-import { sfn_bin_path, with_tmp_dir } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _fixture_src() -> string ![io] {
     return fs.readFile("compiler/tests/e2e/fixtures/tostring_member_access_probe.sfn");
@@ -34,7 +34,7 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 
 fn _marker(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-tostring-" + name + ".out";
     if fs.exists(path) { fs.deleteFile(path); }
