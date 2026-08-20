@@ -42,6 +42,8 @@
 //     ctors find them via `sfn_resolve_type`).
 //
 // Pinned by `compiler/tests/e2e/test_runtime_type_meta.sh`.
+import { NativeFunction } from "sfn/ir";
+
 import { target_uses_comdat } from "../lowering_debug_state";
 import { sanitize_symbol } from "../symbols";
 import {
@@ -75,6 +77,64 @@ struct TypeDescriptorEmission {
     body_lines: string[];
     has_descriptors: boolean;
     merged_module_init: boolean;
+}
+
+// SFN-1005: a module with no `fn main` has no call site for its
+// `@sailfin_module_init__<module>` function (planted only at user-main
+// entry, gated on `emission.sfn`'s `emit_main_wrapper`, true only for
+// `fn main`), so
+// its runtime-computed globals never run past `default_return_literal`'s
+// zero value. Register the init function through `@llvm.global_ctors`
+// instead for exactly that case — the entry module keeps its existing
+// user-main call site unchanged. A ctor there would double-run
+// initializers, and there is a sharper reason to keep it out: ctors
+// run strictly before `@main`, deterministically (no race), but a
+// throwing initializer that runs as a ctor throws with an empty
+// exception chain and `sfn_throw` `abort()`s (`runtime/sfn/exception.sfn`)
+// with no diagnostic, whereas the identical initializer running at the
+// planted user-main call site executes inside the top-level exception
+// frame `emission.sfn`'s `@main` wrapper installs, and gets the
+// top-level catch with exit 1 instead of a bare SIGABRT.
+//
+// Known gap, not solved here: a `thread_local` global with a computed
+// initializer only runs its ctor on the initial thread. None exist in
+// the tree today; SFN-1005's follow-up covers per-thread init.
+// True when `functions` defines a non-extern `fn main` — an exact mirror of
+// the `emit_main_wrapper` gate in `emission.sfn`, which plants the sole
+// `@sailfin_module_init__<module>` call site. The two must agree in both
+// directions: a module this reports as having `main` and `emission.sfn` does
+// not gets no initialization at all, and the reverse double-runs every
+// initializer (SFN-1005).
+fn module_defines_main(functions: NativeFunction[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= functions.length { return false; }
+        let f = functions[i];
+        i += 1;
+        if f == null { continue; }
+        if f.is_extern { continue; }
+        if f.name == "main" { return true; }
+    }
+}
+
+// The module-init ctor as its own single-entry `@llvm.global_ctors` array,
+// for a module that needs one but emitted no type descriptors to merge it
+// into (no named types, or the type-meta module, which owns
+// `sfn_type_register` and suppresses its own ctor). Callers emit this ONLY
+// when `TypeDescriptorEmission.merged_module_init` is false — LLVM permits
+// exactly one `@llvm.global_ctors` definition per module, and both
+// producers live in this file so that invariant can be checked by reading
+// one place (SFN-1005).
+//
+// 65535 matches the merged array's module-init priority, and descriptor
+// ctors use 65534 in BOTH branches: the split is a global ordering across
+// every module in the link, since two ctors at equal priority in different
+// translation units share one `.init_array.<N>` section, where ELF order is
+// link-order dependent and unspecified.
+fn standalone_module_init_ctor_lines(module_init_ctor_symbol: string) -> string[] {
+    return ["@llvm.global_ctors = appending global [1 x { i32, void ()*, i8* }] [{ i32, void ()*, i8* } { i32 65535, void ()* "
+        + module_init_ctor_symbol
+        + ", i8* null }]"];
 }
 
 fn _empty_emission() -> TypeDescriptorEmission {
@@ -464,4 +524,9 @@ fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_na
     };
 }
 
-export { TypeDescriptorEmission, emit_type_descriptors };
+export {
+    TypeDescriptorEmission,
+    emit_type_descriptors,
+    module_defines_main,
+    standalone_module_init_ctor_lines
+};
