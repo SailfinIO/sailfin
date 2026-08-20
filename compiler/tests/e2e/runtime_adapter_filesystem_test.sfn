@@ -22,7 +22,8 @@
 //   7. manifest    — runtime/capsule.toml sfn-sources lists the adapter.
 //   8. round-trips — write/read/append (incl. a multi-MB grow path) and
 //                    createDirectory/listDirectory/deleteFile, exercised
-//                    through the real `sfn run` link path.
+//                    through a real `sfn build` + direct-exec link path
+//                    (`sfn run` takes no fixture argv — `run.sfn:117-121`).
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
 // they cannot be called from an `![io]` test. For subprocess/IR-output
@@ -222,15 +223,21 @@ test "filesystem emit: define for every sfn_fs_* export" ![io] {
 test "probe routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" ![io] {
     let dir = _scratch_dir();
     let probe = dir + "/fs_probe.sfn";
-    fs.writeFile(probe, "fn main() -> int ![io] {\n" + "    fs.writeFile(\""
-        + dir
-        + "/sfn_fs_probe.txt\", \"hello world\");\n"
-        + "    let content = fs.readFile(\""
-        + dir
-        + "/sfn_fs_probe.txt\");\n"
-        + "    fs.appendFile(\""
-        + dir
-        + "/sfn_fs_probe.txt\", \" again\");\n"
+    // SFN-1001: `dir` travels through argv[1], never spliced into source
+    // text — on Windows it's a backslash path, and a literal `+ dir +`
+    // here would silently corrupt it. Nothing rejects the fixture:
+    // `decode_string_literal_escapes`
+    // (`compiler/capsules/syntax/src/parser/utils.sfn:84-113`) handles
+    // `\n \t \r \" \\ \$` and, for any OTHER escape, drops the backslash
+    // and keeps the character — so `\U` decodes to `U`, `\A` to `A`, and
+    // `\t` to a real TAB. The fixture compiles and runs against a
+    // DIFFERENT path, which is why this had to be fixed structurally
+    // rather than by escaping.
+    fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    let dir = argv[1];\n"
+        + "    fs.writeFile(dir + \"/sfn_fs_probe.txt\", \"hello world\");\n"
+        + "    let content = fs.readFile(dir + \"/sfn_fs_probe.txt\");\n"
+        + "    fs.appendFile(dir + \"/sfn_fs_probe.txt\", \" again\");\n"
         + "    return 0;\n"
         + "}\n");
     let ir = _emit_module("fs_probe", probe);
@@ -247,19 +254,14 @@ test "probe routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" ![io] {
 test "probe routes fs.{listDirectory,deleteFile,createDirectory} through @sfn_fs_*" ![io] {
     let dir = _scratch_dir();
     let probe = dir + "/fs_probe_m31b.sfn";
-    fs.writeFile(probe, "fn main() -> int ![io] {\n"
-        + "    fs.createDirectory(\""
-        + dir
-        + "/sfn_fs_probe_m31b/a/b\", true);\n"
-        + "    fs.writeFile(\""
-        + dir
-        + "/sfn_fs_probe_m31b/note.txt\", \"x\");\n"
-        + "    let entries = fs.listDirectory(\""
-        + dir
-        + "/sfn_fs_probe_m31b\");\n"
-        + "    fs.deleteFile(\""
-        + dir
-        + "/sfn_fs_probe_m31b/note.txt\");\n"
+    // SFN-1001: same rationale as the sibling probe above — argv[1]
+    // carries `dir`, never the source text.
+    fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    let dir = argv[1];\n"
+        + "    fs.createDirectory(dir + \"/sfn_fs_probe_m31b/a/b\", true);\n"
+        + "    fs.writeFile(dir + \"/sfn_fs_probe_m31b/note.txt\", \"x\");\n"
+        + "    let entries = fs.listDirectory(dir + \"/sfn_fs_probe_m31b\");\n"
+        + "    fs.deleteFile(dir + \"/sfn_fs_probe_m31b/note.txt\");\n"
         + "    return entries.length;\n"
         + "}\n");
     let ir = _emit_module("fs_probe_m31b", probe);
@@ -306,9 +308,12 @@ test "fs.writeFile / readFile / appendFile round-trip end-to-end" ![io] {
     let dir = _scratch_dir();
     let scratch_file = dir + "/round_trip.txt";
     let probe = dir + "/round_trip_probe.sfn";
-    fs.writeFile(probe, "fn main() -> int ![io] {\n" + "    let path = \""
-        + scratch_file
-        + "\";\n"
+    // SFN-1001: argv[1] carries the scratch dir; the fixture derives
+    // `path` itself so no path is spliced into source text (a Windows
+    // scratch dir is a backslash path — see the probe tests above).
+    fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    if argv.length < 2 { print.error(\"missing-arg\"); return 2; }\n"
+        + "    let path = argv[1] + \"/round_trip.txt\";\n"
         + "    fs.writeFile(path, \"first chunk\");\n"
         + "    let after_write = fs.readFile(path);\n"
         + "    print(after_write);\n"
@@ -317,10 +322,23 @@ test "fs.writeFile / readFile / appendFile round-trip end-to-end" ![io] {
         + "    print(after_append);\n"
         + "    return 0;\n"
         + "}\n");
-    // `sfn run` spawns a full build; thread PATH + SAILFIN_TEST_SCRATCH
-    // (via _child_env) so the linker resolves and program.ll stays
-    // per-invocation under the parallel pool.
-    let run_exit = process.run_capture([sfn_bin_path(), "run", probe], _child_env());
+    // Build then exec directly (rather than `sfn run`, which has no
+    // argv-passthrough surface) so the scratch dir reaches the fixture
+    // as argv[1]. Thread PATH + SAILFIN_TEST_SCRATCH (via _child_env) so
+    // the linker resolves and program.ll stays per-invocation under the
+    // parallel pool.
+    // SFN-693: `-o` is honored verbatim on every target
+    // (`compiler/src/build/target.sfn:248-253`), so the compiler never
+    // adds the suffix here. Windows spawn sites call `CreateProcessA`
+    // with `lpApplicationName = null`, which appends `.exe` when the
+    // parsed name has none — an extensionless PE is unlaunchable. Named
+    // `.exe` on every host: a POSIX ELF does not care about the suffix.
+    let binpath = dir + "/round_trip_probe.exe";
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, probe], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    let run_exit = process.run_capture([binpath, dir], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert run_exit == 0;
@@ -338,50 +356,50 @@ test "fs.createDirectory / listDirectory / deleteFile round-trip end-to-end" ![i
     let listing = dir + "/listing.txt";
     let listing2 = dir + "/listing2.txt";
     let probe = dir + "/m31b_probe.sfn";
-    fs.writeFile(probe, "fn main() -> int ![io] {\n"
-        + "    fs.createDirectory(\""
-        + base
-        + "/x/y/z\", true);\n"
-        + "    fs.writeFile(\""
-        + base
-        + "/alpha.txt\", \"a\");\n"
-        + "    fs.writeFile(\""
-        + base
-        + "/beta.txt\", \"b\");\n"
-        + "    let entries = fs.listDirectory(\""
-        + base
-        + "\");\n"
+    // SFN-1001: argv[1] carries the scratch dir; the fixture derives
+    // base/listing/listing2 itself so no path is spliced into source text.
+    fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    if argv.length < 2 { print.error(\"missing-arg\"); return 2; }\n"
+        + "    let dir = argv[1];\n"
+        + "    let base = dir + \"/m31b\";\n"
+        + "    let listing = dir + \"/listing.txt\";\n"
+        + "    let listing2 = dir + \"/listing2.txt\";\n"
+        + "    fs.createDirectory(base + \"/x/y/z\", true);\n"
+        + "    fs.writeFile(base + \"/alpha.txt\", \"a\");\n"
+        + "    fs.writeFile(base + \"/beta.txt\", \"b\");\n"
+        + "    let entries = fs.listDirectory(base);\n"
         + "    let mut i = 0;\n"
         + "    loop {\n"
         + "        if i >= entries.length { break; }\n"
-        + "        fs.appendFile(\""
-        + listing
-        + "\", entries[i]);\n"
-        + "        fs.appendFile(\""
-        + listing
-        + "\", \"\\n\");\n"
+        + "        fs.appendFile(listing, entries[i]);\n"
+        + "        fs.appendFile(listing, \"\\n\");\n"
         + "        i = i + 1;\n"
         + "    }\n"
-        + "    fs.deleteFile(\""
-        + base
-        + "/alpha.txt\");\n"
-        + "    let after = fs.listDirectory(\""
-        + base
-        + "\");\n"
+        + "    fs.deleteFile(base + \"/alpha.txt\");\n"
+        + "    let after = fs.listDirectory(base);\n"
         + "    let mut j = 0;\n"
         + "    loop {\n"
         + "        if j >= after.length { break; }\n"
-        + "        fs.appendFile(\""
-        + listing2
-        + "\", after[j]);\n"
-        + "        fs.appendFile(\""
-        + listing2
-        + "\", \"\\n\");\n"
+        + "        fs.appendFile(listing2, after[j]);\n"
+        + "        fs.appendFile(listing2, \"\\n\");\n"
         + "        j = j + 1;\n"
         + "    }\n"
         + "    return 0;\n"
         + "}\n");
-    let run_exit = process.run_capture([sfn_bin_path(), "run", probe], _child_env());
+    // Build then exec directly so the scratch dir reaches the fixture as
+    // argv[1] (`sfn run` has no argv-passthrough surface).
+    // SFN-693: `-o` is honored verbatim on every target
+    // (`compiler/src/build/target.sfn:248-253`), so the compiler never
+    // adds the suffix here. Windows spawn sites call `CreateProcessA`
+    // with `lpApplicationName = null`, which appends `.exe` when the
+    // parsed name has none — an extensionless PE is unlaunchable. Named
+    // `.exe` on every host: a POSIX ELF does not care about the suffix.
+    let binpath = dir + "/m31b_probe.exe";
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, probe], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    let run_exit = process.run_capture([binpath, dir], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert run_exit == 0;
@@ -418,19 +436,33 @@ test "large-file round-trip exercises the chunked-read grow path" ![io] {
     fs.writeFile(expected_path, payload);
 
     let probe = dir + "/large_probe.sfn";
-    fs.writeFile(probe, "fn main() -> int ![io] {\n" + "    let src = \""
-        + expected_path
-        + "\";\n"
-        + "    let dst = \""
-        + scratch_file
-        + "\";\n"
+    // SFN-1001: argv[1] carries the scratch dir; src/dst are derived
+    // inside the fixture so no path is spliced into source text.
+    fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    if argv.length < 2 { print.error(\"missing-arg\"); return 2; }\n"
+        + "    let dir = argv[1];\n"
+        + "    let src = dir + \"/large.bin.expected\";\n"
+        + "    let dst = dir + \"/large.bin\";\n"
         + "    let payload = fs.readFile(src);\n"
         + "    fs.writeFile(dst, payload);\n"
         + "    let round_tripped = fs.readFile(dst);\n"
         + "    print(round_tripped);\n"
         + "    return 0;\n"
         + "}\n");
-    let run_exit = process.run_capture([sfn_bin_path(), "run", probe], _child_env());
+    // Build then exec directly so the scratch dir reaches the fixture as
+    // argv[1] (`sfn run` has no argv-passthrough surface).
+    // SFN-693: `-o` is honored verbatim on every target
+    // (`compiler/src/build/target.sfn:248-253`), so the compiler never
+    // adds the suffix here. Windows spawn sites call `CreateProcessA`
+    // with `lpApplicationName = null`, which appends `.exe` when the
+    // parsed name has none — an extensionless PE is unlaunchable. Named
+    // `.exe` on every host: a POSIX ELF does not care about the suffix.
+    let binpath = dir + "/large_probe.exe";
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, probe], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    let run_exit = process.run_capture([binpath, dir], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     assert run_exit == 0;
