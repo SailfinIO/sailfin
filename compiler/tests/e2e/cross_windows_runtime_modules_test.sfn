@@ -177,9 +177,10 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     // exclusive_create.sfn (SFN-974): identical shape to rename_ops above.
     // `open`'s O_CREAT/O_EXCL flags have no Windows meaning; the Windows
     // sibling claims via CreateFileA + CREATE_NEW instead.
-    // `compiler/src/cli/commands/run.sfn`'s `_unique_run_stem` declares
-    // `extern fn sfn_create_exclusive`, so without the sibling in
-    // RUNTIME_MODS the bridge link has no definition for it. Substrings are
+    // `compiler/src/build/fs.sfn` declares `extern fn
+    // sfn_create_exclusive` (`run.sfn` only imports the wrapper), so
+    // without the sibling in RUNTIME_MODS the bridge link has no
+    // definition for it. Substrings are
     // exact both ways: "exclusive_create.sfn" is NOT a substring of
     // "exclusive_create_windows.sfn", and the manifest never names the
     // sibling.

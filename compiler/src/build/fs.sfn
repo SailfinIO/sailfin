@@ -74,6 +74,13 @@ extern fn sfn_rename_replace(src: *u8, dst: *u8) -> i32;
 // the name (SFN-974).
 extern fn sfn_create_exclusive(path: *u8, mode: i32) -> i32;
 
+// SFN-1005: these initializers must stay LITERALS. A computed
+// module-global initializer is silently dropped in a non-entry module and
+// keeps the zero value, so respelling `-1` as `0 - 1` — matching the
+// stylistic `0 - 1` used in some `_windows` modules — would collapse
+// `CREATE_EXCLUSIVE_ERROR` into `CREATE_EXCLUSIVE_CREATED`'s 0 and erase
+// the created-vs-error distinction this primitive exists to provide.
+// Delete this note when SFN-1005 lands.
 let CREATE_EXCLUSIVE_CREATED: i32 = 0;
 
 let CREATE_EXCLUSIVE_EXISTS: i32 = 1;

@@ -1253,9 +1253,9 @@ ci-cross-windows:
 	: "platform/exclusive_create_windows.sfn (SFN-974): the POSIX"; \
 	: "module's O_CREAT/O_EXCL open(2) flags have no Windows meaning;"; \
 	: "the sibling claims via CreateFileA + CREATE_NEW instead."; \
-	: "compiler/src/cli/commands/run.sfn's _unique_run_stem declares"; \
-	: "extern fn sfn_create_exclusive, which has no definition in the"; \
-	: "bridge link without this entry."; \
+	: "compiler/src/build/fs.sfn declares extern fn"; \
+	: "sfn_create_exclusive (run.sfn only imports the wrapper), which"; \
+	: "has no definition in the bridge link without this entry."; \
 	: "clock is"; \
 	: "re-emitted with SAILFIN_TARGET_OS=Windows for the errno->_errno"; \
 	: "fix (#877), and exec for the exe-path intrinsic leg (#967/#971):"; \

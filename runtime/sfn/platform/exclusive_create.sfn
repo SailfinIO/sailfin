@@ -72,6 +72,12 @@ extern fn access(path: *u8, mode: i32) -> i32;
 // probe in SFN-974's implementation pass). Unary `-1` is the proven form
 // (`runtime/sfn/string.sfn:533`'s `_sfn_concat_limit_state`); `fs.sfn:129`
 // shows the same spelling suffices for a local, non-global `let`.
+//
+// The underlying defect is SFN-1005: ANY computed module-global
+// initializer is dropped in a non-entry module, not just a negative one
+// (`2 + 3` reads 0, `"x" + "y"` reads "", `1 > 0` reads false). Delete
+// this paragraph and respell freely once SFN-1005 lands; until then the
+// spelling is load-bearing, not stylistic.
 let mut _excl_open_flags_memo: i32 = -1;
 
 fn _excl_open_flags() -> i32 ![io] {
