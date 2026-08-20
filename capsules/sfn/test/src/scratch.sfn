@@ -23,8 +23,12 @@ import { _host_is_windows } from "./sfn_bin";
 // precedent (`compiler/tests/e2e/process_handle_windows_test.sfn`, which
 // falls back to `TEMP` then `.`).
 //
-// On POSIX this probes `TMPDIR`, falling back to the historical `"/tmp"`
-// literal — byte-identical to the fallback it replaces on that host.
+// On POSIX this probes `TMPDIR` first, falling back to the historical
+// `"/tmp"` literal. Byte-identical to the fallback it replaces only when
+// `TMPDIR` is unset (the usual case on Linux). On macOS, `TMPDIR` is always
+// set to a per-user path, so scratch dirs move from `/tmp` to `$TMPDIR`
+// there — deliberate, since ignoring `TMPDIR` was the original bug's
+// POSIX-side twin, not a Windows-only defect.
 fn default_scratch_dir() -> string ![io] {
     if _host_is_windows() {
         let temp = env.get("TEMP");
