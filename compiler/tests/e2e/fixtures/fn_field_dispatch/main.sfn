@@ -1,0 +1,29 @@
+fn increment(value: int) -> int { return value + 1; }
+
+struct Router {
+    handler: fn (int) -> int;
+    base: int;
+
+    fn offset(self, value: int) -> int { return self.base + value; }
+}
+
+fn make_router(label: string, handler: fn (int) -> int, base: int) -> Router {
+    if label.length == 0 {
+        return Router { handler: handler, base: 0 };
+    }
+    return Router { handler: handler, base: base };
+}
+
+fn main() ![io] {
+    let bias: int = 10;
+    let named = Router { handler: increment, base: 40 };
+    let captured = Router {
+        handler: fn (value: int) -> int { return value + bias; },
+        base: 0
+    };
+
+    print(named.handler(5));
+    print(captured.handler(5));
+    print(named.offset(2));
+    print(make_router("computed", increment, 0).handler(5));
+}

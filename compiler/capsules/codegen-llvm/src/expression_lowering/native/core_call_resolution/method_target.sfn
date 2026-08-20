@@ -20,6 +20,7 @@ import {
 import {
     ends_with,
     extend_diag_array,
+    extend_string_array,
     starts_with,
     trim_text
 } from "../../../utils";
@@ -57,17 +58,14 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
     let mut closure_return_type: string = "";
     let mut closure_parameter_types: string[] = [];
 
-    // Issue #689: closure-callee dispatch. If the call target names a
-    // local with a `__closure__@sfn_lambda_<N>` type annotation
-    // (set by `lower_let_instruction` after lambda lifting) or a
-    // parameter with a `fn(...) -> R` annotation (parser support from
-    // #688), the call is a closure-aggregate dispatch — load the
-    // pair and short-circuit to `coerce_and_emit_call`'s new branch.
-    // This must run BEFORE any method-dispatch fan-out because a
-    // closure binding can shadow a member name.
+    // Issue #689: load closure callees before method fan-out so a closure
+    // binding or fn-typed field cannot be mistaken for a struct method.
     if injected_argument_count == 0 {
         let closure_info = try_resolve_closure_callee(result_target, bindings, locals, functions, context, result_temp, result_lines);
         if closure_info != null {
+            result_diagnostics = extend_string_array(result_diagnostics, closure_info.diagnostics);
+            result_diags = extend_diag_array(result_diags, closure_info.diags);
+            result_string_constants = merge_string_constants(result_string_constants, closure_info.string_constants);
             method_operand = closure_info.operand;
             result_lines = closure_info.lines;
             result_temp = closure_info.temp_index;
