@@ -13,13 +13,12 @@
 // selects a different resolver leg (SFEP-0072 §3.3, the no-import-needed
 // prelude mechanism); this file covers the written-import leg, which ignores
 // the flag entirely.
-import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
-
-fn _sfn_bin() -> string ![io] {
-    let configured = env.get("SAILFIN_BIN");
-    if configured.length > 0 { return configured; }
-    return "build/bin/sfn";
-}
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 fn _build_env(label: string) -> string[] ![io] {
     let mut child = clean_runner_env(nested_runner_scratch(label));
@@ -83,7 +82,7 @@ test "workspace resolution: a member imports a sibling with an empty [dependenci
         let entry = _write_undeclaring_consumer(root + "/app");
 
         let output = root + "/app-out";
-        let exit = process.run_capture([_sfn_bin(), "build", "-o", output, entry], _build_env("sfn-986-member"));
+        let exit = process.run_capture([sfn_bin_path(), "build", "-o", output, entry], _build_env("sfn-986-member"));
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         if exit != 0 {
@@ -134,7 +133,7 @@ test "workspace resolution: the same undeclared import fails outside the workspa
             + "    return 0;\n"
             + "}\n");
         let control_out = root + "/control-out";
-        let control_exit = process.run_capture([_sfn_bin(), "build", "-o", control_out, root
+        let control_exit = process.run_capture([sfn_bin_path(), "build", "-o", control_out, root
             + "/control/src/main.sfn"], _build_env("sfn-986-control"));
         let control_out_text = process.capture_take_stdout();
         let control_err = process.capture_take_stderr();
@@ -145,7 +144,7 @@ test "workspace resolution: the same undeclared import fails outside the workspa
 
         let entry = _write_undeclaring_consumer(root + "/solo");
         let output = root + "/solo-out";
-        let exit = process.run_capture([_sfn_bin(), "build", "-o", output, entry], _build_env("sfn-986-solo"));
+        let exit = process.run_capture([sfn_bin_path(), "build", "-o", output, entry], _build_env("sfn-986-solo"));
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         _log_failure("solo", out + err);
