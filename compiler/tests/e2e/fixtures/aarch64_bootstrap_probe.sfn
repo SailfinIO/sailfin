@@ -2,6 +2,8 @@
 //
 // Native target probe for SFN-472. It combines a user-struct return with an
 // exception round-trip and an on-device `struct stat.st_mode` read.
+import { default_scratch_dir } from "sfn/test";
+
 struct Pair {
     left: int,
     right: int
@@ -21,7 +23,9 @@ fn main() -> void ![io] {
     assert caught;
 
     let mut path = env.get("SAILFIN_BOOTSTRAP_PROBE_PATH");
-    if path.length == 0 { path = "/tmp/sfn-aarch64-bootstrap-probe"; }
+    if path.length == 0 {
+        path = default_scratch_dir() + "/sfn-aarch64-bootstrap-probe";
+    }
     fs.writeFile(path, "probe");
     assert fs.set_perms(path, 384);
     assert fs.get_perms(path) == 384;
