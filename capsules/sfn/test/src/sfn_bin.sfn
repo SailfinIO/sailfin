@@ -44,6 +44,9 @@
 // narrow-stdlib library that the compiler's own tests consume, so importing
 // the driver here would invert the dependency and trip the role split
 // `compiler/tests/unit/compiler_capsule_boundary_test.sfn` ratchets.
+//
+// Exported (rather than file-private) so `scratch.sfn`'s `scratch_root`
+// (SFN-978) can share this probe instead of duplicating its body.
 fn _host_is_windows() -> boolean ![io] {
     let host_override = env.get("SAILFIN_HOST_OS");
     if host_override.length > 0 { return host_override == "Windows"; }

@@ -467,6 +467,17 @@ export { first_present_tool, tool_present } from "./tool_probe";
 export { sfn_bin_path } from "./sfn_bin";
 
 // ---------------------------------------------------------------------------
+// The scratch directory a test should use (SFN-978)
+// ---------------------------------------------------------------------------
+// `scratch_root()` is the scratch directory a test should write temp files
+// under: `SAILFIN_TEST_SCRATCH` verbatim when set, else the host-conditioned
+// `default_scratch_dir()` — `TEMP`/`TMP`/`"."` on Windows, `TMPDIR`/`"/tmp"`
+// on POSIX. It is the single definition of a fallback that 230 test files
+// under `compiler/tests/` had each hand-copied as the POSIX-only literal
+// `"/tmp"`, unrunnable on a native Windows host. See `scratch.sfn`.
+export { default_scratch_dir, scratch_root } from "./scratch";
+
+// ---------------------------------------------------------------------------
 // Voluntary test skips (SFN-815)
 // ---------------------------------------------------------------------------
 // `skip(reason)` records the running test as skipped rather than passed, and
