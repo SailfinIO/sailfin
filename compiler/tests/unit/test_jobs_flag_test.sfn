@@ -95,6 +95,26 @@ test "jobs: auto budget applies global and Darwin caps (SFN-91)" {
     assert _test_jobs_budget(1099511627776, 64, true) == 2;
 }
 
+// SFN-980: `_test_jobs_budget` is pure, so a native Windows host resolving
+// through `windows_physical_ram_bytes` (an extern the test suite cannot
+// exercise on a Linux runner) is covered by feeding it Windows-plausible
+// inputs directly rather than faking the probe.
+test "jobs: Windows-plausible 16 GiB / 8-core host affords more than serial (SFN-980)" {
+    // 16 GiB * 80% = 12.8 GiB, less the 5 GiB parent = 7.8 GiB / 3 GiB = 2.
+    assert _test_jobs_budget(17179869184, 8, false) == 2;
+}
+
+test "jobs: Windows-plausible 128 GiB / 64-core host hits the global cap (SFN-980)" {
+    // 128 GiB * 80% = 102.4 GiB, less the parent, / 3 GiB = 32 — memory does
+    // not bind; 64 cores does, and the global cap then clamps to 16.
+    assert _test_jobs_budget(137438953472, 64, false) == 16;
+}
+
+test "jobs: Windows-plausible low-RAM host floors to serial (SFN-980)" {
+    // 2 GiB cannot seat the 5 GiB parent reserve alone.
+    assert _test_jobs_budget(2147483648, 8, false) == 1;
+}
+
 // SFN-547: a pooled child must not fan its own per-module emit out beside
 // `jobs - 1` siblings doing the same — the pool is the parallelism layer.
 test "jobs: pooled children are pinned to serial emit (SFN-547)" {
