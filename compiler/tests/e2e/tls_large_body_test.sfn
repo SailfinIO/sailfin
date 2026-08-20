@@ -283,19 +283,24 @@ fn _owned_and_handle() -> string {
 
 // Write the TLS server fixture: the shared handler plus a `main` that starts
 // `sfn_serve_tls` (declared `extern`; the linker resolves it to
-// `runtime/sfn/concurrency/serve.sfn`) with the baked cert/key paths.
-fn _write_tls_server(dir: string, cert: string, key: string) -> string ![io] {
+// `runtime/sfn/concurrency/serve.sfn`) with cert/key derived from argv[1].
+//
+// SFN-1002: the cert/key directory travels through argv[1], never spliced
+// into source text — on Windows it's a backslash path, and a literal
+// `+ cert +` / `+ key +` here would silently corrupt it:
+// `decode_string_literal_escapes`
+// (compiler/capsules/syntax/src/parser/utils.sfn:84) drops the backslash
+// from any unrecognized escape (`\U`, `\A`, ...) and turns `\t`/`\n`/`\r`
+// into real control bytes, so the fixture ends up reading its cert/key
+// from a different, usually nonexistent, path.
+fn _write_tls_server(dir: string) -> string ![io] {
     let src = dir + "/tlssrv.sfn";
     fs.writeFile(src, "extern fn sfn_serve_tls(handler: * u8, port: i32, cert: * u8, key: * u8) -> void;\n"
         + _owned_and_handle()
-        + "fn main() -> int ![net, io] {\n"
+        + "fn main(argv: string[]) -> int ![net, io] {\n"
         + "    sfn_serve_tls(handle as * u8, "
         + _tls_port_str()
-        + ", \""
-        + cert
-        + "\" as * u8, \""
-        + key
-        + "\" as * u8);\n"
+        + ", (argv[1] + \"/cert.pem\") as * u8, (argv[1] + \"/key.pem\") as * u8);\n"
         + "    return 0;\n"
         + "}\n");
     return src;
@@ -316,7 +321,7 @@ fn _write_plain_server(dir: string) -> string ![io] {
 }
 
 // Write a client fixture capsule whose `main` POSTs an oversize body to
-// `url` and writes the response to `out_path`. `http.post_json` returns the
+// `url` and writes the response to `argv[1]`. `http.post_json` returns the
 // response body, or an empty result when the round-trip failed before a
 // status was obtained — the same `resp.status == 0` path `sfn publish`
 // reports as "could not reach registry". So the file's presence + content is
@@ -326,7 +331,13 @@ fn _write_plain_server(dir: string) -> string ![io] {
 // field stands in for the base64 tarball. Only its SIZE matters to the
 // record layer, but keeping the shape means this exercises the same
 // `http.post_json` entry point publishing uses.
-fn _write_client(dir: string, url: string, out_path: string) -> string ![io] {
+//
+// SFN-1002: the output path travels through argv[1], never spliced into
+// source text (same rationale as `_write_tls_server` above). `url` stays
+// spliced in literally — it is `"http(s)://localhost:" + <fixed port> +
+// "/"`, never derived from the scratch dir, so it carries no backslash on
+// any host and is not an instance of this defect.
+fn _write_client(dir: string, url: string) -> string ![io] {
     let root = dir + "/client";
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
@@ -341,14 +352,12 @@ fn _write_client(dir: string, url: string, out_path: string) -> string ![io] {
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
     fs.writeFile(root + "/src/main.sfn", _big_helper()
-        + "fn main() -> int ![net, io] {\n"
+        + "fn main(argv: string[]) -> int ![net, io] {\n"
         + "    let body = \"{\\\"content\\\":\\\"\" + _big() + \"\\\"}\";\n"
         + "    let resp = http.post_json(\""
         + url
         + "\", body, \"\");\n"
-        + "    if resp.length > 0 { fs.writeFile(\""
-        + out_path
-        + "\", resp); }\n"
+        + "    if resp.length > 0 { fs.writeFile(argv[1], resp); }\n"
         + "    return 0;\n"
         + "}\n");
     return root + "/src/main.sfn";
@@ -366,11 +375,20 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
 
 // Spawn the prebuilt blocking server wrapped in a wall-clock timeout so it
 // self-reaps (no process-kill primitive; `serve()` never returns).
-fn _spawn_server(tcmd: string, bin: string) -> i64 ![io] {
+// `bin_argv` is forwarded after `bin` — the TLS server fixture reads its
+// cert/key directory back from its own argv[1] (SFN-1002); the plaintext
+// fixture needs none.
+fn _spawn_server(tcmd: string, bin: string, bin_argv: string[]) -> i64 ![io] {
     let mut argv: string[] = [];
     argv.push(tcmd);
     argv.push("90");
     argv.push(bin);
+    let mut i: i64 = 0;
+    loop {
+        if i >= bin_argv.length { break; }
+        argv.push(bin_argv[i]);
+        i = i + 1;
+    }
     return process.spawn_with_env(argv, _child_env());
 }
 
@@ -396,7 +414,7 @@ fn _await_listening(port: i64) -> boolean ![io] {
 // the result reflects THIS run only.
 fn _client_body(client_bin: string, run_env: string[], out_path: string) -> string ![io] {
     let _rm = process.run(["rm", "-f", out_path]);
-    let cexit = process.run_capture([client_bin], run_env);
+    let cexit = process.run_capture([client_bin, out_path], run_env);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if cexit != 0 { return ""; }
@@ -437,22 +455,21 @@ test "tls: a payload larger than one TLS record round-trips in both directions" 
 
     let dir = _scratch_dir("sfn-tls-large-body");
     let cert = dir + "/cert.pem";
-    let key = dir + "/key.pem";
     // SAN matches the connect host (localhost), so trust is the only thing
     // that could reject the peer — and the trusted env supplies it.
     assert _gen_cert(dir, "localhost");
 
     // Build + spawn the native TLS server, then wait for it to accept.
-    let srv_main = _write_tls_server(dir, cert, key);
+    let srv_main = _write_tls_server(dir);
     let srv_bin = _build_bin(srv_main, dir + "/tlssrv-bin");
     assert srv_bin.length > 0;
-    let _handle = _spawn_server(tcmd, srv_bin);
+    let _handle = _spawn_server(tcmd, srv_bin, [dir]);
     assert _await_listening(_tls_port());
 
     // Build the native https client fixture.
     let out_path = dir + "/body.out";
     let cli_main = _write_client(dir, "https://localhost:" + _tls_port_str()
-        + "/", out_path);
+        + "/");
     let cli_bin = _build_bin(cli_main, dir + "/client-bin");
     assert cli_bin.length > 0;
 
@@ -493,12 +510,12 @@ test "tls: the same oversize payload round-trips over plaintext (control)" ![io]
     let srv_main = _write_plain_server(dir);
     let srv_bin = _build_bin(srv_main, dir + "/plainsrv-bin");
     assert srv_bin.length > 0;
-    let _handle = _spawn_server(tcmd, srv_bin);
+    let _handle = _spawn_server(tcmd, srv_bin, []);
     assert _await_listening(_plain_port());
 
     let out_path = dir + "/body.out";
     let cli_main = _write_client(dir, "http://localhost:" + _plain_port_str()
-        + "/", out_path);
+        + "/");
     let cli_bin = _build_bin(cli_main, dir + "/client-bin");
     assert cli_bin.length > 0;
 

@@ -18,7 +18,17 @@ test "fs.appendFile reports a short write without deleting existing content" ![i
     let bin = scratch + "/probe";
     let target = scratch + "/existing.txt";
     fs.createDirectory(scratch, true);
-    fs.writeFile(probe, "fn main() -> int ![io] {\n"
+    // SFN-1002: `target` travels through argv[1], never spliced into
+    // source text — on Windows it's a backslash path, and a literal
+    // `+ target +` here would silently corrupt it:
+    // `decode_string_literal_escapes`
+    // (compiler/capsules/syntax/src/parser/utils.sfn:84) drops the
+    // backslash from any unrecognized escape (`\U`, `\A`, ...) and turns
+    // `\t`/`\n`/`\r` into real control bytes, so the probe would append to
+    // a different, usually nonexistent, path than the one this test
+    // asserts against.
+    fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    let target = argv[1];\n"
         + "    let mut payload = \"\";\n"
         + "    let mut i = 0;\n"
         + "    loop {\n"
@@ -26,9 +36,7 @@ test "fs.appendFile reports a short write without deleting existing content" ![i
         + "        payload = payload + \"A\";\n"
         + "        i = i + 1;\n"
         + "    }\n"
-        + "    if fs.appendFile(\""
-        + target
-        + "\", payload) { print(\"APPEND_OK\"); }\n"
+        + "    if fs.appendFile(target, payload) { print(\"APPEND_OK\"); }\n"
         + "    else { print(\"APPEND_FAILED\"); }\n"
         + "    return 0;\n"
         + "}\n");
@@ -58,6 +66,8 @@ test "fs.appendFile reports a short write without deleting existing content" ![i
     fs.writeFile(target, "PREEXISTING\n");
     let run_rc = process.run_capture(["bash", "-c", "ulimit -f 8; trap '' XFSZ; \""
         + bin
+        + "\" \""
+        + target
         + "\""], _child_env());
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();

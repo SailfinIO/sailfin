@@ -71,7 +71,16 @@ fn _gen_cert(cert: string, key: string) -> bool ![io] {
 // typed `serve_tls` wrapper reuses the capsule trampoline, so the handler can
 // return a `Response` with status + headers that must appear verbatim on the
 // encrypted wire.
-fn _write_server(dir: string, cert: string, key: string) -> string ![io] {
+//
+// SFN-1002: the cert/key directory travels through argv[1], never spliced
+// into source text — on Windows it's a backslash path, and a literal
+// `+ cert +` / `+ key +` here would silently corrupt it:
+// `decode_string_literal_escapes`
+// (compiler/capsules/syntax/src/parser/utils.sfn:84) drops the backslash
+// from any unrecognized escape (`\U`, `\A`, ...) and turns `\t`/`\n`/`\r`
+// into real control bytes, so the fixture ends up reading its cert/key
+// from a different, usually nonexistent, path.
+fn _write_server(dir: string) -> string ![io] {
     let root = dir + "/app";
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
@@ -97,14 +106,10 @@ fn _write_server(dir: string, cert: string, key: string) -> string ![io] {
         + "    return not_found();\n"
         + "}\n"
         + "\n"
-        + "fn main() -> int ![net, io] {\n"
+        + "fn main(argv: string[]) -> int ![net, io] {\n"
         + "    serve_tls(handle as * fn (Request) -> Response, "
         + _tls_port_str()
-        + ", \""
-        + cert
-        + "\", \""
-        + key
-        + "\");\n"
+        + ", argv[1] + \"/cert.pem\", argv[1] + \"/key.pem\");\n"
         + "    return 0;\n"
         + "}\n");
     return root + "/src/main.sfn";
@@ -123,12 +128,14 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
 
 // Spawn the prebuilt blocking server wrapped in a wall-clock timeout so it
 // self-reaps (no process-kill primitive; `serve()` never returns). Guarded
-// on `tcmd` being present by the caller.
-fn _spawn_server(tcmd: string, bin: string) -> i64 ![io] {
+// on `tcmd` being present by the caller. `dir` is forwarded as the server's
+// own argv[1] — it reads its cert/key directory back from there (SFN-1002).
+fn _spawn_server(tcmd: string, bin: string, dir: string) -> i64 ![io] {
     let mut argv: string[] = [];
     argv.push(tcmd);
     argv.push("60");
     argv.push(bin);
+    argv.push(dir);
     return process.spawn_with_env(argv, _child_env());
 }
 
@@ -190,10 +197,10 @@ test "serve TLS loopback: handshake + request→response cycle over TLS" ![io] {
     let key = dir + "/key.pem";
     assert _gen_cert(cert, key);
 
-    let main_path = _write_server(dir, cert, key);
+    let main_path = _write_server(dir);
     let server_bin = _build_bin(main_path, dir + "/tlssrv-bin");
     assert server_bin.length > 0;
-    let _handle = _spawn_server(tcmd, server_bin);
+    let _handle = _spawn_server(tcmd, server_bin, dir);
 
     // Handshake + full request→response cycle over TLS (acceptance #1).
     let resp = _await_ready(tcmd);

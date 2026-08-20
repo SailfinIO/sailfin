@@ -190,9 +190,18 @@ fn _await_listening(port: i64) -> boolean ![io] {
 }
 
 // Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
-// to `out_path`. `http.download` writes the file only on a successful
+// to `argv[1]`. `http.download` writes the file only on a successful
 // round-trip, so its presence + content is the round-trip proof.
-fn _write_client(dir: string, out_path: string) -> string ![io] {
+//
+// SFN-1002: the output path travels through argv[1], never spliced into
+// source text — on Windows it's a backslash path, and a literal
+// `+ out_path +` here would silently corrupt it:
+// `decode_string_literal_escapes`
+// (compiler/capsules/syntax/src/parser/utils.sfn:84) drops the backslash
+// from any unrecognized escape (`\U`, `\A`, ...) and turns `\t`/`\n`/`\r`
+// into real control bytes, so the fixture ends up writing to a different,
+// usually nonexistent, path than the one this test asserts against.
+fn _write_client(dir: string) -> string ![io] {
     let root = dir + "/client";
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
@@ -206,12 +215,10 @@ fn _write_client(dir: string, out_path: string) -> string ![io] {
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
-    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![net, io] {\n"
+    fs.writeFile(root + "/src/main.sfn", "fn main(argv: string[]) -> int ![net, io] {\n"
         + "    let _ = http.download(\"https://localhost:"
         + _tls_port_str()
-        + "/\", \""
-        + out_path
-        + "\");\n"
+        + "/\", argv[1]);\n"
         + "    return 0;\n"
         + "}\n");
     return root + "/src/main.sfn";
@@ -248,7 +255,7 @@ test "runtime tls: https GET round-trips against a local openssl s_server" ![io]
     // Build the client fixture up front (cold build once).
     let out_path = dir + "/body.out";
     let _rm = process.run(["rm", "-f", out_path]);
-    let main_path = _write_client(dir, out_path);
+    let main_path = _write_client(dir);
     let client_bin = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
@@ -266,7 +273,7 @@ test "runtime tls: https GET round-trips against a local openssl s_server" ![io]
     loop {
         if attempt >= 20 { break; }
         let _rm2 = process.run(["rm", "-f", out_path]);
-        let cexit = process.run_capture([client_bin], cenv);
+        let cexit = process.run_capture([client_bin, out_path], cenv);
         let _co = process.capture_take_stdout();
         let _ce = process.capture_take_stderr();
         if cexit == 0 {
