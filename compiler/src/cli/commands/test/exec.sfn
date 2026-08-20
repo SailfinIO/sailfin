@@ -174,8 +174,8 @@ struct TestBinResult {
 // dropped first so POSIX `getenv` (first match wins) returns the override.
 //
 // SFN-693: also seeds `SAILFIN_BIN=<self_exe>` — `ctx.compiler_path`,
-// threaded in from `_run_single_process` — so the 285 e2e fixtures'
-// identical `_sfn_bin()` helper resolves correctly when run via
+// threaded in from `_run_single_process` — so every test's
+// `sfn_bin_path()` (`sfn/test`) resolves correctly when run via
 // `sfn test <single-file>` (this path), not only via the pooled
 // `_pool_child_env` (`./pool.sfn`, the multi-file path). `ctx.compiler_path`
 // rather than `_resolve_test_self_path(binary_dir)`: the latter would
