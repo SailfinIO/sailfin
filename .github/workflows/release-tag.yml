@@ -433,9 +433,300 @@ jobs:
           path: dist/installer-windows-x86_64.tar.gz
           if-no-files-found: error
 
+  # SFEP-0021 M11 / SFN-57: the native MSVC release leg, split into a
+  # cross-seed job (duplicated rather than reused from the `build` matrix's
+  # linux-x86_64 leg or from windows-native-selfhost.yml's own cross-seed
+  # job) and a windows-2025 build job that mirrors
+  # windows-native-selfhost.yml's `native-build` job almost verbatim: same
+  # composite, same fixed-point gate, same packaging step. Duplicating
+  # cross-seed rather than adding `needs: build` is deliberate — the matrix's
+  # linux-arm64 leg alone runs up to ~240 minutes (qemu bootstrap), and
+  # `upload` would then wait on it before even starting the native Windows
+  # leg. Running these two jobs in parallel with `build` instead costs a
+  # serial ~75-minute chain (cross-seed + staircase + Stage 2 build + fixed
+  # point + packaging) rather than layering on top of the ~100-minute `build`
+  # wait.
+  #
+  # This leg is best-effort while it stabilizes: `upload` below proceeds on a
+  # failed or cancelled native-windows-build (see its `if:` condition) so a
+  # still-shaking Windows leg can never block or silently swallow the release
+  # the other four platforms already produced.
+  native-windows-cross-seed:
+    name: Build mingw-cross bootstrap seed [native windows leg]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository (build ref)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Resolve seed version (input override → bootstrap.toml)
+        id: seed
+        shell: bash
+        env:
+          INPUT_SEED_VERSION: ${{ inputs.seed_version }}
+        run: |
+          set -euo pipefail
+          override="$(printf '%s' "$INPUT_SEED_VERSION" | tr -d '[:space:]')"
+          if [ -n "$override" ]; then
+            pin="$override"
+          else
+            if [ ! -f bootstrap.toml ]; then
+              echo "[seed-pin][error] tag ${RELEASE_TAG} predates bootstrap.toml." >&2
+              echo "[seed-pin][error] re-run this workflow with the 'seed_version' input set." >&2
+              exit 1
+            fi
+            pin="$(awk '
+              /^\[[^]]+\]/ { section=$0 }
+              section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+            ' bootstrap.toml)"
+            if [ -z "$pin" ]; then
+              echo "[seed-pin][error] bootstrap.toml has no [seed].version at tag ${RELEASE_TAG}" >&2
+              exit 1
+            fi
+          fi
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang + llvm (Linux)
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 20
+        with:
+          packages: clang-18 llvm-18 jq
+
+      - name: Set CLANG env (Linux)
+        shell: bash
+        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Build native compiler (self-host main)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        with:
+          mode: build-only
+          target: linux-x86_64
+          clang: clang-18
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          package: 'false'
+
+      - name: Install MinGW-w64 cross-compiler (Linux)
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 20
+        with:
+          packages: gcc-mingw-w64-x86-64
+          no-install-recommends: 'true'
+
+      - name: Verify MinGW-w64 cross-compiler (Linux)
+        shell: bash
+        run: x86_64-w64-mingw32-gcc --version | head -1
+
+      - name: Cross-compile the bootstrap seed (Linux)
+        shell: bash
+        run: |
+          set -euo pipefail
+          make ci-cross-windows
+
+      - name: Upload mingw-cross bootstrap seed
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-installer-windows-x86_64
+          path: dist/installer-windows-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  native-windows-build:
+    name: Build + package [native windows-x86_64-msvc]
+    needs: native-windows-cross-seed
+    runs-on: windows-2025 # pinned, not `windows-latest` — SFN-55 Risk R3
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      SAILFIN_TARGET_OS: Windows
+      # Matches windows-native-selfhost.yml (`:29`), which this leg mirrors:
+      # without it the fixed-point gate below proves determinism of the
+      # malloc path, not the arena allocator every other Linux/macOS release
+      # payload and PR CI leg (ci.yml `:17`) actually ships under.
+      SAILFIN_USE_ARENA: "1"
+    steps:
+      - name: Checkout repository (build ref)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BUILD_REF }}
+          # Nothing in this job pushes — it only builds, packages, and
+          # uploads an artifact for `upload` to pick up later — so there is
+          # no reason to keep a checkout token persisted in the workspace
+          # for the ~90-minute duration of a native self-host (matches
+          # `upload`'s own checkout below).
+          persist-credentials: false
+
+      # Same fidelity check as the `build` matrix (see "Verify build
+      # checkout" above) — this leg checks out BUILD_REF independently, so
+      # without this the MSVC asset could be built from a different tree
+      # than the one that gets hashed into SHA256SUMS and published under
+      # the tag.
+      - name: Verify build checkout
+        shell: bash
+        env:
+          EXPECT_SHA: ${{ inputs.expect_sha }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          echo "[ci] building ${BUILD_REF} @ ${head}"
+          if [ -n "${EXPECT_SHA:-}" ]; then
+            if [ "$head" != "${EXPECT_SHA}" ]; then
+              echo "[ci][error] expected commit ${EXPECT_SHA}, got ${head}" >&2
+              exit 1
+            fi
+          elif [ "${BUILD_REF}" = "${RELEASE_TAG}" ]; then
+            current="$(git describe --tags --exact-match)"
+            if [ "$current" != "${RELEASE_TAG}" ]; then
+              echo "[ci][error] expected ${RELEASE_TAG}, got $current" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Build native Windows compiler
+        id: build_windows
+        uses: ./.github/actions/sailfin-build-windows
+        with:
+          seed_source: cross
+
+      # M8 (SFN-54), mirrored verbatim from windows-native-selfhost.yml's
+      # `native-build` job: two isolated `--work-dir` self-hosts, pass-2 must
+      # be byte-identical to pass-1. The mandate is publishing a *proven*
+      # seed (SFEP-0021 M11), not merely a compiling one — the packaging step
+      # below runs only after this gate passes.
+      - name: Gate — self-host fixed point (pass-2 == pass-1)
+        id: fixed_point
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          rm -rf build/selfhost/native-w1 build/selfhost/native-w2 \
+                 build/selfhost/fp1 build/selfhost/fp2
+          mkdir -p build/selfhost/native-w1 build/selfhost/native-w2 \
+                   build/selfhost/fp1 build/selfhost/fp2
+          SAILFIN_TEST_SCRATCH="build/selfhost/native-w1/scratch" \
+            "$NATIVE_SFN" build --no-cache -p compiler \
+              --work-dir build/selfhost/native-w1 \
+              -o build/selfhost/fp1/sfn-selfhost1.exe
+          for probe in sfn sfn.exe sailfin sailfin.exe; do
+            if [ -e "build/selfhost/fp1/$probe" ]; then
+              echo "[error] build/selfhost/fp1/$probe exists; pass-2 would emit with it, not with pass-1 (SFN-922)" >&2
+              exit 1
+            fi
+          done
+          SAILFIN_TEST_SCRATCH="build/selfhost/native-w2/scratch" \
+            build/selfhost/fp1/sfn-selfhost1.exe build --no-cache -p compiler \
+              --work-dir build/selfhost/native-w2 \
+              -o build/selfhost/fp2/sfn-selfhost2.exe
+          for f in build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; do
+            [ -s "$f" ] || { echo "[error] pass artifact missing or empty: $f" >&2; exit 1; }
+          done
+          if ! cmp -s build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; then
+            echo "[error] fixed-point mismatch: pass-2 differs from pass-1" >&2
+            cmp -l build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe | head -n 20 || true
+            exit 1
+          fi
+          echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
+
+      # Transitional target name (SFEP-0021 M11): `make ci-cross-windows`
+      # already owns the `installer-windows-x86_64.tar.gz` basename for the
+      # mingw-cross leg, so this leg must use a distinct `--target` rather
+      # than colliding with it. `_package_target_os` prefix-matches
+      # `windows-` so `.exe` staging still applies to the MSVC target.
+      - name: Package native MSVC installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NATIVE_SFN" package --installer --target windows-x86_64-msvc --compiler-bin "$NATIVE_SFN"
+          ls -la dist/installer-windows-x86_64-msvc.tar.gz
+
+      - name: Verify compiler version matches tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_TAG#v}"
+          file_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' compiler/capsule.toml)"
+          if [ "$file_version" != "$expected" ]; then
+            echo "[ci][error] compiler/capsule.toml has '$file_version', expected '$expected'" >&2
+            exit 1
+          fi
+          actual="$("$NATIVE_SFN" --version | sed -n 's/.*sfn //p')"
+          if [ "$actual" != "$expected" ]; then
+            echo "[ci][error] built compiler reports '$actual', expected '$expected'" >&2
+            exit 1
+          fi
+
+      # Weaker than "Verify compiler version matches tag" above, and the
+      # error text below is worded accordingly. The installer payload
+      # stages only bin/, runtime/, import-context/
+      # (`_package_installer` in `compiler/src/cli/commands/package.sfn`) —
+      # no `.build-stamp`, no `compiler/capsule.toml` alongside the binary.
+      # `resolve_compiler_version` (`compiler/src/version.sfn`) therefore
+      # cannot read a build stamp bundled in the tarball; whatever it
+      # resolves to here depends on this job's own working-directory
+      # layout (its relative capsule.toml lookup can land back on the real
+      # checkout two directories above `_installer_check/bin/`), not on
+      # anything guaranteed once the tarball is unpacked on an end-user
+      # machine. This step asserts the extracted `sfn.exe` prints the
+      # expected version string in THIS CI environment — a real check, but
+      # not proof the packaged binary is self-describing in general. The
+      # strong, unambiguous check is "Verify compiler version matches tag"
+      # above, which reads `compiler/capsule.toml` and `$NATIVE_SFN
+      # --version` directly rather than through the extracted payload.
+      - name: Verify installer payload reports expected version (weaker than the build-level check above)
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_TAG#v}"
+          rm -rf _installer_check
+          mkdir -p _installer_check
+          tar -xzf dist/installer-windows-x86_64-msvc.tar.gz -C _installer_check
+          # `-print -quit` rather than `| head -1`: the payload also
+          # contains thousands of staged `.sfn`/`.sfn-asm` sources, so a
+          # plain `find | head -1` under `set -euo pipefail` can SIGPIPE
+          # when `head` closes the pipe while `find` is still walking,
+          # failing the step intermittently (scripts/verify-payload-dep-closure.sh
+          # already uses this same fix for the same hazard).
+          bin="$(find _installer_check -name 'sfn.exe' -print -quit)"
+          if [ -z "$bin" ]; then
+            echo "[ci][error] sfn.exe not found in installer payload" >&2
+            exit 1
+          fi
+          actual="$("$bin" --version | sed -n 's/.*sfn //p')"
+          if [ "$actual" != "$expected" ]; then
+            echo "[ci][error] extracted installer payload's sfn.exe reports version '$actual' in this CI environment, expected '$expected' (see comment above: this does not by itself prove the shipped tarball is self-describing)" >&2
+            exit 1
+          fi
+
+      - name: Upload native MSVC installer archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-installer-windows-x86_64-msvc
+          path: dist/installer-windows-x86_64-msvc.tar.gz
+          if-no-files-found: error
+
   upload:
     name: Verify, promote & publish
-    needs: build
+    # `!cancelled()` below covers a `native-windows-build` timeout/failure/
+    # cancellation: a cancelled job conclusion otherwise hard-skips every
+    # `needs:` dependent regardless of its own `if:`/`continue-on-error`, so
+    # without this override a stuck native leg would silently take `upload`
+    # (and both notify jobs below, which depend on it) down with it —
+    # unbumped `main`, no tag, no Slack ping. `needs.build.result ==
+    # 'success'` preserves the pre-existing invariant that a failed matrix
+    # leg still blocks publishing (`fail-fast: false` makes the matrix's
+    # aggregate result `failure` if any leg fails); `native-windows-build`'s
+    # result is deliberately NOT checked here — this leg is best-effort while
+    # it stabilizes, so its own outcome never gates the other four platforms.
+    needs: [build, native-windows-build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -519,6 +810,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           while IFS= read -r -d '' payload; do
             label="$(basename "$payload" .tar.gz)"
+            variant=""
             case "$label" in
               *linux-x86_64*)
                 os="linux"
@@ -532,6 +824,14 @@ jobs:
                 os="macos"
                 arch="arm64"
                 ;;
+              # Must precede the *windows-x86_64* arm below — bash `case` is
+              # first-match-wins, and `installer-windows-x86_64-msvc.tar.gz`
+              # also matches the broader mingw pattern.
+              *windows-x86_64-msvc*)
+                os="windows"
+                arch="x86_64"
+                variant="-msvc"
+                ;;
               *windows-x86_64*)
                 os="windows"
                 arch="x86_64"
@@ -541,7 +841,7 @@ jobs:
                 continue
                 ;;
             esac
-            installer_name="sailfin_${version}_${os}_${arch}.tar.gz"
+            installer_name="sailfin_${version}_${os}_${arch}${variant}.tar.gz"
             mv -f "$payload" "dist/${installer_name}"
             if command -v sha256sum >/dev/null 2>&1; then
               sha256sum "dist/${installer_name}" > "dist/${installer_name}.sha256"
@@ -574,6 +874,19 @@ jobs:
             bash .release-gates/scripts/verify-payload-dep-closure.sh \
               "dist/sailfin_${version}_${label}.tar.gz"
           done
+          # The native MSVC asset is optional presence (native-windows-build
+          # is best-effort while it stabilizes — see `upload`'s `if:` above),
+          # but never an optional check: skip only when the payload is
+          # absent, verify unconditionally when it is present. It is the one
+          # release payload produced by a code path that has barely executed
+          # anywhere, making it the most likely to have an incomplete
+          # runtime closure — and a payload that is present but incomplete
+          # link-fails every user program on a fresh install, exactly what
+          # this loop exists to catch for every other platform.
+          msvc_payload="dist/sailfin_${version}_windows_x86_64-msvc.tar.gz"
+          if [ -f "$msvc_payload" ]; then
+            bash .release-gates/scripts/verify-payload-dep-closure.sh "$msvc_payload"
+          fi
 
       # Supply-chain root: publish a signed SHA256SUMS manifest over the release
       # assets so `sfn` can verify a fetched toolchain against the public key
@@ -710,8 +1023,28 @@ jobs:
           fi
   notify-slack-failure:
     name: Notify Slack on release asset failure
-    needs: [build, upload]
-    if: failure()
+    # `native-windows-build` is in `needs` here even though `upload` (the
+    # only OTHER consumer of its result) deliberately ignores it — this is
+    # the leg's one failure-visibility path. Without it, a native-leg-only
+    # failure/cancellation is invisible: `upload` still runs and succeeds
+    # (by design, so the leg can't block the other four platforms), so
+    # neither this job's old `failure()` condition nor notify-slack-success's
+    # `success()` would ever mention it, and the leg fails silently — the
+    # same "nobody notices" rot windows-native-selfhost.yml's own
+    # `notify-failure` job (`:310-470`) exists to close.
+    needs: [build, native-windows-build, upload]
+    # `!cancelled()` guards this job's own scheduling the same way it guards
+    # `upload`'s (see `upload`'s comment above): a cancelled dependency
+    # otherwise hard-skips this job regardless of the disjuncts below.
+    # `needs.native-windows-build.result == 'cancelled'` is listed
+    # explicitly because a job-level timeout there yields `cancelled`, which
+    # `failure()`-style checks do not treat as a failure.
+    if: >-
+      ${{ !cancelled() &&
+          (needs.build.result == 'failure' ||
+           needs.upload.result == 'failure' ||
+           needs.native-windows-build.result == 'failure' ||
+           needs.native-windows-build.result == 'cancelled') }}
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -720,6 +1053,9 @@ jobs:
         env:
           SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
           IS_PROMOTE: ${{ inputs.promote }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          UPLOAD_RESULT: ${{ needs.upload.result }}
+          NATIVE_WINDOWS_RESULT: ${{ needs.native-windows-build.result }}
         run: |
           set -euo pipefail
           if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
@@ -730,19 +1066,28 @@ jobs:
           import os
           tag = os.environ["RELEASE_TAG"]
           run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          # On a promoting cut the gates run before anything is public, so the
-          # usual outcome of this failure is a clean no-op rather than a
-          # half-finished release (SFN-829). Say so: the remediation is "fix and
-          # re-cut", not "go clean up main".
-          suffix = (
-              " Payload gates run before promotion, so `main` is most likely unbumped and untagged"
-              " — check the run for whether the Promote step was reached."
-              if os.environ.get("IS_PROMOTE") == "true"
-              else ""
-          )
-          print(json.dumps({
-              "text": f":x: Sailfin release asset build/upload failed for {tag}.{suffix}\\nRun: {run_url}"
-          }))
+          core_failed = os.environ.get("BUILD_RESULT") == "failure" or os.environ.get("UPLOAD_RESULT") == "failure"
+          native_result = os.environ.get("NATIVE_WINDOWS_RESULT", "")
+          if core_failed:
+              # On a promoting cut the gates run before anything is public, so the
+              # usual outcome of this failure is a clean no-op rather than a
+              # half-finished release (SFN-829). Say so: the remediation is "fix and
+              # re-cut", not "go clean up main". Does not apply to a
+              # native-leg-only failure below, since `upload` deliberately
+              # still published in that case.
+              suffix = (
+                  " Payload gates run before promotion, so `main` is most likely unbumped and untagged"
+                  " — check the run for whether the Promote step was reached."
+                  if os.environ.get("IS_PROMOTE") == "true"
+                  else ""
+              )
+              print(json.dumps({
+                  "text": f":x: Sailfin release asset build/upload failed for {tag}.{suffix}\\nRun: {run_url}"
+              }))
+          else:
+              print(json.dumps({
+                  "text": f":warning: Sailfin release {tag} published, but the native MSVC Windows seed leg ({native_result}) did not produce an asset. The mingw-cross Windows installer still shipped normally; only the native seed is missing from this release.\\nRun: {run_url}"
+              }))
           PY
           curl -fsS -X POST \
             -H 'Content-type: application/json' \
@@ -752,7 +1097,9 @@ jobs:
   notify-slack-success:
     name: Notify Slack on release published
     needs: [build, upload]
-    if: success()
+    # See notify-slack-failure's `!cancelled()` comment above — same
+    # hard-skip hazard applies here.
+    if: ${{ !cancelled() && success() }}
     runs-on: ubuntu-latest
     permissions: {}
     steps:

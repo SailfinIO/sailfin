@@ -70,10 +70,38 @@ tarball's closure on the `linux-x86_64` leg). All matrix legs are required
 `linux-arm64` withholds publication rather than shipping an incomplete
 platform set (SFN-799).
 
+**`native-windows-cross-seed` + `native-windows-build` (SFEP-0021 M11 /
+SFN-57), running parallel to the matrix above, not sequenced after it.**
+Builds a native MSVC compiler on `windows-2025` (mirroring
+`windows-native-selfhost.yml`'s own `cross-seed` + `native-build` jobs: its
+own mingw-cross bootstrap seed, the `sailfin-build-windows` composite, the
+self-host fixed point, then `sfn package --installer --target
+windows-x86_64-msvc`), producing `sailfin_<version>_windows_x86_64-msvc.tar.gz`
+alongside the mingw-cross `sailfin_<version>_windows_x86_64.tar.gz` asset
+the matrix already produces. **Unlike the matrix legs, this leg is not
+required** — it is still stabilizing (draft PR undrafts only after 3+
+consecutive green `windows-native-selfhost.yml` runs). `upload` below waits
+for it to finish but does not gate on its result, and a failure/cancellation
+is reported via the release Slack webhook (`notify-slack-failure`) rather
+than blocking `main`'s bump. This is the one part of stage 2 that is
+allowed to fail without stopping the release; see the accepted-latency note
+under **Also** below for why it runs in parallel rather than after the
+matrix.
+
 ### Stage 3 — `release-tag.yml`, job `upload` ("Verify, promote & publish")
 
+`needs: [build, native-windows-build]`, with
+`if: !cancelled() && needs.build.result == 'success'` — a cancelled or
+failed `native-windows-build` cannot hard-skip this job (which a bare
+`needs:` without that override would otherwise do), and its result is
+deliberately not checked, so the native leg's own failures never withhold
+publication of the four required platforms.
+
 6. Download every leg's artifacts, normalize the layout, rename installers
-   to their final `sailfin_<version>_<os>_<arch>.tar.gz` names.
+   to their final `sailfin_<version>_<os>_<arch>.tar.gz` names (the MSVC
+   asset, when present, gets its own `-msvc` variant suffix via a
+   `*windows-x86_64-msvc*` classifier arm ordered before the broader
+   `*windows-x86_64*` one).
 7. Verify expected platform payloads are all present
    (`scripts/verify-release-payloads.sh`).
 8. Verify the dependency closure inside every platform tarball
@@ -131,6 +159,15 @@ force-pushes over it. Delete manually with:
 git push origin --delete release-staging/v<version>
 ```
 
+**`native-windows-build` fails or is cancelled.** Does not affect the
+release: `upload` still promotes and publishes the four required platforms
+normally (see stage 3). `notify-slack-failure` still fires — its payload
+distinguishes this case ("release published, but the native MSVC Windows
+seed leg did not produce an asset") from a core build/upload failure, so
+the on-call engineer isn't left guessing whether `main` needs attention.
+Re-run is a plain `workflow_dispatch` of `release-tag.yml` against the
+already-published tag; it does not touch `main` or the tag again.
+
 ---
 
 ## Also
@@ -141,6 +178,20 @@ git push origin --delete release-staging/v<version>
 - **Dry runs are unchanged.** `release.yml` with `dry_run: true` computes
   and reports the version only — no file rewrite, no commit, no staging
   branch, no asset build.
+- **The native Windows leg's accepted latency cost.** Measured release
+  durations (the 0.10.1 cut) put the matrix's own critical path around
+  10 minutes (`macos-arm64`, its slowest leg) and the whole run at roughly
+  12 minutes end to end. `native-windows-cross-seed` +
+  `native-windows-build` run in parallel with the matrix rather than after
+  it specifically to avoid stacking their own ~45-75 minute chain (bootstrap
+  seed + staircase + Stage 2 self-host + fixed point + packaging) on top of
+  that — but `upload` still `needs:` the native leg to finish (even though
+  it ignores the result), so a slow-but-not-failing run can still stretch
+  the pre-`Promote` window well past the ~12-minute baseline. Every added
+  minute in that window raises the odds of the non-force `git push
+  --atomic` in step 10 being rejected because `main` advanced during the
+  build — accepted deliberately (SFEP-0021 M11 / SFN-57) rather than
+  discovered as a surprise regression.
 
 ---
 
@@ -148,6 +199,9 @@ git push origin --delete release-staging/v<version>
 
 - SFN-829 — this invariant.
 - SFN-799 — the required-leg-per-platform policy stage 2 relies on.
+- SFN-57 / SFEP-0021 M11 — the native MSVC Windows leg.
 - `.github/workflows/release.yml` — stages 1 and 4.
 - `.github/workflows/release-tag.yml` — stages 2 and 3.
+- `.github/workflows/windows-native-selfhost.yml` — the nightly job the
+  native leg's `cross-seed`/`native-build` shape is modelled on.
 - `.claude/commands/release.md` — the `/release` dispatch playbook.

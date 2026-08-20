@@ -202,7 +202,7 @@ const releaseAssetTemplates = [
   },
   {
     source: ".github/workflows/release-tag.yml",
-    fragment: 'installer_name="sailfin_${version}_${os}_${arch}.tar.gz"',
+    fragment: 'installer_name="sailfin_${version}_${os}_${arch}${variant}.tar.gz"',
   },
 ];
 
