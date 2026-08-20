@@ -8,11 +8,13 @@
 // already tolerated a missing entry, so these tests pin both legs
 // agreeing and confirm the gate does not over-fire on real, including
 // empty, files.
+import { default_scratch_dir } from "sfn/test";
+
 import { _collect_sfn_files_cmd } from "../../src/build/fs";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-fmt-missing-unit";
     fs.createDirectory(dir, true);
     return dir;

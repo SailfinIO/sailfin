@@ -9,14 +9,14 @@
 // cannot be called from an `![io]` test like this. Assert on captured stdout
 // with `sfn/strings::contains`/`trim` instead.
 import { contains, find, trim } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
+import { default_scratch_dir, with_tmp_dir } from "sfn/test";
 
 // Marker files live under `SAILFIN_TEST_SCRATCH` (or `/tmp`), not inside the
 // `with_tmp_dir` fixture's own directory, so they survive the fixture's
 // scope-exit teardown and can be read back after the closure returns.
 fn _scratch_marker(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/arm-seed-" + name + ".out";
     if fs.exists(path) { fs.deleteFile(path); }

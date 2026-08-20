@@ -20,7 +20,7 @@
 // cannot be called from an `![io]` test like this. Assert on captured
 // stdout / parsed `jq` output with `sfn/strings` predicates instead. (#842.)
 import { contains, find, split } from "sfn/strings";
-import { sfn_bin_path, tool_present } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, tool_present } from "sfn/test";
 
 // Absolute path to the compiler binary (needed for --compiler-bin, which the
 // .sh resolved via realpath). If sfn_bin_path() is already absolute, return it;
@@ -38,7 +38,7 @@ fn _sfn_bin_abs() -> string ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
 }

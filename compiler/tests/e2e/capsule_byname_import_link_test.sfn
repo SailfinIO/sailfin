@@ -22,7 +22,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test. (#842.)
 import { contains } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // The build spawns a nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
@@ -77,7 +77,7 @@ fn _ensure_fixture() ![io] {
 // Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
 fn _bin_path(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     return base + "/sfn-byname-link-" + tag + "-prog";
 }
 

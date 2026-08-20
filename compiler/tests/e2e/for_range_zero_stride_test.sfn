@@ -12,6 +12,7 @@ import { lower_native_text_to_llvm_artifact_with_context_and_provider } from "sf
 import { find } from "sfn/strings";
 import {
     clean_runner_env,
+    default_scratch_dir,
     expect_contains_str,
     expect_eq_bool,
     nested_runner_scratch,
@@ -23,7 +24,7 @@ import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
 }

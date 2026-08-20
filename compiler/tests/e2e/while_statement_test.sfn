@@ -2,11 +2,11 @@
 // loop/conditional-break path. These tests cover runtime semantics directly
 // and use child compiler invocations for diagnostics and formatter stability.
 import { contains, find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 fn _fixture_dir(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-while-443-" + tag;
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");

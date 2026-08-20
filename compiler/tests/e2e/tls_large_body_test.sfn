@@ -54,7 +54,12 @@
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
 import { contains, find } from "sfn/strings";
-import { first_present_tool, sfn_bin_path, tool_present } from "sfn/test";
+import {
+    default_scratch_dir,
+    first_present_tool,
+    sfn_bin_path,
+    tool_present
+} from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tlb_` so these never collide with the external-linkage runtime
@@ -208,7 +213,7 @@ fn _timeout_cmd() -> string ![io] {
 // regardless of the server process's cwd.
 fn _scratch_dir(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/" + name;
     fs.createDirectory(dir, true);
     return dir;

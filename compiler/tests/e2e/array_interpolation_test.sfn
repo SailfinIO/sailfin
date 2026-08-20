@@ -8,6 +8,7 @@
 // int / float / boolean / string element kinds and nested arrays.
 import { find } from "sfn/strings";
 import {
+    default_scratch_dir,
     expect_eq_bool,
     expect_eq_int,
     sfn_bin_path,
@@ -22,7 +23,7 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 
 fn _marker(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-array-interp-" + name + ".out";
     if fs.exists(path) { fs.deleteFile(path); }

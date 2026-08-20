@@ -22,15 +22,9 @@
 // NOTE: assert with `sfn/strings` predicates — the `sfn/test` `expect_*`
 // matchers are `![pure]` and cannot be used from an `![io]` test (#842).
 import { contains } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { scratch_root, sfn_bin_path } from "sfn/test";
 
 fn _exec_sfn() -> string { return "runtime/sfn/platform/exec.sfn"; }
-
-fn _scratch_base() -> string ![io] {
-    let s = env.get("SAILFIN_TEST_SCRATCH");
-    if s.length > 0 { return s; }
-    return "/tmp";
-}
 
 // Base env for the spawned compiler with PATH threaded. An empty env
 // array is the *empty* environment, not "inherit".
@@ -49,7 +43,7 @@ fn _base_env() -> string[] ![io] {
 
 // Emit LLVM IR for exec.sfn with the target leg forced via SAILFIN_TARGET_OS.
 fn _emit_for_target_os(target_os: string, tag: string) -> string ![io] {
-    let dir = _scratch_base() + "/sfn-exe-path-reader";
+    let dir = scratch_root() + "/sfn-exe-path-reader";
     fs.createDirectory(dir, true);
     let out = dir + "/exec-" + tag + ".ll";
     let mut e = _base_env();

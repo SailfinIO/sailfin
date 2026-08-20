@@ -13,7 +13,7 @@
 // after `make compile`, mirroring the harness's own preflight. See
 // `.claude/rules/no-bash-e2e.md` for the subprocess-driven e2e pattern.
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // The sweep spawns a nested `emit` subprocess, so the child needs a populated
 // environment (PATH for `timeout`/the seed, plus per-invocation scratch);
@@ -34,7 +34,7 @@ fn _child_env() -> string[] ![io] {
 fn _out_dir() -> string ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { return scratch + "/det-sweep-e2e"; }
-    return "/tmp/det-sweep-e2e";
+    return default_scratch_dir() + "/det-sweep-e2e";
 }
 
 test "det-sweep: a known-good compiler sweeps one module deterministically (exit 0)" ![io] {

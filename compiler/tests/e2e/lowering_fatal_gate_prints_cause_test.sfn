@@ -11,7 +11,12 @@
 // stderr — it fails if the print loop is removed and only the bare
 // "compile failed" refusal marker remains.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
 
 // A clean top-level child environment for the nested `sfn test` (SFN-401):
 // the ambient PATH/HOME/TMPDIR/toolchain vars minus the parallel pool's
@@ -23,7 +28,7 @@ fn _child_env() -> string[] ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
 }

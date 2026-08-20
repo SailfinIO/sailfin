@@ -7,7 +7,7 @@
 // cannot be called from an `![io]` test like this. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
 import { contains, split, trim } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // Child environment for the spawned `sfn` invocations. `process.run_capture`
 // treats an empty array as the *empty* environment (not "inherit"), so PATH
@@ -25,7 +25,7 @@ fn _child_env() -> string[] ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
 }

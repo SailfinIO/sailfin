@@ -28,7 +28,12 @@ import {
     parse_int,
     trim
 } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
 
 // Full ambient environment — used ONLY for the clang/bash relink steps and
 // for running the produced native binaries below. Neither is a nested `sfn`
@@ -52,7 +57,7 @@ fn _asan_run_env() -> string[] ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     fs.createDirectory(base, true);
     return fs.mkdtemp(base + "/sfn-channel-nursery-reclaim-");
 }

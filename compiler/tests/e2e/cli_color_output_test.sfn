@@ -5,6 +5,7 @@
 // environment/TTY-driven disablement, and the structured-output invariant.
 import { contains, find } from "sfn/strings";
 import {
+    default_scratch_dir,
     expect_eq_bool,
     expect_eq_int,
     expect_eq_str,
@@ -29,7 +30,7 @@ fn _child_env(no_color: string) -> string[] ![io] {
 
 fn _fixture() -> string ![io] {
     let mut root = env.get("SAILFIN_TEST_SCRATCH");
-    if root.length == 0 { root = "/tmp"; }
+    if root.length == 0 { root = default_scratch_dir(); }
     root = root + "/cli-color-output";
     fs.createDirectory(root, true);
     let path = root + "/broken.sfn";

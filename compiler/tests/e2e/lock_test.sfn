@@ -20,14 +20,14 @@
 // the closure returns — the `sfn/test` idiom (see
 // `compiler/tests/e2e/sailfin_main_entry_test.sfn`).
 import { find } from "sfn/strings";
-import { sfn_bin_path, with_tmp_dir } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // A fresh marker-file path under the runner's scratch dir (or `/tmp`), with
 // any stale value removed so each run starts clean. Lives outside the
 // `with_tmp_dir` tree so it survives teardown.
 fn _marker(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-lock-" + name + ".out";
     if fs.exists(path) { fs.deleteFile(path); }

@@ -28,7 +28,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test. (#842.)
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // `sfn build -p` spawns a nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
@@ -50,7 +50,7 @@ fn _child_env() -> string[] ![io] {
 // `tag`. Returns the absolute capsule root.
 fn _capsule_root(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-effect-entry-" + tag;
     fs.createDirectory(root + "/src/util", true);
     return root;

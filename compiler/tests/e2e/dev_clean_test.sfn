@@ -5,7 +5,12 @@
 // compiler-under-test against it as cwd — no real build tree is ever
 // touched.
 import { find, split } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
 
 import { _clean_abs_with, _clean_guard_cache_root_from, _clean_target_ok } from "../../src/cli/commands/dev_clean";
 
@@ -31,7 +36,7 @@ fn _first_line(text: string) -> string {
 // keeps it unique under the parallel pool; `/tmp` is the standalone fallback.
 fn _scratch_repo(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     return dir + "/" + name;
 }
 

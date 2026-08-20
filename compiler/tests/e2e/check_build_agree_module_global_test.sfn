@@ -25,7 +25,7 @@
 // SAILFIN_TEST_SCRATCH) mirrors module_global_runtime_init_test.sfn —
 // see `.claude/rules/no-bash-e2e.md` for the why. `check` emits no IR,
 // so it needs no build-cache isolation and runs outside `with_tmp_dir`.
-import { sfn_bin_path, with_tmp_dir } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // The representative module-global program: an empty-array-literal global
 // (the #1386/#1389 repro) plus a runtime mutation in `main`. Before the
@@ -46,7 +46,7 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 // cross-test collision under the parallel pool.)
 fn _scratch_src() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-1389-check-build-agree.sfn";
     fs.writeFile(path, _repro_src());

@@ -44,6 +44,19 @@ compiler from a shifted `cwd` still absolutizes on top of `sfn_bin_path()`
 (the `_sfn_bin_abs()` shape in a handful of e2e files) — that's fine, it's a
 different job from resolving the path in the first place.
 
+`scratch_root() -> string ![io]` (`sfn/test`, `scratch.sfn`, SFN-978) is the
+same shape for a test's own scratch directory: `$SAILFIN_TEST_SCRATCH` wins
+verbatim when set, else the host-conditioned `default_scratch_dir()` —
+`$TMPDIR`/`/tmp` on POSIX, `%TEMP%`/`%TMP%`/`.` on a Windows host (never a
+hardcoded system path such as `C:\Windows\Temp`, which a non-elevated
+process frequently cannot write). A test must **not** hand-roll its own
+`"/tmp"` fallback — that literal is POSIX-only and unrunnable on a native
+Windows host, the exact regrowth `test_scratch_dir_regrowth_guard_test.sfn`
+fails the build on. Prefer `scratch_root()` outright; call
+`default_scratch_dir()` instead only when the surrounding code already reads
+`SAILFIN_TEST_SCRATCH` itself (for example inside the fallback arm of an
+existing `if scratch.length == 0 { ... }`), so the env var isn't read twice.
+
 The supported building blocks (all already shipped):
 
 - **Run a subprocess:** `process.run_capture(argv: string[], env: string[]) -> int`,

@@ -25,6 +25,7 @@ import { Env, env_from_current, env_set } from "sfn/os";
 import { contains, find, split } from "sfn/strings";
 import {
     Background,
+    default_scratch_dir,
     sfn_bin_path,
     wait_until,
     with_background
@@ -42,7 +43,7 @@ fn _is_hex_char(ch: string) -> boolean {
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
 }

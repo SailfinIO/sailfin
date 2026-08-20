@@ -27,7 +27,7 @@
 // not auto-discover `runtime/native/capsule.toml`. See
 // `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { report_child_failure, sfn_bin_path } from "sfn/test";
+import { report_child_failure, scratch_root, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
@@ -38,14 +38,8 @@ fn _child_env() -> string[] ![io] {
     return process.environ();
 }
 
-fn _scratch_root() -> string ![io] {
-    let dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length > 0 { return dir; }
-    return "/tmp";
-}
-
 fn _dir(tag: string) -> string ![io] {
-    return _scratch_root() + "/linker-sel-" + tag;
+    return scratch_root() + "/linker-sel-" + tag;
 }
 
 fn _bin(tag: string) -> string ![io] { return _dir(tag) + "/main.bin"; }

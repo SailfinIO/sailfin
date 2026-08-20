@@ -1,0 +1,108 @@
+// Tests for `scratch_root` / `default_scratch_dir` (SFN-978).
+//
+// Same constraint as `sfn_bin_test.sfn`: the resolver reads process env, and
+// there is no in-process env mutation in the prelude, so each case writes a
+// fixture that prints `scratch_root()`, builds it, then runs the compiled
+// binary as a real subprocess under a scoped `os::Env` via `with_env`, and
+// asserts on the captured stdout.
+import { ProcessOutput, env_from_current, env_set } from "sfn/os";
+import { trim } from "sfn/strings";
+
+import { sfn_bin_path, with_env } from "../src/mod";
+
+// Mirrors `_scratch_dir` in `sfn_bin_test.sfn`.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _marker(tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/scratch-root-marker-" + tag + ".txt";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Source for a fixture that prints `scratch_root()` on one line.
+fn _fixture_src() -> string {
+    return "import { scratch_root } from \"sfn/test\";\n\nfn main() ![io] {\n"
+        + "    print(scratch_root());\n"
+        + "}\n";
+}
+
+// Build the fixture, then run the compiled binary under a scoped
+// environment carrying `host_os`, `test_scratch`, and the POSIX/Windows
+// temp-dir candidates under test, and return the trimmed stdout the child
+// printed. Any env var not passed is cleared, so each case exercises
+// exactly the precedence layer it names.
+fn _probe_scratch_root(tag: string, host_os: string, test_scratch: string, tmpdir: string, temp: string, tmp: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/scratch-root-probe-" + tag + ".sfn";
+    let binpath = dir + "/scratch-root-probe-" + tag;
+    let marker = _marker(tag);
+    fs.writeFile(src, _fixture_src());
+
+    // Build under the AMBIENT environment — see `sfn_bin_test.sfn` for why
+    // `SAILFIN_HOST_OS` must not be set during the build step itself.
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, src], process.environ());
+    let _build_stdout = process.capture_take_stdout();
+    let _build_stderr = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let scoped = env_set(env_set(env_set(env_set(env_set(env_from_current(), "SAILFIN_HOST_OS", host_os), "SAILFIN_TEST_SCRATCH", test_scratch), "TMPDIR", tmpdir), "TEMP", temp), "TMP", tmp);
+    let run_exit = with_env([binpath], scoped, fn (out: ProcessOutput) -> int {
+        fs.writeFile(marker, out.stdout);
+        return out.exit;
+    });
+    fs.deleteFile(src);
+    fs.deleteFile(binpath);
+    assert run_exit == 0;
+    let result = trim(fs.readFile(marker));
+    fs.deleteFile(marker);
+    return result;
+}
+
+// 1. `SAILFIN_TEST_SCRATCH` wins verbatim on a POSIX host, ahead of `TMPDIR`.
+test "scratch_root: SAILFIN_TEST_SCRATCH wins verbatim on a POSIX host" ![io] {
+    let out = _probe_scratch_root("posix-scratch-wins", "Linux", "/custom/scratch", "/custom/tmpdir", "", "");
+    assert out == "/custom/scratch";
+}
+
+// 2. POSIX host, no `SAILFIN_TEST_SCRATCH`, falls back to `TMPDIR`.
+test "scratch_root: POSIX host with no SAILFIN_TEST_SCRATCH falls back to TMPDIR" ![io] {
+    let out = _probe_scratch_root("posix-tmpdir", "Linux", "", "/custom/tmpdir", "", "");
+    assert out == "/custom/tmpdir";
+}
+
+// 3. POSIX host, neither var set, falls back to the historical `/tmp` literal.
+test "scratch_root: POSIX host with nothing set falls back to /tmp" ![io] {
+    let out = _probe_scratch_root("posix-default", "Linux", "", "", "", "");
+    assert out == "/tmp";
+}
+
+// 4. `SAILFIN_TEST_SCRATCH` wins verbatim on a Windows host too.
+test "scratch_root: SAILFIN_TEST_SCRATCH wins verbatim on a Windows host" ![io] {
+    let out = _probe_scratch_root("windows-scratch-wins", "Windows", "/custom/scratch", "", "C:\\custom\\temp", "");
+    assert out == "/custom/scratch";
+}
+
+// 5. Windows host, no `SAILFIN_TEST_SCRATCH`, falls back to `TEMP`.
+test "scratch_root: Windows host with no SAILFIN_TEST_SCRATCH falls back to TEMP" ![io] {
+    let out = _probe_scratch_root("windows-temp", "Windows", "", "", "C:\\custom\\temp", "C:\\custom\\tmp");
+    assert out == "C:\\custom\\temp";
+}
+
+// 6. Windows host, only `TMP` set, falls back to `TMP`.
+test "scratch_root: Windows host with only TMP set falls back to TMP" ![io] {
+    let out = _probe_scratch_root("windows-tmp", "Windows", "", "", "", "C:\\custom\\tmp");
+    assert out == "C:\\custom\\tmp";
+}
+
+// 7. Windows host, nothing set, falls back to `.` — never a hardcoded
+//    system path (`C:\Windows\Temp` is frequently unwritable).
+test "scratch_root: Windows host with nothing set falls back to dot" ![io] {
+    let out = _probe_scratch_root("windows-default", "Windows", "", "", "", "");
+    assert out == ".";
+}

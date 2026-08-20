@@ -11,9 +11,10 @@
 // SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation). Captured
 // output is stashed outside the temporary capsule so it survives teardown.
 import {
-    sfn_bin_path,
+    default_scratch_dir,
     expect_contains_str,
     expect_eq_bool,
+    sfn_bin_path,
     with_tmp_dir
 } from "sfn/test";
 
@@ -21,7 +22,7 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 
 fn _marker() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn530-import-shadow.out";
     if fs.exists(path) { fs.deleteFile(path); }

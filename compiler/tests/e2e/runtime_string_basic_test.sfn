@@ -30,7 +30,7 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. `emit` / `check` neither link nor spawn
@@ -55,7 +55,7 @@ fn _child_env() -> string[] ![io] {
 // under the parallel pool.
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-runtime-string-basic";
     fs.createDirectory(dir, true);
     return dir;

@@ -29,7 +29,7 @@
 // JSON structure is validated by scanning for the known field patterns
 // rather than full jq-style parsing.
 import { contains, find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // The build spawns nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll cache per invocation so
@@ -52,7 +52,7 @@ fn _child_env() -> string[] ![io] {
 // beta: 1 test). Returns the directory path.
 fn _make_pass_dir(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn-runner-json-mf-pass-" + tag;
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/alpha_test.sfn", "test \"alpha: one\" { assert 1 + 1 == 2; }\n"
@@ -64,7 +64,7 @@ fn _make_pass_dir(tag: string) -> string ![io] {
 // Create a scratch directory with one passing and one failing test file.
 fn _make_fail_dir(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn-runner-json-mf-fail-" + tag;
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/ok_test.sfn", "test \"ok: passes\" { assert 1 == 1; }\n");

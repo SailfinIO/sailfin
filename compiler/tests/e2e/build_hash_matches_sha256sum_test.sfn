@@ -5,7 +5,7 @@
 // every representative artifact class the build hashes in production: the
 // compiler binary, a compressed tar archive, and generated LLVM IR larger than
 // the retired 64 KiB threshold.
-import { sfn_bin_path, tool_present } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, tool_present } from "sfn/test";
 
 import { _sha256_of_file } from "../../src/build/fs";
 import { sha256_hex_of_string } from "../../src/build/hash";
@@ -46,7 +46,7 @@ fn _tmp_path(name: string) -> string ![io] {
     if scratch.length > 0 { return scratch + "/" + name; }
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { return tmpdir + "/.sfn_bh_test_" + name; }
-    return "/tmp/.sfn_bh_test_" + name;
+    return default_scratch_dir() + "/.sfn_bh_test_" + name;
 }
 
 test "build_hash: string entry point matches the system digest" ![io] {

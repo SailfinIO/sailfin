@@ -34,7 +34,8 @@
 // shard. Matching on a process name instead would be a trap: the vehicle's
 // own command line contains the wrapper's name, so a `pgrep -f` would select
 // the signaller as readily as its target.
-import { find, contains } from "sfn/strings";
+import { contains, find } from "sfn/strings";
+import { default_scratch_dir } from "sfn/test";
 
 // Absolute repo root — the vehicle `cd`s into the per-run subdir, so a
 // relative wrapper path would not resolve.
@@ -74,7 +75,7 @@ fn _child_env() -> string[] ![io] {
 
 fn _scratch_base() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-agent-report-abort";
     fs.createDirectory(dir, true);
     return dir;

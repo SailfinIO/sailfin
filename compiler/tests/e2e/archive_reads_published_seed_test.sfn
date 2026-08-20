@@ -26,10 +26,11 @@
 // missing, the test skips rather than reaching for the network, matching
 // the `tool_present` degrade pattern used across this suite.
 import { ExtractOptions, targz_extract } from "sfn/archive";
+import { default_scratch_dir } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
 }

@@ -7,7 +7,12 @@
 // via a nested `sfn build`, so the child env carries PATH (clang + linker) and
 // SAILFIN_TEST_SCRATCH (build-cache isolation under the parallel pool).
 import { find } from "sfn/strings";
-import { nested_runner_scratch, report_child_failure, sfn_bin_path } from "sfn/test";
+import {
+    default_scratch_dir,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -52,7 +57,7 @@ test "bench: --csv writes the perf-history schema header and a workload row" ![i
         return;
     }
     let tmp = env.get("TMPDIR");
-    let mut dir = tmp.length > 0? tmp: "/tmp";
+    let mut dir = tmp.length > 0? tmp: default_scratch_dir();
     if !strings_equal(substring(dir, dir.length - 1, dir.length), "/") {
         dir = dir + "/";
     }

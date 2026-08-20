@@ -13,13 +13,7 @@
 // the mtime-on-hit test drives a real `sfn build` twice because the
 // touch only fires on a genuine cache hit.
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
-
-fn _scratch() -> string ![io] {
-    let base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { return "/tmp"; }
-    return base;
-}
+import { scratch_root, sfn_bin_path } from "sfn/test";
 
 struct Run {
     exit: int,
@@ -30,7 +24,7 @@ struct Run {
 // The resolved cache root the compiler and `sfn cache` share is
 // `<base>/v2` (`cache_root` appends the schema suffix).
 fn _cache_base(tag: string) -> string ![io] {
-    let base = _scratch() + "/sfn-cache-" + tag;
+    let base = scratch_root() + "/sfn-cache-" + tag;
     if fs.exists(base) { process.run(["rm", "-rf", base]); }
     fs.createDirectory(base, true);
     return base;
@@ -237,7 +231,7 @@ test "cache: no subcommand prints usage and exits non-zero" ![io] {
 // ---- mtime-on-hit (real build) ----
 test "cache: a cache hit refreshes entry mtime (verified by prune ordering)" ![io] {
     let base = _cache_base("mtime_hit");
-    let src_dir = _scratch() + "/sfn-cache-mtime-src";
+    let src_dir = scratch_root() + "/sfn-cache-mtime-src";
     if fs.exists(src_dir) { process.run(["rm", "-rf", src_dir]); }
     fs.createDirectory(src_dir, true);
     let src = src_dir + "/hello.sfn";

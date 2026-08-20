@@ -43,7 +43,7 @@
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
 import { find, split } from "sfn/strings";
-import { report_child_failure, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _first_line(text: string) -> string {
     let lines = split(text, "\n");
@@ -137,7 +137,7 @@ fn _run_with(main_sfn: string, test_scratch: string, cache_dir: string, extra_fl
 // the fixture root; `src/main.sfn` is passed relative to that root.
 fn _ensure_private_fixture(name: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/" + name;
     fs.createDirectory(root + "/src", true);
 
@@ -187,7 +187,7 @@ fn _run_with_cwd(dir: string, test_scratch: string, cache_dir: string, extra_fla
 // ---- Test 1: backwards compat — `sfn run <file>` with no flags ----
 test "sfn run <file> still works (no flags)" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t1";
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
@@ -214,7 +214,7 @@ test "sfn run <file> still works (no flags)" ![io] {
 // normal `sfn run` unless `--cache-trace` is requested.
 test "first run suppresses cache summary by default" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t2";
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
@@ -231,7 +231,7 @@ test "first run suppresses cache summary by default" ![io] {
 // ---- Test 3: warm --cache-trace run prints summary with misses=0 ----
 test "warm run with --cache-trace prints warm cache summary (hits>=1, misses=0)" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t3";
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
@@ -251,7 +251,7 @@ test "warm run with --cache-trace prints warm cache summary (hits>=1, misses=0)"
 // ---- Test 4: --no-cache suppresses the [cache] summary line ----
 test "sfn run --no-cache prints no '[cache]' summary" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t4";
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
@@ -271,7 +271,7 @@ test "sfn run --no-cache prints no '[cache]' summary" ![io] {
 // ---- Test 5: --cache-trace emits per-module [cache hit] lines ----
 test "sfn run --cache-trace prints '[cache hit] sfn/math'" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t5";
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
@@ -293,7 +293,7 @@ test "sfn run --cache-trace prints '[cache hit] sfn/math'" ![io] {
 // repo itself as cwd.
 test "sfn run --clean wipes the cache and rebuilds" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t6";
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
@@ -344,7 +344,7 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
 // oracle instead.
 test "sfn run --clean wipes the staged import-context tree (SFN-872)" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t7";
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";

@@ -16,11 +16,16 @@
 // text, the exact exit code, and that neither an ICE nor a "failing IR"
 // note is emitted. See `.claude/rules/no-bash-e2e.md`.
 import { contains } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/sfn-test-missing-e2e";
     fs.createDirectory(dir, true);
     return dir;

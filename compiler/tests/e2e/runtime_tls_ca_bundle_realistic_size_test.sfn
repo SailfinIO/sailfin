@@ -35,6 +35,7 @@
 import { int_to_string } from "sfn/strings";
 import {
     clean_runner_env,
+    default_scratch_dir,
     first_present_tool,
     nested_runner_scratch,
     sfn_bin_path,
@@ -106,7 +107,7 @@ fn _timeout_cmd() -> string ![io] {
 
 fn _scratch_root() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     return dir;
 }
 

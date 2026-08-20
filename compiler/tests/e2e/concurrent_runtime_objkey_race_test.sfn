@@ -25,11 +25,11 @@
 // `run.ll`/`.o`/binary stay isolated per child), asserting every child
 // builds and prints its own marker with no cross-contamination.
 import { contains } from "sfn/strings";
-import { report_child_failure, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
 
 fn _scratch_base() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     dir = dir + "/objkey-race";
     fs.createDirectory(dir, true);
     return dir;

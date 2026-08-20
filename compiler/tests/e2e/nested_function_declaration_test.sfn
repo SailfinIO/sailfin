@@ -11,7 +11,7 @@
 // nested build runs clang + its linker), HOME, TMPDIR, and
 // SAILFIN_TEST_SCRATCH so the nested `sfn build` does not collide with
 // sibling builds under the parallel `sfn test` pool.
-import { sfn_bin_path, with_tmp_dir } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -32,7 +32,7 @@ fn _child_env() -> string[] ![io] {
 // captured stdout+stderr for a diagnosable failure.
 fn _marker(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-nested-fn-" + name + ".out";
     if fs.exists(path) { fs.deleteFile(path); }

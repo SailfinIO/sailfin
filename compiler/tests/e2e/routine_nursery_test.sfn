@@ -40,7 +40,7 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 fn _nursery_path() -> string { return "runtime/sfn/concurrency/nursery.sfn"; }
 
@@ -63,7 +63,7 @@ fn _child_env() -> string[] ![io] {
 
 fn _scratch_dir() -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     fs.createDirectory(base, true);
     return fs.mkdtemp(base + "/sfn-routine-nursery-");
 }

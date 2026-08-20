@@ -20,7 +20,7 @@
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
 import { contains, find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak (the outer SAILFIN_TEST_SCRATCH is threaded through deliberately).
 fn _child_env() -> string[] ![io] {
@@ -45,7 +45,7 @@ fn _child_env() -> string[] ![io] {
 // Create a scratch directory with four passing test files (6 tests total).
 fn _make_pass_dir(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn-runner-jobs-pass-" + tag;
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/alpha_test.sfn", "test \"alpha: one\" { assert 1 + 1 == 2; }\n"
@@ -60,7 +60,7 @@ fn _make_pass_dir(tag: string) -> string ![io] {
 // Create a directory with one passing and one failing test file.
 fn _make_fail_dir(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn-runner-jobs-fail-" + tag;
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/ok_test.sfn", "test \"ok: passes\" { assert 1 == 1; }\n");
@@ -168,7 +168,7 @@ test "--jobs 2: failing file propagates non-zero, single frame (#1236)" ![io] {
 // ---- Test 4: invalid --jobs values are usage errors (exit 2) ----
 test "invalid --jobs values are usage errors (exit 2) (#1236)" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn-runner-jobs-inv";
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/dummy_test.sfn", "test \"dummy\" { assert 1 == 1; }\n");

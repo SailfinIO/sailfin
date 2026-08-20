@@ -21,7 +21,7 @@
 // clang/linker, SAILFIN_TEST_SCRATCH for per-invocation build-cache
 // isolation under the parallel pool). See `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { sfn_bin_path, with_tmp_dir } from "sfn/test";
+import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 fn _fixture_src() -> string ![io] {
     return fs.readFile("compiler/tests/e2e/fixtures/union_named_variant_match_probe.sfn");
@@ -31,7 +31,7 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 
 fn _marker(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = "/tmp"; }
+    if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     let path = dir + "/sfn-union-match-" + name + ".out";
     if fs.exists(path) { fs.deleteFile(path); }

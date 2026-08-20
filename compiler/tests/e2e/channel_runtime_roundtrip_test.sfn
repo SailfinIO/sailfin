@@ -32,7 +32,7 @@
 // cannot be called from an `![io]` test. Assert on captured stdout with
 // `sfn/strings` predicates instead. (#842.)
 import { contains } from "sfn/strings";
-import { report_child_failure, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
 
 // `process.run_capture`'s empty array is the *empty* environment, not
 // "inherit". `sfn run` spawns a nested clang + linker, so the child needs
@@ -56,7 +56,7 @@ fn _child_env() -> string[] ![io] {
 // fixture source paths never collide under the parallel pool.
 fn _scratch_dir() -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = "/tmp"; }
+    if base.length == 0 { base = default_scratch_dir(); }
     fs.createDirectory(base, true);
     return fs.mkdtemp(base + "/sfn-channel-roundtrip-");
 }

@@ -1,0 +1,58 @@
+// sfn/test — the scratch directory a test should write temp files under
+// (SFN-978).
+//
+// Every e2e test that needs a private scratch dir has to decide a fallback
+// for when `SAILFIN_TEST_SCRATCH` is unset, and 230 files each hand-copied
+// the same POSIX literal:
+//
+//     if dir.length == 0 { dir = "/tmp"; }
+//
+// which is wrong on a native Windows host — there is no `/tmp` there.
+// `scratch_root()` is the single definition of that fallback. It mirrors
+// `sfn_bin_path()` in `sfn_bin.sfn` (SFN-977): host detection goes through
+// `_host_is_windows()`, exported from that module rather than duplicated
+// here, for the same capsule-boundary reason documented there.
+import { _host_is_windows } from "./sfn_bin";
+
+// The host-conditioned scratch-dir fallback used when `SAILFIN_TEST_SCRATCH`
+// is unset.
+//
+// On Windows this probes `TEMP` then `TMP`, falling back to `"."` — never a
+// hardcoded system path such as `C:\Windows\Temp`, which is frequently not
+// writable by a non-elevated process. `"."` is the existing in-repo
+// precedent (`compiler/tests/e2e/process_handle_windows_test.sfn`, which
+// falls back to `TEMP` then `.`). `"."` resolves to the process cwd, which
+// for a test binary is the repo root — so on a Windows host with neither
+// `TEMP` nor `TMP` set, scratch artifacts land inside the repo tree rather
+// than outside it. Rare in practice (Windows effectively always sets
+// `TEMP`), but a test whose isolation depends on writing outside the repo
+// tree (for example so `sfn build` does not auto-discover a stray
+// `capsule.toml`, as `compiler/tests/e2e/linker_selection_test.sfn`
+// requires) is not protected by this terminus alone on that host.
+//
+// On POSIX this probes `TMPDIR` first, falling back to the historical
+// `"/tmp"` literal. Byte-identical to the fallback it replaces only when
+// `TMPDIR` is unset (the usual case on Linux). On macOS, `TMPDIR` is always
+// set to a per-user path, so scratch dirs move from `/tmp` to `$TMPDIR`
+// there — deliberate, since ignoring `TMPDIR` was the original bug's
+// POSIX-side twin, not a Windows-only defect.
+fn default_scratch_dir() -> string ![io] {
+    if _host_is_windows() {
+        let temp = env.get("TEMP");
+        if temp.length > 0 { return temp; }
+        let tmp = env.get("TMP");
+        if tmp.length > 0 { return tmp; }
+        return ".";
+    }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { return tmpdir; }
+    return "/tmp";
+}
+
+// The scratch directory a test should use: `SAILFIN_TEST_SCRATCH` verbatim
+// when set, else the host-conditioned `default_scratch_dir()`.
+fn scratch_root() -> string ![io] {
+    let configured = env.get("SAILFIN_TEST_SCRATCH");
+    if configured.length > 0 { return configured; }
+    return default_scratch_dir();
+}
