@@ -199,8 +199,11 @@ fn _write_three_conn_client(dir: string, port_a: string, port_b: string) -> stri
         + "kind = \"library\"\n");
     // SFN-1001: `dir` travels through argv[1], never spliced into source
     // text — a Windows scratch dir is a backslash path, and a literal
-    // `+ dir +` here would turn `\...` into escape sequences the parser
-    // trips on before this fixture's own capsule even builds.
+    // `+ dir +` here would silently corrupt it rather than fail loudly.
+    // `decode_string_literal_escapes`
+    // (`compiler/capsules/syntax/src/parser/utils.sfn:84-113`) drops the
+    // backslash and keeps the character for any escape it does not
+    // recognize, so the fixture builds fine and reads a DIFFERENT path.
     fs.writeFile(root + "/src/main.sfn", "fn _ok(path: string) -> boolean ![io] {\n"
         + "    if !fs.exists(path) { return false; }\n"
         + "    return fs.readFile(path).length > 0;\n"

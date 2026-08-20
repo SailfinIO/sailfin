@@ -225,8 +225,14 @@ test "probe routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" ![io] {
     let probe = dir + "/fs_probe.sfn";
     // SFN-1001: `dir` travels through argv[1], never spliced into source
     // text — on Windows it's a backslash path, and a literal `+ dir +`
-    // here would turn `\U`/`\A`/... into escape sequences the parser
-    // trips on before emit even starts.
+    // here would silently corrupt it. Nothing rejects the fixture:
+    // `decode_string_literal_escapes`
+    // (`compiler/capsules/syntax/src/parser/utils.sfn:84-113`) handles
+    // `\n \t \r \" \\ \$` and, for any OTHER escape, drops the backslash
+    // and keeps the character — so `\U` decodes to `U`, `\A` to `A`, and
+    // `\t` to a real TAB. The fixture compiles and runs against a
+    // DIFFERENT path, which is why this had to be fixed structurally
+    // rather than by escaping.
     fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
         + "    let dir = argv[1];\n"
         + "    fs.writeFile(dir + \"/sfn_fs_probe.txt\", \"hello world\");\n"
