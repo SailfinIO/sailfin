@@ -436,16 +436,33 @@ jobs:
   # SFEP-0021 M11 / SFN-57: the native MSVC release leg, split into a
   # cross-seed job (duplicated rather than reused from the `build` matrix's
   # linux-x86_64 leg or from windows-native-selfhost.yml's own cross-seed
-  # job) and a windows-2025 build job that mirrors
-  # windows-native-selfhost.yml's `native-build` job almost verbatim: same
-  # composite, same fixed-point gate, same packaging step. Duplicating
-  # cross-seed rather than adding `needs: build` is deliberate — the matrix's
-  # linux-arm64 leg alone runs up to ~240 minutes (qemu bootstrap), and
-  # `upload` would then wait on it before even starting the native Windows
-  # leg. Running these two jobs in parallel with `build` instead costs a
-  # serial ~75-minute chain (cross-seed + staircase + Stage 2 build + fixed
-  # point + packaging) rather than layering on top of the ~100-minute `build`
-  # wait.
+  # job) and a windows-2025 build job that brings Windows to the SAME
+  # release-leg shape the other three platforms already have: build,
+  # package, verify — no fixed-point gate. Every other leg in this workflow
+  # is `mode: build-package` via the `sailfin-build` composite plus a smoke
+  # test and version checks; none of them, including the `bootstrap.toml`-
+  # pinned Linux seed that ships through this exact path, runs a self-host
+  # fixed point in the release run. Determinism for every platform is
+  # `nightly-selfhost.yml`'s (Linux/macOS) and `windows-native-selfhost.yml`'s
+  # (Windows) job, both running the fixed point unconditionally on every
+  # push to `main` and on a daily cron — the released commit is already
+  # fixed-point-verified by that mechanism before this leg ever builds it.
+  #
+  # Duplicating cross-seed rather than adding `needs: build` is deliberate
+  # — the matrix's linux-arm64 leg alone runs up to ~240 minutes (qemu
+  # bootstrap), and `upload` would then wait on it before even starting the
+  # native Windows leg. Running these two jobs in parallel with `build`
+  # instead costs, split honestly into its transitional and steady-state
+  # parts:
+  #   - Transitional: `native-windows-cross-seed` (~10-15 min) exists only
+  #     because no native Windows seed has been published yet. It
+  #     disappears once one exists and `sailfin-build-windows`'s
+  #     `seed_source: 'release'` mode (currently unimplemented) replaces it.
+  #   - Steady state: `native-windows-build` itself — slower than the other
+  #     platforms' Windows runners tend to be, but build+package only (no
+  #     fixed point), and it runs parallel to the `build` matrix rather than
+  #     after it, so its contribution to the critical path is materially
+  #     smaller than the transitional cross-seed cost above.
   #
   # This leg is best-effort while it stabilizes: `upload` below proceeds on a
   # failed or cancelled native-windows-build (see its `if:` condition) so a
@@ -545,12 +562,16 @@ jobs:
     permissions:
       contents: read
     env:
+      # No `SAILFIN_USE_ARENA` pin here, deliberately — no other leg in
+      # this workflow sets one, so the Linux and macOS release binaries are
+      # malloc-built, and this leg matches them. `windows-native-selfhost.yml`
+      # pins it (`:23-27`) specifically so ITS fixed-point gate exercises the
+      # arena path rather than malloc; this leg has no fixed point (see the
+      # comment on "Package native MSVC installer" below), so that rationale
+      # doesn't apply here, and pinning it anyway would make the shipped
+      # Windows asset the one arena-built binary in the release for no
+      # explained reason.
       SAILFIN_TARGET_OS: Windows
-      # Matches windows-native-selfhost.yml (`:29`), which this leg mirrors:
-      # without it the fixed-point gate below proves determinism of the
-      # malloc path, not the arena allocator every other Linux/macOS release
-      # payload and PR CI leg (ci.yml `:17`) actually ships under.
-      SAILFIN_USE_ARENA: "1"
     steps:
       - name: Checkout repository (build ref)
         uses: actions/checkout@v7
@@ -596,45 +617,23 @@ jobs:
         with:
           seed_source: cross
 
-      # M8 (SFN-54), mirrored verbatim from windows-native-selfhost.yml's
-      # `native-build` job: two isolated `--work-dir` self-hosts, pass-2 must
-      # be byte-identical to pass-1. The mandate is publishing a *proven*
-      # seed (SFEP-0021 M11), not merely a compiling one — the packaging step
-      # below runs only after this gate passes.
-      - name: Gate — self-host fixed point (pass-2 == pass-1)
-        id: fixed_point
-        shell: bash
-        timeout-minutes: 30
-        run: |
-          set -euo pipefail
-          rm -rf build/selfhost/native-w1 build/selfhost/native-w2 \
-                 build/selfhost/fp1 build/selfhost/fp2
-          mkdir -p build/selfhost/native-w1 build/selfhost/native-w2 \
-                   build/selfhost/fp1 build/selfhost/fp2
-          SAILFIN_TEST_SCRATCH="build/selfhost/native-w1/scratch" \
-            "$NATIVE_SFN" build --no-cache -p compiler \
-              --work-dir build/selfhost/native-w1 \
-              -o build/selfhost/fp1/sfn-selfhost1.exe
-          for probe in sfn sfn.exe sailfin sailfin.exe; do
-            if [ -e "build/selfhost/fp1/$probe" ]; then
-              echo "[error] build/selfhost/fp1/$probe exists; pass-2 would emit with it, not with pass-1 (SFN-922)" >&2
-              exit 1
-            fi
-          done
-          SAILFIN_TEST_SCRATCH="build/selfhost/native-w2/scratch" \
-            build/selfhost/fp1/sfn-selfhost1.exe build --no-cache -p compiler \
-              --work-dir build/selfhost/native-w2 \
-              -o build/selfhost/fp2/sfn-selfhost2.exe
-          for f in build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; do
-            [ -s "$f" ] || { echo "[error] pass artifact missing or empty: $f" >&2; exit 1; }
-          done
-          if ! cmp -s build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; then
-            echo "[error] fixed-point mismatch: pass-2 differs from pass-1" >&2
-            cmp -l build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe | head -n 20 || true
-            exit 1
-          fi
-          echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
-
+      # Deliberately build + package, no fixed-point gate — matching the
+      # other three platform legs' shape, not a lesser standard for
+      # Windows. Every other leg here runs `mode: build-package` via the
+      # `sailfin-build` composite (see the `build` matrix step above) plus
+      # a smoke test and version checks; none of them run a self-host
+      # fixed point in the release run either, including the
+      # `bootstrap.toml`-pinned Linux seed that ships through this exact
+      # path. Determinism for all platforms — this one included — is
+      # `nightly-selfhost.yml`'s and `windows-native-selfhost.yml`'s job:
+      # both run the fixed point unconditionally on every push to `main`
+      # and on a daily cron, so the released commit is already
+      # fixed-point-verified by the same mechanism the other platforms
+      # rely on before this leg ever builds it again here. Re-running it
+      # inside the release critical path would apply a stricter bar to
+      # Windows than to the platform we self-host on every day — do not
+      # re-add it on the assumption its absence is an oversight.
+      #
       # Transitional target name (SFEP-0021 M11): `make ci-cross-windows`
       # already owns the `installer-windows-x86_64.tar.gz` basename for the
       # mingw-cross leg, so this leg must use a distinct `--target` rather
