@@ -512,12 +512,16 @@ here.
   fixed for `sfn toolchain install`). `copy_tree` copies what a symlink
   resolves to rather than preserving it — a stated divergence from `cp -R`,
   not a bug, since neither `is_symlink` nor `lstat` exists yet and no tree in
-  scope contains one. **`sfn package` still cannot run end-to-end on a
-  native Windows host**: `tar -czf` (three sites, blocked on SFN-753's
-  in-process `.tar.gz` writer) and `date -u` (three sites, needs
-  epoch→civil formatting that exists nowhere yet) are the shell spawns
-  left on the Windows path. A `uname -m` arch probe also remains, but only
-  on the POSIX leg — the Windows leg returns before reaching it.
+  scope contains one. **`sfn package --installer` now runs end-to-end on a
+  native Windows host**: SFN-753's in-process `.tar.gz` writer retired the
+  `tar -czf` shell spawns, and an ISO-8601 epoch→civil formatter retired the
+  `date -u` ones, so no `process.run`/shell read remains on the Windows
+  packaging path. The one surviving `uname -m` arch probe is unreachable on
+  Windows — `_package_detect_target` returns `"windows-x86_64"` before
+  control reaches it. SFN-57 (SFEP-0021 M11) builds on this to publish a
+  native MSVC-built Windows seed from `release-tag.yml`, packaged with `sfn
+  package --installer --target windows-x86_64-msvc` and staged first through
+  the `windows-native-selfhost.yml` nightly.
 - **Structured output.** `sfn build --json` emits a schema-versioned
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP

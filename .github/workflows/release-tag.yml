@@ -433,9 +433,168 @@ jobs:
           path: dist/installer-windows-x86_64.tar.gz
           if-no-files-found: error
 
+  # SFN-57 / SFEP-0021 M11: publish a native MSVC Windows seed alongside the
+  # mingw-cross asset the `linux-x86_64` leg above already produces
+  # (`installer-windows-x86_64.tar.gz`). This is a self-contained pair of
+  # jobs — a Linux job that stages the mingw-cross bootstrap seed (mirroring
+  # `windows-native-selfhost.yml`'s `cross-seed` job) and a `windows-2025`
+  # job that consumes it to drive a native MSVC self-host build via the
+  # shared `sailfin-build-windows` composite, then packages the result with
+  # `sfn package --installer --target windows-x86_64-msvc`.
+  #
+  # `continue-on-error: true` on both: this is the asset's first-ever
+  # release run, and a failure here must not withhold or fail the release —
+  # the mingw-cross asset (`installer-windows-x86_64.tar.gz`, published as
+  # `sailfin_${version}_windows_x86_64.tar.gz` below) remains the canonical
+  # Windows asset this cycle. Remove `continue-on-error` (and consider
+  # retiring the mingw leg — a separate issue) once this leg has been proven
+  # green over a full release cadence.
+  native-windows-cross-seed:
+    name: Build mingw-cross bootstrap seed for native MSVC leg [linux]
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository (build ref)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Resolve seed version (input override → bootstrap.toml)
+        id: seed
+        shell: bash
+        env:
+          INPUT_SEED_VERSION: ${{ inputs.seed_version }}
+        run: |
+          set -euo pipefail
+          override="$(printf '%s' "$INPUT_SEED_VERSION" | tr -d '[:space:]')"
+          if [ -n "$override" ]; then
+            echo "[seed-pin] using seed $override (workflow input override)"
+            pin="$override"
+          else
+            if [ ! -f bootstrap.toml ]; then
+              echo "[seed-pin][error] tag ${RELEASE_TAG} predates bootstrap.toml." >&2
+              echo "[seed-pin][error] re-run this workflow with the 'seed_version' input set." >&2
+              exit 1
+            fi
+            pin="$(awk '
+              /^\[[^]]+\]/ { section=$0 }
+              section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+            ' bootstrap.toml)"
+            if [ -z "$pin" ]; then
+              echo "[seed-pin][error] bootstrap.toml has no [seed].version at tag ${RELEASE_TAG}" >&2
+              exit 1
+            fi
+            echo "[seed-pin] using seed $pin from bootstrap.toml at ${RELEASE_TAG}"
+          fi
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang + llvm (Linux)
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 20
+        with:
+          packages: clang-18 llvm-18 jq
+
+      - name: Set CLANG env (Linux)
+        shell: bash
+        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Build native compiler (self-host main)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        with:
+          mode: build-only
+          target: linux-x86_64
+          clang: clang-18
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          package: 'false'
+
+      - name: Install MinGW-w64 cross-compiler (Linux)
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 20
+        with:
+          packages: gcc-mingw-w64-x86-64
+          no-install-recommends: 'true'
+
+      - name: Verify MinGW-w64 cross-compiler (Linux)
+        shell: bash
+        run: x86_64-w64-mingw32-gcc --version | head -1
+
+      - name: Cross-compile the bootstrap seed (Linux)
+        shell: bash
+        run: make ci-cross-windows
+
+      # Named to match `windows-native-selfhost.yml`'s `cross-seed` job and
+      # `ci.yml`'s `build-compiler-linux`: `sailfin-build-windows` downloads
+      # `ci-installer-windows-x86_64` unconditionally regardless of caller.
+      - name: Upload mingw-cross bootstrap seed
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-installer-windows-x86_64
+          path: dist/installer-windows-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  native-windows-build:
+    name: Native MSVC build + package [windows-2025]
+    needs: native-windows-cross-seed
+    continue-on-error: true
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      SAILFIN_TARGET_OS: Windows
+    steps:
+      - name: Checkout repository (build ref)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Build native Windows compiler
+        id: build_windows
+        uses: ./.github/actions/sailfin-build-windows
+        with:
+          seed_source: cross
+
+      # `--compiler-bin` is required: the composite's Stage 2 build lands
+      # the native binary under `build/capsules/sfn/compiler/bin/compiler.exe`
+      # (`sailfin-build-windows/action.yml`'s locate step), not the
+      # `build/bin/sfn` `sfn package` defaults to absent an override.
+      - name: Package native MSVC installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NATIVE_SFN" package --installer --target windows-x86_64-msvc --compiler-bin "$NATIVE_SFN"
+          ls -la dist/installer-windows-x86_64-msvc.tar.gz
+
+      # `release-*` name: this is a real release candidate asset, unlike the
+      # nightly workflow's identically-produced artifact (which is
+      # deliberately named to NOT match this pattern). Distinct basename
+      # from the mingw leg's `installer-windows-x86_64.tar.gz` — see the
+      # "Prepare installer assets" classifier below, which must resolve
+      # this to a distinct final asset name
+      # (`sailfin_${version}_windows_x86_64_msvc.tar.gz`).
+      - name: Upload native MSVC installer archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-installer-windows-x86_64-msvc
+          path: dist/installer-windows-x86_64-msvc.tar.gz
+          if-no-files-found: error
+
   upload:
     name: Verify, promote & publish
-    needs: build
+    # `native-windows-build` carries `continue-on-error: true` (SFN-57): its
+    # failure does not block `upload` here, but its *artifact* — when it
+    # succeeds — must exist before "Download build artifacts" runs, or the
+    # asset is silently dropped from this cycle purely on timing rather than
+    # on the leg's own result.
+    needs: [build, native-windows-build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -482,10 +641,29 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz' -exec mv -f {} dist/ \;
-          find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz.sha256' -exec mv -f {} dist/ \;
-          find . -maxdepth 3 -type f -name 'sailfin-native-*.manifest.json' -exec mv -f {} dist/ \;
-          find . -maxdepth 3 -type f -name 'installer-*.tar.gz' -exec mv -f {} dist/ \;
+
+          # `mv -f` on a basename collision silently overwrites — last file
+          # wins, no error. With the native MSVC leg (SFN-57) now producing
+          # its own `installer-windows-x86_64-msvc.tar.gz` alongside the
+          # mingw-cross leg's `installer-windows-x86_64.tar.gz`, a future
+          # naming mistake in either leg could collide unnoticed and quietly
+          # publish the wrong bits. Fail loudly instead.
+          move_unique() {
+            local pattern="$1"
+            local dupes
+            dupes="$(find . -maxdepth 3 -type f -name "$pattern" -printf '%f\n' | sort | uniq -d)"
+            if [ -n "$dupes" ]; then
+              echo "[normalize][error] duplicate basename(s) found for pattern '$pattern':" >&2
+              echo "$dupes" >&2
+              exit 1
+            fi
+            find . -maxdepth 3 -type f -name "$pattern" -exec mv -f {} dist/ \;
+          }
+
+          move_unique 'sailfin-native-*.tar.gz'
+          move_unique 'sailfin-native-*.tar.gz.sha256'
+          move_unique 'sailfin-native-*.manifest.json'
+          move_unique 'installer-*.tar.gz'
 
       - name: Prepare installer assets
         shell: bash
@@ -494,6 +672,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           while IFS= read -r -d '' payload; do
             label="$(basename "$payload" .tar.gz)"
+            variant=""
             case "$label" in
               *linux-x86_64*)
                 os="linux"
@@ -507,6 +686,18 @@ jobs:
                 os="macos"
                 arch="arm64"
                 ;;
+              # SFN-57: the native MSVC leg's asset. Must be matched BEFORE
+              # the broader `*windows-x86_64*` arm below — that glob also
+              # matches this label, and the first matching arm wins in bash
+              # `case`, so this transitional variant would otherwise be
+              # silently swallowed into the mingw-cross asset's name and
+              # collide with it at the "Verify expected platform payloads"
+              # / duplicate-basename-guard stage.
+              *windows-x86_64-msvc*)
+                os="windows"
+                arch="x86_64"
+                variant="_msvc"
+                ;;
               *windows-x86_64*)
                 os="windows"
                 arch="x86_64"
@@ -516,7 +707,7 @@ jobs:
                 continue
                 ;;
             esac
-            installer_name="sailfin_${version}_${os}_${arch}.tar.gz"
+            installer_name="sailfin_${version}_${os}_${arch}${variant}.tar.gz"
             mv -f "$payload" "dist/${installer_name}"
             if command -v sha256sum >/dev/null 2>&1; then
               sha256sum "dist/${installer_name}" > "dist/${installer_name}.sha256"
