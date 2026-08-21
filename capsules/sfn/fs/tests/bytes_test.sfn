@@ -1,0 +1,215 @@
+// Tests for sfn/fs/bytes — binary-safe file I/O (SFN-1008).
+//
+// A Sailfin `string` cannot carry byte 0x00, so NUL-bearing fixtures are
+// written with `malloc` + `memset` + `fwrite` (mirrors `_write_byte_fixture`,
+// `compiler/tests/unit/read_file_bytes_test.sfn`), never `fs.write`. Each
+// test mints a hermetic scratch dir via `mkdtemp` and tears it down with
+// `remove_all` (portable — no `rm -rf` subprocess).
+import {
+    FileBytes,
+    byte_at,
+    copy,
+    free_bytes,
+    read_bytes,
+    write_bytes
+} from "../src/mod";
+import { mkdtemp, remove_all } from "../src/mod";
+
+extern fn fopen(path: *u8, mode: *u8) -> *File;
+
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn fclose(f: *File) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+// Write `n` bytes to `path`, one byte at a time via `memset`, so the
+// fixture can carry NUL bytes that a Sailfin `string` cannot hold.
+fn _write_byte_fixture(path: string, bytes: int[]) -> void ![io] {
+    let mode: string = "wb";
+    let f: *File = fopen(path as *u8, mode as *u8);
+    assert(f as i64) != 0;
+    let buf: *u8 = malloc(1 as usize);
+    assert(buf as i64) != 0;
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        memset(buf, bytes[i] as i32, 1 as usize);
+        let _ = fwrite(buf, 1 as usize, 1 as usize, f);
+        i += 1;
+    }
+    free(buf);
+    let _ = fclose(f);
+}
+
+// FNV-1a-64 checksum over a `FileBytes` buffer via `byte_at`, so the
+// 1 MiB round-trip test can assert byte-exactness without pulling in a
+// hashing capsule dependency.
+fn _fnv1a64(data: FileBytes) -> int {
+    let mut hash: int = -3750763034362895579;
+    let prime: int = 1099511628211;
+    let mut i: int = 0;
+    loop {
+        if i >= data.length { break; }
+        hash = hash ^ byte_at(data, i);
+        hash = hash * prime;
+        i += 1;
+    }
+    return hash;
+}
+
+test "fs bytes: interior NULs round-trip at full length" ![io] {
+    let scratch = mkdtemp("sfn-fs-bytes-nul-");
+    assert scratch.length > 0;
+    let src = scratch + "/src.bin";
+    let dst = scratch + "/dst.bin";
+    let fixture: int[] = [65, 0, 66, 0, 0, 67, 10, 0];
+    _write_byte_fixture(src, fixture);
+
+    let b = read_bytes(src);
+    assert b.status == 0;
+    assert b.length == 8;
+    let mut i: int = 0;
+    loop {
+        if i >= fixture.length { break; }
+        assert byte_at(b, i) == fixture[i];
+        i += 1;
+    }
+
+    assert write_bytes(dst, b);
+    free_bytes(b);
+
+    let b2 = read_bytes(dst);
+    assert b2.status == 0;
+    assert b2.length == 8;
+    let mut j: int = 0;
+    loop {
+        if j >= fixture.length { break; }
+        assert byte_at(b2, j) == fixture[j];
+        j += 1;
+    }
+    free_bytes(b2);
+
+    remove_all(scratch);
+}
+
+test "fs bytes: copy is byte-exact over a 1 MiB NUL-bearing payload" ![io] {
+    let scratch = mkdtemp("sfn-fs-bytes-copy-");
+    assert scratch.length > 0;
+    let src = scratch + "/src.bin";
+    let dst = scratch + "/dst.bin";
+
+    // ~1 MiB, repeating a short pattern that includes byte 0 at known
+    // offsets within each 16-byte period.
+    let period: int[] = [1, 2, 3, 0, 4, 5, 6, 7, 0, 8, 9, 10, 11, 12, 13, 14];
+    let total: int = 1048576;
+    let mut fixture: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= total { break; }
+        fixture.push(period[i % 16]);
+        i += 1;
+    }
+    _write_byte_fixture(src, fixture);
+
+    assert copy(src, dst);
+
+    let b_src = read_bytes(src);
+    assert b_src.status == 0;
+    assert b_src.length == total;
+    let checksum_src = _fnv1a64(b_src);
+
+    let b_dst = read_bytes(dst);
+    assert b_dst.status == 0;
+    assert b_dst.length == total;
+    let checksum_dst = _fnv1a64(b_dst);
+
+    assert checksum_src == checksum_dst;
+
+    // Spot-check byte 0 at known offsets (period index 3 and 8).
+    assert byte_at(b_dst, 3) == 0;
+    assert byte_at(b_dst, 8) == 0;
+    assert byte_at(b_dst, 19) == 0;
+
+    free_bytes(b_src);
+    free_bytes(b_dst);
+    remove_all(scratch);
+}
+
+test "fs bytes: empty file is status 0, length 0, non-null addr" ![io] {
+    let scratch = mkdtemp("sfn-fs-bytes-empty-");
+    assert scratch.length > 0;
+    let path = scratch + "/empty.bin";
+    _write_byte_fixture(path, []);
+
+    let b = read_bytes(path);
+    assert b.status == 0;
+    assert b.length == 0;
+    assert b.addr != 0;
+    free_bytes(b);
+
+    remove_all(scratch);
+}
+
+test "fs bytes: missing file is status 1" ![io] {
+    let scratch = mkdtemp("sfn-fs-bytes-missing-");
+    assert scratch.length > 0;
+    let path = scratch + "/does-not-exist.bin";
+
+    let b = read_bytes(path);
+    assert b.status == 1;
+    assert b.addr == 0;
+    assert b.length == 0;
+
+    remove_all(scratch);
+}
+
+test "fs bytes: byte_at rejects out-of-bounds with -1" ![io] {
+    let scratch = mkdtemp("sfn-fs-bytes-oob-");
+    assert scratch.length > 0;
+    let path = scratch + "/small.bin";
+    _write_byte_fixture(path, [1, 2, 3]);
+
+    let b = read_bytes(path);
+    assert b.status == 0;
+    assert byte_at(b, -1) == -1;
+    assert byte_at(b, b.length) == -1;
+    free_bytes(b);
+
+    remove_all(scratch);
+}
+
+test "fs bytes: a directory source reports failure, not an empty file" ![io] {
+    let dir = mkdtemp("sfn-fs-bytes-dir-src-");
+    assert dir.length > 0;
+    let dst = dir + "/dst.bin";
+
+    // `fopen(dir, "rb")` succeeds on Linux and `fread` then fails
+    // immediately, which without the `ferror` guard (SFN-1008) reports the
+    // directory as a zero-length "empty file" instead of a failure.
+    let b = read_bytes(dir);
+    assert b.status != 0;
+
+    assert copy(dir, dst) == false;
+
+    remove_all(dir);
+}
+
+test "fs bytes: write_bytes reports false for a bad destination" ![io] {
+    let scratch = mkdtemp("sfn-fs-bytes-baddst-");
+    assert scratch.length > 0;
+    let src = scratch + "/src.bin";
+    _write_byte_fixture(src, [1, 2, 3]);
+    let b = read_bytes(src);
+    assert b.status == 0;
+
+    let bad_dst = scratch + "/no-such-dir/out.bin";
+    assert write_bytes(bad_dst, b) == false;
+    free_bytes(b);
+
+    remove_all(scratch);
+}

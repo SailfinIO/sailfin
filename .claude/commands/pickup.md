@@ -27,15 +27,24 @@ up" shortlist; `Ready` is the groomed pool it is drawn from. Query `Todo` first
 and only fall through when it is empty:
 
 ```
-mcp__Linear__list_issues team="Sailfin" state="Todo"  limit=50
-mcp__Linear__list_issues team="Sailfin" state="Ready" limit=50   # only if Todo is empty
+mcp__Linear__list_issues team="Sailfin" state="Todo"  limit=50 includeArchived=false \
+  fields=["title","status","archivedAt","assignee","priority","estimate","labels","url"]
+mcp__Linear__list_issues team="Sailfin" state="Ready" limit=50 includeArchived=false \
+  fields=[...same...]   # only if Todo is empty
 ```
+
+Pass `includeArchived=false` and request `archivedAt` explicitly — an archived
+issue is not pickable no matter what its status says, and the default field set
+does not carry `archivedAt`, so without it the filter below cannot run.
 
 Do **not** merge the two lists. A `Todo` issue outranks every `Ready` issue
 regardless of priority — that is the whole point of the lane. Within `Todo`,
 order by the same rules below.
 
 Filter out any issue that is:
+- **Archived** (`archivedAt` non-null). Drop it silently; do not report it as a
+  candidate and do not un-archive it.
+- Not actually in the queried lane (`status` is anything but `Todo`/`Ready`).
 - Assigned to someone else (`assignee` set to another user).
 - Has an open **blocked-by** relation — fetch relations and confirm every
   blocker is `Done`/`Canceled`:
@@ -46,7 +55,8 @@ Filter out any issue that is:
   verify, because a blocker may have re-opened.)
 
 If `$ARGUMENTS` names an issue, fetch only that one and verify it is pickable
-(`Todo` or `Ready`, unassigned or assigned to you, no open blocker):
+(not archived, `Todo` or `Ready`, unassigned or assigned to you, no open
+blocker):
 
 ```
 mcp__Linear__get_issue id="SFN-<N>" includeRelations=true
@@ -58,6 +68,9 @@ mcp__Linear__get_issue id="SFN-<N>" includeRelations=true
 3. `type:perf` (perf next — compounds future work)
 4. Smallest **estimate** first within the same type (1 → 2 → 3)
 5. Lowest `SFN-` number as tiebreaker (FIFO)
+
+If every candidate is filtered out, the lane is empty — say so. Never fall back
+to archived or terminal-status issues to have something to report.
 
 If no pickable issue exists in either lane, report: "No pickable SFN issues in
 `Todo` or `Ready`. Run `/triage` to work the Triage lane, or `/groom <epic>` to
@@ -301,5 +314,7 @@ Surface any deferral or mid-flight scope adjustment explicitly.
 - **Never declare done with unchecked acceptance criteria.**
 - **Never push to `main`.** Work on `claude/sfn-<N>-<slug>` and open a PR.
 - **Never skip Phase 1.5** when the issue lists `## Required in pinned seed`.
+- **Never surface an archived issue as a candidate.** Archived is terminal for
+  pickup regardless of the status field.
 - **One issue per session.** Issues were sized to be standalone; don't bundle
   (except a genuine seed prerequisite per the bundle rule above).

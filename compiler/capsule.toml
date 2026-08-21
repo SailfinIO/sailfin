@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/compiler"
-version = "0.10.1"
+version = "0.10.2"
 description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm IR"
 publish = false
 
@@ -10,7 +10,7 @@ publish = false
 # of the version would fail `make check` (use SAILFIN_TOOLCHAIN=off only for a
 # deliberate seed transition — see the Makefile note).
 [toolchain]
-sfn = "0.10.1"
+sfn = "0.10.2"
 
 [dependencies]
 "sfn/syntax" = "*"

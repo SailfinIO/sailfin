@@ -586,6 +586,7 @@ fn load_config(path: string) -> string ![io] {
 - The returned string includes all bytes decoded as UTF-8.
 - No line-ending normalization is performed.
 - For large files, the entire content is loaded into memory.
+- **A file containing an interior NUL byte aborts the process** with a diagnostic naming the path, instead of returning a truncated string (SFN-1008). A Sailfin `string` carries an explicit length but is recovered by a NUL scan at this coercion boundary, so binary content cannot round-trip through it. Use `read_bytes`/`copy` from the `sfn/fs` capsule (below) for binary or otherwise NUL-bearing content.
 
 ---
 
@@ -740,13 +741,97 @@ fn release_pin_target(link: string) -> string ![io] {
 
 ---
 
+### Binary-safe file I/O (`sfn/fs` capsule)
+
+`fs.readFile`/`fs.writeFile` above round-trip through a Sailfin `string`, whose length is recovered by a NUL scan at the coercion boundary, so a file with an interior NUL cannot survive the trip. The `sfn/fs` capsule adds a raw-buffer API that carries an explicit length instead, so binary content — interior NULs included — round-trips intact (SFN-1008).
+
+**Declare the dependency in `capsule.toml` before importing:**
+
+```toml
+[dependencies]
+"sfn/fs" = "*"
+```
+
+```sfn
+import { FileBytes, read_bytes, write_bytes, byte_at, free_bytes, copy } from "sfn/fs";
+```
+
+---
+
+#### `FileBytes`
+
+```sfn
+struct FileBytes {
+    addr: int;
+    length: int;
+    status: int;
+}
+```
+
+A raw heap buffer plus its true byte count. `addr` is a `malloc`'d buffer the caller owns, released via `free_bytes`. `length` is the byte count, including any interior NULs. `status` is `0` (ok), `1` (not found), `2` (unreadable / IO error — this covers a path that names a directory), or `3` (allocation failure). A genuinely empty file reports `status == 0`, `length == 0`, and a non-zero `addr` — distinguishable from a failure, which always reports `addr == 0`.
+
+---
+
+#### `read_bytes(path: string) -> FileBytes ![io]`
+
+Read the entire contents of `path` into a raw buffer. Never truncates and never aborts on an interior NUL — the failure modes are reported through `status` instead. Every `status == 0` result must be released with `free_bytes` exactly once.
+
+---
+
+#### `write_bytes(path: string, data: FileBytes) -> boolean ![io]`
+
+Write `data`'s buffer to `path` using its exact `length` (interior NULs included). Returns `false` without writing if `data.status != 0`.
+
+---
+
+#### `byte_at(data: FileBytes, index: int) -> int`
+
+Return the byte at `index` as an `int` in `0..255`, or `-1` if `index` is out of bounds. Reads the already-loaded buffer; does not itself perform I/O.
+
+---
+
+#### `free_bytes(data: FileBytes) -> void`
+
+Release the buffer held by `data`. The caller **must** call this exactly once per `status == 0` result from `read_bytes`; a `status != 0` result holds no buffer to free.
+
+---
+
+#### `copy(src: string, dst: string) -> boolean ![io]`
+
+Byte-exact file copy — one call for copying binaries. Streams `src` to `dst` in fixed-size chunks rather than buffering the whole file, so peak memory is bounded by the chunk size and not by the file size. Returns `false` if `src` cannot be read or `dst` cannot be written.
+
+```sfn
+import { copy } from "sfn/fs";
+
+fn backup(path: string) -> boolean ![io] {
+    return copy(path, path + ".bak");
+}
+```
+
+`read_bytes`/`byte_at`/`free_bytes` together, with the required release:
+
+```sfn
+import { read_bytes, byte_at, free_bytes } from "sfn/fs";
+
+fn first_byte(path: string) -> int ![io] {
+    let data = read_bytes(path);
+    if data.status != 0 { return -1; }
+
+    let b = byte_at(data, 0);
+    free_bytes(data); // required: exactly one free per status == 0 result
+    return b;
+}
+```
+
+---
+
 ### Filesystem — Planned
 
 The following filesystem helpers are planned for a future release and are not available today:
 
 - `fs.readLines(path: string) -> string[] ![io]` — read file as an array of lines
 - `fs.move(src: string, dst: string) ![io]` — rename or move a file
-- `fs.copy(src: string, dst: string) ![io]` — copy a file
+- `fs.copy(src: string, dst: string) ![io]` — a builtin-namespace copy; the `sfn/fs` capsule's `copy` (above) already ships as the binary-safe path
 - `fs.walk(path: string) -> string[] ![io]` — recursive directory walk
 
 ---
