@@ -301,26 +301,27 @@ fn _is_https_url(url: string) -> boolean {
 // install` cannot work on such a build — and the user has no way to
 // deduce that from "failed to download".
 //
-// Deliberately phrased as the likeliest cause rather than a diagnosis:
-// this code cannot observe which link produced the running binary, and a
-// natively-built Windows compiler links the real `tls.sfn` and is
-// unaffected. Naming the discriminator (plain `http://` still works when
-// only TLS is stubbed) lets the reader settle it in one command.
+// Deliberately phrased as one of two possibilities rather than a
+// diagnosis: this code cannot observe which link produced the running
+// binary, and a natively-built Windows compiler links the real `tls.sfn`
+// and is unaffected. Since SFN-1033 made the native `-msvc` asset
+// reachable, both builds are in circulation simultaneously, so asserting
+// the mingw cause would be actively wrong roughly whenever the reader is
+// on the build we now prefer. The note therefore names the asset that
+// settles it instead of guessing (SFN-1028 tracks making this
+// self-verifying, which is the real fix).
 //
-// That discriminator's premise — that plain `http://` genuinely works on
-// the shipped mingw-cross build — was unverified when this note was
-// written, and was in fact false until SFN-927: `http.sfn` and its
-// `platform/socket_ops_windows.sfn`/`platform/fd_io_windows.sfn`
-// dependencies are all in the Makefile `ci-cross-windows` RUNTIME_MODS
-// list (the mingw-cross toolchain's runtime source set) alongside the TLS
-// stubs, so a Windows-built `sfn` from before SFN-927 landed carried the
-// same Winsock `recv`/`send` sign-truncation and millisecond/DWORD
-// timeout bugs `http.sfn`'s client path hit on every request — the
-// `http://` half of this note's advice would have failed too, for an
-// unrelated reason, undermining the very discriminator it names. SFN-927
-// fixes that, so the claim now holds for any toolchain built after it.
+// Do not reintroduce the discriminator this note used to carry — "plain
+// `http://` still works when only TLS is stubbed". It is not decisive:
+// under SFN-1026 plain `http://` worked and TLS was NOT the cause,
+// because a hostname never resolved. Anything that cannot separate "no
+// TLS" from "never resolved the host" sends the reader at the wrong
+// layer with false confidence, which is the failure this whole note
+// exists to avoid. (It was also, separately, false until SFN-927: the
+// mingw runtime set carried Winsock `recv`/`send` sign-truncation and
+// millisecond/DWORD timeout bugs that broke the `http://` half too.)
 //
-// Removal condition: SFN-58 — this note stops being true when no shipped
+// Removal condition: SFN-58 — this note stops being useful when no shipped
 // Windows binary carries the TLS stubs, i.e. when `runtime/ir/
 // windows_stubs.ll` and the mingw cross path are retired in favour of the
 // native MSVC build, which links the real `tls.sfn`. SFN-923 is a
@@ -328,17 +329,20 @@ fn _is_https_url(url: string) -> boolean {
 // `__sfn_type_desc.*` failures that block a cross-Windows link are in
 // `sfn/crypto` itself, so the capsule cannot be staged until that lands —
 // but staging it would not retire this note, because the mingw build
-// would still ship stubs. SFN-927 does not retire this note (it fixes a different bug on
-// the same runtime-module list); it only makes the note's `http://`
-// discriminator trustworthy rather than aspirational.
+// would still ship stubs. SFN-927 does not retire this note either: it
+// fixed a different bug on the same runtime-module list. Once SFN-58
+// lands there is only one Windows build and nothing left for the note to
+// distinguish, so it goes away entirely rather than being narrowed.
 fn _download_failure_note(url: string) -> string ![io] {
     if !_is_https_url(url) { return ""; }
     if !host_is_windows() { return ""; }
-    return "note: this is an https:// URL, and Windows builds from the mingw cross-path\n"
-        + "      ship without TLS support, so every https:// request fails before it\n"
-        + "      reaches the network — regardless of connectivity or certificates.\n"
-        + "      A plain http:// URL still works on such a build; if it does, TLS is\n"
-        + "      the cause rather than the network. Tracked as SFN-923.";
+    return "note: this is an https:// URL, and recent releases ship two Windows\n"
+        + "      builds. The native \"...x86_64-msvc.tar.gz\" asset has working TLS;\n"
+        + "      the legacy mingw \"...x86_64.tar.gz\" asset has none, and on that\n"
+        + "      build every https:// request fails before it reaches the network —\n"
+        + "      regardless of connectivity or certificates. Check which asset this\n"
+        + "      binary came from before suspecting the network. Mingw retirement is\n"
+        + "      SFN-58; this note cannot yet tell the two builds apart (SFN-1028).";
 }
 
 // Print the shared failure preamble for a download that did not land:
@@ -504,10 +508,10 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let sha_path = store_dir + "/.sha256";
 
-    let asset = "sailfin_" + ver + "_" + os + "_" + arch + ".tar.gz";
+    let mut asset = "sailfin_" + ver + "_" + os + "_" + arch + ".tar.gz";
     let tag = "v" + ver;
     let release_base = _release_base() + "/" + tag;
-    let asset_url = release_base + "/" + asset;
+    let mut asset_url = release_base + "/" + asset;
     let sums_url = release_base + "/SHA256SUMS";
     let sig_url = release_base + "/SHA256SUMS.sig";
 
@@ -551,6 +555,22 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
         print("  the release manifest is unsigned or tampered; refusing to install");
         remove_tree(tmp);
         return 1;
+    }
+
+    // The msvc build is the native one with working TLS; the plain asset is
+    // the legacy mingw cross build being retired by SFN-58. Resolving the
+    // choice from the signed manifest (already verified above) costs no
+    // extra request and can't be spoofed by a filename on the wire. The
+    // fallback to the plain asset is mandatory, not defensive: releases
+    // before v0.10.3 have no msvc asset, and arm64 has none at any version
+    // (SFN-1033).
+    if os == "windows" {
+        let msvc_asset = "sailfin_" + ver + "_" + os + "_" + arch
+            + "-msvc.tar.gz";
+        if _digest_for_asset(sums_text, msvc_asset).length != 0 {
+            asset = msvc_asset;
+            asset_url = release_base + "/" + asset;
+        }
     }
 
     // 3. Resolve the asset's expected digest from the verified manifest.

@@ -20,8 +20,13 @@ set -euo pipefail
 #                            VERSION and SKIPS signature/digest verification)
 #
 # Assets are expected to be named:
+#   sailfin_<version>_<os>_<arch>-msvc.tar.gz  (windows only)
 #   sailfin_<version>_<os>_<arch>.tar.gz
-# where <os> is linux|macos|windows and <arch> is x86_64|arm64.
+# where <os> is linux|macos|windows and <arch> is x86_64|arm64. On windows,
+# the -msvc asset (the native build, with working TLS) is preferred when
+# present; the plain asset is the legacy mingw cross build and is used as a
+# fallback for releases before v0.10.3 and for arm64, which has no -msvc
+# asset at any version.
 
 REPO="${REPO:-SailfinIO/sailfin}"
 BINARY="${BINARY:-sailfin}"
@@ -124,20 +129,30 @@ fi
 
 TAG=""
 ASSET=""
+RESOLVED_VIA_LATEST="0"
 if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
+  RESOLVED_VIA_LATEST="1"
   log "VERSION is 'latest'; resolving most recent release with matching asset (including prereleases)…"
   releases_json="$(api "https://api.github.com/repos/${REPO}/releases?per_page=50")"
 
   select_release() {
     local binary_name="$1"
+    # The msvc build is the native one with working TLS; the plain asset is
+    # the legacy mingw cross build being retired by SFN-58. Prefer msvc,
+    # falling back to plain — a release matches if either is present.
+    # Fallback is mandatory: releases before v0.10.3 have no -msvc asset,
+    # and arm64 has none at any version (SFN-1033).
     printf '%s' "$releases_json" | jq -c --arg binary "$binary_name" --arg os "$OS" --arg arch "$ARCH" --arg exclude "$EXCLUDE_TAG" '
         [ .[]
           | select(($exclude == "") or (.tag_name != $exclude))
           | . as $rel
           | ($rel.tag_name | sub("^v"; "")) as $ver
-          | ($binary + "_" + $ver + "_" + $os + "_" + $arch + ".tar.gz") as $asset
-          | select(any((($rel.assets // [])[]); .name == $asset))
-          | {tag: $rel.tag_name, version: $ver, asset: $asset}
+          | ($binary + "_" + $ver + "_" + $os + "_" + $arch + ".tar.gz") as $plain_asset
+          | ($binary + "_" + $ver + "_" + $os + "_" + $arch + "-msvc.tar.gz") as $msvc_asset
+          | (($rel.assets // [])) as $assets
+          | (if ($os == "windows") then (any($assets[]; .name == $msvc_asset)) else false end) as $has_msvc
+          | select($has_msvc or any($assets[]; .name == $plain_asset))
+          | {tag: $rel.tag_name, version: $ver, asset: (if $has_msvc then $msvc_asset else $plain_asset end)}
         ][0]
       '
   }
@@ -161,7 +176,6 @@ fi
 
 log "Using release tag: ${TAG}"
 log "Using version: ${VERSION}"
-log "Expected asset: ${ASSET}"
 
 # Resolve the asset id for the GitHub API download path. This call hits
 # api.github.com, whose unauthenticated/low-quota responses can be rate
@@ -174,6 +188,55 @@ release_json=""
 if [ -z "$LOCAL_ARCHIVE" ]; then
   release_json="$(api "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" 2>/dev/null || true)"
 fi
+
+# Auth header shared by both download paths (optional; raises API rate
+# limits and enables private-repo asset access). Hoisted above the msvc
+# probe below (rather than left by the download calls that also use it)
+# so that probe authenticates too: on a private repo with a
+# REST-restricted token, release_json comes back empty and the probe
+# would otherwise 404 unauthenticated, silently choosing the plain
+# mingw asset even though the token would have worked (SFN-1033).
+DL_AUTH_ARGS=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  DL_AUTH_ARGS=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+fi
+
+# Prefer the msvc asset for an explicit (non-"latest") Windows install; the
+# "latest" path above already resolved this via releases_json. The msvc
+# build is the native one with working TLS; the plain asset is the legacy
+# mingw cross build being retired by SFN-58. The release-JSON lookup just
+# above is deliberately non-fatal, so this can't depend on it being
+# available: when it is, check the asset list directly; when it isn't
+# (rate limiting or a scoped token), probe the public download URL
+# instead. A release-download URL redirects to a presigned object URL
+# signed for GET only, so HEAD returns 401 there — a ranged GET asks the
+# same existence question the way the URL is signed to answer it
+# (SFN-798). Fallback to plain is mandatory: releases before v0.10.3 have
+# no -msvc asset, and arm64 has none at any version (SFN-1033).
+if [ "$OS" = "windows" ] && [ -z "$LOCAL_ARCHIVE" ] && [ "$RESOLVED_VIA_LATEST" != "1" ]; then
+  MSVC_ASSET="${BINARY}_${VERSION}_${OS}_${ARCH}-msvc.tar.gz"
+  USE_MSVC=0
+  if [ -n "$release_json" ]; then
+    if printf '%s' "$release_json" \
+        | jq -e --arg asset "$MSVC_ASSET" '[.assets[]? | select(.name==$asset)] | length > 0' \
+        >/dev/null 2>&1; then
+      USE_MSVC=1
+    fi
+  else
+    MSVC_URL="https://github.com/${REPO}/releases/download/${TAG}/${MSVC_ASSET}"
+    if curl -fsSL -o /dev/null -r 0-0 \
+        ${DL_AUTH_ARGS[@]+"${DL_AUTH_ARGS[@]}"} \
+        "$MSVC_URL" 2>/dev/null; then
+      USE_MSVC=1
+    fi
+  fi
+  if [ "$USE_MSVC" = "1" ]; then
+    ASSET="$MSVC_ASSET"
+  fi
+fi
+
+log "Expected asset: ${ASSET}"
+
 asset_id=""
 if [ -n "$release_json" ]; then
   asset_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$ASSET"'") | .id' 2>/dev/null | head -n 1)"
@@ -189,13 +252,6 @@ ARCHIVE_PATH="${TMPDIR}/${ASSET}"
 if [ -n "$LOCAL_ARCHIVE" ]; then
   ASSET="$(basename "$LOCAL_ARCHIVE")"
   ARCHIVE_PATH="$LOCAL_ARCHIVE"
-fi
-
-# Auth header shared by both download paths (optional; raises API rate
-# limits and enables private-repo asset access).
-DL_AUTH_ARGS=()
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-  DL_AUTH_ARGS=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 fi
 
 # Primary: GitHub API asset download (handles private repos + auth). Only

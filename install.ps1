@@ -27,8 +27,12 @@
                       and SKIPS signature/digest verification.)
 
     Assets are expected to be named:
+      sailfin_<version>_windows_<arch>-msvc.tar.gz
       sailfin_<version>_windows_<arch>.tar.gz
-    where <arch> is x86_64|arm64.
+    where <arch> is x86_64|arm64. The -msvc asset (the native build, with
+    working TLS) is preferred when present; the plain asset is the legacy
+    mingw cross build and is used as a fallback for releases before
+    v0.10.3 and for arm64, which has no -msvc asset at any version.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -111,6 +115,9 @@ if ($LocalArchive) {
 
 $Tag   = ""
 $Asset = ""
+# Preference-ordered asset names to try against the release's actual asset
+# list once it is fetched (msvc first, then the legacy mingw fallback).
+$AssetCandidates = @()
 
 if (-not $Version -or $Version -eq "latest") {
     Log "VERSION is 'latest'; resolving most recent release with matching asset..."
@@ -120,7 +127,16 @@ if (-not $Version -or $Version -eq "latest") {
     foreach ($Rel in $Releases) {
         if ($ExcludeTag -and $Rel.tag_name -eq $ExcludeTag) { continue }
         $Ver = $Rel.tag_name -replace "^v", ""
-        $CandidateAsset = "${Binary}_${Ver}_${OS}_${Arch}.tar.gz"
+        $PlainAsset = "${Binary}_${Ver}_${OS}_${Arch}.tar.gz"
+        # The msvc build is the native one with working TLS; the plain asset
+        # is the legacy mingw cross build being retired by SFN-58. Fall back
+        # to it for releases before v0.10.3 and for arm64, which has no
+        # -msvc asset at any version (SFN-1033).
+        $MsvcAsset = "${Binary}_${Ver}_${OS}_${Arch}-msvc.tar.gz"
+        $CandidateAsset = $PlainAsset
+        if ($OS -eq "windows" -and ($Rel.assets | Where-Object { $_.name -eq $MsvcAsset })) {
+            $CandidateAsset = $MsvcAsset
+        }
         $Match = $Rel.assets | Where-Object { $_.name -eq $CandidateAsset }
         if ($Match) {
             $Tag     = $Rel.tag_name
@@ -129,6 +145,7 @@ if (-not $Version -or $Version -eq "latest") {
             break
         }
     }
+    $AssetCandidates = @($Asset)
 
     if (-not $Tag -or -not $Version -or -not $Asset) {
         if ($ExcludeTag) {
@@ -139,12 +156,24 @@ if (-not $Version -or $Version -eq "latest") {
 } else {
     $Version = $Version -replace "^[vV]", ""
     $Tag   = "v$Version"
-    $Asset = "${Binary}_${Version}_${OS}_${Arch}.tar.gz"
+    $PlainAsset = "${Binary}_${Version}_${OS}_${Arch}.tar.gz"
+    $AssetCandidates = @($PlainAsset)
+    if ($OS -eq "windows") {
+        # The msvc build is the native one with working TLS; the plain asset
+        # is the legacy mingw cross build being retired by SFN-58. The asset
+        # list is not fetched at this point (that happens below for the
+        # download), so the choice is deferred as a preference-ordered
+        # candidate list and resolved once the list is known. Falling back
+        # to the plain asset is mandatory: releases before v0.10.3 have no
+        # -msvc asset, and arm64 has none at any version (SFN-1033).
+        $MsvcAsset = "${Binary}_${Version}_${OS}_${Arch}-msvc.tar.gz"
+        $AssetCandidates = @($MsvcAsset, $PlainAsset)
+    }
+    $Asset = $AssetCandidates[0]
 }
 
 Log "Using release tag: $Tag"
 Log "Using version: $Version"
-Log "Expected asset: $Asset"
 
 # --- Download asset ----------------------------------------------------------
 
@@ -166,10 +195,23 @@ if ($LocalArchive) {
     $ReleaseUrl  = "https://api.github.com/repos/$Repo/releases/tags/$Tag"
     $ReleaseJson = Invoke-RestMethod -Uri $ReleaseUrl -Headers $Headers
 
-    $AssetObj = $ReleaseJson.assets | Where-Object { $_.name -eq $Asset } | Select-Object -First 1
-    if (-not $AssetObj) {
-        Die "Could not find asset '$Asset' in release '$Tag'."
+    # Resolve the first candidate (msvc preferred, plain as fallback) that is
+    # actually present in this release's asset list.
+    $AssetObj = $null
+    foreach ($Candidate in $AssetCandidates) {
+        $AssetObj = $ReleaseJson.assets | Where-Object { $_.name -eq $Candidate } | Select-Object -First 1
+        if ($AssetObj) {
+            $Asset = $Candidate
+            break
+        }
     }
+    if (-not $AssetObj) {
+        # Name every candidate that was tried, not just the preferred one --
+        # reporting only the msvc name would read as "this release is missing
+        # its native build" when the plain asset is equally absent.
+        Die "Could not find any of [$($AssetCandidates -join ', ')] in release '$Tag'."
+    }
+    Log "Expected asset: $Asset"
 
     $AssetId = $AssetObj.id
     $ArchivePath = Join-Path $TmpDir $Asset
