@@ -73,6 +73,7 @@ sfn-sources = [
     "sfn/platform/fd_io.sfn",
     "sfn/platform/socket_ops.sfn",
     "sfn/platform/rename_ops.sfn",
+    "sfn/platform/exclusive_create.sfn",
     "sfn/platform/cert_roots.sfn",
     "sfn/adapters/filesystem.sfn",
     "sfn/adapters/http.sfn",

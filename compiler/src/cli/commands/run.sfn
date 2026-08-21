@@ -45,6 +45,12 @@ import {
     _resolve_capsule_build_spec,
     _resolve_sailfin_cache_dir_for_work
 } from "../../build/cache";
+import {
+    CREATE_EXCLUSIVE_CREATED,
+    CREATE_EXCLUSIVE_ERROR,
+    CREATE_EXCLUSIVE_MODE_EXE,
+    _create_exclusive_cmd
+} from "../../build/fs";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ends_with, _ensure_dir } from "../../build/paths";
 import { _runtime_bundle_exists } from "../../build/runtime_objs";
@@ -75,39 +81,48 @@ fn command_def() -> Command {
     return cmd;
 }
 
-// SFN-719: mint a per-invocation exe path so a nested or concurrent `sfn
-// run` never targets the same file as another still-running one. On
-// Windows a running `.exe` is locked by the OS, so reusing the fixed
-// `run` name blocks the link step of a second invocation outright; on
-// every platform it's also a correctness hazard (one run's binary could
-// be overwritten mid-execution by another). `monotonic_millis()` seeds
-// the suffix; the `fs.exists` probe only rules out a STALE name still on
-// disk from an earlier invocation — it is NOT an atomic claim, so two
-// invocations starting in the same millisecond can still race onto the
-// same candidate. Closing that window needs an exclusive-create that
-// reports created-vs-existed, which no primitive here provides:
-// `sfn_fs_mkdir` discards `mkdir`'s return and treats a later existence
-// probe as authoritative, and `_mktemp_from_template_cmd` returns "" on
-// a Windows host by design. SFN-974 adds that primitive; this probe and
-// this comment are deleted when `_unique_run_stem` moves onto it.
-// Bounded so the probe loop can't run forever.
+// SFN-719 / SFN-974: claim a per-invocation exe path so a nested or
+// concurrent `sfn run` never targets the same file as another still-running
+// one. `monotonic_millis()` seeds the candidate; the claim is what makes it
+// unique — `_create_exclusive_cmd` creates the executable's own path
+// atomically, so exactly one of two invocations starting in the same
+// millisecond can win a given name and the loser advances the ordinal.
 //
-// Returns an extensionless STEM, not a path. Both this invocation's
-// executable and its `.ll` are derived from it, so the two cannot disagree
-// about which invocation they belong to (SFN-1004). The staleness probe
-// checks both derived names: either one surviving from an earlier
-// invocation means the stem is not free.
+// Returns an extensionless STEM, not a path, so this invocation's executable
+// and its `.ll` cannot disagree about which invocation they belong to
+// (SFN-1004). Only the EXE name is claimed: the `.ll` is derived from the
+// won stem, so a unique stem makes it unique too.
+//
+// Returns "" when no name could be claimed. The two ways that happens are
+// deliberately not distinguished by the return value — both are fatal to the
+// invocation and the caller reports one message.
 fn _unique_run_stem(run_cache_dir: string) -> string ![clock, io] {
     let base = run_cache_dir + "/run-" + int_to_string(monotonic_millis());
+    let target_os = build_target_os();
     let mut candidate = base;
-    let mut attempt = 1;
+    let mut attempt: int = 1;
     loop {
-        if !fs.exists(target_exe_name(candidate, build_target_os())) && !fs.exists(candidate
-            + ".ll") { return candidate; }
-        if attempt > 1000 { return candidate; }
+        let claim = _create_exclusive_cmd(target_exe_name(candidate, target_os), CREATE_EXCLUSIVE_MODE_EXE);
+        if claim == CREATE_EXCLUSIVE_CREATED { return candidate; }
+        // A real filesystem fault (unwritable cache dir, missing parent) is
+        // not about this name, so advancing the ordinal would just repeat it
+        // 1000 times before failing anyway.
+        if claim == CREATE_EXCLUSIVE_ERROR { return ""; }
+        if attempt > 1000 { return ""; }
         candidate = base + "-" + int_to_string(attempt);
         attempt += 1;
     }
+}
+
+// Delete the artifacts this invocation claimed. No-op on the guarded
+// (`SAILFIN_TEST_SCRATCH`) branch, which keeps the fixed `run` name and
+// claims nothing. `keep_ll` is true only on the link-failure path, where
+// the SFN-34 backend-failure banner names the IR file.
+fn _release_run_stem(claimed: boolean, exe_path: string, ll_path: string, keep_ll: boolean) -> void ![io] {
+    if !claimed { return; }
+    if fs.exists(exe_path) { fs.deleteFile(exe_path); }
+    if keep_ll { return; }
+    if fs.exists(ll_path) { fs.deleteFile(ll_path); }
 }
 
 // Reproduce the legacy `_legacy_dispatch_run` body against typed matches.
@@ -205,7 +220,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // renaming it would churn cache keys for no gain.
     let run_exe_unguarded = env.get("SAILFIN_TEST_SCRATCH").length == 0;
     let mut run_stem = run_cache_dir + "/run";
-    if run_exe_unguarded { run_stem = _unique_run_stem(run_cache_dir); }
+    if run_exe_unguarded {
+        run_stem = _unique_run_stem(run_cache_dir);
+        if run_stem.length == 0 {
+            print.err("sfn run: could not claim a unique executable name under "
+                + run_cache_dir);
+            return 1;
+        }
+    }
     let exe_path = target_exe_name(run_stem, build_target_os());
     let ll_path = run_stem + ".ll";
 
@@ -241,7 +263,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         retain_full_runtime: false
     };
     let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, run_consumer, "", ctx.compiler_path, "", binary_dir);
-    if !run_capsule_result.success { return 1; }
+    if !run_capsule_result.success {
+        _release_run_stem(run_exe_unguarded, exe_path, ll_path, false);
+        return 1;
+    }
     let capsule_lls = run_capsule_result.ll_paths;
 
     let source = fs.readFile(input_path);
@@ -249,7 +274,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let ok = compile_to_llvm_file_with_module_imports_and_implicit(source, module_name, ll_path, "", run_capsule_result.entry_import_asm_paths, run_capsule_result.implicit_provider_asm_paths);
     if !ok {
         print("failed to compile LLVM for: " + input_path);
-
+        _release_run_stem(run_exe_unguarded, exe_path, ll_path, false);
         return 1;
     }
 
@@ -288,6 +313,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         if link_result.ran_backend {
             print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
         }
+        // `keep_ll = true`: the banner just printed names `ll_path`.
+        _release_run_stem(run_exe_unguarded, exe_path, ll_path, true);
         return link_rc;
     }
 
@@ -314,14 +341,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // locked. Delete only this invocation's own path — never a sweep of
     // the shared directory — so the per-invocation naming scheme above
     // doesn't accumulate across repeated `sfn run` calls without ever
-    // touching an artifact another live invocation owns.
-    if run_exe_unguarded && fs.exists(exe_path) { fs.deleteFile(exe_path); }
-    // SFN-1004: the `.ll` is per-invocation now, so leaving it behind would
-    // grow the shared directory without bound on every `sfn run` — the same
-    // accumulation the exe cleanup above exists to prevent. Only on the
-    // success path: a link failure returns earlier and deliberately leaves
-    // the IR in place, because the backend-failure banner names it.
-    if run_exe_unguarded && fs.exists(ll_path) { fs.deleteFile(ll_path); }
+    // touching an artifact another live invocation owns. SFN-1004: the
+    // `.ll` is per-invocation now too, so it is released alongside the exe
+    // rather than left to grow the shared directory without bound.
+    _release_run_stem(run_exe_unguarded, exe_path, ll_path, false);
     return run_rc;
 }
 

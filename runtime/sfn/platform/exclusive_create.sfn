@@ -1,0 +1,147 @@
+// runtime/sfn/platform/exclusive_create.sfn
+//
+// Atomically claim `path`: create it as an empty regular file iff it does
+// not already exist. Swapped for `exclusive_create_windows.sfn` on a
+// Windows target by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`), the same mechanism `rename_ops.sfn`
+// uses (SFN-720) — swap, not append, because `sfn_create_exclusive` is a
+// Sailfin-authored symbol whose body differs per target, unlike a bare
+// libc symbol POSIX already supplies for free.
+//
+// Closes the one check-then-act gap left in the compiler (SFN-974):
+// minting a caller-chosen unique path today probes `fs.exists` and then
+// creates separately (`_unique_run_stem`,
+// `compiler/src/cli/commands/run.sfn`), so two invocations racing onto
+// the same candidate can both pass the probe and one silently clobbers
+// the other's file. This primitive collapses probe-then-act into one
+// atomic syscall.
+//
+// Return contract — three distinguishable outcomes, nothing else:
+//   0  CREATED — `path` did not exist; it does now, as a zero-length
+//                regular file this process alone created. Nothing is
+//                left open.
+//   1  EXISTS  — `path` was already taken (a file, a directory, or
+//                anything else occupying the name). Nothing was
+//                created, opened, truncated, or modified.
+//  -1  ERROR   — a real filesystem fault (missing parent, permission
+//                denied, read-only filesystem, name too long, fd
+//                exhaustion, or an unrecognized host — see
+//                `_excl_open_flags` below). Never retry with a
+//                different name on this outcome; the fault is not
+//                about the name.
+//
+// No handle is returned: every consumer wants a name reservation, not an
+// open file (`_unique_run_stem` hands the claimed path straight to
+// `clang -o`), and returning one would force a second cross-platform
+// primitive just to close it (POSIX `open` yields an `int` fd, the Windows
+// sibling's create call yields a `HANDLE`, and the UCRT cannot `_close`
+// the latter). A future descriptor-holding sibling is
+// `sfn_open_exclusive`, not a change to this function.
+extern fn open(path: *u8, flags: i32, mode: i32) -> i32;
+
+extern fn close(fd: i32) -> i32;
+
+extern fn access(path: *u8, mode: i32) -> i32;
+
+extern fn unlink(path: *u8) -> i32;
+
+// `fchmod`, not a bare reliance on `open`'s variadic `mode` argument: Apple's
+// arm64 ABI (a documented deviation from standard AAPCS64) passes named
+// arguments in registers but spills ALL variadic arguments to the stack,
+// while x86-64 SysV and standard AArch64 AAPCS pass them the same way
+// regardless of variadic position. `open`'s fixed 3-arity extern below reads
+// as ABI-compatible on x86-64 SysV/AAPCS64 (and is — Linux CI is green), but
+// on Darwin arm64 the `mode` argument lands in a register libc's variadic
+// `open` never reads, so the created file gets a garbage permission bit
+// pattern instead of `mode` (SFN-974; caught by
+// `compiler/tests/unit/create_exclusive_test.sfn`'s content/permission
+// assertions failing only on `macos-arm64` CI while the tri-state return
+// contract passed everywhere). `fchmod` is POSIX and non-variadic, so it
+// takes the same registers-only path on every target; calling it on the fd
+// this process just opened (not `chmod` on the path) also closes the TOCTOU
+// window a path-based call would reopen. Do not fold `mode` back into a bare
+// reliance on `open`'s third argument.
+extern fn fchmod(fd: i32, mode: i32) -> i32;
+
+// `open`'s `O_CREAT`/`O_EXCL` flag WORDS differ between Linux and Darwin
+// (`O_WRONLY|O_CREAT|O_EXCL` = 193 on Linux, 2561 on Darwin), and this
+// module compiles as one shared POSIX source for both targets — a wrong
+// guess is not inert, it TRUNCATES a peer's file: Linux's 193 read on
+// Darwin opens an existing file for writing with no create/exclusivity,
+// and Darwin's 2561 read on Linux is `O_WRONLY|O_TRUNC|O_NONBLOCK`, which
+// opens AND TRUNCATES an existing file. Neither wrong reading fails; both
+// report "created" after destroying a peer's data (SFN-974 design §3.3).
+//
+// Resolved once per process and memoized (`-1` = unresolved, `0` =
+// unsupported host) from a POSITIVE marker per platform — never the
+// present/absent single-probe form used elsewhere in this tree
+// (`_fs_dirent_dname_offset`, `build_host_os`): that form hands a
+// `/proc`-less Linux host the Darwin (truncating) word instead of an
+// error. Requiring a positive marker for each platform and returning `0`
+// when neither answers converts a mis-detected host into a loud,
+// immediate, first-call error instead of silent corruption. Do not
+// simplify this back to one probe.
+//
+// The initializer is spelled as the unary literal `-1`, not `0 - 1`: a
+// module-level `let mut` in a non-entry runtime source (this module has no
+// `main`) that initializes from `0 - 1` silently keeps the zero-init
+// default instead of running the subtraction, so every read of
+// `_excl_open_flags_memo` before its first write observed `0` — which
+// collides with the "unsupported host" sentinel and made every call
+// resolve `-1`/ERROR regardless of platform (caught by the `sfn run`
+// probe in SFN-974's implementation pass). Unary `-1` is the proven form
+// (`runtime/sfn/string.sfn:533`'s `_sfn_concat_limit_state`); `fs.sfn:129`
+// shows the same spelling suffices for a local, non-global `let`.
+//
+// The underlying defect is SFN-1005: ANY computed module-global
+// initializer is dropped in a non-entry module, not just a negative one
+// (`2 + 3` reads 0, `"x" + "y"` reads "", `1 > 0` reads false). Delete
+// this paragraph and respell freely once SFN-1005 lands; until then the
+// spelling is load-bearing, not stylistic.
+let mut _excl_open_flags_memo: i32 = -1;
+
+fn _excl_open_flags() -> i32 ![io] {
+    if _excl_open_flags_memo != -1 { return _excl_open_flags_memo; }
+    let mut resolved: i32 = 0;
+    let linux_marker: string = "/proc/self/status";
+    let darwin_marker: string = "/System/Library/CoreServices";
+    if access(linux_marker as *u8, 0) == 0 { resolved = 193; } else if access(darwin_marker as *u8, 0) == 0 {
+        resolved = 2561;
+    }
+    _excl_open_flags_memo = resolved;
+    return resolved;
+}
+
+// POSIX `EEXIST` — identical value on Linux and Darwin.
+let SFN_EXCL_EEXIST: i32 = 17;
+
+// POSIX `EINTR` — identical value on Linux and Darwin (matches the pin at
+// `socket_ops.sfn`'s `SFN_SOCKET_EINTR`). A signal delivered mid-`open`
+// is resumable, not a real failure.
+let SFN_EXCL_EINTR: i32 = 4;
+
+fn sfn_create_exclusive(path: *u8, mode: i32) -> i32 ![io] {
+    let flags: i32 = _excl_open_flags();
+    if flags == 0 { return -1; }
+    let mut guard: i64 = 0;
+    loop {
+        guard = guard + 1;
+        if guard > 1048576 { return -1; }
+        let fd: i32 = open(path, flags, mode);
+        if fd >= 0 {
+            if fchmod(fd, mode) != 0 {
+                close(fd);
+                unlink(path);
+                return -1;
+            }
+            close(fd);
+            return 0;
+        }
+        let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+        if err == SFN_EXCL_EEXIST { return 1; }
+        if err == SFN_EXCL_EINTR { continue; }
+        return -1;
+    }
+}
+
+export { sfn_create_exclusive };

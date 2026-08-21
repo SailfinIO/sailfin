@@ -174,6 +174,31 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert ! contains(rename_posix, ".old");
     assert ! contains(rename_posix, "MoveFileExA");
 
+    // exclusive_create.sfn (SFN-974): identical shape to rename_ops above.
+    // `open`'s O_CREAT/O_EXCL flags have no Windows meaning; the Windows
+    // sibling claims via CreateFileA + CREATE_NEW instead.
+    // `compiler/src/build/fs.sfn` declares `extern fn
+    // sfn_create_exclusive` (`run.sfn` only imports the wrapper), so
+    // without the sibling in RUNTIME_MODS the bridge link has no
+    // definition for it. Substrings are
+    // exact both ways: "exclusive_create.sfn" is NOT a substring of
+    // "exclusive_create_windows.sfn", and the manifest never names the
+    // sibling.
+    assert contains(manifest, "\"sfn/platform/exclusive_create.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/platform/exclusive_create.sfn");
+    assert contains(makefile, "runtime/sfn/platform/exclusive_create_windows.sfn");
+    assert ! contains(manifest, "exclusive_create_windows");
+
+    // Source-drift guard, not a behaviour proof (mirrors the SFN-721 pair
+    // above): pins that the two legs have not drifted into each other. A
+    // Linux host cannot execute the Windows leg's CreateFileA path.
+    let excl_win = fs.readFile("runtime/sfn/platform/exclusive_create_windows.sfn");
+    let excl_posix = fs.readFile("runtime/sfn/platform/exclusive_create.sfn");
+    assert contains(excl_win, "CreateFileA");
+    assert ! contains(excl_posix, "CreateFileA");
+    assert contains(excl_posix, "/proc/self/status");
+    assert ! contains(excl_win, "/proc/self/status");
+
     // assert.sfn: in the manifest, excluded from RUNTIME_MODS.
     assert contains(manifest, "\"sfn/assert.sfn\"");
     assert ! contains(makefile, "runtime/sfn/assert.sfn");

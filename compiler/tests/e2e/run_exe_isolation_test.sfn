@@ -89,6 +89,64 @@ fn _wait_for_run_exe_entry(dir: string, deadline_ms: int) -> boolean ![clock, io
     }
 }
 
+// Every EXECUTABLE entry directly under `dir` whose name starts with
+// "run-" (SFN-974), mirroring `_count_run_exe_entries`'s filter.
+fn _run_exe_names(dir: string) -> string[] ![io] {
+    if !fs.exists(dir) { return []; }
+    let entries = fs.listDirectory(dir);
+    let mut names: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        if find(name, "run-", 0) == 0 && !_ends_with(name, ".ll") {
+            names.push(name);
+        }
+        i += 1;
+    }
+    return names;
+}
+
+// Every "run-*.ll" entry directly under `dir` (SFN-1004's per-invocation IR).
+fn _count_run_ll_entries(dir: string) -> int ![io] {
+    if !fs.exists(dir) { return 0; }
+    let entries = fs.listDirectory(dir);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        if find(name, "run-", 0) == 0 && _ends_with(name, ".ll") { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+// Fold `names` into `set`, keeping `set` a duplicate-free union across
+// repeated polls (a name observed on poll N and again on poll N+1 must not
+// double-count).
+fn _union_unique(set: string[], names: string[]) -> string[] {
+    let mut out: string[] = set;
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        let name = names[i];
+        let mut already: boolean = false;
+        let mut j: int = 0;
+        loop {
+            if j >= out.length { break; }
+            if out[j] == name {
+                already = true;
+                break;
+            }
+            j += 1;
+        }
+        if !already { out.push(name); }
+        i += 1;
+    }
+    return out;
+}
+
 test "run: unguarded default path mints a per-invocation exe name and cleans up after itself" ![clock, io] {
     let root = nested_runner_scratch("run-exe-isolation-single");
     _ensure_fixture(root, 1500);
@@ -119,20 +177,44 @@ test "run: unguarded default path mints a per-invocation exe name and cleans up 
     assert _count_run_exe_entries(sailfin_dir) == 0;
 }
 
-test "run: two overlapping invocations in one directory both succeed" ![clock, io] {
+// SFN-974: three, not two and not four — three is enough to demonstrate
+// N-way claiming, and each extra concurrent `sfn run` child costs ~3 GiB
+// against the pool's memory budget (`.claude/rules/compiler-safety.md`),
+// so doubling the prior two-child count is not free.
+test "run: three overlapping invocations in one directory all succeed with distinct names" ![clock, io] {
     let root = nested_runner_scratch("run-exe-isolation-overlap");
     _ensure_fixture(root, 1500);
     let child_env = clean_runner_env("");
     let bin = sfn_bin_abs_path();
+    let sailfin_dir = root + "/build/sailfin";
 
-    // Start both before waiting on either, so their builds and their
+    // Start all three before waiting on any, so their builds and their
     // fixtures' own `sleep()` genuinely overlap in the same directory —
-    // the acceptance criterion in SFN-719 ("two concurrent `sfn run`
-    // invocations in one directory both succeed").
+    // the acceptance criterion in SFN-719 ("concurrent `sfn run` invocations
+    // in one directory all succeed"), extended by SFN-974 to prove they also
+    // claim distinct names rather than merely not crashing each other.
     let handle_a = process.spawn_with_env_cwd([bin, "run", "src/main.sfn"], child_env, root);
     let handle_b = process.spawn_with_env_cwd([bin, "run", "src/main.sfn"], child_env, root);
+    let handle_c = process.spawn_with_env_cwd([bin, "run", "src/main.sfn"], child_env, root);
     assert handle_a != 0;
     assert handle_b != 0;
+    assert handle_c != 0;
+
+    // Poll the directory every 50ms, unioning every observed "run-" name,
+    // WHILE all three are still overlapping (before any `handle_wait`
+    // blocks on one). Reliable rather than timing-dependent because of the
+    // design this pins: the claim happens before the compile (SFN-974), so
+    // each name sits on disk for the whole compile+link+run window
+    // (seconds), not just the fixture's 1500ms sleep.
+    let mut seen: string[] = [];
+    let mut waited: int = 0;
+    loop {
+        seen = _union_unique(seen, _run_exe_names(sailfin_dir));
+        if seen.length >= 3 { break; }
+        if waited >= 60000 { break; }
+        sleep(50);
+        waited += 50;
+    }
 
     let out_a = process.handle_read_stdout(handle_a);
     let err_a = process.handle_read_stderr(handle_a);
@@ -142,9 +224,13 @@ test "run: two overlapping invocations in one directory both succeed" ![clock, i
     let err_b = process.handle_read_stderr(handle_b);
     let exit_b = process.handle_wait(handle_b);
 
-    // SFN-1004: surface the child's own stderr before asserting. This test
+    let out_c = process.handle_read_stdout(handle_c);
+    let err_c = process.handle_read_stderr(handle_c);
+    let exit_c = process.handle_wait(handle_c);
+
+    // SFN-1004: surface each child's own stderr before asserting. This test
     // failed once in a nightly `make check` and the log carried nothing but
-    // the bare assertion line, because both children's stderr was read and
+    // the bare assertion line, because every child's stderr was read and
     // discarded — so the one artifact that would have named the cause (an
     // `sfn run: no binary at <path>` from the exec, or a link diagnostic)
     // was thrown away. A concurrency failure here is rare and timing-bound;
@@ -156,9 +242,25 @@ test "run: two overlapping invocations in one directory both succeed" ![clock, i
     if exit_b != 0 {
         print.error("run B failed, exit " + int_to_string(exit_b) + ": " + err_b);
     }
+    if exit_c != 0 {
+        print.error("run C failed, exit " + int_to_string(exit_c) + ": " + err_c);
+    }
 
     assert exit_a == 0;
     assert exit_b == 0;
+    assert exit_c == 0;
     assert find(out_a, "7", 0) >= 0;
     assert find(out_b, "7", 0) >= 0;
+    assert find(out_c, "7", 0) >= 0;
+
+    // The deterministic core (SFN-974): under the pre-fix probe, two
+    // concurrent invocations took the SAME stem every time on this host
+    // (max 1 concurrent exe observed across ~6.6s of real overlap) — so
+    // three distinct names here is the regression pin, not a formality.
+    assert seen.length == 3;
+
+    // The release path (SFN-974 design §5) leaks nothing: every claimed
+    // exe AND its per-invocation `.ll` are gone once all three have joined.
+    assert _count_run_exe_entries(sailfin_dir) == 0;
+    assert _count_run_ll_entries(sailfin_dir) == 0;
 }
