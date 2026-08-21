@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://sailfin.dev">
+  <a href="https://sfn.dev">
     <img src="https://raw.githubusercontent.com/SailfinIO/sailfin/main/site/public/images/sfn_lang_logo_256.svg" alt="Sailfin" width="128">
   </a>
 </p>
@@ -11,12 +11,12 @@
 </p>
 
 <p align="center">
-  <a href="https://sailfin.dev"><strong>Website</strong></a> ·
-  <a href="https://sailfin.dev/docs/getting-started/install">Install</a> ·
-  <a href="https://sailfin.dev/docs/reference/spec/">Language Spec</a> ·
-  <a href="https://sailfin.dev/roadmap">Roadmap</a> ·
-  <a href="https://sailfin.dev/blog">Blog</a> ·
-  <a href="https://sailfin.dev/llms.txt"><code>llms.txt</code></a>
+  <a href="https://sfn.dev"><strong>Website</strong></a> ·
+  <a href="https://sfn.dev/docs/getting-started/install">Install</a> ·
+  <a href="https://sfn.dev/docs/reference/spec/">Language Spec</a> ·
+  <a href="https://sfn.dev/roadmap">Roadmap</a> ·
+  <a href="https://sfn.dev/blog">Blog</a> ·
+  <a href="https://sfn.dev/llms.txt"><code>llms.txt</code></a>
 </p>
 
 <p align="center">
@@ -89,7 +89,7 @@ still planned.
 
 For the detailed current-state matrix, use [`docs/status.md`](docs/status.md).
 For language semantics, use the
-[specification](https://sailfin.dev/docs/reference/spec/).
+[specification](https://sfn.dev/docs/reference/spec/).
 
 ## Example
 
@@ -180,7 +180,7 @@ selected archive's SHA-256 digest before extraction. They warn and continue
 only when the signed manifest is absent or suitable OpenSSL is unavailable;
 once verification can run, malformed or invalid signed metadata and digest
 mismatches abort. See the
-[manual verification guide](https://sailfin.dev/docs/getting-started/verify-download/).
+[manual verification guide](https://sfn.dev/docs/getting-started/verify-download/).
 
 ## Building From Source
 
@@ -226,13 +226,13 @@ sfn fmt --check compiler/src/ runtime/
 - `docs/status.md` is the source of truth for shipped, partial, and planned
   behavior.
 - User-facing docs live in `site/src/content/docs/` and are published at
-  [sailfin.dev/docs](https://sailfin.dev/docs/).
+  [sfn.dev/docs](https://sfn.dev/docs/).
 - The public roadmap is generated from GitHub milestones at
-  [sailfin.dev/roadmap](https://sailfin.dev/roadmap).
+  [sfn.dev/roadmap](https://sfn.dev/roadmap).
 
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution guidelines. Groomed
 work is tracked in the [issue tracker](https://github.com/SailfinIO/sailfin/issues),
-and the roadmap at [sailfin.dev/roadmap](https://sailfin.dev/roadmap) tracks
+and the roadmap at [sfn.dev/roadmap](https://sfn.dev/roadmap) tracks
 the larger milestones.
