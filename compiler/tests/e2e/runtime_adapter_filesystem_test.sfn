@@ -218,6 +218,7 @@ test "filesystem emit: define for every sfn_fs_* export" ![io] {
     assert _has_define_named(ir, "sfn_fs_mkdir");
     assert _has_define_named(ir, "sfn_fs_list_dir");
     assert _has_define_named(ir, "sfn_fs_read_bytes");
+    assert _has_define_named(ir, "sfn_fs_write_bytes");
 }
 
 test "probe routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" ![io] {
@@ -283,6 +284,7 @@ test "compiler binary exports the defined sfn_fs_* family" ![io] {
     assert _nm_has_defined(bin, "sfn_fs_mkdir");
     assert _nm_has_defined(bin, "sfn_fs_list_dir");
     assert _nm_has_defined(bin, "sfn_fs_read_bytes");
+    assert _nm_has_defined(bin, "sfn_fs_write_bytes");
 }
 
 test "runtime/capsule.toml sfn-sources lists the filesystem adapter" ![io] {

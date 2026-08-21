@@ -362,6 +362,9 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.read_bytes", symbol: "sfn_fs_read_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_fs_read_bytes", c_abi_return_type: null
     });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.write_bytes", symbol: "sfn_fs_write_bytes", return_type: "i1", parameter_types: ["i8*", "i64", "i64"], native_signature: "sfn_fs_write_bytes", c_abi_return_type: null
+    });
 
     // #1780 (SFEP-0035 §3.2): the hand-typed `find_char` / `string_starts_with`
     // / `record_eq_flag_message` prelude-mirror rows were removed here. Like the

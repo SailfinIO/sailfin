@@ -1,0 +1,144 @@
+// End-to-end test for binary-safe file I/O in `sfn/fs` (SFN-1008).
+//
+// Before this, no Sailfin program could copy a binary file. `fs.readFile`
+// returns a `* u8` that the caller coerces to a `string` through the
+// `string.length` descriptor, whose `sfn_str_len` recovers the length with
+// a bounded `strnlen` — so `fs.write(dst, fs.read(src))` against the 4.7 MB
+// `sfn` binary wrote 7 bytes (the ELF header up to its first NUL) and
+// reported success.
+//
+// Pins, end-to-end:
+//   1. copy       — `fs.copy` reproduces a multi-megabyte executable
+//                   byte-for-byte, asserted by BOTH length and SHA-256.
+//   2. on disk    — the destination is re-read in a second pass, so the
+//                   assertion covers what landed on disk rather than the
+//                   in-memory buffer that wrote it.
+//   3. loud fail  — `fs.readFile` on that same binary aborts with a
+//                   diagnostic instead of silently truncating.
+//
+// The multi-megabyte fixture is `sfn_bin_path()` — the compiler binary
+// itself. It is a real executable with interior NULs, so nothing is
+// generated and nothing is committed.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test — use `sfn/strings`, as the
+// sibling `runtime_adapter_filesystem_test.sfn` does.
+import { copy, free_bytes, read_bytes } from "sfn/fs";
+import { contains } from "sfn/strings";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+
+import { sha256_hex_of_bytes } from "../../src/build/hash";
+
+// `run_capture`'s empty array is the *empty* environment; thread what the
+// toolchain needs. The probe below spawns a full build (clang + linker
+// resolve through PATH) and routes its `program.ll` build cache under
+// SAILFIN_TEST_SCRATCH (#1333) — both mandatory under the parallel pool.
+// Mirrors `_child_env` in `runtime_adapter_filesystem_test.sfn`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-fs-copy-binary";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+test "fs copy: a multi-megabyte executable copies byte-for-byte" ![io] {
+    let dir = _scratch_dir();
+    let src = sfn_bin_path();
+    let dst = dir + "/copied-sfn-binary";
+
+    assert copy(src, dst);
+
+    let original = read_bytes(src);
+    let copied = read_bytes(dst);
+    assert original.status == 0;
+    assert copied.status == 0;
+
+    // The fixture must actually be the multi-megabyte executable the
+    // acceptance criterion names, not a stub that happens to round-trip.
+    assert original.length > 1000000;
+    assert copied.length == original.length;
+
+    // Size alone would pass on a buffer of the right length full of the
+    // wrong bytes, so the digest is the load-bearing half.
+    let original_hash = sha256_hex_of_bytes(original.addr, original.length);
+    let copied_hash = sha256_hex_of_bytes(copied.addr, copied.length);
+    assert original_hash.length == 64;
+    assert copied_hash == original_hash;
+
+    free_bytes(original);
+    free_bytes(copied);
+}
+
+test "fs copy: the copied binary is byte-identical on disk" ![io] {
+    let dir = _scratch_dir();
+    let src = sfn_bin_path();
+    let dst = dir + "/copied-sfn-binary-second-pass";
+
+    assert copy(src, dst);
+
+    // Re-read both in a fresh pass. The sibling test hashes buffers that
+    // were live across the copy; this one proves the bytes survived the
+    // trip through the filesystem.
+    let a = read_bytes(src);
+    let b = read_bytes(dst);
+    assert a.status == 0;
+    assert b.status == 0;
+    assert b.length == a.length;
+    assert sha256_hex_of_bytes(b.addr, b.length) == sha256_hex_of_bytes(a.addr, a.length);
+
+    free_bytes(a);
+    free_bytes(b);
+}
+
+test "fs readFile: binary input aborts instead of truncating" ![io] {
+    let dir = _scratch_dir();
+    let probe = dir + "/read_binary_probe.sfn";
+
+    // SFN-1001: the binary's path travels through argv[1], never spliced
+    // into the fixture source — on Windows it is a backslash path, and
+    // `decode_string_literal_escapes` would silently rewrite `\U` to `U`
+    // rather than rejecting it, so the probe would compile and run against
+    // a DIFFERENT path.
+    fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    let target = argv[1];\n"
+        + "    let content = fs.readFile(target);\n"
+        + "    return content.length;\n"
+        + "}\n");
+
+    // Build then exec directly: `sfn run` forwards no argv to the fixture
+    // (`run.sfn:117-121`), and the path has to reach the probe as an
+    // argument rather than as source text.
+    let binpath = dir + "/read_binary_probe";
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, probe], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let exit = process.run_capture([binpath, sfn_bin_path()], _child_env());
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    // `fn main -> int` returning 7 would itself exit 7, so a nonzero exit
+    // alone is only a weak precondition here. The `contains(err, ...)`
+    // assertions below are what actually pin the abort-and-diagnose guard.
+    assert exit != 0;
+    assert contains(err, "interior NUL");
+    // The diagnostic must route the caller to the working, copy-pasteable
+    // import, not just report that it gave up.
+    assert contains(err, "import { copy, read_bytes }");
+    assert contains(err, "sfn/fs");
+}

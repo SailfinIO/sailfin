@@ -128,6 +128,7 @@ fn intrinsic_effect_table() -> IntrinsicEffectTable {
     table = append_intrinsic_effects(table, "env.get", ["io"]);
     table = append_intrinsic_effects(table, "env.home", ["io"]);
     table = append_intrinsic_effects(table, "fs.read_bytes", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.write_bytes", ["io.fs"]);
     // SFN-822: `tls.last_error` / `tls.last_alert` deliberately have NO row
     // here. `effect_checker/collector.sfn` resolves exact target first, then
     // falls back to the `tls.*` namespace union only when no `tls.*` row

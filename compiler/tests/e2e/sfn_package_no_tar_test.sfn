@@ -18,7 +18,8 @@
 // (harmless) but would not prove anything about `tar` specifically, since
 // EVERYTHING would be unresolvable. A shim carrying every real tool except
 // `tar`/`bsdtar` isolates the one thing this test is actually checking.
-import { char_code_at, find } from "sfn/strings";
+import { byte_at, free_bytes, read_bytes } from "sfn/fs";
+import { find } from "sfn/strings";
 import { default_scratch_dir, sfn_bin_abs_path } from "sfn/test";
 
 fn _split_lines(text: string) -> string[] {
@@ -178,10 +179,19 @@ test "sfn package (no tar on PATH): still produces a valid gzip tarball" ![io] {
     // A valid gzip stream starts with magic bytes 0x1f 0x8b -- proof this is
     // a real archive, not an empty or truncated file left by a silent
     // failure.
-    let content = fs.readFile(tarball);
+    //
+    // Read through the byte path, not `fs.readFile`: a gzip stream carries
+    // interior NULs, and `fs.readFile` coerces its result into a `string`
+    // whose length is recovered by a NUL scan, so it now aborts rather than
+    // hand back a truncated buffer (SFN-1008). This assertion is also
+    // stronger for it — `length` is the archive's true byte count instead of
+    // the offset of its first NUL.
+    let content = read_bytes(tarball);
+    assert content.status == 0;
     assert content.length > 0;
-    assert char_code_at(content, 0) == 31;
-    assert char_code_at(content, 1) == 139;
+    assert byte_at(content, 0) == 31;
+    assert byte_at(content, 1) == 139;
+    free_bytes(content);
 
     // The sha256 sidecar `sfn package` always writes alongside the tarball.
     assert fs.exists(tarball + ".sha256");

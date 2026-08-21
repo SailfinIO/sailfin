@@ -164,6 +164,8 @@ extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
 extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
+extern fn ferror(f: *File) -> i32;
+
 // Extended POSIX filesystem primitives (#1311, epic #1308 C7). Two
 // portable libc symbols are bound directly (no C trampoline):
 // `chmod` backs `set_perms` and `access` backs `is_executable`
@@ -221,6 +223,20 @@ extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 extern fn strlen(s: *u8) -> usize;
 
 extern fn strchr(s: *u8, c: i32) -> *u8;
+
+// The fatal-diagnostic pair for `sfn_fs_read_file`'s interior-NUL guard
+// (SFN-1008). Routed through `platform/fd_io.sfn`'s `sfn_fd_write` rather
+// than a raw `write` extern: the UCRT's `_write` is `int` (32-bit), not
+// POSIX's `ssize_t`, so a raw `-> i64` extern would promote a `-1` error
+// into `4294967295` on Windows — the defect SFN-927 fixed on the socket
+// path, and `runtime/sfn/io.sfn` avoids for the same reason.
+// `sfn_fd_write` is defined by `platform/fd_io.sfn` (POSIX) /
+// `platform/fd_io_windows.sfn` (Windows); each module emits its own object
+// and the linker binds `@sfn_fd_write` at link time, with no ordering
+// requirement on `runtime/capsule.toml` `sfn-sources`.
+extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
+
+extern fn abort() -> void;
 
 extern fn unlink(path: *u8) -> i32;
 
@@ -475,6 +491,45 @@ fn sfn_fs_read_file(path: *u8) -> *u8 ![io] {
     let term_addr: i64 = (buf as i64) + len;
     let term_ptr: *u8 = term_addr as *u8;
     memset(term_ptr, 0, 1 as usize);
+
+    // Interior-NUL guard (SFN-1008). This `* u8` return is coerced to a
+    // Sailfin `string` by the caller through the `string.length`
+    // descriptor, whose `sfn_str_len` recovers the length with a bounded
+    // `strnlen` — so a file with an embedded NUL silently became a
+    // truncated string, reporting success. A 4.7 MB executable read back
+    // as 7 bytes.
+    //
+    // Round-tripping the full buffer is not reachable from here: a
+    // `-> SfnString` return has its length recovered by the same NUL scan
+    // at the return-path coercion (`runtime/sfn/string.sfn`
+    // `sfn_str_sfn_from_cstr`), and this adapter has no error channel —
+    // `fs.read` returns a bare `string`, and the capsule convention has no
+    // `Result<T, E>` until the canonical `IoError` ships. So the choice is
+    // between aborting and corrupting, and silent corruption is not an
+    // acceptable resting state. Binary callers have `fs.read_bytes` /
+    // `fs.copy`, which carry the length explicitly.
+    //
+    // The buffer is NUL-terminated at exactly `len` above, so a short scan
+    // means an interior NUL and nothing else. A directory (which `fopen`
+    // opens on Linux, but `fread` immediately fails) yields `len == 0` and
+    // scans to 0, so it does not trip this.
+    let scanned: i64 = strlen(buf) as i64;
+    if scanned != len {
+        // Raw diagnostic + termination, mirroring `sfn_mem_bounds_check`
+        // (`runtime/sfn/memory/mem.sfn`): the author-asserted unsafe FFI
+        // region. `strlen` supplies each byte count, so no hand-counted
+        // literal length can drift out of sync with its message.
+        let head: string = "[sailfin] fs.readFile: file contains interior NUL bytes and cannot be read as a string: ";
+        let hint: string = "\n           for binary content use: import { copy, read_bytes } from \"sfn/fs\"\n";
+        let head_ptr: *u8 = head as *u8;
+        let hint_ptr: *u8 = hint as *u8;
+        unsafe {
+            sfn_fd_write(2, head_ptr, strlen(head_ptr));
+            sfn_fd_write(2, path, strlen(path));
+            sfn_fd_write(2, hint_ptr, strlen(hint_ptr));
+            abort();
+        }
+    }
 
     return buf;
 }
@@ -841,6 +896,18 @@ fn sfn_fs_read_bytes(path: *u8, out_length: *u8) -> *u8 ![io] {
         if read_i < chunk_size { break; }
     }
 
+    // `fopen(dir, "rb")` succeeds on Linux; `fread` then fails immediately,
+    // leaving `len == 0` — which would otherwise be indistinguishable from a
+    // genuinely empty file and report success (SFN-1008). A mid-read `EIO`
+    // hits the same short-read exit with partial `len`. `ferror` catches
+    // both, mapping them to a hard failure so the caller's "empty file"
+    // status stays truthful.
+    if ferror(f) != 0 {
+        free(buf);
+        fclose(f);
+        return null;
+    }
+
     fclose(f);
 
     // NUL-terminate at offset `len` (the +1 capacity slack reserves it).
@@ -859,6 +926,29 @@ fn sfn_fs_read_bytes(path: *u8, out_length: *u8) -> *u8 ![io] {
     }
 
     return buf;
+}
+
+// `sfn_fs_write_bytes(path, data_addr, len)` — binary-safe counterpart to
+// `sfn_fs_write_file`, whose `i8*` content param discards the caller's
+// length at the coercion boundary and instead recovers it via `strlen`,
+// stopping at the first embedded NUL. Here the length travels alongside
+// the buffer explicitly (SFN-1008). `data_addr` is `i64`, not `*u8` — the
+// caller's `FileBytes.addr` is an `int`, so no pointer coercion happens at
+// the call site; the cast to `*u8` happens inside this body instead.
+fn sfn_fs_write_bytes(path: *u8, data_addr: i64, len: i64) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+    if len < 0 { return false; }
+    if len > 0 && data_addr == 0 { return false; }
+
+    let mode_str: string = "wb";
+    let f: *File = fopen(path, mode_str as *u8);
+    if f as i64 == 0 { return false; }
+
+    let mut written: i64 = 0;
+    if len > 0 { written = _fs_fwrite_all(data_addr as *u8, len, f); }
+
+    let close_rc = fclose(f);
+    return written == len && close_rc == 0;
 }
 
 // `sfn_fs_set_perms(path, mode)` — `chmod(2)` equivalent. Masks
