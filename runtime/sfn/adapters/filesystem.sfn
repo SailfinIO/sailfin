@@ -13,12 +13,18 @@
 // `fs_read_file` / `fs.readFile` / `fs_write_file` /
 // `fs.writeFile` / `fs_append_file` / `fs.appendFile` descriptor
 // rows' `native_signature` to `sfn_fs_read_file` /
-// `sfn_fs_write_file` / `sfn_fs_append_file`. The descriptor
-// shape stays `["i8*"]` (read) / `["i8*", "i8*"]` (write,
-// append) — both `path` and `contents` arrive as NUL-terminated
-// `* u8` buffers. The aggregate-typed SfnString flip (M1.A.2)
-// will retype the parameters to `{i8*, i64}` without touching
-// these bodies' callers.
+// `sfn_fs_write_file` / `sfn_fs_append_file`.
+//
+// SFN-1009 carried out the aggregate-typed flip for the two write
+// rows: `fs.writeFile` / `fs.appendFile` now declare
+// `["i8*", "{i8*, i64}"]` and resolve to the length-carrying
+// `sfn_fs_write_file_lv` / `sfn_fs_append_file_lv` twins below, so the
+// payload's byte count survives the call instead of being dropped and
+// re-derived with `strlen`. The `fs_write_file` / `fs_append_file`
+// snake_case rows and the read row keep the bare-`i8*` shape, and the
+// bare-pointer bodies stay exported for seed-built IR that still calls
+// them. `fs.readFile` is a different problem — it returns a length
+// rather than taking one (SFN-43).
 //
 // M3.1b (#815): the directory-listing, delete, create-directory,
 // and byte-read rows flip here too. The split mirrors the M3.1a
@@ -93,8 +99,12 @@
 //     `sfn_fs_write_lines`** (#1311, epic #1308 C7): pure Sailfin —
 //     `fopen("wb"/"ab")` + `fwrite` + `fclose` (portable C stdio).
 //     `write_lines` reads the `SfnArray` `data`/`len` fields through
-//     the `SfnArrayView` overlay. For a real buffer `strlen` recovers
-//     the byte length. A pre-M1.A.2 immediate-codepoint tagged pointer
+//     the `SfnArrayView` overlay. These bare-pointer bodies recover the
+//     byte length with `strlen`; their `_lv` twins (SFN-1009) take it as
+//     a parameter and do not. `write_lines` still `strlen`s each entry,
+//     and cannot stop: its array slots are `i8*` each, so the per-line
+//     length is already gone one level below the descriptor — that one
+//     needs the element-ABI flip (SFN-43), not a descriptor change. A pre-M1.A.2 immediate-codepoint tagged pointer
 //     in the *content* would crash `strlen`/`fwrite`, so all three decode
 //     it in pure Sailfin (#1308: `_fs_decode_immediate` → the native
 //     `sfn_str_from_codepoint`, the same shape `io.sfn`'s print family
@@ -600,6 +610,76 @@ fn sfn_fs_append_file(path: *u8, contents: *u8) -> bool ![io] {
 
     let len: i64 = strlen(real) as i64;
     let written = _fs_fwrite_all(real, len, f);
+    let close_rc = fclose(f);
+    return written == len && close_rc == 0;
+}
+
+// `sfn_fs_write_file_lv(path, data, len)` / `sfn_fs_append_file_lv(...)` —
+// the length-carrying twins of the two adapters above (SFN-1009).
+//
+// The `fs.writeFile` / `fs.appendFile` descriptors declare the payload as
+// `{i8*, i64}` and route the call here through `native_signature`, so the
+// caller's byte length arrives intact instead of being dropped by an
+// `extractvalue ..., 0` at the coercion boundary and then re-derived with
+// `strlen`. Two consequences: a payload carrying an interior NUL is written
+// whole rather than truncated at the first zero byte, and every write stops
+// paying a full scan of its own content (the recovery tax SFN-628 measured).
+//
+// A `{i8*, i64}` descriptor entry paired with split `(*u8, i64)` params here
+// is the shape already proven by `sfn_str_codepoint_lv`,
+// `sfn_str_to_number_lv`, and `sfn_str_grapheme_count_lv`: the aggregate is
+// two integer eightbytes, so it occupies the same registers as the two
+// scalars, and the runtime module links as a separate object — the IR-type
+// difference between the emitted `declare` and this `define` never reaches
+// the linker.
+//
+// The twins are additive, and must stay that way. `make compile` has the
+// pinned seed lower the compiler's own `fs.*` call sites using the SEED's
+// registry, which still names the bare-`i8*` `sfn_fs_write_file`, against
+// runtime objects built from THIS source. Re-signaturing the originals in
+// place would leave those seed-emitted calls handing two arguments to a
+// three-argument body; C linking does not check, so the failure would be
+// silent corruption rather than a link error. The originals stay.
+//
+// No immediate-codepoint decode here, unlike the bare-pointer originals.
+// That encoding was a property of the one-slot calling convention — a single
+// grapheme had nowhere to carry a length, so it was tagged into the pointer
+// value itself — and it is retired; see the `_sfn_is_immediate` note in
+// `runtime/sfn/io.sfn`. No path that builds a `{i8*, i64}` aggregate has ever
+// tagged its data pointer, so there is nothing here to decode.
+fn sfn_fs_write_file_lv(path: *u8, data: *u8, len: i64) -> void ![io] {
+    if path as i64 == 0 { return; }
+    // Bail on a null payload unconditionally, matching the bare-pointer
+    // original above rather than only when `len > 0`. Guarding on the
+    // length would let a null/zero aggregate reach `fopen(path, "wb")` and
+    // truncate a file the original left untouched — a behaviour change
+    // this migration has no reason to make.
+    if data as i64 == 0 { return; }
+    if len < 0 { return; }
+
+    let mode_str: string = "wb";
+    let f: *File = fopen(path, mode_str as *u8);
+    if f as i64 == 0 { return; }
+
+    if len > 0 { let _ = _fs_fwrite_all(data, len, f); }
+    fclose(f);
+}
+
+fn sfn_fs_append_file_lv(path: *u8, data: *u8, len: i64) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+    // Unconditional, for the same reason as the write twin: `fopen(path,
+    // "ab")` CREATES the file, so a length-guarded check would have a null
+    // payload create an empty file and report success where the original
+    // returned false without touching the filesystem.
+    if data as i64 == 0 { return false; }
+    if len < 0 { return false; }
+
+    let mode_str: string = "ab";
+    let f: *File = fopen(path, mode_str as *u8);
+    if f as i64 == 0 { return false; }
+
+    let mut written: i64 = 0;
+    if len > 0 { written = _fs_fwrite_all(data, len, f); }
     let close_rc = fclose(f);
     return written == len && close_rc == 0;
 }

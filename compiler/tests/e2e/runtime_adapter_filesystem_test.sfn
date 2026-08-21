@@ -125,6 +125,21 @@ fn _references(ir: string, sym: string) -> boolean {
     return false;
 }
 
+// The first `call ... @sym(` line, or "" — lets a caller assert over the
+// emitted operand types rather than only the symbol name.
+fn _call_line(ir: string, sym: string) -> string {
+    let lines = split(ir, "\n");
+    let needle = "@" + sym + "(";
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, "call ") && contains(line, needle) { return line; }
+        i = i + 1;
+    }
+    return "";
+}
+
 // `call ... @sym(` on any line — a legacy C call site (declares are
 // tolerated; only call sites are forbidden by the original).
 fn _has_call_site(ir: string, sym: string) -> boolean {
@@ -214,6 +229,10 @@ test "filesystem emit: define for every sfn_fs_* export" ![io] {
     assert _has_define_named(ir, "sfn_fs_read_file");
     assert _has_define_named(ir, "sfn_fs_write_file");
     assert _has_define_named(ir, "sfn_fs_append_file");
+    // SFN-1009: the length-carrying twins that fs.writeFile/appendFile
+    // now route through must be defined alongside the originals.
+    assert _has_define_named(ir, "sfn_fs_write_file_lv");
+    assert _has_define_named(ir, "sfn_fs_append_file_lv");
     assert _has_define_named(ir, "sfn_fs_delete");
     assert _has_define_named(ir, "sfn_fs_mkdir");
     assert _has_define_named(ir, "sfn_fs_list_dir");
@@ -244,8 +263,27 @@ test "probe routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" ![io] {
     let ir = _emit_module("fs_probe", probe);
     assert ir != "EMIT_FAILED";
     assert _references(ir, "sfn_fs_read_file");
-    assert _references(ir, "sfn_fs_write_file");
-    assert _references(ir, "sfn_fs_append_file");
+    assert _references(ir, "sfn_fs_write_file_lv");
+    assert _references(ir, "sfn_fs_append_file_lv");
+    // SFN-1009: the bare-`i8*` twins stay DEFINED (seed-built IR still
+    // calls them) but must no longer be the target of a freshly emitted
+    // call — that is what proves the length is carried rather than
+    // dropped and re-derived with `strlen`.
+    assert ! _has_call_site(ir, "sfn_fs_write_file");
+    assert ! _has_call_site(ir, "sfn_fs_append_file");
+    // SFN-1009: pin the operand SHAPE, not just the symbol. The twins
+    // agree with the emitted `declare` only because a `{i8*, i64}`
+    // by-value aggregate flattens to the same registers as the split
+    // `(*u8, i64)` params the Sailfin body declares. `byval` would break
+    // that — it passes the aggregate INDIRECTLY, so the body would read a
+    // pointer-to-struct as its data pointer. Nothing else in the suite
+    // would catch it, and on a target whose C ABI passes 16-byte
+    // aggregates indirectly the failure is silent corruption, not a
+    // link error.
+    let write_call = _call_line(ir, "sfn_fs_write_file_lv");
+    assert write_call != "";
+    assert contains(write_call, "{i8*, i64}");
+    assert ! contains(write_call, "byval");
     // Legacy C call sites must be gone (declares tolerated).
     assert ! _has_call_site(ir, "sailfin_adapter_fs_read_file");
     assert ! _has_call_site(ir, "sailfin_adapter_fs_write_file");
@@ -280,6 +318,9 @@ test "compiler binary exports the defined sfn_fs_* family" ![io] {
     assert _nm_has_defined(bin, "sfn_fs_read_file");
     assert _nm_has_defined(bin, "sfn_fs_write_file");
     assert _nm_has_defined(bin, "sfn_fs_append_file");
+    // SFN-1009: the length-carrying twins must be defined text symbols too.
+    assert _nm_has_defined(bin, "sfn_fs_write_file_lv");
+    assert _nm_has_defined(bin, "sfn_fs_append_file_lv");
     assert _nm_has_defined(bin, "sfn_fs_delete");
     assert _nm_has_defined(bin, "sfn_fs_mkdir");
     assert _nm_has_defined(bin, "sfn_fs_list_dir");
