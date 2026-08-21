@@ -39,4 +39,8 @@ cheapest rung that catches the error instead.
 
 ## Budget
 
-Expect 15–20 minutes on typical hardware. If the script runs past 30 minutes, something is wrong — investigate instead of waiting.
+Expect **over an hour**. The nightly self-host workflow measures the `make
+check` step at ~70 min on Linux x86_64 and ~130 min on macOS arm64
+(`.github/workflows/nightly-selfhost.yml`, which caps the job at
+`timeout-minutes: 180`). Budget a timeout accordingly; only past ~3 hours is
+something wrong.
