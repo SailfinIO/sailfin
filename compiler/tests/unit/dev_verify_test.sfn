@@ -20,6 +20,7 @@ import {
     _dv_scrape_scalar,
     _dv_test_argv
 } from "../../src/cli/commands/dev_verify";
+import { load_workspace_inventory } from "../../src/workspace_inventory";
 
 // --------------------------------------------------------------
 // _dv_classify — producer-emitted failure taxonomy
@@ -166,14 +167,8 @@ test "dev verify: empty strings render as JSON null" {
 // _dv_env_without — child-env scrubbing
 // --------------------------------------------------------------
 test "dev verify: drops an exact key without touching prefixed siblings" {
-    let src: string[] = [
-        "PATH=/usr/bin",
-        "SAILFIN_INNER=1",
-        "SAILFIN_INNERMOST=keep",
-        "HOME=/root"
-    ];
-    expect_eq_str_array(_dv_env_without(src, "SAILFIN_INNER"),
-        ["PATH=/usr/bin", "SAILFIN_INNERMOST=keep", "HOME=/root"]);
+    let src: string[] = ["PATH=/usr/bin", "SAILFIN_INNER=1", "SAILFIN_INNERMOST=keep", "HOME=/root"];
+    expect_eq_str_array(_dv_env_without(src, "SAILFIN_INNER"), ["PATH=/usr/bin", "SAILFIN_INNERMOST=keep", "HOME=/root"]);
 }
 
 test "dev verify: scrubbing an absent key is a no-op" {
@@ -184,32 +179,34 @@ test "dev verify: scrubbing an absent key is a no-op" {
 // --------------------------------------------------------------
 // _dv_test_argv — the cold-backstop invariant
 // --------------------------------------------------------------
-test "dev verify: full-suite phases always run cold" {
+test "dev verify: full-suite phases always run cold" ![io] {
     // Both full-suite phases exist as COLD backstops (`check-impl`
     // hard-codes `TEST_BIN_CACHE_FLAGS=--no-test-cache`), so a warm
     // per-test binary cache would defeat the point of running them.
-    expect_eq_str_array(_dv_test_argv("build/bin/sfn-seedcheck", 0, false), [
-        "build/bin/sfn-seedcheck",
-        "test",
-        "compiler/tests/unit",
-        "compiler/tests/integration",
-        "compiler/tests/e2e",
-        "capsules",
-        "--no-test-cache"
-    ]);
+    let inventory = load_workspace_inventory(".");
+    let mut expected: string[] = ["build/bin/sfn-seedcheck", "test"];
+    let mut i: int = 0;
+    loop {
+        if i >= inventory.test_roots.length { break; }
+        expected.push(inventory.test_roots[i]);
+        i += 1;
+    }
+    expected.push("--no-test-cache");
+    expect_eq_str_array(_dv_test_argv("build/bin/sfn-seedcheck", 0, false), expected);
 }
 
-test "dev verify: an explicit --jobs threads into the suite argv" {
-    expect_eq_str_array(_dv_test_argv("build/bin/sfn", 4, true), [
-        "build/bin/sfn",
-        "test",
-        "compiler/tests/unit",
-        "compiler/tests/integration",
-        "compiler/tests/e2e",
-        "capsules",
-        "--no-test-cache",
-        "--jobs",
-        "4",
-        "--json"
-    ]);
+test "dev verify: an explicit --jobs threads into the suite argv" ![io] {
+    let inventory = load_workspace_inventory(".");
+    let mut expected: string[] = ["build/bin/sfn", "test"];
+    let mut i: int = 0;
+    loop {
+        if i >= inventory.test_roots.length { break; }
+        expected.push(inventory.test_roots[i]);
+        i += 1;
+    }
+    expected.push("--no-test-cache");
+    expected.push("--jobs");
+    expected.push("4");
+    expected.push("--json");
+    expect_eq_str_array(_dv_test_argv("build/bin/sfn", 4, true), expected);
 }

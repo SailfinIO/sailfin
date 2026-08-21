@@ -1,0 +1,1 @@
+fn runtime_fixture() -> int { return 1; }

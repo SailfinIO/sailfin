@@ -1,0 +1,68 @@
+// compiler/src/cli/commands/dev_inventory.sfn
+//
+// Emit the strict workspace-derived path views consumed by local repository
+// automation. The paths are deterministic, deduplicated, and relative to the
+// requested workspace root when that root is relative.
+import {
+    Command,
+    Matches,
+    arg,
+    command,
+    flag_value,
+    get,
+    with_arg,
+    with_flag
+} from "sfn/cli";
+
+import { strings_equal } from "../../string_utils";
+import { WorkspaceInventory, load_workspace_inventory } from "../../workspace_inventory";
+import { CliContext } from "../context";
+
+fn _inventory_paths(inventory: WorkspaceInventory, view: string) -> string[] {
+    if strings_equal(view, "compiler-sources") {
+        return inventory.compiler_source_inputs;
+    }
+    if strings_equal(view, "maintainer-sources") {
+        return inventory.maintainer_source_inputs;
+    }
+    if strings_equal(view, "sources") { return inventory.all_source_inputs; }
+    if strings_equal(view, "member-tests") {
+        return inventory.member_test_roots;
+    }
+    if strings_equal(view, "tests") { return inventory.test_roots; }
+    if strings_equal(view, "manifests") { return inventory.manifest_inputs; }
+    if strings_equal(view, "runtime-ir") {
+        return inventory.runtime_ir_inputs;
+    }
+    if strings_equal(view, "explicit-inputs") {
+        return inventory.explicit_inputs;
+    }
+    return [];
+}
+
+fn inventory_command_def() -> Command {
+    let inventory = with_arg(command("inventory", "Print a workspace-derived local automation inventory"), arg("view", "compiler-sources|maintainer-sources|sources|member-tests|tests|manifests|runtime-ir|explicit-inputs"));
+    return with_flag(inventory, flag_value("workspace-root", "Workspace root (default: .)"));
+}
+
+fn inventory_run(matches: Matches, _ctx: CliContext) -> int ![io] {
+    let view = get(matches, "view");
+    let mut root = get(matches, "workspace-root");
+    if root.length == 0 { root = "."; }
+    let inventory = load_workspace_inventory(root);
+    if !inventory.ok { return 1; }
+    let paths = _inventory_paths(inventory, view);
+    if paths.length == 0 && !strings_equal(view, "member-tests") && !strings_equal(view, "runtime-ir") {
+        print.err("sfn dev inventory: unknown or empty view: " + view);
+        return 2;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        print(paths[i]);
+        i += 1;
+    }
+    return 0;
+}
+
+export { inventory_command_def, inventory_run };

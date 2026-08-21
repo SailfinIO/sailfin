@@ -117,11 +117,12 @@ NATIVE_BIN ?= build/bin/sfn$(EXE_EXT)
 # timestamp. The fingerprint includes sorted paths and bytes (SFN-564).
 COMPILER_SOURCE_FINGERPRINT := build/.compiler-source-fingerprint
 COMPILER_SOURCE_FINGERPRINT_CMD := $(NATIVE_BIN) dev bootstrap fingerprint
+WORKSPACE_INVENTORY_CMD := $(NATIVE_BIN) dev inventory
 
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-strict check-fast package clean bench bench-runtime bench-consumer test-arena
+.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-strict check-fast fmt fmt-check package clean bench bench-runtime bench-consumer test-arena
 
 .PHONY: ci-prepare-test-artifacts ci-package
 
@@ -229,7 +230,9 @@ help:
 	@echo "  make install        # Install the built compiler binary into PREFIX/bin"
 	@echo "  make check          # Compile (if needed) then run the full test suite"
 	@echo "  make check-strict   # Same as check, but a stage2/stage3 fixed-point mismatch is fatal"
-	@echo "  make check-fast     # Check compiler/src/, compiler/capsules/, and runtime/"
+	@echo "  make check-fast     # Check workspace compiler/runtime maintainer sources"
+	@echo "  make fmt            # Format workspace compiler/runtime maintainer sources"
+	@echo "  make fmt-check      # Check formatting for workspace maintainer sources"
 	@echo "  make test           # Run Sailfin-native unit + integration + e2e tests"
 	@echo "  make test TEST_JOBS=4 # Same, with 4 parallel test children (pick N for your RAM budget)"
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
@@ -282,12 +285,15 @@ test-impl:
 	@# report composer; pipefail preserves the runner's real exit code
 	@# across the tee. (The legacy `.sh` e2e branch is gone — epic #840.)
 	@rc=0; \
+	test_roots=(); \
+	while IFS= read -r path; do test_roots+=("$$path"); done < <($(WORKSPACE_INVENTORY_CMD) tests); \
+	if [ "$${#test_roots[@]}" -eq 0 ]; then echo "[test] empty workspace test inventory" >&2; exit 2; fi; \
 	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) --json | tee build/agent-test.test.jsonl || rc=$$?; \
+		$(NATIVE_BIN) test "$${test_roots[@]}" $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) --json | tee build/agent-test.test.jsonl || rc=$$?; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) || rc=$$?; \
+		$(NATIVE_BIN) test "$${test_roots[@]}" $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) || rc=$$?; \
 	fi; \
 	exit $$rc
 
@@ -412,11 +418,9 @@ test-e2e-impl:
 		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG); \
 	fi
 
-# Per-capsule tests live alongside each capsule under
-# `capsules/<scope>/<name>/tests/*_test.sfn`. The unified runner's
-# directory BFS walks every nested `tests/` dir from `capsules/`,
-# so passing just `capsules` matches the prior
-# `find capsules -path '*/tests/*_test.sfn'` discovery.
+# Member-local tests live under each expanded workspace member's `tests/`
+# directory. The current public-capsule members resolve to the same 102 files
+# formerly discovered by recursively passing `capsules`.
 test-capsules:
 	@$(AGENT_REPORT) --target test-capsules -- $(MAKE) test-capsules-impl
 
@@ -426,12 +430,15 @@ test-capsules-impl:
 		$(MAKE) compile; \
 	fi
 	@# JSON=1 gate (#1121) — see test-unit-impl for the rationale.
-	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+	@member_tests=(); \
+	while IFS= read -r path; do member_tests+=("$$path"); done < <($(WORKSPACE_INVENTORY_CMD) member-tests); \
+	if [ "$${#member_tests[@]}" -eq 0 ]; then echo "[test-capsules] empty workspace member-test inventory" >&2; exit 2; fi; \
+	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test capsules $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-capsules.jsonl; \
+		$(NATIVE_BIN) test "$${member_tests[@]}" $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-capsules.jsonl; \
 	else \
-		$(NATIVE_BIN) test capsules $(TEST_JOBS_FLAG); \
+		$(NATIVE_BIN) test "$${member_tests[@]}" $(TEST_JOBS_FLAG); \
 	fi
 
 # Sharded test execution for parallel CI legs. Phase 1 of
@@ -622,11 +629,9 @@ compile-impl:
 	@# exactly one rebuild instead of relying on that coincidence); every
 	@# later `make compile` self-heals from the fresh fingerprint.
 	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD) 2>/dev/null || true)"; \
-	case "$$current_fingerprint" in \
-		*[!0-9a-f]*|"") current_fingerprint="" ;; \
-		????????????????????????????????????????????????????????????????) ;; \
-		*) current_fingerprint="" ;; \
-	esac; \
+	digest_body="$${current_fingerprint#v2-}"; \
+	case "$$digest_body" in *[!0-9a-f]*|"") current_fingerprint="" ;; esac; \
+	if [ "$${#digest_body}" -ne 64 ]; then current_fingerprint=""; fi; \
 	stored_fingerprint="$$(cat "$(COMPILER_SOURCE_FINGERPRINT)" 2>/dev/null || true)"; \
 	if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
 		[ -n "$$current_fingerprint" ] && \
@@ -758,7 +763,7 @@ check-fast-impl:
 		echo "[check-fast] missing $(NATIVE_BIN); run: make compile"; \
 		exit 1; \
 	fi
-	@echo "[check-fast] running sfn check on compiler/src/ compiler/capsules/ runtime/"
+	@echo "[check-fast] running sfn check on workspace maintainer sources"
 	@# JSON=1 / SAILFIN_AGENT_REPORT=1 gate (#1122): run `sfn check --json` and
 	@# tee the `sailfin-check/1` envelope to build/agent-check-fast.json for the
 	@# report composer (issue E). PIPESTATUS[0] preserves the check exit-code
@@ -768,12 +773,15 @@ check-fast-impl:
 	@# create build/ or write the file (read-only FS, disk full) is a setup
 	@# error (exit 2) rather than a silent OK — check's own exit code still wins
 	@# when it is non-zero. Default (no JSON=1) runs stay human-only, no file.
-	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+	@check_roots=(); \
+	while IFS= read -r path; do check_roots+=("$$path"); done < <($(WORKSPACE_INVENTORY_CMD) maintainer-sources); \
+	if [ "$${#check_roots[@]}" -eq 0 ]; then echo "[check-fast] empty workspace maintainer inventory" >&2; exit 2; fi; \
+	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		if ! mkdir -p build; then \
 			echo "[check-fast] cannot create build/ for JSON envelope" >&2; \
 			exit 2; \
 		fi; \
-		$(NATIVE_BIN) check --json compiler/src/ compiler/capsules/ runtime/ | tee build/agent-check-fast.json; \
+		$(NATIVE_BIN) check --json "$${check_roots[@]}" | tee build/agent-check-fast.json; \
 		pipe_rc=("$${PIPESTATUS[@]}"); \
 		if [ "$${pipe_rc[0]}" -ne 0 ]; then exit "$${pipe_rc[0]}"; fi; \
 		if [ "$${pipe_rc[1]}" -ne 0 ]; then \
@@ -781,9 +789,20 @@ check-fast-impl:
 			exit 2; \
 		fi; \
 	else \
-		$(NATIVE_BIN) check compiler/src/ compiler/capsules/ runtime/; \
+		$(NATIVE_BIN) check "$${check_roots[@]}"; \
 	fi
 	@echo "[check-fast] OK"
+
+fmt fmt-check:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then echo "[$@] missing $(NATIVE_BIN); run: make compile"; exit 1; fi
+	@format_roots=(); \
+	while IFS= read -r path; do format_roots+=("$$path"); done < <($(WORKSPACE_INVENTORY_CMD) maintainer-sources); \
+	if [ "$${#format_roots[@]}" -eq 0 ]; then echo "[$@] empty workspace maintainer inventory" >&2; exit 2; fi; \
+	if [ "$@" = "fmt" ]; then \
+		$(NATIVE_BIN) fmt --write "$${format_roots[@]}"; \
+	else \
+		$(NATIVE_BIN) fmt --check "$${format_roots[@]}"; \
+	fi
 
 # Pre-release determinism gate. Runs the emit harness at parallel load to
 # detect intermittent IR corruption. Use before cutting a seed release.
@@ -934,24 +953,21 @@ rebuild-impl:
 	@# tree. It runs after the seed is resolved (and fetched, on a fresh clone)
 	@# so the seed can stand in, and still well before the build below.
 	@#
-	@# The seed is a valid oracle because the digest is a SHA-256 over the
-	@# working-tree .sfn sources under compiler/src, compiler/capsules and
-	@# runtime (compiler/src/build/source_fingerprint.sfn) — a statement about
-	@# the SOURCES, not about the binary that hashed them. It is therefore
-	@# compared ACROSS binaries: a seed-produced snapshot against a digest the
-	@# freshly built compiler recomputes. That makes the digest definition
-	@# seed-coupled — changing default_fingerprint_roots() or the manifest
-	@# format is a seed-blocker (.claude/rules/seed-dependency.md), because
-	@# until the new definition reaches the pinned seed every cold build fails
-	@# the `pending != cur` check at the final step. The note in
-	@# source_fingerprint.sfn records this.
+	@# SFN-935 versions the default digest. A cold build cannot ask the pinned
+	@# 0.10.1 seed for the new schema, so the bootstrap-safe layout enumerator
+	@# computes the same path+content `v2-` manifest as the fresh compiler. The
+	@# seed probe remains a legacy fallback, but a raw-v1 snapshot is never
+	@# promoted as a v2 freshness claim.
 	@#
 	@# SFN-679: still best-effort in shape. A binary predating
 	@# `dev bootstrap fingerprint` prints a usage line on STDOUT instead of a
-	@# digest; the shape check below blanks anything that is not a 64-char
-	@# lowercase-hex string, so such a seed degrades to no snapshot — the
+	@# digest; the shape check below accepts raw-v1 or `v2-` plus 64 lowercase
+	@# hex characters, so an older seed degrades to no snapshot — the
 	@# previous behaviour — rather than a malformed one.
-	@current_fingerprint=""; \
+	@current_fingerprint="$$(bash scripts/module_layout_fingerprint.sh --freshness 2>/dev/null || true)"; \
+	digest_body="$${current_fingerprint#v2-}"; \
+	case "$$digest_body" in *[!0-9a-f]*|"") current_fingerprint="" ;; esac; \
+	if [ "$${#digest_body}" -ne 64 ] || [ "$$current_fingerprint" = "$$digest_body" ]; then current_fingerprint=""; fi; \
 	snapshot_seed=""; \
 	if [ -f build/.seed-resolved ]; then \
 		snapshot_seed="$$(cat build/.seed-resolved)"; \
@@ -959,11 +975,9 @@ rebuild-impl:
 	for probe in "$(NATIVE_BIN)" "$$snapshot_seed"; do \
 		if [ -z "$$current_fingerprint" ] && [ -n "$$probe" ] && [ -x "$$probe" ]; then \
 			candidate="$$("$$probe" dev bootstrap fingerprint 2>/dev/null || true)"; \
-			case "$$candidate" in \
-				*[!0-9a-f]*|"") candidate="" ;; \
-				????????????????????????????????????????????????????????????????) ;; \
-				*) candidate="" ;; \
-			esac; \
+			digest_body="$${candidate#v2-}"; \
+			case "$$digest_body" in *[!0-9a-f]*|"") candidate="" ;; esac; \
+			if [ "$${#digest_body}" -ne 64 ]; then candidate=""; fi; \
 			current_fingerprint="$$candidate"; \
 		fi; \
 	done; \

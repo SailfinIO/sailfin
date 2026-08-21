@@ -45,6 +45,7 @@ import {
     strings_equal,
     substring
 } from "../../string_utils";
+import { load_workspace_inventory } from "../../workspace_inventory";
 import { CliContext } from "../context";
 import { _resolve_test_self_path } from "./test/pool";
 
@@ -284,13 +285,15 @@ fn _det_parse_int(s: string) -> int {
 }
 
 // Enumerate the modules to sweep: explicit `roots` positionals win; else the
-// default (`compiler/src`, `compiler/capsules`, `runtime`). The collected list is sorted
+// default maintainer-source workspace view. The collected list is sorted
 // so `results.tsv` ordering and diagnostics are stable across filesystems
 // (`fs.listDirectory` order is not), matching the retired `find ... | sort`.
 fn _det_enumerate_modules(roots: string[]) -> string[] ![io] {
     let mut use_roots = roots;
     if use_roots.length == 0 {
-        use_roots = ["compiler/src", "compiler/capsules", "runtime"];
+        let inventory = load_workspace_inventory(".");
+        if !inventory.ok { return []; }
+        use_roots = inventory.maintainer_source_inputs;
     }
     let mut modules: string[] = [];
     let mut ri = 0;
@@ -341,6 +344,10 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     }
 
     let modules = _det_enumerate_modules(roots);
+    if modules.length == 0 {
+        print.err("sfn dev determinism-sweep: workspace inventory produced no modules");
+        return 2;
+    }
 
     let repo_root = _shell_read_cmd("pwd");
     let out = _det_abspath(repo_root, out_in);
@@ -498,7 +505,7 @@ fn det_sweep_command_def() -> Command {
     sweep = with_flag(sweep, flag_int("iters", "Emit iterations per module (default 10)"));
     sweep = with_flag(sweep, flag_value("out", "Output/artifact directory (default /tmp/sailfin-diag-det)"));
     sweep = with_flag(sweep, flag_value("module", "internal: run the sweep for a single module (worker mode)"));
-    sweep = with_arg(sweep, arg_variadic("path", "Roots to sweep (default: compiler/src compiler/capsules runtime)"));
+    sweep = with_arg(sweep, arg_variadic("path", "Roots to sweep (default: workspace maintainer sources)"));
     return sweep;
 }
 

@@ -1,6 +1,6 @@
 // compiler/src/build/source_fingerprint.sfn
 //
-// A single content digest over the compiler's Sailfin sources, used to
+// A versioned content digest over the compiler's workspace-derived inputs, used to
 // gate `sfn dev bootstrap build` so a rebuild only runs — and only
 // republishes `build/bin/sfn` — when the sources actually changed
 // (SFN-679).
@@ -25,15 +25,15 @@
 // result depends only on file contents and paths — never on mtimes,
 // permissions, or the order the filesystem happens to enumerate.
 //
-// SFN-918: this definition is compared ACROSS compiler binaries, so it is
-// seed-coupled. `rebuild-impl` lets the pinned seed take the pre-build
-// snapshot when no `build/bin/sfn` exists yet (a cold build), and
-// `_dev_bootstrap_install` then compares that snapshot against a digest the
-// freshly built compiler recomputes. Changing the steps above — or
-// `default_fingerprint_roots()` — is therefore a `seed-blocker`
-// (.claude/rules/seed-dependency.md): until the new definition reaches the
-// pinned seed, the two disagree and every cold build fails the
-// "sources changed during the build" check at the final step of a self-host.
+// The unprefixed 64-hex form above is schema v1 and remains available for
+// explicit roots and for validating a cold-build snapshot produced by the
+// pinned 0.10.1 seed. The default workspace form is `v2-<64 hex>` and hashes
+// the maintainer source view plus workspace/bootstrap/member manifests and
+// runtime IR. `_dev_bootstrap_install` may compare a caller-supplied v1
+// pending snapshot with the v1 compatibility scope, but never promotes it to
+// a v2 freshness record. Cold Make builds use the bootstrap-safe workspace
+// enumerator to snapshot v2 before compilation.
+import { load_workspace_inventory } from "../workspace_inventory";
 import {
     _atomic_rename_into_place,
     _collect_sfn_files_cmd,
@@ -199,6 +199,51 @@ fn compute_source_fingerprint(roots: string[]) -> string ![io] {
     return sha256_hex_of_string(manifest);
 }
 
+// Schema-v2 default fingerprint. Source roots retain the v1 recursive `.sfn`
+// collector, while explicit repository inputs are hashed as individual files.
+// Keeping the `v2-` marker outside the digest makes seed-era snapshots
+// distinguishable without weakening either manifest definition.
+fn compute_workspace_source_fingerprint(workspace_root: string) -> string ![io] {
+    let inventory = load_workspace_inventory(workspace_root);
+    if !inventory.ok { return ""; }
+    let mut collected: string[] = [];
+    let mut ri: int = 0;
+    loop {
+        if ri >= inventory.maintainer_source_inputs.length { break; }
+        let root = inventory.maintainer_source_inputs[ri];
+        if !fs.exists(root) { return ""; }
+        let files = _collect_sfn_files_cmd(root, 32);
+        let mut fi: int = 0;
+        loop {
+            if fi >= files.length { break; }
+            collected.push(_normalize_slashes(files[fi]));
+            fi += 1;
+        }
+        ri += 1;
+    }
+    let mut ei: int = 0;
+    loop {
+        if ei >= inventory.explicit_inputs.length { break; }
+        let path = inventory.explicit_inputs[ei];
+        if !fs.exists(path) { return ""; }
+        collected.push(_normalize_slashes(path));
+        ei += 1;
+    }
+
+    let ordered = _sort_and_dedupe_paths(collected);
+    let mut manifest: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= ordered.length { break; }
+        let path = ordered[i];
+        let digest = _sha256_of_file(path);
+        if digest.length == 0 { return ""; }
+        manifest = manifest + digest + "\t" + path + "\n";
+        i += 1;
+    }
+    return "v2-" + sha256_hex_of_string(manifest);
+}
+
 // Read a previously stored fingerprint, trimmed of surrounding
 // whitespace/newlines. Returns "" when `path` does not exist.
 fn read_stored_fingerprint(path: string) -> string ![io] {
@@ -256,6 +301,7 @@ fn install_built_compiler(src: string, dst: string) -> boolean ![io] {
 
 export {
     default_fingerprint_roots,
+    compute_workspace_source_fingerprint,
     source_fingerprint_path,
     pending_fingerprint_path,
     native_install_path,

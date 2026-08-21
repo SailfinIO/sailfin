@@ -41,6 +41,7 @@ import { int_to_string } from "sfn/strings";
 
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import { strings_equal } from "../../string_utils";
+import { load_workspace_inventory } from "../../workspace_inventory";
 import { CliContext } from "../context";
 import {
     _resolve_test_jobs,
@@ -69,7 +70,9 @@ struct ShardDef {
 
 // The CI shard map (formerly `SFN_SHARDS` in scripts/test_shards.sh). Kept in
 // one place so the runner, `list`, and the cover lint can never drift apart.
-fn _shard_defs() -> ShardDef[] {
+fn _shard_defs() -> ShardDef[] ![io] {
+    let inventory = load_workspace_inventory(".");
+    if !inventory.ok { return []; }
     let unit = "compiler/tests/unit";
     let integ = "compiler/tests/integration";
     let e2e = "compiler/tests/e2e";
@@ -83,8 +86,15 @@ fn _shard_defs() -> ShardDef[] {
     defs.push(ShardDef {
         name: "unit-c", roots: [unit], index: 3, total: 3
     });
+    let mut int_caps: string[] = [integ];
+    let mut member_index: int = 0;
+    loop {
+        if member_index >= inventory.member_test_roots.length { break; }
+        int_caps.push(inventory.member_test_roots[member_index]);
+        member_index += 1;
+    }
     defs.push(ShardDef {
-        name: "int-caps", roots: [integ, "capsules"], index: 0, total: 0
+        name: "int-caps", roots: int_caps, index: 0, total: 0
     });
     defs.push(ShardDef {
         name: "e2e-a", roots: [e2e], index: 1, total: 4
@@ -104,8 +114,10 @@ fn _shard_defs() -> ShardDef[] {
 // The roots `make test` discovers (`sfn test compiler/tests/unit
 // compiler/tests/integration compiler/tests/e2e capsules`). The cover lint
 // compares the shards' union against the discovery of exactly these roots.
-fn _make_test_roots() -> string[] {
-    return ["compiler/tests/unit", "compiler/tests/integration", "compiler/tests/e2e", "capsules"];
+fn _make_test_roots() -> string[] ![io] {
+    let inventory = load_workspace_inventory(".");
+    if !inventory.ok { return []; }
+    return inventory.test_roots;
 }
 
 // Discover the `_test.sfn` files under `roots`, concatenating each root's own
@@ -167,7 +179,7 @@ fn _shard_files(def: ShardDef) -> string[] ![io] {
 }
 
 // Resolve a shard by name. A `""`-named result signals "unknown shard".
-fn _find_shard(name: string) -> ShardDef {
+fn _find_shard(name: string) -> ShardDef ![io] {
     let defs = _shard_defs();
     let mut i: int = 0;
     loop {
@@ -216,6 +228,10 @@ fn _dedup_sorted(sorted: string[]) -> string[] {
 // `test_shards.sh names` and `sfn-names`, now identical).
 fn _shard_names() -> int ![io] {
     let defs = _shard_defs();
+    if defs.length == 0 {
+        print.err("sfn dev shard: workspace inventory produced no shard definitions");
+        return 1;
+    }
     let mut i: int = 0;
     loop {
         if i >= defs.length { break; }
@@ -309,6 +325,10 @@ fn _shard_run_one(name: string, json: boolean, jobs: int, ctx: CliContext) -> in
 // a literal `1`, matching scripts/test_shards.sh's `rc`.
 fn _shard_cover() -> int ![io] {
     let defs = _shard_defs();
+    if defs.length == 0 {
+        print.err("[shard-cover] FAIL: workspace inventory produced no shard definitions");
+        return 1;
+    }
     let mut concat: string[] = [];
     let mut di: int = 0;
     loop {
@@ -323,7 +343,12 @@ fn _shard_cover() -> int ![io] {
         di += 1;
     }
     let concat_sorted = _sort_strings_cmd(concat);
-    let full = _dedup_sorted(_sort_strings_cmd(_discover(_make_test_roots())));
+    let test_roots = _make_test_roots();
+    if test_roots.length == 0 {
+        print.err("[shard-cover] FAIL: workspace inventory produced no test roots");
+        return 1;
+    }
+    let full = _dedup_sorted(_sort_strings_cmd(_discover(test_roots)));
 
     let mut rc: int = 0;
 

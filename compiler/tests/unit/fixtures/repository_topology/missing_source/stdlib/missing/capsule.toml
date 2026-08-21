@@ -1,0 +1,6 @@
+[capsule]
+name = "sfn/missing"
+version = "0.0.0"
+
+[build]
+kind = "library"

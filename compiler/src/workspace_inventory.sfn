@@ -1,0 +1,308 @@
+// compiler/src/workspace_inventory.sfn
+//
+// Physical source, test, and manifest inventory for repository automation.
+// Workspace membership stays authoritative in capsule_resolver/workspace.sfn;
+// this layer derives the distinct views used by local compiler maintenance
+// without teaching each caller the current repository topology.
+import { compiler_capsule_role } from "./capsule_names";
+import { _cr_path_join, _cr_sort_strings } from "./capsule_resolver/paths";
+import { WorkspaceMember } from "./capsule_resolver/types";
+import {
+    _cr_expand_member_globs,
+    load_workspace_members,
+    parse_workspace_member_paths,
+    validate_unique_workspace_member_names
+} from "./capsule_resolver/workspace";
+import { _source_identity_normalize_path } from "./module_paths";
+import { substring } from "./string_utils";
+import {
+    toml_get_prelude_entry,
+    toml_get_string,
+    toml_get_workspace_exclude,
+    toml_get_workspace_members
+} from "./toml_parser";
+
+struct WorkspaceInventory {
+    ok: boolean;
+    members: WorkspaceMember[];
+    member_roots: string[];
+    compiler_source_inputs: string[];
+    maintainer_source_inputs: string[];
+    all_source_inputs: string[];
+    member_test_roots: string[];
+    cross_domain_test_roots: string[];
+    test_roots: string[];
+    manifest_inputs: string[];
+    runtime_ir_inputs: string[];
+    explicit_inputs: string[];
+}
+
+fn _wi_empty() -> WorkspaceInventory {
+    return WorkspaceInventory {
+        ok: false,
+        members: [],
+        member_roots: [],
+        compiler_source_inputs: [],
+        maintainer_source_inputs: [],
+        all_source_inputs: [],
+        member_test_roots: [],
+        cross_domain_test_roots: [],
+        test_roots: [],
+        manifest_inputs: [],
+        runtime_ir_inputs: [],
+        explicit_inputs: []
+    };
+}
+
+fn _wi_contains(items: string[], value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        if items[i] == value { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _wi_push_unique(items: string[], value: string) -> string[] {
+    let mut out = items;
+    if value.length == 0 || _wi_contains(out, value) { return out; }
+    out.push(value);
+    return out;
+}
+
+fn _wi_sort_unique(items: string[]) -> string[] {
+    let sorted = _cr_sort_strings(items);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= sorted.length { break; }
+        out = _wi_push_unique(out, sorted[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _wi_starts_with(text: string, prefix: string) -> boolean {
+    if prefix.length > text.length { return false; }
+    return substring(text, 0, prefix.length) == prefix;
+}
+
+fn _wi_ends_with(text: string, suffix: string) -> boolean {
+    if suffix.length > text.length { return false; }
+    return substring(text, text.length - suffix.length, text.length) == suffix;
+}
+
+fn _wi_is_within(path: string, root: string) -> boolean {
+    if path == root { return true; }
+    return _wi_starts_with(path, root + "/");
+}
+
+fn _wi_join(root: string, path: string) -> string {
+    return _source_identity_normalize_path(_cr_path_join(root, path));
+}
+
+fn _wi_member_manifest(root: string, member: WorkspaceMember) -> string {
+    return _wi_join(root, member.member_path + "/capsule.toml");
+}
+
+fn _wi_collect_extension_files(root: string, suffix: string, max_depth: int) -> string[] ![io] {
+    let mut out: string[] = [];
+    if !fs.exists(root) { return out; }
+    let mut queue: string[] = [root];
+    let mut depth: int = 0;
+    loop {
+        if depth >= max_depth || queue.length == 0 { break; }
+        let mut next: string[] = [];
+        let mut qi: int = 0;
+        loop {
+            if qi >= queue.length { break; }
+            let dir = queue[qi];
+            qi += 1;
+            let names = _cr_sort_strings(fs.listDirectory(dir));
+            let mut ni: int = 0;
+            loop {
+                if ni >= names.length { break; }
+                let path = _wi_join(dir, names[ni]);
+                ni += 1;
+                if _wi_ends_with(path, suffix) {
+                    out = _wi_push_unique(out, path);
+                    continue;
+                }
+                if fs.listDirectory(path).length > 0 { next.push(path); }
+            }
+        }
+        queue = next;
+        depth += 1;
+    }
+    return _wi_sort_unique(out);
+}
+
+fn _wi_add_source(inventory: WorkspaceInventory, path: string, compiler: boolean, maintainer: boolean) -> WorkspaceInventory {
+    let mut out = inventory;
+    out.all_source_inputs = _wi_push_unique(out.all_source_inputs, path);
+    if compiler {
+        out.compiler_source_inputs = _wi_push_unique(out.compiler_source_inputs, path);
+    }
+    if maintainer {
+        out.maintainer_source_inputs = _wi_push_unique(out.maintainer_source_inputs, path);
+    }
+    return out;
+}
+
+fn _wi_add_declared_source(inventory: WorkspaceInventory, member_root: string, relative: string, compiler: boolean, maintainer: boolean, covered_root: string) -> WorkspaceInventory ![io] {
+    let mut out = inventory;
+    if relative.length == 0 { return out; }
+    let path = _wi_join(member_root, relative);
+    if !fs.exists(path) {
+        print.err("workspace inventory: declared source input is missing: "
+            + path);
+        out.ok = false;
+        return out;
+    }
+    if covered_root.length > 0 && _wi_is_within(path, covered_root) {
+        return out;
+    }
+    return _wi_add_source(out, path, compiler, maintainer);
+}
+
+fn _wi_member_test_overlaps_cross_domain(candidate: string, cross_domain: string[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= cross_domain.length { break; }
+        if _wi_is_within(cross_domain[i], candidate) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Load the strict local-automation inventory. Unlike load_workspace_members,
+// this fails when a declared member was skipped, two paths provide one name,
+// or a member has no discoverable Sailfin source input. The dormant current
+// prelude is the supported exception to a local src/ directory: its escaped
+// [build].entry is included, then deduplicated with runtime prelude-entry.
+fn load_workspace_inventory(workspace_root: string) -> WorkspaceInventory ![io] {
+    let mut out = _wi_empty();
+    let root = _source_identity_normalize_path(workspace_root);
+    let workspace_manifest = _wi_join(root, "workspace.toml");
+    if !fs.exists(workspace_manifest) {
+        print.err("workspace inventory: missing workspace.toml at "
+            + workspace_manifest);
+        return out;
+    }
+
+    let workspace_text = fs.readFile(workspace_manifest);
+    let declared = parse_workspace_member_paths(toml_get_workspace_members(workspace_text));
+    let paths = _cr_expand_member_globs(root, declared, toml_get_workspace_exclude(workspace_text));
+    let members = load_workspace_members(root);
+    if paths.length != members.length {
+        print.err("workspace inventory: one or more declared workspace members were omitted");
+        return out;
+    }
+    if !validate_unique_workspace_member_names(members, root) { return out; }
+
+    out.ok = true;
+    out.members = members;
+    out.explicit_inputs = [workspace_manifest];
+    let bootstrap = _wi_join(root, "bootstrap.toml");
+    if fs.exists(bootstrap) { out.explicit_inputs.push(bootstrap); }
+
+    let cross_rel: string[] = ["compiler/tests/unit", "compiler/tests/integration", "compiler/tests/e2e"];
+    let mut ci: int = 0;
+    loop {
+        if ci >= cross_rel.length { break; }
+        let candidate = _wi_join(root, cross_rel[ci]);
+        ci += 1;
+        if fs.exists(candidate) {
+            out.cross_domain_test_roots.push(candidate);
+        }
+    }
+
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let member = members[i];
+        i += 1;
+        let member_root = _wi_join(root, member.member_path);
+        let manifest = _wi_member_manifest(root, member);
+        out.member_roots = _wi_push_unique(out.member_roots, member_root);
+        out.manifest_inputs = _wi_push_unique(out.manifest_inputs, manifest);
+        out.explicit_inputs = _wi_push_unique(out.explicit_inputs, manifest);
+
+        let compiler = compiler_capsule_role(member.name).length > 0;
+        let runtime = member.build_kind == "runtime";
+        let maintainer = compiler || runtime;
+        let src = _source_identity_normalize_path(member.src_dir);
+        let mut source_count: int = 0;
+        let mut covered_root: string = "";
+        if fs.exists(src) {
+            out = _wi_add_source(out, src, compiler, maintainer);
+            covered_root = src;
+            source_count += 1;
+        }
+
+        let manifest_text = fs.readFile(manifest);
+        let entry = toml_get_string(manifest_text, "build", "entry");
+        if entry.length > 0 {
+            let before = out.all_source_inputs.length;
+            out = _wi_add_declared_source(out, member_root, entry, compiler, maintainer, covered_root);
+            if !out.ok { return out; }
+            if out.all_source_inputs.length > before || fs.exists(_wi_join(member_root, entry)) {
+                source_count += 1;
+            }
+        }
+        if runtime {
+            let prelude = toml_get_prelude_entry(manifest_text);
+            if prelude.length > 0 {
+                let before = out.all_source_inputs.length;
+                out = _wi_add_declared_source(out, member_root, prelude, false, true, covered_root);
+                if !out.ok { return out; }
+                if out.all_source_inputs.length > before || fs.exists(_wi_join(member_root, prelude)) {
+                    source_count += 1;
+                }
+            }
+            let ir_root = _wi_join(member_root, "ir");
+            let ir_files = _wi_collect_extension_files(ir_root, ".ll", 16);
+            let mut iri: int = 0;
+            loop {
+                if iri >= ir_files.length { break; }
+                out.runtime_ir_inputs = _wi_push_unique(out.runtime_ir_inputs, ir_files[iri]);
+                out.explicit_inputs = _wi_push_unique(out.explicit_inputs, ir_files[iri]);
+                iri += 1;
+            }
+        }
+        if source_count == 0 {
+            print.err("workspace inventory: member has no Sailfin source input: "
+                + member.name
+                + " ("
+                + member.member_path
+                + ")");
+            out.ok = false;
+            return out;
+        }
+
+        let tests = _wi_join(member_root, "tests");
+        if fs.exists(tests) && !_wi_member_test_overlaps_cross_domain(tests, out.cross_domain_test_roots) {
+            out.member_test_roots = _wi_push_unique(out.member_test_roots, tests);
+        }
+    }
+
+    out.member_roots = _wi_sort_unique(out.member_roots);
+    out.compiler_source_inputs = _wi_sort_unique(out.compiler_source_inputs);
+    out.maintainer_source_inputs = _wi_sort_unique(out.maintainer_source_inputs);
+    out.all_source_inputs = _wi_sort_unique(out.all_source_inputs);
+    out.member_test_roots = _wi_sort_unique(out.member_test_roots);
+    out.manifest_inputs = _wi_sort_unique(out.manifest_inputs);
+    out.runtime_ir_inputs = _wi_sort_unique(out.runtime_ir_inputs);
+    out.explicit_inputs = _wi_sort_unique(out.explicit_inputs);
+    out.test_roots = out.cross_domain_test_roots;
+    let mut ti: int = 0;
+    loop {
+        if ti >= out.member_test_roots.length { break; }
+        out.test_roots = _wi_push_unique(out.test_roots, out.member_test_roots[ti]);
+        ti += 1;
+    }
+    return out;
+}
+
+export { WorkspaceInventory, load_workspace_inventory };
