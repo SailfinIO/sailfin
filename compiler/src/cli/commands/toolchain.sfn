@@ -39,7 +39,7 @@ import {
     _toml_trim_cmd
 } from "../../build/fs";
 import { copy_tree, ensure_dir_p, remove_tree } from "../../build/fs_tree";
-import { build_host_os, host_is_windows } from "../../build/target";
+import { build_host_os, host_exe_name, host_is_windows } from "../../build/target";
 import { _env_flag, _get_home_cmd } from "../../build_flags";
 import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver/toolchain";
 import { release_signing_public_key_hex } from "../../release_trust";
@@ -377,7 +377,13 @@ fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] 
 // reports success/failure and the caller treats `false` as fatal.
 fn _toolchain_link_alias(bin_path: string, alias_path: string) -> boolean ![io] {
     fs.deleteFile(alias_path);
-    if fs.symlink("sailfin", alias_path) { return true; }
+    // The relative target must be the name the store actually holds
+    // (SFN-1007). Once the binary is `sailfin.exe` on a Windows host, a
+    // symlink to the bare `sailfin` DANGLES. That is not hypothetical
+    // simply because `symlink(2)` usually fails on Windows and this falls
+    // through to the copy below: with Developer Mode enabled it succeeds,
+    // and correctness must not rest on another call failing.
+    if fs.symlink(host_exe_name("sailfin"), alias_path) { return true; }
     if !_copy_file(bin_path, alias_path) { return false; }
     // Best-effort: on Windows `fs.set_perms` can only express the
     // read-only attribute, so a `false` return here is not an error
@@ -417,7 +423,9 @@ fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: stri
 
     // `sfn`-named peer in the versioned dir (SFN-195): a post-SFN-173
     // binary re-invokes `<dir>/sfn` for parallel emit workers.
-    let alias_path = store_dir + "/sfn";
+    // HOST-gated (SFN-1007): SFN-195's parallel-emit workers re-invoke
+    // `<dir>/sfn`, which must be `sfn.exe` to be launchable on Windows.
+    let alias_path = host_exe_name(store_dir + "/sfn");
     if !_toolchain_link_alias(bin_path, alias_path) {
         print("error: failed to create the sfn alias in " + store_dir);
         return false;
@@ -486,7 +494,12 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     }
 
     let store_dir = store_base + "/" + ver;
-    let bin_path = store_dir + "/sailfin";
+    // HOST-gated (SFN-1007): this WRITES the store's binary, and
+    // `_dispatch_store_ready` / `_bootstrap_store_ready` probe the same
+    // name. Writer and probe must share one spelling or a Windows store
+    // never reads as ready and re-installs on every invocation — the
+    // producer/consumer split SFN-693 exists to close.
+    let bin_path = host_exe_name(store_dir + "/sailfin");
     let sha_path = store_dir + "/.sha256";
 
     let asset = "sailfin_" + ver + "_" + os + "_" + arch + ".tar.gz";
@@ -678,7 +691,10 @@ fn _dispatch_work_root() -> string ![io] {
 // the tarball digest, not the binary's), not claimed here.
 fn _dispatch_store_ready(base: string, ver: string) -> boolean ![io] {
     let store_dir = base + "/" + ver;
-    if !fs.exists(store_dir + "/sailfin") { return false; }
+    // HOST-gated via `host_exe_name` (SFN-1007): the Windows installer
+    // writes `sailfin.exe`, so a bare literal never matches there. Same
+    // class as SFN-701; see `_bootstrap_seed_bin` in `dev.sfn`.
+    if !fs.exists(host_exe_name(store_dir + "/sailfin")) { return false; }
     let sha_path = store_dir + "/.sha256";
     if !fs.exists(sha_path) { return false; }
     let recorded = _toml_trim_cmd(fs.readFile(sha_path));
@@ -771,7 +787,9 @@ fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: bo
         print.err(render_terminal_diagnostic(diagnostic_to_diag(_toolchain_store_diagnostic(), "toolchain"), empty_lines, "toolchain"));
         return 1;
     }
-    let bin_path = base + "/" + target + "/sailfin";
+    // HOST-gated (SFN-1007): spawned via `exec_argv` below, and a relative
+    // extensionless path fails `ERROR_FILE_NOT_FOUND` on Windows.
+    let bin_path = host_exe_name(base + "/" + target + "/sailfin");
 
     // Ensure the pinned toolchain is stored. An already-complete entry
     // dispatches offline (marker re-verified by `_dispatch_store_ready`);

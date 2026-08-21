@@ -1,0 +1,126 @@
+// compiler/tests/unit/seed_store_exe_name_test.sfn
+//
+// SFN-1007: the seed store's binary/alias names were spelled as bare
+// extensionless literals (`store_dir + "/sailfin"`), so on a native Windows
+// host — where `install.ps1` writes `sailfin.exe` — nothing extensionless
+// exists to find, and spawning the relative extensionless path fails
+// `ERROR_FILE_NOT_FOUND`. Six call sites across `dev.sfn` and
+// `toolchain.sfn` now route through `host_exe_name`
+// (`compiler/src/build/target.sfn:277`), which is
+// `target_exe_name(name, build_host_os())`.
+//
+// Two complementary tests: the naming RULE itself (`target_exe_name` /
+// `host_exe_name`), and a source-scan GUARD over the two files this bug's
+// sites live in, so a future edit that reintroduces a bare literal at any
+// of those sites — or a new one alongside them — fails here instead of
+// silently regressing on the next native-Windows run.
+import {
+    contains,
+    int_to_string,
+    split,
+    starts_with,
+    trim
+} from "sfn/strings";
+
+import { build_host_os, host_exe_name, target_exe_name } from "../../src/build/target";
+
+let _dev_path: string = "compiler/src/cli/commands/dev.sfn";
+let _toolchain_path: string = "compiler/src/cli/commands/toolchain.sfn";
+
+// True for a line whose first non-whitespace characters are `//`.
+fn _is_comment_line(line: string) -> boolean {
+    return starts_with(trim(line), "//");
+}
+
+// Scan `path`'s lines for a bare seed-store literal — `"/sailfin"` or
+// `"/sfn"` inside a string literal — that is not routed through
+// `host_exe_name` on the same line (SFN-1007).
+//
+// `_binary_in_root` (`toolchain.sfn`) is deliberately excluded: its own
+// comment says `.exe` is accepted for Windows assets ON PURPOSE, because it
+// reads a downloaded release-asset tree that may hold either spelling. It
+// is a reader of an existing tree, not a namer of a path this compiler will
+// itself spawn, so `host_exe_name` does not apply there and this guard must
+// not flag it. Detection relies on `sfn fmt`'s canonical brace style: a
+// top-level function's closing `}` is always column-0 with nothing else on
+// the line, so a bare `}` line reliably ends the excluded scope.
+fn _bare_literal_offenders(path: string) -> string[] ![io] {
+    let mut offenders: string[] = [];
+    let lines = split(fs.readFile(path), "\n");
+    let mut i: int = 0;
+    let mut in_binary_in_root: boolean = false;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let lineno = i + 1;
+        i += 1;
+
+        if starts_with(line, "fn _binary_in_root(") {
+            in_binary_in_root = true;
+            continue;
+        }
+        if in_binary_in_root {
+            if line == "}" { in_binary_in_root = false; }
+            continue;
+        }
+
+        if _is_comment_line(line) { continue; }
+        if !contains(line, "\"/sailfin\"") && !contains(line, "\"/sfn\"") {
+            continue;
+        }
+        if contains(line, "host_exe_name") { continue; }
+        offenders.push(path + ":" + int_to_string(lineno));
+    }
+    return offenders;
+}
+
+test "seed store naming: host_exe_name follows target_exe_name's Windows/POSIX split" ![io] {
+    // There is no runtime `setenv`, so `host_exe_name`'s call to
+    // `build_host_os()` cannot be mutated in-process mid-test (the SFN-478
+    // pattern documented in `toolchain_host_detect_test.sfn`). `target_exe_name`
+    // (`build/target.sfn:264`) takes `target_os` as an explicit argument
+    // though, so the naming rule itself is pinned directly and
+    // deterministically here, on every host, with no env dependency at all.
+    assert target_exe_name("sailfin", "Windows") == "sailfin.exe";
+    assert target_exe_name("sailfin", "Linux") == "sailfin";
+    assert target_exe_name("sailfin", "Darwin") == "sailfin";
+    // Idempotent: an already-`.exe` name is not double-suffixed.
+    assert target_exe_name("sailfin.exe", "Windows") == "sailfin.exe";
+    assert target_exe_name("sailfin", "Windows") != "sailfin";
+
+    // `host_exe_name` is a one-line delegation to `target_exe_name` gated on
+    // `build_host_os()`. Assert the delegation holds on the CURRENT host so a
+    // future rewrite that hand-appends `.exe` instead of calling
+    // `target_exe_name` is caught, even though the concrete branch taken
+    // depends on the runner. The Windows branch of `host_exe_name` itself is
+    // independently exercised end-to-end (a real subprocess spawned under
+    // `SAILFIN_HOST_OS=Windows`) by `windows_exe_suffix_test.sfn`'s "the
+    // selfhost first-pass default is host-gated" test.
+    let host = build_host_os();
+    assert host_exe_name("sailfin") == target_exe_name("sailfin", host);
+    assert host_exe_name("store/1.2.3/sailfin") == target_exe_name("store/1.2.3/sailfin", host);
+}
+
+test "seed store naming: dev.sfn and toolchain.sfn route every store literal through host_exe_name" ![io] {
+    let mut offenders: string[] = [];
+    let dev_offenders = _bare_literal_offenders(_dev_path);
+    let mut d: int = 0;
+    loop {
+        if d >= dev_offenders.length { break; }
+        offenders.push(dev_offenders[d]);
+        d += 1;
+    }
+    let toolchain_offenders = _bare_literal_offenders(_toolchain_path);
+    let mut t: int = 0;
+    loop {
+        if t >= toolchain_offenders.length { break; }
+        offenders.push(toolchain_offenders[t]);
+        t += 1;
+    }
+
+    // A non-empty list means a seed-store binary/alias path was spelled as a
+    // bare extensionless literal again — silent on Linux/macOS,
+    // `ERROR_FILE_NOT_FOUND` on a native Windows host, exactly the SFN-1007
+    // regression this test exists to catch.
+    assert offenders.length == 0;
+}
