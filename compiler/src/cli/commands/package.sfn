@@ -83,10 +83,21 @@ import { _is_safe_capsule_version_cmd, _package_basename } from "./cmd_shared";
 // `<stem>.manifest.json`. Outputs match `tools/package.sh`'s shape
 // except the manifest is now schema-versioned (see `dist_manifest.sfn`).
 //
-// Staging path is deterministic (`build/sailfin/.package-staging`)
-// rather than mktemp — easier to inspect failed runs and to clean
-// idempotently. Concurrent invocations would clobber each other;
-// acceptable for a release-time tool.
+// Staging is minted per invocation: the root honours
+// `SAILFIN_TEST_SCRATCH` (falling back to `build/sailfin`) and the leaf
+// is a fresh `fs.mkdtemp` directory. The original fixed
+// `build/sailfin/.package-staging` literal was wiped on entry and exit,
+// which was sound while packaging was release-only but became a
+// cross-invocation hazard once pooled e2e tests began driving
+// `sfn package` concurrently: one run's entry wipe deleted another's
+// staged tree mid-flight (SFN-983).
+//
+// A hard crash — or an exit wipe that fails, since those discard their
+// result — now leaks a staging directory rather than self-healing on the
+// next run. That is deliberate: sweeping stale siblings on entry would
+// reintroduce the exact deletion hazard this removes, because nothing
+// distinguishes a stale directory from a live concurrent one.
+// `build/sailfin` is build output; `make clean-build` reclaims it.
 //
 // Does NOT auto-rebuild — run `make compile` (or `sfn build -p
 // <path>`) first. Auto-rebuilding from inside a Sailfin-native
@@ -328,6 +339,46 @@ fn _package_target_os(target: string) -> string {
     return triple_target_os(target);
 }
 
+// Root for per-invocation staging. Honours `SAILFIN_TEST_SCRATCH` so a
+// pooled `sfn test` child stages inside its own scratch dir rather than
+// the shared repo build tree; falls back to the historical
+// `build/sailfin` for ordinary release-time runs.
+//
+// Deliberately does not probe `test_runner_scratch_root()` first, the way
+// `_cr_scratch_root` (`capsule_resolver/paths.sfn`) does: that returns ""
+// unless the in-process test runner is active, and `sfn package` always
+// runs as a separate process from `sfn test`, so the probe would be dead
+// code here.
+fn _package_staging_root() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    return "build/sailfin";
+}
+
+// Mint a fresh staging directory under the staging root. Returns "" when
+// the directory could not be created; every caller treats that as fatal.
+// The two failure modes are reported separately because they have
+// different remedies: an uncreatable root is a permission or space problem
+// on the root itself, while a failed mint means the root is fine but the
+// leaf could not be claimed.
+fn _package_mint_staging_dir(label: string) -> string ![io] {
+    let root = _package_staging_root();
+    if !ensure_dir_p(root) {
+        print("sfn package: failed to create staging root " + root);
+        return "";
+    }
+    // The prefix contains a '/', so `fs.mkdtemp` treats it as a literal
+    // template prefix instead of anchoring under `$TMPDIR`
+    // (`sfn_fs_mkdtemp`, `runtime/sfn/adapters/filesystem.sfn`).
+    let staging = fs.mkdtemp(root + "/." + label + "-");
+    if staging.length == 0 {
+        print("sfn package: failed to mint " + label
+            + " staging directory under "
+            + root);
+    }
+    return staging;
+}
+
 // Package the compiler. Reads `compiler/capsule.toml` for version,
 // stages `<bin>/sailfin` + `<bin>/sfn` (`.exe`-suffixed on a Windows
 // target), tars + sha256s + manifest.
@@ -360,7 +411,8 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     }
 
     let stem = "sailfin-native-" + target + "-" + version;
-    let staging = "build/sailfin/.package-staging";
+    let staging = _package_mint_staging_dir("package-staging");
+    if staging.length == 0 { return 1; }
     let staging_root = staging + "/sailfin-native-" + target;
     let staging_bin = staging_root + "/bin";
     // Target-gated (not host-gated): a staged tarball member is a
@@ -370,15 +422,6 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     let sailfin_name = target_exe_name("sailfin", pkg_target_os);
     let sfn_name = target_exe_name("sfn", pkg_target_os);
 
-    // Staging is wiped on entry AND exit so a prior failed run
-    // can't bleed contents into this run. The entry wipe's result is
-    // checked (unlike the exit wipes below): a failed `rm -rf` used to
-    // discard its exit status, so a prior run's files could bleed
-    // silently into this run's tarball — a release artifact.
-    if !remove_tree(staging) {
-        print("sfn package: failed to wipe staging directory " + staging);
-        return 1;
-    }
     ensure_dir_p(staging_bin);
     if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/"
         + sailfin_name) {
@@ -544,7 +587,8 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     }
 
     let stem = "installer-" + target;
-    let staging = "build/sailfin/.installer-staging";
+    let staging = _package_mint_staging_dir("installer-staging");
+    if staging.length == 0 { return 1; }
     let staging_bin = staging + "/bin";
     let staging_runtime = staging + "/runtime";
     // Target-gated (not host-gated): a staged tarball member is a
@@ -553,12 +597,6 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let pkg_target_os = _package_target_os(target);
     let sailfin_name = target_exe_name("sailfin", pkg_target_os);
     let sfn_name = target_exe_name("sfn", pkg_target_os);
-    // Staging is wiped on entry AND exit so a prior failed run can't
-    // bleed contents into this run.
-    if !remove_tree(staging) {
-        print("sfn package: failed to wipe staging directory " + staging);
-        return 1;
-    }
     ensure_dir_p(staging_bin);
     ensure_dir_p(staging_runtime);
     if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/"
@@ -902,15 +940,10 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     // Sanitised tarball stem: replace `/` in capsule names with `-`.
     let safe_name = _package_sanitise_name(capsule_name);
     let stem = safe_name + "-" + target + "-" + version;
-    let staging = "build/sailfin/.package-staging";
+    let staging = _package_mint_staging_dir("capsule-staging");
+    if staging.length == 0 { return 1; }
     let staging_root = staging + "/" + safe_name + "-" + target;
 
-    // Staging is wiped on entry AND exit so a prior failed run can't
-    // bleed contents into this run.
-    if !remove_tree(staging) {
-        print("sfn package: failed to wipe staging directory " + staging);
-        return 1;
-    }
     ensure_dir_p(staging_root);
 
     // Stage the artifact under bin/ or obj/ depending on kind.
