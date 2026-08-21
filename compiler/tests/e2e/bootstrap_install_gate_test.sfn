@@ -51,13 +51,25 @@ fn _scratch_repo(name: string) -> string ![io] {
     return dir + "/" + name;
 }
 
-// Mirror every source population required by `default_fingerprint_roots`.
-// The directories may be empty in a scenario that exercises install failure
-// handling, but a missing root deliberately makes fingerprinting fail closed.
+// Build a strict workspace-shaped fingerprint fixture. The directories may be
+// empty in a scenario that exercises install failure handling, but every
+// declared member and manifest must remain resolvable.
 fn _create_fingerprint_roots(repo: string) -> void ![io] {
     fs.createDirectory(repo + "/compiler/src", true);
-    fs.createDirectory(repo + "/compiler/capsules", true);
-    fs.createDirectory(repo + "/runtime", true);
+    fs.createDirectory(repo + "/compiler/capsules/syntax/src", true);
+    fs.createDirectory(repo + "/runtime/sfn", true);
+    fs.createDirectory(repo + "/runtime/ir", true);
+    fs.writeFile(repo + "/workspace.toml", "[workspace]\n"
+        + "members = [\"compiler\", \"compiler/capsules/*\", \"runtime\"]\n");
+    fs.writeFile(repo + "/compiler/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/compiler\"\nversion = \"0.0.0\"\n\n"
+        + "[build]\nkind = \"binary\"\n");
+    fs.writeFile(repo + "/compiler/capsules/syntax/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/syntax\"\nversion = \"0.0.0\"\n\n"
+        + "[build]\nkind = \"library\"\n");
+    fs.writeFile(repo + "/runtime/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/runtime-native\"\nversion = \"0.0.0\"\n\n"
+        + "[build]\nkind = \"runtime\"\nsfn-source-root = \"sfn\"\n");
 }
 
 // Count non-empty lines in the marker file — the number of times the stub
@@ -164,7 +176,7 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     _seed_stub(repo, marker);
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/compiler/capsules/syntax/src/mod.sfn", "fn syntax_value() -> int { return 3; }\n");
-    fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
+    fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
 
     let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate"));
@@ -251,7 +263,7 @@ test "bootstrap install gate: a malformed .pending is treated as no snapshot, no
     fs.createDirectory(repo, true);
     _create_fingerprint_roots(repo);
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
-    fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
+    fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
 
     // Fabricate a build output directly (bypassing `dev bootstrap build`) so
     // `install` runs with only the malformed `.pending` a pre-SFN-679
@@ -277,6 +289,38 @@ test "bootstrap install gate: a malformed .pending is treated as no snapshot, no
     process.run(["rm", "-rf", repo]);
 }
 
+test "bootstrap install gate: a matching raw-v1 pending digest is never promoted as v2" ![io] {
+    let repo = _scratch_repo("bootstrap-install-gate-repo-raw-v1");
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    _create_fingerprint_roots(repo);
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+    fs.writeFile(repo + "/compiler/capsules/syntax/src/mod.sfn", "fn syntax_value() -> int { return 2; }\n");
+    fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 3; }\n");
+    let built = repo + "/build/capsules/sfn/compiler/bin/compiler";
+    fs.createDirectory(repo + "/build/capsules/sfn/compiler/bin", true);
+    fs.writeFile(built, "#!/bin/sh\necho raw-v1-candidate\nexit 0\n");
+    process.run(["chmod", "+x", built]);
+
+    let sfn = sfn_bin_abs_path();
+    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_raw_v1"));
+    let fp_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "fingerprint", "compiler/src", "compiler/capsules", "runtime"], child_env, repo);
+    let raw_v1 = process.capture_take_stdout();
+    let _fp_err = process.capture_take_stderr();
+    assert fp_exit == 0;
+    assert raw_v1.length == 65;
+    fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", raw_v1);
+
+    let install_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install"], child_env, repo);
+    let install_out = process.capture_take_stdout();
+    let _install_err = process.capture_take_stderr();
+    assert install_exit == 0;
+    assert fs.exists(repo + "/build/bin/sfn");
+    assert ! fs.exists(repo + "/build/.compiler-source-fingerprint");
+    assert find(install_out, "freshness record not written", 0) >= 0;
+    process.run(["rm", "-rf", repo]);
+}
+
 test "bootstrap install gate: a failed build leaves the installed binary and fingerprint untouched" ![io] {
     let repo = _scratch_repo("bootstrap-install-gate-repo-failed-build");
     process.run(["rm", "-rf", repo]);
@@ -287,7 +331,7 @@ test "bootstrap install gate: a failed build leaves the installed binary and fin
     _write_bootstrap_toml(repo);
     _seed_stub(repo, marker);
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
-    fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
+    fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
 
     let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_failed_build"));
@@ -328,7 +372,7 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
     _write_bootstrap_toml(repo);
     _seed_stub(repo, marker);
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
-    fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
+    fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
 
     let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_unrunnable"));

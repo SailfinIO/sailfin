@@ -58,6 +58,7 @@ import { ensure_dir_p } from "../../build/fs_tree";
 import {
     built_program_path,
     compute_source_fingerprint,
+    compute_workspace_source_fingerprint,
     default_fingerprint_roots,
     install_built_compiler,
     native_install_path,
@@ -78,6 +79,7 @@ import { CliContext } from "../context";
 import { arena_command_def, arena_run } from "./dev_arena";
 import { clean_command_def, clean_run } from "./dev_clean";
 import { det_sweep_command_def, det_sweep_run } from "./dev_det_sweep";
+import { inventory_command_def, inventory_run } from "./dev_inventory";
 import { shard_command_def, shard_run } from "./dev_shard";
 import { verify_command_def, verify_run } from "./dev_verify";
 import { toolchain_install_to_base } from "./toolchain";
@@ -398,8 +400,7 @@ fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
         return 1;
     }
 
-    let roots = default_fingerprint_roots();
-    let pre = compute_source_fingerprint(roots);
+    let pre = compute_workspace_source_fingerprint(".");
     if pre.length == 0 {
         print.err("error: could not compute the compiler source fingerprint");
         return 1;
@@ -434,7 +435,7 @@ fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
         return rc;
     }
 
-    let post = compute_source_fingerprint(roots);
+    let post = compute_workspace_source_fingerprint(".");
     if post.length == 0 || post != pre {
         fs.deleteFile(pending_fingerprint_path());
         print.err("error: compiler sources changed during the build; refusing to publish a stale binary");
@@ -479,9 +480,10 @@ fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
 // uses the default scope). A Makefile/CI captures this with `$(...)`, so
 // nothing else may reach stdout here.
 fn _dev_bootstrap_fingerprint(roots: string[]) -> int ![io] {
-    let mut scope = roots;
-    if scope.length == 0 { scope = default_fingerprint_roots(); }
-    let digest = compute_source_fingerprint(scope);
+    let mut digest = "";
+    if roots.length == 0 {
+        digest = compute_workspace_source_fingerprint(".");
+    } else { digest = compute_source_fingerprint(roots); }
     if digest.length == 0 {
         print.err("error: could not compute the compiler source fingerprint");
         return 1;
@@ -494,8 +496,11 @@ fn _dev_bootstrap_fingerprint(roots: string[]) -> int ![io] {
 // lowercase hex characters. Anything else is treated as absent rather
 // than as a conflicting snapshot (SFN-679).
 fn _looks_like_digest(s: string) -> boolean {
-    if s.length != 64 { return false; }
-    let mut i: int = 0;
+    let mut start: int = 0;
+    if s.length == 67 && substring(s, 0, 3) == "v2-" { start = 3; } else if s.length != 64 {
+        return false;
+    }
+    let mut i: int = start;
     loop {
         if i >= s.length { break; }
         let c = char_code(s[i]);
@@ -528,7 +533,7 @@ fn _dev_bootstrap_install(from_path: string) -> int ![io] {
         return 1;
     }
 
-    let cur = compute_source_fingerprint(default_fingerprint_roots());
+    let cur = compute_workspace_source_fingerprint(".");
     if cur.length == 0 {
         // Not fatal: an unhashable tree (unreadable input, allocation
         // failure, or a file over the binary-read size cap) must not
@@ -547,7 +552,12 @@ fn _dev_bootstrap_install(from_path: string) -> int ![io] {
     // instead of self-healing.
     let have_snapshot = _looks_like_digest(pending);
 
-    if have_snapshot && cur.length > 0 && pending != cur {
+    let mut comparable = cur;
+    if pending.length == 64 {
+        comparable = compute_source_fingerprint(default_fingerprint_roots());
+    }
+
+    if have_snapshot && comparable.length > 0 && pending != comparable {
         fs.deleteFile(pending_path);
         print.err("error: compiler sources changed during the build; refusing to publish a stale binary");
         return 1;
@@ -576,7 +586,9 @@ fn _dev_bootstrap_install(from_path: string) -> int ![io] {
         return 1;
     }
 
-    if have_snapshot && cur.length > 0 && pending == cur {
+    let promotable_v2 = pending.length == 67 && substring(pending, 0, 3) == "v2-";
+    if have_snapshot && promotable_v2 && cur.length > 0 && comparable.length > 0
+        && pending == comparable {
         write_fingerprint(source_fingerprint_path(), cur);
         fs.deleteFile(pending_path);
     } else {
@@ -666,7 +678,7 @@ fn command_def() -> Command {
     bootstrap = with_subcommand(bootstrap, with_flag(command("build", "Build the compiler with the exact seed"), flag("force", "Rebuild even when the source fingerprint is unchanged")));
     bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
     bootstrap = with_subcommand(bootstrap, with_arg(command("pin", "Update the pinned seed version"), arg("version", "Seed version to pin (e.g. 0.8.0-alpha.4)")));
-    bootstrap = with_subcommand(bootstrap, with_arg(command("fingerprint", "Print the compiler source fingerprint"), arg_variadic("root", "Source roots to hash (default: compiler/src compiler/capsules runtime)")));
+    bootstrap = with_subcommand(bootstrap, with_arg(command("fingerprint", "Print the compiler source fingerprint"), arg_variadic("root", "Source roots to hash (default: workspace maintainer + explicit inputs)")));
     bootstrap = with_subcommand(bootstrap, with_flag(command("install", "Publish an already-built compiler as build/bin/sfn"), flag_value("from", "Path to the built compiler binary (default: build/capsules/sfn/compiler/bin/compiler)")));
     let mut dev: Command = with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
     dev = with_subcommand(dev, shard_command_def());
@@ -674,6 +686,7 @@ fn command_def() -> Command {
     dev = with_subcommand(dev, det_sweep_command_def());
     dev = with_subcommand(dev, clean_command_def());
     dev = with_subcommand(dev, verify_command_def());
+    dev = with_subcommand(dev, inventory_command_def());
     return dev;
 }
 
@@ -714,6 +727,9 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // keeps it clear of the `bootstrap` leaves dispatched below.
     if path.length >= 2 && strings_equal(path[1], "verify") {
         return verify_run(matches, ctx);
+    }
+    if path.length >= 2 && strings_equal(path[1], "inventory") {
+        return inventory_run(matches, ctx);
     }
     let sub: string = subcommand(matches);
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }

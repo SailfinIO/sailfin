@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-21 (SFN-1008). Seed pinned to `0.10.1` (`bootstrap.toml`
+Updated: 2026-08-21 (SFN-1008, SFN-935). Seed pinned to `0.10.1` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -150,6 +150,16 @@ here.
   Duplicate names fail through the shared workspace resolver. Physical member
   discovery, source/entry containment, formatter/test inventory, and the
   pending CI/release/package automation migration remain path-based.
+- **Local automation inventories follow workspace membership** (SFN-935,
+  SFEP-0072 §§3.4, 3.7 slice 4). Local formatting, fast checking, compiler
+  freshness, module-layout fingerprinting, compiler benchmarking, staged-change
+  detection, and test discovery derive their distinct source and owner-local
+  test views from expanded workspace members. The current physical layout keeps
+  the same effective inputs, while transitional and target layouts enumerate
+  each logical input once. Workspace and member manifests, `bootstrap.toml`,
+  runtime IR, and the three cross-domain compiler test suites remain explicit
+  repository inputs. CI cache expressions, release/package paths, ownership
+  policy, and source moves remain pending later SFEP-0072 slices.
 - **Implicit workspace capsule graph** (SFN-931, SFEP-0072 §§3.3, 3.7 slice
   2). Workspace libraries with `[build] implicit = true` enter the resolved
   graph and final link exactly once; an ordinary dependency on the same

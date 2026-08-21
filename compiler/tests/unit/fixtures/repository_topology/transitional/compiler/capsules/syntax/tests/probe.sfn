@@ -1,0 +1,1 @@
+fn transitional_syntax_test_fixture() -> int { return 1; }

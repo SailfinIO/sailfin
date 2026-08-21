@@ -1,0 +1,111 @@
+// SFN-935: local automation derives topology-sensitive inputs from the
+// expanded workspace while preserving each consumer's distinct scope.
+import { WorkspaceInventory, load_workspace_inventory } from "../../src/workspace_inventory";
+
+fn _fixture(name: string) -> string ![io] {
+    let mut root = env.get("SAILFIN_REPO_ROOT");
+    if root.length == 0 { root = "."; }
+    return root + "/compiler/tests/unit/fixtures/repository_topology/" + name;
+}
+
+fn _contains(items: string[], suffix: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        let item = items[i];
+        if item.length >= suffix.length && substring(item, item.length - suffix.length, item.length) == suffix {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _assert_unique(items: string[]) {
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        let mut j: int = i + 1;
+        loop {
+            if j >= items.length { break; }
+            assert items[i] != items[j];
+            j += 1;
+        }
+        i += 1;
+    }
+}
+
+fn _assert_inventory_unique(inventory: WorkspaceInventory) {
+    _assert_unique(inventory.member_roots);
+    _assert_unique(inventory.compiler_source_inputs);
+    _assert_unique(inventory.maintainer_source_inputs);
+    _assert_unique(inventory.all_source_inputs);
+    _assert_unique(inventory.member_test_roots);
+    _assert_unique(inventory.test_roots);
+    _assert_unique(inventory.explicit_inputs);
+}
+
+test "workspace inventory: current checkout preserves local automation scopes" ![io] {
+    let inventory = load_workspace_inventory(".");
+    assert inventory.ok;
+    assert inventory.members.length == 30;
+    assert inventory.compiler_source_inputs.length == 6;
+    assert inventory.maintainer_source_inputs.length == 8;
+    assert inventory.all_source_inputs.length == 30;
+    assert inventory.member_test_roots.length == 20;
+    assert inventory.test_roots.length == 23;
+    assert inventory.manifest_inputs.length == 30;
+    assert inventory.runtime_ir_inputs.length == 1;
+    assert inventory.explicit_inputs.length == 33;
+    assert _contains(inventory.compiler_source_inputs, "compiler/src");
+    assert _contains(inventory.maintainer_source_inputs, "runtime/prelude.sfn");
+    assert _contains(inventory.maintainer_source_inputs, "runtime/sfn");
+    assert _contains(inventory.runtime_ir_inputs, "runtime/ir/windows_stubs.ll");
+    assert ! _contains(inventory.member_test_roots, "compiler/tests");
+    assert _contains(inventory.cross_domain_test_roots, "compiler/tests/unit");
+    _assert_inventory_unique(inventory);
+}
+
+test "workspace inventory: dual-root transitional fixture enumerates once" ![io] {
+    let inventory = load_workspace_inventory(_fixture("transitional"));
+    assert inventory.ok;
+    assert inventory.members.length == 6;
+    assert inventory.compiler_source_inputs.length == 3;
+    assert inventory.maintainer_source_inputs.length == 4;
+    assert inventory.all_source_inputs.length == 6;
+    assert inventory.member_test_roots.length == 2;
+    assert inventory.test_roots.length == 5;
+    assert inventory.runtime_ir_inputs.length == 1;
+    assert _contains(inventory.compiler_source_inputs, "compiler/capsules/syntax/src");
+    assert _contains(inventory.compiler_source_inputs, "compiler/analyzer/src");
+    assert _contains(inventory.all_source_inputs, "capsules/sfn/strings/src");
+    assert _contains(inventory.all_source_inputs, "stdlib/json/src");
+    _assert_inventory_unique(inventory);
+}
+
+test "workspace inventory: target fixture uses canonical three-root layout" ![io] {
+    let inventory = load_workspace_inventory(_fixture("target"));
+    assert inventory.ok;
+    assert inventory.members.length == 5;
+    assert inventory.compiler_source_inputs.length == 2;
+    assert inventory.maintainer_source_inputs.length == 3;
+    assert inventory.all_source_inputs.length == 5;
+    assert inventory.member_test_roots.length == 2;
+    assert inventory.test_roots.length == 5;
+    assert inventory.runtime_ir_inputs.length == 1;
+    assert _contains(inventory.compiler_source_inputs, "compiler/driver/src");
+    assert _contains(inventory.compiler_source_inputs, "compiler/syntax/src");
+    assert _contains(inventory.all_source_inputs, "stdlib/prelude/src");
+    assert _contains(inventory.all_source_inputs, "stdlib/strings/src");
+    _assert_inventory_unique(inventory);
+}
+
+test "workspace inventory: duplicate canonical provider fails" ![io] {
+    let inventory = load_workspace_inventory(_fixture("duplicate_name"));
+    assert ! inventory.ok;
+}
+
+test "workspace inventory: missing member source fails closed" ![io] {
+    let inventory = load_workspace_inventory(_fixture("missing_source"));
+    assert ! inventory.ok;
+}

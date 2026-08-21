@@ -2,7 +2,7 @@
 # install_precommit.sh — opt-in pre-commit hook for Sailfin contributors.
 #
 # Installs a Git pre-commit hook that runs `make check-fast` (a
-# `sfn check compiler/src/ compiler/capsules/ runtime/` invocation, ~2 min) so contributors
+# workspace-derived maintainer-source `sfn check` invocation, ~2 min) so contributors
 # catch parser, typecheck, and effect-system breakage before pushing.
 #
 # This is opt-in by design — it adds ~2 min to every commit, which is a
@@ -97,13 +97,41 @@ if [ "${SAILFIN_SKIP_PRECOMMIT:-0}" = "1" ]; then
     exit 0
 fi
 
-# Only run if a compiler/runtime source actually changed. The diff filter
-# includes deletions (D) — removing a source file can break the build
-# just as easily as editing one, so the gate must fire either way.
-changed=$(git diff --cached --name-only --diff-filter=ACMRD | \
-    grep -E '^(compiler/src/|compiler/capsules/|runtime/)' || true)
+# Resolve the same maintainer-source and explicit-input inventory as
+# `make check-fast`. If inventory loading itself fails (for example a staged
+# manifest deletion), run the gate so the failure is visible instead of
+# silently treating the change as unrelated.
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+changed=$(git diff --cached --name-only --diff-filter=ACMRD)
 if [ -z "$changed" ]; then
     exit 0
+fi
+explicit_changed=$(printf '%s\n' "$changed" | grep -E '(^|/)(workspace\.toml|bootstrap\.toml|capsule\.toml)$|^runtime/ir/.*\.ll$' || true)
+inventory=""
+inventory_ok=0
+if [ -z "$explicit_changed" ] && [ -x build/bin/sfn ]; then
+    if inventory="$({ build/bin/sfn dev inventory maintainer-sources; build/bin/sfn dev inventory explicit-inputs; } 2>/dev/null)"; then
+        inventory_ok=1
+    fi
+fi
+if [ -n "$explicit_changed" ]; then
+    : # Stable explicit-input patterns also catch deletions absent from disk.
+elif [ "$inventory_ok" -eq 1 ]; then
+    intersects=0
+    while IFS= read -r changed_path; do
+        while IFS= read -r input; do
+            case "$changed_path" in
+                "$input"|"$input"/*) intersects=1; break 2 ;;
+            esac
+        done <<< "$inventory"
+    done <<< "$changed"
+    if [ "$intersects" -eq 0 ]; then exit 0; fi
+else
+    # A missing compiler cannot enumerate a moved workspace, so conservatively
+    # gate Sailfin, manifest, bootstrap, and runtime-IR changes.
+    relevant=$(printf '%s\n' "$changed" | grep -E '\.sfn$' || true)
+    if [ -z "$relevant" ]; then exit 0; fi
 fi
 
 # Defer binary detection to `make check-fast` itself — it knows the
@@ -122,6 +150,6 @@ HOOK
 chmod +x "$HOOK_PATH"
 
 echo "[install-precommit] installed $HOOK_PATH"
-echo "[install-precommit] runs 'make check-fast' on commits touching compiler/src/, compiler/capsules/, or runtime/"
+echo "[install-precommit] runs 'make check-fast' on commits touching workspace maintainer inputs"
 echo "[install-precommit] skip with: SAILFIN_SKIP_PRECOMMIT=1 git commit ...   (or --no-verify)"
 echo "[install-precommit] uninstall with: bash scripts/install_precommit.sh --remove"

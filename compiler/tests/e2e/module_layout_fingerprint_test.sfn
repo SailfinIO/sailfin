@@ -15,9 +15,11 @@
 // job) and the restore prefix (the same action, plus the warmer job) must
 // never drift apart, or PR CI is stranded on a permanently cold cache.
 import { contains } from "sfn/strings";
+import { sfn_bin_abs_path } from "sfn/test";
 
 fn _repo_root() -> string ![io] {
     let mut repo = env.get("SAILFIN_REPO_ROOT");
+    if repo.length == 0 { repo = env.get("PWD"); }
     if repo.length == 0 { repo = "."; }
     return repo;
 }
@@ -34,6 +36,29 @@ fn _script_env() -> string[] ![io] {
 fn _fingerprint(root: string) -> string ![io] {
     let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
     let _exit = process.run_capture(["bash", script, root], _script_env());
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
+fn _default_fingerprint(root: string) -> string ![io] {
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let _exit = process.run_capture_cwd(["bash", script], _script_env(), root);
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
+fn _freshness_fingerprint(root: string) -> string ![io] {
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let _exit = process.run_capture_cwd(["bash", script, "--freshness"], _script_env(), root);
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
+fn _native_freshness_fingerprint(root: string) -> string ![io] {
+    let _exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fingerprint"], [], root);
     let output = process.capture_take_stdout();
     let _error = process.capture_take_stderr();
     return output;
@@ -90,6 +115,107 @@ test "module layout fingerprint: adding a module changes it" ![io] {
 
     assert before != after;
     process.run(["rm", "-rf", scratch]);
+}
+
+test "module layout fingerprint: explicit overlapping roots preserve v1 multiplicity" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/module-layout-fingerprint-overlap";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
+    let once = _fingerprint(scratch);
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let _exit = process.run_capture(["bash", script, scratch, scratch], _script_env());
+    let twice = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    assert once != twice;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "module layout fingerprint: transitional workspace expands deterministically" ![io] {
+    let root = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/transitional";
+    let first = _default_fingerprint(root);
+    let second = _default_fingerprint(root);
+    assert first.length == 68;
+    assert substring(first, 0, 3) == "v2-";
+    assert first == second;
+}
+
+test "module layout fingerprint: target workspace expands deterministically" ![io] {
+    let root = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/target";
+    let first = _default_fingerprint(root);
+    let second = _default_fingerprint(root);
+    assert first.length == 68;
+    assert substring(first, 0, 3) == "v2-";
+    assert first == second;
+}
+
+test "module layout fingerprint: shell and native v2 freshness inventories agree" ![io] {
+    let transitional = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/transitional";
+    let target = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/target";
+    assert _freshness_fingerprint(transitional) == _native_freshness_fingerprint(transitional);
+    assert _freshness_fingerprint(target) == _native_freshness_fingerprint(target);
+}
+
+test "module layout fingerprint: literal members ignore workspace excludes" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/module-layout-fingerprint-literal-exclude";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch + "/stdlib/kept/src", true);
+    fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/kept\"]\nexclude = [\"stdlib/kept\"]\n");
+    fs.writeFile(scratch + "/stdlib/kept/capsule.toml", "[capsule]\nname = \"sfn/kept\"\n\n[build]\nkind = \"library\"\n");
+    fs.writeFile(scratch + "/stdlib/kept/src/mod.sfn", "fn kept() -> int { return 1; }\n");
+    let shell = _freshness_fingerprint(scratch);
+    let native = _native_freshness_fingerprint(scratch);
+    assert shell == native;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "module layout fingerprint: missing declared entry fails closed" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/module-layout-fingerprint-missing-entry";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch + "/compiler/src", true);
+    fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"compiler\"]\n");
+    fs.writeFile(scratch + "/compiler/capsule.toml", "[capsule]\nname = \"sfn/compiler\"\n\n[build]\nkind = \"binary\"\nentry = \"src/missing.sfn\"\n");
+    fs.writeFile(scratch + "/compiler/src/other.sfn", "fn other() -> int { return 1; }\n");
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let exit = process.run_capture_cwd(["bash", script], _script_env(), scratch);
+    let _output = process.capture_take_stdout();
+    let error = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(error, "missing declared entry");
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "module layout fingerprint: non-runtime IR is outside the layout" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/module-layout-fingerprint-nonruntime-ir";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch + "/stdlib/lib/src", true);
+    fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/lib\"]\n");
+    fs.writeFile(scratch + "/stdlib/lib/capsule.toml", "[capsule]\nname = \"sfn/lib\"\n\n[build]\nkind = \"library\"\n");
+    fs.writeFile(scratch + "/stdlib/lib/src/mod.sfn", "fn value() -> int { return 1; }\n");
+    let before = _default_fingerprint(scratch);
+    fs.createDirectory(scratch + "/stdlib/lib/ir", true);
+    fs.writeFile(scratch + "/stdlib/lib/ir/ignored.ll", "; ignored\n");
+    assert _default_fingerprint(scratch) == before;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "module layout fingerprint: missing member source fails closed" ![io] {
+    let root = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/missing_source";
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let exit = process.run_capture_cwd(["bash", script], _script_env(), root);
+    let _output = process.capture_take_stdout();
+    let error = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(error, "member has no Sailfin source input");
 }
 
 // --------------------------------------------------------------

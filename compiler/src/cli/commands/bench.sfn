@@ -39,6 +39,7 @@ import { _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { module_name_for_source } from "../../capsule_resolver/identity";
 import { char_code_at_text, index_of } from "../../string_utils";
 import { resolve_compiler_version } from "../../version";
+import { load_workspace_inventory } from "../../workspace_inventory";
 import { CliContext } from "../context";
 import { consumer_run } from "./bench_consumer";
 import { BenchJsonResult, render_bench_json_envelope } from "./bench_json";
@@ -192,13 +193,20 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     let version = resolve_compiler_version(ctx.binary_dir);
     let platform = _bench_rt_platform();
 
-    let mut all = _collect_sfn_files_cmd("compiler/src", 32);
-    let capsule_sources = _collect_sfn_files_cmd("compiler/capsules", 32);
-    let mut capsule_index: int = 0;
+    let inventory = load_workspace_inventory(".");
+    if !inventory.ok { return 1; }
+    let mut all: string[] = [];
+    let mut root_index: int = 0;
     loop {
-        if capsule_index >= capsule_sources.length { break; }
-        all.push(capsule_sources[capsule_index]);
-        capsule_index += 1;
+        if root_index >= inventory.compiler_source_inputs.length { break; }
+        let found = _collect_sfn_files_cmd(inventory.compiler_source_inputs[root_index], 32);
+        let mut source_index: int = 0;
+        loop {
+            if source_index >= found.length { break; }
+            all.push(found[source_index]);
+            source_index += 1;
+        }
+        root_index += 1;
     }
     let mut sources: string[] = all;
     if modules.length > 0 { sources = _bench_filter_sources(all, modules); }

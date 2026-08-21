@@ -8,12 +8,19 @@
 // `sfn dev bootstrap fingerprint` subcommand; this file now drives that
 // subcommand directly instead of shelling out to the script.
 import { contains } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { sfn_bin_abs_path, sfn_bin_path } from "sfn/test";
 
 // `sfn dev bootstrap fingerprint <root>` prints ONLY the hex digest on
 // stdout.
 fn _fingerprint(root: string) -> string ![io] {
     let _exit = process.run_capture([sfn_bin_path(), "dev", "bootstrap", "fingerprint", root], []);
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
+fn _workspace_fingerprint(root: string) -> string ![io] {
+    let _exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fingerprint"], [], root);
     let output = process.capture_take_stdout();
     let _error = process.capture_take_stderr();
     return output;
@@ -100,6 +107,54 @@ test "compiler source fingerprint ignores non-sfn files under the root" ![io] {
 
     assert before.length > 0;
     assert after == before;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "compiler source fingerprint v2 covers workspace explicit inputs" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/source-fingerprint-workspace-v2";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch + "/compiler/src", true);
+    fs.createDirectory(scratch + "/runtime/sfn", true);
+    fs.createDirectory(scratch + "/runtime/ir", true);
+    let workspace = "[workspace]\nmembers = [\"compiler\", \"runtime\"]\n";
+    let bootstrap = "[seed]\nversion = \"0.0.0\"\n";
+    let compiler_manifest = "[capsule]\nname = \"sfn/compiler\"\nversion = \"0.0.0\"\n\n[build]\nkind = \"binary\"\nentry = \"src/main.sfn\"\n";
+    let runtime_manifest = "[capsule]\nname = \"sfn/runtime-native\"\nversion = \"0.0.0\"\n\n[build]\nkind = \"runtime\"\nsfn-source-root = \"sfn\"\n";
+    fs.writeFile(scratch + "/workspace.toml", workspace);
+    fs.writeFile(scratch + "/bootstrap.toml", bootstrap);
+    fs.writeFile(scratch + "/compiler/capsule.toml", compiler_manifest);
+    fs.writeFile(scratch + "/compiler/src/main.sfn", "fn main() -> int { return 0; }\n");
+    fs.writeFile(scratch + "/runtime/capsule.toml", runtime_manifest);
+    fs.writeFile(scratch + "/runtime/sfn/mod.sfn", "fn runtime_value() -> int { return 1; }\n");
+    fs.writeFile(scratch + "/runtime/ir/stub.ll", "; runtime stub\n");
+
+    let baseline = _workspace_fingerprint(scratch);
+    assert baseline.length == 68;
+    assert substring(baseline, 0, 3) == "v2-";
+
+    fs.writeFile(scratch + "/README.md", "unrelated\n");
+    assert _workspace_fingerprint(scratch) == baseline;
+
+    fs.writeFile(scratch + "/workspace.toml", workspace + "# changed\n");
+    assert _workspace_fingerprint(scratch) != baseline;
+    fs.writeFile(scratch + "/workspace.toml", workspace);
+
+    fs.writeFile(scratch + "/bootstrap.toml", bootstrap + "# changed\n");
+    assert _workspace_fingerprint(scratch) != baseline;
+    fs.writeFile(scratch + "/bootstrap.toml", bootstrap);
+
+    fs.writeFile(scratch + "/compiler/capsule.toml", compiler_manifest
+        + "# changed\n");
+    assert _workspace_fingerprint(scratch) != baseline;
+    fs.writeFile(scratch + "/compiler/capsule.toml", compiler_manifest);
+
+    fs.writeFile(scratch + "/runtime/ir/stub.ll", "; changed runtime stub\n");
+    assert _workspace_fingerprint(scratch) != baseline;
+    fs.writeFile(scratch + "/runtime/ir/stub.ll", "; runtime stub\n");
+
+    fs.writeFile(scratch + "/compiler/src/main.sfn", "fn main() -> int { return 1; }\n");
+    assert _workspace_fingerprint(scratch) != baseline;
     process.run(["rm", "-rf", scratch]);
 }
 

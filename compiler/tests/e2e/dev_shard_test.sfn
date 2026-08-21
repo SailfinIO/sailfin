@@ -12,7 +12,14 @@ import {
     split,
     trim
 } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { sfn_bin_abs_path, sfn_bin_path } from "sfn/test";
+
+fn _repo_root() -> string ![io] {
+    let mut root = env.get("SAILFIN_REPO_ROOT");
+    if root.length == 0 { root = env.get("PWD"); }
+    if root.length == 0 { root = "."; }
+    return root;
+}
 
 // Non-empty trimmed lines of a command's stdout.
 fn _lines(out: string) -> string[] {
@@ -56,6 +63,17 @@ test "dev shard: cover reports the map partitions the test surface" ![io] {
     let err = process.capture_take_stderr();
     assert exit == 0;
     assert find(out + err, "[shard-cover] ok", 0) >= 0;
+}
+
+test "dev shard: invalid workspace fails cover closed" ![io] {
+    let fixture = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/missing_source";
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "shard", "cover"], [], fixture);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "[shard-cover] ok", 0) < 0;
+    assert find(err, "workspace inventory", 0) >= 0;
 }
 
 test "dev shard: list unit-a yields unit test files under the stride" ![io] {
