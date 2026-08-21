@@ -2,7 +2,7 @@ name: Release
 
 # Manually-triggered release workflow.  Replaces python-semantic-release.
 #
-# Reads the current version from compiler/capsule.toml, computes the next
+# Resolves the `sfn/compiler` workspace manifest, computes the next
 # version based on `channel` and `bump` inputs, updates the compiler and
 # implementation-capsule manifests plus version.sfn, and commits — then pushes
 # that commit to a *staging branch* rather than to `main`.
@@ -108,11 +108,12 @@ jobs:
 
           CHANNEL="${{ inputs.channel }}"
           BUMP="${{ inputs.bump }}"
+          compiler_manifest="$(bash scripts/module_layout_fingerprint.sh --member-manifest sfn/compiler)"
 
           # --- Read current version from capsule.toml -------------------------
-          current="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml)"
+          current="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' "$compiler_manifest")"
           if [ -z "$current" ]; then
-            echo "::error::Could not read version from compiler/capsule.toml"
+            echo "::error::Could not read version from $compiler_manifest"
             exit 1
           fi
           echo "Current version: $current"
@@ -228,27 +229,31 @@ jobs:
           NEXT: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
+          compiler_manifest="$(bash scripts/module_layout_fingerprint.sh --member-manifest sfn/compiler)"
+          compiler_root="${compiler_manifest%/capsule.toml}"
+          version_source="$compiler_root/src/version.sfn"
+          compiler_manifests=()
+          while IFS= read -r manifest; do compiler_manifests+=("$manifest"); done \
+            < <(bash scripts/module_layout_fingerprint.sh --compiler-manifests)
+          if [ "${#compiler_manifests[@]}" -ne 6 ]; then
+            echo "::error::Expected six compiler-role manifests, found ${#compiler_manifests[@]}"
+            exit 1
+          fi
 
           # Update the compiler manifest (whitespace-tolerant around = and quotes).
-          capsule_matches=$(grep -c '^version *=' compiler/capsule.toml || true)
+          capsule_matches=$(grep -c '^version *=' "$compiler_manifest" || true)
           if [ "$capsule_matches" -ne 1 ]; then
             echo "::error::Expected exactly 1 'version =' line in capsule.toml, found $capsule_matches"
             exit 1
           fi
-          current_compiler_version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml)"
-          sed -i "s/^version *= *\"[^\"]*\"/version = \"${NEXT}\"/" compiler/capsule.toml
+          current_compiler_version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' "$compiler_manifest")"
+          sed -i "s/^version *= *\"[^\"]*\"/version = \"${NEXT}\"/" "$compiler_manifest"
 
           # SFEP-0020: private compiler implementation capsules share the
           # compiler release version. Refuse pre-existing drift, then bump the
-          # complete physical capsule set atomically with the root manifest.
-          mapfile -t internal_manifests < <(
-            find compiler/capsules -mindepth 2 -maxdepth 2 -name capsule.toml -print | sort
-          )
-          if [ "${#internal_manifests[@]}" -eq 0 ]; then
-            echo "::error::No compiler implementation capsule manifests found"
-            exit 1
-          fi
-          for manifest in "${internal_manifests[@]}"; do
+          # complete canonical compiler-role set atomically with the driver.
+          for manifest in "${compiler_manifests[@]}"; do
+            if [ "$manifest" = "$compiler_manifest" ]; then continue; fi
             manifest_matches=$(grep -c '^version *=' "$manifest" || true)
             if [ "$manifest_matches" -ne 1 ]; then
               echo "::error::Expected exactly 1 'version =' line in $manifest, found $manifest_matches"
@@ -266,23 +271,24 @@ jobs:
           # The compiler reads its version from capsule.toml at runtime, but
           # installed binaries fall back to __version_fallback__ when capsule.toml
           # is not on disk.
-          sfn_matches=$(grep -c 'let __version_fallback__ *=' compiler/src/version.sfn || true)
+          sfn_matches=$(grep -c 'let __version_fallback__ *=' "$version_source" || true)
           if [ "$sfn_matches" -ne 1 ]; then
             echo "::error::Expected exactly 1 '__version_fallback__' assignment in version.sfn, found $sfn_matches"
             exit 1
           fi
-          sed -i "s/let __version_fallback__ *= *\"[^\"]*\"/let __version_fallback__ = \"${NEXT}\"/" compiler/src/version.sfn
+          sed -i "s/let __version_fallback__ *= *\"[^\"]*\"/let __version_fallback__ = \"${NEXT}\"/" "$version_source"
 
           # Verify the replacements took effect
-          echo "--- compiler/capsule.toml ---"
-          grep '^version' compiler/capsule.toml
+          echo "--- $compiler_manifest ---"
+          grep '^version' "$compiler_manifest"
           echo "--- compiler implementation capsules ---"
-          for manifest in "${internal_manifests[@]}"; do
+          for manifest in "${compiler_manifests[@]}"; do
+            if [ "$manifest" = "$compiler_manifest" ]; then continue; fi
             printf '%s: ' "$manifest"
             grep '^version' "$manifest"
           done
-          echo "--- compiler/src/version.sfn ---"
-          grep '__version_fallback__' compiler/src/version.sfn
+          echo "--- $version_source ---"
+          grep '__version_fallback__' "$version_source"
 
           # Update llms.txt's "> Version:" stamp. The drift guard
           # (compiler/tests/e2e/test_llms_txt_sync.sh) asserts this line
@@ -302,15 +308,15 @@ jobs:
           grep '^> Version:' llms.txt
 
           # Final sanity check: the new version must appear in every version file.
-          if ! grep -q "\"${NEXT}\"" compiler/capsule.toml; then
+          if ! grep -q "\"${NEXT}\"" "$compiler_manifest"; then
             echo "::error::capsule.toml was not updated to version ${NEXT}"
             exit 1
           fi
-          if ! grep -q "\"${NEXT}\"" compiler/src/version.sfn; then
+          if ! grep -q "\"${NEXT}\"" "$version_source"; then
             echo "::error::version.sfn was not updated to version ${NEXT}"
             exit 1
           fi
-          for manifest in "${internal_manifests[@]}"; do
+          for manifest in "${compiler_manifests[@]}"; do
             if ! grep -q "^version *= *\"${NEXT}\"" "$manifest"; then
               echo "::error::$manifest was not updated to version ${NEXT}"
               exit 1
@@ -327,7 +333,16 @@ jobs:
           TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
-          git add compiler/capsule.toml compiler/capsules/*/capsule.toml compiler/src/version.sfn llms.txt
+          compiler_manifest="$(bash scripts/module_layout_fingerprint.sh --member-manifest sfn/compiler)"
+          compiler_root="${compiler_manifest%/capsule.toml}"
+          compiler_manifests=()
+          while IFS= read -r manifest; do compiler_manifests+=("$manifest"); done \
+            < <(bash scripts/module_layout_fingerprint.sh --compiler-manifests)
+          if [ "${#compiler_manifests[@]}" -ne 6 ]; then
+            echo "::error::Expected six compiler-role manifests, found ${#compiler_manifests[@]}"
+            exit 1
+          fi
+          git add -- "${compiler_manifests[@]}" "$compiler_root/src/version.sfn" llms.txt
           git commit -m "chore(release): ${TAG#v}"
 
       # SFN-829: the bump commit goes to a throwaway staging branch, never to
@@ -349,8 +364,8 @@ jobs:
 
           # main is written to concurrently (e.g. capsule-release.yml auto-commits
           # `chore(capsules): bump versions`). Rebase our version-bump commit onto the
-          # latest origin/main so the promotion push is a fast-forward. Paths are
-          # disjoint (we touch compiler/*, capsule bot touches capsules/*), so the
+          # latest origin/main so the promotion push is a fast-forward. Release and
+          # public-capsule version bumps touch disjoint workspace members, so the
           # rebase replays without conflicts; abort defensively if one occurs.
           git fetch origin main
 
@@ -360,17 +375,33 @@ jobs:
           # main at promotion), which is safe ONLY while its compiler is
           # byte-behaviour-identical to that verified commit. Re-check here —
           # origin/main may have advanced since the train evaluated — and refuse to
-          # cut if it moved onto a compiler / runtime / seed change the nightly never
-          # saw; the next nightly must re-verify first. Diffed BEFORE our own bump
-          # commit, so the bump's compiler manifest/version edits never trip it.
+          # cut if its canonical workspace freshness differs from the nightly;
+          # the next nightly must re-verify first. Both fingerprints are taken
+          # before our own bump commit, so the bump never trips the comparison.
           # Empty on manual/override cuts (the operator owns the risk).
           if [ -n "$VERIFIED_SHA" ]; then
-            unverified="$(git diff --name-only "${VERIFIED_SHA}..origin/main" -- compiler/src compiler/capsules runtime bootstrap.toml)"
-            if [ -n "$unverified" ]; then
-              echo "::error::origin/main advanced onto self-host-relevant changes not covered by verified nightly ${VERIFIED_SHA}; refusing to cut an unverified compiler. Re-run after the next green nightly. Files:"
-              echo "$unverified"
+            fingerprint_script="$PWD/scripts/module_layout_fingerprint.sh"
+            compare_root="$(mktemp -d "${RUNNER_TEMP:-/tmp}/sailfin-release-verify.XXXXXX")"
+            verified_tree="$compare_root/verified"
+            main_tree="$compare_root/main"
+            cleanup_compare_trees() {
+              git worktree remove --force "$verified_tree" >/dev/null 2>&1 || true
+              git worktree remove --force "$main_tree" >/dev/null 2>&1 || true
+              rm -rf "$compare_root"
+            }
+            trap cleanup_compare_trees EXIT
+            git worktree add --detach "$verified_tree" "$VERIFIED_SHA" >/dev/null
+            git worktree add --detach "$main_tree" origin/main >/dev/null
+            verified_fingerprint="$(cd "$verified_tree" && bash "$fingerprint_script" --ci-freshness)"
+            main_fingerprint="$(cd "$main_tree" && bash "$fingerprint_script" --ci-freshness)"
+            if [ "$verified_fingerprint" != "$main_fingerprint" ]; then
+              echo "::error::origin/main has self-host-relevant workspace changes not covered by verified nightly ${VERIFIED_SHA}; refusing to cut an unverified compiler. Re-run after the next green nightly."
+              echo "verified: $verified_fingerprint"
+              echo "main:     $main_fingerprint"
               exit 1
             fi
+            cleanup_compare_trees
+            trap - EXIT
           fi
 
           if ! git rebase origin/main; then
