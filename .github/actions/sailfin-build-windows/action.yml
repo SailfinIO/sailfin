@@ -139,6 +139,32 @@ runs:
 
     - name: Native MSVC build of the compiler (Stage 2)
       shell: bash
+      env:
+        # `sfn build -p compiler` in a compiler checkout runs
+        # `bootstrap_gate_or_dispatch` (SFEP-0047), which self-hosts from the
+        # EXACT pinned seed and re-execs when the running toolchain is a
+        # different version. That gate is a no-op on the Linux/macOS legs
+        # because they build with the fetched pinned seed. It is never a
+        # no-op here: this leg's seed is cross-built from the working tree,
+        # so during a release cut it reports the bumped version while
+        # `bootstrap.toml` still pins the previous one.
+        #
+        # The gate then tries to FETCH the pinned seed over https, and a
+        # mingw cross-path Windows build ships without TLS (SFN-923), so the
+        # request fails before it reaches the network and the step dies with
+        # "could not obtain the pinned seed". Only `build -p compiler` is
+        # affected; the hello-world rungs above never enter the gate because
+        # it is guarded by `is_compiler_selfhost_capsule`.
+        #
+        # Skipping is CORRECT here, not a workaround: this step exists to
+        # build the compiler with the cross seed built above, which IS the
+        # intended stage0 on this leg. `dev.sfn` documents the knob for
+        # exactly this seed/pin-skew window.
+        #
+        # Removal condition: a native Windows release seed (SFN-57) plus
+        # `seed_source: 'release'` (SFN-994) — then the running toolchain
+        # satisfies the pin here as it does on the other legs.
+        SAILFIN_BOOTSTRAP: "off"
       run: |
         set -euo pipefail
         # `runs.steps[*]` in a composite action has no `timeout-minutes` key
