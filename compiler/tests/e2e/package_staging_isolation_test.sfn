@@ -1,0 +1,224 @@
+// Regression for SFN-983: `sfn package` bound three fixed repo-root staging
+// literals (`build/sailfin/.package-staging`, `.installer-staging`) and
+// wiped each with `remove_tree` on ENTRY and exit. Two concurrent `sfn
+// package` invocations therefore deleted each other's staged tree
+// mid-flight — one run's entry wipe (or exit wipe) removing files the
+// other run had already staged, or was about to stage into.
+//
+// `run_exe_isolation_test.sfn` (SFN-719/974) is the direct precedent for
+// this shape: launch overlapping children, assert distinct per-invocation
+// state, assert no leftovers. This test mirrors that structure with
+// `sfn package`'s own staging directories instead of `sfn run`'s exe names.
+//
+// Both children share ONE `SAILFIN_TEST_SCRATCH` root (via
+// `clean_runner_env(nested_runner_scratch(...))`) rather than isolated
+// roots — that is deliberate: it proves the per-invocation `fs.mkdtemp`
+// leaves stay distinct WITHIN a shared root, which is exactly the
+// collision surface the fixed literal used to share.
+import { find } from "sfn/strings";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_abs_path
+} from "sfn/test";
+
+// Discover the single tarball under `dir` whose name starts with `prefix`
+// and ends with `.tar.gz`. Returns the absolute path or "".
+// Mirrors `sfn_package_test.sfn::_find_tarball`.
+fn _find_tarball(dir: string, prefix: string) -> string ![io] {
+    if !fs.exists(dir) { return ""; }
+    let entries = fs.listDirectory(dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        let starts = name.length >= prefix.length && substring(name, 0, prefix.length) == prefix;
+        let ends = name.length >= 7 && substring(name, name.length - 7, name.length) == ".tar.gz";
+        if starts && ends { return dir + "/" + name; }
+        i += 1;
+    }
+    return "";
+}
+
+// 64 lowercase-hex chars exactly (the `.sha256` sidecar contract).
+// Mirrors `sfn_package_test.sfn::_is_hex64`.
+fn _is_hex64(s: string) -> boolean {
+    if s.length != 64 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let code = char_code(substring(s, i, i + 1));
+        let is_hex = (code >= 48 && code <= 57) || (code >= 97 && code <= 102);
+        if !is_hex { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// First line of a file's contents, trailing newline dropped.
+fn _first_line_of_file(path: string) -> string ![io] {
+    if !fs.exists(path) { return ""; }
+    let text = fs.readFile(path);
+    let nl = find(text, "\n", 0);
+    if nl < 0 { return text; }
+    return substring(text, 0, nl);
+}
+
+// True when any entry directly under `dir` starts with `prefix` — used to
+// assert no `.package-staging*` / `.installer-staging*` / `.capsule-staging*`
+// leftover survives the run.
+fn _has_entry_with_prefix(dir: string, prefix: string) -> boolean ![io] {
+    if !fs.exists(dir) { return false; }
+    let entries = fs.listDirectory(dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if find(entries[i], prefix, 0) == 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "package: overlapping invocations mint distinct staging dirs and leave none behind" ![clock, io] {
+    // A shared scratch root: both children see the SAME `SAILFIN_TEST_SCRATCH`,
+    // so `_package_staging_root()` (package.sfn) resolves both to the same
+    // parent directory and only the `fs.mkdtemp` leaf distinguishes them.
+    let scratch = nested_runner_scratch("package-staging-isolation");
+    let child_env = clean_runner_env(scratch);
+    let bin = sfn_bin_abs_path();
+    let dist_a = scratch + "/dist-a";
+    let dist_b = scratch + "/dist-b";
+
+    // Start both before waiting on either, so their staging + tar/sha/manifest
+    // work genuinely overlaps — the pre-fix bug needed real concurrent
+    // filesystem activity against the one shared literal to manifest.
+    let handle_a = process.spawn_with_env([bin, "package", "--out", dist_a, "--compiler-bin", bin], child_env);
+    let handle_b = process.spawn_with_env([bin, "package", "--out", dist_b, "--compiler-bin", bin], child_env);
+    assert handle_a != 0;
+    assert handle_b != 0;
+
+    let out_a = process.handle_read_stdout(handle_a);
+    let err_a = process.handle_read_stderr(handle_a);
+    let exit_a = process.handle_wait(handle_a);
+    report_child_failure("package A", exit_a, out_a, err_a);
+
+    let out_b = process.handle_read_stdout(handle_b);
+    let err_b = process.handle_read_stderr(handle_b);
+    let exit_b = process.handle_wait(handle_b);
+    report_child_failure("package B", exit_b, out_b, err_b);
+
+    assert exit_a == 0;
+    assert exit_b == 0;
+
+    // Each invocation produced a valid, complete tarball + sha256 sidecar +
+    // manifest — not a partial tree clobbered by the other invocation's
+    // entry/exit wipe.
+    let tarball_a = _find_tarball(dist_a, "sailfin-native-");
+    let tarball_b = _find_tarball(dist_b, "sailfin-native-");
+    assert tarball_a.length > 0;
+    assert tarball_b.length > 0;
+    assert fs.exists(tarball_a);
+    assert fs.exists(tarball_b);
+
+    let sha_a = _first_line_of_file(tarball_a + ".sha256");
+    let sha_b = _first_line_of_file(tarball_b + ".sha256");
+    assert _is_hex64(sha_a);
+    assert _is_hex64(sha_b);
+
+    let stem_a = substring(tarball_a, 0, tarball_a.length - 7);
+    let stem_b = substring(tarball_b, 0, tarball_b.length - 7);
+    assert fs.exists(stem_a + ".manifest.json");
+    assert fs.exists(stem_b + ".manifest.json");
+
+    // No `.package-staging*` / `.installer-staging*` / `.capsule-staging*`
+    // directory survives under the shared scratch root once both have
+    // returned — each invocation's own exit wipe reclaimed its own mkdtemp
+    // leaf.
+    assert ! _has_entry_with_prefix(scratch, ".package-staging");
+    assert ! _has_entry_with_prefix(scratch, ".installer-staging");
+    assert ! _has_entry_with_prefix(scratch, ".capsule-staging");
+}
+
+// Deterministic companion to the concurrency test above. That test proves
+// the realistic end-to-end shape (two overlapping invocations survive); this
+// one pins the actual mechanism SFN-983 removed, with no timing dependence.
+//
+// The retired staging literal (`"build/sailfin/.package-staging"` in
+// `_package_user_capsule`, `package.sfn`) was a bare string — CWD-relative,
+// not repo-root-relative — and unconditionally `remove_tree()`d on entry.
+// Give `sfn package -p` a cwd whose `build/sailfin/.package-staging` we
+// control, plant a sentinel file there before running, and the retired
+// code's entry wipe deletes it before staging anything. Fixed code never
+// resolves that path at all when `SAILFIN_TEST_SCRATCH` is set (this test
+// always sets it): `_package_staging_root()` returns the scratch root
+// instead of falling through to the cwd-relative literal, so the sentinel
+// is never touched. No concurrency, no window to miss — either the
+// sentinel survives or it doesn't.
+test "package: staging no longer touches the fixed build/sailfin literal" ![clock, io] {
+    let scratch = nested_runner_scratch("package-staging-literal-abandoned");
+    let bin = sfn_bin_abs_path();
+    let child_env = clean_runner_env(scratch);
+
+    // A minimal, dependency-free library fixture (mirrors the
+    // self-contained shape `run_exe_isolation_test.sfn::_ensure_fixture`
+    // uses) — no `sfn/math` import or `capsules` symlink needed, since this
+    // test's only interest is where staging writes, not what gets packaged.
+    let fixture = scratch + "/fixture";
+    fs.createDirectory(fixture + "/src", true);
+    fs.writeFile(fixture + "/capsule.toml", "[capsule]\n"
+        + "name = \"demo/sentinel\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[build]\n"
+        + "kind = \"library\"\n"
+        + "entry = \"src/mod.sfn\"\n");
+    fs.writeFile(fixture + "/src/mod.sfn", "fn sentinel_value() -> int { return 7; }\n");
+
+    // The exact path the retired literal resolves to when cwd == fixture.
+    let sentinel_dir = fixture + "/build/sailfin/.package-staging";
+    let sentinel_file = sentinel_dir + "/sentinel.txt";
+    let sentinel_content = "SFN-983 sentinel: must survive a fixed sfn package\n";
+    fs.createDirectory(sentinel_dir, true);
+    fs.writeFile(sentinel_file, sentinel_content);
+
+    // Precondition for `-p`: build the fixture so its C2c sidecar exists.
+    // cwd must be the fixture so the sidecar lands under
+    // `fixture/build/capsules/...`, matching where `sfn package -p .` will
+    // look for it below.
+    let build_handle = process.spawn_with_env_cwd([bin, "build", "-p", "."], child_env, fixture);
+    assert build_handle != 0;
+    let build_out = process.handle_read_stdout(build_handle);
+    let build_err = process.handle_read_stderr(build_handle);
+    let build_exit = process.handle_wait(build_handle);
+    report_child_failure("package sentinel: build", build_exit, build_out, build_err);
+    assert build_exit == 0;
+
+    // The build step touches `build/capsules/...` and (via
+    // `SAILFIN_TEST_SCRATCH`) the shared scratch root, but never
+    // `build/sailfin/.package-staging` — confirm the sentinel is still
+    // exactly as planted before `sfn package` runs, so a later failure
+    // can't be misattributed to the build step.
+    assert fs.exists(sentinel_file);
+    assert fs.readFile(sentinel_file) == sentinel_content;
+
+    let dist = scratch + "/dist-sentinel";
+    let pkg_handle = process.spawn_with_env_cwd([bin, "package", "-p", ".", "--out", dist], child_env, fixture);
+    assert pkg_handle != 0;
+    let pkg_out = process.handle_read_stdout(pkg_handle);
+    let pkg_err = process.handle_read_stderr(pkg_handle);
+    let pkg_exit = process.handle_wait(pkg_handle);
+    report_child_failure("package sentinel: package", pkg_exit, pkg_out, pkg_err);
+    assert pkg_exit == 0;
+
+    let tarball = _find_tarball(dist, "demo-sentinel-");
+    assert tarball.length > 0;
+    assert fs.exists(tarball);
+
+    // The lock: the sentinel this test planted at the retired literal's
+    // exact resolved path must still exist with byte-identical content.
+    // Unfixed code `remove_tree()`s `sentinel_dir` on entry, before staging
+    // anything — this assertion is the one that would fail on unfixed
+    // `package.sfn`.
+    assert fs.exists(sentinel_file);
+    assert fs.readFile(sentinel_file) == sentinel_content;
+}
