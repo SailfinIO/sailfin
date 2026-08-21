@@ -66,6 +66,7 @@ import {
     source_fingerprint_path,
     write_fingerprint
 } from "../../build/source_fingerprint";
+import { host_exe_name } from "../../build/target";
 import {
     is_absolute_path,
     starts_with,
@@ -125,7 +126,7 @@ fn _bootstrap_abspath(path: string) -> string ![io] {
 // force a needless re-fetch of an already-usable seed.
 fn _bootstrap_store_ready(install_base: string, ver: string) -> boolean ![io] {
     let store_dir = install_base + "/" + ver;
-    if !fs.exists(store_dir + "/sailfin") { return false; }
+    if !fs.exists(_bootstrap_seed_bin(install_base, ver)) { return false; }
     let sha_path = store_dir + "/.sha256";
     if fs.exists(sha_path) {
         let recorded = _toml_trim_cmd(fs.readFile(sha_path));
@@ -135,8 +136,19 @@ fn _bootstrap_store_ready(install_base: string, ver: string) -> boolean ![io] {
 }
 
 // The seed binary path within the store.
-fn _bootstrap_seed_bin(install_base: string, ver: string) -> string {
-    return install_base + "/" + ver + "/sailfin";
+//
+// HOST-gated (SFN-1007, the same class SFN-701 closed elsewhere): this
+// names a binary THIS machine has to probe and execute, so it follows
+// `build_host_os()` and never `build_target_os()`. The Windows installer
+// writes `sailfin.exe` (`install.ps1`'s alias list), so an extensionless
+// literal here finds nothing on a native Windows host — and spawning the
+// relative extensionless path fails `ERROR_FILE_NOT_FOUND` outright.
+// Route through `host_exe_name` rather than appending `.exe` by hand, so
+// there stays exactly one definition of how an executable is named per
+// target. The probe in `_bootstrap_store_ready` calls this function for
+// the same reason: one spelling, not two that can drift.
+fn _bootstrap_seed_bin(install_base: string, ver: string) -> string ![io] {
+    return host_exe_name(install_base + "/" + ver + "/sailfin");
 }
 
 // Lay the `bin_dir` aliases (`sfn`, `sailfin`) over the freshly-installed
@@ -147,8 +159,12 @@ fn _bootstrap_seed_bin(install_base: string, ver: string) -> string {
 fn _bootstrap_link_bin(install_base: string, bin_dir: string, ver: string) -> void ![io] {
     ensure_dir_p(bin_dir);
     let abs_bin = _bootstrap_abspath(_bootstrap_seed_bin(install_base, ver));
-    _bootstrap_alias(abs_bin, bin_dir + "/sfn");
-    _bootstrap_alias(abs_bin, bin_dir + "/sailfin");
+    // HOST-gated (SFN-1007), matching the store-entry scheme in
+    // `toolchain.sfn`: an extensionless copy is not launchable on Windows,
+    // and the Makefile's `SEED = build/toolchains/seed/bin/sfn` reads this
+    // alias directly.
+    _bootstrap_alias(abs_bin, host_exe_name(bin_dir + "/sfn"));
+    _bootstrap_alias(abs_bin, host_exe_name(bin_dir + "/sailfin"));
 }
 
 // Point `alias` at `abs_bin`, preferring a symlink and falling back to a
