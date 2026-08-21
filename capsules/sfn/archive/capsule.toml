@@ -20,7 +20,25 @@ description = "In-process .tar.gz reading and writing for Sailfin"
 # `io` is required by the file-backed reader/writer sources only. Declared here
 # because `required` is a ceiling on this capsule's OWN functions, checked when
 # `sfn/archive` is the resolved project root; it is not inherited by consumers.
-required = ["io"]
+# `clock` is carried ONLY for `tests/inflate_memory_test.sfn` (SFN-1020): its
+# peak-RSS regression bound goes through `process.run_capture_metered`, which
+# is `![io, clock]` because it also reports wall time. No production source
+# under `src/` uses `clock`, so this ceiling is deliberately wider than the
+# shipped surface — an honest cost, recorded rather than hidden.
+#
+# There is no precedent for this and it should not become one. The compiler's
+# own `clock` is PRODUCTION (`compile_to_llvm_with_module_timed`), not a
+# test-only widening. The right mechanism does not exist yet: SFN-764's design
+# note proposes `[capabilities] dev-required = [...]`, a test-time capability
+# kept out of the shipped surface. Move `clock` there and restore
+# `required = ["io"]` once that lands — that is this line's removal condition.
+#
+# Bounded, not free: `required` is a ceiling on this capsule's OWN functions,
+# checked when `sfn/archive` is the resolved project root, and is NOT inherited
+# by consumers — so no program depending on this capsule gains clock authority.
+# Dropping the test instead was considered and rejected: this defect sat at 92%
+# of the memory cap across two releases precisely because nothing measured it.
+required = ["clock", "io"]
 
 [build]
 entry = "src/mod.sfn"

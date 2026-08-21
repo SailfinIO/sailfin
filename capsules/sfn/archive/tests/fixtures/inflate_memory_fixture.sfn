@@ -1,0 +1,38 @@
+// capsules/sfn/archive/tests/fixtures/inflate_memory_fixture.sfn
+//
+// The metered child spawned by `inflate_memory_test.sfn` (SFN-1020). Does
+// nothing but `targz_extract` a pre-built tarball — the parent test
+// measures THIS process's peak RSS via `process.run_capture_metered`, so
+// this fixture stays as small as possible around the one call under test:
+// no tarball construction here (that runs in the parent, unmetered, via
+// `targz_create`), so the measured peak reflects decompression only.
+//
+// Uses the PUBLIC `sfn/archive` package surface, not a relative `../src`
+// import: this file is a standalone `sfn run` target, resolved through the
+// workspace's capsule registry like any external consumer (`toolchain.sfn`'s
+// `targz_extract` call), not through the capsule's own internal test graph.
+import { ExtractOptions, targz_extract } from "sfn/archive";
+
+fn main() ![io] {
+    let tarball: string = env.get("SFN_ARCHIVE_MEMORY_FIXTURE_TARBALL");
+    let dest_dir: string = env.get("SFN_ARCHIVE_MEMORY_FIXTURE_DEST");
+    fs.createDirectory(dest_dir, true);
+    let opts = ExtractOptions {
+        copy_instead_of_link: false,
+        apply_modes: true,
+        max_total_bytes: 1073741824,
+        max_members: 65536,
+        host_is_windows: false
+    };
+    let result = targz_extract(tarball, dest_dir, opts);
+    match result {
+        Result.Ok { value }
+        : {
+            print("extracted: ${value.member_count} members, ${value.bytes_written} bytes");
+        },
+        Result.Err { error }
+        : {
+            print("ERROR: ${error.message}");
+        }
+    }
+}

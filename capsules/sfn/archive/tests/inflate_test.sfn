@@ -477,3 +477,37 @@ test "archive inflate: max_output is enforced for a stored block" {
         }
     }
 }
+
+// 14. A Huffman code that never matches any known code (SFN-1020): the
+// fixed distance table is deliberately incomplete (30 five-bit codes out
+// of 32 possible, `_fixed_tables()`'s own comment), so a fixed-Huffman
+// block whose distance bits are one of the two unassigned 5-bit codes
+// (11111, MSB-first) never terminates in `_huff_decode` within
+// `_MAX_BITS` — the `_BR_ERR_BAD_HUFFMAN` path through the `_BitReader`
+// error channel `_bit_reader_error()` reconstructs. Hand-assembled per the
+// module docblock's bit-by-bit method: BFINAL=1, BTYPE=01 (fixed), a
+// literal/length symbol 257 (length base 3, no extra bits, 7-bit fixed
+// code `0000001`), then 15 bits of distance-code attempt whose first 5
+// (`11111`) already miss every valid code and whose remaining 10 (`0`)
+// only serve to exhaust the length loop rather than hit end-of-stream —
+// packed LSB-first per byte, verified against an independent
+// reimplementation of `_huff_construct`/`_huff_decode`'s canonical-code
+// algorithm before pasting. Only `_BR_ERR_TRUNCATED` (test 7) had an
+// assertion before this; without a case reaching `_BR_ERR_BAD_HUFFMAN`, a
+// transposition in `_bit_reader_error`'s code table would go unnoticed.
+test "archive inflate: a Huffman code matching nothing in the table is rejected, not an infinite loop" {
+    let compressed: int[] = [3, 126, 0, 0,];
+    let result = _inflate_int_array(compressed, 1024);
+    match result {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.CorruptStream;
+            assert error.message == "Huffman code did not match any known code (bad tree or corrupt stream)";
+        }
+    }
+}
