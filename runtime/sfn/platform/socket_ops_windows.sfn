@@ -29,6 +29,13 @@
 // life of the process and is never released. That is the deliberate
 // consequence of having no `WSACleanup` (below), not a leak to fix.
 //
+// Socket creation is no longer the only site. `sfn_socket_net_init`
+// (below) is also called by the name resolvers, which run ahead of it
+// (SFN-1026) — so a hostname connect now startups twice per attempt,
+// and `sfn_net_resolve` startups without ever creating a socket. Same
+// refcount reasoning, roughly double the rate, against a value with
+// ample headroom.
+//
 // Why no `WSACleanup`: it would have to balance every `WSAStartup`,
 // and an unbalanced call tears the library down while other sockets
 // in the process are still live. Process exit reclaims the
@@ -108,6 +115,25 @@ fn _sfn_wsa_startup() -> i32 {
     return rc;
 }
 
+// Initialize Winsock for callers that run before any socket exists.
+// Returns 0 on success, non-zero otherwise — same contract as the
+// POSIX sibling, where there is nothing to initialize and it is a
+// no-op.
+//
+// `sfn_socket_open` below is not sufficient on its own: `getaddrinfo`
+// is just as subject to `WSANOTINITIALISED` as `socket` is, and the
+// name resolvers run one step ahead of socket creation, so a client
+// connecting to a hostname resolved DNS with Winsock uninitialized,
+// failed, and returned before ever reaching `sfn_socket_open` — which
+// meant `WSAStartup` never ran at all. That made every hostname-based
+// client connect fail on native Windows while dotted-quad and
+// server-bind paths kept working (SFN-1026).
+//
+// Safe to call unconditionally, for the reasons recorded in this
+// module's header: `WSAStartup` is documented as callable more than
+// once and is internally reference-counted.
+fn sfn_socket_net_init() -> i32 { return _sfn_wsa_startup(); }
+
 // Create a socket, initializing Winsock first. On initialization
 // failure this returns `-1` rather than attempting the call, which
 // matches `INVALID_SOCKET`'s truncated form and so satisfies the
@@ -185,6 +211,7 @@ fn sfn_socket_timeout_readback_ms(fd: i32) -> i64 {
 }
 
 export {
+    sfn_socket_net_init,
     sfn_socket_open,
     sfn_socket_close,
     sfn_socket_set_timeouts,

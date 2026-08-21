@@ -87,6 +87,8 @@ extern fn atoi(s: *u8) -> i32;
 // externs and the linker binds whichever sibling was compiled — the
 // same shape as `_sfn_fs_access_exec_mode` in `filesystem.sfn`
 // (SFN-671).
+extern fn sfn_socket_net_init() -> i32;
+
 extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
@@ -211,6 +213,21 @@ fn _net_sockaddr_octets(sa: i64, out: *u8) -> bool {
 // branch on the target, so we read both candidate slots and let
 // `_net_sockaddr_octets` pick the one that validates as an AF_INET sockaddr.
 fn _net_resolve_dns(host: *u8, out: *u8) -> bool ![net] {
+    // Winsock refuses `getaddrinfo` with `WSANOTINITIALISED` until the
+    // library is initialized, so resolving before `sfn_socket_open` has
+    // run leaves DNS failing on native Windows (SFN-1026). Which of
+    // this module's three resolver callers that bites differs, so the
+    // init belongs here rather than at any one of them:
+    //
+    //   `sfn_net_connect` — resolves (:339) before opening (:340), so
+    //       without this nothing initializes Winsock and DNS fails.
+    //   `sfn_net_listen`  — opens (:447) before resolving (:457), so
+    //       Winsock is already up and this is only a refcount bump.
+    //   `sfn_net_resolve` — never opens a socket at all, so this is the
+    //       only thing that initializes Winsock on that path.
+    //
+    // No-op on POSIX.
+    if sfn_socket_net_init() != 0 { return false; }
     let hints: *u8 = malloc(48 as usize);
     if hints as i64 == 0 { return false; }
     memset(hints, 0, 48 as usize);
