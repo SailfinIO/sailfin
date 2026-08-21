@@ -532,19 +532,34 @@ here.
   fixed for `sfn toolchain install`). `copy_tree` copies what a symlink
   resolves to rather than preserving it — a stated divergence from `cp -R`,
   not a bug, since neither `is_symlink` nor `lstat` exists yet and no tree in
-  scope contains one. **`sfn package --installer` should now run end-to-end
-  on a native Windows host**: SFN-753's in-process `.tar.gz` writer retired
-  the `tar -czf` shell spawns, and an ISO-8601 epoch→civil formatter retired
-  the `date -u` ones, so no `process.run`/shell read remains on the Windows
-  packaging path by code reading. The one surviving `uname -m` arch probe is
-  unreachable on Windows — `_package_detect_target` returns
-  `"windows-x86_64"` before control reaches it. This is not yet an observed
-  fact: `windows-native-selfhost.yml`'s nightly `native-build` job (SFN-57 /
-  SFEP-0021 M11) now packages the fixed-point-proven binary every night to
-  exercise exactly this path, but no run has gone green yet. Per SFEP-0021
-  §4.3's staging order, a native MSVC release asset (`sfn package --installer
-  --target windows-x86_64-msvc` from `release-tag.yml`) is planned once that
-  nightly is green, not shipped yet.
+  scope contains one. **`sfn package --installer` runs end-to-end on a native
+  Windows host** — as of 2026-08-21 an observed fact rather than a
+  code-reading claim. SFN-753's in-process `.tar.gz` writer retired the
+  `tar -czf` shell spawns and an ISO-8601 epoch→civil formatter retired the
+  `date -u` ones, so no `process.run`/shell read remains on the Windows
+  packaging path; the one surviving `uname -m` arch probe is unreachable
+  there, since `_package_detect_target` returns `"windows-x86_64"` before
+  control reaches it. `windows-native-selfhost.yml`'s nightly `native-build`
+  job (SFN-57 / SFEP-0021 M11) packages the fixed-point-proven binary every
+  night, and its `Package native MSVC installer` step passed on 2026-08-21.
+  **That is not the same as the nightly being green** — the same day it
+  failed twice in the *preceding* `Build native Windows compiler` step,
+  because v0.10.2 bumped `compiler/capsule.toml` while `bootstrap.toml` still
+  pinned 0.10.1, and that skew makes `bootstrap_gate_or_dispatch` (SFEP-0047)
+  try to *fetch* the pinned seed — which a mingw-cross binary can never do,
+  since it carries no TLS at all. #3048 fixed the trigger
+  (`SAILFIN_BOOTSTRAP: "off"`,
+  `.github/actions/sailfin-build-windows/action.yml:167`); the seed-pin gate
+  defect behind it is SFN-1011. **No native MSVC release asset has shipped on
+  any tag through v0.10.2.** The leg is wired — `release-tag.yml`'s
+  `native-windows-build` job (SFN-998) runs the same `package --installer
+  --target windows-x86_64-msvc`, and its artifact publishes as
+  `sailfin_<version>_windows_x86_64-msvc.tar.gz` — but it has never
+  succeeded, and because the `upload` job deliberately does not gate on its
+  result, v0.10.2 published without the asset and without failing. With #3048
+  merged the next cut is the first that could carry one. Retiring the mingw
+  cross path (SFN-58) additionally needs SFEP-0021 §4.5's full-release-cycle
+  soak, which has not run.
 - **Structured output.** `sfn build --json` emits a schema-versioned
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP
