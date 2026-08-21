@@ -52,8 +52,10 @@ catches the error.
    exports) need `make clean-build` first.
 3. **Targeted tests** — `build/bin/sfn test <path>`, `-k <name>` for one test.
    Issue acceptance should name these narrow commands.
-4. **`make check`** — full triple-pass self-host + suite, ~15–20 min. Reserve for
-   shipping a feature, cutting a release, or after a structural change.
+4. **`make check`** — full triple-pass self-host + suite. **Over an hour** —
+   the nightly measures ~70 min on Linux x86_64 and ~130 min on macOS arm64
+   (`.github/workflows/nightly-selfhost.yml`, `timeout-minutes: 180`). Reserve
+   for shipping a feature, cutting a release, or after a structural change.
 
 Never burn `make check` to discover what rung 1 or 3 would have caught. Run
 `make help` for the full target list; `sailfin_*` MCP tools are passthroughs to
