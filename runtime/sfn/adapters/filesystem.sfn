@@ -13,12 +13,18 @@
 // `fs_read_file` / `fs.readFile` / `fs_write_file` /
 // `fs.writeFile` / `fs_append_file` / `fs.appendFile` descriptor
 // rows' `native_signature` to `sfn_fs_read_file` /
-// `sfn_fs_write_file` / `sfn_fs_append_file`. The descriptor
-// shape stays `["i8*"]` (read) / `["i8*", "i8*"]` (write,
-// append) — both `path` and `contents` arrive as NUL-terminated
-// `* u8` buffers. The aggregate-typed SfnString flip (M1.A.2)
-// will retype the parameters to `{i8*, i64}` without touching
-// these bodies' callers.
+// `sfn_fs_write_file` / `sfn_fs_append_file`.
+//
+// SFN-1009 carried out the aggregate-typed flip for the two write
+// rows: `fs.writeFile` / `fs.appendFile` now declare
+// `["i8*", "{i8*, i64}"]` and resolve to the length-carrying
+// `sfn_fs_write_file_lv` / `sfn_fs_append_file_lv` twins below, so the
+// payload's byte count survives the call instead of being dropped and
+// re-derived with `strlen`. The `fs_write_file` / `fs_append_file`
+// snake_case rows and the read row keep the bare-`i8*` shape, and the
+// bare-pointer bodies stay exported for seed-built IR that still calls
+// them. `fs.readFile` is a different problem — it returns a length
+// rather than taking one (SFN-43).
 //
 // M3.1b (#815): the directory-listing, delete, create-directory,
 // and byte-read rows flip here too. The split mirrors the M3.1a
@@ -93,8 +99,12 @@
 //     `sfn_fs_write_lines`** (#1311, epic #1308 C7): pure Sailfin —
 //     `fopen("wb"/"ab")` + `fwrite` + `fclose` (portable C stdio).
 //     `write_lines` reads the `SfnArray` `data`/`len` fields through
-//     the `SfnArrayView` overlay. For a real buffer `strlen` recovers
-//     the byte length. A pre-M1.A.2 immediate-codepoint tagged pointer
+//     the `SfnArrayView` overlay. These bare-pointer bodies recover the
+//     byte length with `strlen`; their `_lv` twins (SFN-1009) take it as
+//     a parameter and do not. `write_lines` still `strlen`s each entry,
+//     and cannot stop: its array slots are `i8*` each, so the per-line
+//     length is already gone one level below the descriptor — that one
+//     needs the element-ABI flip (SFN-43), not a descriptor change. A pre-M1.A.2 immediate-codepoint tagged pointer
 //     in the *content* would crash `strlen`/`fwrite`, so all three decode
 //     it in pure Sailfin (#1308: `_fs_decode_immediate` → the native
 //     `sfn_str_from_codepoint`, the same shape `io.sfn`'s print family
@@ -639,8 +649,13 @@ fn sfn_fs_append_file(path: *u8, contents: *u8) -> bool ![io] {
 // tagged its data pointer, so there is nothing here to decode.
 fn sfn_fs_write_file_lv(path: *u8, data: *u8, len: i64) -> void ![io] {
     if path as i64 == 0 { return; }
+    // Bail on a null payload unconditionally, matching the bare-pointer
+    // original above rather than only when `len > 0`. Guarding on the
+    // length would let a null/zero aggregate reach `fopen(path, "wb")` and
+    // truncate a file the original left untouched — a behaviour change
+    // this migration has no reason to make.
+    if data as i64 == 0 { return; }
     if len < 0 { return; }
-    if len > 0 && data as i64 == 0 { return; }
 
     let mode_str: string = "wb";
     let f: *File = fopen(path, mode_str as *u8);
@@ -652,8 +667,12 @@ fn sfn_fs_write_file_lv(path: *u8, data: *u8, len: i64) -> void ![io] {
 
 fn sfn_fs_append_file_lv(path: *u8, data: *u8, len: i64) -> bool ![io] {
     if path as i64 == 0 { return false; }
+    // Unconditional, for the same reason as the write twin: `fopen(path,
+    // "ab")` CREATES the file, so a length-guarded check would have a null
+    // payload create an empty file and report success where the original
+    // returned false without touching the filesystem.
+    if data as i64 == 0 { return false; }
     if len < 0 { return false; }
-    if len > 0 && data as i64 == 0 { return false; }
 
     let mode_str: string = "ab";
     let f: *File = fopen(path, mode_str as *u8);

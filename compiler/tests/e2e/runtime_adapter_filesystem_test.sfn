@@ -125,6 +125,21 @@ fn _references(ir: string, sym: string) -> boolean {
     return false;
 }
 
+// The first `call ... @sym(` line, or "" — lets a caller assert over the
+// emitted operand types rather than only the symbol name.
+fn _call_line(ir: string, sym: string) -> string {
+    let lines = split(ir, "\n");
+    let needle = "@" + sym + "(";
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, "call ") && contains(line, needle) { return line; }
+        i = i + 1;
+    }
+    return "";
+}
+
 // `call ... @sym(` on any line — a legacy C call site (declares are
 // tolerated; only call sites are forbidden by the original).
 fn _has_call_site(ir: string, sym: string) -> boolean {
@@ -256,6 +271,19 @@ test "probe routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" ![io] {
     // dropped and re-derived with `strlen`.
     assert ! _has_call_site(ir, "sfn_fs_write_file");
     assert ! _has_call_site(ir, "sfn_fs_append_file");
+    // SFN-1009: pin the operand SHAPE, not just the symbol. The twins
+    // agree with the emitted `declare` only because a `{i8*, i64}`
+    // by-value aggregate flattens to the same registers as the split
+    // `(*u8, i64)` params the Sailfin body declares. `byval` would break
+    // that — it passes the aggregate INDIRECTLY, so the body would read a
+    // pointer-to-struct as its data pointer. Nothing else in the suite
+    // would catch it, and on a target whose C ABI passes 16-byte
+    // aggregates indirectly the failure is silent corruption, not a
+    // link error.
+    let write_call = _call_line(ir, "sfn_fs_write_file_lv");
+    assert write_call != "";
+    assert contains(write_call, "{i8*, i64}");
+    assert ! contains(write_call, "byval");
     // Legacy C call sites must be gone (declares tolerated).
     assert ! _has_call_site(ir, "sailfin_adapter_fs_read_file");
     assert ! _has_call_site(ir, "sailfin_adapter_fs_write_file");
