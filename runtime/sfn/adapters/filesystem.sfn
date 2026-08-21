@@ -164,6 +164,8 @@ extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
 extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
+extern fn ferror(f: *File) -> i32;
+
 // Extended POSIX filesystem primitives (#1311, epic #1308 C7). Two
 // portable libc symbols are bound directly (no C trampoline):
 // `chmod` backs `set_perms` and `access` backs `is_executable`
@@ -228,8 +230,10 @@ extern fn strchr(s: *u8, c: i32) -> *u8;
 // POSIX's `ssize_t`, so a raw `-> i64` extern would promote a `-1` error
 // into `4294967295` on Windows — the defect SFN-927 fixed on the socket
 // path, and `runtime/sfn/io.sfn` avoids for the same reason.
-// `platform/fd_io.sfn` precedes this module in `runtime/capsule.toml`
-// `sfn-sources`, so this is a plain cross-module runtime reference.
+// `sfn_fd_write` is defined by `platform/fd_io.sfn` (POSIX) /
+// `platform/fd_io_windows.sfn` (Windows); each module emits its own object
+// and the linker binds `@sfn_fd_write` at link time, with no ordering
+// requirement on `runtime/capsule.toml` `sfn-sources`.
 extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn abort() -> void;
@@ -516,7 +520,7 @@ fn sfn_fs_read_file(path: *u8) -> *u8 ![io] {
         // region. `strlen` supplies each byte count, so no hand-counted
         // literal length can drift out of sync with its message.
         let head: string = "[sailfin] fs.readFile: file contains interior NUL bytes and cannot be read as a string: ";
-        let hint: string = "\n           use fs.read_bytes / fs.copy (sfn/fs) for binary content\n";
+        let hint: string = "\n           for binary content use: import { copy, read_bytes } from \"sfn/fs\"\n";
         let head_ptr: *u8 = head as *u8;
         let hint_ptr: *u8 = hint as *u8;
         unsafe {
@@ -890,6 +894,18 @@ fn sfn_fs_read_bytes(path: *u8, out_length: *u8) -> *u8 ![io] {
         let read_i: i64 = read_n as i64;
         len = len + read_i;
         if read_i < chunk_size { break; }
+    }
+
+    // `fopen(dir, "rb")` succeeds on Linux; `fread` then fails immediately,
+    // leaving `len == 0` — which would otherwise be indistinguishable from a
+    // genuinely empty file and report success (SFN-1008). A mid-read `EIO`
+    // hits the same short-read exit with partial `len`. `ferror` catches
+    // both, mapping them to a hard failure so the caller's "empty file"
+    // status stays truthful.
+    if ferror(f) != 0 {
+        free(buf);
+        fclose(f);
+        return null;
     }
 
     fclose(f);

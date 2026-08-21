@@ -15,17 +15,37 @@ extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
 
+// Stdio externs backing `copy`'s streaming chunk loop (SFN-1008), spelled
+// exactly as `capsules/sfn/archive/src/tar_read.sfn`'s chunked file-to-file
+// copy.
+extern fn fopen(path: *u8, mode: *u8) -> *File;
+
+extern fn fclose(f: *File) -> i32;
+
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn ferror(f: *File) -> i32;
+
 // `addr` is a libc-`malloc`'d buffer the caller owns, released via
 // `free_bytes` exactly once per `status == 0` result. `length` is the true
 // byte count, including interior NULs. `status`: 0 ok, 1 not found, 2
-// unreadable / IO error. A genuinely empty file is `status == 0`,
-// `length == 0`, and a non-zero `addr` — that keeps it distinguishable from
-// a failure (all of which report `addr == 0`), a distinction plain
-// `fs.read`/`fs.readFile` collapses (SFN-659).
+// unreadable / IO error, 3 allocation failure. A genuinely empty file is
+// `status == 0`, `length == 0`, and a non-zero `addr` — that keeps it
+// distinguishable from a failure (all of which report `addr == 0`), a
+// distinction plain `fs.read`/`fs.readFile` collapses (SFN-659).
 //
 // The status codes are documented here rather than exported as named
 // constants because an imported module-level `let` lowers to `internal
-// global` with no cross-capsule import path (`compiler/capsule.toml:41`).
+// global` with no cross-capsule import path (the `[capsule]` block near the
+// top of `compiler/capsule.toml`).
+//
+// `compiler/src/build/fs.sfn`'s same-named `FileBytes` is the hardened
+// compiler-internal sibling: it shares this status vocabulary for codes
+// 0-3 but additionally caps the read size (`4`) and guards against
+// no-progress reads (`5`). This one has no size cap or loop guard, so
+// codes `4` and `5` are unused here.
 struct FileBytes {
     addr: int;
     length: int;
@@ -39,7 +59,7 @@ fn read_bytes(path: string) -> FileBytes ![io] {
 
     let out: *u8 = malloc(8 as usize);
     if out as i64 == 0 {
-        return FileBytes { addr: 0, length: 0, status: 2 };
+        return FileBytes { addr: 0, length: 0, status: 3 };
     }
     memset(out, 0, 8 as usize);
 
@@ -50,8 +70,8 @@ fn read_bytes(path: string) -> FileBytes ![io] {
     }
 
     // Decode the little-endian 8-byte out-param the adapter stored the
-    // binary length into (mirrors its byte-wise store loop,
-    // `runtime/sfn/adapters/filesystem.sfn:853-861`).
+    // binary length into (mirrors the out-param store loop in
+    // `sfn_fs_read_bytes`, `runtime/sfn/adapters/filesystem.sfn`).
     let mut len: int = 0;
     let mut k: int = 0;
     loop {
@@ -79,10 +99,60 @@ fn free_bytes(data: FileBytes) -> void {
     if data.addr != 0 { free(data.addr as *u8); }
 }
 
+// Streams `src` to `dst` in 65536-byte chunks rather than buffering the
+// whole file, so peak memory is bounded by the chunk size rather than the
+// file size — compiled user programs carry no `RLIMIT_AS`
+// (`.claude/rules/compiler-safety.md`), so a whole-file buffer-then-write
+// is an unbounded transient allocation. Mirrors
+// `compiler/src/build/fs.sfn`'s `_copy_file_counted`.
 fn copy(src: string, dst: string) -> boolean ![io] {
-    let b = read_bytes(src);
-    if b.status != 0 { return false; }
-    let ok = write_bytes(dst, b);
-    free_bytes(b);
+    let read_mode: string = "rb";
+    let f: *File = fopen(src as *u8, read_mode as *u8);
+    if (f as i64) == 0 { return false; }
+
+    let write_mode: string = "wb";
+    let out: *File = fopen(dst as *u8, write_mode as *u8);
+    if (out as i64) == 0 {
+        fclose(f);
+        return false;
+    }
+
+    let chunk: int = 65536;
+    let chunk_buf: *u8 = malloc(chunk as usize);
+    if (chunk_buf as i64) == 0 {
+        fclose(f);
+        fclose(out);
+        return false;
+    }
+
+    let mut ok: boolean = true;
+    let mut guard: int = 0;
+    let max_iters: int = 200000;
+    loop {
+        guard += 1;
+        if guard > max_iters {
+            ok = false;
+            break;
+        }
+        let got: int = fread(chunk_buf, 1 as usize, chunk as usize, f) as int;
+        if got > 0 {
+            let written: int = fwrite(chunk_buf, 1 as usize, got as usize, out) as int;
+            if written != got {
+                ok = false;
+                break;
+            }
+        }
+        if got < chunk { break; }
+    }
+
+    if ferror(f) != 0 { ok = false; }
+    if ferror(out) != 0 { ok = false; }
+    free(chunk_buf);
+
+    let close_src: int = fclose(f) as int;
+    let close_dst: int = fclose(out) as int;
+    if close_src != 0 { ok = false; }
+    if close_dst != 0 { ok = false; }
+
     return ok;
 }

@@ -183,6 +183,22 @@ test "fs bytes: byte_at rejects out-of-bounds with -1" ![io] {
     remove_all(scratch);
 }
 
+test "fs bytes: a directory source reports failure, not an empty file" ![io] {
+    let dir = mkdtemp("sfn-fs-bytes-dir-src-");
+    assert dir.length > 0;
+    let dst = dir + "/dst.bin";
+
+    // `fopen(dir, "rb")` succeeds on Linux and `fread` then fails
+    // immediately, which without the `ferror` guard (SFN-1008) reports the
+    // directory as a zero-length "empty file" instead of a failure.
+    let b = read_bytes(dir);
+    assert b.status != 0;
+
+    assert copy(dir, dst) == false;
+
+    remove_all(dir);
+}
+
 test "fs bytes: write_bytes reports false for a bad destination" ![io] {
     let scratch = mkdtemp("sfn-fs-bytes-baddst-");
     assert scratch.length > 0;

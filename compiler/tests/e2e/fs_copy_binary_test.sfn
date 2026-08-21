@@ -132,11 +132,13 @@ test "fs readFile: binary input aborts instead of truncating" ![io] {
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
 
-    // A silent truncation would exit 0 having returned 7. The whole point
-    // of SFN-1008 is that this is now loud.
+    // `fn main -> int` returning 7 would itself exit 7, so a nonzero exit
+    // alone is only a weak precondition here. The `contains(err, ...)`
+    // assertions below are what actually pin the abort-and-diagnose guard.
     assert exit != 0;
     assert contains(err, "interior NUL");
-    // The diagnostic must route the caller to the working path, not just
-    // report that it gave up.
-    assert contains(err, "read_bytes");
+    // The diagnostic must route the caller to the working, copy-pasteable
+    // import, not just report that it gave up.
+    assert contains(err, "import { copy, read_bytes }");
+    assert contains(err, "sfn/fs");
 }
