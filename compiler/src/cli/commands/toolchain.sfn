@@ -39,6 +39,7 @@ import {
     _toml_trim_cmd
 } from "../../build/fs";
 import { copy_tree, ensure_dir_p, remove_tree } from "../../build/fs_tree";
+import { _path_basename } from "../../build/paths";
 import { build_host_os, host_exe_name, host_is_windows } from "../../build/target";
 import { _env_flag, _get_home_cmd } from "../../build_flags";
 import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver/toolchain";
@@ -377,13 +378,14 @@ fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] 
 // reports success/failure and the caller treats `false` as fatal.
 fn _toolchain_link_alias(bin_path: string, alias_path: string) -> boolean ![io] {
     fs.deleteFile(alias_path);
-    // The relative target must be the name the store actually holds
-    // (SFN-1007). Once the binary is `sailfin.exe` on a Windows host, a
-    // symlink to the bare `sailfin` DANGLES. That is not hypothetical
-    // simply because `symlink(2)` usually fails on Windows and this falls
-    // through to the copy below: with Developer Mode enabled it succeeds,
-    // and correctness must not rest on another call failing.
-    if fs.symlink(host_exe_name("sailfin"), alias_path) { return true; }
+    // The relative target is `bin_path`'s own basename, not a bare
+    // `"sailfin"` literal (SFN-1007). Deriving it means the link always
+    // names the file the store actually holds — `sailfin` on POSIX,
+    // `sailfin.exe` where the writer produced that — with no host gate to
+    // drift out of sync with the writer, and nothing to revisit if
+    // `fs.symlink`'s Windows `false` stub is ever replaced. Still
+    // relative, so the store entry stays relocatable.
+    if fs.symlink(_path_basename(bin_path), alias_path) { return true; }
     if !_copy_file(bin_path, alias_path) { return false; }
     // Best-effort: on Windows `fs.set_perms` can only express the
     // read-only attribute, so a `false` return here is not an error
