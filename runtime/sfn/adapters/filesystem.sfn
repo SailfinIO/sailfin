@@ -604,6 +604,67 @@ fn sfn_fs_append_file(path: *u8, contents: *u8) -> bool ![io] {
     return written == len && close_rc == 0;
 }
 
+// `sfn_fs_write_file_lv(path, data, len)` / `sfn_fs_append_file_lv(...)` —
+// the length-carrying twins of the two adapters above (SFN-1009).
+//
+// The `fs.writeFile` / `fs.appendFile` descriptors declare the payload as
+// `{i8*, i64}` and route the call here through `native_signature`, so the
+// caller's byte length arrives intact instead of being dropped by an
+// `extractvalue ..., 0` at the coercion boundary and then re-derived with
+// `strlen`. Two consequences: a payload carrying an interior NUL is written
+// whole rather than truncated at the first zero byte, and every write stops
+// paying a full scan of its own content (the recovery tax SFN-628 measured).
+//
+// A `{i8*, i64}` descriptor entry paired with split `(*u8, i64)` params here
+// is the shape already proven by `sfn_str_codepoint_lv`,
+// `sfn_str_to_number_lv`, and `sfn_str_grapheme_count_lv`: the aggregate is
+// two integer eightbytes, so it occupies the same registers as the two
+// scalars, and the runtime module links as a separate object — the IR-type
+// difference between the emitted `declare` and this `define` never reaches
+// the linker.
+//
+// The twins are additive, and must stay that way. `make compile` has the
+// pinned seed lower the compiler's own `fs.*` call sites using the SEED's
+// registry, which still names the bare-`i8*` `sfn_fs_write_file`, against
+// runtime objects built from THIS source. Re-signaturing the originals in
+// place would leave those seed-emitted calls handing two arguments to a
+// three-argument body; C linking does not check, so the failure would be
+// silent corruption rather than a link error. The originals stay.
+//
+// No immediate-codepoint decode here, unlike the bare-pointer originals.
+// That encoding was a property of the one-slot calling convention — a single
+// grapheme had nowhere to carry a length, so it was tagged into the pointer
+// value itself — and it is retired; see the `_sfn_is_immediate` note in
+// `runtime/sfn/io.sfn`. No path that builds a `{i8*, i64}` aggregate has ever
+// tagged its data pointer, so there is nothing here to decode.
+fn sfn_fs_write_file_lv(path: *u8, data: *u8, len: i64) -> void ![io] {
+    if path as i64 == 0 { return; }
+    if len < 0 { return; }
+    if len > 0 && data as i64 == 0 { return; }
+
+    let mode_str: string = "wb";
+    let f: *File = fopen(path, mode_str as *u8);
+    if f as i64 == 0 { return; }
+
+    if len > 0 { let _ = _fs_fwrite_all(data, len, f); }
+    fclose(f);
+}
+
+fn sfn_fs_append_file_lv(path: *u8, data: *u8, len: i64) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+    if len < 0 { return false; }
+    if len > 0 && data as i64 == 0 { return false; }
+
+    let mode_str: string = "ab";
+    let f: *File = fopen(path, mode_str as *u8);
+    if f as i64 == 0 { return false; }
+
+    let mut written: i64 = 0;
+    if len > 0 { written = _fs_fwrite_all(data, len, f); }
+    let close_rc = fclose(f);
+    return written == len && close_rc == 0;
+}
+
 // `sfn_fs_delete(path)` — remove the file named by `path`. Pure
 // Sailfin: `unlink(2)` returns 0 on success, -1 on error. Files
 // only — `unlink` cannot remove directories (it fails with

@@ -214,6 +214,10 @@ test "filesystem emit: define for every sfn_fs_* export" ![io] {
     assert _has_define_named(ir, "sfn_fs_read_file");
     assert _has_define_named(ir, "sfn_fs_write_file");
     assert _has_define_named(ir, "sfn_fs_append_file");
+    // SFN-1009: the length-carrying twins that fs.writeFile/appendFile
+    // now route through must be defined alongside the originals.
+    assert _has_define_named(ir, "sfn_fs_write_file_lv");
+    assert _has_define_named(ir, "sfn_fs_append_file_lv");
     assert _has_define_named(ir, "sfn_fs_delete");
     assert _has_define_named(ir, "sfn_fs_mkdir");
     assert _has_define_named(ir, "sfn_fs_list_dir");
@@ -244,8 +248,14 @@ test "probe routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" ![io] {
     let ir = _emit_module("fs_probe", probe);
     assert ir != "EMIT_FAILED";
     assert _references(ir, "sfn_fs_read_file");
-    assert _references(ir, "sfn_fs_write_file");
-    assert _references(ir, "sfn_fs_append_file");
+    assert _references(ir, "sfn_fs_write_file_lv");
+    assert _references(ir, "sfn_fs_append_file_lv");
+    // SFN-1009: the bare-`i8*` twins stay DEFINED (seed-built IR still
+    // calls them) but must no longer be the target of a freshly emitted
+    // call — that is what proves the length is carried rather than
+    // dropped and re-derived with `strlen`.
+    assert ! _has_call_site(ir, "sfn_fs_write_file");
+    assert ! _has_call_site(ir, "sfn_fs_append_file");
     // Legacy C call sites must be gone (declares tolerated).
     assert ! _has_call_site(ir, "sailfin_adapter_fs_read_file");
     assert ! _has_call_site(ir, "sailfin_adapter_fs_write_file");
@@ -280,6 +290,9 @@ test "compiler binary exports the defined sfn_fs_* family" ![io] {
     assert _nm_has_defined(bin, "sfn_fs_read_file");
     assert _nm_has_defined(bin, "sfn_fs_write_file");
     assert _nm_has_defined(bin, "sfn_fs_append_file");
+    // SFN-1009: the length-carrying twins must be defined text symbols too.
+    assert _nm_has_defined(bin, "sfn_fs_write_file_lv");
+    assert _nm_has_defined(bin, "sfn_fs_append_file_lv");
     assert _nm_has_defined(bin, "sfn_fs_delete");
     assert _nm_has_defined(bin, "sfn_fs_mkdir");
     assert _nm_has_defined(bin, "sfn_fs_list_dir");
