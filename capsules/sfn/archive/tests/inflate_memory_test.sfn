@@ -1,0 +1,162 @@
+// capsules/sfn/archive/tests/inflate_memory_test.sfn
+//
+// Memory regression for SFN-1020: `inflate.sfn`'s bit reader
+// (`_BitReader`/`_br_bits`/`_huff_decode`) used to allocate a fresh
+// `_BitReader`/`_BitsResult`/`Result.Ok` on every single BIT read — ~344
+// bytes of process memory per decompressed output byte — which exhausted
+// the 8 GiB `RLIMIT_AS` cap decompressing a real seed tarball with no
+// diagnostic (the OOM reporter itself needed an allocation and re-entered
+// into a bare `abort()`). Fixed by threading one malloc'd `*_BitReader`
+// through the whole call, mutated in place instead of reconstructed per
+// bit.
+//
+// This drives the fix through the exact public entry point `sfn dev
+// bootstrap fetch` / `sfn toolchain install` use — `targz_extract`, not
+// `inflate_all` directly — decompressing a real (if synthetic) `.tar.gz`
+// in a metered CHILD process (`process.run_capture_metered`) so the
+// assertion is against genuine process RSS, not an in-process proxy.
+//
+// The fixture is `sfn build`-compiled into a standalone binary FIRST
+// (unmetered, in this parent), and only the resulting binary is metered —
+// never `sfn run <fixture>` directly, because `rusage` peak RSS is the max
+// over the whole process tree, and metering `sfn run` would fold in
+// compile+link (an emit child, `clang`, the linker) alongside the
+// decompression under test. Measured: building first does NOT drop the
+// floor much (247,444 KB metering the built binary directly vs. 247,528 KB
+// metering `sfn run` end to end) — compile+link was never the dominant
+// term. The floor is `bytes_append_byte` (`bytes.sfn:204-214`), called once
+// per OUTPUT byte from `_inflate_huff_block` and allocating a `ByteBuf` +
+// `Result.Ok` box each time — unrelated to this fix, explicitly out of
+// scope (SFN-1020 review), and already present before this change. Its
+// cost is real (~73 bytes/output byte, separately measured) and sets the
+// floor this bound must clear; building the fixture separately is still
+// correct — it removes an UNRELATED, variable cost (compile+link) from the
+// signal — it just was not the dominant one here.
+//
+// Cross-platform bound: `runtime/sfn/process.sfn:240-245` documents
+// `ru_maxrss` as KiB on Linux but BYTES on Darwin — an unconditional
+// upper-bound assertion in KiB units is a false positive on macOS (any
+// process is "under" a KiB-scale ceiling measured in bytes). Detect the
+// host the same way `compiler/tests/e2e/process_run_capture_metered_test.sfn:23-29`
+// does (`uname -s` via the unmetered `run_capture`) and assert the bound
+// only on Linux, `>= 0` elsewhere — matching that file's `:59-73`
+// precedent. The `exit == 0` and stdout-equality checks below still catch
+// the OOM-abort regression on every platform; only the numeric envelope is
+// Linux-only.
+import { find, repeat } from "sfn/strings";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
+
+import {
+    CreateOptions,
+    DeflateOptions,
+    DeflateStrategy,
+    LinkPolicy,
+    targz_create
+} from "../src/mod";
+
+// Host OS via `uname -s`, captured through the plain (unmetered)
+// run_capture, mirroring `process_run_capture_metered_test.sfn:23-29`.
+fn _is_linux() -> boolean ![io] {
+    let exit = process.run_capture(["uname", "-s"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    return find(out, "Linux", 0) >= 0;
+}
+
+// One repeated line, chosen so the total is a known, exact byte count:
+// 44 bytes x 70,000 = 3,080,000 bytes of highly compressible content. Real
+// output size does not matter to the fix (every bit read allocated
+// regardless of symbol type); what matters is a payload large enough that
+// a reintroduced per-bit leak overshoots the bound below by a wide margin.
+fn _payload_text() -> string {
+    return repeat("the quick brown fox jumps over the lazy dog\n", 70000);
+}
+
+fn _fixed_deflate_opts() -> DeflateOptions {
+    return DeflateOptions { strategy: DeflateStrategy.Fixed };
+}
+
+test "archive inflate: decompressing a real tarball through targz_extract stays within a bounded memory envelope" ![clock, io] {
+    let root: string = scratch_root() + "/inflate-memory-regression";
+    fs.createDirectory(root, true);
+    let src_dir: string = root + "/src";
+    fs.createDirectory(src_dir, true);
+    fs.writeFile(src_dir + "/payload.txt", _payload_text());
+
+    let tarball: string = root + "/payload.tar.gz";
+    let create_opts = CreateOptions {
+        exec_paths: [],
+        link_policy: LinkPolicy.Preserve,
+        deflate: _fixed_deflate_opts()
+    };
+    let created = targz_create(tarball, src_dir, [], create_opts);
+    match created {
+        Result.Ok { value }
+        : {
+            assert value.bytes_written == 3080000;
+        },
+        Result.Err { error }
+        : {
+            print("targz_create failed: " + error.message);
+            assert false;
+        }
+    }
+
+    // Build the fixture into a standalone binary FIRST, unmetered — see
+    // the module comment above for why the metered run must be of the
+    // built binary, not `sfn run`.
+    let fixture_src: string = "capsules/sfn/archive/tests/fixtures/inflate_memory_fixture.sfn";
+    let fixture_bin: string = root + "/inflate-memory-fixture";
+    let build_env: string[] = clean_runner_env(nested_runner_scratch("inflate-memory-build"));
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", fixture_bin, fixture_src], build_env);
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    if build_exit != 0 {
+        print("fixture build failed: " + build_out + build_err);
+    }
+    assert build_exit == 0;
+
+    // The built binary needs no `PATH`/clang — it is already linked — so
+    // its env carries only what the fixture itself reads.
+    let dest_dir: string = root + "/dest";
+    let mut run_env: string[] = [];
+    run_env.push("SFN_ARCHIVE_MEMORY_FIXTURE_TARBALL=" + tarball);
+    run_env.push("SFN_ARCHIVE_MEMORY_FIXTURE_DEST=" + dest_dir);
+
+    let exit = process.run_capture_metered([fixture_bin], run_env);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    let _wall = process.capture_take_wall_ms();
+    let peak_rss_kb = process.capture_take_peak_rss_kb();
+
+    assert exit == 0;
+    assert out == "extracted: 1 members, 3080000 bytes\n";
+
+    if _is_linux() {
+        // 400,000 KB (~400 MB): measured against the built binary alone,
+        // this payload's post-fix floor is 247,444 KB — almost entirely
+        // `bytes_append_byte`'s existing, unrelated ~73 bytes/output-byte
+        // cost (see the module comment above), not this fix's doing. A
+        // FULL reintroduction of the per-bit leak this issue fixes adds
+        // ~3,080,000 x 344 bytes (~1,010 MB) on top of that floor — around
+        // 1,257 MB total. Even a PARTIAL regression (one of the three
+        // per-bit heap objects, ~115 bytes/output byte) adds ~354 MB, for
+        // ~601 MB total. 400 MB sits with real margin above the measured
+        // 247 MB floor and real margin below the ~601 MB a partial
+        // regression would reach — tight enough to catch a partial
+        // reintroduction, loose enough not to flake on ordinary variance
+        // in the unrelated `bytes_append_byte` floor.
+        assert peak_rss_kb < 400000;
+    } else {
+        // Darwin's `ru_maxrss` is bytes, not KiB (`process.sfn:240-245`) —
+        // a KiB-scale bound would pass unconditionally there. Still
+        // confirms the metered call itself ran and reported.
+        assert peak_rss_kb >= 0;
+    }
+}
