@@ -1,0 +1,23 @@
+// Non-entry-module fixture for SFN-1005, the standalone-ctor branch.
+//
+// Pairs with `compiler/tests/e2e/module_init_ctor_two_module_test.sfn`.
+// Unlike `module_init_ctor_two_module_shared.sfn`, this module declares
+// no `struct`/`enum`/`interface`, so `emit_type_descriptors` returns
+// `_empty_emission()` (`type_descriptors.sfn`'s zero-preamble early
+// return) and emits no `@llvm.global_ctors` array at all. That leaves
+// `lowering_core/mod.sfn`'s fallback as the SOLE producer of this
+// module's `@llvm.global_ctors` — a single-entry array pointing directly
+// at `@sailfin_module_init__<module>`, not merged with anything. That
+// fallback line had no test coverage: the sibling fixture's `struct`
+// always routed it through the merged branch instead.
+let scalar: int = 0 - 1;
+
+fn _compute() -> int { return 3; }
+
+let called: int = _compute();
+
+fn get_notype_scalar() -> int { return scalar; }
+
+fn get_notype_called() -> int { return called; }
+
+export { get_notype_called, get_notype_scalar };
