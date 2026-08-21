@@ -2,8 +2,21 @@
 //
 // Provides typed access to the local filesystem. All operations require
 // the `io` effect and are synchronous in the current runtime.
+export {
+    FileBytes,
+    byte_at,
+    copy,
+    free_bytes,
+    read_bytes,
+    write_bytes
+} from "./bytes";
+
 fn read(path: string) -> string ![io] {
-    // Read the entire contents of a file as a UTF-8 string.
+    // Read the entire contents of a file as a UTF-8 string. A Sailfin
+    // `string` cannot round-trip an interior NUL, so a file containing one
+    // aborts the process with a diagnostic rather than silently returning
+    // a truncated result (SFN-1008). Binary content — or anything that may
+    // contain an embedded NUL — must use `read_bytes`/`copy` instead.
     return fs.readFile(path);
 }
 

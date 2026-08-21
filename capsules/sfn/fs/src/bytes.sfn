@@ -1,0 +1,88 @@
+// sfn/fs/bytes — binary-safe file I/O.
+//
+// `read`/`write` in `mod.sfn` round-trip through a Sailfin `string`, whose
+// length is recovered by a NUL scan at the coercion boundary, so a file
+// carrying an interior NUL cannot survive the trip — `read` now aborts on
+// one rather than returning a truncated result. `FileBytes` carries a raw
+// heap buffer plus an explicit length instead, so binary content (interior
+// NULs included) round-trips intact (SFN-1008).
+//
+// Externs redeclared per-module (the #306 cross-module-extern limit) —
+// spelling matches `capsules/sfn/os/src/mod.sfn`.
+extern fn malloc(size: usize) -> *u8;
+
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+// `addr` is a libc-`malloc`'d buffer the caller owns, released via
+// `free_bytes` exactly once per `status == 0` result. `length` is the true
+// byte count, including interior NULs. `status`: 0 ok, 1 not found, 2
+// unreadable / IO error. A genuinely empty file is `status == 0`,
+// `length == 0`, and a non-zero `addr` — that keeps it distinguishable from
+// a failure (all of which report `addr == 0`), a distinction plain
+// `fs.read`/`fs.readFile` collapses (SFN-659).
+//
+// The status codes are documented here rather than exported as named
+// constants because an imported module-level `let` lowers to `internal
+// global` with no cross-capsule import path (`compiler/capsule.toml:41`).
+struct FileBytes {
+    addr: int;
+    length: int;
+    status: int;
+}
+
+fn read_bytes(path: string) -> FileBytes ![io] {
+    if !fs.exists(path) {
+        return FileBytes { addr: 0, length: 0, status: 1 };
+    }
+
+    let out: *u8 = malloc(8 as usize);
+    if out as i64 == 0 {
+        return FileBytes { addr: 0, length: 0, status: 2 };
+    }
+    memset(out, 0, 8 as usize);
+
+    let buf: *u8 = fs.read_bytes(path, out);
+    if buf as i64 == 0 {
+        free(out);
+        return FileBytes { addr: 0, length: 0, status: 2 };
+    }
+
+    // Decode the little-endian 8-byte out-param the adapter stored the
+    // binary length into (mirrors its byte-wise store loop,
+    // `runtime/sfn/adapters/filesystem.sfn:853-861`).
+    let mut len: int = 0;
+    let mut k: int = 0;
+    loop {
+        if k >= 8 { break; }
+        len = len | (load_byte((out as i64) + k) << (k * 8));
+        k += 1;
+    }
+    free(out);
+
+    return FileBytes { addr: buf as i64, length: len, status: 0 };
+}
+
+fn write_bytes(path: string, data: FileBytes) -> boolean ![io] {
+    if data.status != 0 { return false; }
+    return fs.write_bytes(path, data.addr, data.length);
+}
+
+fn byte_at(data: FileBytes, index: int) -> int {
+    if index < 0 { return -1; }
+    if index >= data.length { return -1; }
+    return load_byte(data.addr + (index as i64)) as int;
+}
+
+fn free_bytes(data: FileBytes) -> void {
+    if data.addr != 0 { free(data.addr as *u8); }
+}
+
+fn copy(src: string, dst: string) -> boolean ![io] {
+    let b = read_bytes(src);
+    if b.status != 0 { return false; }
+    let ok = write_bytes(dst, b);
+    free_bytes(b);
+    return ok;
+}
