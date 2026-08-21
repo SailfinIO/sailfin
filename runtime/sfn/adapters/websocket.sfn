@@ -80,6 +80,8 @@ extern fn atoi(s: *u8) -> i32;
 // externs and the linker binds whichever sibling was compiled — the
 // same shape as `_sfn_fs_access_exec_mode` in `filesystem.sfn`
 // (SFN-671).
+extern fn sfn_socket_net_init() -> i32;
+
 extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
@@ -231,6 +233,12 @@ fn _ws_sockaddr_octets(sa: i64, out: *u8) -> bool {
 // `out[0..4]`. Mirrors `http.sfn`'s `_resolve_dns` (v0 scope: IPv4
 // only, first A record, no caching).
 fn _ws_resolve_dns(host: *u8, out: *u8) -> bool ![net] {
+    // Winsock refuses `getaddrinfo` with `WSANOTINITIALISED` until the
+    // library is initialized, and resolution runs one step ahead of
+    // socket creation — so `sfn_socket_open`'s own `WSAStartup` has
+    // not run yet and, on this path, never would (SFN-1026). No-op on
+    // POSIX.
+    if sfn_socket_net_init() != 0 { return false; }
     let hints: *u8 = malloc(48 as usize);
     if hints as i64 == 0 { return false; }
     memset(hints, 0, 48 as usize);

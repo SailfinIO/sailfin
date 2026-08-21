@@ -189,6 +189,11 @@ test "http emit: declares the socket surface, POSIX close/recv/send retired" ![i
     let ir = _emit_module("http", "runtime/sfn/adapters/http.sfn");
     assert ir != "EMIT_FAILED";
     assert _has_declare(ir, "sfn_socket_open");
+    // SFN-1026: the resolver must initialize Winsock before
+    // `getaddrinfo`, since it runs ahead of socket creation. Deleting
+    // that call drops this declare, and no host-side test can catch
+    // it while the Windows CI leg runs no tests (SFN-981).
+    assert _has_declare(ir, "sfn_socket_net_init");
     assert _has_declare(ir, "connect");
     assert _has_declare(ir, "sfn_socket_send");
     assert _has_declare(ir, "sfn_socket_recv");

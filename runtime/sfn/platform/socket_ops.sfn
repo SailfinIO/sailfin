@@ -80,6 +80,16 @@ extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
+// Initialize the host networking library. POSIX has none to
+// initialize, so this is a no-op returning success. The Windows
+// sibling runs `WSAStartup` here.
+//
+// Callers are the name resolvers (`_resolve_dns` and its per-adapter
+// copies in `net.sfn`/`websocket.sfn`), which run BEFORE any socket
+// exists and so cannot rely on `sfn_socket_open` having initialized
+// the library (SFN-1026).
+fn sfn_socket_net_init() -> i32 { return 0; }
+
 // Create a socket. POSIX needs no library initialization, so this is
 // a direct pass-through; the Windows sibling does `WSAStartup` first.
 fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32 {
@@ -195,6 +205,7 @@ fn sfn_socket_timeout_readback_ms(fd: i32) -> i64 {
 }
 
 export {
+    sfn_socket_net_init,
     sfn_socket_open,
     sfn_socket_close,
     sfn_socket_set_timeouts,
