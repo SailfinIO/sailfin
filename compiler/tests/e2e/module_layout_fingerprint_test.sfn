@@ -57,6 +57,30 @@ fn _freshness_fingerprint(root: string) -> string ![io] {
     return output;
 }
 
+fn _ci_freshness_fingerprint(root: string) -> string ![io] {
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let _exit = process.run_capture_cwd(["bash", script, "--ci-freshness"], _script_env(), root);
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
+fn _inventory_view(root: string, view: string) -> string ![io] {
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let _exit = process.run_capture_cwd(["bash", script, view], _script_env(), root);
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
+fn _member_manifest(root: string, name: string) -> string ![io] {
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let _exit = process.run_capture_cwd(["bash", script, "--member-manifest", name], _script_env(), root);
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
 fn _native_freshness_fingerprint(root: string) -> string ![io] {
     let _exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fingerprint"], [], root);
     let output = process.capture_take_stdout();
@@ -159,6 +183,74 @@ test "module layout fingerprint: shell and native v2 freshness inventories agree
         + "/compiler/tests/unit/fixtures/repository_topology/target";
     assert _freshness_fingerprint(transitional) == _native_freshness_fingerprint(transitional);
     assert _freshness_fingerprint(target) == _native_freshness_fingerprint(target);
+}
+
+test "module layout fingerprint: canonical views accept transitional and target roots" ![io] {
+    let transitional = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/transitional";
+    let target = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/target";
+    let transitional_public = _inventory_view(transitional, "--public-members");
+    let target_public = _inventory_view(target, "--public-members");
+
+    assert contains(transitional_public, "sfn/strings\tcapsules/sfn/strings");
+    assert contains(transitional_public, "sfn/json\tstdlib/json");
+    assert contains(target_public, "sfn/strings\tstdlib/strings");
+    assert contains(target_public, "sfn/prelude\tstdlib/prelude");
+    assert ! contains(transitional_public, "sfn/runtime-native");
+    assert ! contains(target_public, "sfn/compiler");
+    assert _member_manifest(transitional, "sfn/compiler") == "compiler/capsule.toml\n";
+    assert _member_manifest(target, "sfn/compiler") == "compiler/driver/capsule.toml\n";
+}
+
+test "module layout fingerprint: freshness is checkout-root independent and ignores docs" ![io] {
+    let fixture = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/target";
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/module-layout-fingerprint-root-independence";
+    let first = scratch + "/first";
+    let second = scratch + "/second";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    process.run(["cp", "-R", fixture, first]);
+    process.run(["cp", "-R", fixture, second]);
+
+    let dependency = "\n[dependencies]\n\"sfn/strings\" = \"*\"\n";
+    let first_manifest = first + "/compiler/driver/capsule.toml";
+    let second_manifest = second + "/compiler/driver/capsule.toml";
+    fs.writeFile(first_manifest, fs.readFile(first_manifest) + dependency);
+    fs.writeFile(second_manifest, fs.readFile(second_manifest) + dependency);
+
+    let baseline = _ci_freshness_fingerprint(first);
+    assert baseline == _ci_freshness_fingerprint(second);
+    fs.writeFile(second + "/README.md", "documentation churn\n");
+    assert baseline == _ci_freshness_fingerprint(second);
+    fs.writeFile(second + "/stdlib/strings/src/mod.sfn", "fn moved() -> int { return 2; }\n");
+    assert baseline != _ci_freshness_fingerprint(second);
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "module layout fingerprint: duplicate canonical members fail every inventory view" ![io] {
+    let root = _repo_root()
+        + "/compiler/tests/unit/fixtures/repository_topology/duplicate_name";
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let exit = process.run_capture_cwd(["bash", script, "--member-records"], _script_env(), root);
+    let _output = process.capture_take_stdout();
+    let error = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(error, "duplicate workspace capsule name");
+}
+
+test "module layout fingerprint: freshness inputs name explicit files exactly once" ![io] {
+    let inputs = _inventory_view(_repo_root(), "--ci-freshness-inputs");
+    assert _count(inputs, "workspace.toml\n") == 1;
+    assert _count(inputs, "bootstrap.toml\n") == 1;
+    assert _count(inputs, "compiler/capsule.toml\n") == 1;
+    assert _count(inputs, "runtime/capsule.toml\n") == 1;
+    assert _count(inputs, "capsules/sfn/cli/src/mod.sfn\n") == 1;
+    assert _count(inputs, "capsules/sfn/strings/src/mod.sfn\n") == 1;
+    assert _count(inputs, "capsules/sfn/crypto/src/mod.sfn\n") == 1;
+    assert _count(inputs, "capsules/sfn/archive/src/mod.sfn\n") == 1;
 }
 
 test "module layout fingerprint: literal members ignore workspace excludes" ![io] {
@@ -269,6 +361,20 @@ test "module layout fingerprint: every build-cache key site carries the fp" ![io
     // jobs, each job defining its own fp step.
     assert _count(workflow, "steps.layout.outputs.fp") == 3;
     assert _count(workflow, "id: layout") == 2;
+}
+
+test "module layout fingerprint: every cache key uses canonical freshness" ![io] {
+    let action = _read_repo_file(".github/actions/sailfin-build/action.yml");
+    let workflow = _read_repo_file(".github/workflows/build-quality.yml");
+
+    assert _count(action, "steps.layout.outputs.freshness") == 2;
+    assert _count(workflow, "steps.layout.outputs.freshness") == 5;
+    assert _count(action, "echo \"freshness=$freshness\"") == 1;
+    assert _count(workflow, "echo \"freshness=$freshness\"") == 2;
+    assert contains(action, "--ci-freshness");
+    assert contains(workflow, "--ci-freshness");
+    assert ! contains(action, "hashFiles('compiler/src");
+    assert ! contains(workflow, "hashFiles('compiler/src");
 }
 
 test "module layout fingerprint: no site uses the failure-swallowing echo form" ![io] {

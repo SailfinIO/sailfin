@@ -173,7 +173,10 @@ jobs:
           # same step in `.github/actions/sailfin-build/action.yml`.
           fp="$(bash scripts/module_layout_fingerprint.sh)"
           [ -n "$fp" ] || { echo "[ci] module layout fingerprint is empty" >&2; exit 1; }
+          freshness="$(bash scripts/module_layout_fingerprint.sh --ci-freshness)"
+          [ -n "$freshness" ] || { echo "[ci] workspace freshness fingerprint is empty" >&2; exit 1; }
           echo "fp=$fp" >> "$GITHUB_OUTPUT"
+          echo "freshness=$freshness" >> "$GITHUB_OUTPUT"
 
       - name: Self-host the compiler (make compile)
         shell: bash
@@ -273,7 +276,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: build/cache
-          key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
+          key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
 
       # Failure-mode wiring (issue #782). Identifying which gate failed
       # has to happen in the gate job (only it can see per-step
@@ -455,7 +458,10 @@ jobs:
           # same step in `.github/actions/sailfin-build/action.yml`.
           fp="$(bash scripts/module_layout_fingerprint.sh)"
           [ -n "$fp" ] || { echo "[ci] module layout fingerprint is empty" >&2; exit 1; }
+          freshness="$(bash scripts/module_layout_fingerprint.sh --ci-freshness)"
+          [ -n "$freshness" ] || { echo "[ci] workspace freshness fingerprint is empty" >&2; exit 1; }
           echo "fp=$fp" >> "$GITHUB_OUTPUT"
+          echo "freshness=$freshness" >> "$GITHUB_OUTPUT"
 
       # Warm module-IR cache for a fast compile. Unlike the determinism
       # gate, this job has no cold-build requirement, so restoring is safe
@@ -467,7 +473,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/cache
-          key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
+          key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
           restore-keys: |
             sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-
 
@@ -498,7 +504,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: build/cache/test-bin
-          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
+          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.freshness }}
           restore-keys: |
             sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-
             sailfin-testbin-linux-x86_64-
@@ -555,7 +561,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: build/cache/test-bin
-          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
+          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.freshness }}
 
       # Publish whatever a failed or timed-out warmer did build, so one flake
       # stops compounding into an ever-colder rebuild (SFN-797: a single
@@ -601,7 +607,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: build/cache/test-bin
-          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
+          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.freshness }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
 
   # Failure-mode job (issue #782). Runs only when `build-quality` fails.
   # Elevated permissions are scoped to this job alone so the gate job

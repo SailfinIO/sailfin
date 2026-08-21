@@ -160,7 +160,6 @@ runs:
     # (SFN-661).
     - name: Compute module layout fingerprint
       id: layout
-      if: ${{ inputs.mode != 'skip-build' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -171,7 +170,10 @@ runs:
         # which strands PR CI on a permanently cold cache.
         fp="$(bash scripts/module_layout_fingerprint.sh)"
         [ -n "$fp" ] || { echo "[ci] module layout fingerprint is empty" >&2; exit 1; }
+        freshness="$(bash scripts/module_layout_fingerprint.sh --ci-freshness)"
+        [ -n "$freshness" ] || { echo "[ci] workspace freshness fingerprint is empty" >&2; exit 1; }
         echo "fp=$fp" >> "$GITHUB_OUTPUT"
+        echo "freshness=$freshness" >> "$GITHUB_OUTPUT"
 
     # Restore the content-addressed module IR cache (`build/cache/`,
     # written by `<seed> build -p compiler`). Keys are content-safe:
@@ -217,7 +219,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: build/cache
-        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
+        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
         restore-keys: |
           sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-
 
@@ -251,7 +253,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: build/cache/test-bin
-        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
+        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.freshness }}
         restore-keys: |
           sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-
           sailfin-testbin-${{ inputs.target }}-

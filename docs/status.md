@@ -148,8 +148,8 @@ here.
   `compiler/*` fixture roots therefore produce the same policy classification,
   while a privileged-looking path with a non-compiler manifest gains no role.
   Duplicate names fail through the shared workspace resolver. Physical member
-  discovery, source/entry containment, formatter/test inventory, and the
-  pending CI/release/package automation migration remain path-based.
+  discovery and source/entry containment remain manifest-expanded; package
+  staging and the pending source moves remain physical.
 - **Local automation inventories follow workspace membership** (SFN-935,
   SFEP-0072 §§3.4, 3.7 slice 4). Local formatting, fast checking, compiler
   freshness, module-layout fingerprinting, compiler benchmarking, staged-change
@@ -158,8 +158,20 @@ here.
   the same effective inputs, while transitional and target layouts enumerate
   each logical input once. Workspace and member manifests, `bootstrap.toml`,
   runtime IR, and the three cross-domain compiler test suites remain explicit
-  repository inputs. CI cache expressions, release/package paths, ownership
-  policy, and source moves remain pending later SFEP-0072 slices.
+  repository inputs. Package paths and source moves remain pending later
+  SFEP-0072 slices.
+- **CI and release automation follows workspace identity** (SFN-936,
+  SFEP-0072 §§3.6–3.7 slice 4). Build and test cache generations consume a
+  v3 workspace freshness fingerprint covering compiler/runtime members, their
+  transitive workspace source dependencies, and explicit inputs; CI scope, seed checks,
+  formatting, and maintainer checks expand workspace members rather than old
+  source roots. Release cuts select the six private compiler roles by capsule
+  name and compare nightly ancestry through the same compiler/runtime,
+  manifest, runtime-IR, workspace, and bootstrap fingerprint. Public capsule
+  discovery accepts both `capsules/sfn/*` and `stdlib/*`, stages selected
+  manifests exactly, and does not version-bump a byte-identical physical move.
+  Cache namespaces, compiler lockstep, capsule versions, artifact paths, and
+  the installed `sfn` command remain unchanged.
 - **Implicit workspace capsule graph** (SFN-931, SFEP-0072 §§3.3, 3.7 slice
   2). Workspace libraries with `[build] implicit = true` enter the resolved
   graph and final link exactly once; an ordinary dependency on the same

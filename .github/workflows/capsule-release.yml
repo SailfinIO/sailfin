@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'capsules/**'
+      - 'stdlib/**'
+      - 'runtime/prelude.sfn'
+      - 'workspace.toml'
 
 concurrency:
   group: capsule-release
@@ -58,14 +61,83 @@ jobs:
 
           echo "Comparing $BEFORE..$AFTER"
 
-          # Find all capsule directories that had source changes (not just capsule.toml bumps)
+          # Select publishable library members by canonical workspace identity,
+          # across current, transitional, and final SFEP-0072 roots.
           changed_capsules=()
-          for capsule_dir in $(find capsules -name capsule.toml -exec dirname {} \;); do
-            # Check if any files OTHER than capsule.toml changed in this capsule
-            if git diff --name-only "$BEFORE".."$AFTER" -- "$capsule_dir" | grep -qv 'capsule\.toml$'; then
+          changed_manifests=()
+          changed_external_entries=()
+          public_count=0
+          diff_status="${RUNNER_TEMP}/capsule-release-name-status"
+          before_public="${RUNNER_TEMP}/capsule-release-before-public"
+          git diff --name-status --find-renames=100% "$BEFORE".."$AFTER" > "$diff_status"
+          inventory_script="$PWD/scripts/module_layout_fingerprint.sh"
+          before_root="$(mktemp -d "${RUNNER_TEMP}/capsule-release-before.XXXXXX")"
+          before_tree="$before_root/tree"
+          cleanup_before_tree() {
+            git worktree remove --force "$before_tree" >/dev/null 2>&1 || true
+            rm -rf "$before_root"
+          }
+          trap cleanup_before_tree EXIT
+          git worktree add --detach "$before_tree" "$BEFORE" >/dev/null
+          (cd "$before_tree" && bash "$inventory_script" --public-members) > "$before_public"
+          if [ ! -s "$before_public" ]; then
+            echo "::error::Previous workspace inventory contains no publishable library capsules."
+            exit 1
+          fi
+          cleanup_before_tree
+          trap - EXIT
+
+          while IFS=$'\t' read -r capsule_name capsule_dir external_entry; do
+            public_count=$((public_count + 1))
+            capsule_changed=false
+            while IFS=$'\t' read -r status old_path new_path; do
+              touches=false
+              case "$old_path" in "$capsule_dir"|"$capsule_dir"/*) touches=true ;; esac
+              case "$new_path" in "$capsule_dir"|"$capsule_dir"/*) touches=true ;; esac
+              if [ -n "$external_entry" ]; then
+                if [ "$old_path" = "$external_entry" ] || [ "$new_path" = "$external_entry" ]; then touches=true; fi
+              fi
+              if [ "$touches" = false ]; then continue; fi
+
+              # Manifest-only edits are release metadata, not source changes.
+              if { [ "$old_path" = "$capsule_dir/capsule.toml" ] || [ -z "$old_path" ]; } && \
+                 { [ "$new_path" = "$capsule_dir/capsule.toml" ] || [ -z "$new_path" ]; }; then
+                continue
+              fi
+
+              # A byte-identical relocation with the same capsule-relative path
+              # is topology work, not a semantic capsule release.
+              if [ "$status" = "R100" ]; then
+                case "$new_path" in
+                  "$capsule_dir"/*)
+                    relative="${new_path#"$capsule_dir"/}"
+                    old_identity="$(awk -F '\t' -v old="$old_path" \
+                      '$3 == old { print $1 }' "$before_public")"
+                    if [ "$old_identity" = "$capsule_name" ]; then continue; fi
+                    case "$old_path" in
+                      */"$relative")
+                        old_root="${old_path%/"$relative"}"
+                        old_identity="$(awk -F '\t' -v root="$old_root" \
+                          '$2 == root { print $1 }' "$before_public")"
+                        if [ "$old_identity" = "$capsule_name" ]; then continue; fi
+                        ;;
+                    esac
+                    ;;
+                esac
+              fi
+              capsule_changed=true
+              break
+            done < "$diff_status"
+            if [ "$capsule_changed" = true ]; then
               changed_capsules+=("$capsule_dir")
+              changed_manifests+=("$capsule_dir/capsule.toml")
+              changed_external_entries+=("$external_entry")
             fi
-          done
+          done < <(bash scripts/module_layout_fingerprint.sh --public-members)
+          if [ "$public_count" -eq 0 ]; then
+            echo "::error::Workspace inventory contains no publishable library capsules."
+            exit 1
+          fi
 
           if [ ${#changed_capsules[@]} -eq 0 ]; then
             echo "No capsule source changes detected, skipping."
@@ -76,12 +148,17 @@ jobs:
 
           committed=false
 
-          for capsule_dir in "${changed_capsules[@]}"; do
+          for capsule_index in "${!changed_capsules[@]}"; do
+            capsule_dir="${changed_capsules[$capsule_index]}"
+            external_entry="${changed_external_entries[$capsule_index]}"
             capsule_name="$(grep -oP '^name\s*=\s*"\K[^"]+' "$capsule_dir/capsule.toml")"
             echo "::group::Processing $capsule_name ($capsule_dir)"
 
             # Get commits that touched this capsule's source files (excluding capsule.toml)
-            commits="$(git log "$BEFORE".."$AFTER" --format='%s' -- "$capsule_dir" | grep -v 'capsule\.toml$' || true)"
+            commit_paths=("$capsule_dir")
+            if [ -n "$external_entry" ]; then commit_paths+=("$external_entry"); fi
+            commits="$(git log "$BEFORE".."$AFTER" --format='%s' -- \
+              "${commit_paths[@]}" ":(exclude)$capsule_dir/capsule.toml" || true)"
 
             if [ -z "$commits" ]; then
               echo "No relevant commits for $capsule_name, skipping."
@@ -141,7 +218,7 @@ jobs:
 
           # Commit all version bumps in one commit
           if [ "$committed" = true ]; then
-            git add capsules/*/capsule.toml capsules/*/*/capsule.toml
+            git add -- "${changed_manifests[@]}"
             git commit -m "chore(capsules): bump versions [skip capsule-release]
 
           $(for capsule_dir in "${changed_capsules[@]}"; do
@@ -151,7 +228,7 @@ jobs:
             done)"
             # `main` is written concurrently (merged PRs, release.yml). Rebase our
             # bump commit onto the latest origin/main and retry; we only touch
-            # capsules/*/capsule.toml, so the replay is conflict-free in practice.
+            # selected public manifests, so the replay is conflict-free in practice.
             for attempt in 1 2 3 4 5; do
               git fetch origin main
               if ! git rebase origin/main; then

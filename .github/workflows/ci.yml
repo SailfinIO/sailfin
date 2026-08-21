@@ -107,9 +107,38 @@ jobs:
             # merge-base reachable.
             git diff --name-only "$base"..."$head" | tee changed-files.txt
 
+            mapfile -t workspace_roots < <(bash scripts/module_layout_fingerprint.sh --member-roots)
+            mapfile -t workspace_inputs < <(bash scripts/module_layout_fingerprint.sh --layout-inputs)
+            driver_manifest="$(bash scripts/module_layout_fingerprint.sh --member-manifest sfn/compiler)"
+            driver_src="${driver_manifest%/capsule.toml}/src"
+            windows_roots=()
+            while IFS=$'\t' read -r name member kind _publish; do
+              case "$name" in
+                sfn/codegen|sfn/codegen-llvm) windows_roots+=("$member") ;;
+              esac
+              if [ "$kind" = "runtime" ]; then windows_roots+=("$member"); fi
+            done < <(bash scripts/module_layout_fingerprint.sh --member-records)
+            if [ "${#workspace_roots[@]}" -eq 0 ] || [ "${#workspace_inputs[@]}" -eq 0 ]; then
+              echo "::error::Workspace inventory is empty; refusing to narrow CI scope."
+              exit 1
+            fi
+
             while IFS= read -r path; do
+              workspace_changed=false
+              for root in "${workspace_roots[@]}"; do
+                case "$path" in "$root"|"$root"/*) workspace_changed=true; break ;; esac
+              done
+              if [ "$workspace_changed" = false ]; then
+                for input in "${workspace_inputs[@]}"; do
+                  if [ "$path" = "$input" ]; then workspace_changed=true; break; fi
+                done
+              fi
+              if [ "$workspace_changed" = true ]; then
+                source=true
+                reason="workspace member or manifest input changed: $path"
+              fi
               case "$path" in
-                compiler/*|runtime/*|capsules/*|scripts/*|Makefile|bootstrap.toml|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
+                compiler/tests/*|scripts/*|Makefile|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
                   source=true
                   reason="compiler/runtime/build-system path changed: $path"
                   ;;
@@ -127,8 +156,20 @@ jobs:
               # `backend.sfn`, `cli/commands/**`, and
               # `runtime/sfn/adapters/**` — ordinary, frequently-edited
               # surfaces the narrower glob does not name.
+              windows_changed=false
+              for root in "${windows_roots[@]}"; do
+                case "$path" in "$root"|"$root"/*) windows_changed=true; break ;; esac
+              done
+              if [ "$windows_changed" = true ]; then
+                windows=true
+                windows_reason="Windows-relevant workspace member changed: $path"
+              fi
               case "$path" in
-                compiler/src/build/*|compiler/src/build_cache.sfn|compiler/src/build_stamp.sfn|compiler/src/backend.sfn|compiler/src/emit_helpers.sfn|compiler/src/capsule_emit_parallel.sfn|compiler/src/cli_selfhost.sfn|compiler/src/native_emit_subprocess.sfn|compiler/src/llvm_validation.sfn|compiler/src/codegen_driver.sfn|compiler/src/capsule_resolver/*|compiler/src/cli/*|compiler/capsules/codegen/*|compiler/capsules/codegen-llvm/*|runtime/*|Makefile|bootstrap.toml|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
+                "$driver_src"/build/*|"$driver_src"/build_cache.sfn|"$driver_src"/build_stamp.sfn|"$driver_src"/backend.sfn|"$driver_src"/emit_helpers.sfn|"$driver_src"/capsule_emit_parallel.sfn|"$driver_src"/cli_selfhost.sfn|"$driver_src"/native_emit_subprocess.sfn|"$driver_src"/llvm_validation.sfn|"$driver_src"/codegen_driver.sfn|"$driver_src"/capsule_resolver/*|"$driver_src"/cli/*)
+                  windows=true
+                  windows_reason="Windows-relevant compiler driver path changed: $path"
+                  ;;
+                Makefile|bootstrap.toml|workspace.toml|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
                   windows=true
                   windows_reason="Windows-relevant path changed: $path"
                   ;;
@@ -349,8 +390,15 @@ jobs:
           # dies as a clean non-zero exit instead of exhausting the
           # runner VM and killing the runner agent (the #1243 failure
           # mode). time -v records the peak RSS either way.
+          compiler_sources=()
+          while IFS= read -r path; do compiler_sources+=("$path"); done \
+            < <(bash scripts/module_layout_fingerprint.sh --compiler-sources)
+          if [ "${#compiler_sources[@]}" -eq 0 ]; then
+            echo "[ci] compiler source inventory is empty" >&2
+            exit 1
+          fi
           SAILFIN_USE_ARENA=1 /usr/bin/time -v \
-            build/toolchains/seed/bin/sfn check compiler/src/ compiler/capsules/
+            build/toolchains/seed/bin/sfn check "${compiler_sources[@]}"
 
   # One compiler build per OS, shared by every shard leg below (#1234,
   # "Lever 1 step 1b" of docs/proposals/0011-ci-test-speed.md §6 step 2).
@@ -1412,16 +1460,23 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
+          format_roots=()
+          while IFS= read -r path; do format_roots+=("$path"); done \
+            < <(bash scripts/module_layout_fingerprint.sh --maintainer-sources)
+          if [ "${#format_roots[@]}" -eq 0 ]; then
+            echo "[fmt] workspace maintainer inventory is empty" >&2
+            exit 1
+          fi
           # Per-file loop to avoid OOM on bulk --check
           while IFS= read -r f; do
             if ! build/bin/sfn fmt --check "$f" > /dev/null 2>&1; then
               echo "[fmt] needs formatting: $f"
               fail=$((fail + 1))
             fi
-          done < <(find compiler/src compiler/capsules runtime -name '*.sfn' -print | sort)
+          done < <(find "${format_roots[@]}" -type f -name '*.sfn' -print | sort -u)
           if [ "$fail" -gt 0 ]; then
             echo ""
-            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/ compiler/capsules/ runtime/"
+            echo "[fmt] $fail file(s) need formatting. Run: make fmt"
             exit 1
           fi
           echo "[fmt] all files formatted"
@@ -1440,13 +1495,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/sailfin
+          ir_manifest="$(bash scripts/module_layout_fingerprint.sh --member-manifest sfn/ir)"
+          ir_root="${ir_manifest%/capsule.toml}"
           canary_files=(
-            compiler/capsules/ir/src/native_ir_api.sfn
-            compiler/capsules/ir/src/native_ir_parser.sfn
-            compiler/capsules/ir/src/native_ir_parser_defs.sfn
-            compiler/capsules/ir/src/native_ir_parser_instructions.sfn
-            compiler/capsules/ir/src/native_ir_utils_layout.sfn
-            compiler/capsules/ir/src/native_ir_utils_parse.sfn
+            "$ir_root/src/native_ir_api.sfn"
+            "$ir_root/src/native_ir_parser.sfn"
+            "$ir_root/src/native_ir_parser_defs.sfn"
+            "$ir_root/src/native_ir_parser_instructions.sfn"
+            "$ir_root/src/native_ir_utils_layout.sfn"
+            "$ir_root/src/native_ir_utils_parse.sfn"
           )
           fail=0
           for f in "${canary_files[@]}"; do
@@ -1486,7 +1543,14 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          build/bin/sfn check compiler/src compiler/capsules runtime
+          maintainer_sources=()
+          while IFS= read -r path; do maintainer_sources+=("$path"); done \
+            < <(bash scripts/module_layout_fingerprint.sh --maintainer-sources)
+          if [ "${#maintainer_sources[@]}" -eq 0 ]; then
+            echo "[ci] workspace maintainer inventory is empty" >&2
+            exit 1
+          fi
+          build/bin/sfn check "${maintainer_sources[@]}"
 
       - name: Fixed-point rebuild check (linux-x86_64)
         if: >-
@@ -1922,16 +1986,23 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
+          format_roots=()
+          while IFS= read -r path; do format_roots+=("$path"); done \
+            < <(bash scripts/module_layout_fingerprint.sh --maintainer-sources)
+          if [ "${#format_roots[@]}" -eq 0 ]; then
+            echo "[fmt] workspace maintainer inventory is empty" >&2
+            exit 1
+          fi
           # Per-file loop to avoid OOM on bulk --check
           while IFS= read -r f; do
             if ! build/bin/sfn fmt --check "$f" > /dev/null 2>&1; then
               echo "[fmt] needs formatting: $f"
               fail=$((fail + 1))
             fi
-          done < <(find compiler/src compiler/capsules runtime -name '*.sfn' -print | sort)
+          done < <(find "${format_roots[@]}" -type f -name '*.sfn' -print | sort -u)
           if [ "$fail" -gt 0 ]; then
             echo ""
-            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/ compiler/capsules/ runtime/"
+            echo "[fmt] $fail file(s) need formatting. Run: make fmt"
             exit 1
           fi
           echo "[fmt] all files formatted"
@@ -1944,13 +2015,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/sailfin
+          ir_manifest="$(bash scripts/module_layout_fingerprint.sh --member-manifest sfn/ir)"
+          ir_root="${ir_manifest%/capsule.toml}"
           canary_files=(
-            compiler/capsules/ir/src/native_ir_api.sfn
-            compiler/capsules/ir/src/native_ir_parser.sfn
-            compiler/capsules/ir/src/native_ir_parser_defs.sfn
-            compiler/capsules/ir/src/native_ir_parser_instructions.sfn
-            compiler/capsules/ir/src/native_ir_utils_layout.sfn
-            compiler/capsules/ir/src/native_ir_utils_parse.sfn
+            "$ir_root/src/native_ir_api.sfn"
+            "$ir_root/src/native_ir_parser.sfn"
+            "$ir_root/src/native_ir_parser_defs.sfn"
+            "$ir_root/src/native_ir_parser_instructions.sfn"
+            "$ir_root/src/native_ir_utils_layout.sfn"
+            "$ir_root/src/native_ir_utils_parse.sfn"
           )
           fail=0
           for f in "${canary_files[@]}"; do
@@ -1984,7 +2057,14 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          build/bin/sfn check compiler/src compiler/capsules runtime
+          maintainer_sources=()
+          while IFS= read -r path; do maintainer_sources+=("$path"); done \
+            < <(bash scripts/module_layout_fingerprint.sh --maintainer-sources)
+          if [ "${#maintainer_sources[@]}" -eq 0 ]; then
+            echo "[ci] workspace maintainer inventory is empty" >&2
+            exit 1
+          fi
+          build/bin/sfn check "${maintainer_sources[@]}"
 
       - name: Enable test runner trace (macOS)
         if: ${{ matrix.primary }}

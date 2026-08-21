@@ -323,18 +323,28 @@ jobs:
         run: |
           set -euo pipefail
           expected="${RELEASE_TAG#v}"
-          file_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' compiler/capsule.toml)"
-          if [ "$file_version" != "$expected" ]; then
-            echo "[ci][error] compiler/capsule.toml has '$file_version', expected '$expected'" >&2
+          compiler_manifests=()
+          if grep -q -- '--compiler-manifests' scripts/module_layout_fingerprint.sh 2>/dev/null; then
+            while IFS= read -r manifest; do compiler_manifests+=("$manifest"); done \
+              < <(bash scripts/module_layout_fingerprint.sh --compiler-manifests)
+          else
+            # Retroactive rebuilds may check out a tag older than the
+            # manifest-inventory helper. Its topology predates SFEP-0072.
+            compiler_manifests+=(compiler/capsule.toml)
+            while IFS= read -r manifest; do compiler_manifests+=("$manifest"); done \
+              < <(find compiler/capsules -mindepth 2 -maxdepth 2 -name capsule.toml -print | sort)
+          fi
+          if [ "${#compiler_manifests[@]}" -ne 6 ]; then
+            echo "[ci][error] expected six compiler-role manifests, found ${#compiler_manifests[@]}" >&2
             exit 1
           fi
-          while IFS= read -r manifest; do
+          for manifest in "${compiler_manifests[@]}"; do
             manifest_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$manifest")"
             if [ "$manifest_version" != "$expected" ]; then
               echo "[ci][error] $manifest has '$manifest_version', expected '$expected'" >&2
               exit 1
             fi
-          done < <(find compiler/capsules -mindepth 2 -maxdepth 2 -name capsule.toml -print | sort)
+          done
           actual="$(build/bin/sfn version | sed -n 's/.*sfn //p')"
           if [ "$actual" != "$expected" ]; then
             echo "[ci][error] built compiler reports '$actual', expected '$expected'" >&2
@@ -651,11 +661,26 @@ jobs:
         run: |
           set -euo pipefail
           expected="${RELEASE_TAG#v}"
-          file_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' compiler/capsule.toml)"
-          if [ "$file_version" != "$expected" ]; then
-            echo "[ci][error] compiler/capsule.toml has '$file_version', expected '$expected'" >&2
+          compiler_manifests=()
+          if grep -q -- '--compiler-manifests' scripts/module_layout_fingerprint.sh 2>/dev/null; then
+            while IFS= read -r manifest; do compiler_manifests+=("$manifest"); done \
+              < <(bash scripts/module_layout_fingerprint.sh --compiler-manifests)
+          else
+            compiler_manifests+=(compiler/capsule.toml)
+            while IFS= read -r manifest; do compiler_manifests+=("$manifest"); done \
+              < <(find compiler/capsules -mindepth 2 -maxdepth 2 -name capsule.toml -print | sort)
+          fi
+          if [ "${#compiler_manifests[@]}" -ne 6 ]; then
+            echo "[ci][error] expected six compiler-role manifests, found ${#compiler_manifests[@]}" >&2
             exit 1
           fi
+          for manifest in "${compiler_manifests[@]}"; do
+            manifest_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$manifest")"
+            if [ "$manifest_version" != "$expected" ]; then
+              echo "[ci][error] $manifest has '$manifest_version', expected '$expected'" >&2
+              exit 1
+            fi
+          done
           actual="$("$NATIVE_SFN" --version | sed -n 's/.*sfn //p')"
           if [ "$actual" != "$expected" ]; then
             echo "[ci][error] built compiler reports '$actual', expected '$expected'" >&2

@@ -2,6 +2,7 @@
 // (SFEP-0020, established with sfn/syntax in SFN-741).
 import { contains } from "sfn/strings";
 
+import { capsule_artifact_dir } from "../../src/capsule_artifact";
 import { compiler_capsule_role } from "../../src/capsule_names";
 import { load_workspace_members, validate_unique_workspace_member_names } from "../../src/capsule_resolver/workspace";
 import { toml_get_publish, toml_get_version } from "../../src/toml_parser";
@@ -62,18 +63,60 @@ test "compiler capsule release: every private manifest matches the compiler vers
         throw "expected six canonical compiler-role manifests, checked "
             + checked.toString();
     }
+    assert capsule_artifact_dir("sfn", "compiler") == "build/capsules/sfn/compiler";
+    assert capsule_artifact_dir("sfn", "syntax") == "build/capsules/sfn/syntax";
+    assert capsule_artifact_dir("sfn", "analyzer") == "build/capsules/sfn/analyzer";
+    assert capsule_artifact_dir("sfn", "ir") == "build/capsules/sfn/ir";
+    assert capsule_artifact_dir("sfn", "codegen") == "build/capsules/sfn/codegen";
+    assert capsule_artifact_dir("sfn", "codegen-llvm") == "build/capsules/sfn/codegen-llvm";
 }
 
-// SFN-936 owns the workflow's physical discovery/staging migration. Keep this
-// guard path-based until that automation slice lands; the release-selection
-// policy above is already canonical-identity based.
-test "compiler capsule release: automation bumps and stages private manifests" ![io] {
+test "compiler capsule release: workflows select private manifests by identity" ![io] {
+    let root = _lockstep_repo_root();
+    let release = fs.readFile(root + "/.github/workflows/release.yml");
+    let tag = fs.readFile(root + "/.github/workflows/release-tag.yml");
+    let train = fs.readFile(root + "/.github/workflows/release-train.yml");
+
+    assert contains(release, "--member-manifest sfn/compiler");
+    assert contains(release, "--compiler-manifests");
+    assert contains(release, "git add --");
+    assert contains(release, "compiler_manifests");
+    assert contains(release, "Expected six compiler-role manifests");
+    assert ! contains(release, "find compiler/capsules");
+    assert ! contains(release, "git add compiler/capsule.toml");
+
+    assert contains(tag, "--compiler-manifests");
+    assert contains(tag, "expected six compiler-role manifests");
+    assert contains(tag, "Retroactive rebuilds may check out a tag older");
+    assert contains(train, "--member-manifest");
+    assert contains(train, "workspaceFacts(r.head_sha).freshness");
+    assert ! contains(train, "SELFHOST_PREFIXES");
+    assert ! contains(train, "<diff too large to verify>");
+}
+
+test "compiler capsule release: public discovery spans topology roots without move bumps" ![io] {
     let workflow = fs.readFile(_lockstep_repo_root()
-        + "/.github/workflows/release.yml");
-    if !contains(workflow, "find compiler/capsules -mindepth 2 -maxdepth 2 -name capsule.toml") {
-        throw "release.yml does not enumerate compiler capsule manifests";
-    }
-    if !contains(workflow, "git add compiler/capsule.toml compiler/capsules/*/capsule.toml") {
-        throw "release.yml does not stage compiler capsule manifests";
-    }
+        + "/.github/workflows/capsule-release.yml");
+    assert contains(workflow, "- 'capsules/**'");
+    assert contains(workflow, "- 'stdlib/**'");
+    assert contains(workflow, "- 'runtime/prelude.sfn'");
+    assert contains(workflow, "--public-members");
+    assert contains(workflow, "--find-renames=100%");
+    assert contains(workflow, "status\" = \"R100");
+    assert contains(workflow, "before_public");
+    assert contains(workflow, "old_identity");
+    assert contains(workflow, "changed_external_entries");
+    assert contains(workflow, "git add --");
+    assert contains(workflow, "changed_manifests");
+    assert ! contains(workflow, "find capsules -name capsule.toml");
+}
+
+test "compiler capsule release: CI formatter and checks use workspace views" ![io] {
+    let workflow = fs.readFile(_lockstep_repo_root()
+        + "/.github/workflows/ci.yml");
+    assert contains(workflow, "--compiler-sources");
+    assert contains(workflow, "--maintainer-sources");
+    assert contains(workflow, "--member-manifest sfn/ir");
+    assert ! contains(workflow, "find compiler/src compiler/capsules runtime");
+    assert ! contains(workflow, "sfn check compiler/src compiler/capsules runtime");
 }

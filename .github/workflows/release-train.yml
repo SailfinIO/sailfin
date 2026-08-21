@@ -7,7 +7,7 @@ name: Release Train (weekly stable)
 # is green, cuts the next STABLE minor automatically — no human confirmation.
 # At each train boundary it:
 #
-#   1. Computes the stable target from `compiler/capsule.toml`:
+#   1. Computes the stable target from the canonical `sfn/compiler` manifest:
 #        - a prerelease line `X.Y.Z-pre.N` ships as `X.Y.Z` stable
 #          (`channel=stable bump=prerelease` — strips the suffix), so a line
 #          already in flight is promoted rather than skipped;
@@ -80,7 +80,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Run weekly stable train
@@ -93,6 +93,9 @@ jobs:
           github-token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
+            const os = require('os');
+            const path = require('path');
+            const { execFileSync } = require('child_process');
             const { owner, repo } = context.repo;
             const dryRun = process.env.DRY_RUN === 'true';
             const confirmDispatch = process.env.CONFIRM_DISPATCH === 'true';
@@ -129,12 +132,48 @@ jobs:
               }
             }
 
+            const defaultBranch = context.payload.repository?.default_branch || 'main';
+            const headSha = (await github.rest.repos.getBranch({
+              owner, repo, branch: defaultBranch,
+            })).data.commit.sha;
+            execFileSync('git', ['fetch', '--no-tags', 'origin', headSha], { stdio: 'inherit' });
+            const inventoryScript = path.resolve('scripts/module_layout_fingerprint.sh');
+            function withWorkspaceTree(sha, read) {
+              const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sailfin-release-train-'));
+              const tree = path.join(tempRoot, 'tree');
+              try {
+                execFileSync('git', ['worktree', 'add', '--detach', tree, sha], { stdio: 'ignore' });
+                return read(tree);
+              } finally {
+                try { execFileSync('git', ['worktree', 'remove', '--force', tree], { stdio: 'ignore' }); } catch (_) {}
+                fs.rmSync(tempRoot, { recursive: true, force: true });
+              }
+            }
+            function workspaceFacts(sha) {
+              return withWorkspaceTree(sha, (tree) => {
+                const compilerManifest = execFileSync(
+                  'bash', [inventoryScript, '--member-manifest', 'sfn/compiler'],
+                  { cwd: tree, encoding: 'utf8' },
+                ).trim();
+                const freshness = execFileSync(
+                  'bash', [inventoryScript, '--ci-freshness'],
+                  { cwd: tree, encoding: 'utf8' },
+                ).trim();
+                return {
+                  compilerManifest,
+                  compilerText: fs.readFileSync(path.join(tree, compilerManifest), 'utf8'),
+                  freshness,
+                };
+              });
+            }
+
             // --- 1. Compute the stable target ---------------------------------
             // A prerelease line ships its own stable (promote, don't skip);
             // an already-stable line advances to the next minor.
-            const capsule = fs.readFileSync('compiler/capsule.toml', 'utf8');
+            const headWorkspace = workspaceFacts(headSha);
+            const capsule = headWorkspace.compilerText;
             const vm = capsule.match(/^version\s*=\s*"([^"]+)"/m);
-            if (!vm) { core.setFailed('Could not read version from compiler/capsule.toml'); return; }
+            if (!vm) { core.setFailed(`Could not read version from ${headWorkspace.compilerManifest}`); return; }
             const cm = vm[1].match(/^(\d+)\.(\d+)\.(\d+)(?:-([a-z]+)\.(\d+))?$/);
             if (!cm) { core.setFailed(`Cannot parse version '${vm[1]}'`); return; }
             const [maj, min, patch] = [parseInt(cm[1], 10), parseInt(cm[2], 10), parseInt(cm[3], 10)];
@@ -161,35 +200,23 @@ jobs:
             // nightly runs once daily and takes up to ~3h, so an exact match is
             // essentially never true and the train could never cut (#1956).
             // Instead we accept the most recent GREEN nightly whose commit is an
-            // ANCESTOR of HEAD, provided nothing self-host-relevant (compiler/src,
-            // runtime, bootstrap.toml — the inputs to the triple-pass build)
+            // ANCESTOR of HEAD, provided no canonical workspace freshness input
             // changed between that commit and HEAD. That preserves the safety
             // property the exact-head binding reached for — a self-host-breaking
             // commit landing after the last green nightly makes the diff DIRTY and
-            // holds the cut — while staying satisfiable: docs / test / CI / capsule
-            // churn no longer blocks the train. release.yml re-checks the same
+            // holds the cut — while staying satisfiable: docs, tests, CI, and
+            // unrelated public capsule sources no longer block the train. release.yml re-checks the same
             // predicate against origin/main at tag time (verified_sha input),
             // closing the eval→tag race. Per-commit single-pass CI is guaranteed
             // by the merge queue; the nightly adds the triple-pass seedcheck.
-            const defaultBranch = context.payload.repository?.default_branch || 'main';
-            const headSha = (await github.rest.repos.getBranch({
-              owner, repo, branch: defaultBranch,
-            })).data.commit.sha;
             const nightlyRuns = (await github.rest.actions.listWorkflowRuns({
               owner, repo, workflow_id: 'nightly-selfhost.yml',
               branch: defaultBranch, per_page: 30,
             })).data.workflow_runs;
-            // A changed path is "self-host-relevant" if it feeds the triple-pass
-            // build: the compiler source, the runtime, or the pinned seed. Note
-            // this deliberately excludes compiler/tests/ (test churn does not
-            // change the compiler binary) and the version-string files the
-            // release bump itself rewrites (compiler/capsule.toml, the private
-            // compiler-capsule manifests, and compiler/src/version.sfn's fallback) — release.yml diffs a base that
-            // predates its own bump commit, so those never trip the re-check.
-            const SELFHOST_PREFIXES = ['compiler/src/', 'compiler/capsules/', 'runtime/'];
-            const SELFHOST_FILES = ['bootstrap.toml'];
-            const isSelfhostRelevant = (f) =>
-              SELFHOST_PREFIXES.some(p => f.startsWith(p)) || SELFHOST_FILES.includes(f);
+            // The canonical freshness fingerprint includes compiler/runtime
+            // workspace sources and their transitive workspace source dependencies,
+            // every member manifest, runtime IR, workspace.toml, and bootstrap.toml
+            // exactly once. Tests and documentation stay out.
             // Walk green nightlies newest-first; take the first whose commit is an
             // ancestor of HEAD (compare status 'identical' or 'ahead'), then judge
             // its diff to HEAD. Older ancestors only have MORE changes, so the
@@ -212,12 +239,9 @@ jobs:
               if (cmp.status !== 'identical' && cmp.status !== 'ahead') continue; // not on HEAD's history
               verifiedRun = r;
               aheadBy = cmp.ahead_by || 0;
-              const files = cmp.files || [];
-              // The compare API caps `files` at 300; a diff that large is beyond
-              // routine cadence churn, so treat it as unverifiable (hold).
-              dirtyFiles = files.length >= 300
-                ? ['<diff too large to verify>']
-                : files.map(f => f.filename).filter(isSelfhostRelevant);
+              dirtyFiles = workspaceFacts(r.head_sha).freshness === headWorkspace.freshness
+                ? []
+                : ['<workspace freshness changed>'];
               if (dirtyFiles.length === 0) verifiedSha = r.head_sha;
               break;
             }
