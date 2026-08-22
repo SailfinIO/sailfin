@@ -8,7 +8,9 @@
 // — to gate this regression. Each invocation costs ~2 min on Linux
 // CI. This unit test gates the same logic in milliseconds, so the
 // e2e test now runs the canonical scenario exactly once.
-import { starts_with } from "sfn/strings";
+import { remove_all } from "sfn/fs";
+import { find, starts_with } from "sfn/strings";
+import { scratch_root, skip } from "sfn/test";
 
 import {
     _atomic_rename_into_place,
@@ -174,10 +176,39 @@ test "dirname: top-level absolute returns root" {
     assert _dirname_cmd("/mod.ll") == "/";
 }
 
+// Each test below gets its own tmp namespace under the portable scratch
+// root (SFN-978); `mkdtemp` mints a unique directory per call so parallel
+// runs never collide.
+fn _cpn_tmp_root(label: string) -> string ![io] {
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn_" + label + "_");
+}
+
+// True when the test runner is a Windows binary. Mirrors the detection
+// idiom in `capsules/sfn/fs/tests/fs_test.sfn:31-40`: the `OS` /
+// `SYSTEMROOT` / `windir` environment variables Windows always sets.
+// Deliberately does NOT honor `SAILFIN_HOST_OS` — the tests below gate on
+// whether `_mktemp_sibling_cmd` actually degrades, which depends on the
+// real host, not a simulated one.
+fn _cpn_is_windows() -> bool ![io] {
+    let os = env.get("OS");
+    if find(os, "Windows", 0) >= 0 { return true; }
+    if env.get("SYSTEMROOT").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    return false;
+}
+
 test "atomic-publish: temp lives in dest dir and rename round-trips" ![io] {
-    let scratch = "/tmp/sfn_atomic_publish_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    // `_mktemp_sibling_cmd` returns "" on Windows by design
+    // (`compiler/src/build/fs.sfn:180`): the caller degrades to a direct,
+    // non-atomic write instead. `windows_build_deshell_test.sfn` pins that
+    // `""` return as expected. This test asserts the POSIX atomic-rename
+    // path, which does not exist on this host.
+    if _cpn_is_windows() {
+        skip("_mktemp_sibling_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); no atomic-rename temp to test");
+    }
+    let scratch = _cpn_tmp_root("atomic_publish_test");
     let dst = scratch + "/artifact.ll";
 
     // The temp MUST be a sibling of `dst` (same dir) so the later
@@ -194,7 +225,7 @@ test "atomic-publish: temp lives in dest dir and rename round-trips" ![io] {
     // sibling a concurrent reader could pick up.
     assert ! fs.exists(tmp);
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 // SFN-720: the test above publishes onto an ABSENT destination, which
@@ -209,9 +240,13 @@ test "atomic-publish: temp lives in dest dir and rename round-trips" ![io] {
 // through `sfn_rename_replace`, whose Windows sibling uses
 // `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING`.
 test "atomic-publish: a second publish REPLACES an existing destination" ![io] {
-    let scratch = "/tmp/sfn_atomic_republish_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    // See the skip comment on the "temp lives in dest dir" test above:
+    // `_mktemp_sibling_cmd` returns "" on Windows by design
+    // (`compiler/src/build/fs.sfn:180`).
+    if _cpn_is_windows() {
+        skip("_mktemp_sibling_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); no atomic-rename temp to test");
+    }
+    let scratch = _cpn_tmp_root("atomic_republish_test");
     let dst = scratch + "/artifact.ll";
 
     let first = _mktemp_sibling_cmd(dst);
@@ -238,7 +273,7 @@ test "atomic-publish: a second publish REPLACES an existing destination" ![io] {
     assert _atomic_rename_into_place(third, dst);
     assert fs.readFile(dst) == "; third";
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 // `_mktemp_sibling_cmd` mints its name into a `calloc(n + 1)` buffer
@@ -248,9 +283,13 @@ test "atomic-publish: a second publish REPLACES an existing destination" ![io] {
 // the `length > 0` and dirname checks above, so pin the exact length
 // and the `O_EXCL` uniqueness contract directly (SFN-490).
 test "atomic-publish: temp name is template-length and unique per call" ![io] {
-    let scratch = "/tmp/sfn_mktemp_sibling_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    // See the skip comment on "temp lives in dest dir" above:
+    // `_mktemp_sibling_cmd` returns "" on Windows by design
+    // (`compiler/src/build/fs.sfn:180`).
+    if _cpn_is_windows() {
+        skip("_mktemp_sibling_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); no minted temp name to pin");
+    }
+    let scratch = _cpn_tmp_root("mktemp_sibling_test");
     let dst = scratch + "/artifact.ll";
 
     let first = _mktemp_sibling_cmd(dst);
@@ -262,7 +301,7 @@ test "atomic-publish: temp name is template-length and unique per call" ![io] {
     assert fs.exists(first);
     assert fs.exists(second);
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 // `_mktemp_from_template_cmd` is the libc `mkstemp` primitive the
@@ -271,9 +310,14 @@ test "atomic-publish: temp name is template-length and unique per call" ![io] {
 // hold for a shell `mktemp` too, so they cannot tell the two
 // implementations apart — these pin the libc contract itself.
 test "temp-mint: explicit template yields an exact-length unique file" ![io] {
-    let scratch = "/tmp/sfn_mktemp_template_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    // `_mktemp_from_template_cmd` returns "" on Windows by design
+    // (`compiler/src/build/fs.sfn:180`) — there is no POSIX `mkstemp` on
+    // this host, so there is no minted file to pin the length/uniqueness
+    // of. `windows_build_deshell_test.sfn` pins the `""` return itself.
+    if _cpn_is_windows() {
+        skip("_mktemp_from_template_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); no minted temp file to test");
+    }
+    let scratch = _cpn_tmp_root("mktemp_template_test");
 
     let template = scratch + "/probe.XXXXXX";
     let first = _mktemp_from_template_cmd(template);
@@ -289,7 +333,7 @@ test "temp-mint: explicit template yields an exact-length unique file" ![io] {
     assert fs.exists(first);
     assert fs.exists(second);
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 // There is deliberately no test pinning what a template lacking the
@@ -315,9 +359,7 @@ test "temp-mint: missing directory degrades to empty" ![io] {
 // with a different SHA-256 than `src`.
 // --------------------------------------------------------------
 test "copy-file: multi-chunk payload round-trips byte-for-byte" ![io] {
-    let scratch = "/tmp/sfn_copy_file_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _cpn_tmp_root("copy_file_test");
     let src = scratch + "/src.bin";
     let dst = scratch + "/dst.bin";
 
@@ -346,26 +388,22 @@ test "copy-file: multi-chunk payload round-trips byte-for-byte" ![io] {
     assert dst_digest.length > 0;
     assert src_digest == dst_digest;
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "copy-file: missing source returns false" ![io] {
-    let scratch = "/tmp/sfn_copy_file_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _cpn_tmp_root("copy_file_test");
     let src = scratch + "/does-not-exist.bin";
     let dst = scratch + "/dst.bin";
 
     assert ! _copy_file(src, dst);
     assert ! fs.exists(dst);
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "copy-file: overwrites an existing destination" ![io] {
-    let scratch = "/tmp/sfn_copy_file_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _cpn_tmp_root("copy_file_test");
     let src = scratch + "/src.bin";
     let dst = scratch + "/dst.bin";
 
@@ -377,7 +415,7 @@ test "copy-file: overwrites an existing destination" ![io] {
     assert _copy_file(src, dst);
     assert fs.readFile(dst) == "short";
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 // --------------------------------------------------------------
@@ -407,9 +445,7 @@ fn _stage_residue_count(dir: string) -> int ![io] {
 }
 
 test "publish-lines: writes exact content and leaves no staging residue" ![io] {
-    let scratch = "/tmp/sfn_publish_lines_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _cpn_tmp_root("publish_lines_test");
     let dst = scratch + "/artifact.ll";
 
     assert _publish_lines_atomic(dst, ["; header", "define i32 @main() {", "}"]);
@@ -419,13 +455,11 @@ test "publish-lines: writes exact content and leaves no staging residue" ![io] {
     assert fs.readFile(dst) == "; header\ndefine i32 @main() {\n}\n";
     assert _stage_residue_count(scratch) == 0;
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "publish-lines: replaces an existing destination" ![io] {
-    let scratch = "/tmp/sfn_publish_lines_replace_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _cpn_tmp_root("publish_lines_replace_test");
     let dst = scratch + "/artifact.ll";
 
     fs.writeFile(dst, "; a previous build's output, considerably longer\n");
@@ -435,13 +469,11 @@ test "publish-lines: replaces an existing destination" ![io] {
     assert fs.readFile(dst) == "; fresh\n";
     assert _stage_residue_count(scratch) == 0;
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "publish-lines: empty array publishes a zero-length artifact" ![io] {
-    let scratch = "/tmp/sfn_publish_lines_empty_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _cpn_tmp_root("publish_lines_empty_test");
     let dst = scratch + "/artifact.ll";
 
     // Preserves the pre-SFN-712 LLVM publication contract: an
@@ -451,12 +483,11 @@ test "publish-lines: empty array publishes a zero-length artifact" ![io] {
     assert fs.readFile(dst) == "";
     assert _stage_residue_count(scratch) == 0;
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "publish-lines: destination in a missing directory is reported as failure" ![io] {
-    let scratch = "/tmp/sfn_publish_lines_absent_test";
-    process.run(["rm", "-rf", scratch]);
+    let scratch = _cpn_tmp_root("publish_lines_absent_test");
     let dst = scratch + "/nested/artifact.ll";
 
     // The mint degrades to "" for a missing parent, the in-place fallback
@@ -466,19 +497,26 @@ test "publish-lines: destination in a missing directory is reported as failure" 
     assert ! _publish_lines_atomic(dst, ["; unreachable"]);
     assert ! fs.exists(dst);
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "publish-lines: a failed rename is reported and leaves no residue" ![io] {
-    let scratch = "/tmp/sfn_publish_lines_rename_fail_test";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    // `_publish_lines_atomic` (`compiler/src/build/fs.sfn:338-372`) routes
+    // through `_mktemp_sibling_cmd`, which returns "" on Windows by design
+    // (`compiler/src/build/fs.sfn:180`), so on this host the function takes
+    // the direct in-place-write degrade branch instead of the sibling-mint
+    // + rename path this test exercises — it never reaches the EISDIR
+    // rename failure the assertions below pin.
+    if _cpn_is_windows() {
+        skip("_mktemp_sibling_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); _publish_lines_atomic takes the degrade branch, not the atomic-rename path under test");
+    }
+    let scratch = _cpn_tmp_root("publish_lines_rename_fail_test");
     let dst = scratch + "/artifact.ll";
 
     // A directory destination fails `rename(2)` with EISDIR while the
     // sibling mint and the staged write both succeed — the only way to
     // reach the rename-failure branch without fault injection.
-    process.run(["mkdir", "-p", dst]);
+    fs.createDirectory(dst, true);
     assert ! _publish_lines_atomic(dst, ["; staged but never published"]);
     // `_atomic_rename_into_place` removes the temp on rename failure, so a
     // caller retrying into the same directory sees no stale sibling.
@@ -488,5 +526,5 @@ test "publish-lines: a failed rename is reported and leaves no residue" ![io] {
     // correctly reported as failed, which is what callers act on.
     assert fs.exists(dst);
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
