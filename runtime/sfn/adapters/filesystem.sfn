@@ -701,7 +701,7 @@ fn sfn_fs_delete(path: *u8) -> bool ![io] {
 // (non-empty directory `ENOTEMPTY`, a non-directory `ENOTDIR`, or a
 // missing path `ENOENT` all surface as `false`). The recursive
 // `rm -rf` composition lives one layer up in the `sfn/fs` capsule
-// (`capsules/sfn/fs/src/mod.sfn`), which clears a directory's
+// (`stdlib/fs/src/mod.sfn`), which clears a directory's
 // children before calling this — mirroring the `sfn_fs_delete` /
 // `unlink` shape exactly (`unlink` for files, `rmdir` for dirs).
 fn sfn_fs_rmdir(path: *u8) -> bool ![io] {

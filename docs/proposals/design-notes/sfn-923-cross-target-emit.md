@@ -66,7 +66,7 @@ concurrent claim and was reassigned to `E0617` during implementation.** This
 note's own §4.2 reasoning ("`E0615` is free … which already owns `E0614` … and
 `E0616`") checked `docs/style-guide.md`'s registry at the time and found it
 empty at that slot — but the registry was incomplete: `E0615` was already
-allocated in shipped code (`capsules/sfn/archive/src/error.sfn`, SFEP-0071
+allocated in shipped code (`stdlib/archive/src/error.sfn`, SFEP-0071
 §3.6 / SFN-753) without a corresponding style-guide row, so grepping the
 registry alone could not surface the collision. The implementation used
 `E0617` for the fail-closed target-disagreement guard instead, and added the

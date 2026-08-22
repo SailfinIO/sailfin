@@ -10,7 +10,7 @@
 // moment a new call site reintroduces the literal directly instead of
 // importing the resolver. Workspace member-local tests are in scope alongside
 // cross-domain compiler tests: `sfn_bin_path()` itself is consumed from
-// `capsules/sfn/test/tests/` and `capsules/sfn/bench/tests/`, so a test author
+// `capsules/sfn/test/tests/` and `stdlib/bench/tests/`, so a test author
 // copying a scratch-dir fallback from inside `sfn/test`'s own suite — the most
 // canonical-looking place to copy from — must be caught too.
 //
@@ -38,7 +38,7 @@ fn _allowed_paths() -> string[] {
     "capsules/sfn/test/tests/scratch_test.sfn",
     // Unrelated: "/tmp" here is a well-known POSIX directory used as a
     // symlink target fixture, not a scratch-dir fallback.
-    "capsules/sfn/fs/tests/fs_test.sfn"];
+    "stdlib/fs/tests/fs_test.sfn"];
 }
 
 fn _is_allowed(path: string, allowed: string[]) -> boolean {

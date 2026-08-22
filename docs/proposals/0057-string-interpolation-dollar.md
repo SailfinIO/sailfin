@@ -382,7 +382,7 @@ bootstrap-compiled runtime interpolation literals on `{{ }}`** (they keep
 working via dual-accept) and migrates them alongside the Phase 4 seed
 advance, when a `${ }`-aware seed is already pinned — everything else
 (examples, tests, capsules not linked into the compiler self-host such as
-`capsules/sfn/bench`) migrates freely in Phase 3 with no cosmetic exposure. Only Phase 4 (dropping
+`stdlib/bench`) migrates freely in Phase 3 with no cosmetic exposure. Only Phase 4 (dropping
 `{{ }}` entirely) is a candidate for a later, separate PR, since its
 correctness depends on an external fact (no remaining `{{ }}` usage anywhere
 that will be built against this compiler) rather than on anything internal

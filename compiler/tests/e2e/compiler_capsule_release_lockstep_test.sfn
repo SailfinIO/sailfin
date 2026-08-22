@@ -1,6 +1,7 @@
 // Release-version lockstep guard for private compiler implementation capsules
 // (SFEP-0020, established with sfn/syntax in SFN-741).
-import { contains } from "sfn/strings";
+import { contains, find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 import { capsule_artifact_dir } from "../../src/capsule_artifact";
 import { compiler_capsule_role } from "../../src/capsule_names";
@@ -8,9 +9,71 @@ import { load_workspace_members, validate_unique_workspace_member_names } from "
 import { toml_get_publish, toml_get_version } from "../../src/toml_parser";
 
 fn _lockstep_repo_root() -> string ![io] {
-    let root = env.get("SAILFIN_REPO_ROOT");
+    let mut root = env.get("SAILFIN_REPO_ROOT");
+    if root.length == 0 { root = env.get("PWD"); }
     if root.length > 0 { return root; }
     return ".";
+}
+
+fn _release_git(argv: string[], child_env: string[], cwd: string) -> string ![io] {
+    let exit = process.run_capture_cwd(argv, child_env, cwd);
+    let output = process.capture_take_stdout();
+    let error = process.capture_take_stderr();
+    if exit != 0 { throw "release fixture git command failed: " + error; }
+    return output;
+}
+
+fn _release_relocation_fixture(label: string, semantic_suffix: string) -> string[] ![io] {
+    let root = nested_runner_scratch("capsule-release-" + label);
+    process.run(["rm", "-rf", root]);
+    fs.createDirectory(root + "/capsules/sfn/probe/tests", true);
+    fs.writeFile(root + "/capsules/sfn/probe/capsule.toml", "[capsule]\nname = \"sfn/probe\"\nversion = \"1.2.3\"\n\n"
+        + "[build]\nentry = \"src/mod.sfn\"\nkind = \"library\"\n");
+    fs.writeFile(root + "/capsules/sfn/probe/tests/path_test.sfn", "let alpha = 1;\nlet beta = 2;\nlet gamma = 3;\n"
+        + "let fixture = \"capsules/sfn/probe/tests/fixture.sfn\";\n"
+        + "let delta = 4;\nlet epsilon = 5;\n");
+    let child_env = clean_runner_env(root + "/runner-scratch");
+    let _ = _release_git(["git", "init", "-q"], child_env, root);
+    let _ = _release_git(["git", "config", "user.email", "test@sailfin.dev"], child_env, root);
+    let _ = _release_git(["git", "config", "user.name", "Sailfin Test"], child_env, root);
+    let _ = _release_git(["git", "add", "."], child_env, root);
+    let _ = _release_git(["git", "commit", "-qm", "baseline"], child_env, root);
+    let before_line = _release_git(["git", "rev-parse", "HEAD"], child_env, root);
+    let before = substring(before_line, 0, before_line.length - 1);
+
+    fs.createDirectory(root + "/stdlib/probe/tests", true);
+    fs.writeFile(root + "/stdlib/probe/capsule.toml", fs.readFile(root
+        + "/capsules/sfn/probe/capsule.toml"));
+    fs.writeFile(root + "/stdlib/probe/tests/path_test.sfn", "let alpha = 1;\nlet beta = 2;\nlet gamma = 3;\n"
+        + "let fixture = \"stdlib/probe/tests/fixture.sfn\";\n"
+        + "let delta = 4;\nlet epsilon = 5;\n"
+        + semantic_suffix);
+    fs.deleteFile(root + "/capsules/sfn/probe/capsule.toml");
+    fs.deleteFile(root + "/capsules/sfn/probe/tests/path_test.sfn");
+    let _ = _release_git(["git", "add", "-A"], child_env, root);
+    let _ = _release_git(["git", "commit", "-qm", "relocate"], child_env, root);
+    let after_line = _release_git(["git", "rev-parse", "HEAD"], child_env, root);
+    let after = substring(after_line, 0, after_line.length - 1);
+    let status_line = _release_git(["git", "diff", "--name-status", "--find-renames=50%", before, after, "--", "capsules/sfn/probe/tests/path_test.sfn", "stdlib/probe/tests/path_test.sfn"], child_env, root);
+    let first_tab = find(status_line, "\t", 0);
+    assert first_tab > 0;
+    let status = substring(status_line, 0, first_tab);
+    assert substring(status, 0, 1) == "R";
+    fs.writeFile(root + "/before-public", "sfn/probe\tcapsules/sfn/probe\t\n");
+    return [root, before, after, status];
+}
+
+fn _release_topology_exit(fixture: string[]) -> int ![io] {
+    let root = fixture[0];
+    let classifier = _lockstep_repo_root()
+        + "/scripts/capsule-release-topology-only.sh";
+    let child_env = clean_runner_env(root + "/classifier-scratch");
+    let exit = process.run_capture_cwd(["bash", classifier, fixture[1], fixture[2], root
+        + "/before-public", "sfn/probe", "stdlib/probe", fixture[3], "capsules/sfn/probe/tests/path_test.sfn", "stdlib/probe/tests/path_test.sfn"], child_env, root);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    process.run(["rm", "-rf", root]);
+    return exit;
 }
 
 test "compiler capsule release: every private manifest matches the compiler version" ![io] {
@@ -101,14 +164,24 @@ test "compiler capsule release: public discovery spans topology roots without mo
     assert contains(workflow, "- 'stdlib/**'");
     assert contains(workflow, "- 'runtime/prelude.sfn'");
     assert contains(workflow, "--public-members");
-    assert contains(workflow, "--find-renames=100%");
-    assert contains(workflow, "status\" = \"R100");
+    assert contains(workflow, "--find-renames=50%");
+    assert contains(workflow, "capsule-release-topology-only.sh");
     assert contains(workflow, "before_public");
-    assert contains(workflow, "old_identity");
+    assert contains(workflow, "topology_classifier");
     assert contains(workflow, "changed_external_entries");
     assert contains(workflow, "git add --");
     assert contains(workflow, "changed_manifests");
     assert ! contains(workflow, "find capsules -name capsule.toml");
+}
+
+test "compiler capsule release: relocation path rewrites do not bump versions" ![io] {
+    let fixture = _release_relocation_fixture("path-only", "");
+    assert _release_topology_exit(fixture) == 0;
+}
+
+test "compiler capsule release: relocation plus semantic edits still bumps versions" ![io] {
+    let fixture = _release_relocation_fixture("semantic", "let behavior = 2;\n");
+    assert _release_topology_exit(fixture) != 0;
 }
 
 test "compiler capsule release: CI formatter and checks use workspace views" ![io] {

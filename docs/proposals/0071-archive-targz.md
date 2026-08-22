@@ -85,7 +85,7 @@ capability manifest.
 
 ### 3.1 Placement: a library capsule, not runtime source
 
-`sfn/archive` lands at `capsules/sfn/archive/`, modelled on
+`sfn/archive` lands at `stdlib/archive/`, modelled on
 `capsules/sfn/crypto/` — pure Sailfin, `capsule.toml` with
 `[build] entry = "src/mod.sfn"` and `kind = "library"`, tests in a sibling
 `tests/` directory.
@@ -117,7 +117,7 @@ The one manifest change outside the capsule is a dependency row in
 #### Module layout
 
 ```
-capsules/sfn/archive/
+stdlib/archive/
   capsule.toml
   src/mod.sfn          // barrel: the public API and nothing else
   src/bytes.sfn        // libc-backed byte buffer + cursor; the only unsafe interior
@@ -153,7 +153,7 @@ already-in-tree spellings that resolve against the pinned **0.9.5** seed
 |---|---|---|
 | Byte read | `load_byte(addr: int) -> int` builtin | `runtime/sfn/string.sfn:126`; lowering at `compiler/capsules/codegen-llvm/src/byte_load.sfn`. Seed 0.7.0-alpha.41 carries it, so 0.9.5 does. |
 | Byte read (fallback) | `sailfin_intrinsic_pointer_read_i32(ptr) & 255` | `capsules/sfn/crypto/src/rand.sfn:57` — **from capsule code**. Over-reads 3 bytes, so the buffer carries 4 bytes of slack (same file, `:38-41`). |
-| Byte write | `memset(p, value, 1)` via `extern fn memset` | `capsules/sfn/os/src/mod.sfn:296` — from capsule code. |
+| Byte write | `memset(p, value, 1)` via `extern fn memset` | `stdlib/os/src/mod.sfn:296` — from capsule code. |
 | Byte write (faster) | masked word RMW on `*i64` | `runtime/sfn/string.sfn:890` (`_num_put_byte`). Requires 8-aligned, multiple-of-8 storage — the `owned_buf_new` discipline. |
 | File bytes in/out | `extern fn fopen/fread/fwrite/fclose/malloc/realloc/free` | `compiler/src/build/fs.sfn:774-858` (`_read_file_bytes`); `capsules/sfn/crypto/src/rand.sfn:30-32` declares `malloc`/`free` from a capsule. |
 
@@ -181,7 +181,7 @@ process cap (`.claude/rules/compiler-safety.md`).
 
 `src/bytes.sfn` defines a libc-backed buffer addressed by `i64`, mirroring the
 `OwnedBuf` shape at `runtime/sfn/memory/ownedbuf.sfn:114-119` (capsules already
-re-declare that struct locally — `capsules/sfn/os/src/mod.sfn:77`,
+re-declare that struct locally — `stdlib/os/src/mod.sfn:77`,
 `capsules/sfn/http/src/server.sfn:50` — so re-declaring is the house pattern,
 not a new one):
 
@@ -207,7 +207,7 @@ struct ByteCursor {
 }
 ```
 
-Ownership is manual (`bytes_free`), matching `capsules/sfn/os::owned_buf_free`
+Ownership is manual (`bytes_free`), matching `stdlib/os::owned_buf_free`
 and `capsules/sfn/crypto/src/rand.sfn`'s `malloc`/`free` discipline. Every
 public entry point owns its allocations end to end and frees on every exit path
 including errors; no `ByteBuf` crosses the capsule boundary. SFEP-0064's
@@ -347,7 +347,7 @@ states the intent: prefer a copy over a link on that host.
   target is a **hard error** — not a skip. Extracting a link to `/etc` from a
   downloaded archive is precisely the escalation the guard exists to stop.
 - On POSIX with `copy_instead_of_link == false`: `fs.symlink(target, path)`
-  (`capsules/sfn/fs/src/mod.sfn:147`).
+  (`stdlib/fs/src/mod.sfn:147`).
 - On Windows, or with `copy_instead_of_link == true`: copy the target's bytes.
   Because tar order is not guaranteed to place the target before the link,
   link members are **deferred** — collected during the main pass and replayed
@@ -373,7 +373,7 @@ this avoids `link(2)` entirely.
   regular member. We do not stat inodes.
 
 Symlink detection on the write path uses `fs.read_link`
-(`capsules/sfn/fs/src/mod.sfn:155`, `readlink(2)`, `""` for a non-symlink) —
+(`stdlib/fs/src/mod.sfn:155`, `readlink(2)`, `""` for a non-symlink) —
 `fs.is_directory` follows symlinks and cannot answer this.
 
 ### 3.6 The extraction path policy (mandatory)
@@ -478,7 +478,7 @@ Canonical mode:
 | Symlink (`2`) | `0777` (what GNU tar stores) |
 
 "Executable" is decided by, in order: membership in `CreateOptions.exec_paths`;
-otherwise `fs.is_executable` (`capsules/sfn/fs/src/mod.sfn:123`, `access(X_OK)`)
+otherwise `fs.is_executable` (`stdlib/fs/src/mod.sfn:123`, `access(X_OK)`)
 on POSIX; otherwise false. `sfn package` already knows which staged entries are
 binaries, so the Windows answer is supplied, not guessed.
 
@@ -488,7 +488,7 @@ gzip header carries `MTIME = 0`, `XFL = 0`, `OS = 255` (unknown). This is what
 makes §2.2's reproducibility claim true.
 
 On extraction, `fs.set_perms` applies the stored mode masked to `0777` on POSIX
-and is a documented no-op on Windows (`capsules/sfn/fs/src/mod.sfn:93-100`). The
+and is a documented no-op on Windows (`stdlib/fs/src/mod.sfn:93-100`). The
 extractor forces the executable bit for any `0755` member on POSIX — that bit is
 the entire reason the extracted `sfn` runs.
 
@@ -643,7 +643,7 @@ capsule is a consumer of the existing model, not an extension of it.
 - Only `tar_read.sfn`, `tar_write.sfn`, and the `gzip_*` stream openers carry
   `![io]`. No `![net]`: the capsule never fetches. Effect lists are single-effect
   here, so the alphabetical rule (`.claude/rules/code-style.md`) is trivially met.
-- `capsules/sfn/archive/capsule.toml` declares `[capabilities] required = ["io"]`.
+- `stdlib/archive/capsule.toml` declares `[capabilities] required = ["io"]`.
   Note that `capsules/sfn/crypto/capsule.toml` declares `required = []` while
   exporting a `![rand]` function, so capsule-manifest enforcement is evidently
   not yet capsule-wide; the implementer declares `["io"]` as the honest answer
@@ -798,7 +798,7 @@ does not exist.
       exhaustive tables; interop tests are the acceptance evidence.
 - [ ] **Self-hosts** — `make compile` after A3 (compiler imports the capsule)
       and again after A5; `make check` before declaring the epic done.
-- [ ] **`sfn fmt --check` clean** — every `.sfn` under `capsules/sfn/archive/`
+- [ ] **`sfn fmt --check` clean** — every `.sfn` under `stdlib/archive/`
       and the touched `compiler/src/cli/commands/*.sfn`.
 - [ ] **Documented in `docs/status.md` + spec** — `docs/status.md` gains an
       `sfn/archive` row; `E0615` is added to `docs/style-guide.md:224`. No spec
@@ -810,7 +810,7 @@ and the four `tar` call sites are gone from `compiler/src/`.
 
 ## 8. Test plan
 
-### 8.1 Unit — `capsules/sfn/archive/tests/` (auto-discovered by `make test-capsules`)
+### 8.1 Unit — `stdlib/archive/tests/` (auto-discovered by `make test-capsules`)
 
 - **`crc32_test.sfn`** — the zlib/RFC 1952 check value `crc32("123456789") ==
   0xCBF43926`; empty input `== 0`; a 1 MiB generated pattern against a
@@ -893,10 +893,10 @@ implementation would make the test assert only that we agree with ourselves.
 ### 8.4 Commands
 
 ```
-build/bin/sfn check capsules/sfn/archive/src/*.sfn
-build/bin/sfn fmt --check capsules/sfn/archive/src/*.sfn capsules/sfn/archive/tests/*_test.sfn
+build/bin/sfn check stdlib/archive/src/*.sfn
+build/bin/sfn fmt --check stdlib/archive/src/*.sfn stdlib/archive/tests/*_test.sfn
 make compile                                   # after A3 and after A5
-build/bin/sfn test capsules/sfn/archive/tests
+build/bin/sfn test stdlib/archive/tests
 make test-capsules
 build/bin/sfn test compiler/tests/e2e/archive_gnu_tar_interop_test.sfn
 build/bin/sfn test compiler/tests/e2e/sfn_package_no_tar_test.sfn

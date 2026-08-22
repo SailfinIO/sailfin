@@ -6,7 +6,7 @@
 // `process.*` builtin surface (the handle round-trip and the
 // argv-empty / spawn-failure `0` sentinel) independently of the
 // higher-level `sfn/os` wrappers exercised by
-// `capsules/sfn/os/tests/spawn_with_env_test.sfn`. The exit-code decode
+// `stdlib/os/tests/spawn_with_env_test.sfn`. The exit-code decode
 // and the C-parity contract (return `0`, not `-1`, on failure) mirror
 // `sailfin_runtime.c:6664-6798`.
 test "spawn_with_env: cat round-trips piped stdin to stdout" ![io] {

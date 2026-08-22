@@ -26,7 +26,7 @@
 //
 // The `--compiler-bin` source MUST be non-executable (0644), not the live
 // host `sfn` binary: `_tw_is_executable`
-// (`capsules/sfn/archive/src/tar_write.sfn`) ORs `exec_paths` membership
+// (`stdlib/archive/src/tar_write.sfn`) ORs `exec_paths` membership
 // with a live `fs.is_executable` probe on the STAGED file, and
 // `_copy_file_preserving_mode` (`compiler/src/build/fs.sfn`) copies the
 // source's mode onto the staged copy. An executable source (0755) makes

@@ -111,7 +111,7 @@ test "archive inflate: decompressing a real tarball through targz_extract stays 
     // Build the fixture into a standalone binary FIRST, unmetered — see
     // the module comment above for why the metered run must be of the
     // built binary, not `sfn run`.
-    let fixture_src: string = "capsules/sfn/archive/tests/fixtures/inflate_memory_fixture.sfn";
+    let fixture_src: string = "stdlib/archive/tests/fixtures/inflate_memory_fixture.sfn";
     let fixture_bin: string = root + "/inflate-memory-fixture";
     let build_env: string[] = clean_runner_env(nested_runner_scratch("inflate-memory-build"));
     let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", fixture_bin, fixture_src], build_env);
