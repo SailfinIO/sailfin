@@ -6,7 +6,7 @@ type: tooling
 created: 2026-08-08
 updated: 2026-08-22
 author: "agent:compiler-architect; human review"
-tracking: SFN-774, SFN-775, SFN-776, SFN-777
+tracking: SFN-774, SFN-775, SFN-776, SFN-777, SFN-1039
 supersedes:
 superseded-by:
 graduates-to:

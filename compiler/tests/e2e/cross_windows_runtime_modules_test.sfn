@@ -42,7 +42,14 @@ test "cross-windows manifest selects every Win32 runtime sibling" ![io] {
     // resolve `sysconf` from winpthreads. Dropping it from the MinGW list
     // leaves `sfn_scheduler_resolve_thread_count` with an undefined
     // reference, so its presence here is load-bearing, not incidental.
-    assert expect_contains_str(manifest, "sfn/platform/pthread_windows.sfn").ok;
+    //
+    // Anchored contiguously from the `sfn-sources-add = [` header rather
+    // than searched for anywhere in the file: a bare whole-file substring
+    // would still pass if the entry were moved to `sfn-sources-drop`, which
+    // is precisely the regression this guards. Reordering these three lines
+    // fails the assertion by design — this list's membership is a link-time
+    // contract, so a reorder should come back through review here.
+    assert expect_contains_str(manifest, "sfn-sources-add = [\n    \"sfn/platform/realpath_windows.sfn\",\n    \"sfn/platform/clock_windows.sfn\",\n    \"sfn/platform/pthread_windows.sfn\",").ok;
     assert expect_contains_str(manifest, "link-libs-drop = []").ok;
     assert expect_contains_str(manifest, "sfn/platform/popen_windows.sfn").ok;
     assert expect_contains_str(manifest, "sfn/platform/mkstemp_windows.sfn").ok;

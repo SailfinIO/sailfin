@@ -20,9 +20,16 @@
 // `target_condition_runtime_sfn_sources`, which names this file and knows
 // nothing of a split-out provider. A separate provider is therefore
 // unreachable on the native MSVC leg and the link fails with
-// `undefined symbol: sysconf`; MinGW hides the fault because winpthreads
-// supplies its own. Split this back out only once a pinned seed carries
-// the `[targets.*]` table (`.claude/rules/seed-dependency.md`).
+// `undefined symbol: sysconf`.
+//
+// MinGW escaped that break only because its cross build runs on a FRESH
+// self-hosted compiler, which does read the `[targets.*]` table — not
+// because winpthreads covers the gap. It does not: a statically linked
+// mingw-w64 leaves `sysconf` undefined, which is why
+// `[targets.x86_64-w64-mingw32] sfn-sources-add` names THIS file. Do not
+// remove it there on the theory that winpthreads supplies `sysconf`.
+// Split this back out only once a pinned seed carries the `[targets.*]`
+// table (`.claude/rules/seed-dependency.md`).
 //
 // SRWLOCK/CONDITION_VARIABLE ARE the mutex/cond storage: both Win32
 // primitives are 8-byte pointer-sized handles that live in place at the

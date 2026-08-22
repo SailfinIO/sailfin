@@ -14,7 +14,7 @@
 // the system `ROOT` certificate store reached through Crypt32. Pins that
 // each module still emits clean LLVM IR for a Windows target and defines
 // the symbol it provides — via a basename swap for rlimit/rand/cert_roots,
-// and via a pure append for the nine anchor-less siblings
+// and via a pure append for the eight anchor-less siblings
 // (no POSIX `.sfn` counterpart to swap from) — in
 // `target_condition_runtime_sfn_sources`
 // (`compiler/src/build/target.sfn`). The native TLS stack (SFN-341) needs no
