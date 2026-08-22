@@ -1,16 +1,35 @@
 // runtime/sfn/platform/pthread_windows.sfn
 //
-// Windows sibling providing the 11 `pthread_*` symbols
+// Windows sibling providing the 11 `pthread_*` symbols plus `sysconf`
 // (SFN-549), APPENDED by `target_condition_runtime_sfn_sources`
 // (`compiler/src/build/target.sfn`) for a Windows target. There is no
 // POSIX `.sfn` module to swap FROM: `pthread.sfn` (the orphaned typecheck
-// skeleton) is an `extern fn` surface, not a compiled runtime module, so — like
+// skeleton) and `sysconf`'s declaration in `concurrency/scheduler.sfn`
+// are `extern fn` surfaces, not compiled runtime modules, so — like
 // `realpath_windows.sfn`/`clock_windows.sfn` — this is a pure addition.
 // Signatures below are copied verbatim from `platform/pthread.sfn` and
 // cross-checked against `concurrency/scheduler.sfn:167-201`, the actual
-// scheduler consumer. CPU-count compatibility lives separately in
-// `sysconf_windows.sfn`, allowing MinGW to use winpthreads without duplicate
-// strong pthread definitions while MSVC still uses this Win32 implementation.
+// scheduler consumer.
+//
+// `sysconf` DELIBERATELY LIVES HERE rather than in a `sysconf_windows.sfn`
+// of its own (SFN-1039). The pinned seed compiles working-tree runtime
+// source (`_compile_runtime_sfn_sources`,
+// `compiler/src/build/runtime_objs.sfn`), and a seed predating SFEP-0068
+// cannot read `runtime/capsule.toml`'s `[targets.*]` table — it selects
+// Windows siblings from the hardcoded list in
+// `target_condition_runtime_sfn_sources`, which names this file and knows
+// nothing of a split-out provider. A separate provider is therefore
+// unreachable on the native MSVC leg and the link fails with
+// `undefined symbol: sysconf`.
+//
+// MinGW escaped that break only because its cross build runs on a FRESH
+// self-hosted compiler, which does read the `[targets.*]` table — not
+// because winpthreads covers the gap. It does not: a statically linked
+// mingw-w64 leaves `sysconf` undefined, which is why
+// `[targets.x86_64-w64-mingw32] sfn-sources-add` names THIS file. Do not
+// remove it there on the theory that winpthreads supplies `sysconf`.
+// Split this back out only once a pinned seed carries the `[targets.*]`
+// table (`.claude/rules/seed-dependency.md`).
 //
 // SRWLOCK/CONDITION_VARIABLE ARE the mutex/cond storage: both Win32
 // primitives are 8-byte pointer-sized handles that live in place at the
@@ -139,4 +158,46 @@ fn pthread_join(thread: usize, result: **u8) -> i32 {
     // WAIT_FAILED == 0xFFFFFFFF == -1 in the DWORD's signed bit pattern.
     if wait_result == 0 - 1 { return 0 - 1; }
     return 0;
+}
+
+// ── CPU count ──────────────────────────────────────────────────
+// `void GetSystemInfo(LPSYSTEM_INFO)` — `dwNumberOfProcessors` sits at
+// byte offset 32 of the x86_64 `SYSTEM_INFO` layout (4-byte `dwOemId` +
+// 4-byte `dwPageSize` + two 8-byte pointers + an 8-byte
+// `dwActiveProcessorMask` = 32 bytes of header, then the 4-byte
+// `dwNumberOfProcessors` field). `SfnWinSystemInfo` is local stack
+// storage sized to the struct's 48-byte total (six `i64` slots, mirroring
+// the `PthreadMutex`/`PthreadCond` opaque-storage idiom in
+// `pthread_layout.sfn` — Sailfin has no fixed-size array type), read back
+// through the pointer-read intrinsic rather than a field access since the
+// struct is never given real Sailfin field names.
+extern fn GetSystemInfo(info: *u8) -> void;
+
+struct SfnWinSystemInfo {
+    _opaque0: i64;
+    _opaque1: i64;
+    _opaque2: i64;
+    _opaque3: i64;
+    _opaque4: i64;
+    _opaque5: i64;
+}
+
+// `name` (the `_SC_NPROCESSORS_ONLN`-style request code) is unused: the
+// only caller (`scheduler.sfn`'s pool-sizing path) asks for the online
+// CPU count, and Windows has one answer to that regardless of which
+// POSIX `_SC_*` id was requested.
+fn sysconf(name: i32) -> i64 {
+    let mut info: SfnWinSystemInfo = SfnWinSystemInfo {
+        _opaque0: 0,
+        _opaque1: 0,
+        _opaque2: 0,
+        _opaque3: 0,
+        _opaque4: 0,
+        _opaque5: 0
+    };
+    let info_ptr: *SfnWinSystemInfo = & info;
+    GetSystemInfo(info_ptr as *u8);
+    let count_ptr: *i32 = ((info_ptr as i64) + 32) as *i32;
+    let count: i32 = sailfin_intrinsic_pointer_read_i32(count_ptr);
+    return count as i64;
 }

@@ -1788,17 +1788,6 @@ fn _runtime_condition_values(base: string[], drops: string[], adds: string[]) ->
     return _runtime_condition_paths(base, empty, drops, adds);
 }
 
-fn _runtime_drop_source_basename(base: string[], basename: string) -> string[] {
-    let mut out: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= base.length { break; }
-        if _path_basename(base[i]) != basename { out.push(base[i]); }
-        i += 1;
-    }
-    return out;
-}
-
 fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: string, target_triple: string) -> RuntimeCapsuleArtifacts[] {
     let mut out: RuntimeCapsuleArtifacts[] = [];
     let mut i: int = 0;
@@ -1818,13 +1807,23 @@ fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: strin
         } else if target_os_is_windows(target_os) {
             // One-seed migration fallback (SFEP-0068 §3.3): a released seed
             // that predates `[targets.*]` still selects the Win32 siblings.
+            //
+            // This branch appends `pthread_windows.sfn` for BOTH Windows
+            // ABIs, MinGW included, and that is deliberate: the file carries
+            // `sysconf` as well as the `pthread_*` bodies, and a statically
+            // linked mingw-w64 does not resolve `sysconf` from winpthreads,
+            // so excluding it leaves `sfn_scheduler_resolve_thread_count`
+            // with an undefined reference (SFN-1039). Its Win32 definitions
+            // win over the archive's, so no duplicate-symbol conflict
+            // arises.
             sfn_sources = target_condition_runtime_sfn_sources(c.sfn_sources, target_os);
             if target_triple == "x86_64-w64-mingw32" {
-                // MinGW supplies the pthread ABI through winpthreads. Keep the
-                // split Sailfin sysconf provider, but never link the MSVC-only
-                // pthread shim alongside the toolchain's strong definitions.
-                sfn_sources = _runtime_drop_source_basename(sfn_sources, "pthread_windows.sfn");
-                link_libs = _runtime_condition_values(c.link_libs, [], ["-lbcrypt", "-lcrypt32", "-lws2_32"]);
+                // `target_extra_link_libs` supplies these on the MSVC ABI
+                // only, so the MinGW leg must add the three Windows import
+                // libs itself.
+                let no_lib_drops: string[] = [];
+                let mingw_libs: string[] = ["-lbcrypt", "-lcrypt32", "-lws2_32"];
+                link_libs = _runtime_condition_values(c.link_libs, no_lib_drops, mingw_libs);
             }
         }
         out.push(RuntimeCapsuleArtifacts {
