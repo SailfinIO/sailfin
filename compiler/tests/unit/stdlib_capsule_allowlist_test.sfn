@@ -3,8 +3,8 @@
 //
 // These guard against drift between the production allowlists in
 // cli_commands_utils.sfn (`_is_stdlib_capsule_cmd`) and toml_parser.sfn
-// (`_is_stdlib`) and the actual set of capsules shipped under
-// `capsules/sfn/`. When a new capsule is added to the tree, update both
+// (`_is_stdlib`) and the actual set of capsules shipped under the transitional
+// `capsules/sfn/` and `stdlib/` roots. When a new capsule is added, update both
 // allowlists AND the list below in lockstep. If this test fails, either
 // add the capsule dir or remove the stale allowlist entry.
 //
@@ -52,7 +52,7 @@ fn _resolve_capsule_name(name: string) -> string {
     return name;
 }
 
-// -- Known-good: every capsule currently under capsules/sfn/ --
+// -- Known-good: every shipped standard-library capsule --
 test "stdlib allowlist: every shipped sfn/* capsule is recognized" {
     assert _is_stdlib_capsule("cli");
     assert _is_stdlib_capsule("crypto");

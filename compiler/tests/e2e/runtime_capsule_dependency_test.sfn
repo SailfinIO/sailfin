@@ -78,9 +78,10 @@ fn _contains_text(haystack: string, needle: string) -> boolean {
 // `probe_rel` as an `sfn-source`. Returns the runtime root path.
 //
 // `locate_runtime_dep_capsule_src` resolves a runtime dep at
-// `<dirname(manifest_dir)>/capsules/<scope>/<name>/src`, so the capsule tree
-// has to sit beside the runtime copy — the same shape an installed toolchain
-// has (`<prefix>/runtime` + `<prefix>/capsules`).
+// `<dirname(manifest_dir)>/capsules/<scope>/<name>/src`, so the installed
+// capsule projection has to sit beside the runtime copy. Foundation capsules
+// live under `stdlib/` in the source workspace but remain under `capsules/`
+// in installed toolchains (SFN-1040).
 fn _stage_runtime_fixture(scratch: string, dep_spec: string, probe_rel: string, probe_source: string) -> string ![io] {
     // Private runtime tree. The name has no `runtime/` segment on purpose.
     let runtime_copy = scratch + "/runtime-copy";
@@ -94,6 +95,15 @@ fn _stage_runtime_fixture(scratch: string, dep_spec: string, probe_rel: string, 
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert cp_caps == 0;
+
+    // Mirror the installer's stable projection for the one foundation
+    // capsule this fixture consumes. Copying it explicitly keeps this test's
+    // out-of-tree shape independent from the source-workspace layout.
+    let cp_strings = process.run_capture(["cp", "-R", "stdlib/strings", scratch
+        + "/capsules/sfn/strings"], _child_env(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_strings == 0;
 
     // Declare the dependency and add a probe module that actually calls into
     // it. Both edits are required: the manifest entry drives staging, and the

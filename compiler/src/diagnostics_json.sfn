@@ -56,7 +56,7 @@ struct CheckJsonSummary {
 // Primitive encoders
 // -------------------------------------------------------------------
 // JSON string escaping per RFC 8259. Mirrors `sfn/json`'s
-// `_escape_json_string` (capsules/sfn/json/src/mod.sfn) but is
+// `_escape_json_string` (stdlib/json/src/mod.sfn) but is
 // duplicated here because the compiler proper doesn't import its own
 // stdlib capsules — we'd hit a build cycle. Same six escapes
 // (`\\"`, `\\\\`, `\\n`, `\\r`, `\\t`, `\\b`, `\\f`) plus a

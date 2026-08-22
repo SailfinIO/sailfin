@@ -125,7 +125,7 @@ labels:
     description: "Diagnostics, error messages, ergonomics, tooling UX"
   - name: area:capsules
     color: "c5def5"
-    description: "capsules/* — standard library and package capsule surfaces"
+    description: "capsules/* and stdlib/* — standard library and package capsule surfaces"
 
   # --- Special markers -------------------------------------------------
   - name: tracking

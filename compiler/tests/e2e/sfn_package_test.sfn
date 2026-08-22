@@ -56,6 +56,18 @@ fn _child_env() -> string[] ![io] {
     return e;
 }
 
+fn _child_env_with_home(home: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("HOME=" + home);
+    return e;
+}
+
 // First line of a captured stdout, trailing newline dropped.
 fn _first_line(text: string) -> string {
     let lines = split(text, "\n");
@@ -280,7 +292,7 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
         return;
     }
 
-    // Per-run unique root (mkdtemp) so the `capsules` symlink and the dist
+    // Per-run unique root (mkdtemp) so the dependency projection and the dist
     // artifacts never collide with a prior invocation's leftovers — the .sh
     // got a fresh mktemp dir each run; a fixed /tmp path is not idempotent.
     // The root MUST be absolute: this test `cd`s into the fixture to run
@@ -295,14 +307,19 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
     let widget = root + "/widget-fixture";
     fs.createDirectory(widget + "/src", true);
 
-    // The .sh symlinked `capsules` into the fixture so `sfn/math` resolves;
-    // reproduce that with `ln -sfn <repo_root>/capsules <widget>/capsules`
-    // (`-f`/`-n` make it idempotent if a stale link is present).
-    let link_exit = process.run_capture(["ln", "-sfn", repo_root + "/capsules", widget
-        + "/capsules"], _child_env());
+    // Project the moved source member into the stable installed capsule
+    // layout consumed by an out-of-tree project. Stage only the declared
+    // dependency so this fixture cannot resolve it through an unrelated
+    // repository tree.
+    fs.createDirectory(widget + "/capsules/sfn", true);
+    let link_exit = process.run_capture(["ln", "-sfn", repo_root
+        + "/stdlib/math", widget
+        + "/capsules/sfn/math"], _child_env());
     let _lo = process.capture_take_stdout();
     let _le = process.capture_take_stderr();
     assert link_exit == 0;
+    let isolated_home = root + "/home";
+    fs.createDirectory(isolated_home, true);
 
     fs.writeFile(widget + "/capsule.toml", "[capsule]\nname = \"demo/widget\"\nversion = \"0.1.0\"\ndescription = \"E2E fixture for sfn package\"\n\n[dependencies]\n\"sfn/math\" = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\n");
     fs.writeFile(widget + "/src/mod.sfn", "import { abs } from \"sfn/math\";\nfn widget_abs(n: number) -> number { return abs(n); }\n");
@@ -316,7 +333,7 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
     let build_exit = process.run_capture(["bash", "-c", "cd \"" + widget
         + "\" && \""
         + sfn_abs
-        + "\" build -p ."], _child_env());
+        + "\" build -p ."], _child_env_with_home(isolated_home));
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;
@@ -327,7 +344,7 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
         + sfn_abs
         + "\" package -p . --out \""
         + userdist
-        + "\""], _child_env());
+        + "\""], _child_env_with_home(isolated_home));
     let _po = process.capture_take_stdout();
     let _pe = process.capture_take_stderr();
     assert pkg_exit == 0;

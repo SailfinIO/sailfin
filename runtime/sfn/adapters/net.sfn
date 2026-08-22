@@ -3,7 +3,7 @@
 // Sailfin-native TCP socket primitives backing the `sfn/net` capsule
 // (#1582, epic #1540 Track B / gap B6). Provides the real
 // connect/read/write/close client surface and a minimal bind/listen/
-// accept server surface so `capsules/sfn/net/src/mod.sfn` performs
+// accept server surface so `stdlib/net/src/mod.sfn` performs
 // actual I/O instead of returning zero-values.
 //
 // This is migration-mechanism 3 (additive frontend): every symbol here

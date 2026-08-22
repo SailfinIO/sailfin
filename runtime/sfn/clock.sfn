@@ -10,7 +10,7 @@
 //
 // Unit contract: `milliseconds`. This matches the public `sleep(ms)`
 // surface in the prelude (`runtime/prelude.sfn`) and the `time`
-// capsule (`capsules/sfn/time/src/mod.sfn`), the language spec
+// capsule (`stdlib/time/src/mod.sfn`), the language spec
 // (`site/.../reference/standard-library.md`), and
 // `docs/proposals/0025-native-runtime-architecture.md` `#38-capability-adapters-and-io-primitives`. Issue #307 is the unit
 // audit that locked this in across all four layers.
