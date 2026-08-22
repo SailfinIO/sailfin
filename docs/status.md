@@ -562,7 +562,24 @@ here.
   since it carries no TLS at all. #3048 fixed the trigger
   (`SAILFIN_BOOTSTRAP: "off"`,
   `.github/actions/sailfin-build-windows/action.yml:167`); the seed-pin gate
-  defect behind it is SFN-1011. **v0.10.3, cut 2026-08-21, is the first
+  defect behind it is SFN-1011. #3048's override lived entirely inside the
+  build composite, so `windows-native-selfhost.yml`'s own
+  `Gate — self-host fixed point (pass-2 == pass-1)` step — which ran both
+  self-host passes and the byte comparison together with no such override —
+  kept hitting the same skew window and kept failing on every release commit,
+  observed on both `eb375ce3` (v0.10.3, `could not obtain the pinned seed
+  0.10.2`) and `98ceafd5` (v0.10.4, `failed to re-exec the pinned seed`,
+  since `sfn_process_exec` is a documented `-1` stub on Windows —
+  `runtime/sfn/platform/process_windows.sfn`). Because the step's name
+  framed this as a determinism check, triage started in the wrong place, and
+  a gate that is predictably red after every release commit is one people
+  learn to wave through. SFN-1035 splits the step in two —
+  `Self-host pass 1 + pass 2 (native MSVC)` (id `selfhost_passes`, now
+  carrying `SAILFIN_BOOTSTRAP: "off"`) and
+  `Gate — self-host fixed point (pass-2 == pass-1)` (id `fixed_point`, byte
+  compare only) — and adds a fourth `windows-selfhost-pass` value to
+  `Identify failed gate` so a dispatch failure is distinguishable from an
+  actual fixed-point mismatch. **v0.10.3, cut 2026-08-21, is the first
   Sailfin release to ship a native MSVC asset.** The leg is wired —
   `release-tag.yml`'s `native-windows-build` job (SFN-998) runs the same
   `package --installer --target windows-x86_64-msvc`, and its artifact
@@ -575,13 +592,25 @@ here.
   by the signed `SHA256SUMS`. The `upload` job still does not gate on the
   MSVC leg's result (SFN-1024), so a future tag can still publish without the
   asset and without failing — this cut simply didn't hit that path. The
-  shipped binary self-hosts and packages correctly but is not yet a usable
-  native seed: SFN-1026 — `getaddrinfo` runs before `WSAStartup`, so every
-  DNS-resolving client connect fails on native Windows — blocks any
-  network-dependent use. That is why SFN-57's publish-alongside → verify →
-  swap transition cannot proceed to the swap yet, and, on top of SFEP-0021
-  §4.5's full-release-cycle soak (which has not run), why retiring the mingw
-  cross path (SFN-58) remains blocked.
+  v0.10.3 binary self-hosted and packaged correctly but was not yet a
+  usable native seed at the time: SFN-1026 — `getaddrinfo` ran before
+  `WSAStartup`, so every DNS-resolving client connect failed on native
+  Windows — blocked network-dependent use. SFN-1026 is now fixed and
+  shipped, merged as `d8c858b8` (#3061) and released in v0.10.4, removing
+  that blocker; SFN-1033, also shipped in v0.10.4, made all three
+  release-asset selectors (`compiler/src/cli/commands/toolchain.sfn`,
+  `install.ps1`, `install.sh`) prefer the `-msvc` asset over the legacy
+  mingw one, falling back to the plain asset for releases before v0.10.3 and
+  for arm64. The chain was verified end-to-end on a real Windows host from
+  the published v0.10.4 binary: `sfn toolchain install 0.10.3` exits 0
+  having selected and digest-verified the msvc asset. SFN-57's
+  publish-alongside → verify → swap transition no longer has a
+  network-correctness blocker on the verify leg, but retiring the mingw
+  cross path (SFN-58) remains blocked — on SFN-994 (`seed_source: 'release'`
+  is unimplemented, so all Windows CI still bootstraps from the mingw cross
+  artifact) and on SFEP-0021 §4.5's full-release-cycle soak, which has not
+  run. The Windows gate still runs zero tests (SFN-981), so green there
+  means the build reaches a fixed point, not that it works.
 - **Structured output.** `sfn build --json` emits a schema-versioned
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP
