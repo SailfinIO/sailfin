@@ -1,0 +1,467 @@
+// compiler/src/installer_staging.sfn
+//
+// Manifest-driven assembly of the workspace assets shipped beside an
+// installed compiler. Source members may live in the current, transitional,
+// or SFEP-0072 target topology; the staged tree keeps the stable installed
+// `runtime/` and `capsules/<scope>/<name>/` compatibility layout.
+import { _copy_file_preserving_mode } from "./build/fs";
+import { copy_tree, ensure_dir_p } from "./build/fs_tree";
+import { is_safe_scope_name, parse_scope_name } from "./capsule_artifact";
+import { _cr_dirname, _cr_path_join, _cr_sort_strings } from "./capsule_resolver/paths";
+import { WorkspaceMember } from "./capsule_resolver/types";
+import { _source_identity_normalize_path } from "./module_paths";
+import { RuntimeCapsuleArtifacts, runtime_capsule_from_root } from "./runtime_capsule_resolver";
+import { contains_string, starts_with, substring } from "./string_utils";
+import { toml_get_dependencies, toml_get_string } from "./toml_parser";
+import { WorkspaceInventory, load_workspace_inventory } from "./workspace_inventory";
+
+struct InstallerStageResult {
+    ok: boolean;
+    compiler_manifest: string;
+    staged_member_names: string[];
+}
+
+fn _is_contains_path(path: string, root: string) -> boolean {
+    if path == root { return true; }
+    return starts_with(path, root + "/");
+}
+
+fn _normalized_join(root: string, path: string) -> string {
+    return _source_identity_normalize_path(_cr_path_join(root, path));
+}
+
+fn _member_root(workspace_root: string, member: WorkspaceMember) -> string {
+    return _normalized_join(workspace_root, member.member_path);
+}
+
+fn _member_manifest(workspace_root: string, member: WorkspaceMember) -> string {
+    return _normalized_join(_member_root(workspace_root, member), "capsule.toml");
+}
+
+fn _member_index(members: WorkspaceMember[], name: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        if members[i].name == name { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _split_dependency_specs(records: string) -> string[] {
+    let mut out: string[] = [];
+    let mut record: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let ch = substring(records, i, i + 1);
+        i += 1;
+        if ch != "\n" {
+            record = record + ch;
+            continue;
+        }
+        let eq = _find_equals(record);
+        if eq > 0 { out.push(substring(record, 0, eq)); } else if record.length > 0 {
+            out.push(record);
+        }
+        record = "";
+    }
+    let eq = _find_equals(record);
+    if eq > 0 { out.push(substring(record, 0, eq)); } else if record.length > 0 {
+        out.push(record);
+    }
+    return out;
+}
+
+fn _find_equals(text: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if substring(text, i, i + 1) == "=" { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _member_dependencies(workspace_root: string, member: WorkspaceMember) -> string[] ![io] {
+    let manifest = _member_manifest(workspace_root, member);
+    if !fs.exists(manifest) { return []; }
+    return _split_dependency_specs(toml_get_dependencies(fs.readFile(manifest)));
+}
+
+fn _installed_capsule_path(name: string) -> string {
+    let parts = parse_scope_name(name);
+    if !is_safe_scope_name(parts.scope, parts.name) { return ""; }
+    return "capsules/" + parts.scope + "/" + parts.name;
+}
+
+fn _copy_staged_file(source: string, destination: string) -> boolean ![io] {
+    if !fs.exists(source) { return false; }
+    let parent = _cr_dirname(destination);
+    if parent.length > 0 && !ensure_dir_p(parent) { return false; }
+    return _copy_file_preserving_mode(source, destination);
+}
+
+fn _relative_to(path: string, root: string) -> string {
+    if path == root { return ""; }
+    if !_is_contains_path(path, root) { return ""; }
+    return substring(path, root.length + 1, path.length);
+}
+
+fn _stage_library_member(workspace_root: string, member: WorkspaceMember, destination_root: string, runtime_prelude: string) -> boolean ![io] {
+    let member_root = _member_root(workspace_root, member);
+    let manifest = _member_manifest(workspace_root, member);
+    let installed_path = _installed_capsule_path(member.name);
+    if (installed_path.length == 0 || !fs.exists(manifest)) {
+        print.err("sfn package: invalid or missing workspace member `" + member.name
+            + "`");
+        return false;
+    }
+    let destination = _normalized_join(destination_root, installed_path);
+    if !ensure_dir_p(destination) || !_copy_staged_file(manifest, destination
+        + "/capsule.toml") {
+        print.err("sfn package: failed to stage manifest for `" + member.name
+            + "`");
+        return false;
+    }
+
+    let manifest_text = fs.readFile(manifest);
+    let entry = toml_get_string(manifest_text, "build", "entry");
+    let mut entry_path: string = "";
+    if entry.length > 0 {
+        entry_path = _normalized_join(member_root, entry);
+    }
+    if entry_path.length > 0 && !fs.exists(entry_path) {
+        print.err("sfn package: missing declared entry for `" + member.name
+            + "`: "
+            + entry_path);
+        return false;
+    }
+
+    let entry_is_contained = entry_path.length == 0 || _is_contains_path(entry_path, member_root);
+    let dormant_prelude = member.name == "sfn/prelude" && !member.implicit
+        && entry_path.length > 0
+        && entry_path == runtime_prelude;
+    if !entry_is_contained && !dormant_prelude {
+        print.err("sfn package: declared entry escapes workspace member `"
+            + member.name
+            + "`: "
+            + entry_path);
+        return false;
+    }
+
+    let source_root = _source_identity_normalize_path(member.src_dir);
+    let has_source_root = fs.exists(source_root);
+    if has_source_root {
+        if !copy_tree(source_root, destination + "/src") {
+            print.err("sfn package: failed to stage sources for `" + member.name
+                + "`");
+            return false;
+        }
+    }
+    if entry_path.length > 0 && entry_is_contained && !_is_contains_path(entry_path, source_root) {
+        let relative_entry = _relative_to(entry_path, member_root);
+        if relative_entry.length == 0 || !_copy_staged_file(entry_path, destination
+            + "/"
+            + relative_entry) {
+            print.err("sfn package: failed to stage entry for `" + member.name
+                + "`");
+            return false;
+        }
+    }
+    if !has_source_root && entry_path.length == 0 {
+        print.err("sfn package: workspace member has no stageable source: `"
+            + member.name
+            + "`");
+        return false;
+    }
+    return true;
+}
+
+fn _runtime_prelude_from_member(workspace_root: string, member: WorkspaceMember) -> string ![io] {
+    let artifacts = runtime_capsule_from_root(_member_root(workspace_root, member));
+    if artifacts.length != 1 { return ""; }
+    return artifacts[0].prelude_entry;
+}
+
+fn _stage_runtime_file(source: string, member_root: string, destination_root: string) -> boolean ![io] {
+    if (!_is_contains_path(source, member_root)) { return false; }
+    let relative = _relative_to(source, member_root);
+    if relative.length == 0 { return false; }
+    return _copy_staged_file(source, destination_root + "/runtime/" + relative);
+}
+
+fn _runtime_sources_valid(artifacts: RuntimeCapsuleArtifacts) -> boolean ![io] {
+    if !fs.exists(artifacts.sfn_source_root) { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= artifacts.sfn_sources.length { break; }
+        let source = artifacts.sfn_sources[i];
+        if !fs.exists(source) || !_is_contains_path(source, artifacts.sfn_source_root) {
+            return false;
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= artifacts.sfn_source_gates.length { break; }
+        let record = artifacts.sfn_source_gates[i];
+        let tab = _find_tab(record);
+        if tab < 0 || tab + 1 >= record.length { return false; }
+        let source = substring(record, tab + 1, record.length);
+        if !fs.exists(source) || !_is_contains_path(source, artifacts.sfn_source_root) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn _find_tab(text: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if substring(text, i, i + 1) == "\t" { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _stage_runtime_member(workspace_root: string, member: WorkspaceMember, runtime_ir_inputs: string[], destination_root: string) -> boolean ![io] {
+    let member_root = _member_root(workspace_root, member);
+    let manifest = _member_manifest(workspace_root, member);
+    let artifacts = runtime_capsule_from_root(member_root);
+    if artifacts.length != 1 || artifacts[0].capsule_name != member.name {
+        print.err("sfn package: invalid runtime workspace member `" + member.name
+            + "`");
+        return false;
+    }
+    let runtime = artifacts[0];
+    if !_runtime_sources_valid(runtime) {
+        print.err("sfn package: missing or escaping runtime source for `"
+            + member.name
+            + "`");
+        return false;
+    }
+    if !ensure_dir_p(destination_root + "/runtime") || !_copy_staged_file(manifest, destination_root
+        + "/runtime/capsule.toml") {
+        print.err("sfn package: failed to stage runtime manifest");
+        return false;
+    }
+
+    let source_relative = _relative_to(runtime.sfn_source_root, member_root);
+    if source_relative.length == 0 || !copy_tree(runtime.sfn_source_root, destination_root
+        + "/runtime/"
+        + source_relative) {
+        print.err("sfn package: failed to stage runtime Sailfin sources");
+        return false;
+    }
+    if runtime.prelude_entry.length > 0 && !_is_contains_path(runtime.prelude_entry, runtime.sfn_source_root) {
+        if !_stage_runtime_file(runtime.prelude_entry, member_root, destination_root) {
+            print.err("sfn package: failed to stage runtime prelude entry");
+            return false;
+        }
+    }
+
+    let mut copied: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_ir_inputs.length { break; }
+        let source = runtime_ir_inputs[i];
+        i += 1;
+        if !_is_contains_path(source, member_root) { continue; }
+        if !_stage_runtime_file(source, member_root, destination_root) {
+            print.err("sfn package: failed to stage runtime IR " + source);
+            return false;
+        }
+        copied.push(source);
+    }
+    let declared_files = _runtime_declared_files(runtime);
+    i = 0;
+    loop {
+        if i >= declared_files.length { break; }
+        let source = declared_files[i];
+        i += 1;
+        if contains_string(copied, source) || _is_contains_path(source, runtime.sfn_source_root) {
+            continue;
+        }
+        if !_stage_runtime_file(source, member_root, destination_root) {
+            print.err("sfn package: failed to stage declared runtime input "
+                + source);
+            return false;
+        }
+        copied.push(source);
+    }
+    i = 0;
+    loop {
+        if i >= runtime.include_dirs.length { break; }
+        let source = runtime.include_dirs[i];
+        i += 1;
+        let relative = _relative_to(source, member_root);
+        if relative.length == 0 || !copy_tree(source, destination_root
+            + "/runtime/"
+            + relative) {
+            print.err("sfn package: failed to stage runtime include directory "
+                + source);
+            return false;
+        }
+    }
+    return true;
+}
+
+fn _runtime_declared_files(runtime: RuntimeCapsuleArtifacts) -> string[] {
+    let mut out = runtime.c_sources;
+    let mut i: int = 0;
+    loop {
+        if i >= runtime.ll_sources.length { break; }
+        if !contains_string(out, runtime.ll_sources[i]) {
+            out.push(runtime.ll_sources[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _installed_workspace_manifest(member_paths: string[]) -> string {
+    let paths = _cr_sort_strings(member_paths);
+    let mut out = "[workspace]\nmembers = [\n";
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        out = out + "    \"" + paths[i] + "\",\n";
+        i += 1;
+    }
+    return out + "]\n";
+}
+
+fn compiler_manifest_from_workspace(workspace_root: string) -> string ![io] {
+    let inventory = load_workspace_inventory(workspace_root);
+    if !inventory.ok { return ""; }
+    let index = _member_index(inventory.members, "sfn/compiler");
+    if index < 0 {
+        print.err("sfn package: workspace has no `sfn/compiler` member");
+        return "";
+    }
+    return _member_manifest(workspace_root, inventory.members[index]);
+}
+
+fn stage_installer_workspace_assets(workspace_root: string, destination_root: string) -> InstallerStageResult ![io] {
+    let mut result = InstallerStageResult {
+        ok: false,
+        compiler_manifest: "",
+        staged_member_names: []
+    };
+    let inventory = load_workspace_inventory(workspace_root);
+    if !inventory.ok { return result; }
+    let compiler_index = _member_index(inventory.members, "sfn/compiler");
+    if compiler_index < 0 {
+        print.err("sfn package: workspace has no `sfn/compiler` member");
+        return result;
+    }
+    let compiler = inventory.members[compiler_index];
+    result.compiler_manifest = _member_manifest(workspace_root, compiler);
+
+    let mut queue = _member_dependencies(workspace_root, compiler);
+    let prelude_index = _member_index(inventory.members, "sfn/prelude");
+    if prelude_index >= 0 && !contains_string(queue, "sfn/prelude") {
+        queue.push("sfn/prelude");
+    }
+    let mut ii: int = 0;
+    loop {
+        if ii >= inventory.members.length { break; }
+        let member = inventory.members[ii];
+        ii += 1;
+        if member.implicit && !contains_string(queue, member.name) {
+            queue.push(member.name);
+        }
+    }
+
+    // Resolve the selected closure before copying so an unrelated runtime
+    // provider elsewhere in the workspace does not conflict with the one
+    // selected by `sfn/compiler` (SFN-937). This pass also discovers the
+    // transitional runtime-owned prelude before any library is staged.
+    let mut closure_names: string[] = [];
+    let mut runtime_prelude: string = "";
+    let mut runtime_count: int = 0;
+    let mut pi: int = 0;
+    loop {
+        if pi >= queue.length { break; }
+        if pi >= 4096 {
+            print.err("sfn package: workspace dependency closure exceeded 4096 members");
+            return result;
+        }
+        let spec = queue[pi];
+        pi += 1;
+        if contains_string(closure_names, spec) { continue; }
+        let index = _member_index(inventory.members, spec);
+        if index < 0 {
+            print.err("sfn package: dependency `" + spec
+                + "` is not a registered workspace member");
+            return result;
+        }
+        let member = inventory.members[index];
+        closure_names.push(member.name);
+        if member.build_kind == "runtime" {
+            runtime_count += 1;
+            if runtime_count > 1 {
+                print.err("sfn package: compiler closure contains multiple runtime providers");
+                return result;
+            }
+            runtime_prelude = _runtime_prelude_from_member(workspace_root, member);
+        }
+        let dependencies = _member_dependencies(workspace_root, member);
+        let mut di: int = 0;
+        loop {
+            if di >= dependencies.length { break; }
+            if !contains_string(closure_names, dependencies[di]) {
+                queue.push(dependencies[di]);
+            }
+            di += 1;
+        }
+    }
+    if runtime_count == 0 {
+        print.err("sfn package: `sfn/compiler` dependency closure has no runtime provider");
+        return result;
+    }
+
+    let mut member_paths: string[] = [];
+    let mut found_runtime: boolean = false;
+    let mut qi: int = 0;
+    loop {
+        if qi >= closure_names.length { break; }
+        let spec = closure_names[qi];
+        qi += 1;
+        let index = _member_index(inventory.members, spec);
+        let member = inventory.members[index];
+        let mut staged_path: string = "";
+        let mut staged: boolean = false;
+        if member.build_kind == "runtime" {
+            if found_runtime {
+                print.err("sfn package: compiler closure contains multiple runtime providers");
+                return result;
+            }
+            found_runtime = true;
+            staged_path = "runtime";
+            staged = _stage_runtime_member(workspace_root, member, inventory.runtime_ir_inputs, destination_root);
+        } else {
+            staged_path = _installed_capsule_path(member.name);
+            staged = _stage_library_member(workspace_root, member, destination_root, runtime_prelude);
+        }
+        if !staged { return result; }
+        result.staged_member_names.push(member.name);
+        member_paths.push(staged_path);
+    }
+    fs.writeFile(destination_root + "/workspace.toml", _installed_workspace_manifest(member_paths));
+    if !fs.exists(destination_root + "/workspace.toml") {
+        print.err("sfn package: failed to stage installed workspace manifest");
+        return result;
+    }
+    result.ok = true;
+    return result;
+}
+
+export {
+    InstallerStageResult,
+    compiler_manifest_from_workspace,
+    stage_installer_workspace_assets
+};

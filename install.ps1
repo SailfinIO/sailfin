@@ -354,30 +354,52 @@ Copy-Item -Path $SrcBinary -Destination $DestPath -Force
 
 # Install runtime bundle if present.
 $RuntimeSrc = Join-Path $RootDir "runtime"
+$RuntimeDest = Join-Path $TargetDir "runtime"
 if (Test-Path $RuntimeSrc) {
     Log "Installing runtime bundle to $TargetDir\runtime..."
-    $RuntimeDest = Join-Path $TargetDir "runtime"
     if (Test-Path $RuntimeDest) { Remove-Item -Recurse -Force $RuntimeDest }
     Copy-Item -Path $RuntimeSrc -Destination $RuntimeDest -Recurse
 } else {
     Log "Warning: runtime bundle not found in archive; sfn run/build will fail without it."
 }
 
-# The runtime capsule's [dependencies] closure (e.g. sfn/crypto), staged by
-# `sfn package --installer` (SFN-773) as a sibling of runtime\ -- the one shape
-# locate_runtime_dep_capsule_src resolves. Absent on releases <= 0.9.3, so no
-# warning here; without it on a newer archive, every user program link-fails.
+# The compiler/runtime workspace dependency closure, staged by
+# `sfn package --installer` (SFN-773, SFN-937) as a sibling of runtime\ -- the
+# compatibility shape installed dependency discovery resolves.
 $CapsulesSrc = Join-Path $RootDir "capsules"
+$CapsulesDest = Join-Path $TargetDir "capsules"
 if (Test-Path $CapsulesSrc) {
     Log "Installing runtime capsule dependencies to $TargetDir\capsules..."
-    $CapsulesDest = Join-Path $TargetDir "capsules"
     if (Test-Path $CapsulesDest) { Remove-Item -Recurse -Force $CapsulesDest }
     Copy-Item -Path $CapsulesSrc -Destination $CapsulesDest -Recurse
 }
 
-# --- Symlinks / copies in global bin dir -------------------------------------
+# SFN-937: publish the generated workspace manifest only after the canonical
+# capsule payload it names. Older archives have no workspace manifest.
+$WorkspaceSrc = Join-Path $RootDir "workspace.toml"
+$WorkspaceDest = Join-Path $TargetDir "workspace.toml"
+if (Test-Path $WorkspaceDest) { Remove-Item -Force $WorkspaceDest }
+if (Test-Path $WorkspaceSrc) {
+    if (-not (Test-Path $CapsulesDest)) {
+        throw "Bundled workspace manifest has no installed capsule payload."
+    }
+    Log "Installing bundled workspace manifest to $TargetDir\workspace.toml..."
+    Copy-Item -Path $WorkspaceSrc -Destination $WorkspaceDest -Force
+}
+
+# --- Copies in global bin dir ------------------------------------------------
 
 New-Item -ItemType Directory -Path $GlobalBinDir -Force | Out-Null
+
+$PointerPath = Join-Path $GlobalBinDir "sailfin-install-root"
+$GlobalPayloadOwned = Test-Path $PointerPath
+if ($GlobalPayloadOwned) {
+    foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
+        $LegacyPath = Join-Path $GlobalBinDir $LegacyName
+        if (Test-Path $LegacyPath) { Remove-Item -Recurse -Force $LegacyPath }
+    }
+}
+if (Test-Path $PointerPath) { Remove-Item -Force $PointerPath }
 
 $Aliases = @($DestName)
 if ($DestName -match '\.exe$') {
@@ -394,6 +416,33 @@ foreach ($Alias in ($Aliases | Select-Object -Unique)) {
     Copy-Item -Path $DestPath -Destination $LinkPath -Force
     Log "Installed: $LinkPath"
 }
+
+# Published compilers predating SFN-937 cannot read the install-root pointer.
+# Their archives have no workspace.toml, so mirror their runtime dependency
+# payload beside the copied executable. New archives use only the pointer.
+if (-not (Test-Path $WorkspaceSrc)) {
+    foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
+        $LegacyPath = Join-Path $GlobalBinDir $LegacyName
+        if ((Test-Path $LegacyPath) -and -not $GlobalPayloadOwned) {
+            throw "Refusing to replace unowned $LegacyPath for legacy installer compatibility."
+        }
+    }
+    if (Test-Path $RuntimeDest) {
+        Copy-Item -Path $RuntimeDest -Destination (Join-Path $GlobalBinDir "runtime") -Recurse
+    }
+    if (Test-Path $CapsulesDest) {
+        Copy-Item -Path $CapsulesDest -Destination (Join-Path $GlobalBinDir "capsules") -Recurse
+    }
+    Log "Installed adjacent payload mirror for pre-SFN-937 compiler compatibility."
+}
+
+# Copied executables report GLOBAL_BIN_DIR as their own directory. Publish the
+# canonical version root after all executable copies so compiler startup can
+# recover the runtime/workspace discovery anchor without changing sfn.exe.
+$TargetDirResolved = (Resolve-Path -LiteralPath $TargetDir).Path
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($PointerPath, $TargetDirResolved, $Utf8NoBom)
+Log "Installed payload pointer: $PointerPath -> $TargetDirResolved"
 
 # --- Update user PATH --------------------------------------------------------
 

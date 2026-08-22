@@ -126,7 +126,13 @@ jobs:
           test -x "${GLOBAL_BIN_DIR}/sfn"
           file -L "${GLOBAL_BIN_DIR}/sfn" | grep -E '${{ matrix.file_pattern }}'
           test "$("${GLOBAL_BIN_DIR}/sfn" --version)" = "sfn ${SEED_VERSION}"
-          "${GLOBAL_BIN_DIR}/sfn" run examples/basics/hello-world.sfn
+          empty_dir="${RUNNER_TEMP}/sailfin-empty-cwd"
+          mkdir -p "$empty_dir"
+          cd "$empty_dir"
+          "${GLOBAL_BIN_DIR}/sfn" run "${GITHUB_WORKSPACE}/examples/basics/hello-world.sfn"
+          "${GLOBAL_BIN_DIR}/sfn" build \
+            "${GITHUB_WORKSPACE}/examples/basics/hello-world.sfn" \
+            -o "${empty_dir}/hello-world"
 
       - name: Install native ARM build toolchain
         if: ${{ matrix.verify_seed_selfhost }}
@@ -221,6 +227,18 @@ jobs:
             throw "Expected sfn.exe and sailfin.exe in $env:GLOBAL_BIN_DIR"
           }
           & $sfn --version
+          $emptyDir = Join-Path $env:RUNNER_TEMP "sailfin-empty-cwd"
+          New-Item -ItemType Directory -Path $emptyDir -Force | Out-Null
+          Push-Location $emptyDir
+          try {
+            $fixture = Join-Path $env:GITHUB_WORKSPACE "examples\basics\hello-world.sfn"
+            & $sfn run $fixture
+            if ($LASTEXITCODE -ne 0) { throw "Installed sfn run failed from an empty cwd" }
+            & $sfn build $fixture -o (Join-Path $emptyDir "hello-world.exe")
+            if ($LASTEXITCODE -ne 0) { throw "Installed sfn build failed from an empty cwd" }
+          } finally {
+            Pop-Location
+          }
 
           if ($env:HAS_MSVC -ne 'True') {
             # SFN-1024: this pinned release has no msvc asset (best-effort

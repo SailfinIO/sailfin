@@ -399,9 +399,10 @@ fn _toolchain_link_alias(bin_path: string, alias_path: string) -> boolean ![io] 
 }
 
 // Lay out a verified store entry under `store_dir`: copy the binary out of
-// the extracted `root`, alias it as `sfn`, copy the bundled runtime when the
-// asset ships one, then write the `.sha256` completeness marker LAST — a
-// store dir without it reads as an incomplete install on the next run.
+// the extracted `root`, alias it as `sfn`, copy the bundled runtime and
+// workspace capsules when the asset ships them, then write the `.sha256`
+// completeness marker LAST — a store dir without it reads as an incomplete
+// install on the next run.
 // Extracted from `toolchain_install_to_base` as pure code motion (SFN-906)
 // so the store-layout tail is directly testable with no network, signing,
 // or fixture. Returns `true` once every step lands; `false` on the first
@@ -445,6 +446,35 @@ fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: stri
         let rt_ok = copy_tree(root + "/runtime", store_dir + "/runtime");
         if !rt_ok {
             print("error: failed to install the runtime bundle into "
+                + store_dir);
+            return false;
+        }
+    }
+
+    // SFN-937: the installed workspace is the manifest-derived compiler and
+    // runtime dependency closure staged under the compatibility capsule
+    // layout. Copy capsules before workspace.toml so discovery is never made
+    // visible without its complete member tree. Older archives may carry
+    // capsules without workspace.toml; preserve that SFN-773 layout.
+    if fs.exists(root + "/capsules") {
+        remove_tree(store_dir + "/capsules");
+        if !copy_tree(root + "/capsules", store_dir + "/capsules") {
+            print("error: failed to install the workspace capsules into "
+                + store_dir);
+            return false;
+        }
+    }
+    if fs.exists(store_dir + "/workspace.toml") {
+        fs.deleteFile(store_dir + "/workspace.toml");
+    }
+    if fs.exists(root + "/workspace.toml") {
+        if !fs.exists(store_dir + "/capsules") {
+            print("error: installed workspace manifest has no capsule payload in "
+                + store_dir);
+            return false;
+        }
+        if !_copy_file(root + "/workspace.toml", store_dir + "/workspace.toml") {
+            print("error: failed to install the workspace manifest into "
                 + store_dir);
             return false;
         }

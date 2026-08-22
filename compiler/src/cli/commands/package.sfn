@@ -53,11 +53,10 @@ import {
     triple_target_os
 } from "../../build/target";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
-import { locate_runtime_dep_capsule_src } from "../../capsule_resolver/locate";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "../../dist_manifest";
-import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
-import { contains_string, index_of, substring } from "../../string_utils";
-import { toml_get_dependencies, toml_get_name, toml_get_version } from "../../toml_parser";
+import { compiler_manifest_from_workspace, stage_installer_workspace_assets } from "../../installer_staging";
+import { index_of, substring } from "../../string_utils";
+import { toml_get_name, toml_get_version } from "../../toml_parser";
 import { CliContext } from "../context";
 import { _is_safe_capsule_version_cmd, _package_basename } from "./cmd_shared";
 
@@ -69,10 +68,10 @@ import { _is_safe_capsule_version_cmd, _package_basename } from "./cmd_shared";
 // Usage:
 //   sfn package [--target T] [--out DIR] [--compiler-bin PATH] [-p <capsule-path>]
 //
-// Without `-p`: packages the compiler. Reads `compiler/capsule.toml`
-// for version (the compiler's `[capsule].name` is single-segment so
-// no per-capsule sidecar exists for it). Default `--compiler-bin =
-// build/bin/sfn`. Tarball stem `sailfin-native-<target>-<version>`.
+// Without `-p`: packages the compiler. Resolves the `sfn/compiler`
+// workspace member for its version (the compiler has no per-capsule
+// sidecar). Default `--compiler-bin = build/bin/sfn`. Tarball stem
+// `sailfin-native-<target>-<version>`.
 //
 // With `-p <path>`: packages a user capsule. Reads the C2c sidecar at
 // `<path>/build/capsules/<scope>/<name>/manifest.json` (must exist —
@@ -379,8 +378,8 @@ fn _package_mint_staging_dir(label: string) -> string ![io] {
     return staging;
 }
 
-// Package the compiler. Reads `compiler/capsule.toml` for version,
-// stages `<bin>/sailfin` + `<bin>/sfn` (`.exe`-suffixed on a Windows
+// Package the compiler. Resolves the `sfn/compiler` workspace member for its
+// version, stages `<bin>/sailfin` + `<bin>/sfn` (`.exe`-suffixed on a Windows
 // target), tars + sha256s + manifest.
 fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> int ![clock, io] {
     if !fs.exists(compiler_bin) {
@@ -388,16 +387,16 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
         print("hint: run `make compile` first");
         return 1;
     }
-    let manifest_path = "compiler/capsule.toml";
+    let manifest_path = compiler_manifest_from_workspace(".");
     if !fs.exists(manifest_path) {
-        print("sfn package: missing " + manifest_path);
+        print("sfn package: missing manifest for workspace member `sfn/compiler`");
         return 1;
     }
     let manifest_text = fs.readFile(manifest_path);
     let version = toml_get_version(manifest_text);
     let capsule_name = toml_get_name(manifest_text);
     if version.length == 0 {
-        print("sfn package: missing version in compiler/capsule.toml");
+        print("sfn package: missing version in " + manifest_path);
         return 1;
     }
     // Defence-in-depth: `version` is interpolated into the tarball
@@ -522,63 +521,31 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 // `targz_create(tarball, staging, [], ...)` walks the whole staging
 // tree, mirroring the historical `tar -czf <out> -C <staging> .`):
 //   - bin/sailfin, bin/sfn               — the compiler (`.exe`-suffixed on a Windows target)
-//   - runtime/capsule.toml               — runtime capsule manifest
-//   - runtime/prelude.sfn, runtime/sfn/  — the Sailfin runtime sources
+//   - workspace.toml                     — installed member inventory
+//   - runtime/                           — runtime manifest, sources, and IR
+//   - capsules/<scope>/<name>/           — compiler/runtime dependency closure
 //   - import-context/                    — staged .sfn-asm tree (if available)
 //
-// Prelude + import-context are conditionally included: the
-// installer is producible from a freshly built compiler that
-// hasn't run a self-host pass yet, and downstream consumers can
-// regenerate both. `tools/package.sh` had the same conditional
-// inclusion.
-// `toml_get_dependencies` returns newline-joined `name=version` records. Only
-// the spec is wanted here — staging copies whole source trees, so the version
-// constraint is irrelevant. `capsule_resolver/discovery.sfn::_cr_parse_deps`
-// and `runtime_capsule_resolver.sfn::_rcr_parse_dep_specs` do this same job,
-// but both are module-private.
-fn _package_dep_spec_of_record(record: string) -> string {
-    let eq = index_of(record, "=");
-    if eq > 0 { return substring(record, 0, eq); }
-    return record;
-}
-
-fn _package_dep_specs(deps_text: string) -> string[] {
-    let mut out: string[] = [];
-    let mut record: string = "";
-    let mut scan: int = 0;
-    loop {
-        if scan >= deps_text.length { break; }
-        let ch = substring(deps_text, scan, scan + 1);
-        scan += 1;
-        if ch != "\n" {
-            record = record + ch;
-            continue;
-        }
-        let spec = _package_dep_spec_of_record(record);
-        if spec.length > 0 { out.push(spec); }
-        record = "";
-    }
-    let tail = _package_dep_spec_of_record(record);
-    if tail.length > 0 { out.push(tail); }
-    return out;
-}
-
+// The compiler dependency closure, runtime assets, and prelude contract are
+// required. `stage_installer_workspace_assets` validates and copies them from
+// resolved workspace members before archive creation; only import-context is
+// optional because a fresh install can regenerate it.
 fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> int ![clock, io] {
     if !fs.exists(compiler_bin) {
         print("sfn package: compiler binary not found: " + compiler_bin);
         print("hint: run `make compile` first");
         return 1;
     }
-    let manifest_path = "compiler/capsule.toml";
+    let manifest_path = compiler_manifest_from_workspace(".");
     if !fs.exists(manifest_path) {
-        print("sfn package: missing " + manifest_path);
+        print("sfn package: missing manifest for workspace member `sfn/compiler`");
         return 1;
     }
     let manifest_text = fs.readFile(manifest_path);
     let version = toml_get_version(manifest_text);
     let capsule_name = toml_get_name(manifest_text);
     if version.length == 0 {
-        print("sfn package: missing version in compiler/capsule.toml");
+        print("sfn package: missing version in " + manifest_path);
         return 1;
     }
     if !_is_safe_capsule_version_cmd(version) {
@@ -590,7 +557,6 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let staging = _package_mint_staging_dir("installer-staging");
     if staging.length == 0 { return 1; }
     let staging_bin = staging + "/bin";
-    let staging_runtime = staging + "/runtime";
     // Target-gated (not host-gated): a staged tarball member is a
     // distribution artifact for `target`, not a binary this host must run
     // (SFN-972; see `target_exe_name`'s doc comment, `build/target.sfn`).
@@ -598,7 +564,6 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let sailfin_name = target_exe_name("sailfin", pkg_target_os);
     let sfn_name = target_exe_name("sfn", pkg_target_os);
     ensure_dir_p(staging_bin);
-    ensure_dir_p(staging_runtime);
     if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/"
         + sailfin_name) {
         print("sfn package: failed to stage sailfin binary");
@@ -611,167 +576,10 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         return 1;
     }
 
-    // Runtime capsule manifest. With `runtime/native/` deleted (#823)
-    // the manifest now lives at the runtime root (`runtime/capsule.toml`)
-    // and is the implicit-resolver's bundle anchor; it lands at
-    // staging/runtime/capsule.toml alongside the prelude + sfn sources
-    // copied below.
-    if !fs.exists("runtime/capsule.toml") {
-        print("sfn package: missing runtime/capsule.toml (was the build run from the repo root?)");
+    let staged_workspace = stage_installer_workspace_assets(".", staging);
+    if !staged_workspace.ok {
         remove_tree(staging);
         return 1;
-    }
-    if !_copy_file_preserving_mode("runtime/capsule.toml", staging_runtime
-        + "/capsule.toml") {
-        print("sfn package: failed to copy runtime/capsule.toml");
-        remove_tree(staging);
-        return 1;
-    }
-
-    // Bundle the runtime Sailfin sources. Post-#940 the install
-    // link path emits the prelude + every runtime `sfn-source` from
-    // disk via the child compiler (see
-    // `assemble_runtime_capsule_link_inputs` in cli_main.sfn). Those
-    // sources resolve to `<root>/runtime/prelude.sfn` and
-    // `<root>/runtime/sfn/**` relative to the bundled
-    // `runtime/capsule.toml`, so without them a fresh install
-    // cannot link any program that touches the runtime (every program
-    // pulls in the arena via prelude). They are REQUIRED, not optional
-    // — a failed copy is a hard error. This replaces the former
-    // per-`.o` bundle staging (prelude/clock/process/type_meta/
-    // filesystem/io/string/array): those pre-built objects were never
-    // consumed by the post-#940 link path, which always emits the
-    // runtime from source. Shipping the sources is both necessary and
-    // sufficient; the `.o` were dead weight.
-    if !fs.exists("runtime/prelude.sfn") {
-        print("sfn package: missing runtime/prelude.sfn (was the build run from the repo root?)");
-        remove_tree(staging);
-        return 1;
-    }
-    if !_copy_file_preserving_mode("runtime/prelude.sfn", staging_runtime
-        + "/prelude.sfn") {
-        print("sfn package: failed to copy runtime/prelude.sfn");
-        remove_tree(staging);
-        return 1;
-    }
-    if !fs.exists("runtime/sfn") {
-        print("sfn package: missing runtime/sfn (was the build run from the repo root?)");
-        remove_tree(staging);
-        return 1;
-    }
-    if !copy_tree("runtime/sfn", staging_runtime + "/sfn") {
-        print("sfn package: failed to copy runtime/sfn sources");
-        remove_tree(staging);
-        return 1;
-    }
-
-    // Stage the runtime capsule's declared `[dependencies]` closure so an
-    // installed toolchain can resolve them. `locate_runtime_dep_capsule_src`
-    // resolves a spec from the user's own project root or a version-keyed
-    // `~/.sfn/cache`, and a runtime dep carries `"*"` — so neither leg finds
-    // it off-repo. Without these sources an installed toolchain link-fails
-    // EVERY user program, not merely ones that touch the dependency.
-    //
-    // The walk is TRANSITIVE. A direct-only walk stages `sfn/crypto` but not
-    // the `sfn/strings` that `sfn/crypto` itself declares, and the install
-    // then fails to lower every crypto module (`E1007`, unknown callee
-    // signature) so nothing reaches the link at all.
-    //
-    // Each capsule's own `capsule.toml` is staged beside its `src/` too:
-    // `enumerate_capsule_sources` reads the manifest from exactly that
-    // sibling path to discover the next hop, so staging sources alone leaves
-    // the rest of the chain undiscoverable at install time.
-    //
-    // Derived from the manifests rather than a hardcoded name list, so the
-    // bundle stays correct as the closure changes. Layout mirrors the repo
-    // (`<prefix>/capsules/<scope>/<name>`), the single shape
-    // `locate_runtime_dep_capsule_src` resolves for in-repo and installed
-    // trees alike. REQUIRED, same class as the `runtime/sfn` copy above.
-    //
-    // Mirrors the visited-set + queue-guard shape of the resolver's own
-    // transitive walk in `capsule_resolver/discovery.sfn`; `visited` bounds
-    // the walk to one visit per spec and the guard is the backstop for a
-    // pathological manifest graph.
-    let pkg_runtime_caps = runtime_capsule_from_root("runtime");
-    let mut dep_queue: string[] = [];
-    let mut dep_anchor: string[] = [];
-    let mut prci: int = 0;
-    loop {
-        if prci >= pkg_runtime_caps.length { break; }
-        let prcap = pkg_runtime_caps[prci];
-        prci += 1;
-        let mut pdi: int = 0;
-        loop {
-            if pdi >= prcap.capsule_deps.length { break; }
-            dep_queue.push(prcap.capsule_deps[pdi]);
-            dep_anchor.push(prcap.manifest_dir);
-            pdi += 1;
-        }
-    }
-
-    let mut dep_visited: string[] = [];
-    let dep_queue_guard: int = 4096;
-    let mut dqi: int = 0;
-    loop {
-        if dqi >= dep_queue.length { break; }
-        if dqi >= dep_queue_guard { break; }
-        let dep_spec = dep_queue[dqi];
-        let dep_anchor_dir = dep_anchor[dqi];
-        dqi += 1;
-        if contains_string(dep_visited, dep_spec) { continue; }
-        dep_visited.push(dep_spec);
-
-        let dep_parts = parse_scope_name(dep_spec);
-        if !is_safe_scope_name(dep_parts.scope, dep_parts.name) {
-            print("sfn package: runtime dependency `" + dep_spec
-                + "` is not a safe scope/name");
-            remove_tree(staging);
-            return 1;
-        }
-        let dep_loc = locate_runtime_dep_capsule_src(dep_anchor_dir, dep_spec);
-        if dep_loc.src_dir.length == 0 {
-            print("sfn package: cannot locate sources for runtime dependency `"
-                + dep_spec
-                + "` (was the build run from the repo root?)");
-            remove_tree(staging);
-            return 1;
-        }
-        let dep_dest_dir = staging + "/capsules/" + dep_parts.scope + "/"
-            + dep_parts.name;
-        ensure_dir_p(dep_dest_dir);
-        if !copy_tree(dep_loc.src_dir, dep_dest_dir + "/src") {
-            print("sfn package: failed to bundle runtime dependency `"
-                + dep_spec
-                + "` sources");
-            remove_tree(staging);
-            return 1;
-        }
-
-        // `locate_runtime_dep_capsule_src` always builds a path ending in
-        // `/src`, so the capsule's manifest is that directory's sibling.
-        let dep_root = substring(dep_loc.src_dir, 0, dep_loc.src_dir.length - 4);
-        let dep_manifest = dep_root + "/capsule.toml";
-        if fs.exists(dep_manifest) {
-            if !_copy_file_preserving_mode(dep_manifest, dep_dest_dir
-                + "/capsule.toml") {
-                print("sfn package: failed to bundle runtime dependency `"
-                    + dep_spec
-                    + "` manifest");
-                remove_tree(staging);
-                return 1;
-            }
-            let dep_text = fs.readFile(dep_manifest);
-            let nested = _package_dep_specs(toml_get_dependencies(dep_text));
-            let mut ndi: int = 0;
-            loop {
-                if ndi >= nested.length { break; }
-                let nested_spec = nested[ndi];
-                ndi += 1;
-                if contains_string(dep_visited, nested_spec) { continue; }
-                dep_queue.push(nested_spec);
-                dep_anchor.push(dep_anchor_dir);
-            }
-        }
     }
 
     // Staged import-context — only present after a self-host
@@ -794,7 +602,11 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let create_opts = CreateOptions {
         exec_paths: ["bin/" + sailfin_name, "bin/" + sfn_name],
         link_policy: LinkPolicy.Preserve,
-        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+        // The complete manifest closure contains enough source text that
+        // fixed-Huffman LZ77's arena-owned token graph exceeds the compiler's
+        // 8 GiB Linux self-cap. Stored blocks remain deterministic and keep
+        // installer creation bounded without weakening that safety invariant.
+        deflate: DeflateOptions { strategy: DeflateStrategy.Stored }
     };
     let created = targz_create(tarball, staging, [], create_opts);
     match created {
