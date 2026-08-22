@@ -26,6 +26,10 @@ on:
       - "site/**"
       - "bootstrap.toml"
       - ".github/workflows/installer-smoke.yml"
+      # SFN-994: the release-seed verifier is the same class of code as
+      # install.ps1 — a fail-closed download verifier — and this is the only
+      # job in the repo that parses PowerShell before running it.
+      - ".github/actions/sailfin-build-windows/verify-release-seed.ps1"
   workflow_dispatch:
     inputs: {}
 
@@ -169,15 +173,26 @@ jobs:
           SEED_TAG: ${{ needs.resolve-version.outputs.tag }}
           SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
         run: |
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path ./install.ps1),
-            [ref]$null,
-            [ref]$errors
-          )
-          if ($errors.Count -ne 0) {
-            $errors | Format-List
-            exit 1
+          # Both scripts, not just install.ps1 (SFN-994). The release-seed
+          # verifier cannot be syntax-checked on a Linux dev host, and a
+          # verification step that dies mid-run looks, at a glance, exactly
+          # like one that verified nothing.
+          foreach ($script in @(
+            './install.ps1',
+            './.github/actions/sailfin-build-windows/verify-release-seed.ps1'
+          )) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$null,
+              [ref]$errors
+            )
+            if ($errors.Count -ne 0) {
+              Write-Host "syntax errors in $script"
+              $errors | Format-List
+              exit 1
+            }
+            Write-Host "parsed OK: $script"
           }
           $asset = "sailfin_$($env:SEED_VERSION)_windows_x86_64-msvc.tar.gz"
           # A release-download URL redirects to a presigned object URL signed

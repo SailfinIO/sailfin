@@ -54,11 +54,15 @@ permissions:
   contents: read
 
 jobs:
-  # ci.yml's `build-compiler-linux` produces and uploads this same archive
-  # on every source PR, but only within that workflow's own run — there is
-  # no sibling `ci.yml` run for a `push: main` or `schedule` event to
-  # download from. Rebuilding it inline here (~2 min on a 1x ubuntu job)
-  # also keeps `make ci-cross-windows` itself exercised nightly.
+  # SFN-994 flipped `native-build` to bootstrap from the published native
+  # seed, so nothing consumes this artifact any more. The job stays for its
+  # other stated purpose — keeping `make ci-cross-windows` exercised nightly
+  # (~2 min on a 1x ubuntu job) — and as the escape hatch: if a bad native
+  # seed ever ships, `seed_source: cross` is still implemented and one line
+  # away, and this job proves it still works.
+  #
+  # SFN-58 deletes both this job and the cross path together. Until then a
+  # green run here is the evidence that retiring it is safe.
   cross-seed:
     name: Build mingw-cross bootstrap seed [linux]
     runs-on: ubuntu-latest
@@ -128,9 +132,11 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # No `needs: cross-seed` since SFN-994 — this job bootstraps from the
+  # published native seed, so a cross-seed failure must not gate it. The two
+  # now run in parallel; `notify-failure` still watches both.
   native-build:
-    name: Native MSVC build from cross seed [windows-2025]
-    needs: cross-seed
+    name: Native MSVC build from release seed [windows-2025]
     runs-on: windows-2025 # pinned, not `windows-latest` — SFN-55 Risk R3
     timeout-minutes: 90
     # The whole job runs with the Windows target seam active. SFN-52's
@@ -145,11 +151,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # SFN-994: bootstrap from the published native MSVC seed named by
+      # `bootstrap.toml [seed].version`, signature- and digest-verified before
+      # it is executed, rather than from a same-run mingw-cross artifact.
+      #
+      # This is the nightly, so it is the right leg to flip first: it proves
+      # the native bootstrap daily without gating anything. `ci.yml`'s tier A
+      # and `release-tag.yml`'s release leg stay on `cross` for now — which is
+      # also what keeps both modes exercised while the cross path still exists.
+      #
+      # It is a real dependency change: this job can now fail because a
+      # PUBLISHED asset is missing, unverifiable, or broken, not only because
+      # this checkout is. That is the signal SFN-58 needs before retiring the
+      # mingw path — a nightly that quietly fell back to `cross` would hide
+      # exactly the failure that should block the retirement.
       - name: Build native Windows compiler
         id: build_windows
         uses: ./.github/actions/sailfin-build-windows
         with:
-          seed_source: cross
+          seed_source: release
 
       # M8 (SFN-54): the native compiler self-hosts twice and pass-2 must be
       # byte-identical to pass-1. Mirrors the POSIX fixed-point gate
