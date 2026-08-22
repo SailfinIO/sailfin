@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/syntax"
-version = "0.10.3"
+version = "0.10.4"
 description = "Sailfin syntax tree, lexer, and parser (toolchain-internal)"
 publish = false
 
