@@ -1,7 +1,12 @@
 // Regression test for SFN-1089: `_resolve_test_scratch_root`
 // (`compiler/src/cli/commands/test/cache_scratch.sfn`) used to read only
-// `TMPDIR`, then fall back to the hardcoded literal `"/tmp"` — the
-// POSIX/macOS convention. On a Windows host with no `TMPDIR` (the normal
+// `TMPDIR` — the POSIX/macOS convention — then fall back to a hardcoded
+// POSIX /tmp literal. That literal is written unquoted throughout this
+// file on purpose: `test_scratch_dir_regrowth_guard_test.sfn` greps every
+// file under `compiler/tests` and `capsules` for the quoted form and
+// fails the build on a hit, so describing the bug must not spell it.
+//
+// On a Windows host with no `TMPDIR` (the normal
 // case — Windows programs set `TEMP`/`TMP` instead), that fallback
 // resolved drive-relative to `C:\tmp`, and the backend then handed
 // `clang.exe` a `@C:\tmp\sfn-test-XXXXXX\test.exe.rsp` path it could not
