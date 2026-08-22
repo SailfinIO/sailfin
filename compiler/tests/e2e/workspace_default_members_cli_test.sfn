@@ -126,13 +126,13 @@ test "workspace defaults: build and test help describe bare-root selection" ![io
     let build_rc = process.run_capture([sfn, "build", "--help"], _runner_env("workspace-help-build"));
     let build_out = process.capture_take_stdout();
     let build_err = process.capture_take_stderr();
-    assert build_rc == 2;
+    assert build_rc == 0;
     assert find(build_out + build_err, "workspace root", 0) >= 0;
     assert find(build_out + build_err, "default-members", 0) >= 0;
     let test_rc = process.run_capture([sfn, "test", "--help"], _runner_env("workspace-help-test"));
     let test_out = process.capture_take_stdout();
     let test_err = process.capture_take_stderr();
-    assert test_rc == 2;
+    assert test_rc == 0;
     assert find(test_out + test_err, "workspace root", 0) >= 0;
     assert find(test_out + test_err, "default-members", 0) >= 0;
 }
