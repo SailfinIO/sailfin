@@ -4,14 +4,16 @@
 // result-type derivation and branch compatibility.
 import {
     Block,
+    ElseBranch,
     Expression,
+    MatchCase,
     ObjectField,
+    Parameter,
     SourceSpan,
     Statement,
     WithClause
 } from "sfn/syntax";
 
-import { LocalBinding, contains_name, walk_block } from "../typecheck_captures";
 import { Diagnostic } from "../typecheck_types";
 import {
     make_conditional_branch_mismatch_diagnostic,
@@ -23,6 +25,9 @@ import {
     result_type_arguments,
     type_is_result
 } from "../typecheck_types/expr_type_rules";
+import { SymbolEntry } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { is_identifier_char } from "../typecheck_types/text_utils";
+import { register_match_pattern_bindings } from "./patterns";
 
 // `?` operator (TryOperator) type rules — issue #833, epic #371 (R.3).
 // See `typecheck_types/expr_type_rules.sfn` for `type_is_result` / `result_type_arguments`
@@ -78,54 +83,326 @@ fn try_operator_result_type(operand_type: string) -> string? {
 }
 
 // E0841 (SFN-901) — reject the `?`-desugar `value`-shadowing hazard. The
-// emit-stage desugar (`emit_native_desugar_try.sfn`) rewrites the FIRST
-// statement in a block containing a hoistable `?` into a `match`, relocating
-// that statement plus every following statement into the `Result.Ok` arm
-// whose binder is forced to the literal name `value`. Any read of `value` in
-// that relocated region would then silently resolve to the unwrapped payload
-// instead of the user's own binding. There is no binder-rename syntax, so
-// this fails the collision closed rather than let it miscompile.
+// emit-stage desugar (`emit_native_desugar_try.sfn`) rewrites a statement
+// carrying a hoistable `?` into a `match`, relocating that statement plus
+// every following statement in the block into the `Result.Ok` arm — whose
+// binder is forced to the literal name `value`. A read of `value` in that
+// relocated region would then resolve to the unwrapped payload instead of
+// the user's own binding, with no diagnostic and no crash. No binder-rename
+// form exists in the pattern grammar, so the collision fails closed here.
 fn check_try_value_shadowing(block: Block) -> Diagnostic[] {
-    let mut hazard_start: int = -1;
-    let mut i: int = 0;
+    let statements = block.statements;
+    let mut index: int = 0;
     loop {
-        if i >= block.statements.length { break; }
-        if _stmt_contains_try(block.statements[i]) {
-            hazard_start = i;
-            break;
+        if index >= statements.length { break; }
+        // Every hoisting site is its own hazard, not just the first:
+        // `dt_build_match` re-runs `dt_block` over the continuation it just
+        // built (`emit_native_desugar_try.sfn:740-742`), so each `?` mints a
+        // fresh `Result.Ok { value }` arm around the statements after it.
+        // Stopping at the first site would miss
+        // `f()?; let value = 7; g()?; use(value);`, where site 1 is clean
+        // because `let value` shadows it but site 2 still miscompiles.
+        if _stmt_contains_try(statements[index]) {
+            if _region_reads_value(statements, index) {
+                let mut diagnostics: Diagnostic[] = [];
+                diagnostics.push(make_try_value_shadowing_diagnostic(_hazard_span(statements[index])));
+                return diagnostics;
+            }
         }
-        i += 1;
+        index += 1;
     }
-    if hazard_start < 0 { return []; }
+    return [];
+}
 
-    // The hazard region includes the `?`-bearing statement itself — it can
-    // read `value` too (`let x = value + f()?;`) since the desugar relocates
-    // it into the Ok arm along with everything after it.
-    let mut hazard_statements: Statement[] = [];
-    let mut j: int = hazard_start;
+// `Statement.WithStatement` declares only `clauses`/`body`/`decorators` —
+// it carries no `span` (`ast.sfn:454-458`), so the span has to be gated by
+// variant rather than read off the node. Every other statement that
+// `_stmt_contains_try` can accept does have one.
+fn _hazard_span(statement: Statement) -> SourceSpan? {
+    if statement.variant == "WithStatement" { return null; }
+    return statement.span;
+}
+
+// Whether the region starting at `start` reads `value` while it still
+// resolves to the desugar's arm binder. Walks forward until the region
+// rebinds `value` at its own top level, after which the user's binding
+// governs and nothing later is at risk.
+fn _region_reads_value(statements: Statement[], start: int) -> boolean {
+    let mut index: int = start;
     loop {
-        if j >= block.statements.length { break; }
-        hazard_statements.push(block.statements[j]);
-        j += 1;
+        if index >= statements.length { break; }
+        let statement = statements[index];
+        if _stmt_reads_value(statement) { return true; }
+        if _stmt_rebinds_value(statement) { return false; }
+        index += 1;
     }
-    let hazard_block = Block {
-        tokens: [],
-        text: "",
-        statements: hazard_statements
-    };
+    return false;
+}
 
-    // `walk_block` is already shadowing-aware (it subtracts names bound by
-    // earlier statements from later statements' free sets) and correctly
-    // treats `ObjectField.name` as not a read — so `return Result.Ok { value:
-    // x };` does not false-positive. Reuse it rather than hand-rolling a
-    // second walker that could drift from those semantics.
-    let empty_scope: LocalBinding[] = [];
-    let result = walk_block(empty_scope, hazard_block);
-    if !contains_name(result.free, "value") { return []; }
+// Only a top-level `let value` re-shadows the arm binder for the statements
+// that follow. `for`/`match`/`catch` binders are scoped to their own bodies
+// and are handled where those bodies are walked.
+fn _stmt_rebinds_value(statement: Statement) -> boolean {
+    if statement.variant != "VariableDeclaration" { return false; }
+    return statement.name == "value";
+}
 
-    let mut diagnostics: Diagnostic[] = [];
-    diagnostics.push(make_try_value_shadowing_diagnostic(block.statements[hazard_start].span));
-    return diagnostics;
+fn _block_reads_value(block: Block) -> boolean {
+    return _region_reads_value(block.statements, 0);
+}
+
+fn _stmt_reads_value(statement: Statement) -> boolean {
+    if statement.variant == "VariableDeclaration" {
+        if statement.initializer == null { return false; }
+        return _expr_reads_value(statement.initializer);
+    }
+    if statement.variant == "ReturnStatement" {
+        if statement.expression == null { return false; }
+        return _expr_reads_value(statement.expression);
+    }
+    if statement.variant == "ExpressionStatement" {
+        return _expr_reads_value(statement.expression);
+    }
+    if statement.variant == "ThrowStatement" {
+        return _expr_reads_value(statement.expression);
+    }
+    if statement.variant == "IfStatement" {
+        if _expr_reads_value(statement.condition) { return true; }
+        if _block_reads_value(statement.then_block) { return true; }
+        return _else_reads_value(statement.else_branch);
+    }
+    if statement.variant == "ForStatement" {
+        if _expr_reads_value(statement.clause.iterable) { return true; }
+        // `for value in ...` rebinds `value` for the whole body.
+        if _pattern_binds_value(statement.clause.target) { return false; }
+        return _block_reads_value(statement.body);
+    }
+    if statement.variant == "LoopStatement" {
+        return _block_reads_value(statement.body);
+    }
+    if statement.variant == "RoutineStatement" {
+        return _block_reads_value(statement.body);
+    }
+    if statement.variant == "BlockStatement" {
+        return _block_reads_value(statement.body);
+    }
+    if statement.variant == "WithStatement" {
+        if _clauses_read_value(statement.clauses) { return true; }
+        return _block_reads_value(statement.body);
+    }
+    if statement.variant == "MatchStatement" {
+        if _expr_reads_value(statement.expression) { return true; }
+        return _cases_read_value(statement.cases);
+    }
+    if statement.variant == "TryStatement" {
+        if _block_reads_value(statement.try_block) { return true; }
+        let catch_block = statement.catch_block;
+        if catch_block != null {
+            // `catch value { ... }` rebinds `value` for the handler.
+            if statement.catch_name != "value" {
+                if _block_reads_value(catch_block) { return true; }
+            }
+        }
+        let finally_block = statement.finally_block;
+        if finally_block == null { return false; }
+        return _block_reads_value(finally_block);
+    }
+    // A nested `fn` is lifted into its own scope and cannot see the
+    // enclosing block's bindings, so its body is not part of this hazard.
+    return false;
+}
+
+fn _else_reads_value(else_branch: ElseBranch?) -> boolean {
+    if else_branch == null { return false; }
+    let body = else_branch.body;
+    if body != null { return _block_reads_value(body); }
+    let nested = else_branch.statement;
+    if nested == null { return false; }
+    return _stmt_reads_value(nested);
+}
+
+fn _cases_read_value(cases: MatchCase[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= cases.length { break; }
+        let case = cases[index];
+        if case.guard != null {
+            if _expr_reads_value(case.guard) { return true; }
+        }
+        // An arm that binds `value` — `Result.Ok { value }`, how every
+        // `Result` match in the tree is written — shadows the desugar's
+        // binder for its entire body. Walking that body would reject
+        // correct, shipped source.
+        if !_pattern_binds_value(case.pattern) {
+            if _block_reads_value(case.body) { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _clauses_read_value(clauses: WithClause[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= clauses.length { break; }
+        if _expr_reads_value(clauses[index].expression) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// Reuses the analyzer's own binder extraction so pattern shapes stay
+// defined in exactly one place — shorthand destructures reach it as
+// `Expression.Raw`, which `register_raw_pattern_bindings` decodes.
+fn _pattern_binds_value(pattern: Expression?) -> boolean {
+    let seed: SymbolEntry[] = [];
+    let bindings = register_match_pattern_bindings(pattern, seed);
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if bindings[index].name == "value" { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _params_bind_value(parameters: Parameter[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= parameters.length { break; }
+        if parameters[index].name == "value" { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _expr_reads_value(expression: Expression) -> boolean {
+    if expression.variant == "Identifier" {
+        return expression.name == "value";
+    }
+    if expression.variant == "Unary" {
+        return _expr_reads_value(expression.operand);
+    }
+    if expression.variant == "Binary" {
+        if _expr_reads_value(expression.left) { return true; }
+        return _expr_reads_value(expression.right);
+    }
+    // `Member.member` is a plain string (`ast.sfn:79`), so `x.value` names a
+    // field and never reads the binding.
+    if expression.variant == "Member" {
+        return _expr_reads_value(expression.object);
+    }
+    if expression.variant == "Call" {
+        if _expr_reads_value(expression.callee) { return true; }
+        return _expr_list_reads_value(expression.arguments);
+    }
+    if expression.variant == "Index" {
+        if _expr_reads_value(expression.sequence) { return true; }
+        return _expr_reads_value(expression.index);
+    }
+    if expression.variant == "Array" {
+        return _expr_list_reads_value(expression.elements);
+    }
+    // `ObjectField.name` is a plain string too, so `Result.Ok { value: x }`
+    // reads only `x` — the single most common shape in code using `?`.
+    if expression.variant == "Object" {
+        return _field_list_reads_value(expression.fields);
+    }
+    if expression.variant == "Struct" {
+        return _field_list_reads_value(expression.fields);
+    }
+    if expression.variant == "Range" {
+        if _expr_reads_value(expression.start) { return true; }
+        return _expr_reads_value(expression.end);
+    }
+    if expression.variant == "Cast" {
+        return _expr_reads_value(expression.operand);
+    }
+    if expression.variant == "Is" {
+        return _expr_reads_value(expression.operand);
+    }
+    if expression.variant == "TryOperator" {
+        return _expr_reads_value(expression.operand);
+    }
+    if expression.variant == "Spawn" {
+        return _expr_reads_value(expression.operand);
+    }
+    if expression.variant == "Await" {
+        return _expr_reads_value(expression.operand);
+    }
+    if expression.variant == "Conditional" {
+        if _expr_reads_value(expression.condition) { return true; }
+        if _expr_reads_value(expression.then_value) { return true; }
+        return _expr_reads_value(expression.else_value);
+    }
+    if expression.variant == "Assignment" {
+        if _expr_reads_value(expression.target) { return true; }
+        return _expr_reads_value(expression.rhs);
+    }
+    if expression.variant == "Channel" {
+        let capacity = expression.capacity;
+        if capacity == null { return false; }
+        return _expr_reads_value(capacity);
+    }
+    if expression.variant == "Parallel" {
+        return _expr_list_reads_value(expression.tasks);
+    }
+    if expression.variant == "Serve" {
+        if _expr_reads_value(expression.handler) { return true; }
+        let port = expression.port;
+        if port == null { return false; }
+        return _expr_reads_value(port);
+    }
+    if expression.variant == "Lambda" {
+        // Unlike `_expr_contains_try`, a lambda is NOT opaque here: it
+        // captures the enclosing scope, so a read of `value` inside its body
+        // still resolves to the desugar's arm binder — unless a parameter
+        // rebinds the name.
+        if _params_bind_value(expression.parameters) { return false; }
+        return _block_reads_value(expression.body);
+    }
+    // A degraded parse keeps its source text only. Scan it for the bare
+    // identifier so the guard fails closed rather than silently missing a
+    // hazard it cannot see structurally.
+    if expression.variant == "Raw" {
+        return _raw_text_reads_value(expression.text);
+    }
+    return false;
+}
+
+fn _expr_list_reads_value(items: Expression[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= items.length { break; }
+        if _expr_reads_value(items[index]) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _field_list_reads_value(fields: ObjectField[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= fields.length { break; }
+        if _expr_reads_value(fields[index].value) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _raw_text_reads_value(text: string) -> boolean {
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if is_identifier_char(ch) { token = token + ch; } else {
+            if token == "value" { return true; }
+            token = "";
+        }
+        index += 1;
+    }
+    return token == "value";
 }
 
 // True when `statement` carries a `?` that the desugar would hoist into THIS
