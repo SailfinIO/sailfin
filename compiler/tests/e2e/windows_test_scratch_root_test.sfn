@@ -1,0 +1,153 @@
+// Regression test for SFN-1089: `_resolve_test_scratch_root`
+// (`compiler/src/cli/commands/test/cache_scratch.sfn`) used to read only
+// `TMPDIR` — the POSIX/macOS convention — then fall back to a hardcoded
+// POSIX /tmp literal. That literal is written unquoted throughout this
+// file on purpose: `test_scratch_dir_regrowth_guard_test.sfn` greps every
+// file under `compiler/tests` and `capsules` for the quoted form and
+// fails the build on a hit, so describing the bug must not spell it.
+//
+// On a Windows host with no `TMPDIR` (the normal
+// case — Windows programs set `TEMP`/`TMP` instead), that fallback
+// resolved drive-relative to `C:\tmp`, and the backend then handed
+// `clang.exe` a `@C:\tmp\sfn-test-XXXXXX\test.exe.rsp` path it could not
+// open: "clang: error: no such file or directory: '@/tmp/...'".
+//
+// `build_host_os()` (`compiler/src/build/target.sfn`) returns
+// `SAILFIN_HOST_OS` verbatim when set, so this drives the Windows branch
+// from any POSIX runner: `SAILFIN_HOST_OS=Windows` plus a `TEMP`/`TMP`
+// pointing at an isolated scratch dir, with the others unset. Pre-fix,
+// the unpatched code ignores them and mints under `/tmp` instead, so no
+// `sfn-test-*` entry appears where these tests look.
+//
+// The fourth specified branch — Windows with NEITHER `TEMP` nor `TMP`,
+// which must skip `fs.mkdtemp` rather than invent a `C:\tmp` default — is
+// deliberately NOT covered here. Its fallback is `_test_scratch_root()`
+// -> `"build/sailfin"`, so a nested build would write `program.ll` into
+// the shared repo-root cache and cross-contaminate concurrent pool
+// children (first trap in `.claude/rules/no-bash-e2e.md`); pinning
+// `SAILFIN_TEST_SCRATCH` to avoid that would trip the early return at the
+// top of `_resolve_test_scratch_root` and prove nothing.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives the nested `sfn
+// test` via `process.run_capture` with `clean_runner_env` (SFN-401), and
+// observes the scratch choice indirectly — `_resolve_test_scratch_root`
+// is module-private — by checking which directory the nested run's
+// `fs.mkdtemp("<base>/sfn-test-")` actually populated.
+import { remove_all } from "sfn/fs";
+import { starts_with } from "sfn/strings";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/scratch_root_trivial.sfn";
+}
+
+// Strip any pre-existing entry for `key` from `envs` (SFN-925: `getenv()`
+// returns the FIRST match, so leaving a stale entry in place would let it
+// silently win over a value this test pushes later, or — for a key these
+// tests want absent entirely, like TMPDIR — leak the outer host's own
+// value into the child).
+fn _without_key(envs: string[], key: string) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    let prefix = key + "=";
+    loop {
+        if i >= envs.length { break; }
+        if !starts_with(envs[i], prefix) { out.push(envs[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+// The PHYSICAL host OS, mirroring `build_host_os()`'s filesystem markers
+// (`compiler/src/build/target.sfn:57-60`) but deliberately skipping its
+// `SAILFIN_HOST_OS` override: these tests set that variable themselves to
+// fake a Windows host, while the nested build's *target* must stay the
+// machine that actually compiles, links, and runs the child — the same
+// local-probe pattern as `mem_limit_selfcap_test.sfn:72-80`. Pinning a
+// `Linux` literal instead broke the macOS leg: `SAILFIN_TARGET_OS=Linux`
+// selects the Linux runtime platform sources (`__errno_location`), but
+// `target_clang_triple` passes no `-target` for non-Windows triples, so
+// clang emits Darwin-native objects referencing Linux-only symbols and
+// the link dies in `ld`.
+fn _real_host_os() -> string ![io] {
+    if fs.exists("/proc/self/status") { return "Linux"; }
+    if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
+    if env.get("SystemRoot").length > 0 { return "Windows"; }
+    return "Linux";
+}
+
+// True when the nested run minted its owned scratch dir under `base`.
+// `var_name` selects which Windows temp variable to set, so the same
+// driver covers both the TEMP and the TMP leg.
+fn _nested_run_mints_under(base: string, var_name: string, tag: string) -> boolean ![io] {
+    let mut env = clean_runner_env("");
+    env = _without_key(env, "TMPDIR");
+    env = _without_key(env, "TEMP");
+    env = _without_key(env, "TMP");
+    env = _without_key(env, "SAILFIN_HOST_OS");
+    env.push(var_name + "=" + base);
+    env.push("SAILFIN_HOST_OS=Windows");
+    // `build_target_os()` falls back to `build_host_os()` when no
+    // `SAILFIN_TARGET_OS`/triple override is set, so flipping
+    // `SAILFIN_HOST_OS` alone would also flip codegen to a Windows
+    // target and the nested compile would fail for an unrelated reason.
+    // Pin the target OS to the PHYSICAL host (never a `Linux` literal —
+    // see `_real_host_os` above) so only host detection (and therefore
+    // scratch-root resolution) is affected.
+    env = _without_key(env, "SAILFIN_TARGET_OS");
+    env.push("SAILFIN_TARGET_OS=" + _real_host_os());
+    // `_cleanup_test_scratch` removes an owned scratch tree on a
+    // successful run, which would erase the very evidence these tests
+    // inspect afterward — keep it.
+    env = _without_key(env, "SAILFIN_TEST_KEEP_SCRATCH");
+    env.push("SAILFIN_TEST_KEEP_SCRATCH=1");
+
+    let exit = process.run_capture([sfn_bin_path(), "test", _fixture()], env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure(tag, exit, out, err);
+    assert exit == 0;
+
+    let entries = fs.listDirectory(base);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if starts_with(entries[i], "sfn-test-") { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// `nested_runner_scratch` returns `<SAILFIN_TEST_SCRATCH>/<label>` when
+// the outer scratch is set (the pool and CI always set it), so the path
+// is deterministic across runs rather than a fresh mkdtemp. Combined with
+// `SAILFIN_TEST_KEEP_SCRATCH=1` above, which deliberately leaves the
+// nested tree behind, a stale `sfn-test-*` from an earlier run would
+// satisfy the assertion even against unfixed code. Wipe before AND after.
+// `remove_all` (`sfn/fs`) is the recursive primitive — `fs.removeDirectory`
+// is plain `rmdir(2)` and fails on a non-empty tree (SFN-1090).
+fn _fresh_base(label: string) -> string ![io] {
+    let base = nested_runner_scratch(label);
+    let _ = remove_all(base);
+    fs.createDirectory(base, true);
+    return base;
+}
+
+test "windows host with TEMP set mints the scratch dir under TEMP, not /tmp" ![io] {
+    let base = _fresh_base("sfn-1089-wintemp");
+    let found = _nested_run_mints_under(base, "TEMP", "sfn-1089-wintemp");
+    assert found;
+    let _ = remove_all(base);
+}
+
+test "windows host falls back to TMP when TEMP is unset" ![io] {
+    let base = _fresh_base("sfn-1089-wintmp");
+    let found = _nested_run_mints_under(base, "TMP", "sfn-1089-wintmp");
+    assert found;
+    let _ = remove_all(base);
+}

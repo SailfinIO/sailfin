@@ -24,6 +24,7 @@
 //      `make check` passes the flag (`Makefile:741`) to get a cold suite;
 //      if the shared cache leaked past it, the gate would silently start
 //      measuring warm artifacts.
+import { remove_all } from "sfn/fs";
 import { contains, ends_with, starts_with } from "sfn/strings";
 import {
     clean_runner_env,
@@ -95,7 +96,7 @@ fn _run_and_count(label: string, cache_root: string, extra_flag: string) -> int 
     // which would make the `warm == 0` assertion pass or fail for reasons
     // unrelated to the cache. Counting is only meaningful over a directory
     // this run alone populated.
-    let _ = fs.removeDirectory(scratch, true);
+    let _ = remove_all(scratch);
     fs.createDirectory(scratch, true);
     let fixture = scratch + "/sfn1086_" + label + "_test.sfn";
     _write_fixture(fixture, label);
@@ -126,7 +127,7 @@ fn _populate_cache(label: string, cache_root: string) -> int ![io] {
     // second run landing on the same `sub-<n>` would find it already warm,
     // emit nothing, and return 0 from a run this file calls "cold",
     // failing both tests on their baselines.
-    let _ = fs.removeDirectory(cache_root, true);
+    let _ = remove_all(cache_root);
     fs.createDirectory(cache_root, true);
     return _run_and_count(label, cache_root, "");
 }

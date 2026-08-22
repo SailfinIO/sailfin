@@ -24,6 +24,8 @@
 // (`SAILFIN_EFFECT_ENFORCE` / `SAILFIN_USE_ARENA`) must stay unset so
 // the test exercises the shipped defaults deterministically instead of
 // inheriting an ambient shell setting.
+import { remove_all } from "sfn/fs";
+
 import { module_name_from_path } from "../../src/module_paths";
 
 fn _contains(haystack: string, needle: string) -> boolean {
@@ -162,7 +164,7 @@ test "SFN-544: workspace export missing from imports reports span and provider" 
 
     _delete_staged_module(provider_slug, provider);
     _delete_staged_module(support_slug, support);
-    fs.removeDirectory(dir, true);
+    remove_all(dir);
 }
 
 test "check resolver: a broken configured entry does not fail a healthy file" ![io] {

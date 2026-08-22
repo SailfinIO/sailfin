@@ -142,8 +142,10 @@ definitions and full matrix live in
 Installing the compiler is only the first prerequisite: compiling, running, or
 testing Sailfin programs still requires LLVM tools 17+ or 18+, `clang`, and the
 platform linker. The Linux/macOS bootstrap script additionally needs `curl`,
-`tar`, `uname`, `mktemp`, and `jq`; signature verification needs OpenSSL 1.1.1+
-with raw-Ed25519 support.
+`tar`, `uname`, `mktemp`, and `jq`; signature verification needs an OpenSSL
+3.0+ build (raw Ed25519 verification requires 3.0). The Windows script needs no
+external verification tooling — its Ed25519 verifier is embedded pure
+PowerShell.
 
 The installer defaults to the latest matching release and exposes the commands
 in `~/.local/bin` on Linux/macOS or
@@ -179,11 +181,13 @@ Release assets follow the pattern `sailfin_<version>_<os>_<arch>.tar.gz`.
 Set `GITHUB_TOKEN` to raise the GitHub API rate limit if release lookup is
 throttled.
 
-Both bootstrap scripts try to verify the signed `SHA256SUMS` manifest and the
-selected archive's SHA-256 digest before extraction. They warn and continue
-only when the signed manifest is absent or suitable OpenSSL is unavailable;
-once verification can run, malformed or invalid signed metadata and digest
-mismatches abort. See the
+Both bootstrap scripts fail closed (SFN-1034): they verify the signed
+`SHA256SUMS` manifest *before* downloading the archive, then verify that
+archive's SHA-256 digest against it *before extracting*, and abort on a
+missing or unreachable manifest, an invalid signature, or a digest mismatch.
+`SAILFIN_ALLOW_UNVERIFIED=1` opts into installing an unsigned historical
+release — or, on Linux/macOS, a host with no working Ed25519 verifier — but
+never bypasses a failed signature or digest check. See the
 [manual verification guide](https://sfn.dev/docs/getting-started/verify-download/).
 
 ## Building From Source

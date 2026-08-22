@@ -124,7 +124,9 @@ runs:
         build/toolchains/seed/bin/sfn version
 
     # Fail closed on the native aarch64 fast path (SFN-580). `make fetch-seed`
-    # verifies the signed SHA256SUMS digest (install.sh), but nothing downstream
+    # verifies the signed SHA256SUMS manifest and the archive digest before
+    # extraction, and since SFN-1034 aborts rather than continuing when it
+    # cannot (install.sh), but nothing downstream
     # checks that the binary it installed is actually an AArch64 build of the
     # pinned version — a mis-selected or stale seed would otherwise surface as a
     # confusing self-host failure much later. The qemu fallback gets the

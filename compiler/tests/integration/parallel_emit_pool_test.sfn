@@ -17,6 +17,7 @@
 // runner's `SAILFIN_TEST_SCRATCH` (or a fresh `mkdtemp` when unset), so
 // concurrent pool workers never share an output path (`.claude/rules/
 // no-bash-e2e.md`).
+import { remove_all } from "sfn/fs";
 import { int_to_string } from "sfn/strings";
 import { nested_runner_scratch } from "sfn/test";
 
@@ -61,7 +62,7 @@ test "parallel emit: fan-out emits and publishes every task" ![io] {
         i += 1;
     }
 
-    fs.removeDirectory(dir, true);
+    let _ = remove_all(dir);
 }
 
 test "parallel emit: a failing child fails the round" ![io] {
@@ -83,7 +84,7 @@ test "parallel emit: a failing child fails the round" ![io] {
     assert fs.exists(tasks[2].output_path);
     assert fs.readFile(tasks[2].output_path).length > 0;
 
-    fs.removeDirectory(dir, true);
+    let _ = remove_all(dir);
 }
 
 test "parallel emit: jobs above task count still completes" ![io] {
@@ -102,7 +103,7 @@ test "parallel emit: jobs above task count still completes" ![io] {
     assert fs.exists(tasks[1].output_path);
     assert fs.readFile(tasks[1].output_path).length > 0;
 
-    fs.removeDirectory(dir, true);
+    let _ = remove_all(dir);
 }
 
 test "parallel process pool: exit codes preserve task order" ![io] {
@@ -133,7 +134,7 @@ test "parallel process pool: exit codes preserve task order" ![io] {
     assert run.exit_codes[3] == 0;
     assert run.exit_codes[4] == 0;
 
-    fs.removeDirectory(dir, true);
+    let _ = remove_all(dir);
 }
 
 test "parallel link assembly: a failing module cleans every staged object" ![io] {
@@ -151,5 +152,5 @@ test "parallel link assembly: a failing module cleans every staged object" ![io]
     assert ! assembled.success;
     assert fs.listDirectory(obj_dir).length == 0;
 
-    fs.removeDirectory(dir, true);
+    let _ = remove_all(dir);
 }
