@@ -114,8 +114,12 @@ not silently coerced):
 
 `target_os_is_windows` and the POSIX→Win32 provider replacements key on the
 **OS** component. The **ABI** component also selects the pthread provider:
-MinGW uses statically linked winpthreads, while MSVC retains the Sailfin
-`pthread_windows.sfn` shim; both use the independent `sysconf_windows.sfn`.
+MinGW uses statically linked winpthreads for the `pthread_*` ABI, but also
+selects the Sailfin `pthread_windows.sfn` shim for `sysconf` — winpthreads
+does not resolve it, and the shim's Win32 definitions link without conflict
+against the winpthreads archive. MSVC gets `pthread_windows.sfn` for both
+`pthread_*` and `sysconf` via the same seed-visible fallback list in
+`target_condition_runtime_sfn_sources` (§5 amendment, SFN-1039).
 The ABI component keys the link decisions that diverge:
 
 | Decision | `windows-msvc` | `windows-gnu` |
@@ -192,7 +196,7 @@ sfn-sources-replace = [
 ]
 sfn-sources-add = [
   "sfn/platform/realpath_windows.sfn",
-  "sfn/platform/sysconf_windows.sfn",
+  "sfn/platform/pthread_windows.sfn",  # also supplies `sysconf` (SFN-1039)
   # ... the target-only Windows providers
 ]
 sfn-sources-drop = []
@@ -229,8 +233,9 @@ coverage and could not support production concurrency. The driver-native
 MinGW build instead links the full manifest-selected runtime with real Windows
 providers. POSIX modules are replaced by their Windows siblings, target-only
 providers are added explicitly, and MinGW supplies its pthread ABI through
-statically linked winpthreads. `sysconf_windows.sfn` owns the independent CPU
-count ABI so it can be linked without the MSVC-only pthread shim.
+statically linked winpthreads plus the Sailfin `pthread_windows.sfn` shim for
+`sysconf`, which winpthreads does not provide; the shim's Win32 definitions
+link without conflicting with the winpthreads archive.
 
 Broad Win32 handle inheritance is serialized only across pipe/duplicate setup,
 `CreateProcessA`, and parent-side handle closure. Process execution and drain
@@ -313,6 +318,24 @@ through `llvm_provider_context.sfn`.
   cut.** Both are compiler source with compiler-source consumers, so
   `make compile` bridges them. The split is therefore honest, not
   seed-taxed.
+- **Amendment (2026-08-22, SFN-1039).** §3.1/§3.4 originally described
+  `sysconf` as living in a standalone `sysconf_windows.sfn` provider. That
+  split violated the seed-visibility constraint above: `sysconf` is a
+  runtime-source *selection* the pinned seed 0.10.4 makes with its own copy of
+  `target_condition_runtime_sfn_sources`, which names `pthread_windows.sfn`
+  but knew nothing of a standalone `sysconf_windows.sfn`, so the provider was
+  unreachable on the native MSVC leg and every native MSVC self-host failed to
+  link `sysconf` (referenced by `sfn_scheduler_resolve_thread_count`,
+  `runtime/sfn/concurrency/scheduler.sfn`). MinGW's leg was unaffected because
+  its cross build is driven by a fresh, self-hosted compiler that reads the
+  `[targets.x86_64-w64-mingw32]` manifest table (§3.3), which already listed
+  `sysconf_windows.sfn` explicitly under `sfn-sources-add`; only the seed-driven
+  native MSVC leg, restricted to the hardcoded fallback list, was broken.
+  `sysconf` has been folded back into `pthread_windows.sfn`, which both ABIs
+  now select. Re-splitting it into a standalone module is gated on
+  a pinned seed that reads the `[targets.*]` manifest table — the same
+  fallback-retirement gate §3.3 already describes for the hardcoded table
+  generally.
 
 **Every migration step leaves a self-hosting compiler:** the triple axis is
 introduced with identity behaviour for the host triple, so the host self-host

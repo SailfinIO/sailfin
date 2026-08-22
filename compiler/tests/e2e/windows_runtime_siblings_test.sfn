@@ -1,13 +1,15 @@
 // compiler/tests/e2e/windows_runtime_siblings_test.sfn
 //
 // SFN-549: `runtime/sfn/platform/rlimit_windows.sfn`,
-// `runtime/sfn/platform/rand_windows.sfn`, and the nine anchor-less appends
+// `runtime/sfn/platform/rand_windows.sfn`, and the eight anchor-less appends
 // (`realpath_windows.sfn`, `clock_windows.sfn`, `pthread_windows.sfn`,
-// `sysconf_windows.sfn`,
 // `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`,
 // `opendir_windows.sfn` — added by SFN-903 — and `mkdtemp_windows.sfn` —
 // added by SFN-993) are
-// the native Windows runtime providers. SFN-808 adds
+// the native Windows runtime providers. SFN-1039 folds `sysconf` back into
+// `pthread_windows.sfn` (its former standalone sibling only worked through a
+// `[targets.x86_64-w64-mingw32]` manifest table the pinned seed cannot read).
+// SFN-808 adds
 // `runtime/sfn/platform/cert_roots_windows.sfn` to the same swap set, for
 // the system `ROOT` certificate store reached through Crypt32. Pins that
 // each module still emits clean LLVM IR for a Windows target and defines
@@ -101,16 +103,13 @@ test "windows siblings: clock_windows.sfn emits and defines clock_gettime" ![io]
     assert contains(ir, "declare void @GetSystemTimePreciseAsFileTime(");
 }
 
+// SFN-1039: sysconf folded back in from the deleted sysconf_windows.sfn
+// (see the file header), so this pin now also covers @sysconf/@GetSystemInfo.
 test "windows siblings: pthread_windows.sfn emits and defines pthread_mutex_init" ![io] {
     let ir = _emit_windows("runtime/sfn/platform/pthread_windows.sfn", "pthread-windows-emit");
     assert ir.length > 0;
     assert contains(ir, "define i32 @pthread_mutex_init(");
     assert contains(ir, "declare void @InitializeSRWLock(");
-}
-
-test "windows siblings: sysconf_windows.sfn emits and defines sysconf" ![io] {
-    let ir = _emit_windows("runtime/sfn/platform/sysconf_windows.sfn", "sysconf-windows-emit");
-    assert ir.length > 0;
     assert contains(ir, "define i64 @sysconf(");
     assert contains(ir, "declare void @GetSystemInfo(");
 }

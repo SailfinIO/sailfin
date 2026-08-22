@@ -564,7 +564,6 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
         i += 1;
     }
     // `realpath_windows.sfn`, `clock_windows.sfn`, `pthread_windows.sfn`,
-    // `sysconf_windows.sfn`,
     // `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`,
     // `opendir_windows.sfn`, and `mkdtemp_windows.sfn` have no POSIX
     // `.sfn` counterpart to swap FROM (SFN-549, SFN-903, SFN-993):
@@ -582,19 +581,24 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
         out.push(_path_join(platform_dir, "realpath_windows.sfn"));
         out.push(_path_join(platform_dir, "clock_windows.sfn"));
         out.push(_path_join(platform_dir, "pthread_windows.sfn"));
-        out.push(_path_join(platform_dir, "sysconf_windows.sfn"));
         out.push(_path_join(platform_dir, "popen_windows.sfn"));
         out.push(_path_join(platform_dir, "mkstemp_windows.sfn"));
         out.push(_path_join(platform_dir, "strcasestr_windows.sfn"));
         out.push(_path_join(platform_dir, "opendir_windows.sfn"));
-        // The compiler that emits the Windows leg is always CURRENT-TREE,
-        // never the pinned seed: there is no released native Windows seed
-        // yet (`docs/runbooks/windows-native.md`), so this append carries
-        // no seed dependency (`.claude/rules/seed-dependency.md`). Once a
-        // real Windows seed ships, a change to Windows-leg codegen itself
-        // (as opposed to an ordinary runtime-source append like this one)
-        // acquires a genuine seed dependency and this reasoning stops
-        // holding — it must be re-evaluated at that point, not assumed.
+        // A released native Windows seed NOW EXISTS (0.10.4), so the
+        // reasoning this list used to carry — "the Windows leg is always
+        // emitted by the current tree, never the pinned seed" — no longer
+        // holds, exactly as that note said it would stop holding once a
+        // real Windows seed shipped. The pinned seed compiles working-tree
+        // runtime source (`_compile_runtime_sfn_sources`,
+        // `build/runtime_objs.sfn`) and selects it with ITS OWN copy of
+        // this list, which a working-tree edit cannot change. So this list
+        // may only ever be SHRUNK to match the seed, never grown: adding a
+        // provider here that the pinned seed does not also append leaves
+        // the symbol undefined on the native MSVC link, which is how
+        // SFN-1039 broke the nightly. A genuinely new provider is a
+        // seed-blocker (`.claude/rules/seed-dependency.md`) — land it
+        // alone, pin a seed carrying it, then add its consumer.
         out.push(_path_join(platform_dir, "mkdtemp_windows.sfn"));
     }
     return out;

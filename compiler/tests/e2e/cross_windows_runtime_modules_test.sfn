@@ -37,7 +37,12 @@ test "cross-windows manifest selects every Win32 runtime sibling" ![io] {
     assert expect_contains_str(manifest, "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn").ok;
     assert expect_contains_str(manifest, "sfn/platform/realpath_windows.sfn").ok;
     assert expect_contains_str(manifest, "sfn/platform/clock_windows.sfn").ok;
-    assert expect_contains_str(manifest, "sfn/platform/sysconf_windows.sfn").ok;
+    // SFN-1039: `pthread_windows.sfn` carries `sysconf` as well as the
+    // `pthread_*` bodies, and a statically linked mingw-w64 does not
+    // resolve `sysconf` from winpthreads. Dropping it from the MinGW list
+    // leaves `sfn_scheduler_resolve_thread_count` with an undefined
+    // reference, so its presence here is load-bearing, not incidental.
+    assert expect_contains_str(manifest, "sfn/platform/pthread_windows.sfn").ok;
     assert expect_contains_str(manifest, "link-libs-drop = []").ok;
     assert expect_contains_str(manifest, "sfn/platform/popen_windows.sfn").ok;
     assert expect_contains_str(manifest, "sfn/platform/mkstemp_windows.sfn").ok;

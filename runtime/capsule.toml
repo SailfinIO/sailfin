@@ -132,10 +132,19 @@ sfn-sources-replace = [
     "sfn/platform/exclusive_create.sfn=sfn/platform/exclusive_create_windows.sfn",
     "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn",
 ]
+# `sysconf` has no standalone provider: it is defined in
+# `pthread_windows.sfn`, which is therefore listed here even though MinGW
+# ships winpthreads. A statically linked mingw-w64 does NOT resolve
+# `sysconf` from winpthreads — verified by an `undefined reference to
+# `sysconf`` at `sfn_scheduler_resolve_thread_count` when this entry was
+# omitted — so both Windows ABIs take the Win32 implementation from that
+# file. Splitting the shim out into its own module broke the native MSVC
+# leg, whose pinned seed cannot read this table (SFN-1039); see
+# `pthread_windows.sfn`'s header for the seed-visibility rule.
 sfn-sources-add = [
     "sfn/platform/realpath_windows.sfn",
     "sfn/platform/clock_windows.sfn",
-    "sfn/platform/sysconf_windows.sfn",
+    "sfn/platform/pthread_windows.sfn",
     "sfn/platform/popen_windows.sfn",
     "sfn/platform/mkstemp_windows.sfn",
     "sfn/platform/strcasestr_windows.sfn",

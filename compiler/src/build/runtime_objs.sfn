@@ -1788,17 +1788,6 @@ fn _runtime_condition_values(base: string[], drops: string[], adds: string[]) ->
     return _runtime_condition_paths(base, empty, drops, adds);
 }
 
-fn _runtime_drop_source_basename(base: string[], basename: string) -> string[] {
-    let mut out: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= base.length { break; }
-        if _path_basename(base[i]) != basename { out.push(base[i]); }
-        i += 1;
-    }
-    return out;
-}
-
 fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: string, target_triple: string) -> RuntimeCapsuleArtifacts[] {
     let mut out: RuntimeCapsuleArtifacts[] = [];
     let mut i: int = 0;
@@ -1820,10 +1809,13 @@ fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: strin
             // that predates `[targets.*]` still selects the Win32 siblings.
             sfn_sources = target_condition_runtime_sfn_sources(c.sfn_sources, target_os);
             if target_triple == "x86_64-w64-mingw32" {
-                // MinGW supplies the pthread ABI through winpthreads. Keep the
-                // split Sailfin sysconf provider, but never link the MSVC-only
-                // pthread shim alongside the toolchain's strong definitions.
-                sfn_sources = _runtime_drop_source_basename(sfn_sources, "pthread_windows.sfn");
+                // `pthread_windows.sfn` is KEPT for MinGW. It carries
+                // `sysconf` as well as the `pthread_*` bodies, and a
+                // statically linked mingw-w64 does not resolve `sysconf`
+                // from winpthreads — dropping this file leaves
+                // `sfn_scheduler_resolve_thread_count` with an undefined
+                // reference (SFN-1039). The Win32 definitions here win over
+                // the archive's, so no duplicate-symbol conflict arises.
                 link_libs = _runtime_condition_values(c.link_libs, [], ["-lbcrypt", "-lcrypt32", "-lws2_32"]);
             }
         }
