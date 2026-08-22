@@ -210,15 +210,29 @@ jobs:
           # — Windows has no `execve` image replacement), so the step died
           # with "failed to re-exec the pinned seed" on every release commit.
           #
-          # `$NATIVE_SFN` is the intended stage0 on this leg, the same
-          # argument the composite's own build step makes
-          # (`.github/actions/sailfin-build-windows/action.yml:167`).
+          # This is not a new argument — the in-tree selfhost driver already
+          # makes it. `_selfhost_stage_env`
+          # (`compiler/src/cli_selfhost.sfn:299-312`) forces the same setting
+          # on every `sfn selfhost` stage child, for the same window, and
+          # states the consequence plainly: the gate "would otherwise fetch +
+          # re-exec the seed here and subvert the self-host check while still
+          # reporting green." This workflow step was the outlier; setting it
+          # restores parity.
           #
-          # Unlike that one, this setting has NO removal condition. The
-          # composite's is transitional, retiring when SFN-57 + SFN-994 let a
-          # release seed satisfy the pin. A fixed-point gate must always
-          # build with the binary it is testing, at any pin, so dispatch must
-          # always be off here.
+          # That green-but-vacuous outcome is what POSIX would have produced
+          # here. Under dispatch, pass 1 re-execs seed X-1; pass 2's driver
+          # also carries the source version, so it dispatches to X-1 too, and
+          # the byte compare degrades to comparing that one seed against
+          # itself. Windows fails loudly instead only by accident of the stub.
+          #
+          # Unlike the composite's setting, this one has NO removal
+          # condition, and the reason is mechanical rather than a judgement
+          # call: `$NATIVE_SFN` is built from the working tree, so its version
+          # tracks `compiler/capsule.toml` and never `bootstrap.toml
+          # [seed].version`. SFN-57 and SFN-994 change which seed BUILDS
+          # `$NATIVE_SFN`; they do not change `$NATIVE_SFN`'s own version, so
+          # the skew window survives them intact. The composite's setting is
+          # transitional. This one is structural.
           SAILFIN_BOOTSTRAP: "off"
         run: |
           set -euo pipefail
@@ -317,6 +331,7 @@ jobs:
       # must never be picked up by a release run; only release-tag.yml's own
       # native leg produces the asset that actually ships.
       - name: Upload native MSVC installer (nightly, not a release asset)
+        id: upload_installer
         uses: actions/upload-artifact@v7
         with:
           name: windows-native-msvc-installer-nightly
@@ -325,19 +340,30 @@ jobs:
           retention-days: 7
 
       # SFN-55 review A2: `notify-failure` needs a gate name to file the
-      # regression issue under. `gate` becomes the issue title, and issues
-      # dedup on that title, so each value should name a distinct failure
-      # mode a reader can act on.
+      # regression issue under. `gate` becomes the issue title, and open
+      # issues dedup on that title, so a value is a PERMANENT anchor: renaming
+      # one later splits the dedup and orphans whatever issue still carries
+      # the old title. Each value should name a distinct failure mode, in
+      # words that cannot be misread.
       #
-      # Four values. `windows-fixed-point` now means only what its name says
-      # — pass-2 differed from pass-1 — because SFN-1035 moved the two builds
-      # into their own step; before that split, a build that never produced a
-      # second binary still filed under the determinism title.
-      # `windows-selfhost-pass` is that new step: the compiler did not
-      # self-host at all. Everything else upstream (seed staging, the ladder,
-      # the Stage 2 build, an ABI gate) still collapses to
-      # `windows-native-build`, and packaging (SFN-57) stays separate so a
-      # packaging regression doesn't misreport as a compiler break.
+      # Four values, and every step that can fail maps to exactly one:
+      #
+      #   windows-selfhost-passes  the compiler did not self-host (SFN-1035)
+      #   windows-fixed-point      it self-hosted twice and the two differed
+      #   windows-native-package   the installer was not produced or uploaded
+      #   windows-native-build     anything earlier — seed staging, the
+      #                            ladder, the Stage 2 build, an ABI gate
+      #
+      # `windows-fixed-point` means only what its name says now. Before
+      # SFN-1035 split the two builds out, a run that never produced a second
+      # binary still filed under the determinism title.
+      #
+      # `windows-native-build` is a catch-all, so nothing that can fail may be
+      # left unchecked above it or it lands there and misdirects triage at the
+      # compiler build. That is why the upload step carries an id: it runs
+      # AFTER packaging, so it is not covered by "anything earlier", and a
+      # failed upload — `if-no-files-found: error`, or a transient 5xx — is a
+      # missing installer rather than a broken compiler.
       - name: Identify failed gate
         id: identify_gate
         if: always()
@@ -347,11 +373,14 @@ jobs:
           # Ordered most-specific first: `selfhost_passes` is checked before
           # `fixed_point` because a failed passes step leaves `fixed_point`
           # skipped, not failed, and a skipped step must not read as a pass.
+          # Quoting is load-bearing: a step that never ran yields '', and an
+          # unquoted `[ = "failure" ]` would be a syntax error, not a false.
           if [ "${{ steps.selfhost_passes.outcome }}" = "failure" ]; then
-            gate=windows-selfhost-pass
+            gate=windows-selfhost-passes
           elif [ "${{ steps.fixed_point.outcome }}" = "failure" ]; then
             gate=windows-fixed-point
-          elif [ "${{ steps.package_installer.outcome }}" = "failure" ]; then
+          elif [ "${{ steps.package_installer.outcome }}" = "failure" ] \
+            || [ "${{ steps.upload_installer.outcome }}" = "failure" ]; then
             gate=windows-native-package
           else
             gate=windows-native-build
