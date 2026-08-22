@@ -4,10 +4,10 @@
 // and asserts on the raw stdout envelope with `sfn/strings` predicates —
 // `symbols` is pure-frontend (no clang/link), so `_child_env()` needs
 // only `PATH`/`HOME`, mirroring `check_json_schema_test.sfn`. The
-// subprocess inherits the runner's cwd (repo root), so the binary
-// resolves `runtime/` and `capsules/` cwd-relatively.
+// subprocess inherits the runner's cwd (repo root), so the binary resolves
+// `runtime/` and derives library locations from `workspace.toml`.
 import { contains } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { sfn_bin_abs_path, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -74,4 +74,24 @@ test "symbols: --capsule sfn/strings restricts to that capsule" ![io] {
     assert r.exit == 0;
     assert contains(r.out, "ascii_uppercase");
     assert contains(r.out, "sfn/strings");
+}
+
+test "symbols: workspace inventory discovers an arbitrary member root" ![io] {
+    let root = fs.mkdtemp("sfn-symbols-member-root-");
+    fs.createDirectory(root + "/runtime", true);
+    fs.createDirectory(root + "/domains/foundation/alpha/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"runtime\", \"domains/foundation/alpha\"]\n");
+    fs.writeFile(root + "/runtime/capsule.toml", "[capsule]\nname = \"sfn/runtime-native\"\nversion = \"0.0.0\"\npublish = false\n\n[capabilities]\nrequired = []\n\n[build]\nkind = \"runtime\"\nentry = \"prelude.sfn\"\nprelude-entry = \"prelude.sfn\"\n");
+    fs.writeFile(root + "/runtime/prelude.sfn", "fn fixture_prelude() -> int { return 1; }\n");
+    fs.writeFile(root + "/domains/foundation/alpha/capsule.toml", "[capsule]\nname = \"sfn/alpha\"\nversion = \"0.0.0\"\n\n[capabilities]\nrequired = []\n\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\n");
+    fs.writeFile(root + "/domains/foundation/alpha/src/mod.sfn", "fn arbitrary_root_marker() -> int { return 7; }\n");
+
+    let mut child_env = _child_env();
+    child_env.push("SAILFIN_RUNTIME_ROOT=" + root + "/runtime");
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "symbols", "--json", "--capsule", "sfn/alpha"], child_env, root);
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "sfn/alpha");
+    assert contains(out, "arbitrary_root_marker");
 }

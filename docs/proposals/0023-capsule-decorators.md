@@ -4,7 +4,7 @@ title: Capsule-Defined Decorators
 status: Accepted
 type: language
 created: 2026-06-15
-updated: 2026-07-24
+updated: 2026-08-22
 author: "agent:compiler-architect"
 tracking: "#1557"
 supersedes:
@@ -55,7 +55,7 @@ The decorator therefore receives **only the function name string** today. It
 does **not** see args, return value, or timing. The `@trace` name lowers to the
 identical hook (no distinct behavior).
 
-Independently, `capsules/sfn/log/src/mod.sfn` is a real library capsule
+Independently, `stdlib/log/src/mod.sfn` is a real library capsule
 (`Logger`, `log_info/warn/error/debug`, `info/warn/error/debug`, `timed`,
 `timed_end`) with **no connection** to the decorator. `capsule.toml` declares
 `required = ["io", "clock"]`.
@@ -116,7 +116,7 @@ descriptor in Tier 1 = the function name (string); decorator arguments precede i
 (resolved decision §9.5). Signature shape:
 
 ```sfn
-// in capsules/sfn/log/src/mod.sfn
+// in stdlib/log/src/mod.sfn
 @decorator
 fn logExecution(args: string[], fn_name: string) -> void ![io] {
     info(fn_name);          // reuses the library's own info()
@@ -257,7 +257,7 @@ import it from `log`") *is* the missing-dependency story.
 ### 4.5 Dogfooding migration: `@logExecution`/`@trace` → `sfn/log`
 
 End state:
-- `logExecution` (and a distinct `trace`) live in `capsules/sfn/log/src/mod.sfn`
+- `logExecution` (and a distinct `trace`) live in `stdlib/log/src/mod.sfn`
   marked `@decorator`, bodies built on the library's own `info`/`Logger`.
 - The compiler no longer string-matches the names.
 - `sfn_log_execution` (runtime body), its helper-registry row, and the
@@ -357,7 +357,7 @@ runtime symbols.
 - `compiler/src/llvm/runtime_helpers.sfn:673-675` — delete row in step F.
 
 **Runtime / stdlib**
-- `capsules/sfn/log/src/mod.sfn` — add `@decorator` `logExecution`/`trace`.
+- `stdlib/log/src/mod.sfn` — add `@decorator` `logExecution`/`trace`.
 - `runtime/prelude.sfn:52,71` — delete `sfn_log_execution` import + alias (step F).
 - `runtime/sfn/io.sfn:447` — delete `sfn_log_execution` body (step F).
 - `docs/status.md` (Runtime Migration table) — add `sfn_log_execution` seed-gated deletion row.
@@ -456,7 +456,7 @@ The design-gate review settled all five open questions:
 The Tier 1 entry-hook signature becomes args-then-name, e.g.:
 
 ```sfn
-// capsules/sfn/log/src/mod.sfn
+// stdlib/log/src/mod.sfn
 @decorator
 fn logExecution(args: string[], fn_name: string) -> void ![io] {
     info(fn_name);                     // [INFO] <fn>

@@ -86,7 +86,7 @@ fn _sidecar_path_for_capsule(capsule_name: string) -> string {
 //
 // If/when manifest emission gains fields with arbitrary string
 // content (or `modules` entries grow nested arrays), swap this
-// helper for `capsules/sfn/json` — that's the deferred path the
+// helper for `stdlib/json` — that's the deferred path the
 // architect verdict on #341 left open.
 //
 // Returns `[]` if the `modules` field is absent or the array is

@@ -182,7 +182,7 @@ fn _iso8601_utc_from_unix_millis(millis: int) -> string {
 
 // Read the realtime wall clock and format it as ISO-8601 UTC, replacing
 // the `date -u` shell-out this module used before SFN-973 (does not
-// exist on native Windows). Mirrors `capsules/sfn/time/src/mod.sfn`'s
+// exist on native Windows). Mirrors `stdlib/time/src/mod.sfn`'s
 // `unix_millis()`: `runtime_unix_millis_fn` is the internal
 // status/out-pointer target for `sfn_clock_unix_millis`
 // (`runtime/sfn/clock.sfn`), recognized as a bare builtin by the effect

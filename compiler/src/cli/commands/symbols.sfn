@@ -6,7 +6,7 @@
 // effects, and canonical import path — without grepping sources.
 //
 // This module owns the IO side: locate the runtime source dir and the
-// in-tree `capsules/` root, read + `parse_program` each `mod.sfn`, and
+// in-tree workspace capsule roots, read + `parse_program` each `mod.sfn`, and
 // hand the parsed `Program`s to `symbols_index` (the pure schema/encoder
 // core). Enumeration is best-effort — a source that fails to parse
 // contributes no symbols but is recorded in the envelope's
@@ -44,6 +44,7 @@ import { parse_program } from "sfn/syntax";
 import { substring } from "../../string_utils";
 import { toml_get_name } from "../../toml_parser";
 import { resolve_compiler_version } from "../../version";
+import { load_workspace_inventory } from "../../workspace_inventory";
 import { CliContext } from "../context";
 
 // Exit codes: reuse the canonical CLI convention (0 ok, 1 for a
@@ -79,11 +80,11 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         }
     }
 
-    // Capsules — enumerate `<project_root>/capsules/*/*/src/mod.sfn`.
-    let capsules_root = _sym_capsules_root(runtime_dir);
+    // Capsules — enumerate canonical workspace members, independent of their
+    // physical SFEP-0072 source root.
     let mut matched_filter: boolean = false;
-    if capsules_root.length > 0 && fs.exists(capsules_root) {
-        let capsule_dirs = _sym_collect_capsule_dirs(capsules_root);
+    if runtime_dir.length > 0 {
+        let capsule_dirs = _sym_collect_workspace_capsule_dirs(runtime_dir);
         let mut i: int = 0;
         loop {
             if i >= capsule_dirs.length { break; }
@@ -168,20 +169,9 @@ fn _sym_find_runtime_dir(ctx: CliContext) -> string ![io] {
     return "";
 }
 
-// The in-tree capsules root: `<parent-of-runtime-dir>/capsules`. Empty
-// when the runtime dir could not be located (installed toolchain with no
-// source tree) — the index then degrades to prelude-only.
-fn _sym_capsules_root(runtime_dir: string) -> string {
-    if runtime_dir.length == 0 { return ""; }
-    let parent = _sym_parent_dir(runtime_dir);
-    return _sym_join_path(parent, "capsules");
-}
-
-// Enumerate concrete capsule directories two levels under the capsules
-// root (`capsules/<group>/<name>/`), matching the in-tree layout. Each
-// returned path is a candidate capsule dir (validated by the caller via
-// its `capsule.toml` + `src/mod.sfn`).
-fn _sym_collect_capsule_dirs(capsules_root: string) -> string[] ![io] {
+// Enumerate the legacy `capsules/<group>/<name>/` layout retained for
+// unmoved and installed capsules during SFEP-0072.
+fn _sym_collect_legacy_capsule_dirs(capsules_root: string) -> string[] ![io] {
     let mut out: string[] = [];
     let groups = fs.listDirectory(capsules_root);
     let mut g: int = 0;
@@ -200,6 +190,36 @@ fn _sym_collect_capsule_dirs(capsules_root: string) -> string[] ![io] {
             out.push(_sym_join_path(group_dir, members[m]));
             m += 1;
         }
+    }
+    return out;
+}
+
+// Discover library capsules from the workspace inventory. Installed legacy
+// source bundles without a workspace manifest retain the old `capsules/`
+// fallback, but repository topology is otherwise owned solely by
+// `workspace.toml`.
+fn _sym_collect_workspace_capsule_dirs(runtime_dir: string) -> string[] ![io] {
+    let mut out: string[] = [];
+    if runtime_dir.length == 0 { return out; }
+    let project_root = _sym_parent_dir(runtime_dir);
+    let workspace_manifest = _sym_join_path(project_root, "workspace.toml");
+    if fs.exists(workspace_manifest) {
+        let inventory = load_workspace_inventory(project_root);
+        if !inventory.ok { return out; }
+        let mut i: int = 0;
+        loop {
+            if i >= inventory.members.length { break; }
+            let member = inventory.members[i];
+            i += 1;
+            if member.build_kind != "library" { continue; }
+            out.push(_sym_join_path(project_root, member.member_path));
+        }
+        return out;
+    }
+
+    let capsules_root = _sym_join_path(project_root, "capsules");
+    if fs.exists(capsules_root) {
+        out = _sym_collect_legacy_capsule_dirs(capsules_root);
     }
     return out;
 }

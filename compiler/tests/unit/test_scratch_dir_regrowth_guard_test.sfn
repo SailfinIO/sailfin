@@ -1,6 +1,6 @@
 // Regrowth guard for SFN-978: a fresh copy-paste of the retired POSIX-only
-// `"/tmp"` scratch-dir fallback must not reappear under `compiler/tests/` or
-// `capsules/`.
+// `"/tmp"` scratch-dir fallback must not reappear in workspace member sources
+// or tests.
 //
 // SFN-977's `sfn_bin_path()` sweep and the `.sh` sprawl in #842/#840 both
 // show the same failure mode: a convenient one-off copy of a hand-rolled
@@ -8,12 +8,11 @@
 // / `scratch_root()` (`capsules/sfn/test/src/scratch.sfn`) are the only
 // sanctioned source of this fallback now, so this test fails the build the
 // moment a new call site reintroduces the literal directly instead of
-// importing the resolver. `capsules/` is in scope alongside
-// `compiler/tests/`: `sfn_bin_path()` itself is consumed from
-// `capsules/sfn/test/tests/` and `capsules/sfn/bench/tests/`, so a test
-// author copying a scratch-dir fallback from inside `sfn/test`'s own test
-// suite — the most canonical-looking place to copy from — must be caught
-// too, not just the compiler's own tests.
+// importing the resolver. Workspace member-local tests are in scope alongside
+// cross-domain compiler tests: `sfn_bin_path()` itself is consumed from
+// `capsules/sfn/test/tests/` and `capsules/sfn/bench/tests/`, so a test author
+// copying a scratch-dir fallback from inside `sfn/test`'s own suite — the most
+// canonical-looking place to copy from — must be caught too.
 //
 // The exact quoted literal `"/tmp"` is the signal: every fallback shape this
 // sweep replaced (a plain assignment, an early return, and a ternary) always
@@ -24,6 +23,9 @@
 // (which necessarily quote the literal they implement) plus one unrelated
 // hit that is not a scratch-dir fallback at all.
 import { ends_with, find } from "sfn/strings";
+
+import { compiler_capsule_role } from "../../src/capsule_names";
+import { load_workspace_inventory } from "../../src/workspace_inventory";
 
 fn _allowed_paths() -> string[] {
     return [
@@ -40,10 +42,14 @@ fn _allowed_paths() -> string[] {
 }
 
 fn _is_allowed(path: string, allowed: string[]) -> boolean {
+    let mut candidate = path;
+    if candidate.length > 2 && substring(candidate, 0, 2) == "./" {
+        candidate = substring(candidate, 2, candidate.length);
+    }
     let mut i = 0;
     loop {
         if i >= allowed.length { break; }
-        if allowed[i] == path { return true; }
+        if allowed[i] == candidate { return true; }
         i += 1;
     }
     return false;
@@ -52,6 +58,10 @@ fn _is_allowed(path: string, allowed: string[]) -> boolean {
 fn _collect_sfn_files(root: string, acc: string[]) -> string[] ![io] {
     let mut out = acc;
     if !fs.exists(root) { return out; }
+    if ends_with(root, ".sfn") {
+        out.push(root);
+        return out;
+    }
     let entries = fs.listDirectory(root);
     let mut i: int = 0;
     loop {
@@ -68,14 +78,36 @@ fn _collect_sfn_files(root: string, acc: string[]) -> string[] ![io] {
     return out;
 }
 
-test "scratch-dir regrowth guard: no bare \"/tmp\" literal under compiler/tests or capsules" ![io] {
+fn _collect_root_list(roots: string[], acc: string[]) -> string[] ![io] {
+    let mut out = acc;
+    let mut i: int = 0;
+    loop {
+        if i >= roots.length { break; }
+        out = _collect_sfn_files(roots[i], out);
+        i += 1;
+    }
+    return out;
+}
+
+test "scratch-dir regrowth guard: no bare \"/tmp\" literal in workspace sources or tests" ![io] {
     // Skip this file's own path: its guarding logic and doc comments quote
     // the literal it hunts for, which would otherwise flag itself.
     let self_path = "compiler/tests/unit/test_scratch_dir_regrowth_guard_test.sfn";
     let allowed = _allowed_paths();
+    let inventory = load_workspace_inventory(".");
+    assert inventory.ok;
     let mut files: string[] = [];
-    files = _collect_sfn_files("compiler/tests", files);
-    files = _collect_sfn_files("capsules", files);
+    let mut mi: int = 0;
+    loop {
+        if mi >= inventory.members.length { break; }
+        let member = inventory.members[mi];
+        mi += 1;
+        if member.build_kind != "library" { continue; }
+        if compiler_capsule_role(member.name).length > 0 { continue; }
+        files = _collect_sfn_files(member.src_dir, files);
+    }
+    files = _collect_root_list(inventory.member_test_roots, files);
+    files = _collect_root_list(inventory.cross_domain_test_roots, files);
     assert files.length > 200;
 
     let needle = "\"/tmp\"";
@@ -85,7 +117,7 @@ test "scratch-dir regrowth guard: no bare \"/tmp\" literal under compiler/tests 
         if fi >= files.length { break; }
         let path = files[fi];
         fi += 1;
-        if path == self_path { continue; }
+        if path == self_path || path == "./" + self_path { continue; }
         if _is_allowed(path, allowed) { continue; }
         let source = fs.readFile(path);
         if find(source, needle, 0) >= 0 { failures.push(path); }

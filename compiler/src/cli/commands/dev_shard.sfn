@@ -58,7 +58,7 @@ import { command_def as test_command_def, run as test_run } from "./test/mod";
 
 // A named CI shard: the test roots it discovers and the file-count-balanced
 // stride it keeps. `total == 0` means "no stride — run every file under
-// `roots`" (the int-caps leg: integration + capsules with no split). The
+// `roots`" (the int-caps leg: integration + member tests with no split). The
 // union of every shard's file set equals `make test`'s surface; `_shard_cover`
 // proves it holds after any rebalance.
 struct ShardDef {
@@ -112,7 +112,7 @@ fn _shard_defs() -> ShardDef[] ![io] {
 }
 
 // The roots `make test` discovers (`sfn test compiler/tests/unit
-// compiler/tests/integration compiler/tests/e2e capsules`). The cover lint
+// compiler/tests/integration compiler/tests/e2e <member-test-roots>`). The cover lint
 // compares the shards' union against the discovery of exactly these roots.
 fn _make_test_roots() -> string[] ![io] {
     let inventory = load_workspace_inventory(".");

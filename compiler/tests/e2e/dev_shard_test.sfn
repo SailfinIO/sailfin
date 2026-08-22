@@ -92,13 +92,14 @@ test "dev shard: list unit-a yields unit test files under the stride" ![io] {
     }
 }
 
-test "dev shard: list int-caps spans integration and capsules" ![io] {
+test "dev shard: list int-caps spans integration and mixed member roots" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "dev", "shard", "list", "int-caps"], []);
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
     assert find(out, "compiler/tests/integration", 0) >= 0;
     assert find(out, "capsules/", 0) >= 0;
+    assert find(out, "stdlib/", 0) >= 0;
 }
 
 test "dev shard: the unit shards partition disjointly" ![io] {
