@@ -74,13 +74,18 @@ platform set (SFN-799).
 SFN-57), running parallel to the matrix above, not sequenced after it.**
 Builds a native MSVC compiler on `windows-2025` (mirroring
 `windows-native-selfhost.yml`'s own `cross-seed` + `native-build` jobs: its
-own mingw-cross bootstrap seed, the `sailfin-build-windows` composite, the
-self-host fixed point, then `sfn package --installer --target
-windows-x86_64-msvc`), producing `sailfin_<version>_windows_x86_64-msvc.tar.gz`
-alongside the mingw-cross `sailfin_<version>_windows_x86_64.tar.gz` asset
-the matrix already produces. **Unlike the matrix legs, this leg is not
-required** — it is still stabilizing (draft PR undrafts only after 3+
-consecutive green `windows-native-selfhost.yml` runs). `upload` below waits
+own mingw-cross bootstrap seed, the `sailfin-build-windows` composite, then
+`sfn package --installer --target windows-x86_64-msvc`), producing
+`sailfin_<version>_windows_x86_64-msvc.tar.gz` alongside the mingw-cross
+`sailfin_<version>_windows_x86_64.tar.gz` asset the matrix already produces.
+It does **not** run the self-host fixed point — deliberately, and in the same
+shape as the other three platform legs, none of which run one in the release
+path either (`release-tag.yml:630-645`). Determinism is
+`nightly-selfhost.yml`'s and `windows-native-selfhost.yml`'s job, on every
+push to `main` and daily, so the commit being released has already been
+fixed-point-verified before this leg builds it again. **Unlike the matrix
+legs, this leg is not required** — it is still stabilizing (draft PR undrafts
+only after 3+ consecutive green `windows-native-selfhost.yml` runs). `upload` below waits
 for it to finish but does not gate on its result, and a failure/cancellation
 is reported via the release Slack webhook (`notify-slack-failure`) rather
 than blocking `main`'s bump. This is the one part of stage 2 that is
