@@ -7,6 +7,10 @@ fn _validator_argv(tool: string, ll_path: string, out_path: string) -> string[] 
 }
 
 fn validate_llvm_ir(ll_path: string) -> boolean ![io] {
+    // This is a validator preference order, not the final-link driver. A bare
+    // clang is intentional after both llvm-as spellings: it validates the
+    // textual IR with the PATH-selected LLVM toolchain and never drives a
+    // platform linker (SFN-1077).
     let candidates: string[] = ["llvm-as", "llvm-as-18", "clang", "clang-18"];
     let child_env = process.environ();
     let sink = ll_path + ".validate.bc";

@@ -871,9 +871,13 @@ here.
   the resolved link argv to stderr (`[trace-link] <argv>`, #1908, naming
   `ld.lld` or `clang` per the path taken) for both the program and test
   link layouts; linker-choice diagnostics (`[link] ...`) are trace-gated
-  too. On Darwin, the backend self-supplies the SDK and host deployment
-  target so outdated Homebrew LLVM does not infer stale macOS versions
-  during links. The trace path has no behavior change when unset.
+  too. On a native Darwin link, the backend resolves the driver to the
+  explicit `SAILFIN_CC` override or Apple's `/usr/bin/clang`, independently
+  of a Homebrew LLVM clang earlier on `PATH` (SFN-1077). Object assembly still
+  deliberately follows the PATH-selected LLVM toolchain. The backend also
+  self-supplies the SDK and host deployment target so outdated Homebrew LLVM
+  does not infer stale macOS versions during links. The trace path has no
+  behavior change when unset.
   **Object-only link boundary (SFN-453):** program, capsule-dependency, and test
   LLVM inputs are content-addressed and assembled before `Backend.link`;
   `LinkPlan` contains only object paths, so clang's assembler and linker-driver

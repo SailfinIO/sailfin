@@ -1,8 +1,9 @@
 // Regression e2e for #1914: on macOS the build driver must pass an
 // explicitly-probed `-isysroot <sdk>` / `-L<sdk>/usr/lib` to `clang` so the
 // link resolves the platform libraries (`libSystem`, `libm`, `libpthread`)
-// on its own — independent of the ambient SDK environment (`SDKROOT` /
-// `LIBRARY_PATH`) or which `clang` is first on `PATH`. Before the fix the
+// on its own and selects Apple's final-link driver — independent of the
+// ambient SDK environment (`SDKROOT` / `LIBRARY_PATH`) or which `clang` is
+// first on `PATH`. Before the fixes the
 // nested link leaned on that ambient env; a subprocess build that inherited
 // a stripped env (the parallel test pool forwards only PATH/HOME/TMPDIR) or
 // a non-Apple `clang` on `PATH` then failed the link (`ld: library
@@ -87,6 +88,7 @@ test "macos-sdk-link: build carries explicit -isysroot and links under a strippe
         assert contains(err, "-isysroot");
         assert contains(err, "-mmacosx-version-min=");
         assert contains(err, "/usr/lib");
+        assert contains(err, "[trace-link] /usr/bin/clang ");
         // Behavioural proof: the runtime-linking build succeeds without any
         // ambient SDK env — the regression was this link failing.
         assert exit == 0;

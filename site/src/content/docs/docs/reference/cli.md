@@ -691,7 +691,7 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `NATIVE_BIN` | Makefile | Compiler binary used by test, check, and bench targets. Defaults to `build/bin/sfn`. |
 | `NATIVE_OUT` | Makefile | Output path for `make rebuild`. Defaults to `build/bin/sfn`. |
 | `CLANG` | Makefile | `clang` executable to use. Defaults to `clang`. |
-| `SAILFIN_CC` | Makefile on macOS | Target of the local clang shim used by seed/built compiler subprocesses. Defaults to `/usr/bin/clang`. |
+| `SAILFIN_CC` | Native macOS final links and transitional Makefile recipes | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. |
 | `CLANG_LL_FLAGS` | Makefile | Extra flags when compiling `.ll` files with clang. |
 | `TEST_JOBS` | Makefile | Parallel `sfn test --jobs N` children for `make test*`. Defaults to auto-detected CPU/memory budget. |
 | `CHECK_TEST_JOBS` | Makefile | Parallelism for `make check` test legs. Defaults to `TEST_JOBS`. |
