@@ -25,7 +25,9 @@
   <a href="https://github.com/SailfinIO/sailfin/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/SailfinIO/sailfin?style=flat"></a>
 </p>
 
-> **Status:** Sailfin is pre-1.0 and under active development. The native
+> **Status:** The current release is
+> [`v0.10.4`](https://github.com/SailfinIO/sailfin/releases/tag/v0.10.4).
+> Sailfin is pre-1.0 and under active development. The native
 > compiler is self-hosted and the runtime is written in Sailfin. The current
 > backend still lowers through LLVM and links with the platform toolchain;
 > LLVM/clang independence is a project goal, not the current shipping state. For
@@ -94,21 +96,23 @@ For language semantics, use the
 ## Example
 
 ```sfn
+import { expect_eq_str } from "sfn/test";
+
 struct User {
   id:   int;
   name: string;
 }
 
 fn greet(user: User) -> string ![io] {
-  let msg = "Hello, {{ user.name }}!";
+  let msg = "Hello, ${user.name}!";
   print(msg);
   return msg;
 }
 
-test "greet produces correct output" {
+test "greet produces correct output" ![io] {
   let u = User { id: 1, name: "Alice" };
   let result = greet(u);
-  assert(result == "Hello, Alice!");
+  expect_eq_str(result, "Hello, Alice!");
 }
 ```
 
@@ -154,7 +158,7 @@ curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh |
 To pin a specific release:
 
 ```sh
-VERSION=0.8.0
+VERSION=0.10.4
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION="$VERSION" bash
 ```
 
@@ -167,7 +171,7 @@ irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 To pin a specific release:
 
 ```powershell
-$env:VERSION = "0.8.0"
+$env:VERSION = "0.10.4"
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 
@@ -186,8 +190,7 @@ mismatches abort. See the
 
 The compiler self-hosts from the released seed pinned in
 [`bootstrap.toml`](bootstrap.toml). Source builds require `bash`, `make`, `jq`,
-LLVM tools 17+ or 18+, `clang`, and OpenSSL development libraries because the
-Sailfin-native runtime links TLS into every binary. See
+LLVM tools 17+ or 18+, and `clang`. See
 [`docs/development-setup.md`](docs/development-setup.md) for per-platform
 dependency installation and the supported build flags.
 
@@ -227,7 +230,7 @@ sfn fmt --check compiler/src/ runtime/
   behavior.
 - User-facing docs live in `site/src/content/docs/` and are published at
   [sfn.dev/docs](https://sfn.dev/docs/).
-- The public roadmap is generated from GitHub milestones at
+- Linear is the planning source of truth; the reviewed public projection is at
   [sfn.dev/roadmap](https://sfn.dev/roadmap).
 
 ## Contributing
