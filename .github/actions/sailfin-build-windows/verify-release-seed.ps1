@@ -9,12 +9,17 @@
 # 15-minute round trip per typo, and worse, a step that dies mid-verification
 # is indistinguishable at a glance from one that verified nothing.
 #
-# FAILS CLOSED at every step, by design. `install.ps1` and `install.sh`
-# warn-and-continue when OpenSSL is missing or the manifest fetch fails
-# (SFN-1034). Copying that shape would let Windows CI bootstrap from an
-# unverified binary, in the one place `bootstrap.toml`'s
-# `[verify] required = true` is unambiguous. There is deliberately no
-# downgrade path and no override knob.
+# FAILS CLOSED at every step, by design. There is deliberately no downgrade
+# path and no override knob here, in the one place `bootstrap.toml`'s
+# `[verify] required = true` is unambiguous.
+#
+# `install.ps1` and `install.sh` used to warn-and-continue when OpenSSL was
+# missing or the manifest fetch failed; SFN-1034 closed that, so all three now
+# fail closed. They are NOT identical: the installers accept a loudly named
+# `SAILFIN_ALLOW_UNVERIFIED=1` opt-in for genuinely unsigned artifacts, which
+# this script must never grow. `install.ps1` also carries an embedded Ed25519
+# verifier and needs no OpenSSL at all; SFN-1093 converges this script onto it
+# so CI and users exercise identical arithmetic, and deletes this paragraph.
 
 [CmdletBinding()]
 param(

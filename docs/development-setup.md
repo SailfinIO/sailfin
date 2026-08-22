@@ -36,6 +36,7 @@ Install these before running `make compile`:
 | `make` | Top-level build and validation targets. |
 | `curl`, `tar`, `mktemp`, `uname` | Release installer and seed download plumbing. |
 | `jq` | GitHub release JSON parsing in `install.sh` / `make fetch-seed`. |
+| OpenSSL 3.0+ | `install.sh` signature verification (Ed25519 `pkeyutl -rawin`, SFN-1034); probed via `$SAILFIN_OPENSSL`, `PATH`, or a Homebrew `openssl@3` keg. |
 | LLVM tools 17+ or 18+ | LLVM IR validation and assembly tools such as `llvm-as`. |
 | `clang` | Assemble LLVM IR and link native executables. |
 | `shasum` or `sha256sum` | Seed/self-host hash checks. `shasum -a 256` is the portable default. |

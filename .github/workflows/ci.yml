@@ -1341,7 +1341,15 @@ jobs:
             exit 1
           fi
 
-          SAILFIN_LOCAL_ARCHIVE="$PWD/dist/installer-linux-x86_64.tar.gz" \
+          # This step just built the archive, so it can state the digest it
+          # expects. That lands the install in DIGEST_PINNED rather than
+          # forcing SAILFIN_ALLOW_UNVERIFIED, which would turn a real check
+          # into an opt-out -- and it makes this smoke an end-to-end exercise
+          # of the installer's digest path against a locally built payload
+          # (SFN-1034).
+          archive="$PWD/dist/installer-linux-x86_64.tar.gz"
+          SAILFIN_LOCAL_ARCHIVE="$archive" \
+          SAILFIN_LOCAL_ARCHIVE_SHA256="$(sha256sum "$archive" | cut -d' ' -f1)" \
           VERSION="$version" \
           INSTALL_BASE="$RUNNER_TEMP/pkgsmoke/versions" \
           GLOBAL_BIN_DIR="$RUNNER_TEMP/pkgsmoke/bin" \

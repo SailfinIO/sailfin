@@ -58,6 +58,11 @@ LLVM/clang.
 
 The installer script itself also requires `curl`, `tar`, `uname`, `mktemp`, and
 `jq` on Linux/macOS because it selects release assets through the GitHub API.
+`install.sh` additionally requires an **OpenSSL 3.0+** build (raw Ed25519
+verification via `pkeyutl -rawin` needs 3.0) to verify the signed release
+manifest; it probes `$SAILFIN_OPENSSL`, `openssl` on `PATH`, and the Homebrew
+`openssl@3` keg paths before giving up. `install.ps1` needs no external
+verification tooling — its Ed25519 verifier is embedded pure PowerShell.
 
 If you are building Sailfin itself from source, you also need `bash`, `make`,
 OpenSSL development libraries, and the source-build dependencies listed in
@@ -81,14 +86,19 @@ The script will:
 3. Install `sailfin` and `sfn` to `~/.local/bin`
 4. Print confirmation when complete
 
-> **Bootstrap security:** The install script embeds the Sailfin release-signing
-> public key and verifies the release before extracting anything: it downloads
-> `SHA256SUMS` and `SHA256SUMS.sig`, checks the Ed25519 manifest signature and
-> the archive's SHA-256 digest. A missing manifest/signature (as with an older
-> unsigned release) or unavailable OpenSSL 1.1.1+ raw-Ed25519 support produces
-> a warning and continues. Once verification can run, malformed or invalid
-> signed metadata, a missing/duplicate archive entry, and digest mismatch all
-> abort before extraction. To verify manually instead, follow
+> **Bootstrap security:** The install script fails closed. It embeds the
+> Sailfin release-signing public key and verifies the release *before*
+> downloading the archive: it fetches `SHA256SUMS` and `SHA256SUMS.sig`,
+> checks the Ed25519 manifest signature (requiring a KAT-passing OpenSSL 3.0+
+> on Linux/macOS; a self-contained embedded verifier on Windows, no external
+> tooling needed), then checks the archive's SHA-256 digest. A missing
+> manifest/signature, a fetch that could not be reached at all, or no
+> KAT-passing verifier on the host all abort the install. Set
+> `SAILFIN_ALLOW_UNVERIFIED=1` to explicitly consent to installing an
+> unverified artifact anyway (an older unsigned release, or — on Linux/macOS
+> only — a host with no working verifier; `install.ps1` embeds its verifier,
+> so no Windows host is in that state) — it never bypasses a failed signature
+> or a digest mismatch. To verify manually instead, follow
 > [Verifying Your Download](/docs/getting-started/verify-download). Subsequent
 > `sfn toolchain install` downloads verify both the Ed25519 signature and SHA-256
 > digest automatically (fail-closed).
@@ -187,6 +197,23 @@ Set `$env:VERSION` before invoking `iex` so the script reads it.
 > **Why pin?** The Sailfin project is marching toward a 1.0 release. Alpha
 > builds may include regressions as large parts of the compiler and runtime are
 > rewritten. Pinning gives CI and onboarding scripts a reproducible toolchain.
+
+---
+
+## Verification and mirror environment variables
+
+Both install scripts accept a few env vars beyond `VERSION`/`REPO`/`GITHUB_TOKEN`:
+
+| Variable | Effect |
+|---|---|
+| `SAILFIN_OPENSSL` | Path to an OpenSSL 3.0+ binary to try first as the signature verifier (Linux/macOS only). |
+| `SAILFIN_RELEASE_BASE` | Overrides where `SHA256SUMS`, `SHA256SUMS.sig`, and the archive are fetched from (files read from `<base>/<tag>/`). Changes *location* only — verification stays mandatory and the trust anchor is never overridable. |
+| `SAILFIN_LOCAL_ARCHIVE` | Installs a tarball already on disk instead of a published release. Requires an explicit `VERSION`. |
+| `SAILFIN_LOCAL_ARCHIVE_SHA256` | Pins `SAILFIN_LOCAL_ARCHIVE` to a caller-supplied SHA-256, reaching trust state `DIGEST_PINNED` instead of requiring the opt-in below. |
+| `SAILFIN_ALLOW_UNVERIFIED=1` | Consent to install an artifact whose signature chain cannot be established: an unsigned historical release, a local archive with no pinned digest, or (Linux/macOS only) no KAT-passing Ed25519 verifier on the host. **Never** bypasses a failed signature, a digest mismatch, a malformed manifest, or an unreachable manifest — those abort regardless. |
+
+See [Verifying Your Download](/docs/getting-started/verify-download) for the
+full trust-state model.
 
 ---
 
