@@ -310,6 +310,15 @@ test "target: host runtime module set is unchanged" ![pure] {
 // root, the same relative-path convention the `fs.readFile` wiring guards
 // in this file already use.
 //
+// Scope of the proof: this compares the UNGATED `sfn-sources`. In a real
+// build `[sfn-source-gates]` selection runs first, and there the two
+// mechanisms are not identically shaped — the fallback's eight appends are
+// conditional on having found a `platform_dir` anchor, while
+// `sfn-sources-add` is unconditional. They cannot diverge today because
+// `exec.sfn`, `rlimit.sfn`, `terminal.sfn`, and `fd_io.sfn` are ungated and
+// so always anchor, but that is an argument, not an assertion — a future
+// gate on all four would break the equivalence without failing this test.
+//
 // `_declares_target` is not decoration. With NO table for a triple,
 // `_condition_runtime_capsules` falls through to the very fallback these
 // tests compare against, so the equivalence assertion alone passes
@@ -344,6 +353,13 @@ test "target: the MSVC manifest table matches the hardcoded Windows fallback" ![
     // `link-libs-add` across and double-adding them.
     assert expect_eq_str_array(via_manifest[0].link_libs, caps[0].link_libs).ok;
     assert expect_eq_str_array(target_extra_link_libs("x86_64-pc-windows-msvc"), ["-lbcrypt", "-lcrypt32", "-lws2_32"]).ok;
+
+    // `ll-sources-add` has no fallback counterpart to compare against, so the
+    // equivalence above cannot see it: a plausible-looking `.ll` entry passes
+    // `_rcr_target_identity_inputs_valid` (it only checks the path sits under
+    // the member root), reaches the msvc link, and leaves every other
+    // assertion here green. Pin it to the unconditioned list instead.
+    assert expect_eq_str_array(via_manifest[0].ll_sources, caps[0].ll_sources).ok;
 }
 
 // The same equivalence for mingw. It held before SFN-1084 by inspection
@@ -365,6 +381,8 @@ test "target: the MinGW manifest table matches the hardcoded Windows fallback" !
     assert _argv_contains(via_manifest[0].link_libs, "-lws2_32");
     assert _argv_contains(via_manifest[0].link_libs, "-lbcrypt");
     assert _argv_contains(via_manifest[0].link_libs, "-lcrypt32");
+
+    assert expect_eq_str_array(via_manifest[0].ll_sources, caps[0].ll_sources).ok;
 }
 
 test "target: Windows swaps platform sources and appends native providers" ![pure] {
