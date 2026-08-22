@@ -6,7 +6,7 @@
 // `process.environ` target onto it. These tests pin the raw
 // `process.*` builtin surface independently of the higher-level
 // `sfn/os::env_from_current` wrapper exercised by
-// `capsules/sfn/os/tests/env_from_current_test.sfn`.
+// `stdlib/os/tests/env_from_current_test.sfn`.
 //
 // The test harness always runs with a populated environment (PATH at
 // minimum — the runner spawns children through it), so the

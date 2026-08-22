@@ -250,7 +250,7 @@ test "module layout fingerprint: freshness inputs name explicit files exactly on
     assert _count(inputs, "capsules/sfn/cli/src/mod.sfn\n") == 1;
     assert _count(inputs, "stdlib/strings/src/mod.sfn\n") == 1;
     assert _count(inputs, "capsules/sfn/crypto/src/mod.sfn\n") == 1;
-    assert _count(inputs, "capsules/sfn/archive/src/mod.sfn\n") == 1;
+    assert _count(inputs, "stdlib/archive/src/mod.sfn\n") == 1;
 }
 
 test "module layout fingerprint: literal members ignore workspace excludes" ![io] {

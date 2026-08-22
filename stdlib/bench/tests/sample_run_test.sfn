@@ -14,7 +14,7 @@ import { sfn_bin_path } from "sfn/test";
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
 test "bench: sample bench compiles, runs, and prints the structured record" ![io] {
-    let exit = process.run_capture([sfn_bin_path(), "run", "capsules/sfn/bench/examples/sample_bench.sfn"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", "stdlib/bench/examples/sample_bench.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;

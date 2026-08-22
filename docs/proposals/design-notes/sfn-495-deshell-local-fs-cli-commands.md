@@ -597,7 +597,7 @@ This section originally called for a probe on the grounds that `fs.symlink`
 **"has never had a call site anywhere in the tree."** That is not correct, and
 the probe it motivated is unnecessary.
 
-`capsules/sfn/fs/tests/fs_test.sfn` exercises it directly at `:137`, `:152`,
+`stdlib/fs/tests/fs_test.sfn` exercises it directly at `:137`, `:152`,
 `:170`, `:184`, and `:200` — creating a link, reading through it, a dangling
 link (POSIX permits one), the `EEXIST` rejection, and a relative target —
 plus `remove_test.sfn:100`. The whole file passed 18/18 during SFN-756

@@ -2,9 +2,9 @@
 //
 // The §3.5 symlink-materialization policy under a real, `tar`-built
 // archive. Header-level decode is covered by
-// `capsules/sfn/archive/tests/ustar_test.sfn` ("decodes a symlink
+// `stdlib/archive/tests/ustar_test.sfn` ("decodes a symlink
 // header's linkname") and target rejection by
-// `capsules/sfn/archive/tests/path_guard_test.sfn`, but neither exercises
+// `stdlib/archive/tests/path_guard_test.sfn`, but neither exercises
 // the real write path in `tar_read.sfn`'s deferred-link replay
 // (`_DeferredLink`, `tar_read.sfn:657-675`) that turns a typeflag '2'
 // member into bytes on disk. This test closes that gap.
@@ -145,7 +145,7 @@ test "archive extracts symlink member: copy_instead_of_link materializes a regul
     }
 
     assert fs.exists(dest_dir + "/sfn");
-    // `fs.read_link` on a non-symlink returns "" (`capsules/sfn/fs/src/mod.sfn:155-161`,
+    // `fs.read_link` on a non-symlink returns "" (`stdlib/fs/src/mod.sfn:155-161`,
     // SFN-46) — the copy policy must not leave a real symlink behind.
     assert fs.read_link(dest_dir + "/sfn").length == 0;
 }

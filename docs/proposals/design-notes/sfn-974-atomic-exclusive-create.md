@@ -740,7 +740,7 @@ Searched: every `attempt`/`candidate` retry loop in `compiler/src`, every
 | `_unique_run_stem`, `compiler/src/cli/commands/run.sfn:100-111` | `fs.exists` probe, 1000-attempt bound | **The only check-then-act mint in the compiler. Migrates now.** |
 | `_mktemp_from_template_cmd`, `compiler/src/build/fs.sfn:128-152` | libc `mkstemp` (atomic) on POSIX; `""` degrade on a Windows host at `fs.sfn:130` | Atomic where it runs; **the Windows degrade is a follow-up (§6.2)** |
 | `_mktemp_sibling_cmd`, `fs.sfn:160-162` and its 15 call sites (`capsule_emit_parallel.sfn:553,653`, `capsule_resolver/staging.sfn:118,268,373,725,758`, `build/clang_argv.sfn:164`, `emit_helpers.sfn:237`, `native_emit_subprocess.sfn:11`, `build_cache.sfn:854`, `cli_selfhost.sfn:447`, `build/fs.sfn:299`) | delegates to the above | inherits whatever `_mktemp_from_template_cmd` does; no per-site change ever |
-| `cli/commands/test/cache_scratch.sfn:55`, `capsules/sfn/test/src/fixtures.sfn:56,208`, `compile_assert.sfn:259`, `capsules/sfn/fs/src/mod.sfn:120` | `fs.mkdtemp` (atomic, Windows sibling ships) | already correct; no change |
+| `cli/commands/test/cache_scratch.sfn:55`, `capsules/sfn/test/src/fixtures.sfn:56,208`, `compile_assert.sfn:259`, `stdlib/fs/src/mod.sfn:120` | `fs.mkdtemp` (atomic, Windows sibling ships) | already correct; no change |
 | `cli/commands/test/multi_file_run.sfn:108` | `monotonic_millis()` as a cache **nonce**, not a path | not a claim; no change |
 
 This table is the evidence for §0 item 2. It also shows why the primitive must

@@ -1,4 +1,4 @@
-// capsules/sfn/bench/src/mod.sfn — In-language microbenchmark harness.
+// stdlib/bench/src/mod.sfn — In-language microbenchmark harness.
 //
 // The benchmarking parallel to `sfn/test`: a Sailfin program links this
 // capsule to measure its own hot paths, and the bundled runtime workloads

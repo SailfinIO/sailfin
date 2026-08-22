@@ -61,7 +61,7 @@ sfn = "0.10.4"
 # tarball in-process via `targz_extract` instead of shelling out to `tar`
 # (`cli/commands/toolchain.sfn`). A normal source capsule dependency, staged
 # and linked into the self-hosted build like `sfn/cli` and `sfn/crypto`
-# above (workspace member `capsules/sfn/archive`).
+# above (workspace member `stdlib/archive`).
 "sfn/archive" = "*"
 # `sfn/http` is deliberately NOT declared here (SFN-496): its barrel exports a
 # client `get(url: string)` that collides on bare name with `sfn/cli`'s

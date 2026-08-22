@@ -69,8 +69,9 @@ jobs:
           public_count=0
           diff_status="${RUNNER_TEMP}/capsule-release-name-status"
           before_public="${RUNNER_TEMP}/capsule-release-before-public"
-          git diff --name-status --find-renames=100% "$BEFORE".."$AFTER" > "$diff_status"
+          git diff --name-status --find-renames=50% "$BEFORE".."$AFTER" > "$diff_status"
           inventory_script="$PWD/scripts/module_layout_fingerprint.sh"
+          topology_classifier="$PWD/scripts/capsule-release-topology-only.sh"
           before_root="$(mktemp -d "${RUNNER_TEMP}/capsule-release-before.XXXXXX")"
           before_tree="$before_root/tree"
           cleanup_before_tree() {
@@ -105,25 +106,14 @@ jobs:
                 continue
               fi
 
-              # A byte-identical relocation with the same capsule-relative path
-              # is topology work, not a semantic capsule release.
-              if [ "$status" = "R100" ]; then
-                case "$new_path" in
-                  "$capsule_dir"/*)
-                    relative="${new_path#"$capsule_dir"/}"
-                    old_identity="$(awk -F '\t' -v old="$old_path" \
-                      '$3 == old { print $1 }' "$before_public")"
-                    if [ "$old_identity" = "$capsule_name" ]; then continue; fi
-                    case "$old_path" in
-                      */"$relative")
-                        old_root="${old_path%/"$relative"}"
-                        old_identity="$(awk -F '\t' -v root="$old_root" \
-                          '$2 == root { print $1 }' "$before_public")"
-                        if [ "$old_identity" = "$capsule_name" ]; then continue; fi
-                        ;;
-                    esac
-                    ;;
-                esac
+              # A same-identity relocation with the same capsule-relative path
+              # is topology work, not a semantic capsule release. Lower-
+              # similarity renames are exempt only when their sole byte change
+              # is the required old-member-root -> new-member-root path rewrite.
+              if bash "$topology_classifier" "$BEFORE" "$AFTER" \
+                "$before_public" "$capsule_name" "$capsule_dir" \
+                "$status" "$old_path" "$new_path"; then
+                continue
               fi
               capsule_changed=true
               break

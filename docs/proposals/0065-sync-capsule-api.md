@@ -791,7 +791,7 @@ nothing; it is not exercising a capability.
 
 **Body effects need no polymorphism.** A `fn () -> int` parameter carries no
 effect row, and the effect checker attributes a closure's effects to the scope
-that *defines* it — recorded at `capsules/sfn/bench/src/mod.sfn:18-23` and
+that *defines* it — recorded at `stdlib/bench/src/mod.sfn:18-23` and
 `capsules/sfn/test/src/fixtures.sfn`. So a caller passing an `![io]` body to
 `with_lock` already accounts for that `io` in its own signature, and `with_lock`
 declares only what it uses directly, which is nothing. This is why the
@@ -1020,7 +1020,7 @@ changes — but is run once per phase to confirm that claim rather than assume i
 - `capsules/sfn/test/src/fixtures.sfn:55` (`with_tmp_dir`) — the production
   precedent for the acquire / `try` / cleanup-on-both-paths / re-throw
   combinator in §3.2.
-- `capsules/sfn/bench/src/mod.sfn:18-23` — the recorded rule that a `fn () -> int`
+- `stdlib/bench/src/mod.sfn:18-23` — the recorded rule that a `fn () -> int`
   parameter carries no effect row and closure effects are attributed to the
   defining scope; the basis for §4.
 - `capsules/sfn/test/src/expect.sfn:17-19` — a shipped capsule backing away from
