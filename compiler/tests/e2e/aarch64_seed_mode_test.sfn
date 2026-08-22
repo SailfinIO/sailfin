@@ -282,9 +282,9 @@ test "aarch64 seed mode: the installer smoke probes never use HEAD" ![io] {
     assert ! contains(workflow, "--head ");
 }
 
-test "release payloads: v0.9.2 shape without ARM64 payloads fails closed" ![io] {
+test "release payloads: a payload set without ARM64 fails closed" ![io] {
     let exit = with_tmp_dir(fn (dir: string) -> int {
-        _touch_assets(dir, ["sailfin-native-linux-x86_64-0.9.2.tar.gz", "sailfin_0.9.2_linux_x86_64.tar.gz", "sailfin-native-macos-arm64-0.9.2.tar.gz", "sailfin_0.9.2_macos_arm64.tar.gz", "sailfin_0.9.2_windows_x86_64.tar.gz",]);
+        _touch_assets(dir, ["sailfin-native-linux-x86_64-0.9.2.tar.gz", "sailfin_0.9.2_linux_x86_64.tar.gz", "sailfin-native-macos-arm64-0.9.2.tar.gz", "sailfin_0.9.2_macos_arm64.tar.gz", "sailfin_0.9.2_windows_x86_64.tar.gz", "sailfin_0.9.2_windows_x86_64-msvc.tar.gz",]);
         return _run_release_payload_gate(dir, "0.9.2");
     });
     assert exit != 0;
@@ -292,7 +292,7 @@ test "release payloads: v0.9.2 shape without ARM64 payloads fails closed" ![io] 
 
 test "release payloads: a partial ARM64 payload pair fails closed" ![io] {
     let exit = with_tmp_dir(fn (dir: string) -> int {
-        _touch_assets(dir, ["sailfin-native-linux-x86_64-9.9.9.tar.gz", "sailfin_9.9.9_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-9.9.9.tar.gz", "sailfin-native-macos-arm64-9.9.9.tar.gz", "sailfin_9.9.9_macos_arm64.tar.gz", "sailfin_9.9.9_windows_x86_64.tar.gz",]);
+        _touch_assets(dir, ["sailfin-native-linux-x86_64-9.9.9.tar.gz", "sailfin_9.9.9_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-9.9.9.tar.gz", "sailfin-native-macos-arm64-9.9.9.tar.gz", "sailfin_9.9.9_macos_arm64.tar.gz", "sailfin_9.9.9_windows_x86_64.tar.gz", "sailfin_9.9.9_windows_x86_64-msvc.tar.gz",]);
         return _run_release_payload_gate(dir, "9.9.9");
     });
     assert exit != 0;
@@ -300,10 +300,34 @@ test "release payloads: a partial ARM64 payload pair fails closed" ![io] {
 
 test "release payloads: v0.9.3 complete ARM64 pair is publishable" ![io] {
     let exit = with_tmp_dir(fn (dir: string) -> int {
-        _touch_assets(dir, ["sailfin-native-linux-x86_64-0.9.3.tar.gz", "sailfin_0.9.3_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-0.9.3.tar.gz", "sailfin_0.9.3_linux_arm64.tar.gz", "sailfin-native-macos-arm64-0.9.3.tar.gz", "sailfin_0.9.3_macos_arm64.tar.gz", "sailfin_0.9.3_windows_x86_64.tar.gz",]);
+        _touch_assets(dir, ["sailfin-native-linux-x86_64-0.9.3.tar.gz", "sailfin_0.9.3_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-0.9.3.tar.gz", "sailfin_0.9.3_linux_arm64.tar.gz", "sailfin-native-macos-arm64-0.9.3.tar.gz", "sailfin_0.9.3_macos_arm64.tar.gz", "sailfin_0.9.3_windows_x86_64.tar.gz", "sailfin_0.9.3_windows_x86_64-msvc.tar.gz",]);
         return _run_release_payload_gate(dir, "0.9.3");
     });
     assert exit == 0;
+}
+
+// SFN-1024. The native MSVC payload was presence-optional, so a failed
+// `native-windows-build` published a release with no Windows native binary
+// and no signal. It is required now that `seed_source: 'release'` bootstraps
+// Windows CI from it; these two cases are what would fail if that were
+// reverted.
+test "release payloads: a missing native MSVC payload fails closed" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _touch_assets(dir, ["sailfin-native-linux-x86_64-9.9.7.tar.gz", "sailfin_9.9.7_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-9.9.7.tar.gz", "sailfin_9.9.7_linux_arm64.tar.gz", "sailfin-native-macos-arm64-9.9.7.tar.gz", "sailfin_9.9.7_macos_arm64.tar.gz", "sailfin_9.9.7_windows_x86_64.tar.gz",]);
+        return _run_release_payload_gate(dir, "9.9.7");
+    });
+    assert exit != 0;
+}
+
+// The mingw payload stays required until its leg retires (SFN-58), so the
+// msvc asset cannot stand in for it. Without this, demoting mingw would look
+// like a passing change.
+test "release payloads: a missing legacy mingw payload fails closed" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _touch_assets(dir, ["sailfin-native-linux-x86_64-9.9.6.tar.gz", "sailfin_9.9.6_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-9.9.6.tar.gz", "sailfin_9.9.6_linux_arm64.tar.gz", "sailfin-native-macos-arm64-9.9.6.tar.gz", "sailfin_9.9.6_macos_arm64.tar.gz", "sailfin_9.9.6_windows_x86_64-msvc.tar.gz",]);
+        return _run_release_payload_gate(dir, "9.9.6");
+    });
+    assert exit != 0;
 }
 
 test "seed pin assets: unrelated v0.9.2 assets cannot satisfy the ARM64 gate" ![io] {

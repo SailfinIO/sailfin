@@ -173,12 +173,14 @@ the fixed point — so they land under the `windows-native-build` catch-all
 gate, whose name reads as a compiler problem when it is not one:
 
 - **404 on the seed asset.** The release named by `bootstrap.toml
-  [seed].version` never published a native MSVC asset. `release-tag.yml`'s
-  msvc leg is best-effort (SFN-1024), and `cadence-seed-pin.yml` advances
-  the pin without requiring that asset to exist first, so the pin can name a
-  release with no msvc archive. `verify-release-seed.ps1` says so directly
-  in its thrown error — it spells out that this is "NOT a regression in this
-  checkout" and to "fix the release or the pin." Do that; do not add a
+  [seed].version` never published a native MSVC asset. As of SFN-1024 the
+  msvc payload is required by `scripts/verify-release-payloads.sh`, so this
+  can no longer happen for a release cut after that change — but a pin can
+  still name a pre-SFN-1024 release, since `cadence-seed-pin.yml` does not
+  itself check for the msvc asset's presence. `verify-release-seed.ps1` says
+  so directly in its thrown error — it spells out that this is "NOT a
+  regression in this checkout" and to "fix the release or the pin." Do
+  that; do not add a
   mingw fallback to the verifier — the script's own comment rules it out by
   design.
 - **Signature or digest mismatch.** The `SHA256SUMS` ed25519 signature

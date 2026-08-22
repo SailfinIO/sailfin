@@ -43,7 +43,26 @@ if [ ! -f "${root_dir}/runtime/capsule.toml" ]; then
     exit 1
 fi
 
-deps="$(awk '/^\[[^]]+\]/ { section=$0 } section == "[dependencies]" && /^"/ { gsub(/"/, "", $1); print $1 }' "${root_dir}/runtime/capsule.toml")"
+# Emit each `[dependencies]` key from a capsule manifest, one per line.
+#
+# `sub(/\r$/, "")` is load-bearing, not defensive tidying. `sfn package` on a
+# Windows runner stages manifests with CRLF endings, so without it `section`
+# holds "[dependencies]\r", never equals "[dependencies]", and the walk below
+# reports "nothing to verify" and exits 0 — passing a payload it never looked
+# at. That is what the native MSVC payload did from the day it started
+# shipping until SFN-1024: verified against the published v0.10.4 tarball,
+# whose staged `runtime/capsule.toml` carries 182 CRs and declares
+# `sfn/crypto` the parser could not see.
+#
+# Factored out of the two call sites rather than fixed twice: the duplicate
+# awk is why the defect existed in both the top-level and nested walks.
+_capsule_deps() {
+    awk '{ sub(/\r$/, "") }
+         /^\[[^]]+\]/ { section = $0 }
+         section == "[dependencies]" && /^"/ { gsub(/"/, "", $1); print $1 }' "$1"
+}
+
+deps="$(_capsule_deps "${root_dir}/runtime/capsule.toml")"
 if [ -z "${deps}" ]; then
     echo "[payload-dep-closure] ${tarball}: runtime/capsule.toml declares no dependencies; nothing to verify"
     exit 0
@@ -102,7 +121,7 @@ while [ "${qi}" -lt "${#worklist[@]}" ]; do
 
     verified="${verified}${dep} "
 
-    nested_deps="$(awk '/^\[[^]]+\]/ { section=$0 } section == "[dependencies]" && /^"/ { gsub(/"/, "", $1); print $1 }' "${manifest}")"
+    nested_deps="$(_capsule_deps "${manifest}")"
     if [ -n "${nested_deps}" ]; then
         while IFS= read -r nested_dep; do
             worklist+=("${nested_dep}")

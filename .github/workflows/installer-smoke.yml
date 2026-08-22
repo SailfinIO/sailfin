@@ -202,11 +202,13 @@ jobs:
           # so this only works because this step is `shell: pwsh` (PowerShell
           # 7 / HttpClient) — it throws under Windows PowerShell 5.1.
           #
-          # The msvc asset is NOT guaranteed to exist on the pinned release
-          # (SFN-1024: release-tag.yml's native-build upload leg is
-          # best-effort while it stabilizes). A 404 here means "not present
-          # yet", not "broken installer", so it is recorded via $HasMsvc
-          # instead of thrown -- the next step decides what that implies.
+          # The msvc asset is NOT guaranteed to exist on the pinned release.
+          # SFN-1024 made it a required payload, so releases cut after that
+          # always carry one -- but the pin can still name an earlier
+          # release, and pre-v0.10.3 tags have none at all. A 404 here means
+          # "this pin predates the asset", not "broken installer", so it is
+          # recorded via $HasMsvc instead of thrown -- the next step decides
+          # what that implies.
           $hasMsvc = $true
           try {
             Invoke-WebRequest `
@@ -256,11 +258,11 @@ jobs:
           }
 
           if ($env:HAS_MSVC -ne 'True') {
-            # SFN-1024: this pinned release has no msvc asset (best-effort
-            # upload leg still stabilizing), so the installer necessarily
-            # fell back to the legacy mingw build and there is nothing
-            # native to assert on. Loud skip, not a silent pass -- see the
-            # `check` step for the existence probe this depends on.
+            # This pinned release predates SFN-1024's required msvc payload
+            # and published no msvc asset, so the installer necessarily fell
+            # back to the legacy mingw build and there is nothing native to
+            # assert on. Loud skip, not a silent pass -- see the `check`
+            # step for the existence probe this depends on.
             Write-Warning "SFN-1024: native-build guard SKIPPED -- the pinned release has no msvc asset, so the installed binary is expected to be the legacy mingw build."
             exit 0
           }

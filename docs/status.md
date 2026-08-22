@@ -619,9 +619,18 @@ here.
   expected version`; the release run concluded `success`, with `Notify Slack
   on release asset failure` skipped. The published artifact,
   `sailfin_0.10.3_windows_x86_64-msvc.tar.gz` (6,850,631 bytes), is covered
-  by the signed `SHA256SUMS`. The `upload` job still does not gate on the
-  MSVC leg's result (SFN-1024), so a future tag can still publish without the
-  asset and without failing — this cut simply didn't hit that path. The
+  by the signed `SHA256SUMS`. As of SFN-1024, both Windows payloads —
+  `sailfin_<version>_windows_x86_64-msvc.tar.gz` and the legacy mingw
+  `sailfin_<version>_windows_x86_64.tar.gz` — are required in
+  `scripts/verify-release-payloads.sh` (8 payloads total), so a failed or
+  missing native leg now blocks publishing via that payload gate; the
+  `upload` job's `if:` still does not check `native-windows-build`'s result
+  directly, but enforcement now lives in the payload gate rather than that
+  condition — so a stuck leg still reaches the gate and fails there naming
+  the missing asset, instead of hard-skipping `upload` and the notify jobs.
+  Its payload is also closure-checked inside `native-windows-build` itself,
+  matching every other platform, so a bad tarball fails that leg rather than
+  aborting the release ~90 minutes in. The
   v0.10.3 binary self-hosted and packaged correctly but was not yet a
   usable native seed at the time: SFN-1026 — `getaddrinfo` ran before
   `WSAStartup`, so every DNS-resolving client connect failed on native
@@ -643,9 +652,9 @@ here.
   `ci.yml` and `release-tag.yml` still *default* to `seed_source: 'cross'`
   — a deliberate SFEP-0021 §4.5 soak, not a missing capability. Retiring
   the mingw cross path (SFN-58) therefore remains blocked only on that
-  full-release-cycle soak and on SFN-1037. The Windows gate still runs zero
-  tests (SFN-981), so green there means the build reaches a fixed point,
-  not that it works.
+  full-release-cycle soak and on SFN-981 (the Windows gate still running
+  zero tests, so green there means the build reaches a fixed point, not
+  that it works).
 - **Structured output.** `sfn build --json` emits a schema-versioned
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP

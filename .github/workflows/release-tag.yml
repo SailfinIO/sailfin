@@ -479,10 +479,12 @@ jobs:
   #     after it, so its contribution to the critical path is materially
   #     smaller than the transitional cross-seed cost above.
   #
-  # This leg is best-effort while it stabilizes: `upload` below proceeds on a
-  # failed or cancelled native-windows-build (see its `if:` condition) so a
-  # still-shaking Windows leg can never block or silently swallow the release
-  # the other four platforms already produced.
+  # This leg is no longer best-effort (SFN-1024). `upload` below still
+  # proceeds on a failed or cancelled `native-windows-build` — see its `if:`
+  # condition and the comment there — but that is now only so the run reaches
+  # the payload gate and fails there, naming the missing asset, rather than
+  # hard-skipping `upload` and both notify jobs. The msvc payload is required,
+  # so a failed Windows leg blocks the release like any other platform's.
   native-windows-cross-seed:
     name: Build mingw-cross bootstrap seed [native windows leg]
     runs-on: ubuntu-latest
@@ -662,6 +664,24 @@ jobs:
           "$NATIVE_SFN" package --installer --target windows-x86_64-msvc --compiler-bin "$NATIVE_SFN"
           ls -la dist/installer-windows-x86_64-msvc.tar.gz
 
+      # Every other payload's closure is checked inside the job that builds
+      # it (`:376-380` per matrix leg, `:415-420` for the mingw cross-build).
+      # This leg had no such step, so with the msvc payload now required
+      # (SFN-1024) its first closure check would otherwise happen in `upload`
+      # — ~90 minutes in, past the point where failing is cheap. Checking
+      # here fails the leg instead of aborting the release.
+      #
+      # It also runs the check on Windows, where the payload is produced.
+      # `upload` runs it on Ubuntu against the same tarball, and the two
+      # disagreeing is itself worth knowing: this payload is the only one
+      # staged by a Windows `sfn package`, which is what wrote the CRLF
+      # manifests that made the checker no-op before SFN-1024.
+      - name: Verify native MSVC installer payload dependency closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-payload-dep-closure.sh "dist/installer-windows-x86_64-msvc.tar.gz"
+
       - name: Verify compiler version matches tag
         shell: bash
         run: |
@@ -753,8 +773,15 @@ jobs:
     # 'success'` preserves the pre-existing invariant that a failed matrix
     # leg still blocks publishing (`fail-fast: false` makes the matrix's
     # aggregate result `failure` if any leg fails); `native-windows-build`'s
-    # result is deliberately NOT checked here — this leg is best-effort while
-    # it stabilizes, so its own outcome never gates the other four platforms.
+    # result is deliberately NOT checked here, but that no longer means the
+    # leg is best-effort. As of SFN-1024 its payload is required by
+    # `verify-release-payloads.sh`, so a failed native leg blocks publishing
+    # via the payload gate — the same mechanism as every other platform —
+    # rather than via a bespoke `needs:` condition here. Enforcing it in one
+    # place keeps the "which assets must ship" invariant readable in the
+    # script that owns it, and preserves the `!cancelled()` override above so
+    # a stuck leg still reaches the gate and fails loudly, naming the missing
+    # asset, instead of hard-skipping `upload` and both notify jobs.
     needs: [build, native-windows-build]
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
@@ -900,23 +927,18 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          for label in linux_x86_64 linux_arm64 macos_arm64 windows_x86_64; do
+          # `windows_x86_64-msvc` is in this loop rather than behind an
+          # `if [ -f ]` presence check: the payload is required as of
+          # SFN-1024, so `verify-release-payloads.sh` has already failed the
+          # release if it is absent. It is the payload produced by the
+          # youngest code path, making it the likeliest to carry an
+          # incomplete runtime closure — and a payload that is present but
+          # incomplete link-fails every user program on a fresh install,
+          # which is exactly what this loop exists to catch.
+          for label in linux_x86_64 linux_arm64 macos_arm64 windows_x86_64 windows_x86_64-msvc; do
             bash .release-gates/scripts/verify-payload-dep-closure.sh \
               "dist/sailfin_${version}_${label}.tar.gz"
           done
-          # The native MSVC asset is optional presence (native-windows-build
-          # is best-effort while it stabilizes — see `upload`'s `if:` above),
-          # but never an optional check: skip only when the payload is
-          # absent, verify unconditionally when it is present. It is the one
-          # release payload produced by a code path that has barely executed
-          # anywhere, making it the most likely to have an incomplete
-          # runtime closure — and a payload that is present but incomplete
-          # link-fails every user program on a fresh install, exactly what
-          # this loop exists to catch for every other platform.
-          msvc_payload="dist/sailfin_${version}_windows_x86_64-msvc.tar.gz"
-          if [ -f "$msvc_payload" ]; then
-            bash .release-gates/scripts/verify-payload-dep-closure.sh "$msvc_payload"
-          fi
 
       # Supply-chain root: publish a signed SHA256SUMS manifest over the release
       # assets so `sfn` can verify a fetched toolchain against the public key
@@ -1054,10 +1076,13 @@ jobs:
   notify-slack-failure:
     name: Notify Slack on release asset failure
     # `native-windows-build` is in `needs` here even though `upload` (the
-    # only OTHER consumer of its result) deliberately ignores it — this is
-    # the leg's one failure-visibility path. Without it, a native-leg-only
-    # failure/cancellation is invisible: `upload` still runs and succeeds
-    # (by design, so the leg can't block the other four platforms), so
+    # only OTHER consumer of its result) does not check it directly. Since
+    # SFN-1024 the leg's failure is no longer invisible — the required msvc
+    # payload fails the gate and `upload` fails with it — so this job is now
+    # the leg's *attribution* path rather than its only signal: it names the
+    # Windows leg specifically, where the gate failure alone would only say
+    # an asset was missing. Historically (pre-SFN-1024) it was the sole
+    # signal, because `upload` still ran and succeeded, so
     # neither this job's old `failure()` condition nor notify-slack-success's
     # `success()` would ever mention it, and the leg fails silently — the
     # same "nobody notices" rot windows-native-selfhost.yml's own
@@ -1102,9 +1127,10 @@ jobs:
               # On a promoting cut the gates run before anything is public, so the
               # usual outcome of this failure is a clean no-op rather than a
               # half-finished release (SFN-829). Say so: the remediation is "fix and
-              # re-cut", not "go clean up main". Does not apply to a
-              # native-leg-only failure below, since `upload` deliberately
-              # still published in that case.
+              # re-cut", not "go clean up main". Since SFN-1024 made the msvc
+              # payload required, a native-leg failure lands here too: it
+              # fails the payload gate, so `UPLOAD_RESULT` is `failure` and
+              # this branch — not the `else` below — produces the message.
               suffix = (
                   " Payload gates run before promotion, so `main` is most likely unbumped and untagged"
                   " — check the run for whether the Promote step was reached."

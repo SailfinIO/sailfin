@@ -79,10 +79,11 @@ foreach ($f in @(@{u="$base/$asset"; o=$archive},
       if ($status -eq 404) {
         # Worth spelling out, because the gate name this lands under says
         # "windows-native-build" and the cause is neither Windows nor a build.
-        # `release-tag.yml`'s MSVC leg is best-effort (SFN-1024) and
-        # `cadence-seed-pin.yml` does not require the asset before advancing
-        # the pin, so the pin can name a release that never published one.
-        throw "SFN-994: $($f.u) does not exist (404). If this is the seed archive, the pinned release v$ver published no native msvc asset -- that is SFN-1024's unguarded path (release-tag.yml's msvc leg is best-effort and the seed pin does not require it), NOT a regression in this checkout. Fix the release or the pin; do not add a mingw fallback here."
+        # SFN-1024 made the msvc payload required, so a release cut after it
+        # cannot publish without one. A pin naming an EARLIER release still
+        # can, and `cadence-seed-pin.yml` does not itself check the asset
+        # before advancing, so this path stays reachable.
+        throw "SFN-994: $($f.u) does not exist (404). If this is the seed archive, the pinned release v$ver published no native msvc asset. Releases cut after SFN-1024 require that payload, so this means the pin names an earlier release -- NOT a regression in this checkout. Fix the release or the pin; do not add a mingw fallback here."
       }
 
       if ($attempt -ge 3) {
