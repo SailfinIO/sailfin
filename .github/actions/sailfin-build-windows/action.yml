@@ -10,10 +10,12 @@ description: >-
 inputs:
   seed_source:
     description: >-
-      'cross' = stage the mingw-cross bootstrap seed from the
-      `ci-installer-windows-x86_64` artifact (M9, the only supported value
-      today). 'release' is reserved for the pinned native windows-x86_64
-      release asset (M11/SFN-57) and is not implemented yet.
+      'cross' = stage the mingw-cross bootstrap seed from the same-run
+      `ci-installer-windows-x86_64` artifact (M9). 'release' = fetch the
+      published native MSVC seed named by `bootstrap.toml [seed].version` and
+      verify its signed SHA256SUMS before use (M11/SFN-994); this is the mode
+      that survives retiring the mingw cross path (SFN-58). Default stays
+      'cross' until the release path has soaked.
     required: false
     default: "cross"
 
@@ -67,13 +69,92 @@ runs:
         echo "staged seed: $EXE"
         "$EXE" --version || true
 
+    # ---------------------------------------------------------------------
+    # seed_source: 'release' (SFN-994) — bootstrap from the published native
+    # MSVC seed instead of a same-run mingw-cross artifact.
+    #
+    # The two sources differ in trust, and that difference is the substance of
+    # this path. 'cross' consumes an ephemeral same-run artifact
+    # (`retention-days: 1`) built from this very checkout, so it is trusted
+    # inherently and verifies nothing. 'release' fetches a binary from a public
+    # URL and MUST verify it before executing it — this is CI about to run a
+    # downloaded executable that will then compile the compiler.
+    #
+    # Verification here FAILS CLOSED at every step. `install.ps1` and
+    # `install.sh` warn-and-continue when OpenSSL is missing or the manifest
+    # fetch fails (SFN-1034); copying that shape would let Windows CI bootstrap
+    # from an unverified binary, in the one place `bootstrap.toml`'s
+    # `[verify] required = true` is unambiguous. There is deliberately no
+    # downgrade path and no override knob.
+    - name: Resolve the pinned seed version (release)
+      if: ${{ inputs.seed_source == 'release' }}
+      id: seed_pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Same parse as windows-native-selfhost.yml's `Resolve seed version`
+        # step. `bootstrap.toml [seed].version` is the sole compiler-checkout
+        # seed source of truth (SFEP-0047); nothing here may invent a version.
+        pin="$(awk '
+          /^\[[^]]+\]/ { section=$0 }
+          section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+        ' bootstrap.toml)"
+        [ -n "$pin" ] || {
+          echo "[sailfin-build-windows] bootstrap.toml [seed].version is empty" >&2
+          exit 1
+        }
+        echo "version=$pin" >> "$GITHUB_OUTPUT"
+        echo "pinned seed: $pin"
+
+    # `shell: pwsh` and not bash, deliberately — this is the only non-bash step
+    # in the action. OpenSSL's presence is EVIDENCED for pwsh on this image
+    # (installer-smoke.yml's windows job runs install.ps1's openssl-gated
+    # verification and does not emit its "OpenSSL unavailable" warning; the
+    # runner reports `Image: windows-2025-vs2026`, whose manifest lists OpenSSL
+    # 3.6.3). No equivalent evidence exists for Git Bash's PATH, and a
+    # verification step is the wrong place to infer a dependency.
+    #
+    # That evidence is a snapshot, not a guarantee: `windows-latest` will move
+    # to a newer image and the `windows-2025` pin will not follow it. Failing
+    # closed is what turns that drift into a loud failure instead of a silent
+    # unverified bootstrap.
+    - name: Fetch and verify the native release seed
+      if: ${{ inputs.seed_source == 'release' }}
+      shell: pwsh
+      env:
+        SEED_VERSION: ${{ steps.seed_pin.outputs.version }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        # `github.action_path` and not a workspace-relative path: a composite
+        # action's own files are not addressable from `$PWD`, which is the
+        # caller's workspace root.
+        & (Join-Path "${{ github.action_path }}" "verify-release-seed.ps1") `
+            -Version $env:SEED_VERSION
+
+    - name: Stage the release seed
+      if: ${{ inputs.seed_source == 'release' }}
+      shell: bash
+      env:
+        SEED_VERSION: ${{ steps.seed_pin.outputs.version }}
+      run: |
+        set -euo pipefail
+        # Converges on the same `$SEED_EXE` contract the 'cross' path sets, so
+        # every step below this one is source-agnostic.
+        mkdir -p seed
+        tar -xzf "seed-dl/sailfin_${SEED_VERSION}_windows_x86_64-msvc.tar.gz" -C seed
+        EXE="$(find "$PWD/seed" -name sailfin.exe | head -1)"
+        [ -n "$EXE" ] || { echo "sailfin.exe not found in the release seed" >&2; exit 1; }
+        echo "SEED_EXE=$EXE" >> "$GITHUB_ENV"
+        echo "staged seed: $EXE"
+        "$EXE" --version || true
+
     - name: Reject unsupported seed_source
-      if: ${{ inputs.seed_source != 'cross' }}
+      if: ${{ inputs.seed_source != 'cross' && inputs.seed_source != 'release' }}
       shell: bash
       env:
         SEED_SOURCE: ${{ inputs.seed_source }}
       run: |
-        echo "[sailfin-build-windows] seed_source '$SEED_SOURCE' is not implemented; only 'cross' is supported until SFN-57 lands the native release seed." >&2
+        echo "[sailfin-build-windows] seed_source '$SEED_SOURCE' is not a known value; expected 'cross' or 'release'." >&2
         exit 1
 
     - name: Set up MSVC developer environment (UCRT + libs on PATH/LIB/INCLUDE)
@@ -161,9 +242,15 @@ runs:
         # intended stage0 on this leg. `dev.sfn` documents the knob for
         # exactly this seed/pin-skew window.
         #
-        # Removal condition: a native Windows release seed (SFN-57) plus
-        # `seed_source: 'release'` (SFN-994) — then the running toolchain
-        # satisfies the pin here as it does on the other legs.
+        # Applies to `seed_source: 'cross'` only. Under `'release'` the staged
+        # seed IS the pinned release build, so running == pin, the gate is a
+        # no-op, and neither the skew nor the TLS argument above holds — the
+        # setting is harmless there, not load-bearing. It stays unconditional
+        # because `ci.yml` and `release-tag.yml` still pass `'cross'`.
+        #
+        # Removal condition, now half discharged: SFN-57 shipped the native
+        # release seed and SFN-994 implemented `seed_source: 'release'`, so
+        # this retires when the last `'cross'` caller does — which is SFN-58.
         SAILFIN_BOOTSTRAP: "off"
       run: |
         set -euo pipefail

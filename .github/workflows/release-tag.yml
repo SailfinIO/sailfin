@@ -464,10 +464,14 @@ jobs:
   # native Windows leg. Running these two jobs in parallel with `build`
   # instead costs, split honestly into its transitional and steady-state
   # parts:
-  #   - Transitional: `native-windows-cross-seed` (~10-15 min) exists only
-  #     because no native Windows seed has been published yet. It
-  #     disappears once one exists and `sailfin-build-windows`'s
-  #     `seed_source: 'release'` mode (currently unimplemented) replaces it.
+  #   - Transitional: `native-windows-cross-seed` (~10-15 min). Both of its
+  #     preconditions for removal are now met — native seeds publish (SFN-57)
+  #     and `seed_source: 'release'` is implemented (SFN-994) — but this leg
+  #     deliberately stays on `cross` for now. A release must be buildable
+  #     from its own checkout: making the release path depend on a PREVIOUS
+  #     release's asset is a bootstrap risk the nightly should absorb first.
+  #     `windows-native-selfhost.yml` runs `release` daily; this leg follows
+  #     once that has soaked.
   #   - Steady state: `native-windows-build` itself — slower than the other
   #     platforms' Windows runners tend to be, but build+package only (no
   #     fixed point), and it runs parallel to the `build` matrix rather than
