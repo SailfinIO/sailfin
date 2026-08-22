@@ -256,3 +256,148 @@ test "toolchain install: a signed manifest refuses an asset digest mismatch" ![i
     assert contains(out + err, "digest mismatch");
     assert ! _installed(store, ver);
 }
+
+test "toolchain install: a windows host with no msvc entry falls back to the plain asset" ![io] {
+    let tcmd = _timeout_cmd();
+    if !tool_present("python3") {
+        assert true;
+        return;
+    }
+    if tcmd.length == 0 {
+        assert true;
+        return;
+    }
+
+    // Same signed v0.9.5 fixture the digest-mismatch leg uses, which has no
+    // `-msvc` entry (SFN-1033: pre-v0.10.3 releases never published one).
+    // `SAILFIN_HOST_OS=Windows` is the `build/target.sfn:37-39` test seam
+    // that makes `_detect_os`/`_detect_arch` resolve windows/x86_64 on this
+    // Linux runner without an actual Windows host. The signed manifest
+    // lists only the plain windows asset, so the msvc-preference check in
+    // `toolchain.sfn` finds no digest for the msvc name and falls back —
+    // this asserts that fallback fired by asserting the resolved asset
+    // named in the digest-mismatch error is the plain name, not the msvc
+    // one.
+    //
+    // This leg covers the FALLBACK branch only. It asserts the same
+    // outcome whether or not the msvc-preference check exists at all
+    // (`asset` already defaults to the plain name before that check runs),
+    // so it is not a regression guard for msvc preference — that is the
+    // next test below, which uses a manifest that DOES carry an `-msvc`
+    // entry.
+    let ver = "0.9.5";
+    let tag = "v" + ver;
+    let srv = _scratch_root() + "/win-fallback-srv";
+    let store = _scratch_root() + "/win-fallback-store";
+    process.run(["rm", "-rf", srv]);
+    process.run(["rm", "-rf", store]);
+    let release_dir = srv + "/" + tag;
+    fs.createDirectory(release_dir, true);
+    let fixture = "compiler/tests/e2e/fixtures/toolchain_v0.9.5_SHA256SUMS";
+    let signature_fixture = fixture + ".sig";
+    fs.writeFile(release_dir + "/SHA256SUMS", fs.readFile(fixture));
+    fs.writeFile(release_dir + "/SHA256SUMS.sig", fs.readFile(signature_fixture));
+    let corrupt = "not the signed release archive";
+    fs.writeFile(release_dir + "/sailfin_0.9.5_windows_x86_64.tar.gz", corrupt);
+
+    // Own, unshared loopback port: 18790-18799, 18882-18886, 18893-18895,
+    // 18898-18900, 18902, 18910-18912, 18916, 18917 are claimed elsewhere
+    // under `compiler/tests/` (surveyed at `tls_large_body_test.sfn:128`);
+    // 18913 sits in that file's noted free 18913-18919 block.
+    let port = "18913";
+    let base = "http://127.0.0.1:" + port;
+    let _pid = process.spawn_with_env([tcmd, "30", "python3", "-m", "http.server", port, "--bind", "127.0.0.1", "--directory", srv], process.environ());
+    let poll = "import socket,sys,time\n" + "for _ in range(50):\n"
+        + "    try:\n"
+        + "        socket.create_connection(('127.0.0.1',"
+        + port
+        + "),0.2).close(); sys.exit(0)\n"
+        + "    except Exception:\n"
+        + "        time.sleep(0.1)\n"
+        + "sys.exit(1)\n";
+    let up = process.run_capture(["python3", "-c", poll], process.environ());
+    let _pout = process.capture_take_stdout();
+    let _perr = process.capture_take_stderr();
+    if up != 0 {
+        assert true;
+        return;
+    }
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
+        + base, "SAILFIN_HOST_OS=Windows"]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "digest mismatch for sailfin_0.9.5_windows_x86_64.tar.gz");
+    assert ! _installed(store, ver);
+}
+
+test "toolchain install: a windows host prefers the msvc entry when the manifest lists one" ![io] {
+    let tcmd = _timeout_cmd();
+    if !tool_present("python3") {
+        assert true;
+        return;
+    }
+    if tcmd.length == 0 {
+        assert true;
+        return;
+    }
+
+    // Real v0.10.3 release metadata, signed by the release key embedded in
+    // the compiler (same provenance as the v0.9.5 fixture: vendored
+    // verbatim from the published release, not locally minted). Unlike
+    // v0.9.5, this manifest DOES list an `-msvc` entry, so this is a
+    // genuine regression guard: with the msvc-preference check in
+    // `toolchain.sfn` removed, `asset` stays at the plain default, the
+    // digest-mismatch error names the plain filename instead, and this
+    // assertion fails.
+    let ver = "0.10.3";
+    let tag = "v" + ver;
+    let srv = _scratch_root() + "/win-preference-srv";
+    let store = _scratch_root() + "/win-preference-store";
+    process.run(["rm", "-rf", srv]);
+    process.run(["rm", "-rf", store]);
+    let release_dir = srv + "/" + tag;
+    fs.createDirectory(release_dir, true);
+    let fixture = "compiler/tests/e2e/fixtures/toolchain_v0.10.3_SHA256SUMS";
+    let signature_fixture = fixture + ".sig";
+    fs.writeFile(release_dir + "/SHA256SUMS", fs.readFile(fixture));
+    fs.writeFile(release_dir + "/SHA256SUMS.sig", fs.readFile(signature_fixture));
+    let corrupt = "not the signed release archive";
+    fs.writeFile(release_dir + "/sailfin_0.10.3_windows_x86_64-msvc.tar.gz", corrupt);
+    fs.writeFile(release_dir + "/sailfin_0.10.3_windows_x86_64.tar.gz", corrupt);
+
+    // Own, unshared loopback port: 18790-18799, 18882-18886, 18893-18895,
+    // 18898-18900, 18902, 18910-18913, 18916, 18917, 18920 are claimed
+    // elsewhere under `compiler/tests/` (surveyed at
+    // `tls_large_body_test.sfn:128`, plus this file's own leg above at
+    // 18913); 18914 sits in that noted free 18913-18919 block.
+    let port = "18914";
+    let base = "http://127.0.0.1:" + port;
+    let _pid = process.spawn_with_env([tcmd, "30", "python3", "-m", "http.server", port, "--bind", "127.0.0.1", "--directory", srv], process.environ());
+    let poll = "import socket,sys,time\n" + "for _ in range(50):\n"
+        + "    try:\n"
+        + "        socket.create_connection(('127.0.0.1',"
+        + port
+        + "),0.2).close(); sys.exit(0)\n"
+        + "    except Exception:\n"
+        + "        time.sleep(0.1)\n"
+        + "sys.exit(1)\n";
+    let up = process.run_capture(["python3", "-c", poll], process.environ());
+    let _pout = process.capture_take_stdout();
+    let _perr = process.capture_take_stderr();
+    if up != 0 {
+        assert true;
+        return;
+    }
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
+        + base, "SAILFIN_HOST_OS=Windows"]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "digest mismatch for sailfin_0.10.3_windows_x86_64-msvc.tar.gz");
+    assert ! _installed(store, ver);
+}

@@ -157,6 +157,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Check PowerShell syntax and release asset
+        id: check
         shell: pwsh
         env:
           SEED_TAG: ${{ needs.resolve-version.outputs.tag }}
@@ -172,24 +173,43 @@ jobs:
             $errors | Format-List
             exit 1
           }
-          $asset = "sailfin_$($env:SEED_VERSION)_windows_x86_64.tar.gz"
+          $asset = "sailfin_$($env:SEED_VERSION)_windows_x86_64-msvc.tar.gz"
           # A release-download URL redirects to a presigned object URL signed
           # for GET only, so HEAD gets a 401 there; a one-byte ranged GET asks
           # the same existence question the way the URL is signed to answer
           # it (SFN-798). Range is a restricted header under HttpWebRequest,
           # so this only works because this step is `shell: pwsh` (PowerShell
           # 7 / HttpClient) — it throws under Windows PowerShell 5.1.
-          Invoke-WebRequest `
-            -Method Get `
-            -Headers @{ Range = 'bytes=0-0' } `
-            -Uri "https://github.com/SailfinIO/sailfin/releases/download/$($env:SEED_TAG)/$asset" `
-            -UseBasicParsing
+          #
+          # The msvc asset is NOT guaranteed to exist on the pinned release
+          # (SFN-1024: release-tag.yml's native-build upload leg is
+          # best-effort while it stabilizes). A 404 here means "not present
+          # yet", not "broken installer", so it is recorded via $HasMsvc
+          # instead of thrown -- the next step decides what that implies.
+          $hasMsvc = $true
+          try {
+            Invoke-WebRequest `
+              -Method Get `
+              -Headers @{ Range = 'bytes=0-0' } `
+              -Uri "https://github.com/SailfinIO/sailfin/releases/download/$($env:SEED_TAG)/$asset" `
+              -UseBasicParsing `
+              -ErrorAction Stop | Out-Null
+          } catch {
+            if ($_.Exception.Response -and
+                $_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) {
+              $hasMsvc = $false
+            } else {
+              throw
+            }
+          }
+          "has_msvc=$hasMsvc" >> $env:GITHUB_OUTPUT
 
       - name: Install the pinned release into an empty prefix
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
+          HAS_MSVC: ${{ steps.check.outputs.has_msvc }}
         run: |
           $env:VERSION = $env:SEED_VERSION
           $env:INSTALL_BASE = Join-Path $env:RUNNER_TEMP "sailfin\versions"
@@ -201,6 +221,43 @@ jobs:
             throw "Expected sfn.exe and sailfin.exe in $env:GLOBAL_BIN_DIR"
           }
           & $sfn --version
+
+          if ($env:HAS_MSVC -ne 'True') {
+            # SFN-1024: this pinned release has no msvc asset (best-effort
+            # upload leg still stabilizing), so the installer necessarily
+            # fell back to the legacy mingw build and there is nothing
+            # native to assert on. Loud skip, not a silent pass -- see the
+            # `check` step for the existence probe this depends on.
+            Write-Warning "SFN-1024: native-build guard SKIPPED -- the pinned release has no msvc asset, so the installed binary is expected to be the legacy mingw build."
+            exit 0
+          }
+
+          # Confirm the installed binary is genuinely the native msvc build,
+          # not the legacy mingw cross build, by inspecting its PE import
+          # table. `-lbcrypt` is msvc-only (target.sfn:405 vs :407), so
+          # bcrypt.dll must be imported; msvcrt.dll is the legacy mingw CRT
+          # and must not be. Don't key on crypt32.dll/ws2_32.dll -- both ABIs
+          # link them (target.sfn:405-408), so neither discriminates. A
+          # byte/string scan of the whole file avoids requiring dumpbin
+          # (needs a VS environment); it does not parse the PE import
+          # directory specifically, which is sound today because no
+          # msvcrt.dll/bcrypt.dll string literal exists anywhere else in
+          # compiler source (target.sfn:405 emits `-lbcrypt`, the linker
+          # flag, never the DLL name) -- a future literal would make this
+          # throw on an otherwise-correct binary, loud rather than silent.
+          # Deliberately NOT `sfn toolchain install` or any other network
+          # call: this pinned release's msvc build predates the SFN-1026
+          # Winsock/DNS fix, so a hostname-based https call from it would
+          # fail here for a reason unrelated to this change -- do not
+          # "upgrade" this to a network-touching assertion.
+          $peBytes = [System.IO.File]::ReadAllBytes($sfn)
+          $peText = [System.Text.Encoding]::ASCII.GetString($peBytes)
+          if ($peText -notmatch '(?i)bcrypt\.dll') {
+            throw "Installed sfn.exe does not import bcrypt.dll; expected the native msvc build (SFN-1033)."
+          }
+          if ($peText -match '(?i)msvcrt\.dll') {
+            throw "Installed sfn.exe imports msvcrt.dll (the legacy mingw CRT); expected the native msvc build (SFN-1033)."
+          }
 
   site:
     name: Astro build and internal links

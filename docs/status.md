@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-21 (SFN-1026, SFN-808, SFN-1024). Seed pinned to `0.10.2` (`bootstrap.toml`
+Updated: 2026-08-21 (SFN-1026, SFN-808, SFN-1024, SFN-1033). Seed pinned to `0.10.3` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -1158,7 +1158,7 @@ here.
 | `sfn lsp` / editor integration | Deferred — gated on resident incremental analysis (unowned) | Syntax highlighting, effect-annotation recognition, and snippets ship today via the `SailfinIO.sfn` VS Code extension; diagnostics, go-to-definition, hover, and completion need a language server. The real prerequisite is analysis that survives between requests (resident process, content-hash file cache, per-request arena reclamation) — larger than the LSP itself and owned by no proposal. `sailfin-check/1` already supplies the diagnostic wire format. SFEP-0003 §3.5; `site/src/content/docs/docs/getting-started/editor-setup.md` |
 | Package registry (`sfn init/add/publish`) | Shipped | Default registry `pkg.sfn.dev`; `SFN_REGISTRY` / `sfn config set registry` override. **De-shelled onto `sfn/http` (SFN-496):** `publish`/`add` no longer spawn `curl`; the publish JSON body is assembled in-process (`base64_encode` from `sfn/crypto`) and POSTed through `sfn/http`'s typed `fetch`, reading status from `Response.status`; the registry-index GET goes through `fetch` and the `.sfnpkg` download uses `http.download` (redirect-following, preserving `curl -L`); temp cleanup moved to `fs.deleteFile`. Both entrypoints widened `![io]` → `![io, net]`, so registry reach is now effect-checked. `sfn/http` is imported from `cmd_shared.sfn` rather than the two command modules to avoid an LLVM bare-name signature collision with `sfn/cli`'s `get` (SFN-893). `https://` terminates through the native TLS 1.3 stack, not OpenSSL — SFN-341 deleted the OpenSSL-linked TLS stack entirely, and the toolchain links no `-lssl`/`-lcrypto` (`compiler/src/build/target.sfn:479-487`). The Windows system `ROOT` certificate store is bound (SFN-808); the remaining blocker for `publish`/`add` on native Windows is SFN-1026 — `getaddrinfo` runs before `WSAStartup`, so hostname resolution fails before a connection is attempted. |
 | Toolchain pinning (`[toolchain]` manifest + version/channel gate) | **Shipped (Phase 1)** | SFEP-0046 §3.1–3.4, SFN-167: floor-semver + channel gate on `sfn build`/`run`/`check`/`test`; `sfn init` scaffolds the pin; `--skip-toolchain-check` / `SAILFIN_SKIP_TOOLCHAIN_CHECK` / `SAILFIN_TOOLCHAIN=off` escape hatches. Root `workspace.toml` `[toolchain]` floor adopted repo-wide (SFEP-0051 Phase 2, SFN-414): default floor for every member, member `capsule.toml` overrides per field. |
-| Native toolchain install (`sfn toolchain install`) | **Shipped (Phase 2 acquire)** | SFEP-0046 §3.5, SFN-168/SFN-660: native fetch + fail-closed Ed25519-signature + binary-safe in-process SHA-256 verification into the version store, including native Windows; `SAILFIN_TOOLCHAIN_RELEASE_BASE` mirror override. Extraction is in-process via `sfn/archive`'s `targz_extract` (SFEP-0071, SFN-898) — no `tar` subprocess remains on this path; a rejected/malformed archive is `E0615`. |
+| Native toolchain install (`sfn toolchain install`) | **Shipped (Phase 2 acquire)** | SFEP-0046 §3.5, SFN-168/SFN-660: native fetch + fail-closed Ed25519-signature + binary-safe in-process SHA-256 verification into the version store, including native Windows; `SAILFIN_TOOLCHAIN_RELEASE_BASE` mirror override. Extraction is in-process via `sfn/archive`'s `targz_extract` (SFEP-0071, SFN-898) — no `tar` subprocess remains on this path; a rejected/malformed archive is `E0615`. On Windows, asset resolution now prefers the `-msvc` asset over the legacy mingw one, falling back to the latter only when the former is absent (`compiler/src/cli/commands/toolchain.sfn`, SFN-1033; see Installer below) — matched by `install.ps1`/`install.sh`. |
 | Toolchain re-exec dispatch (`SAILFIN_TOOLCHAIN=auto`/`local`/`<version>`/`off`) | **Shipped** | SFEP-0046 §3.5, SFN-172: on a `[toolchain]` floor-check failure, `sfn build`/`run`/`check`/`test` fetch (if needed, `auto`, default) + verify + re-exec the pinned toolchain with the original argv; re-entrancy guard `SAILFIN_TOOLCHAIN_DISPATCHED`; offline falls back to the install hint. SFEP-0046 tracks six issues (SFN-167–172); it stays `Accepted` pending the remainder. |
 | `workspace.lock` (`sfn lock` write + resolver consume) | **Shipped** | Explicit `sfn lock` writes the root lockfile (#1070); `sfn lock --work-dir DIR` sets the workspace-discovery start dir so the command can run against a workspace without `cd`. Resolver prefers `workspace → workspace.lock → capsule.lock → cache → registry` for external deps, sibling-first untouched (#1071). Roots own lockfiles; library capsules don't commit them. Committing the root `workspace.lock` is #1050, gated on a seed embedding #1071 (satisfied at `v0.7.0-alpha.31`) |
 | Workspace capability envelope (`[workspace.capabilities]` allow/deny/grants + enforce/warn gate) | **Shipped (declared surface, enforced)** | SFEP-0051 Phase 4. Declared-surface audit (SFN-416, 4a): each member's `capsule.toml [capabilities] required` is checked against the workspace envelope `effective(M) = (allow ∪ grants[M]) \ deny` (reuses SFEP-0017 subsumption, so an `io` entry covers `io.*`); a drifting effect emits `E0405`, a malformed envelope entry `E0406`. Enforcement gate (SFN-419, 4c): `sfn check` and `sfn build` at workspace scope run the audit and **fail on drift** by default (`enforce`); `[workspace.capabilities] mode = "warn"` reports without failing (migration aid only, not the marketed state). The envelope is **opt-in** — the gate activates only when the workspace declares a non-empty `allow` ceiling, so envelope-free workspaces (including this repo) are never retroactively broken. `sfn capabilities audit` prints the per-member required-vs-effective table and exits non-zero on drift (CI-dashboard surface). Inferred-`![...]`-surface audit (Phase 4b, SFN-418) is still open, so the SFEP stays `Accepted`; the declared-surface gate is enforced end-to-end. |
@@ -1295,7 +1295,20 @@ unit; history in the linked issues.
 
 - Release tarballs follow `sailfin_<version>_<os>_<arch>.tar.gz`. Release builds
   publish Linux x86_64, Linux arm64, macOS arm64 (Apple Silicon), and Windows
-  x86_64 installer assets. Release publication requires both the native
+  x86_64 installer assets. **Windows x86_64 ships two assets as of v0.10.3**
+  (SFN-1033): `sailfin_<version>_windows_x86_64-msvc.tar.gz`, the native MSVC
+  build with a real TLS 1.3 stack and working networking, and the plain
+  `sailfin_<version>_windows_x86_64.tar.gz`, the legacy mingw cross build
+  whose TLS is stubbed (`runtime/ir/windows_stubs.ll`) so every `https://`
+  request fails before reaching the network. All three asset selectors —
+  `sfn toolchain install`, `install.ps1`, `install.sh` — now prefer the
+  `-msvc` asset and fall back to the plain one only when it is absent
+  (releases before v0.10.3 carry no `-msvc` asset, and arm64 Windows has none
+  at any version). The mingw asset stays published pending its retirement,
+  tracked as SFN-58, which is gated on a full SFEP-0021 §4.5 release-cycle
+  soak; see the TLS 1.3 row above for the outstanding native-Windows blocker
+  (SFN-1026 — merged to `main`, not yet in a published release). Release
+  publication requires both the native
   `sailfin-native-linux-arm64-<version>.tar.gz` payload and the matching
   `sailfin_<version>_linux_arm64.tar.gz` installer; cadence seed pinning checks
   that exact pair independently before opening or auto-merging a pin PR, whose
@@ -1318,7 +1331,7 @@ unit; history in the linked issues.
   in `~/.local/bin` (`INSTALL_BASE` / `GLOBAL_BIN_DIR` overrides). Windows uses
   `%LOCALAPPDATA%\sailfin\versions\<version>` and
   `%LOCALAPPDATA%\sailfin\bin`, adding the bin directory to the user `PATH`.
-- Current release: `v0.9.3` (see `bootstrap.toml` `[seed].version`
+- Current release: `v0.10.3` (see `bootstrap.toml` `[seed].version`
   for the pinned self-host seed, which may trail the latest release).
 
 ### Support Tiers

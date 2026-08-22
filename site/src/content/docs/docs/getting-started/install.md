@@ -32,14 +32,22 @@ target, but owned syscalls and a fully gated syscall boundary are not supported
 there.
 
 > **Windows is a Tier 3 (best-effort) target.** A published installer does not by
-> itself promote a platform. The Windows binary is cross-compiled from Linux, and
-> the merge gate proves only that it boots (`--version`) and runs `sfn check` on
-> one example. Compiling, linking, the test suite, and self-hosting are **not**
-> exercised on Windows by merge-blocking CI, so expect gaps beyond the frontend.
-> Native MSVC self-hosting is still in progress and today runs only as an
-> exploratory, dispatch-only harness. For day-to-day Sailfin work on a Windows
-> machine, prefer **WSL**, which installs and runs the Tier 1 Linux x86_64
-> toolchain.
+> itself promote a platform. Windows x86_64 ships two release assets as of
+> v0.10.3: a native MSVC build with a real TLS 1.3 stack, and a legacy build
+> cross-compiled from Linux whose TLS is stubbed out, so its `https://`
+> requests fail before reaching the network. `sfn toolchain install`,
+> `install.ps1`, and `install.sh` all prefer the native MSVC asset and fall
+> back to the legacy one only when no MSVC asset exists for that
+> release/architecture (every release before v0.10.3, and Windows arm64 at any
+> version — there is no native arm64 asset). The merge gate that blocks every
+> source PR proves only that the legacy build boots (`--version`) and runs
+> `sfn check` on one example; a separate nightly job self-hosts and packages
+> the native MSVC build, but neither leg runs the full test suite yet, and the
+> native build cannot resolve hostnames over HTTPS today — the fix is merged
+> to `main` but not yet in a release — so don't expect `sfn toolchain
+> install`/`publish` to work end-to-end on Windows until that ships. For
+> day-to-day Sailfin work on a Windows machine, prefer **WSL**, which installs
+> and runs the Tier 1 Linux x86_64 toolchain.
 
 ### Compiler and linker tools
 
@@ -250,7 +258,12 @@ Examples:
 | `sailfin_${VERSION}_linux_x86_64.tar.gz` | Linux x86_64 |
 | `sailfin_${VERSION}_linux_arm64.tar.gz` | Linux arm64 (aarch64) |
 | `sailfin_${VERSION}_macos_arm64.tar.gz` | macOS Apple Silicon |
-| `sailfin_${VERSION}_windows_x86_64.tar.gz` | Windows x86_64 |
+| `sailfin_${VERSION}_windows_x86_64-msvc.tar.gz` | Windows x86_64 (native MSVC — prefer this one) |
+| `sailfin_${VERSION}_windows_x86_64.tar.gz` | Windows x86_64 (legacy mingw cross build — TLS is stubbed, so `https://` never works) |
+
+Windows x86_64 has shipped both assets since v0.10.3; earlier releases have
+only the plain `windows_x86_64.tar.gz` name. If you are downloading manually,
+prefer the `-msvc` asset when it exists for your version.
 
 ### Step 2: Verify the download
 
