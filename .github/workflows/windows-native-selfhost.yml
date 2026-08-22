@@ -181,10 +181,45 @@ jobs:
       # timeout that outruns the job's remainder yields GitHub's generic
       # job cancellation instead of this step's own timeout message —
       # a worse diagnostic, not a wrong verdict.
-      - name: Gate — self-host fixed point (pass-2 == pass-1)
-        id: fixed_point
+      #
+      # The two passes are a SEPARATE step from the comparison below on
+      # purpose (SFN-1035). Both observed release-commit failures were
+      # bootstrap-dispatch failures in pass 1 that never reached a byte
+      # compare, yet were reported under a step named for a determinism
+      # check — so triage started at "the compiler is non-deterministic"
+      # when the compiler had not run. A step reports one verdict; these are
+      # two.
+      - name: Self-host pass 1 + pass 2 (native MSVC)
+        id: selfhost_passes
         shell: bash
         timeout-minutes: 30
+        env:
+          # SFN-1035: a `chore(release): X` commit bumps
+          # `compiler/capsule.toml` to X while `bootstrap.toml [seed].version`
+          # still pins X-1 — the cadence seed-pin PR lands minutes to hours
+          # later. Through that window `bootstrap_gate_or_dispatch`
+          # (`compiler/src/cli/commands/dev.sfn:259`) sees running != pin and
+          # takes the DISPATCH path on both passes below.
+          #
+          # Dispatch is not merely inconvenient here, it is wrong. This gate
+          # exists to prove the binary built above self-hosts to a fixed
+          # point; handing the build to the *previous release's* seed tests a
+          # different compiler than the one under test. Windows fails loudly
+          # instead of silently only by accident of `sfn_process_exec` being
+          # a documented `-1` stub (`runtime/sfn/platform/process_windows.sfn`
+          # — Windows has no `execve` image replacement), so the step died
+          # with "failed to re-exec the pinned seed" on every release commit.
+          #
+          # `$NATIVE_SFN` is the intended stage0 on this leg, the same
+          # argument the composite's own build step makes
+          # (`.github/actions/sailfin-build-windows/action.yml:167`).
+          #
+          # Unlike that one, this setting has NO removal condition. The
+          # composite's is transitional, retiring when SFN-57 + SFN-994 let a
+          # release seed satisfy the pin. A fixed-point gate must always
+          # build with the binary it is testing, at any pin, so dispatch must
+          # always be off here.
+          SAILFIN_BOOTSTRAP: "off"
         run: |
           set -euo pipefail
           # SFN-922: each pass writes into its own EMPTY directory, and that
@@ -235,6 +270,18 @@ jobs:
           for f in build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; do
             [ -s "$f" ] || { echo "[error] pass artifact missing or empty: $f" >&2; exit 1; }
           done
+
+      # Comparison only — the passes ran in the step above. Anything that
+      # fails HERE is a genuine determinism break, which is what makes this
+      # step name diagnostic rather than merely descriptive.
+      #
+      # No `SAILFIN_BOOTSTRAP` needed: this step runs no Sailfin toolchain.
+      - name: Gate — self-host fixed point (pass-2 == pass-1)
+        id: fixed_point
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
           ls -lh build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe
           (sha256sum build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe 2>/dev/null || shasum -a 256 build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe || true)
           if ! cmp -s build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; then
@@ -278,19 +325,31 @@ jobs:
           retention-days: 7
 
       # SFN-55 review A2: `notify-failure` needs a gate name to file the
-      # regression issue under. Three values now — the fixed-point step's own
-      # outcome distinguishes a determinism break from everything upstream of
-      # it (seed staging, the ladder, the Stage 2 build, or an ABI gate),
-      # which all collapse to "the native build itself is broken"; the
-      # packaging step's outcome (SFN-57) is attributed separately so a
-      # packaging regression doesn't misreport as a fixed-point break.
+      # regression issue under. `gate` becomes the issue title, and issues
+      # dedup on that title, so each value should name a distinct failure
+      # mode a reader can act on.
+      #
+      # Four values. `windows-fixed-point` now means only what its name says
+      # — pass-2 differed from pass-1 — because SFN-1035 moved the two builds
+      # into their own step; before that split, a build that never produced a
+      # second binary still filed under the determinism title.
+      # `windows-selfhost-pass` is that new step: the compiler did not
+      # self-host at all. Everything else upstream (seed staging, the ladder,
+      # the Stage 2 build, an ABI gate) still collapses to
+      # `windows-native-build`, and packaging (SFN-57) stays separate so a
+      # packaging regression doesn't misreport as a compiler break.
       - name: Identify failed gate
         id: identify_gate
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ steps.fixed_point.outcome }}" = "failure" ]; then
+          # Ordered most-specific first: `selfhost_passes` is checked before
+          # `fixed_point` because a failed passes step leaves `fixed_point`
+          # skipped, not failed, and a skipped step must not read as a pass.
+          if [ "${{ steps.selfhost_passes.outcome }}" = "failure" ]; then
+            gate=windows-selfhost-pass
+          elif [ "${{ steps.fixed_point.outcome }}" = "failure" ]; then
             gate=windows-fixed-point
           elif [ "${{ steps.package_installer.outcome }}" = "failure" ]; then
             gate=windows-native-package
