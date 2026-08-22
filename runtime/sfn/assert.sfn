@@ -37,11 +37,8 @@
 // does not reliably format in a runtime module); digits are formatted
 // manually into the buffer.
 //
-// Excluded from the cross-windows RUNTIME_MODS (its `write(2)` record
-// sink is Linux/macOS test-harness plumbing); Windows resolves
-// `@runtime_assert_fail_fn` / `@sailfin_assert_fail` from the abort stubs
-// in `runtime/ir/windows_stubs.ll`. Sync pinned by
-// `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
+// Linked on every native target. Its record sink routes through the
+// target-conditioned fd provider, including `_write` on Windows.
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
@@ -57,10 +54,8 @@ extern fn getenv(name: *u8) -> *u8;
 // rather than a raw `write` extern: the UCRT's `_write` is `int` (32-bit),
 // not POSIX's `ssize_t` (64-bit), so a raw `-> i64` extern here would
 // silently promote a `-1` error into `4294967295` — the same defect
-// `platform/socket_ops.sfn` fixes for `recv`/`send` (SFN-927). Moot on
-// the mingw cross RUNTIME_MODS path (this module is excluded there, see
-// the header), but this module IS compiled for the native MSVC target via
-// the ordinary `target_condition_runtime_sfn_sources` swap.
+// `platform/socket_ops.sfn` fixes for `recv`/`send` (SFN-927). This module
+// is compiled for both Windows ABIs through native target conditioning.
 extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8;

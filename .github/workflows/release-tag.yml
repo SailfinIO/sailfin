@@ -379,14 +379,14 @@ jobs:
           set -euo pipefail
           bash scripts/verify-payload-dep-closure.sh "dist/installer-${{ matrix.package_label }}.tar.gz"
 
-      # --- Cross-compile Windows binary from Linux LLVM IR ---
+      # --- Native driver cross-build for Windows ---
       - name: Install MinGW-w64 cross-compiler (Linux)
         if: matrix.package_label == 'linux-x86_64'
         uses: ./.github/actions/apt-install
         timeout-minutes: 20
         with:
-          # Only the x86-64 C cross toolchain is used by `make
-          # ci-cross-windows`; the `mingw-w64` metapackage pulls ~277 MB of
+          # Only the x86-64 C cross toolchain is used by the native driver;
+          # the `mingw-w64` metapackage pulls ~277 MB of
           # i686 / g++ / win32 packages this build never touches and which
           # stalled the Ubuntu/Azure mirror fetch (#1402).
           #
@@ -406,7 +406,8 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          make ci-cross-windows
+          build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
+          build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
 
       # Windows is cross-built inside this linux-x86_64 leg rather than
       # having its own matrix entry, so the per-leg dependency closure check
@@ -558,7 +559,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          make ci-cross-windows
+          build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
+          build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
 
       - name: Upload mingw-cross bootstrap seed
         uses: actions/upload-artifact@v7
@@ -648,7 +650,7 @@ jobs:
       # Windows than to the platform we self-host on every day — do not
       # re-add it on the assumption its absence is an oversight.
       #
-      # Transitional target name (SFEP-0021 M11): `make ci-cross-windows`
+      # Transitional artifact label (SFEP-0021 M11): the native MinGW build
       # already owns the `installer-windows-x86_64.tar.gz` basename for the
       # mingw-cross leg, so this leg must use a distinct `--target` rather
       # than colliding with it. `_package_target_os` prefix-matches

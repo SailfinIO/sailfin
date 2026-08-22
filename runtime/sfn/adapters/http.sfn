@@ -96,17 +96,12 @@
 // connected socket via these helpers, whose bodies live in
 // `../platform/tls.sfn`. Declared here as `extern fn` FORWARD-DECLARATIONS
 // rather than `import`ed for the SAME SFN-635 reason the libc externs below
-// are inlined: a cross-module `import` is resolved from a staged
-// import-context that the standalone per-module runtime emit (the
-// `ci-cross-windows` bridge, which emits `http.sfn` in isolation) does not
-// stage, so lowering fails with "callee signature is not known". A forward
-// declaration makes this module self-contained for every emit path; the
+// are inlined: a forward declaration keeps standalone module emission
+// self-contained; the
 // linker resolves each `@tls_*` symbol to `tls.sfn`'s definition in the
 // full runtime link (unmangled external linkage, same as the `sfn_http_*`
-// exports). On the Windows cross-build — where `tls.sfn` is excluded (it
-// pulls OpenSSL, which that target does not link) — they resolve to the stubs
-// in `runtime/ir/windows_stubs.ll`, so `https://` degrades to a clean null
-// there. (The runtime effect is identical to the prior `import`; only the
+// exports). Every native target, including MinGW, links the real Sailfin TLS
+// provider. (The runtime effect is identical to the prior `import`; only the
 // resolution mechanism changes.)
 extern fn tls_client_ctx() -> *u8;
 

@@ -406,7 +406,6 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     assert _listing_has_suffix(listing, "runtime/capsule.toml");
     assert _listing_has_suffix(listing, "runtime/prelude.sfn");
     assert _listing_contains(listing, "runtime/sfn/");
-    assert _listing_has_suffix(listing, "runtime/ir/windows_stubs.ll");
     assert _listing_has_suffix(listing, "capsules/sfn/prelude/capsule.toml");
     assert _listing_has_suffix(listing, "capsules/sfn/syntax/capsule.toml");
     assert _listing_has_suffix(listing, "capsules/sfn/archive/capsule.toml");

@@ -113,6 +113,40 @@ prelude-entry = "prelude.sfn"
 [dependencies]
 "sfn/crypto" = "*"
 
+# SFN-775 / SFEP-0068: target differences belong to the runtime provider,
+# not to CI or the build frontend. Replacements preserve the base list's
+# order (and therefore compose with demand-driven source gates); additions
+# are deterministic manifest-order tails. The compiler retains its current
+# hardcoded Windows mapping only as a one-seed fallback for manifests that do
+# not declare this table.
+[targets.x86_64-w64-mingw32]
+sfn-sources-replace = [
+    "sfn/process.sfn=sfn/platform/process_windows.sfn",
+    "sfn/platform/rlimit.sfn=sfn/platform/rlimit_windows.sfn",
+    "sfn/platform/terminal.sfn=sfn/platform/terminal_windows.sfn",
+    "sfn/platform/rand.sfn=sfn/platform/rand_windows.sfn",
+    "sfn/platform/fs_exec_mode.sfn=sfn/platform/fs_exec_mode_windows.sfn",
+    "sfn/platform/fd_io.sfn=sfn/platform/fd_io_windows.sfn",
+    "sfn/platform/socket_ops.sfn=sfn/platform/socket_ops_windows.sfn",
+    "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_windows.sfn",
+    "sfn/platform/exclusive_create.sfn=sfn/platform/exclusive_create_windows.sfn",
+    "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn",
+]
+sfn-sources-add = [
+    "sfn/platform/realpath_windows.sfn",
+    "sfn/platform/clock_windows.sfn",
+    "sfn/platform/sysconf_windows.sfn",
+    "sfn/platform/popen_windows.sfn",
+    "sfn/platform/mkstemp_windows.sfn",
+    "sfn/platform/strcasestr_windows.sfn",
+    "sfn/platform/opendir_windows.sfn",
+    "sfn/platform/mkdtemp_windows.sfn",
+]
+sfn-sources-drop = []
+ll-sources-add = []
+link-libs-drop = []
+link-libs-add = ["-lbcrypt", "-lcrypt32", "-lws2_32"]
+
 # Demand-driven `sfn-sources` selection (SFN-882). A source listed under an
 # effect name is compiled only when the build's declared effect surface demands
 # that effect; a source named in NO gate is always compiled. Keys are canonical
@@ -127,8 +161,9 @@ prelude-entry = "prelude.sfn"
 # server loop. Every entry point into these modules is `net`-rooted in
 # `compiler/capsules/ir/src/intrinsic_effects.sfn`, so a program that can call
 # one must declare a `net` effect transitively to `fn main` or fail E0400.
-# DO NOT list the `_windows` siblings here. It is tempting — they are gated
-# modules' platform twins — but it is both unnecessary and actively harmful.
+# DO NOT list the `_windows` siblings in this gate table. They are declared in
+# the target table above, but selection intentionally runs against the base
+# source set before target conditioning.
 #
 # Unnecessary, because selection runs BEFORE target conditioning: the call
 # sites narrow, and `_condition_runtime_capsules` runs later inside
@@ -138,13 +173,6 @@ prelude-entry = "prelude.sfn"
 # is never appended. When `net` IS demanded the module survives, the sibling is
 # appended, and it is wanted. Both branches are correct with no entry here; that
 # ordering is therefore load-bearing, not incidental.
-#
-# Harmful, because `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn`
-# asserts the Windows spellings appear NOWHERE in this file — its whole-text
-# `contains` search is exact only while each token occurs in one place, and it
-# cannot be rewritten to parse the arrays instead (that form reproducibly
-# miscompiles from an `![io]` test, documented in its own header). Listing a
-# sibling here fails that test with no behaviour change to show for it.
 #
 # THIS SECTION MUST STAY LAST IN THE FILE. `toml_get_string_array` scans forward
 # from a `[section]` header to the next header, so a section inserted before

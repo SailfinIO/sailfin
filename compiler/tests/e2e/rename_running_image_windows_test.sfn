@@ -6,8 +6,8 @@
 // bytes onto the vacated path.
 //
 // PLATFORM GATE. The fallback this exercises lives ONLY in the Windows
-// runtime module (`rename_ops_windows.sfn`, in the cross-windows
-// RUNTIME_MODS, NOT in `runtime/capsule.toml`). On Linux/macOS the test
+// runtime module (`rename_ops_windows.sfn`, selected by the runtime
+// manifest's Windows target table). On Linux/macOS the test
 // binary instead links the POSIX `rename_ops.sfn`, whose `rename(2)` has
 // no such fallback to prove, so this SKIPS (asserts trivially) off
 // Windows. Detection mirrors `process_run_capture_windows_test.sfn` /

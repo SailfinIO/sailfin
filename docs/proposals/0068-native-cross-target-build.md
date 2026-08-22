@@ -4,7 +4,7 @@ title: Native Cross-Target Builds (`sfn build --target=<triple>`)
 status: Accepted
 type: tooling
 created: 2026-08-08
-updated: 2026-08-08
+updated: 2026-08-22
 author: "agent:compiler-architect; human review"
 tracking: SFN-774, SFN-775, SFN-776, SFN-777
 supersedes:
@@ -112,16 +112,18 @@ not silently coerced):
 | `x86_64-pc-windows-msvc` | Windows | msvc | `windows-msvc` |
 | `x86_64-w64-mingw32` | Windows | gnu | `windows-gnu` |
 
-`target_os_is_windows` and the runtime-swap logic key on the **OS** component
-(both Windows ABIs need identical source substitution). The **ABI** component
-keys the four link decisions that actually diverge:
+`target_os_is_windows` and the POSIX→Win32 provider replacements key on the
+**OS** component. The **ABI** component also selects the pthread provider:
+MinGW uses statically linked winpthreads, while MSVC retains the Sailfin
+`pthread_windows.sfn` shim; both use the independent `sysconf_windows.sfn`.
+The ABI component keys the link decisions that diverge:
 
 | Decision | `windows-msvc` | `windows-gnu` |
 |---|---|---|
 | clang `-target` | `x86_64-pc-windows-msvc` | `x86_64-w64-mingw32` |
 | linker | `-fuse-ld=lld` | `x86_64-w64-mingw32-gcc -static` |
 | GNU link GC (`--gc-sections`, `-Wl,-u`) | off | **on** |
-| link libs | drop `-lm -lpthread -lssl -lcrypto`; add `-lbcrypt -lws2_32` | keep `-lm -lpthread`; add `-lws2_32` |
+| link libs | drop POSIX-only libs; add native Windows libs | keep `-lm -lpthread`; add `-lbcrypt -lcrypt32 -lws2_32` |
 | TLS | native | `-femulated-tls` |
 
 **Zero-behaviour contract preserved (#1112).** Every non-Windows triple keeps
@@ -186,30 +188,29 @@ Additive schema in `runtime/capsule.toml`:
 sfn-sources-replace = [
   "sfn/process.sfn=sfn/platform/process_windows.sfn",
   "sfn/platform/rlimit.sfn=sfn/platform/rlimit_windows.sfn",
-  # ... the seven swaps
+  # ... every POSIX provider with a Windows sibling
 ]
 sfn-sources-add = [
   "sfn/platform/realpath_windows.sfn",
-  # ... the six appends
+  "sfn/platform/sysconf_windows.sfn",
+  # ... the target-only Windows providers
 ]
-sfn-sources-drop = ["sfn/concurrency/serve.sfn", "sfn/assert.sfn"]
-ll-sources-add   = ["ir/windows_stubs.ll"]
+sfn-sources-drop = []
+ll-sources-add   = []
 link-libs-drop   = []
-link-libs-add    = ["-lws2_32"]
-
-[targets.x86_64-pc-windows-msvc]
-# same replace/add; different link-libs
-link-libs-drop = ["-lm", "-lpthread", "-lssl", "-lcrypto"]
-link-libs-add  = ["-lbcrypt", "-lws2_32"]
+link-libs-add    = ["-lbcrypt", "-lcrypt32", "-lws2_32"]
 ```
 
 Because `toml_get_string_array` is **section-scoped**, a top-level
 `sfn-sources` read by an older parser is unaffected by the new tables — the
 schema is genuinely additive.
 
-`target_condition_runtime_sfn_sources` keeps its name and its swap semantics
-but becomes manifest-driven, taking the already-loaded manifest text from
-`runtime_capsule_resolver.sfn`.
+`runtime_capsule_resolver.sfn` resolves and validates the target table once at
+the manifest boundary. `build/runtime_objs.sfn` applies the selected triple's
+replacements, additions, drops, IR additions, and link-library edits through a
+single shared transformation used by both compilation and linked-test cache
+identity. `target_condition_runtime_sfn_sources` remains only as the one-seed
+migration fallback described below.
 
 **Migration constraint (load-bearing).** Do **not** delete the hardcoded
 compiler-source table in the same change that adds the manifest table. On the
@@ -220,16 +221,21 @@ read the manifest tables would build the Windows runtime with POSIX modules.
 Keep the hardcoded table as the fallback when the manifest declares no
 `[targets.<triple>]` section; delete it one seed later (see §5).
 
-### 3.4 `windows_stubs.ll` and the curated exclusion list
+### 3.4 Real runtime providers replace the curated stub architecture
 
-`runtime/ir/windows_stubs.ll` exists because the Makefile's `RUNTIME_MODS`
-list *excludes* modules (`concurrency/*`, `serve.sfn`, `assert.sfn`) whose
-externs cannot resolve in a static mingw link, then stubs the dangling
-symbols. The driver has no such curated list — it builds the manifest's full
-`sfn-sources`. Preserve behaviour first, narrow later: express the exclusions
-as `sfn-sources-drop` and declare the stub file as `ll-sources-add` in the
-mingw target table (the manifest already has an `ll-sources` key, currently
-`[]`, and the driver already assembles `ll-sources` entries with clang).
+Native link validation refined the accepted design: the old Make target's
+curated exclusion list and `runtime/ir/windows_stubs.ll` hid missing runtime
+coverage and could not support production concurrency. The driver-native
+MinGW build instead links the full manifest-selected runtime with real Windows
+providers. POSIX modules are replaced by their Windows siblings, target-only
+providers are added explicitly, and MinGW supplies its pthread ABI through
+statically linked winpthreads. `sysconf_windows.sfn` owns the independent CPU
+count ABI so it can be linked without the MSVC-only pthread shim.
+
+Broad Win32 handle inheritance is serialized only across pipe/duplicate setup,
+`CreateProcessA`, and parent-side handle closure. Process execution and drain
+remain concurrent, preventing cross-spawn inheritance without serializing
+child lifetimes. The target therefore needs no source drops and no stub IR.
 
 `cross_module_shim.c` needs no special handling: it is produced in the
 driver's own work dir and the native link path already picks it up.
@@ -256,6 +262,9 @@ directly**. Required, in the same change as the triple axis:
 - `_runtime_obj_key_with_target` (`build/runtime_objs.sfn`) likewise.
 - `target_artifact_tag` returns `windows-msvc` / `windows-gnu`, so the two
   ABIs get distinct on-disk artifact paths instead of overwriting each other.
+- Linked-test runtime identity hashes the same effective target-conditioned
+  source, IR, and link-lib set that `assemble_runtime_capsule_link_inputs`
+  consumes.
 
 Without this, an msvc build and a mingw build silently share cache entries and
 cross-link.
@@ -289,10 +298,11 @@ through `llvm_provider_context.sfn`.
   build driven by `build/bin/sfn`) is in the same tree. `make compile` builds
   the new compiler from the old seed and that fresh compiler performs the
   cross build. **Not `seed-blocker`; no seed cut.**
-- **The runtime-source carve-out does not apply.** The carve-out bites when
-  *runtime source* calls a compiler capability the seed lacks. No runtime
-  `.sfn` changes here — only the *list* of runtime sources is conditioned, and
-  that conditioning runs in the driver.
+- **The runtime-source carve-out does not block this change.** The new and
+  hardened Windows providers use existing Sailfin syntax, Win32 extern ABI,
+  and runtime primitives; they do not call a compiler capability absent from
+  the pinned seed. The fresh compiler built from that compatible seed selects
+  and compiles them through the manifest table.
 - **One genuine seed gate exists, and it is a deletion.** Removing the
   hardcoded Windows swap table from `build/target.sfn` requires a pinned seed
   that reads the manifest tables, because the seed performs that swap on the
@@ -353,8 +363,8 @@ to survive in whatever replaces the Makefile.
 
 **Extend (unit):**
 - `compiler/tests/unit/target_conditioning_test.sfn` — triple → (OS, ABI)
-  decomposition; identity for every non-Windows triple; both Windows triples
-  producing the same source-substitution result and different link results.
+  decomposition; identity for every non-Windows triple; shared Windows
+  replacements plus ABI-specific pthread and link results.
 - `compiler/tests/unit/runtime_obj_target_identity_test.sfn` — the two Windows
   triples must produce **different** runtime-object keys.
 
@@ -362,7 +372,7 @@ to survive in whatever replaces the Makefile.
 - `compiler/tests/e2e/target_flag_cache_key_test.sfn` — `--target` for the two
   Windows triples yields distinct artifact dirs and distinct cache keys; an
   unknown triple is rejected with a diagnostic, not silently coerced.
-- `compiler/tests/e2e/cross_target_windows_test.sfn` — a driver-native
+- `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn` — a driver-native
   `--target=x86_64-w64-mingw32` build of a small capsule produces a PE
   binary; asserts the manifest target table and the compiler-source fallback
   table agree (the replacement for

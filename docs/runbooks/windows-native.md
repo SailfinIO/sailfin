@@ -25,10 +25,9 @@ It proves two things in sequence:
 
 `cross-seed` (ubuntu) still runs, but no longer feeds `native-build`
 (SFN-994 dropped `needs: cross-seed`, so the two jobs now run in parallel).
-It stays for two reasons: to keep `make ci-cross-windows` exercised
-nightly, and to keep the `seed_source: cross` escape hatch on the shared
-composite proven, in case a bad release seed ever ships. SFN-58 deletes
-both jobs together once the release-seed path has soaked.
+It stays for two reasons: to exercise the native MinGW target build nightly,
+and to keep the `seed_source: cross` escape hatch on the shared composite
+proven, in case a bad release seed ever ships.
 
 When either job fails, or either job is cancelled after it started (a
 `timeout-minutes` expiry, not an expected concurrency supersede — see
@@ -45,7 +44,7 @@ have:
 - `windows-cross-seed` — `cross-seed` failed or was cancelled while
   `native-build` did not itself fail or get cancelled. This is the Linux job
   that rebuilds the mingw-cross bootstrap seed breaking, not the Windows
-  native compiler — triage `make ci-cross-windows`, not the compiler.
+  native compiler — triage the native MinGW target build, not the compiler.
   Reachable only since SFN-994 made the two jobs run in parallel; before
   that, a `cross-seed` failure left `native-build` skipped, and the title
   fell through to the `windows-native-build` fallback below — misleadingly,
@@ -89,10 +88,11 @@ mkdir -p seed
 tar -xzf "seed-dl/sailfin_${ver}_windows_x86_64-msvc.tar.gz" -C seed
 SEED_EXE="$(find "$PWD/seed" -name sailfin.exe | head -1)"
 
-# Fallback (`seed_source: cross` on the composite): the mingw-cross
-# bootstrap seed, still the escape hatch until SFN-58 retires the path.
-#   make ci-cross-windows   # on Linux, produces dist/installer-windows-x86_64.tar.gz
-#   # copy/extract that archive onto the Windows host as SEED_EXE instead
+# Fallback (`seed_source: cross` on the composite): stage a mingw-cross
+# bootstrap seed with the native target driver on Linux or macOS, then copy
+# and extract the archive on the Windows host as SEED_EXE instead.
+#   build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
+#   build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
 
 SAILFIN_TARGET_OS=Windows "$SEED_EXE" build -p compiler
 NATIVE_SFN=<path to the resulting compiler.exe / sfn.exe under build/>
@@ -152,12 +152,11 @@ placebo.
 
 **What it does NOT cover**, and where those still require the real thing:
 
-- **The mingw cross-bridge link** (`make ci-cross-windows`) — a separate
-  toolchain (mingw-w64, not MSVC) and a separate, hand-maintained
-  `RUNTIME_MODS` module list (`Makefile`). A symbol present in one bridge can
-  be absent from the other (e.g. `libmingwex.a` lacks `mkdtemp` even though
-  MSVC's UCRT link has no such gap) — always also run `make ci-cross-windows`
-  when a change touches `platform/*_windows.sfn`.
+- **The native MinGW target link** (`sfn build
+  --target=x86_64-w64-mingw32`) — a separate toolchain (mingw-w64, not
+  MSVC). Runtime policy is shared through `runtime/capsule.toml`, but the
+  actual CRT/import libraries still differ, so run this command whenever a
+  change touches `platform/*_windows.sfn`.
 - **The native-MSVC self-host fixed point** (§1 above) — the pass-1/pass-2
   byte-identity proof only exists on the real `windows-2025` host, since it
   needs a compiler binary that itself already runs on Windows.
@@ -221,7 +220,7 @@ different reasons, and only one of them is a regression:
   surfaces as `failure`, not `cancelled` (see §1's "either job fails"). If
   this run is still the newest of its event type/ref and shows `cancelled`,
   it hit one of the job-level caps. Check the job log for where it stopped —
-  the Linux self-host/`make ci-cross-windows` step in `cross-seed`, or a
+  the Linux self-host/native MinGW build step in `cross-seed`, or a
   heartbeat gap in `native-build`'s Stage 2 build step — and treat it as a
   build-setup regression (SFN-55 §2's measured budget: ~13m30s
   build+boot+ABI, ~14m27s for both fixed-point passes; a run running

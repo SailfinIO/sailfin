@@ -549,7 +549,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
 // Gated on `manifest_dep_specs` being non-empty — i.e. the entry's
 // `capsule.toml` declares `[dependencies]`. This deliberately EXCLUDES
 // build-internal bare `emit llvm` calls on runtime modules
-// (`runtime/prelude.sfn`, `runtime/sfn/*` — `make ci-cross-windows`),
+// (`runtime/prelude.sfn`, `runtime/sfn/*`),
 // which have NO consumer manifest. Staging such a module's relative
 // sibling closure into the shared import-context makes the subsequent
 // in-process emit pick up the siblings' runtime-helper signatures and

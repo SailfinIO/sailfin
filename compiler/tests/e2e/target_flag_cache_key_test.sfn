@@ -84,15 +84,16 @@ test "target flag: the legacy SAILFIN_TARGET_OS alias still resolves to the msvc
 //
 // Both spawns pin `SAILFIN_TARGET_OS=Windows` (a RECOGNIZED value) rather
 // than `Linux`. `build_target_os()` — the separate OS-only resolver that
-// gates direct-`ld.lld` vs. the clang driver
-// (`compiler/src/backend.sfn:361-382`, `resolve_direct_ld_lld`) — checks
+// gates direct-`ld.lld` vs. the target-owned driver
+// (`compiler/src/backend.sfn`, `resolve_direct_ld_lld`) — checks
 // its own `SAILFIN_TARGET_OS` override FIRST, ahead of any `--target`
 // flag's triple. `SAILFIN_TARGET_OS=Linux` makes that gate take the
-// direct-`ld.lld` path unconditionally (verified empirically against this
-// commit), which never renders a clang `-target` token at all regardless
+// direct-`ld.lld` path unconditionally, which never renders a target-driver
+// identity at all regardless
 // of which triple resolver would otherwise win. Pinning `Windows` keeps
-// both spawns on the clang-driver path, isolating the assertion to the
-// triple resolver's precedence — the thing this test exists to pin.
+// both spawns on the target-driver path, isolating the assertion to the triple
+// resolver's precedence — the thing this test exists to pin. MinGW now selects
+// its GCC driver directly, while MSVC remains a clang `-target` invocation.
 test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS" ![io] {
     let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
@@ -107,7 +108,7 @@ test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS"
         let _exit_a = process.run_capture_cwd([sfn, "build", "main.sfn"], env_a, dir);
         let _out_a = process.capture_take_stdout();
         let err_a = process.capture_take_stderr();
-        assert contains(err_a, "-target x86_64-w64-mingw32");
+        assert contains(err_a, "x86_64-w64-mingw32-gcc");
         assert ! contains(err_a, "-target x86_64-pc-windows-msvc");
 
         // --target beats both SAILFIN_TARGET_TRIPLE and SAILFIN_TARGET_OS.
@@ -119,7 +120,7 @@ test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS"
         let _out_b = process.capture_take_stdout();
         let err_b = process.capture_take_stderr();
         assert contains(err_b, "-target x86_64-pc-windows-msvc");
-        assert ! contains(err_b, "-target x86_64-w64-mingw32");
+        assert ! contains(err_b, "x86_64-w64-mingw32-gcc");
 
         return 0;
     });

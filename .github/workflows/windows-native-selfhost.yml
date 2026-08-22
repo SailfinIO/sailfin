@@ -10,10 +10,9 @@
 # and runs the self-host fixed point: the native compiler rebuilds itself
 # twice and pass-2 must be byte-identical to pass-1.
 #
-# `cross-seed` no longer feeds it. It rebuilds the mingw-cross seed on Linux
-# to keep `make ci-cross-windows` exercised nightly and to keep the
-# `seed_source: cross` escape hatch proven, and the two jobs now run in
-# parallel. SFN-58 deletes both together.
+# `cross-seed` no longer feeds it. It exercises the native MinGW target build
+# on Linux and keeps the `seed_source: cross` escape hatch proven; the two jobs
+# run in parallel.
 #
 # This is SFN-55 (SFEP-0021 M9) tier B: the *unconditional* backstop to tier
 # A's path-filtered `build-compiler-windows` job in `ci.yml`. Tier A only
@@ -59,13 +58,9 @@ permissions:
 jobs:
   # SFN-994 flipped `native-build` to bootstrap from the published native
   # seed, so nothing consumes this artifact any more. The job stays for its
-  # other stated purpose — keeping `make ci-cross-windows` exercised nightly
-  # (~2 min on a 1x ubuntu job) — and as the escape hatch: if a bad native
-  # seed ever ships, `seed_source: cross` is still implemented and one line
-  # away, and this job proves it still works.
-  #
-  # SFN-58 deletes both this job and the cross path together. Until then a
-  # green run here is the evidence that retiring it is safe.
+  # other stated purpose — exercising the native MinGW target build nightly
+  # — and as the escape hatch: if a bad native seed ever ships,
+  # `seed_source: cross` remains implemented and this job proves it works.
   cross-seed:
     name: Build mingw-cross bootstrap seed [linux]
     runs-on: ubuntu-latest
@@ -120,7 +115,9 @@ jobs:
 
       - name: Cross-compile the bootstrap seed (Linux)
         shell: bash
-        run: make ci-cross-windows
+        run: |
+          build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
+          build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
 
       # Named to match ci.yml's `build-compiler-linux` upload: the
       # `sailfin-build-windows` composite (used by both tier A in ci.yml and
@@ -431,7 +428,7 @@ jobs:
     # `!cancelled()` would suppress it (copied verbatim from
     # `build-quality.yml:632-638`). `cross-seed` gets the same `cancelled`
     # disjunct as `native-build`: it carries its own 90-minute timeout and
-    # does real work (a full Linux self-host + `make ci-cross-windows`), and
+    # does real work (a full Linux self-host + native MinGW target build), and
     # without it a `cross-seed` cancellation leaves `native-build` `skipped`
     # — no disjunct holds, and nothing is filed (SFN-55 review, round 2).
     if: >-
@@ -459,7 +456,7 @@ jobs:
     env:
       # `gate` becomes the regression issue's title, and open issues dedup on
       # that title (see `Identify failed gate`), so a wrong value does not just
-      # mislead — it appends a Linux `make ci-cross-windows` flake onto an open
+      # mislead — it appends a Linux native MinGW-build flake onto an open
       # Windows-compiler regression issue.
       #
       # `cross-seed` is checked FIRST, and only when `native-build` did not

@@ -25,9 +25,8 @@
 // `compiler/src/build/fs.sfn::_cwd_cmd`, SFN-888), and the
 // CRT mallocs its own buffer whenever `resolved` is null — `maxlen` is
 // documented as ignored on that path, so the constant is inert for every
-// caller today. Kept (rather than dropped) to match the retired
-// `windows_stubs.ll` stub's exact shape and to serve a future non-null
-// caller correctly, should one appear.
+// caller today. Kept to serve a future non-null caller correctly, should one
+// appear.
 //
 // Two behavioral differences from POSIX `realpath`, both confirmed benign
 // at all three current call sites:

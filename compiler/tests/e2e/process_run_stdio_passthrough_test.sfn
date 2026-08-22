@@ -109,9 +109,8 @@ test "process.run_capture: still captures rather than passing through (SFN-546)"
 }
 
 // ── The Linux-runnable half of the SFN-546 guard ──────────────────────
-// `runtime/sfn/platform/process_windows.sfn` is deliberately absent from
-// `runtime/capsule.toml`'s `sfn-sources` and enters only the Makefile's
-// cross-windows RUNTIME_MODS, so nothing on a Linux run compiles it and the
+// `runtime/sfn/platform/process_windows.sfn` is selected only by the runtime
+// manifest's Windows target table, so nothing on a Linux run compiles it and the
 // two tests above exercise only their POSIX leg here. Without a static check,
 // the Windows fix could be reverted and every Linux check would stay green.
 //
@@ -173,5 +172,23 @@ test "process.run_capture: the Windows spawn duplicates stdin inheritable (SFN-5
     // pass. Pinning the two adjacent lines is what makes this a guard for
     // *placement* rather than existence; the passthrough path's analogue is
     // `_pw_close_dup(h_err);` before its own `if ok == 0 {`.
-    assert contains(src, "_pw_close_dup(h_stdin);\n    if ok == 0 {");
+    assert contains(src, "_pw_close_dup(h_stdin);\n    // Close the inheritable write ends before releasing the process-wide\n    // spawn lock.");
+}
+
+test "Windows inheritable-handle setup is serialized and fails closed" ![io] {
+    let src = fs.readFile("runtime/sfn/platform/process_windows.sfn");
+
+    assert contains(src, "fn _pw_lock_inheritable_spawn()");
+    assert contains(src, "fn _pw_unlock_inheritable_spawn()");
+    assert contains(src, "_pw_lock_inheritable_spawn();\n    let self_proc:");
+    assert contains(src, "memset(hbuf, 0, 32 as usize);\n    let hbase: i64 = hbuf as i64;\n    _pw_lock_inheritable_spawn();");
+    assert contains(src, "memset(hbuf, 0, 48 as usize);\n    let hbase: i64 = hbuf as i64;\n\n    _pw_lock_inheritable_spawn();");
+    assert contains(src, "_pw_close_dup(h_err);\n    _pw_unlock_inheritable_spawn();");
+    assert contains(src, "let _cw2: i32 = CloseHandle(err_wr);\n    _pw_unlock_inheritable_spawn();");
+    assert contains(src, "let _cc3: i32 = CloseHandle(err_wr);\n    _pw_unlock_inheritable_spawn();");
+
+    // Parent-only ends must not remain inheritable. A failed clear is a hard
+    // spawn-setup error, since proceeding would keep pipe EOF from arriving.
+    assert contains(src, "if s1 == 0 || s2 == 0 {");
+    assert contains(src, "if s1 == 0 || s2 == 0 || s3 == 0 {");
 }

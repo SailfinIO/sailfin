@@ -69,13 +69,10 @@
 import { clock_gettime, nanosleep } from "./platform/posix";
 
 // Why inline `extern fn memcpy` rather than `import { memcpy } from
-// "./platform/libc"`? The single-file emit path that `make
-// ci-cross-windows` drives re-emits this module standalone with no
-// `--import-context`, so it resolves imported extern signatures only from
-// the shared tree that `make rebuild` re-stages with `posix` alone. An
+// "./platform/libc"`? A standalone single-file emit has no consumer
+// import-context. An
 // imported `memcpy` therefore lowers to `cannot resolve return type for
-// call to memcpy` (E1007) on the cross-Windows leg while every other path
-// stays green. Inlining the one declaration we need keeps this module
+// call to memcpy` (E1007). Inlining the one declaration we need keeps this module
 // self-contained for every seed and every emit path, matching the rest of
 // the runtime.
 //

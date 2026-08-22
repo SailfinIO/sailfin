@@ -469,12 +469,7 @@ jobs:
           seed_version: ${{ steps.seed.outputs.seed_version }}
           package: 'false'
 
-      # --- Cross-compile Windows binary from Linux LLVM IR ---
-      # Lives here (not on a shard leg) because it consumes build
-      # products the shared artifact deliberately excludes:
-      # `build/native/raw/*.ll` and the build work dir's shim — both
-      # fresh from the `make rebuild` above. Keeping them out of the
-      # shard artifact keeps it bounded (#1234 risk note).
+      # --- Native driver cross-build for Windows ---
       - name: Cache MinGW-w64 apt packages
         if: ${{ github.event_name != 'schedule' }}
         uses: actions/cache@v6
@@ -486,7 +481,7 @@ jobs:
         if: ${{ github.event_name != 'schedule' }}
         run: |
           set -euo pipefail
-          # `make ci-cross-windows` only uses the x86-64 C cross toolchain
+          # The native driver uses the x86-64 C cross toolchain
           # (`clang -target x86_64-w64-mingw32` + `x86_64-w64-mingw32-gcc`).
           # The `mingw-w64` metapackage drags in ~277 MB across 25 packages —
           # i686, g++, and both win32/posix runtimes — none of which this
@@ -532,7 +527,8 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          make ci-cross-windows
+          build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
+          build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
 
       - name: Upload Windows installer archive
         if: ${{ github.event_name != 'schedule' }}
@@ -544,7 +540,6 @@ jobs:
 
       # Bounded shard payload: compiler binary + import-context +
       # module-IR cache (+ build stamp). Explicitly NOT included:
-      # build/native/raw (cross-windows only, consumed above),
       # build/cache/test-bin (each shard leg restores its own test-bin
       # cache and would be clobbered by an empty copy), and any scratch.
       - name: Bundle compiler tree for shard legs
@@ -1647,7 +1642,7 @@ jobs:
 
       # NOTE (#1234): the Windows cross-compile + its installer upload
       # moved to the `build-compiler-linux` job — it needs
-      # `build/native/raw/*.ll`, which the shared shard artifact
+      # target-specific build outputs, which the shared shard artifact
       # deliberately excludes to stay bounded.
 
       - name: Upload native artifacts
@@ -2198,7 +2193,7 @@ jobs:
   # Native Windows smoke test. The Windows .exe is cross-compiled on
   # ubuntu (build-compiler-linux) and was, until now, shipped without
   # ever being executed (#DOA: it segfaulted at startup on a native-TLS
-  # access — fixed by -femulated-tls in `make ci-cross-windows`). This
+  # access — fixed by the native driver's MinGW `-femulated-tls`). This
   # job runs the cross-built binary on a real windows-latest runner so
   # that regression can never ship again.
   smoke-windows:
@@ -2261,7 +2256,7 @@ jobs:
   # B) is the unconditional backstop that bounds how long the filter can be
   # wrong. `needs: build-compiler-linux` because the bootstrap seed staged
   # here is the `ci-installer-windows-x86_64` artifact THAT job produces
-  # (`make ci-cross-windows`, already consumed by `smoke-windows` above) —
+  # (the native MinGW build, already consumed by `smoke-windows` above) —
   # no separate cross-seed job.
   #
   # `windows-2025` is pinned, not `windows-latest` — an unpinned label has

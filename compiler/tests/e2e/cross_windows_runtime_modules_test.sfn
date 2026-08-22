@@ -1,304 +1,56 @@
-// Guard test (#941, Risk R4): the `ci-cross-windows` Make target emits +
-// links a hardcoded list of runtime Sailfin modules (`RUNTIME_MODS`). That
-// list is a copy of `runtime/capsule.toml`'s `sfn-sources` array plus its
-// `prelude-entry`, MINUS `process.sfn`, the pthread-dependent
-// `concurrency/*` modules, `platform/rlimit.sfn`, `platform/rand.sfn`, and
-// `assert.sfn`, PLUS the Windows-only `platform/process_windows.sfn` (which is
-// intentionally NOT in the manifest). If the manifest and the Makefile drift,
-// the Windows bridge
-// would silently drop or double-link a runtime module; these static checks
-// fail the moment they diverge.
+// SFN-775 / SFEP-0068 native cross-target source-of-truth guard.
 //
-// Native (no-bash) replacement for `test_cross_windows_runtime_modules.sh`
-// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`). Pure
-// source-consistency check: reads the manifest, the Makefile, and the Windows
-// stub IR with `fs.readFile` and asserts on their contents with
-// `sfn/strings::contains` — no compiler invocation. (The `sfn/test` `expect_*`
-// matchers are `![pure]` and unusable from an `![io]` test, #842.)
-//
-// IMPLEMENTATION NOTE — these assertions search the WHOLE file text with
-// `contains` rather than parsing the `RUNTIME_MODS=` / `sfn-sources` lines
-// into string arrays and diffing them. Two reasons:
-//
-//   1. Every module path is unique enough that a whole-file substring search
-//      is an exact membership test. The excluded paths
-//      (`runtime/sfn/process.sfn`, `runtime/sfn/concurrency/`) appear NOWHERE
-//      else in the Makefile (not even in comments), and the manifest entries
-//      (`"sfn/process.sfn"` etc.) appear only in the `sfn-sources` array; the
-//      Windows-only `process_windows` token appears only where expected. So
-//      `contains` / `!contains` pins each per-module drift contract exactly.
-//   2. The array-parsing form (an `_expected_runtime_mods` /
-//      `_makefile_runtime_mods` pair that builds `string[]` via `out.push`
-//      in a loop, with a per-line `line[0:prefix.length]` slice to locate the
-//      source lines, then a set-equality compare) reproducibly miscompiles
-//      from an `![io]` test in this repo: depending on module composition and
-//      test count, the slice loop / array-growth returns an empty result, so
-//      `actual.length > 0` fails even though the same code is correct in a
-//      smaller module. The whole-file `contains` form avoids string slicing
-//      and in-loop array growth entirely, so it is stable. The pure
-//      set-equality diff is therefore expressed as the conjunction of the
-//      membership contracts below.
+// The former test compared `runtime/capsule.toml` with Makefile's duplicated
+// `RUNTIME_MODS` shell list. That list no longer exists: the runtime provider
+// declares its MinGW differences once and the native driver consumes them.
+// These static contracts keep the migration fallback and production manifest
+// aligned without recreating a second target table in test code.
 import { contains } from "sfn/strings";
+import { expect_contains_str, expect_eq_bool } from "sfn/test";
 
-// ---- Per-module RUNTIME_MODS <-> manifest drift contracts ----
-test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
+test "cross-windows runtime policy is manifest-owned" ![io] {
     let manifest = fs.readFile("runtime/capsule.toml");
     let makefile = fs.readFile("Makefile");
+    let conditioner = fs.readFile("compiler/src/build/runtime_objs.sfn");
 
-    // process.sfn: in the manifest sfn-sources (posix_spawnp body for
-    // Linux/macOS), excluded from RUNTIME_MODS (mingw cannot resolve
-    // posix_spawnp/waitpid). `runtime/sfn/process.sfn` is not a substring of
-    // the `process_windows.sfn` path and appears nowhere in the Makefile, so
-    // the exclusion check is exact.
-    assert contains(manifest, "\"sfn/process.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/process.sfn");
-
-    // process_windows.sfn: the inverse — owns the Windows @sfn_process_*
-    // family, so it is in RUNTIME_MODS but NOT in the manifest.
-    assert contains(makefile, "runtime/sfn/platform/process_windows.sfn");
-    assert ! contains(manifest, "process_windows");
-
-    // rlimit.sfn: in the manifest, excluded from RUNTIME_MODS — its
-    // getrlimit/setrlimit externs have no static-mingw provider. SFN-698
-    // swapped its Windows sibling in rather than stubbing the symbol: the
-    // sibling arms a kernel32 job-object budget, so it links under mingw
-    // exactly as process_windows.sfn does, and the bridge now carries a real
-    // memory cap instead of a no-op.
-    assert contains(manifest, "\"sfn/platform/rlimit.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/rlimit.sfn");
-    assert contains(makefile, "runtime/sfn/platform/rlimit_windows.sfn");
-    assert ! contains(manifest, "rlimit_windows");
-
-    // terminal.sfn uses POSIX isatty; the released Windows bridge must emit
-    // the UCRT `_isatty` sibling instead.
-    assert contains(manifest, "\"sfn/platform/terminal.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/terminal.sfn");
-    assert contains(makefile, "runtime/sfn/platform/terminal_windows.sfn");
-    assert ! contains(manifest, "terminal_windows");
-
-    // rand.sfn (SFN-123): in the manifest, excluded from RUNTIME_MODS — its
-    // getentropy / /dev/urandom externs have no static-mingw provider. The
-    // compiler pulls @sfn_rand_fill via the sfn/crypto `random_bytes` export,
-    // resolved to the windows_stubs.ll fail-closed no-op stub.
-    assert contains(manifest, "\"sfn/platform/rand.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/rand.sfn");
-
-    // cert_roots.sfn (SFN-808): in the manifest, excluded from RUNTIME_MODS —
-    // its Windows sibling's Crypt32 externs are not staged by the hand-rolled
-    // cross loop. The compiler pulls @sfn_cert_roots_blob via the sfn/crypto
-    // `trust_store_load` export, resolved to the windows_stubs.ll null stub.
-    // `cert_roots` appears nowhere in the Makefile, so the exclusion check is
-    // exact for both the POSIX module and its sibling.
-    assert contains(manifest, "\"sfn/platform/cert_roots.sfn\"");
-    assert ! contains(makefile, "cert_roots");
-
-    // tls.sfn: in the manifest, excluded from RUNTIME_MODS. SFN-341 swapped
-    // the OpenSSL-backed implementation for a native TLS stack, so the
-    // module no longer pulls OpenSSL externs — but Windows TLS itself
-    // remains unimplemented (Windows TLS is #1485 M10), so it is still left
-    // out of the mingw bridge rather than joined to it. http.sfn
-    // forward-declares its @tls_* symbols, resolved to the windows_stubs.ll
-    // no-op stubs.
-    assert contains(manifest, "\"sfn/platform/tls.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/tls.sfn");
-
-    // fs_exec_mode.sfn (SFN-649): the POSIX module supplies access(2)'s
-    // X_OK, which is not a legal mode for the Windows CRT's _access — on
-    // UCRT it fastfails the process outright. So the manifest carries the
-    // POSIX module and RUNTIME_MODS carries the F_OK sibling instead,
-    // exactly mirroring the native path's
-    // target_condition_runtime_sfn_sources swap. The substring test is
-    // exact in both directions: "fs_exec_mode.sfn" is NOT a substring of
-    // "fs_exec_mode_windows.sfn", and the manifest never names the sibling.
-    //
-    // This pair is the reason the two mechanisms must be kept in step. The
-    // native swap alone leaves the mingw bridge with an undefined
-    // reference to @_sfn_fs_access_exec_mode at link time, which is how
-    // this was caught (CI, PR #2738).
-    assert contains(manifest, "\"sfn/platform/fs_exec_mode.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/fs_exec_mode.sfn");
-    assert contains(makefile, "runtime/sfn/platform/fs_exec_mode_windows.sfn");
-    assert ! contains(manifest, "fs_exec_mode_windows");
-
-    // fd_io.sfn (SFN-927): identical shape to fs_exec_mode above. The
-    // POSIX module's raw read(2)/write(2) declare -> i64 (ssize_t), but
-    // the UCRT's _read/_write are int (32-bit), so a -1 error reads back
-    // as 4294967295 and defeats every downstream `<= 0`/`< 0` guard in
-    // io.sfn/assert.sfn (both already in RUNTIME_MODS/the manifest). The
-    // sibling declares the true 32-bit width and sign-extends. Substrings
-    // are exact both ways: "fd_io.sfn" is NOT a substring of
-    // "fd_io_windows.sfn", and the manifest never names the sibling.
-    assert contains(manifest, "\"sfn/platform/fd_io.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/fd_io.sfn");
-    assert contains(makefile, "runtime/sfn/platform/fd_io_windows.sfn");
-    assert ! contains(manifest, "fd_io_windows");
-
-    // socket_ops.sfn (SFN-671): identical shape to fs_exec_mode above.
-    // The POSIX module calls close(2) on what is a Winsock SOCKET on
-    // Windows — a process-killing fastfail, not an error return — and
-    // nothing anywhere called WSAStartup, so sockets could not be opened
-    // at all. The sibling supplies closesocket plus the initialization.
-    // http.sfn is the only socket-owning module in RUNTIME_MODS, and it
-    // declares sfn_socket_open/sfn_socket_close as externs, so without
-    // the sibling in the list the bridge link has no definition for
-    // either. The substring checks are exact in both directions:
-    // "socket_ops.sfn" is NOT a substring of "socket_ops_windows.sfn",
-    // and the manifest never names the sibling.
-    assert contains(manifest, "\"sfn/platform/socket_ops.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/socket_ops.sfn");
-    assert contains(makefile, "runtime/sfn/platform/socket_ops_windows.sfn");
-    assert ! contains(manifest, "socket_ops_windows");
-    // rename_ops.sfn (SFN-720): identical shape to fs_exec_mode above.
-    // The POSIX module's rename(2) replaces an existing destination
-    // atomically; the Windows CRT's rename() fails EEXIST instead, which
-    // broke every publish-into-place after the first. The sibling uses
-    // MoveFileExA + MOVEFILE_REPLACE_EXISTING. This list feeds the
-    // released Windows seed, so the entry is what puts the fix IN that
-    // seed. Substrings are exact both ways: "rename_ops.sfn" is NOT a
-    // substring of "rename_ops_windows.sfn".
-    assert contains(manifest, "\"sfn/platform/rename_ops.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/rename_ops.sfn");
-    assert contains(makefile, "runtime/sfn/platform/rename_ops_windows.sfn");
-    assert ! contains(manifest, "rename_ops_windows");
-
-    // SFN-721: source-drift guard, not a behaviour proof — pins that the
-    // running-image displace-then-publish fallback lives ONLY in the
-    // Windows sibling, and that the POSIX module (whose plain `rename(2)`
-    // displaces regardless of readers and needs no such fallback) stays
-    // byte-identical to before. A Linux host cannot observe the fallback
-    // actually firing; this only proves the two sources have not drifted
-    // apart.
-    let rename_win = fs.readFile("runtime/sfn/platform/rename_ops_windows.sfn");
-    let rename_posix = fs.readFile("runtime/sfn/platform/rename_ops.sfn");
-    assert contains(rename_win, ".old");
-    assert ! contains(rename_posix, ".old");
-    assert ! contains(rename_posix, "MoveFileExA");
-
-    // exclusive_create.sfn (SFN-974): identical shape to rename_ops above.
-    // `open`'s O_CREAT/O_EXCL flags have no Windows meaning; the Windows
-    // sibling claims via CreateFileA + CREATE_NEW instead.
-    // `compiler/src/build/fs.sfn` declares `extern fn
-    // sfn_create_exclusive` (`run.sfn` only imports the wrapper), so
-    // without the sibling in RUNTIME_MODS the bridge link has no
-    // definition for it. Substrings are
-    // exact both ways: "exclusive_create.sfn" is NOT a substring of
-    // "exclusive_create_windows.sfn", and the manifest never names the
-    // sibling.
-    assert contains(manifest, "\"sfn/platform/exclusive_create.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/platform/exclusive_create.sfn");
-    assert contains(makefile, "runtime/sfn/platform/exclusive_create_windows.sfn");
-    assert ! contains(manifest, "exclusive_create_windows");
-
-    // Source-drift guard, not a behaviour proof (mirrors the SFN-721 pair
-    // above): pins that the two legs have not drifted into each other. A
-    // Linux host cannot execute the Windows leg's CreateFileA path.
-    let excl_win = fs.readFile("runtime/sfn/platform/exclusive_create_windows.sfn");
-    let excl_posix = fs.readFile("runtime/sfn/platform/exclusive_create.sfn");
-    assert contains(excl_win, "CreateFileA");
-    assert ! contains(excl_posix, "CreateFileA");
-    assert contains(excl_posix, "/proc/self/status");
-    assert ! contains(excl_win, "/proc/self/status");
-
-    // assert.sfn: in the manifest, excluded from RUNTIME_MODS.
-    assert contains(manifest, "\"sfn/assert.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/assert.sfn");
-
-    // serve.sfn (concurrency/): in the manifest, excluded from RUNTIME_MODS.
-    assert contains(manifest, "\"sfn/concurrency/serve.sfn\"");
-    assert ! contains(makefile, "runtime/sfn/concurrency/serve.sfn");
-
-    // The whole concurrency/* family is excluded from RUNTIME_MODS.
-    assert ! contains(makefile, "runtime/sfn/concurrency/");
-
-    // SFN-623: clock.sfn is emitted with SAILFIN_TARGET_OS=Windows and stays
-    // in the real runtime set. Its Unix-millis ABI therefore reaches the
-    // mingw-w64 clock_gettime provider instead of a fail-closed stub.
-    assert contains(manifest, "\"sfn/clock.sfn\"");
-    assert contains(makefile, "clock:runtime/sfn/clock.sfn");
-    assert contains(makefile, "SAILFIN_TARGET_OS=Windows");
-
-    // mkdtemp_windows.sfn (SFN-993): a pure addition like the other
-    // anchor-less Windows siblings (mkstemp_windows.sfn, opendir_windows.sfn,
-    // …) — `mkdtemp(3)` is a bare libc symbol on POSIX, not a manifest
-    // module, so there is no POSIX counterpart for it to diff against. Its
-    // absence from RUNTIME_MODS is exactly what left the mingw bridge
-    // undefined at `@mkdtemp` (`nm --defined-only libmingwex.a` carries
-    // `mkstemp` but not `mkdtemp`), so the membership check pins the fix.
-    assert contains(makefile, "runtime/sfn/platform/mkdtemp_windows.sfn");
-    assert ! contains(manifest, "mkdtemp_windows");
-
-    // The prelude entry IS linked by the cross-windows bridge.
-    assert contains(makefile, "runtime/prelude.sfn");
+    assert expect_contains_str(manifest, "[targets.x86_64-w64-mingw32]").ok;
+    assert expect_contains_str(manifest, "sfn-sources-replace").ok;
+    assert expect_contains_str(manifest, "sfn-sources-add").ok;
+    assert expect_contains_str(manifest, "link-libs-add = [\"-lbcrypt\", \"-lcrypt32\", \"-lws2_32\"]").ok;
+    assert expect_contains_str(conditioner, "target_condition_runtime_sfn_sources").ok;
+    assert expect_eq_bool(contains(makefile, "ci-cross-windows:"), false).ok;
+    assert expect_eq_bool(contains(makefile, "RUNTIME_MODS="), false).ok;
+    assert expect_eq_bool(contains(makefile, "build/native/raw"), false).ok;
 }
 
-// ---- The Windows stub IR that backs the excluded / retired symbols ----
-test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
-    let stubs = fs.readFile("runtime/ir/windows_stubs.ll");
+test "cross-windows manifest selects every Win32 runtime sibling" ![io] {
     let manifest = fs.readFile("runtime/capsule.toml");
-    let makefile = fs.readFile("Makefile");
+    assert expect_contains_str(manifest, "sfn/process.sfn=sfn/platform/process_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/rlimit.sfn=sfn/platform/rlimit_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/terminal.sfn=sfn/platform/terminal_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/rand.sfn=sfn/platform/rand_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/fs_exec_mode.sfn=sfn/platform/fs_exec_mode_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/fd_io.sfn=sfn/platform/fd_io_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/socket_ops.sfn=sfn/platform/socket_ops_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/exclusive_create.sfn=sfn/platform/exclusive_create_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/realpath_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/clock_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/sysconf_windows.sfn").ok;
+    assert expect_contains_str(manifest, "link-libs-drop = []").ok;
+    assert expect_contains_str(manifest, "sfn/platform/popen_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/mkstemp_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/strcasestr_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/opendir_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/mkdtemp_windows.sfn").ok;
+}
 
-    // Strong stubs Windows resolves in place of the excluded modules / the
-    // deleted sailfin_runtime.c (#1308, #822).
-    // SFN-698 retired the `@apply_default_mem_limit` no-op: the bridge now
-    // links `platform/rlimit_windows.sfn`, which defines the symbol for real.
-    // Pinned negatively so a re-added stub would collide with that definition
-    // here rather than at link time.
-    assert ! contains(stubs, "define i32 @apply_default_mem_limit");
-    assert contains(stubs, "define void @sailfin_runtime_serve");
-    assert contains(stubs, "@realpath");
-    assert contains(stubs, "@runtime_assert_fail_fn");
-    assert contains(stubs, "@sailfin_assert_fail");
-
-    // TLS client wrappers (#1782): tls.sfn is excluded from RUNTIME_MODS, so
-    // http.o's forward-declared @tls_* symbols resolve to these Windows
-    // no-op stubs (https:// degrades to a clean null; Windows TLS is M10).
-    assert contains(stubs, "define i8* @tls_client_ctx");
-    assert contains(stubs, "define i8* @tls_connect_fd");
-    assert contains(stubs, "define i64 @tls_read");
-    assert contains(stubs, "define i64 @tls_write");
-
-    // SFN-655 retired the Ed25519 EVP externs. Pin the Windows stubs negatively
-    // so the deleted fail-closed compatibility surface cannot return unnoticed.
-    assert ! contains(stubs, "@EVP_PKEY_new_raw_public_key");
-    assert ! contains(stubs, "@EVP_PKEY_free");
-    assert ! contains(stubs, "@EVP_MD_CTX_new");
-    assert ! contains(stubs, "@EVP_MD_CTX_free");
-    assert ! contains(stubs, "@EVP_DigestVerifyInit");
-    assert ! contains(stubs, "@EVP_DigestVerify");
-
-    // `EVP_sha256` / `HMAC` (SFN-549): retired from windows_stubs.ll — the
-    // pure-Sailfin `hmac_sha256` (`capsules/sfn/crypto/src/mod.sfn`) replaced
-    // the last consumer per SFEP-0048 Phase D, so these two libcrypto stubs
-    // have zero callers anywhere in `capsules/` or `runtime/`.
-    assert ! contains(stubs, "@EVP_sha256");
-    assert ! contains(stubs, "@HMAC");
-
-    // Native entropy primitive (SFN-123): rand.sfn is excluded from
-    // RUNTIME_MODS, so the compiler's @sfn_rand_fill reference (pulled in by
-    // the sfn/crypto `random_bytes` export) resolves to this fail-closed stub.
-    assert contains(stubs, "define i32 @sfn_rand_fill");
-
-    // Platform trust-store enumeration (SFN-808): cert_roots.sfn is likewise
-    // excluded from RUNTIME_MODS, so the compiler's @sfn_cert_roots_blob
-    // reference (pulled in by the sfn/crypto `trust_store_load` export)
-    // resolves to this null-returning stub. Null is not a fabricated failure:
-    // it means "no enumerable platform trust store", which routes
-    // `trust_store_load` to its environment-override / bundle-path probe.
-    assert contains(stubs, "define i8* @sfn_cert_roots_blob");
-
-    // Realtime is not degraded on Windows: clock.sfn supplies the ABI and
-    // mingw-w64 supplies clock_gettime. A stub for either would let the
-    // release link fabricate failure instead of using the real provider.
-    let clock = fs.readFile("runtime/sfn/clock.sfn");
-    assert contains(clock, "fn sfn_clock_unix_millis(");
-    assert contains(clock, "clock_gettime(0, ts_ptr)");
-    assert ! contains(stubs, "@sfn_clock_unix_millis");
-    assert ! contains(stubs, "@clock_gettime");
-
-    // windows_stubs.ll is a cross-windows-only object: NOT in the manifest
-    // (its `ll-sources` is empty — adding windows_stubs would duplicate the
-    // strong defs on Linux/macOS), but wired into the Makefile cross-windows
-    // link. `windows_stubs` appears nowhere in the manifest.
-    assert ! contains(manifest, "windows_stubs");
-    assert contains(makefile, "windows_stubs.ll");
+test "cross-windows native linker is driver-owned" ![io] {
+    let target = fs.readFile("compiler/src/build/target.sfn");
+    let backend = fs.readFile("compiler/src/backend.sfn");
+    assert expect_contains_str(target, "x86_64-w64-mingw32-gcc").ok;
+    assert expect_contains_str(target, "-femulated-tls").ok;
+    assert expect_contains_str(target, "-static").ok;
+    assert expect_contains_str(backend, "target_linker_driver").ok;
 }

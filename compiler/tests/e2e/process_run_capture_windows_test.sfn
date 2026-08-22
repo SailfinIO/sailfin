@@ -7,8 +7,8 @@
 // 64 KiB default pipe buffer cannot deadlock the parent.
 //
 // PLATFORM GATE. The `run_capture` symbol this exercises lives ONLY in the
-// Windows runtime module (`process_windows.sfn`, in the cross-windows
-// RUNTIME_MODS, NOT in `runtime/capsule.toml`). On Linux/macOS the test
+// Windows runtime module (`process_windows.sfn`, selected by the runtime
+// manifest's Windows target table). On Linux/macOS the test
 // binary instead links the POSIX `process.sfn`, so these assertions would
 // be testing the POSIX path. The test therefore SKIPS (asserts trivially)
 // off Windows and only does real work when the runner is a Windows binary

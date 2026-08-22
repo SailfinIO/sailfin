@@ -20,8 +20,8 @@
 // up: it is the only record of what was actually passed once the argv
 // stops appearing in a process listing, which is worth more than the few
 // KB it occupies next to the binary it produced.
-// A response-file entry is tokenized by the CONSUMER, and both consumers
-// here use GNU rules: `ld.lld` always does, and the clang driver selects
+// A response-file entry is tokenized by the CONSUMER, and all consumers here
+// use GNU rules: `ld.lld` and MinGW GCC always do, and the clang driver selects
 // Windows tokenization only in clang-cl mode — the Windows link runs
 // `clang -target x86_64-pc-windows-msvc` (`build/target.sfn`), not
 // `clang-cl`, so it is GNU-tokenized on a Windows host too.

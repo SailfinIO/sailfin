@@ -23,6 +23,7 @@ import {
     build_target_os,
     build_target_triple,
     target_forced_linker_flag,
+    target_linker_driver,
     target_reproducible_link_flag,
     target_uses_gnu_link_gc,
     triple_target_os
@@ -98,6 +99,13 @@ fn _resolve_linker() -> string ![io] {
     if forced.length > 0 {
         _trace_linker_choice("lld (MSVC target default)");
         return forced;
+    }
+    // A non-clang target driver owns its linker selection. Host mold/lld
+    // discovery would otherwise leak a Linux linker choice into a MinGW
+    // cross link (SFN-775).
+    if target_linker_driver(build_target_triple()) != "clang" {
+        _trace_linker_choice("target driver default");
+        return "";
     }
     if os != "Linux" {
         _trace_linker_choice("system default (auto-detect is Linux-only; "
