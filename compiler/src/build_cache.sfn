@@ -1504,6 +1504,35 @@ fn test_bin_cache_root() -> string ![io] {
     return test_bin_cache_root_with_override(_get_env_cmd("SAILFIN_BUILD_CACHE_DIR"));
 }
 
+// SFN-1086: root for the shared content-addressed runtime object cache as
+// the `sfn test` link path addresses it. Deliberately the SAME store the
+// build/run path uses, so a runtime object emitted by `sfn build` serves a
+// later `sfn test` link and vice versa.
+//
+// `cache_root_with_override` is `cache_root_from(x, false, "", "")`, which
+// is string-identical to `cache_root("sfn/compiler")` in both branches that
+// can be reached here: an explicit `$SAILFIN_BUILD_CACHE_DIR` short-circuits
+// at the top of the ladder, and otherwise the self-host pin resolves to the
+// same in-tree `build/cache/<schema>`. Reusing the pure helper keeps one
+// copy of the ladder rather than duplicating it for this caller.
+//
+// The divergence this does NOT close: for a non-self-host capsule with no
+// explicit override, `cache_root` resolves to `$XDG_CACHE_HOME`/`$HOME`
+// while this stays in-tree, so a user project's `sfn build` and `sfn test`
+// populate different stores. Both remain persistent across invocations —
+// which is the property this root exists for — they simply do not share.
+// Unifying the ladder needs a capsule name the test command does not have
+// (`discovery.sfn` resolves one per suite, not one per invocation).
+//
+// Note the in-tree default is RELATIVE, so the store is cwd-bound and
+// "persists across invocations" holds only for invocations sharing a cwd.
+// That is satisfied here because neither `run_capture` nor
+// `spawn_with_env` chdir, so a pooled child inherits the parent's cwd, and
+// both `sfn build` and `sfn test` run from the repo root in this tree.
+fn runtime_obj_cache_root() -> string ![io] {
+    return cache_root_with_override(_get_env_cmd("SAILFIN_BUILD_CACHE_DIR"));
+}
+
 // Derive the content-addressed cache key for a single test's linked
 // binary. The dep set is the test-source-specific set of inputs the
 // link consumes — the resolver-produced dependency `.ll` files
@@ -1687,6 +1716,7 @@ export {
     cache_sweep_stale_schemas,
     is_valid_digest,
     test_bin_cache_schema_version,
+    runtime_obj_cache_root,
     test_bin_cache_root_with_override,
     test_bin_cache_root,
     test_bin_cache_key,

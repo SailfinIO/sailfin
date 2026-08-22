@@ -9,6 +9,7 @@ import {
     write_runtime_identity_stamp
 } from "../../../build/runtime_objs";
 import { build_target_os, build_target_triple } from "../../../build/target";
+import { runtime_obj_cache_root } from "../../../build_cache";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
 import { collect_test_entries, render_start_event, render_summary_event } from "../../../test_runner_json";
 import { exit_test_runner_mode, test_filters_active } from "../../../test_runner_state";
@@ -90,6 +91,8 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
     // warm failure is non-fatal: children re-attempt and surface a
     // precise per-file link error.
     let warm_caps = runtime_capsule_from_root(runtime_root);
+    let mut warm_shared_cache_root: string = "";
+    if !no_test_cache { warm_shared_cache_root = runtime_obj_cache_root(); }
     // #1996 / SFEP-0044 §3-A: after a successful warm, write the
     // invocation stamp so children skip the per-file runtime
     // cache-key derivation. The nonce ties the stamp to THIS
@@ -102,7 +105,12 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
     let mut stamp_nonce: string = "";
     if warm_caps.length > 0 {
         _ensure_dir_cmd(sub_root);
-        let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir, "");
+        // SFN-1086: the parent warm reads/publishes through the same shared
+        // content-addressed cache the leaf link now uses, so the once-per-
+        // invocation warm is itself served from a previous invocation
+        // instead of re-emitting the runtime into every fresh `sub_root`.
+        // "" under `--no-test-cache` keeps the cold suite cold.
+        let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir, warm_shared_cache_root);
         if !warm.success {
             print.err("[test] warning: failed to pre-warm runtime objects under "
                 + sub_root

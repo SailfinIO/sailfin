@@ -12,6 +12,7 @@ import {
     cache_lookup_artifact,
     cache_store_artifact,
     canonicalize_flags,
+    runtime_obj_cache_root,
     test_bin_cache_key,
     test_bin_cache_root,
     test_bin_compiler_identity
@@ -208,6 +209,26 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
     // above, so a cross-target `sfn test` run cannot restore a binary
     // linked for a different OS/triple (see `test_bin_cache_key`).
     let tb_target_triple = build_target_triple();
+    // SFN-1086: shared runtime object cache root, resolved once per
+    // invocation like `tb_compiler_identity` / `tb_target_triple` above.
+    //
+    // Gated on `test_cache_enabled`, not merely `!no_test_cache`, so the
+    // shared root also goes empty when the test-bin layer failed to hash
+    // the compiler binary. That is not over-coupling — it is the one
+    // condition under which the RUNTIME key loses its discriminator too.
+    // `cache_compiler_identity` (`build_cache.sfn`) folds the binary SHA
+    // only when the version ends in `.dirty`, and falls back to the bare
+    // version string when the hash fails; every uncommitted tree at a given
+    // commit then shares one identity, which is exactly the stale-object
+    // reuse #1197 fixed. `test_bin_compiler_identity` folds the hash
+    // unconditionally and returns "" on failure, so `test_cache_enabled`
+    // going false IS the "binary is unhashable" signal. Failing closed here
+    // costs a rebuild in a rare edge case; not failing closed can serve a
+    // runtime object emitted by different codegen.
+    //
+    // Empty root disables both the read and the write.
+    let mut rt_shared_cache_root: string = "";
+    if test_cache_enabled { rt_shared_cache_root = runtime_obj_cache_root(); }
     let mut test_bin_hits: int = 0;
     let mut test_bin_misses: int = 0;
 
@@ -318,7 +339,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             }
 
             if trace_runner { print.err("test runner: link start"); }
-            let link_res = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir, groups[group_idx].runtime_demand);
+            let link_res = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir, groups[group_idx].runtime_demand, rt_shared_cache_root);
             let link_rc = link_res.rc;
             if link_rc != 0 {
                 // Only a genuine backend failure earns the SFN-34 ICE banner;
