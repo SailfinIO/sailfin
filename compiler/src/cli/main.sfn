@@ -347,13 +347,15 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     if _requests_json(args) { color_mode = "never"; }
     configure_terminal_output(color_mode);
 
-    // `sfn guillermo` — the registered subcommand matched. Dispatch to
-    // the guillermo command's `run` (it takes no input, so `matches` and
-    // `ctx` are unused), reproducing the cold-path argv trace v2 owns. The
+    // `sfn guillermo` — the registered subcommand matched. Dispatch to the
+    // guillermo command's `run` (it takes no input, so `matches` and `ctx`
+    // are unused), reproducing the cold-path argv trace v2 owns. The
     // `parse_ok` gate is deliberate and unlike every other dispatch below:
     // `guillermo` is an easter egg, so `sfn guillermo --help` deliberately
     // does NOT get a rendered help page — it falls through to the root
-    // fallthrough, keeping the command undiscoverable through `--help`.
+    // fallthrough, keeping the command undiscoverable through `--help`. It
+    // stays listed in `sfn --help --json` and shell completion, which walk
+    // the whole `root` tree.
     if parse_ok {
         if strings_equal(subcommand(matches), "guillermo") {
             if ctx.trace_argv { _v2_trace_argv(argv); }
@@ -363,186 +365,160 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
 
     // `sfn init` — the registered subcommand matched. `init` declares no
     // args, so a clean parse (`parse_ok`) is the bare invocation and
-    // dispatches to `init.run` (exit 0 scaffolded / 1 already-exists).
-    // Any trailing token makes the parse non-ok while still marking the
-    // `init` subcommand as descended; that is a usage error (exit 2),
-    // matching the legacy handler's `args.length != 1` guard — the parser
-    // owns argument validation, so the misuse never reaches `init.run`.
-    // The literal `2` (not `sfn/cli`'s `EXIT_USAGE`) is deliberate: the
-    // `EXIT_*` constants are module-level `let`s with no cross-capsule
-    // import value path today, so they lower to 0 here (see `init.sfn`).
+    // dispatches to `init.run` (exit 0 scaffolded / 1 already-exists). Any
+    // trailing token makes the parse non-ok while still marking the `init`
+    // subcommand as descended; that is a usage error (exit 2), matching the
+    // legacy handler's `args.length != 1` guard — the parser owns argument
+    // validation, so the misuse never reaches `init.run`.
     if strings_equal(subcommand(matches), "init") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return init_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn login [token]` — the registered subcommand matched. A clean
-    // parse dispatches to `login.run` (which uses the `token` positional
-    // when present, else prompts and reads from stdin). A non-ok parse that
-    // still descended into `login` (e.g. a second positional)
-    // is a usage error (exit 2), matching the legacy handler's
-    // `args.length > 2` guard — the parser owns argument validation, so the
-    // misuse never reaches `login.run`. The literal `2` mirrors the `init`
-    // dispatch above (the `sfn/cli` `EXIT_*` constants lower to 0 here).
+    // `sfn login [token]` — the registered subcommand matched. A clean parse
+    // dispatches to `login.run` (which uses the `token` positional when
+    // present, else prompts and reads from stdin). A non-ok parse that still
+    // descended into `login` (e.g. a second positional) is a usage error
+    // (exit 2), matching the legacy handler's `args.length > 2` guard — the
+    // parser owns argument validation, so the misuse never reaches
+    // `login.run`.
     if strings_equal(subcommand(matches), "login") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return login_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn add [--dev] [--update] <capsule>` — the registered subcommand
-    // matched. A clean parse dispatches to `add.run`. A non-ok parse that
-    // still descended into `add` (a missing `<capsule>`, an unexpected extra
-    // positional) is a usage error (exit 2), matching the legacy
-    // handler's `capsule_arg.length == 0` / "unexpected argument" guards — the
-    // parser owns argument validation, so the misuse never reaches `add.run`.
-    // The literal `2` mirrors the `init` / `login` dispatches above (the
-    // `sfn/cli` `EXIT_*` constants lower to 0 here).
+    // `sfn add [options] <capsule>` — the registered subcommand matched. A
+    // clean parse dispatches to `add.run`. A non-ok parse that still
+    // descended into `add` (a missing `<capsule>`, an unexpected extra
+    // positional) is a usage error (exit 2), matching the legacy handler's
+    // `capsule_arg.length == 0` / "unexpected argument" guards — the parser
+    // owns argument validation, so the misuse never reaches `add.run`.
     if strings_equal(subcommand(matches), "add") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return add_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn publish [path]` — the registered subcommand matched. A clean
-    // parse dispatches to `publish.run` (which packages the capsule at the
-    // optional `[path]`, defaulting to the current directory). A non-ok parse
-    // that still descended into `publish` (an unexpected extra positional)
-    // is a usage error (exit 2), matching the legacy handler's
-    // `args.length > 2` guard — the parser owns argument validation, so the
-    // misuse never reaches `publish.run`. The literal `2` mirrors the `init` /
-    // `login` / `add` dispatches above (the `sfn/cli` `EXIT_*` constants lower
-    // to 0 here).
+    // `sfn publish [path]` — the registered subcommand matched. A clean parse
+    // dispatches to `publish.run` (which packages the capsule at the optional
+    // `[path]`, defaulting to the current directory). A non-ok parse that
+    // still descended into `publish` (an unexpected extra positional) is a
+    // usage error (exit 2), matching the legacy handler's `args.length > 2`
+    // guard — the parser owns argument validation, so the misuse never
+    // reaches `publish.run`.
     if strings_equal(subcommand(matches), "publish") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return publish_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn lock [--work-dir DIR]` — the registered subcommand matched. A
-    // clean parse dispatches to `lock.run`, which reconstructs the legacy
-    // positional slice and delegates to `handle_lock_command` (the
-    // workspace-lock body now lives in `cli/commands/lock.sfn`). A
-    // non-ok parse that still descended into `lock` (a `--work-dir` with
-    // no value, an unrecognized flag) is a usage error (exit
-    // 2), matching the legacy handler's "requires a directory argument" /
-    // unknown-flag guards — the parser owns argument validation, so the
-    // misuse never reaches `lock.run`. The literal `2` mirrors the `init` /
-    // `login` / `add` / `publish` dispatches above (the `sfn/cli` `EXIT_*`
-    // constants lower to 0 here).
+    // `sfn lock [options]` — the registered subcommand matched. A clean parse
+    // dispatches to `lock.run`, which reconstructs the legacy positional
+    // slice and delegates to `handle_lock_command` (the workspace-lock body
+    // now lives in `cli/commands/lock.sfn`). A non-ok parse that still
+    // descended into `lock` (a `--work-dir` with no value, an unrecognized
+    // flag) is a usage error (exit 2), matching the legacy handler's
+    // "requires a directory argument" / unknown-flag guards — the parser owns
+    // argument validation, so the misuse never reaches `lock.run`.
     if strings_equal(subcommand(matches), "lock") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return lock_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]`
-    // — the registered subcommand matched. A clean parse dispatches to
-    // `package.run`, which reconstructs the legacy positional slice and
-    // delegates to `handle_package_command` (the packaging body now lives
-    // in `cli/commands/package.sfn`). A non-ok parse that still descended
-    // into `package` (a value flag with no value, an unrecognized flag)
-    // is a usage error (exit 2) — the parser owns argument
-    // validation. The literal `2` mirrors the dispatches above (the `sfn/cli`
-    // `EXIT_*` constants lower to 0 here).
+    // `sfn package [options]` — the registered subcommand matched. A clean
+    // parse dispatches to `package.run`, which reconstructs the legacy
+    // positional slice and delegates to `handle_package_command` (the
+    // packaging body now lives in `cli/commands/package.sfn`). A non-ok parse
+    // that still descended into `package` (a value flag with no value, an
+    // unrecognized flag) is a usage error (exit 2) — the parser owns argument
+    // validation.
     if strings_equal(subcommand(matches), "package") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return package_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn emit [--timing] [-o OUTPUT] [--module-name SLUG]
-    // [--import-context DIR] [--attempts N] [--no-retry] [--validate]
-    // [--no-validate] [--no-resolve-gate] <llvm|sailfin|native> <file.sfn>`
-    // — the registered subcommand matched (including the normalized `--emit`
-    // alias). A clean parse dispatches to `emit.run`, which reproduces the
-    // legacy `_legacy_dispatch_emit` body against typed matches. A non-ok
-    // parse that still descended into `emit` (a value flag with no value, an
-    // unrecognized flag, a missing/surplus positional) is a
-    // usage error (exit 2) — the parser owns argument validation, replacing
-    // the legacy `_usage()` branches. The literal `2` mirrors the dispatches
-    // above (the `sfn/cli` `EXIT_*` constants lower to 0 here).
+    // `sfn emit [options] <llvm|sailfin|native> <file.sfn>` — the registered
+    // subcommand matched (including the normalized `--emit` alias). A clean
+    // parse dispatches to `emit.run`, which reproduces the legacy
+    // `_legacy_dispatch_emit` body against typed matches. A non-ok parse that
+    // still descended into `emit` (a value flag with no value, an
+    // unrecognized flag, a missing/surplus positional) is a usage error (exit
+    // 2) — the parser owns argument validation, replacing the legacy
+    // `_usage()` branches.
     if strings_equal(subcommand(matches), "emit") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return emit_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn fmt [--check] [--write] <path...>` — the registered subcommand
-    // matched. The variadic `[path...]` accepts zero tokens, so a bare
-    // `sfn fmt` (and every flag combination) parses ok and dispatches to
-    // `fmt.run`, which owns the no-path usage message (exit 1) and the
-    // `--check`/`--write` mutual-exclusion error (exit 1), preserving the
-    // legacy handler's exit codes. A non-ok parse that still descended into
-    // `fmt` (an unrecognized flag) is a usage error (exit 2) —
-    // the parser owns flag validation. The literal `2` mirrors the `init` /
-    // `login` / `add` / `publish` dispatches above (the `sfn/cli` `EXIT_*`
-    // constants lower to 0 here).
+    // `sfn fmt [options] <path...>` — the registered subcommand matched. The
+    // variadic `[path...]` accepts zero tokens, so a bare `sfn fmt` (and
+    // every flag combination) parses ok and dispatches to `fmt.run`, which
+    // owns the no-path usage message (exit 1) and the `--check`/`--write`
+    // mutual-exclusion error (exit 1), preserving the legacy handler's exit
+    // codes. A non-ok parse that still descended into `fmt` (an unrecognized
+    // flag) is a usage error (exit 2) — the parser owns flag validation.
     if strings_equal(subcommand(matches), "fmt") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return fmt_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots]
-    // [--no-test-cache] [--jobs N] [suite...]` — the registered subcommand
-    // matched. The variadic `<suite...>` accepts zero tokens, so a bare
-    // `sfn test` (and every flag combination) parses ok and dispatches to
-    // `test.run`, which defaults an empty suite list to "." and owns its
-    // own exit codes (0 pass / 1 test or setup failure / 2 jobs range
-    // error). A non-ok parse that still descended into `test` (an
-    // unrecognized flag, a `--jobs` non-integer rejected as `type_error`,
-    //) is a usage error (exit 2) — the parser owns flag
-    // validation. The literal `2` mirrors the `init` / `login` / `add` /
-    // `publish` / `fmt` dispatches above (the `sfn/cli` `EXIT_*` constants
-    // lower to 0 here).
+    // `sfn test [options] [suite...]` — the registered subcommand matched.
+    // The variadic `<suite...>` accepts zero tokens, so a bare `sfn test`
+    // (and every flag combination) parses ok and dispatches to `test.run`,
+    // which defaults an empty suite list to "." and owns its own exit codes
+    // (0 pass / 1 test or setup failure / 2 jobs range error). A non-ok parse
+    // that still descended into `test` (an unrecognized flag, or a `--jobs`
+    // non-integer rejected as `type_error`) is a usage error (exit 2) — the
+    // parser owns flag validation.
     if strings_equal(subcommand(matches), "test") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return test_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn check [--quiet] [--json] [--allow-bare-assert] [path...]` — the
-    // registered subcommand matched. The variadic `[path...]` accepts zero
-    // tokens, so a bare `sfn check` (and every flag combination) parses ok
-    // and dispatches to `check.run`, which reconstructs the legacy positional
-    // slice and delegates to `handle_check_command` (the body stays in
-    // `check/engine.sfn`, reused verbatim — SFEP-0027 §3.4 command #5). A non-ok
-    // parse that still descended into `check` (an unrecognized flag)
-    // is a usage error (exit 2) — the parser owns flag validation.
-    // The literal `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*`
-    // constants lower to 0 here).
+    // `sfn check [options] [path...]` — the registered subcommand matched.
+    // The variadic `[path...]` accepts zero tokens, so a bare `sfn check`
+    // (and every flag combination) parses ok and dispatches to `check.run`,
+    // which reconstructs the legacy positional slice and delegates to
+    // `handle_check_command` (the body stays in `check/engine.sfn`, reused
+    // verbatim — SFEP-0027 §3.4 command #5). A non-ok parse that still
+    // descended into `check` (an unrecognized flag) is a usage error (exit 2)
+    // — the parser owns flag validation.
     if strings_equal(subcommand(matches), "check") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return check_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn symbols [--json] [--capsule SLUG]` — the registered subcommand
-    // matched. A clean parse dispatches to `symbols.run` (always JSON in
-    // v1); a non-ok parse that still descended into `symbols` (e.g. an
-    // unrecognized flag) is a usage error (exit 2), matching the other
-    // migrated commands. The literal `2` mirrors the dispatches above.
+    // `sfn symbols [options]` — the registered subcommand matched. A clean
+    // parse dispatches to `symbols.run` (always JSON in v1); a non-ok parse
+    // that still descended into `symbols` (e.g. an unrecognized flag) is a
+    // usage error (exit 2), matching the other migrated commands.
     if strings_equal(subcommand(matches), "symbols") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return symbols_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn config <get|set|unset|list> [key] [value]` — the registered
-    // subcommand matched. `config` is the first migrated command with
-    // nested subcommands, so `subcommand(result.matches)` returns the
-    // *leaf* (e.g. "get") rather than "config"; the dispatch therefore
-    // gates on the descent path's root (`subcommand_path[0]`). A clean
-    // parse dispatches to `config.run`, which reconstructs the legacy
-    // positional slice and delegates to `handle_config_command`. A non-ok
-    // parse that descended into `config` is a usage error (exit 2): the
-    // `unknown_subcommand` / `unknown_flag` kinds carry a non-empty
-    // diagnostic (e.g. `config quantum` → "unknown subcommand 'quantum'",
-    // preserving the e2e parity oracle), which `_v2_help_or_usage` prints
-    // ahead of the derived help; the `help_requested` kind carries an empty
-    // message and is answered with the help alone on exit 0.
+    // `sfn config <command>` — the registered subcommand matched. `config` is
+    // the first migrated command with nested subcommands, so
+    // `subcommand(result.matches)` returns the *leaf* (e.g. "get") rather
+    // than "config"; the dispatch therefore gates on the descent path's root
+    // (`subcommand_path[0]`). A clean parse dispatches to `config.run`, which
+    // reconstructs the legacy positional slice and delegates to
+    // `handle_config_command`. A non-ok parse that descended into `config` is
+    // a usage error (exit 2): the `unknown_subcommand` / `unknown_flag` kinds
+    // carry a non-empty diagnostic (e.g. `config quantum` → "unknown
+    // subcommand 'quantum'", preserving the e2e parity oracle), which
+    // `_v2_help_or_usage` prints ahead of the derived help; the
+    // `help_requested` kind carries an empty message and is answered with the
+    // help alone on exit 0.
     let config_path: string[] = subcommand_path(matches);
     if config_path.length > 0 {
         if strings_equal(config_path[0], "config") {
@@ -552,17 +528,15 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         }
     }
 
-    // `sfn cache <info|prune|clean>` — the registered subcommand matched.
-    // Like `config`, `cache` has nested subcommands, so
-    // `subcommand(result.matches)` returns the *leaf* (e.g. "prune") and
-    // the dispatch gates on the descent path's root (`subcommand_path[0]`).
-    // A clean parse dispatches to `cache.run`; a non-ok parse that
-    // descended into `cache` (an unrecognized flag, a `--max-size`
-    // non-integer) is a usage error (exit 2) — the parser
-    // owns flag validation. A carried diagnostic (unknown subcommand/flag)
-    // is printed when present; otherwise a fixed usage line. The literal
-    // `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*` constants
-    // lower to 0 here).
+    // `sfn cache <command>` — the registered subcommand matched. Like
+    // `config`, `cache` has nested subcommands, so
+    // `subcommand(result.matches)` returns the *leaf* (e.g. "prune") and the
+    // dispatch gates on the descent path's root (`subcommand_path[0]`). A
+    // clean parse dispatches to `cache.run`; a non-ok parse that descended
+    // into `cache` (an unrecognized flag, a `--max-size` non-integer) is a
+    // usage error (exit 2) — the parser owns flag validation. A carried
+    // diagnostic (unknown subcommand/flag) is printed ahead of the derived
+    // help.
     let cache_path: string[] = subcommand_path(matches);
     if cache_path.length > 0 {
         if strings_equal(cache_path[0], "cache") {
@@ -572,12 +546,11 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         }
     }
 
-    // `sfn toolchain install <version>` — nested subcommand, so the
-    // dispatch gates on the descent path's root (`subcommand_path[0]`)
-    // exactly like `config`/`cache`. A clean parse dispatches to
-    // `toolchain.run`; a non-ok parse that descended into `toolchain`
-    // (missing `<version>`, unknown leaf) is a usage error
-    // (exit 2) — the parser owns argument validation.
+    // `sfn toolchain <command>` — nested subcommand, so the dispatch gates on
+    // the descent path's root (`subcommand_path[0]`) exactly like
+    // `config`/`cache`. A clean parse dispatches to `toolchain.run`; a non-ok
+    // parse that descended into `toolchain` (missing `<version>`, unknown
+    // leaf) is a usage error (exit 2) — the parser owns argument validation.
     let toolchain_path: string[] = subcommand_path(matches);
     if toolchain_path.length > 0 {
         if strings_equal(toolchain_path[0], "toolchain") {
@@ -587,11 +560,11 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         }
     }
 
-    // `sfn capabilities audit` — SFEP-0051 Phase 4c workspace capability
+    // `sfn capabilities <command>` — SFEP-0051 Phase 4c workspace capability
     // envelope reporting surface, a nested subcommand gated on the descent
     // path's root exactly like `toolchain`/`cache`. A clean parse dispatches
-    // to `capabilities.run`; a non-ok parse that descended into `capabilities`
-    // (unknown leaf) is a usage error (exit 2).
+    // to `capabilities.run`; a non-ok parse that descended into
+    // `capabilities` (unknown leaf) is a usage error (exit 2).
     let capabilities_path: string[] = subcommand_path(matches);
     if capabilities_path.length > 0 {
         if strings_equal(capabilities_path[0], "capabilities") {
@@ -648,26 +621,25 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         return version_run(matches, ctx);
     }
 
-    // `sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace]
-    // [--json] [--work-dir DIR] [--check-determinism] [<file.sfn> | -p <capsule-path>]`
-    // — the registered subcommand matched. A clean parse dispatches to
-    // `build.run`, which reproduces the legacy `_legacy_dispatch_build` body
-    // against typed matches. A non-ok parse that still descended into `build`
-    // (a value flag with no value, an unrecognized flag) is a
-    // usage error (exit 2) — the parser owns argument validation.
+    // `sfn build [options] [<file.sfn>]` — the registered subcommand matched.
+    // A clean parse dispatches to `build.run`, which reproduces the legacy
+    // `_legacy_dispatch_build` body against typed matches. A non-ok parse
+    // that still descended into `build` (a value flag with no value, an
+    // unrecognized flag) is a usage error (exit 2) — the parser owns argument
+    // validation.
     if strings_equal(subcommand(matches), "build") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return build_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
     }
 
-    // `sfn run [--no-cache] [--clean] [--cache-trace] <file.sfn>` — the
-    // registered subcommand matched. A clean parse dispatches to `run.run`,
-    // which reproduces the legacy `_legacy_dispatch_run` build-then-exec body
-    // against typed matches. A non-ok parse that still descended into `run`
-    // (an unrecognized flag) is a usage error (exit 2) — the
-    // parser owns argument validation. Bare-file dispatch (`sfn foo.sfn`)
-    // re-enters here as `["run", foo.sfn]` from the legacy fallthrough.
+    // `sfn run [options] <file.sfn>` — the registered subcommand matched. A
+    // clean parse dispatches to `run.run`, which reproduces the legacy
+    // `_legacy_dispatch_run` build-then-exec body against typed matches. A
+    // non-ok parse that still descended into `run` (an unrecognized flag) is
+    // a usage error (exit 2) — the parser owns argument validation. Bare-file
+    // dispatch (`sfn foo.sfn`) re-enters here as `["run", foo.sfn]` from the
+    // legacy fallthrough.
     if strings_equal(subcommand(matches), "run") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return run_run(matches, ctx); }
@@ -676,15 +648,14 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
 
     // `sfn bench --compiler [--module M]... [--top N] [--csv PATH]
     // [--budget-time S] [--budget-mem KB]` or `sfn bench --consumer
-    // [--fixtures DIR] [--csv PATH]` — the registered subcommand matched.
-    // A clean parse dispatches to `bench.run`, which owns the
+    // [--fixtures DIR] [--csv PATH]` — the registered subcommand matched. A
+    // clean parse dispatches to `bench.run`, which owns the
     // `--compiler`/`--consumer`-mode gate (exit 2 when absent) and its own
     // exit codes (0 clean / 1 module or fixture failures / 2 budget
     // violations). A non-ok parse that still descended into `bench` (an
     // unrecognized flag, a non-integer `--top`/`--budget-time`/
-    // `--budget-mem`) is a usage error (exit 2) — the parser
-    // owns argument validation. The literal `2` mirrors the dispatches
-    // above (the `sfn/cli` `EXIT_*` constants lower to 0 here).
+    // `--budget-mem`) is a usage error (exit 2) — the parser owns argument
+    // validation.
     if strings_equal(subcommand(matches), "bench") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return bench_run(matches, ctx); }
@@ -697,10 +668,8 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // whole command tree — the same source `--help --json` renders — not just
     // this command's matches. A clean parse dispatches to `completion.run`
     // (exit 0 / exit 2 on an unsupported shell); a non-ok parse that still
-    // descended into `completion` (a missing/surplus positional)
-    // is a usage error (exit 2) — the parser owns argument validation. The
-    // literal `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*`
-    // constants lower to 0 here).
+    // descended into `completion` (a missing/surplus positional) is a usage
+    // error (exit 2) — the parser owns argument validation.
     if strings_equal(subcommand(matches), "completion") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok {

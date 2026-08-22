@@ -480,6 +480,12 @@ fn format_help_for_path(root: Command, path: string[]) -> string {
     // exiting `run()` below, so they can answer `--help` from the command
     // tree instead of a hand-maintained literal that drifts out of sync
     // with the flags a command actually declares (SFN-1074).
+    //
+    // `path` is expected to be a real descent — `Matches.subcommand_path`
+    // from a `parse()` of this same `root`. It is not validated: an element
+    // that names no registered subcommand stops the descent and renders the
+    // last command that did resolve, while the label still joins the whole
+    // path, so a bogus path yields a label the body does not match.
     return _format_help(_resolve_active_path(root, path), _command_label(root.name, path));
 }
 
