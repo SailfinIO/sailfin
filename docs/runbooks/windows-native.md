@@ -22,10 +22,24 @@ When either job fails, or either job is cancelled after it started (a
 `timeout-minutes` expiry, not an expected concurrency supersede — see
 §2 below), the `notify-failure` job opens a deduplicated regression issue
 labeled `area:architecture` and `windows-native-regression`. The issue title
-suffix is the failing gate: `windows-native-build` (anything through the ABI
-gates) or `windows-fixed-point` (the determinism step itself). If the
-failing event is `push: main`, the merging PR also gets a comment linking
-the regression issue and the failing run.
+suffix names the failing gate — four values, checked most-specific first in
+the `Identify failed gate` step (`windows-native-selfhost.yml:367-388`):
+
+- `windows-selfhost-passes` — the native compiler itself failed to complete
+  either self-host pass (the `Self-host pass 1 + pass 2 (native MSVC)` step).
+- `windows-fixed-point` — both passes completed but pass-2 was not
+  byte-identical to pass-1 (a genuine determinism break).
+- `windows-native-package` — the fixed point held but the installer step
+  failed: either `sfn package --installer` itself, or the subsequent
+  `actions/upload-artifact` step (`if-no-files-found: error`, or a transient
+  5xx). Either way the compiler is proven good and the installer is what's
+  missing — triage the packaging/upload step, not the self-host passes.
+- `windows-native-build` — the fallback for anything not matched by the three
+  values above: seed staging, the SFN-53 diagnostic ladder, the Stage 2
+  build, or an R1/R3 ABI gate.
+
+If the failing event is `push: main`, the merging PR also gets a comment
+linking the regression issue and the failing run.
 
 This page is the triage runbook for those regressions.
 
@@ -47,12 +61,18 @@ make ci-cross-windows        # on Linux, produces dist/installer-windows-x86_64.
 SAILFIN_TARGET_OS=Windows "$SEED_EXE" build -p compiler
 NATIVE_SFN=<path to the resulting compiler.exe / sfn.exe under build/>
 
-# Fixed point: two isolated passes, `--no-cache` on both.
+# Fixed point: two isolated passes, `--no-cache` on both, with
+# `SAILFIN_BOOTSTRAP=off` (SFN-1035). On a `chore(release): X` commit,
+# `compiler/capsule.toml` is ahead of `bootstrap.toml [seed].version` until
+# the cadence seed-pin PR lands, so without the override
+# `bootstrap_gate_or_dispatch` sees running != pin and dispatches both passes
+# to the *previous* release's seed instead of testing `$NATIVE_SFN` itself —
+# reproducing the wrong compiler, not the one this gate exists to check.
 SAILFIN_TEST_SCRATCH=build/selfhost/native-w1/scratch \
-  "$NATIVE_SFN" build --no-cache -p compiler \
+  SAILFIN_BOOTSTRAP=off "$NATIVE_SFN" build --no-cache -p compiler \
     --work-dir build/selfhost/native-w1 -o build/selfhost/fp1/sfn-selfhost1.exe
 SAILFIN_TEST_SCRATCH=build/selfhost/native-w2/scratch \
-  build/selfhost/fp1/sfn-selfhost1.exe build --no-cache -p compiler \
+  SAILFIN_BOOTSTRAP=off build/selfhost/fp1/sfn-selfhost1.exe build --no-cache -p compiler \
     --work-dir build/selfhost/native-w2 -o build/selfhost/fp2/sfn-selfhost2.exe
 
 cmp build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe
@@ -122,16 +142,18 @@ different reasons, and only one of them is a regression:
   `workflow_dispatch`, the same ref) has since started; if so, it skips
   notification.
 - **A genuine timeout.** `cross-seed` and `native-build` each carry a
-  90-minute job timeout, and the fixed-point step inside `native-build` its
-  own 30-minute step timeout — a step-level timeout surfaces as `failure`,
-  not `cancelled` (see §1's "either job fails"). If this run is still the
-  newest of its event type/ref and shows `cancelled`, it hit one of the
-  job-level caps. Check the job log for where it stopped — the Linux
-  self-host/`make ci-cross-windows` step in `cross-seed`, or a heartbeat gap
-  in `native-build`'s Stage 2 build step — and treat it as a build-setup
-  regression (SFN-55 §2's measured budget: ~13m30s build+boot+ABI, ~14m27s
-  for both fixed-point passes; a run running meaningfully longer than that on
-  a warm-cache run is itself the finding).
+  90-minute job timeout; within `native-build`, the `Self-host pass 1 + pass
+  2 (native MSVC)` step carries its own 30-minute step timeout, and the
+  downstream `Gate — self-host fixed point (pass-2 == pass-1)` comparison
+  step carries a separate 5-minute step timeout — a step-level timeout
+  surfaces as `failure`, not `cancelled` (see §1's "either job fails"). If
+  this run is still the newest of its event type/ref and shows `cancelled`,
+  it hit one of the job-level caps. Check the job log for where it stopped —
+  the Linux self-host/`make ci-cross-windows` step in `cross-seed`, or a
+  heartbeat gap in `native-build`'s Stage 2 build step — and treat it as a
+  build-setup regression (SFN-55 §2's measured budget: ~13m30s
+  build+boot+ABI, ~14m27s for both fixed-point passes; a run running
+  meaningfully longer than that on a warm-cache run is itself the finding).
 
 `schedule` runs never cancel each other or a `push` run — the concurrency
 group is keyed by `github.event_name`, not just `github.ref`
@@ -173,7 +195,7 @@ Once the offending commit is identified, file a fix issue with:
 
 Set the fix issue's Linear-native priority per severity (a Windows-only
 regression does not block the Linux/macOS release train, but a persistent
-one erodes the tier the note staged this work at — see §9 below).
+one erodes the tier the note staged this work at — see §5 below).
 
 The fix issue's body should `Closes` the regression issue
 (`windows-native regression: <gate>`) so the dedup anchor closes
