@@ -63,7 +63,11 @@ import {
     triple_target_os
 } from "../../src/build/target";
 import { active_build_target, clear_build_target, set_build_target } from "../../src/build/target_state";
-import { RuntimeCapsuleArtifacts, RuntimeTargetArtifacts } from "../../src/runtime_capsule_resolver";
+import {
+    RuntimeCapsuleArtifacts,
+    RuntimeTargetArtifacts,
+    runtime_capsule_from_root
+} from "../../src/runtime_capsule_resolver";
 
 // Membership check over an emitted argv (`string[]`).
 fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
@@ -287,6 +291,80 @@ test "target: host runtime module set is unchanged" ![pure] {
     let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/io.sfn"];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
+}
+
+// SFN-1084. Two mechanisms select the Windows runtime source set, and both
+// are live until SFN-777 deletes the second after a seed cut:
+//   - the `[targets.<triple>]` tables in `runtime/capsule.toml` — working-tree
+//     data the seed reads, so an edit takes effect immediately;
+//   - `target_condition_runtime_sfn_sources` — baked into the seed binary, so
+//     an edit takes effect only after a seed cut.
+//
+// A divergence between them is silent. It does not fail `make compile`; it
+// surfaces as an undefined symbol at link on the Windows leg, which is
+// precisely what SFN-1039 was. So resolve the REAL manifest both ways and
+// compare member-for-member rather than asserting substrings against the
+// TOML text — a substring check passes a table that is present but wrong.
+//
+// `runtime_capsule_from_root` reads `runtime/capsule.toml` from the repo
+// root, the same relative-path convention the `fs.readFile` wiring guards
+// in this file already use.
+//
+// `_declares_target` is not decoration. With NO table for a triple,
+// `_condition_runtime_capsules` falls through to the very fallback these
+// tests compare against, so the equivalence assertion alone passes
+// vacuously — verified by deleting the MSVC table and watching both tests
+// stay green. Proving the table parsed is what makes the comparison mean
+// anything.
+fn _declares_target(caps: RuntimeCapsuleArtifacts[], triple: string) -> boolean ![pure] {
+    if caps.length != 1 { return false; }
+    let entries = caps[0].target_artifacts;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if entries[i].triple == triple && entries[i].valid { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "target: the MSVC manifest table matches the hardcoded Windows fallback" ![io] {
+    let caps = runtime_capsule_from_root("runtime");
+    assert caps.length == 1;
+    assert _declares_target(caps, "x86_64-pc-windows-msvc");
+
+    let via_manifest = condition_runtime_capsules_for_target(caps, "Windows", "x86_64-pc-windows-msvc");
+    assert via_manifest.length == 1;
+    let via_fallback = target_condition_runtime_sfn_sources(caps[0].sfn_sources, "Windows");
+    assert expect_eq_str_array(via_manifest[0].sfn_sources, via_fallback).ok;
+
+    // The one intended asymmetry: the MSVC table adds no link libs, because
+    // `target_extra_link_libs` already supplies them for this ABI. Asserting
+    // it here is what stops someone "fixing" the table by copying mingw's
+    // `link-libs-add` across and double-adding them.
+    assert expect_eq_str_array(via_manifest[0].link_libs, caps[0].link_libs).ok;
+    assert expect_eq_str_array(target_extra_link_libs("x86_64-pc-windows-msvc"), ["-lbcrypt", "-lcrypt32", "-lws2_32"]).ok;
+}
+
+// The same equivalence for mingw. It held before SFN-1084 by inspection
+// only; asserting it means a future edit to either mechanism fails here
+// rather than on a Windows link.
+test "target: the MinGW manifest table matches the hardcoded Windows fallback" ![io] {
+    let caps = runtime_capsule_from_root("runtime");
+    assert caps.length == 1;
+    assert _declares_target(caps, "x86_64-w64-mingw32");
+
+    let via_manifest = condition_runtime_capsules_for_target(caps, "Windows", "x86_64-w64-mingw32");
+    assert via_manifest.length == 1;
+    let via_fallback = target_condition_runtime_sfn_sources(caps[0].sfn_sources, "Windows");
+    assert expect_eq_str_array(via_manifest[0].sfn_sources, via_fallback).ok;
+
+    // Mingw gets the three Windows import libs from its own table, since
+    // `target_extra_link_libs` returns nothing for the gnu ABI.
+    assert expect_eq_str_array(target_extra_link_libs("x86_64-w64-mingw32"), []).ok;
+    assert _argv_contains(via_manifest[0].link_libs, "-lws2_32");
+    assert _argv_contains(via_manifest[0].link_libs, "-lbcrypt");
+    assert _argv_contains(via_manifest[0].link_libs, "-lcrypt32");
 }
 
 test "target: Windows swaps platform sources and appends native providers" ![pure] {

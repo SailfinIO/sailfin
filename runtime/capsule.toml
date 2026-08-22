@@ -156,6 +156,63 @@ ll-sources-add = []
 link-libs-drop = []
 link-libs-add = ["-lbcrypt", "-lcrypt32", "-lws2_32"]
 
+# SFN-1084 / SFEP-0068 §3.3. The native MSVC ABI, declared for the same
+# reason mingw is: with no table here, `_condition_runtime_capsules`
+# (`compiler/src/build/runtime_objs.sfn`) falls through to the compiler's
+# hardcoded `target_condition_runtime_sfn_sources`, which lives *inside the
+# seed binary*. A provider added to that list in the working tree is
+# invisible to the pinned seed, which is exactly how SFN-1039 left `sysconf`
+# undefined at link on this leg. Manifest data the seed reads takes effect
+# immediately; the baked-in list needs a seed cut.
+#
+# The source set is identical to mingw's above — the hardcoded fallback keys
+# on `target_os`, not the triple, so both Windows ABIs already receive the
+# same modules. That equivalence is asserted, not assumed:
+# `compiler/tests/unit/target_conditioning_test.sfn` resolves this manifest
+# both ways and compares member-for-member, so the two mechanisms cannot
+# drift while both exist.
+#
+# `link-libs-add` is the one real difference, and it must stay empty:
+# `target_extra_link_libs` (`compiler/src/build/target.sfn`) already returns
+# `-lbcrypt`/`-lcrypt32`/`-lws2_32` for the msvc ABI. Mingw adds them in its
+# table precisely because it does not get them from there — duplicating them
+# here would be the mirror-image mistake.
+#
+# Deleting the hardcoded fallback is SFN-777, and waits on a seed cut
+# carrying SFN-775's manifest branch (merged after v0.10.4 was tagged, so
+# the pinned seed cannot read either table yet).
+[targets.x86_64-pc-windows-msvc]
+sfn-sources-replace = [
+    "sfn/process.sfn=sfn/platform/process_windows.sfn",
+    "sfn/platform/rlimit.sfn=sfn/platform/rlimit_windows.sfn",
+    "sfn/platform/terminal.sfn=sfn/platform/terminal_windows.sfn",
+    "sfn/platform/rand.sfn=sfn/platform/rand_windows.sfn",
+    "sfn/platform/fs_exec_mode.sfn=sfn/platform/fs_exec_mode_windows.sfn",
+    "sfn/platform/fd_io.sfn=sfn/platform/fd_io_windows.sfn",
+    "sfn/platform/socket_ops.sfn=sfn/platform/socket_ops_windows.sfn",
+    "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_windows.sfn",
+    "sfn/platform/exclusive_create.sfn=sfn/platform/exclusive_create_windows.sfn",
+    "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn",
+]
+# Order is load-bearing: the fallback appends these as a fixed tail, and the
+# manifest path appends in declaration order, so a reorder here breaks the
+# equivalence assertion rather than silently diverging. `pthread_windows.sfn`
+# carries `sysconf` as well as the `pthread_*` bodies (SFN-1039).
+sfn-sources-add = [
+    "sfn/platform/realpath_windows.sfn",
+    "sfn/platform/clock_windows.sfn",
+    "sfn/platform/pthread_windows.sfn",
+    "sfn/platform/popen_windows.sfn",
+    "sfn/platform/mkstemp_windows.sfn",
+    "sfn/platform/strcasestr_windows.sfn",
+    "sfn/platform/opendir_windows.sfn",
+    "sfn/platform/mkdtemp_windows.sfn",
+]
+sfn-sources-drop = []
+ll-sources-add = []
+link-libs-drop = []
+link-libs-add = []
+
 # Demand-driven `sfn-sources` selection (SFN-882). A source listed under an
 # effect name is compiled only when the build's declared effect surface demands
 # that effect; a source named in NO gate is always compiled. Keys are canonical
