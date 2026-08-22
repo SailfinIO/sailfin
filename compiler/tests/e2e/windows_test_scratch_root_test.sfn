@@ -14,7 +14,7 @@
 //
 // `build_host_os()` (`compiler/src/build/target.sfn`) returns
 // `SAILFIN_HOST_OS` verbatim when set, so this drives the Windows branch
-// from a Linux runner: `SAILFIN_HOST_OS=Windows` plus a `TEMP`/`TMP`
+// from any POSIX runner: `SAILFIN_HOST_OS=Windows` plus a `TEMP`/`TMP`
 // pointing at an isolated scratch dir, with the others unset. Pre-fix,
 // the unpatched code ignores them and mints under `/tmp` instead, so no
 // `sfn-test-*` entry appears where these tests look.
@@ -63,6 +63,24 @@ fn _without_key(envs: string[], key: string) -> string[] {
     return out;
 }
 
+// The PHYSICAL host OS, mirroring `build_host_os()`'s filesystem markers
+// (`compiler/src/build/target.sfn:57-60`) but deliberately skipping its
+// `SAILFIN_HOST_OS` override: these tests set that variable themselves to
+// fake a Windows host, while the nested build's *target* must stay the
+// machine that actually compiles, links, and runs the child — the same
+// local-probe pattern as `mem_limit_selfcap_test.sfn:72-80`. Pinning a
+// `Linux` literal instead broke the macOS leg: `SAILFIN_TARGET_OS=Linux`
+// selects the Linux runtime platform sources (`__errno_location`), but
+// `target_clang_triple` passes no `-target` for non-Windows triples, so
+// clang emits Darwin-native objects referencing Linux-only symbols and
+// the link dies in `ld`.
+fn _real_host_os() -> string ![io] {
+    if fs.exists("/proc/self/status") { return "Linux"; }
+    if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
+    if env.get("SystemRoot").length > 0 { return "Windows"; }
+    return "Linux";
+}
+
 // True when the nested run minted its owned scratch dir under `base`.
 // `var_name` selects which Windows temp variable to set, so the same
 // driver covers both the TEMP and the TMP leg.
@@ -77,11 +95,12 @@ fn _nested_run_mints_under(base: string, var_name: string, tag: string) -> boole
     // `build_target_os()` falls back to `build_host_os()` when no
     // `SAILFIN_TARGET_OS`/triple override is set, so flipping
     // `SAILFIN_HOST_OS` alone would also flip codegen to a Windows
-    // target on this Linux runner and the nested compile would fail for
-    // an unrelated reason. Pin the target OS explicitly so only host
-    // detection (and therefore scratch-root resolution) is affected.
+    // target and the nested compile would fail for an unrelated reason.
+    // Pin the target OS to the PHYSICAL host (never a `Linux` literal —
+    // see `_real_host_os` above) so only host detection (and therefore
+    // scratch-root resolution) is affected.
     env = _without_key(env, "SAILFIN_TARGET_OS");
-    env.push("SAILFIN_TARGET_OS=Linux");
+    env.push("SAILFIN_TARGET_OS=" + _real_host_os());
     // `_cleanup_test_scratch` removes an owned scratch tree on a
     // successful run, which would erase the very evidence these tests
     // inspect afterward — keep it.
