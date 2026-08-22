@@ -602,7 +602,11 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let create_opts = CreateOptions {
         exec_paths: ["bin/" + sailfin_name, "bin/" + sfn_name],
         link_policy: LinkPolicy.Preserve,
-        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+        // The complete manifest closure contains enough source text that
+        // fixed-Huffman LZ77's arena-owned token graph exceeds the compiler's
+        // 8 GiB Linux self-cap. Stored blocks remain deterministic and keep
+        // installer creation bounded without weakening that safety invariant.
+        deflate: DeflateOptions { strategy: DeflateStrategy.Stored }
     };
     let created = targz_create(tarball, staging, [], create_opts);
     match created {
