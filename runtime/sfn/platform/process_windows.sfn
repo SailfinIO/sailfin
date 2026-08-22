@@ -11,14 +11,13 @@
 // Win32 `CreateProcessA` body — the unused extern family would leave
 // undefined references on each target. Instead:
 //   - `runtime/sfn/process.sfn` keeps the POSIX bodies (posix_spawnp /
-//     waitpid). It is in `runtime/capsule.toml` (native builds)
-//     and is DELIBERATELY EXCLUDED from the cross-windows RUNTIME_MODS.
-//   - this module provides the same `@sfn_process_*` symbols for Windows.
-//     It is in the cross-windows RUNTIME_MODS ONLY and is NOT in
-//     `capsule.toml`, so its Win32 externs never enter Linux/macOS IR.
+//     waitpid) in the manifest's base source set.
+//   - this module provides the same `@sfn_process_*` symbols for Windows and
+//     is selected by the manifest target replacement, so its Win32 externs
+//     never enter Linux/macOS IR.
 // This mirrors the retired `sailfin_runtime.c` `#if defined(_WIN32)`
 // branch (the `CreateProcessA` body at :5564 and the `@sfn_process_*`
-// forwarders at :8163). Sync of the RUNTIME_MODS membership is pinned by
+// forwarders at :8163). Target-manifest membership is pinned by
 // `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn`.
 //
 // CONTRACT. `run`, `exit`, and `run_capture` (+ its `capture_take_*`)
@@ -44,7 +43,7 @@
 // so do NOT read "the family is real" as "`sfn test` / parallel emit work
 // on Windows". They do not yet.
 //
-// SINGLE-THREADED SPAWN. `CreateProcessA` with `bInheritHandles=TRUE`
+// INHERITANCE SERIALIZATION. `CreateProcessA` with `bInheritHandles=TRUE`
 // grants the child EVERY inheritable handle open in the process, not
 // just the three named in `STARTUPINFOA`. Three functions spawn that
 // way, each with its own leak window:
@@ -62,17 +61,15 @@
 //     stdin across `CreateProcessA`, so it carries a second, narrower
 //     `_pw_dup_inheritable`→`_pw_close_dup` window of the same shape.
 //
-// Two spawns overlapping IN DIFFERENT THREADS would cross-inherit: a
+// Two spawns overlapping IN DIFFERENT THREADS would otherwise cross-inherit: a
 // victim's pipe read end would never see EOF (its pipe would still have
 // a live writer), and a child holding a duplicate of the parent's stdout
-// would wedge any capture reading it. That race cannot arise today: the
-// concurrency modules are excluded from the cross-windows RUNTIME_MODS,
-// so every Windows spawn is single-threaded, and the async family exists
-// precisely so ONE thread can drive many children by polling. Should a
-// Windows thread pool ever link this module, replace all three
-// inherit-everything spawns with an explicit
-// `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` (STARTUPINFOEXA +
-// EXTENDED_STARTUPINFO_PRESENT) and delete this paragraph.
+// would wedge any capture reading it. Native Windows builds include the
+// concurrency runtime, so the complete inheritable-handle lifetime is
+// protected by one process-local SRW lock. The lock covers only handle setup,
+// `CreateProcessA`, and parent-side closure; children still execute and drain
+// concurrently. Every new inheritable-handle spawn path must use the same
+// helpers.
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
@@ -96,6 +93,10 @@ extern fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8;
 
 // ── Win32 kernel32 (implicitly linked by mingw; no extra `-l`). ──────
 extern fn CreateProcessA(app: *u8, cmdline: *u8, pattr: *u8, tattr: *u8, inherit: i32, flags: i32, env: *u8, cwd: *u8, si: *u8, pi: *u8) -> i32;
+
+extern fn AcquireSRWLockExclusive(lock: *i64) -> void;
+
+extern fn ReleaseSRWLockExclusive(lock: *i64) -> void;
 
 extern fn WaitForSingleObject(handle: i64, ms: i32) -> i32;
 
@@ -236,6 +237,19 @@ let mut pw_capture_wall_ms: i64 = 0;
 
 let mut pw_capture_peak_rss_kb: i64 = 0;
 
+// A zero-initialized pointer-sized cell is `SRWLOCK_INIT`. Keeping the lock in
+// this provider avoids depending on either pthread implementation: MinGW links
+// winpthreads, while the MSVC target uses `pthread_windows.sfn`.
+let mut pw_spawn_inherit_lock: i64 = 0;
+
+fn _pw_lock_inheritable_spawn() -> void ![io] {
+    AcquireSRWLockExclusive(& pw_spawn_inherit_lock);
+}
+
+fn _pw_unlock_inheritable_spawn() -> void ![io] {
+    ReleaseSRWLockExclusive(& pw_spawn_inherit_lock);
+}
+
 // `_pw_dup_inheritable(proc, h)` — an inheritable duplicate of one of the
 // parent's standard handles, or `0` when there is none to duplicate.
 // `GetStdHandle` reports "no such handle" as either `0` or `-1`
@@ -357,6 +371,7 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     //
     // Duplicated after `pi` so that no early return sits between the
     // duplicates and the `_pw_close_dup` calls below.
+    _pw_lock_inheritable_spawn();
     let self_proc: i64 = GetCurrentProcess();
     let h_in: i64 = _pw_dup_inheritable(self_proc, GetStdHandle(-10));
     let h_out: i64 = _pw_dup_inheritable(self_proc, GetStdHandle(-11));
@@ -390,6 +405,7 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     _pw_close_dup(h_in);
     _pw_close_dup(h_out);
     _pw_close_dup(h_err);
+    _pw_unlock_inheritable_spawn();
     if ok == 0 {
         free(si);
         free(pi);
@@ -677,7 +693,9 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
     }
     memset(hbuf, 0, 32 as usize);
     let hbase: i64 = hbuf as i64;
+    _pw_lock_inheritable_spawn();
     if CreatePipe(hbase as *i64, (hbase + 8) as *i64, sa, 0) == 0 {
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -689,6 +707,7 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
         let o_wr: i64 = atomic_load((hbase + 8) as *i64);
         let _co1: i32 = CloseHandle(o_rd);
         let _co2: i32 = CloseHandle(o_wr);
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -703,8 +722,19 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
 
     // The read ends are parent-only: clear HANDLE_FLAG_INHERIT (1) so the
     // child does not inherit (and leak) them.
-    let _s1: i32 = SetHandleInformation(out_rd, 1, 0);
-    let _s2: i32 = SetHandleInformation(err_rd, 1, 0);
+    let s1: i32 = SetHandleInformation(out_rd, 1, 0);
+    let s2: i32 = SetHandleInformation(err_rd, 1, 0);
+    if s1 == 0 || s2 == 0 {
+        let _c1: i32 = CloseHandle(out_rd);
+        let _c2: i32 = CloseHandle(out_wr);
+        let _c3: i32 = CloseHandle(err_rd);
+        let _c4: i32 = CloseHandle(err_wr);
+        _pw_unlock_inheritable_spawn();
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        return -1;
+    }
 
     // STARTUPINFOA (104 bytes): zeroed, then cb@0=104,
     // dwFlags@60=STARTF_USESTDHANDLES(0x100=256),
@@ -718,6 +748,7 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
         let _c2: i32 = CloseHandle(out_wr);
         let _c3: i32 = CloseHandle(err_rd);
         let _c4: i32 = CloseHandle(err_wr);
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -738,6 +769,7 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
         let _c2: i32 = CloseHandle(out_wr);
         let _c3: i32 = CloseHandle(err_rd);
         let _c4: i32 = CloseHandle(err_wr);
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -770,11 +802,15 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
     // `CreateProcessA` has copied the named handles into the child, so the
     // parent's duplicate is dead on both the success and the failure path.
     _pw_close_dup(h_stdin);
+    // Close the inheritable write ends before releasing the process-wide
+    // spawn lock. A concurrent spawn must never inherit these parent copies,
+    // or this capture's read ends can remain open past child exit and wedge.
+    let _cw1: i32 = CloseHandle(out_wr);
+    let _cw2: i32 = CloseHandle(err_wr);
+    _pw_unlock_inheritable_spawn();
     if ok == 0 {
         let _c1: i32 = CloseHandle(out_rd);
-        let _c2: i32 = CloseHandle(out_wr);
-        let _c3: i32 = CloseHandle(err_rd);
-        let _c4: i32 = CloseHandle(err_wr);
+        let _c2: i32 = CloseHandle(err_rd);
         free(si);
         free(pi);
         return -1;
@@ -782,11 +818,6 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
 
     let h_process: i64 = atomic_load(pi as *i64);
     let h_thread: i64 = atomic_load((pi as i64 + 8) as *i64);
-
-    // Parent closes the write ends so the read ends see EOF once the
-    // child (now the only writer) exits.
-    let _cw1: i32 = CloseHandle(out_wr);
-    let _cw2: i32 = CloseHandle(err_wr);
 
     let gb_out: *PwGrowBuf = malloc(24 as usize) as *PwGrowBuf;
     let gb_err: *PwGrowBuf = malloc(24 as usize) as *PwGrowBuf;
@@ -1135,7 +1166,9 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
     memset(hbuf, 0, 48 as usize);
     let hbase: i64 = hbuf as i64;
 
+    _pw_lock_inheritable_spawn();
     if CreatePipe(hbase as *i64, (hbase + 8) as *i64, sa, 0) == 0 {
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -1145,6 +1178,7 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
     if CreatePipe((hbase + 16) as *i64, (hbase + 24) as *i64, sa, 0) == 0 {
         let _c1: i32 = CloseHandle(atomic_load(hbase as *i64));
         let _c2: i32 = CloseHandle(atomic_load((hbase + 8) as *i64));
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -1156,6 +1190,7 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
         let _c2: i32 = CloseHandle(atomic_load((hbase + 8) as *i64));
         let _c3: i32 = CloseHandle(atomic_load((hbase + 16) as *i64));
         let _c4: i32 = CloseHandle(atomic_load((hbase + 24) as *i64));
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -1174,9 +1209,22 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
     // so the child neither inherits nor leaks them. Leaving `in_wr`
     // inheritable would be the subtle one — the child would hold a writer
     // on its OWN stdin and never see EOF from `handle_close_stdin`.
-    let _s1: i32 = SetHandleInformation(in_wr, 1, 0);
-    let _s2: i32 = SetHandleInformation(out_rd, 1, 0);
-    let _s3: i32 = SetHandleInformation(err_rd, 1, 0);
+    let s1: i32 = SetHandleInformation(in_wr, 1, 0);
+    let s2: i32 = SetHandleInformation(out_rd, 1, 0);
+    let s3: i32 = SetHandleInformation(err_rd, 1, 0);
+    if s1 == 0 || s2 == 0 || s3 == 0 {
+        let _c1: i32 = CloseHandle(in_rd);
+        let _c2: i32 = CloseHandle(in_wr);
+        let _c3: i32 = CloseHandle(out_rd);
+        let _c4: i32 = CloseHandle(out_wr);
+        let _c5: i32 = CloseHandle(err_rd);
+        let _c6: i32 = CloseHandle(err_wr);
+        _pw_unlock_inheritable_spawn();
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        return 0;
+    }
 
     // STARTUPINFOA (104 bytes): cb@0=104, dwFlags@60=STARTF_USESTDHANDLES
     // (0x100=256), hStdInput@80, hStdOutput@88, hStdError@96. cb/dwFlags are
@@ -1190,6 +1238,7 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
         let _c4: i32 = CloseHandle(out_wr);
         let _c5: i32 = CloseHandle(err_rd);
         let _c6: i32 = CloseHandle(err_wr);
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -1213,6 +1262,7 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
         let _c4: i32 = CloseHandle(out_wr);
         let _c5: i32 = CloseHandle(err_rd);
         let _c6: i32 = CloseHandle(err_wr);
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -1231,6 +1281,7 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
         let _c4: i32 = CloseHandle(out_wr);
         let _c5: i32 = CloseHandle(err_rd);
         let _c6: i32 = CloseHandle(err_wr);
+        _pw_unlock_inheritable_spawn();
         free(cmdline);
         free(env_block);
         free(sa);
@@ -1241,8 +1292,8 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
     memset(h as *u8, 0, 88 as usize);
 
     // bInheritHandles=TRUE(1) so the child inherits the three redirected
-    // ends; flags=0 (ANSI environment block). See the file header on why
-    // this is safe only while Windows spawns stay single-threaded.
+    // ends; flags=0 (ANSI environment block). The file-level inheritance
+    // lock is held until the parent closes its child-side pipe ends below.
     let ok: i32 = CreateProcessA(null, cmdline, null, null, 1, 0, env_block, null, si, pi);
     free(cmdline);
     free(env_block);
@@ -1254,6 +1305,7 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
         let _c4: i32 = CloseHandle(out_wr);
         let _c5: i32 = CloseHandle(err_rd);
         let _c6: i32 = CloseHandle(err_wr);
+        _pw_unlock_inheritable_spawn();
         free(h as *u8);
         free(si);
         free(pi);
@@ -1271,6 +1323,7 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
     let _cc1: i32 = CloseHandle(in_rd);
     let _cc2: i32 = CloseHandle(out_wr);
     let _cc3: i32 = CloseHandle(err_wr);
+    _pw_unlock_inheritable_spawn();
 
     h.h_stdin_wr = in_wr;
     h.h_stdout_rd = out_rd;

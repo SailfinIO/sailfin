@@ -36,7 +36,7 @@ import {
     runtime_object_cache_key_with_identity,
     runtime_object_entry_key_from_str
 } from "../../src/build_cache";
-import { RuntimeCapsuleArtifacts } from "../../src/runtime_capsule_resolver";
+import { RuntimeCapsuleArtifacts, RuntimeTargetArtifacts } from "../../src/runtime_capsule_resolver";
 
 // A self_path that cannot resolve to a runnable binary. Used to prove a
 // call was served from the shared cache without ever reaching the emit
@@ -84,6 +84,7 @@ test "runtime-obj slug wiring: a shared entry stored under one slug is never ser
     let empty4: string[] = [];
     let empty5: string[] = [];
     let empty6: string[] = [];
+    let empty_targets: RuntimeTargetArtifacts[] = [];
     let cap = RuntimeCapsuleArtifacts {
         capsule_name: "runtime-native",
         manifest_dir: manifest_dir,
@@ -96,7 +97,8 @@ test "runtime-obj slug wiring: a shared entry stored under one slug is never ser
         sfn_source_root: manifest_dir,
         sfn_module_prefix: "runtime",
         capsule_deps: empty5,
-        sfn_source_gates: empty6
+        sfn_source_gates: empty6,
+        target_artifacts: empty_targets
     };
 
     // Compose the expected key for `alpha.sfn` at module slug

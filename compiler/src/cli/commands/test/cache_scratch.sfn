@@ -1,5 +1,6 @@
 import { _ends_with_cmd, _strip_trailing_slashes_cmd } from "../../../build/fs";
-import { runtime_stamp_identity } from "../../../build/runtime_objs";
+import { condition_runtime_capsules_for_target, runtime_stamp_identity } from "../../../build/runtime_objs";
+import { build_target_os, build_target_triple } from "../../../build/target";
 import { runtime_link_inputs_identity } from "../../../build_cache";
 import { _get_env_cmd } from "../../../build_flags";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
@@ -221,11 +222,12 @@ fn _collect_header_files_cmd(root: string, max_depth: int) -> string[] ![io] {
 // per-test binary cache correct across a runtime edit while letting
 // genuinely-unchanged tests hit across commits.
 //
-// Folds, per runtime capsule: the `.c`/`.ll`/`.sfn` sources + prelude
+// First applies the same active-target transformation as runtime compilation,
+// then folds, per runtime capsule: the `.c`/`.ll`/`.sfn` sources + prelude
 // entry (by content), the `.h` headers found under each include root (by
 // content — a header edit changes the compiled runtime objects), the
 // include-dir paths (`-I<dir>`, by value — an include-root change), and
-// the declared link libs (by value). `unique_suffix` makes the hash temp
+// the effective target-conditioned link libs (by value). `unique_suffix` makes the hash temp
 // path collision-safe across concurrent `sfn test` invocations (pass the
 // per-invocation scratch root).
 fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> string ![io] {
@@ -242,7 +244,7 @@ fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> st
         let stamped_identity = runtime_stamp_identity(stamp_objdir);
         if stamped_identity.length > 0 { return stamped_identity; }
     }
-    let caps = runtime_capsule_from_root(runtime_root);
+    let caps = condition_runtime_capsules_for_target(runtime_capsule_from_root(runtime_root), build_target_os(), build_target_triple());
     let mut sources: string[] = [];
     let mut values: string[] = [];
     let mut ci: int = 0;

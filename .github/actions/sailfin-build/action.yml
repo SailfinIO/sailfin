@@ -239,8 +239,8 @@ runs:
     # commit-stable capsule version with the compiler binary SHA-256
     # (SFN-545), so a foreign compiler's restored entries cannot match.
     # The hashFiles set includes the runtime capsule manifest
-    # (`runtime/capsule.toml`) and `runtime/ir/**` (the cross-windows
-    # link stub) on top of the `.sfn` trees, because those inputs change
+    # (`runtime/capsule.toml`) and `runtime/ir/**` (prewritten runtime IR)
+    # on top of the `.sfn` trees, because those inputs change
     # the linked runtime objects baked into a cached test binary.
     # (`runtime/native/**` retired in #823 when that directory was
     # deleted.) `actions/cache/save` is a no-op when a key already exists,

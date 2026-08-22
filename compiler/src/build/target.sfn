@@ -303,7 +303,27 @@ fn target_clang_triple(triple: string) -> string {
 fn target_clang_flags(triple: string) -> string[] {
     let clang_triple = target_clang_triple(triple);
     if clang_triple.length == 0 { return []; }
+    // MinGW's CRT requires emulated TLS for LLVM's thread-local globals;
+    // this was previously buried in the Makefile cross recipe. Keeping it
+    // beside the triple makes every native assembly path identical.
+    if triple == "x86_64-w64-mingw32" {
+        return ["-target", clang_triple, "-femulated-tls"];
+    }
     return ["-target", clang_triple];
+}
+
+// Final-link driver and its target-owned flags. MinGW must link through its
+// GCC driver so the correct CRT/start files and search paths are selected;
+// clang remains the driver for every other target. These are pure target
+// properties and therefore shared by build and test link layouts.
+fn target_linker_driver(triple: string) -> string {
+    if triple == "x86_64-w64-mingw32" { return "x86_64-w64-mingw32-gcc"; }
+    return "clang";
+}
+
+fn target_linker_driver_flags(triple: string) -> string[] {
+    if triple == "x86_64-w64-mingw32" { return ["-static"]; }
+    return target_clang_flags(triple);
 }
 
 // The `-fuse-ld=` flag a target forces regardless of host auto-detection.
@@ -311,12 +331,9 @@ fn target_clang_flags(triple: string) -> string[] {
 // every other target returns "" so the driver's existing Linux-only
 // mold/lld auto-detect (and the `SAILFIN_LINKER` override) is unchanged.
 //
-// The windows-gnu ABI (`x86_64-w64-mingw32`) needs its OWN linker driver
-// (`x86_64-w64-mingw32-gcc -static`), not a `-fuse-ld=` flag on clang, so
-// it cannot be expressed by this function's return shape. The branch is
-// structured on ABI here so SFN-775 (A2) only has to fill the `gnu` arm
-// in; deliberately still `""` (no forced flag) until that lands — do not
-// invent the mingw link path in this slice.
+// The windows-gnu ABI (`x86_64-w64-mingw32`) uses its own linker driver
+// (`x86_64-w64-mingw32-gcc -static`) through `target_linker_driver` above,
+// not a `-fuse-ld=` flag on clang, so its correct result here remains `""`.
 fn target_forced_linker_flag(triple: string) -> string {
     let abi = triple_abi(triple);
     if abi == "msvc" { return "-fuse-ld=lld"; }
@@ -392,20 +409,13 @@ fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
 //                 net/websocket runtime modules are always linked in
 //                 (SFN-649).
 //
-// `-lws2_32` and `-lcrypt32` are needed by BOTH Windows ABIs (Winsock2 and
-// Crypt32 are the same DLLs either way, and unlike bcrypt neither is in
-// mingw-w64's default auto-linked import-lib set); `-lbcrypt` is msvc-only
-// — the windows-gnu ABI's mingw-w64 CRT resolves `BCryptGenRandom` through
-// its own import libs, so adding it there would be a redundant (harmless
-// but incorrect-by-omission) flag. No other target links any of the
-// three, so every non-Windows target returns `[]` (identity →
-// byte-identical link, #1112).
+// The GNU-Windows equivalents are runtime-provider policy and now come from
+// `runtime/capsule.toml [targets.x86_64-w64-mingw32]` (SFN-775). The
+// manifest-absent migration fallback is applied in `runtime_objs.sfn`, so
+// this compiler-global helper remains MSVC-only.
 fn target_extra_link_libs(triple: string) -> string[] {
     let abi = triple_abi(triple);
     if abi == "msvc" { return ["-lbcrypt", "-lcrypt32", "-lws2_32"]; }
-    if abi == "gnu" && triple_target_os(triple) == "Windows" {
-        return ["-lcrypt32", "-lws2_32"];
-    }
     return [];
 }
 
@@ -414,8 +424,7 @@ fn target_extra_link_libs(triple: string) -> string[] {
 // `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
 // `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
 // (SFN-549 — previously dropped outright, leaving
-// `apply_default_mem_limit` unresolved once `windows_stubs.ll` stopped
-// linking on the native path), `terminal.sfn` (`isatty`) for
+// `apply_default_mem_limit` unresolved), `terminal.sfn` (`isatty`) for
 // `platform/terminal_windows.sfn` (`_isatty`), `rand.sfn`
 // (getentropy/`/dev/urandom`) for
 // `platform/rand_windows.sfn` (SFN-549, `BCryptGenRandom`), and
@@ -429,16 +438,11 @@ fn target_extra_link_libs(triple: string) -> string[] {
 // by `trust_store_default_paths()`) for `platform/cert_roots_windows.sfn`
 // (SFN-808 — Windows has no CA-bundle file anywhere, so the system `ROOT`
 // certificate store reached through Crypt32 is the only trust source
-// there). Five further modules —
-// `platform/realpath_windows.sfn`, `platform/clock_windows.sfn`,
-// `platform/pthread_windows.sfn`, `platform/popen_windows.sfn`, and
-// `platform/mkstemp_windows.sfn` (all SFN-549) — are APPENDED rather than
-// swapped, since none has a POSIX `.sfn` module to swap FROM (each backs
-// a bare libc/pthreads symbol, not a Sailfin-authored runtime module);
-// see the note below the loop. This mirrors the mingw Makefile
-// `RUNTIME_MODS` swap and is the extensible seam for the broader MSVC
-// exclusion set, finalized empirically against a real native link in
-// SFEP-0021 M7. Every other target returns the list unchanged.
+// there). Additional Win32 providers with no POSIX `.sfn` counterpart are
+// appended below. This function is the one-seed migration fallback for a
+// runtime manifest without `[targets.<triple>]`; current manifests use the
+// generic table-driven conditioner in `runtime_objs.sfn`. Every other target
+// returns the list unchanged.
 //
 // `sources` are already runtime-root-resolved absolute paths; match on the
 // basename so the manifest-root prefix is irrelevant, and rebuild the
@@ -560,6 +564,7 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
         i += 1;
     }
     // `realpath_windows.sfn`, `clock_windows.sfn`, `pthread_windows.sfn`,
+    // `sysconf_windows.sfn`,
     // `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`,
     // `opendir_windows.sfn`, and `mkdtemp_windows.sfn` have no POSIX
     // `.sfn` counterpart to swap FROM (SFN-549, SFN-903, SFN-993):
@@ -577,6 +582,7 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
         out.push(_path_join(platform_dir, "realpath_windows.sfn"));
         out.push(_path_join(platform_dir, "clock_windows.sfn"));
         out.push(_path_join(platform_dir, "pthread_windows.sfn"));
+        out.push(_path_join(platform_dir, "sysconf_windows.sfn"));
         out.push(_path_join(platform_dir, "popen_windows.sfn"));
         out.push(_path_join(platform_dir, "mkstemp_windows.sfn"));
         out.push(_path_join(platform_dir, "strcasestr_windows.sfn"));
@@ -620,6 +626,8 @@ export {
     host_exe_name,
     target_clang_triple,
     target_clang_flags,
+    target_linker_driver,
+    target_linker_driver_flags,
     target_forced_linker_flag,
     target_reproducible_link_flag,
     target_uses_gnu_link_gc,

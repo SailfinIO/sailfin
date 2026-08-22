@@ -147,10 +147,9 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "intrinsic.errno_location.darwin", symbol: "__error", return_type: "i32*", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
     // Windows/mingw-w64 spells the errno-slot accessor `int *_errno(void)`.
-    // Selected when the sentinel resolves the *target* OS to Windows via
-    // `SAILFIN_TARGET_OS` (cross-compilation from a Linux host — see
-    // `make ci-cross-windows` and `errno_locator_symbol` in
-    // `lowering_debug_state.sfn`, #877). Dotted target, same rationale as
+    // Selected when the sentinel resolves the *target* OS to Windows via the
+    // driver target snapshot (native cross-builds included; see
+    // `errno_locator_symbol` in `lowering_debug_state.sfn`, #877). Dotted target, same rationale as
     // the rows above: internal-only, never a bare source-level global.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "intrinsic.errno_location.mingw", symbol: "_errno", return_type: "i32*", parameter_types: [], native_signature: null, c_abi_return_type: null
@@ -372,24 +371,19 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // the self-host build and the runtime-sfn-source consumer path
     // (`runtime_sfn_sources_link_consumer_test.sfn`) now always resolve
     // the `%Timespec*` form and this descriptor is only ever shadowed on
-    // those paths. It is retained as the fallback for the last emit path
-    // that still lacks staged posix: `ci-cross-windows`'s standalone
-    // `clock.sfn` re-emit (SFN-58), which reads posix from the SHARED
-    // tree the Makefile still stages for exactly this reason. Removal
-    // condition: delete this descriptor (and its `clock_gettime` sibling,
-    // the `rendering.sfn` exemption, and `_drifted_nanosleep` in
-    // `prelude_mirror_drift_fatal_test.sfn`) once the cross-windows
-    // standalone `clock` emit is retired or gains its own posix staging.
+    // those paths. It remains the generic fallback for direct/standalone
+    // `clock.sfn` emission without an imported-platform context, which unit
+    // coverage intentionally exercises. It can be deleted together with its
+    // `clock_gettime` sibling, the `rendering.sfn` exemption, and
+    // `_drifted_nanosleep` only when every direct emit stages posix imports.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "nanosleep", symbol: "nanosleep", return_type: "i32", parameter_types: ["i8*", "i8*"], native_signature: null, c_abi_return_type: null
     });
     // Per-symbol fallback signature for libc `clock_gettime`, called
     // from `runtime/sfn/clock.sfn::sfn_clock_monotonic_nanos` (#878).
-    // Same fallback discipline and removal condition as `nanosleep`
-    // directly above: shadowed on the driver-staged self-host and
-    // consumer paths (SFN-344), retained for the `ci-cross-windows`
-    // (SFN-58) standalone `clock` re-emit that reads posix from the
-    // SHARED tree.
+    // Same generic direct-emit fallback discipline and removal condition as
+    // `nanosleep` directly above; driver-staged self-host and consumer paths
+    // shadow it with the imported `%Timespec*` signature (SFN-344).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "clock_gettime", symbol: "clock_gettime", return_type: "i32", parameter_types: ["i32", "i8*"], native_signature: null, c_abi_return_type: null
     });

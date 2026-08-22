@@ -50,8 +50,29 @@ import {
     toml_get_sfn_source_gate,
     toml_get_sfn_source_root,
     toml_get_sfn_sources,
+    toml_get_string_array,
+    toml_get_target_triples,
     toml_get_workspace_members
 } from "./toml_parser";
+
+// Target-specific runtime inputs parsed from one `[targets.<triple>]`
+// manifest table (SFN-775 / SFEP-0068). Paths are resolved at the same
+// manifest boundary as the base runtime inputs; the build layer only applies
+// these already-canonical records. Keeping one descriptor per triple makes
+// target conditioning data-driven without coupling manifest discovery to the
+// process-global active target.
+struct RuntimeTargetArtifacts {
+    triple: string;
+    valid: boolean;
+    // Absolute `from\tto` records. A tab cannot occur in a TOML path token,
+    // so the representation stays unambiguous without adding a pair type.
+    sfn_source_replacements: string[];
+    sfn_sources_add: string[];
+    sfn_sources_drop: string[];
+    ll_sources_add: string[];
+    link_libs_add: string[];
+    link_libs_drop: string[];
+}
 
 // Resolved per-runtime-capsule build inputs. All paths are
 // workspace-rooted; consumers feed them straight into
@@ -106,6 +127,7 @@ struct RuntimeCapsuleArtifacts {
     // the comparison downstream is absolute-to-absolute and cannot drift when
     // `SAILFIN_RUNTIME_ROOT` relocates the runtime — the SFN-146 defect class.
     sfn_source_gates: string[];
+    target_artifacts: RuntimeTargetArtifacts[];
 }
 
 fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
@@ -116,6 +138,7 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
     let empty5: string[] = [];
     let empty6: string[] = [];
     let empty7: string[] = [];
+    let empty_targets: RuntimeTargetArtifacts[] = [];
     return RuntimeCapsuleArtifacts {
         capsule_name: "",
         manifest_dir: "",
@@ -128,7 +151,8 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
         sfn_source_root: "",
         sfn_module_prefix: "",
         capsule_deps: empty6,
-        sfn_source_gates: empty7
+        sfn_source_gates: empty7,
+        target_artifacts: empty_targets
     };
 }
 
@@ -411,6 +435,60 @@ fn _rcr_resolve_paths(manifest_dir: string, relatives: string[]) -> string[] {
     return out;
 }
 
+// Resolve `from=to` target replacement entries to absolute tab-separated
+// records. Malformed entries are omitted; the identity validation below then
+// rejects a target whose declared source set cannot be owned by the runtime
+// capsule. The manifest regression tests pin every production entry, so an
+// omission cannot silently change the shipped target set.
+fn _rcr_resolve_replacements(manifest_dir: string, entries: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let entry = entries[i];
+        let mut eq: int = -1;
+        let mut j: int = 0;
+        loop {
+            if j >= entry.length { break; }
+            if substring(entry, j, j + 1) == "=" {
+                eq = j;
+                break;
+            }
+            j += 1;
+        }
+        if eq > 0 && eq + 1 < entry.length {
+            let from = _rcr_resolve_path(manifest_dir, substring(entry, 0, eq));
+            let to = _rcr_resolve_path(manifest_dir, substring(entry, eq + 1, entry.length));
+            out.push(from + "\t" + to);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _rcr_target_artifacts(manifest_dir: string, manifest_text: string) -> RuntimeTargetArtifacts[] {
+    let mut out: RuntimeTargetArtifacts[] = [];
+    let triples = _rcr_split_newlines(toml_get_target_triples(manifest_text));
+    let mut i: int = 0;
+    loop {
+        if i >= triples.length { break; }
+        let triple = triples[i];
+        let section = "targets." + triple;
+        let replacements = _rcr_split_newlines(toml_get_string_array(manifest_text, section, "sfn-sources-replace"));
+        let sfn_add = _rcr_split_newlines(toml_get_string_array(manifest_text, section, "sfn-sources-add"));
+        let sfn_drop = _rcr_split_newlines(toml_get_string_array(manifest_text, section, "sfn-sources-drop"));
+        let ll_add = _rcr_split_newlines(toml_get_string_array(manifest_text, section, "ll-sources-add"));
+        let libs_add = _rcr_split_newlines(toml_get_string_array(manifest_text, section, "link-libs-add"));
+        let libs_drop = _rcr_split_newlines(toml_get_string_array(manifest_text, section, "link-libs-drop"));
+        let resolved_replacements = _rcr_resolve_replacements(manifest_dir, replacements);
+        out.push(RuntimeTargetArtifacts {
+            triple: triple, valid: resolved_replacements.length == replacements.length, sfn_source_replacements: resolved_replacements, sfn_sources_add: _rcr_resolve_paths(manifest_dir, sfn_add), sfn_sources_drop: _rcr_resolve_paths(manifest_dir, sfn_drop), ll_sources_add: _rcr_resolve_paths(manifest_dir, ll_add), link_libs_add: libs_add, link_libs_drop: libs_drop
+        });
+        i += 1;
+    }
+    return out;
+}
+
 // Newline-split helper for `toml_get_workspace_members` output.
 fn _rcr_split_newlines(text: string) -> string[] {
     let mut out: string[] = [];
@@ -558,6 +636,84 @@ fn _rcr_runtime_identity_inputs_valid(sources: string[], gates: string[], owner:
     return true;
 }
 
+// Target-added prewritten IR is not a Sailfin module, so it cannot use the
+// source-identity validator above. It is nevertheless executable link input
+// owned by the runtime capsule and must stay beneath that capsule's manifest
+// root. Both values have already passed through `_rcr_normalize_path`.
+fn _rcr_runtime_ir_path_owned(path: string, member_root: string) -> boolean {
+    if path == member_root { return true; }
+    let prefix = member_root + "/";
+    if path.length <= prefix.length { return false; }
+    return substring(path, 0, prefix.length) == prefix;
+}
+
+fn _rcr_target_identity_inputs_valid(targets: RuntimeTargetArtifacts[], base_sources: string[], owner: SourceIdentityOwner) -> boolean {
+    let mut seen_triples: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= targets.length { break; }
+        let target = targets[i];
+        if !target.valid { return false; }
+        if contains_string(seen_triples, target.triple) { return false; }
+        seen_triples.push(target.triple);
+        let mut paths: string[] = [];
+        let mut seen_replacement_sources: string[] = [];
+        let mut r: int = 0;
+        loop {
+            if r >= target.sfn_source_replacements.length { break; }
+            let record = target.sfn_source_replacements[r];
+            let mut tab: int = -1;
+            let mut j: int = 0;
+            loop {
+                if j >= record.length { break; }
+                if substring(record, j, j + 1) == "\t" {
+                    tab = j;
+                    break;
+                }
+                j += 1;
+            }
+            if tab <= 0 || tab + 1 >= record.length { return false; }
+            let from = substring(record, 0, tab);
+            if !contains_string(base_sources, from) { return false; }
+            if contains_string(seen_replacement_sources, from) { return false; }
+            seen_replacement_sources.push(from);
+            paths.push(from);
+            paths.push(substring(record, tab + 1, record.length));
+            r += 1;
+        }
+        let mut a: int = 0;
+        loop {
+            if a >= target.sfn_sources_add.length { break; }
+            paths.push(target.sfn_sources_add[a]);
+            a += 1;
+        }
+        let mut d: int = 0;
+        loop {
+            if d >= target.sfn_sources_drop.length { break; }
+            paths.push(target.sfn_sources_drop[d]);
+            d += 1;
+        }
+        let mut p: int = 0;
+        loop {
+            if p >= paths.length { break; }
+            if !source_identity_for(paths[p], owner, source_role_runtime_provider()).ok {
+                return false;
+            }
+            p += 1;
+        }
+        let mut ll: int = 0;
+        loop {
+            if ll >= target.ll_sources_add.length { break; }
+            if !_rcr_runtime_ir_path_owned(target.ll_sources_add[ll], owner.member_root) {
+                return false;
+            }
+            ll += 1;
+        }
+        i += 1;
+    }
+    return true;
+}
+
 fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, manifest_text: string) -> RuntimeCapsuleArtifacts {
     let kind = toml_get_build_kind(manifest_text);
     if kind != "runtime" { return empty_runtime_capsule_artifacts(); }
@@ -593,13 +749,15 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
     let sfn_source_root = _rcr_resolve_path(manifest_dir, sfn_source_root_rel);
     let sfn_sources = _rcr_resolve_paths(manifest_dir, sfn_sources_rel);
     let sfn_source_gates = _rcr_resolve_source_gates(manifest_dir, manifest_text);
+    let target_artifacts = _rcr_target_artifacts(manifest_dir, manifest_text);
     let identity_owner = SourceIdentityOwner {
         manifest_name: name,
         member_root: manifest_dir,
         source_root: sfn_source_root,
         module_prefix: sfn_module_prefix
     };
-    if !_rcr_runtime_identity_inputs_valid(sfn_sources, sfn_source_gates, identity_owner) {
+    if !_rcr_runtime_identity_inputs_valid(sfn_sources, sfn_source_gates, identity_owner)
+        || !_rcr_target_identity_inputs_valid(target_artifacts, sfn_sources, identity_owner) {
         return empty_runtime_capsule_artifacts();
     }
     return RuntimeCapsuleArtifacts {
@@ -614,7 +772,8 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
         sfn_source_root: sfn_source_root,
         sfn_module_prefix: sfn_module_prefix,
         capsule_deps: capsule_deps,
-        sfn_source_gates: sfn_source_gates
+        sfn_source_gates: sfn_source_gates,
+        target_artifacts: target_artifacts
     };
 }
 
@@ -708,6 +867,7 @@ fn runtime_capsule_from_root(runtime_root: string) -> RuntimeCapsuleArtifacts[] 
 
 export {
     RuntimeCapsuleArtifacts,
+    RuntimeTargetArtifacts,
     // Module-private by convention; exported solely as a test seat so
     // the SFN-642 root/separator rules are assertable as pure string
     // logic on a Linux host, with no Windows and no filesystem. Same

@@ -68,7 +68,15 @@ fn _setup_scratch_workspace(scratch: string) ![io] {
         + "sfn-sources = [\"../sfn/io.sfn\", \"../sfn/clock.sfn\"]\n"
         + "include-dirs = [\"include\"]\n"
         + "link-libs = [\"-lm\", \"-lpthread\"]\n"
-        + "prelude-entry = \"../prelude.sfn\"\n";
+        + "prelude-entry = \"../prelude.sfn\"\n"
+        + "\n"
+        + "[targets.x86_64-w64-mingw32]\n"
+        + "sfn-sources-replace = [\"../sfn/io.sfn=../sfn/platform/io_windows.sfn\"]\n"
+        + "sfn-sources-add = [\"../sfn/platform/clock_windows.sfn\"]\n"
+        + "sfn-sources-drop = [\"../sfn/clock.sfn\"]\n"
+        + "ll-sources-add = [\"ir/target.ll\"]\n"
+        + "link-libs-drop = [\"-lpthread\"]\n"
+        + "link-libs-add = [\"-lws2_32\"]\n";
     fs.writeFile(scratch + "/runtime/native/capsule.toml", runtime_manifest);
 
     // A `kind = "library"` capsule alongside the runtime capsule —
@@ -222,6 +230,77 @@ test "enumerate: link_libs flow through verbatim (not path-resolved)" ![io] {
     // must NOT be prepended with the manifest dir.
     assert result[0].link_libs[0] == "-lm";
     assert result[0].link_libs[1] == "-lpthread";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: target runtime tables are resolved once at the manifest boundary" ![io] {
+    let scratch = "build/sailfin/.runtime-resolver-test-targets";
+    _setup_scratch_workspace(scratch);
+    let result = enumerate_runtime_capsule_artifacts(scratch, []);
+    assert result.length == 1;
+    assert result[0].target_artifacts.length == 1;
+    let target = result[0].target_artifacts[0];
+    assert target.triple == "x86_64-w64-mingw32";
+    assert target.sfn_source_replacements[0] == scratch
+        + "/runtime/sfn/io.sfn\t"
+        + scratch
+        + "/runtime/sfn/platform/io_windows.sfn";
+    assert target.sfn_sources_add[0] == scratch
+        + "/runtime/sfn/platform/clock_windows.sfn";
+    assert target.sfn_sources_drop[0] == scratch + "/runtime/sfn/clock.sfn";
+    assert target.ll_sources_add[0] == scratch + "/runtime/native/ir/target.ll";
+    assert target.link_libs_drop[0] == "-lpthread";
+    assert target.link_libs_add[0] == "-lws2_32";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: malformed target replacement fails closed" ![io] {
+    let scratch = "build/sailfin/.runtime-resolver-test-target-malformed";
+    _setup_scratch_workspace(scratch);
+    let path = scratch + "/runtime/native/capsule.toml";
+    let manifest = fs.readFile(path);
+    fs.writeFile(path, manifest
+        + "\n[targets.bad-target]\nsfn-sources-replace = [\"missing-equals\"]\n");
+    let result = enumerate_runtime_capsule_artifacts(scratch, []);
+    assert result.length == 0;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: duplicate target replacement sources fail closed" ![io] {
+    let scratch = "build/sailfin/.runtime-resolver-test-target-duplicate-from";
+    _setup_scratch_workspace(scratch);
+    let path = scratch + "/runtime/native/capsule.toml";
+    let manifest = fs.readFile(path);
+    fs.writeFile(path, manifest
+        + "\n[targets.duplicate-from]\nsfn-sources-replace = ["
+        + "\"../sfn/io.sfn=../sfn/platform/io_windows.sfn\", "
+        + "\"../sfn/io.sfn=../sfn/platform/clock_windows.sfn\"]\n");
+    let result = enumerate_runtime_capsule_artifacts(scratch, []);
+    assert result.length == 0;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: target IR additions cannot escape the runtime capsule" ![io] {
+    let scratch = "build/sailfin/.runtime-resolver-test-target-ir-owner";
+    _setup_scratch_workspace(scratch);
+    let path = scratch + "/runtime/native/capsule.toml";
+    let manifest = fs.readFile(path);
+    fs.writeFile(path, manifest
+        + "\n[targets.bad-ir-target]\nll-sources-add = [\"../../outside.ll\"]\n");
+    let result = enumerate_runtime_capsule_artifacts(scratch, []);
+    assert result.length == 0;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: replacement source must exist in the base runtime set" ![io] {
+    let scratch = "build/sailfin/.runtime-resolver-test-target-from";
+    _setup_scratch_workspace(scratch);
+    let path = scratch + "/runtime/native/capsule.toml";
+    let manifest = fs.readFile(path);
+    fs.writeFile(path, manifest
+        + "\n[targets.bad-target]\nsfn-sources-replace = [\"../sfn/missing.sfn=../sfn/platform/io_windows.sfn\"]\n");
+    let result = enumerate_runtime_capsule_artifacts(scratch, []);
+    assert result.length == 0;
     process.run(["rm", "-rf", scratch]);
 }
 

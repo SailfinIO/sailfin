@@ -30,7 +30,7 @@ import {
     source_role_library,
     source_role_runtime_provider
 } from "../module_paths";
-import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
+import { RuntimeCapsuleArtifacts, RuntimeTargetArtifacts } from "../runtime_capsule_resolver";
 import { contains_string } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import { llvm_assemble, llvm_assemble_argv } from "./clang_argv";
@@ -56,11 +56,9 @@ import { runtime_demanded_dep_specs } from "./runtime_selection";
 // their `platform/*_windows` siblings. Identity off Windows, so
 // Linux/macOS link inputs are byte-identical.
 //
-// SFN-549: the native path no longer links `runtime/ir/windows_stubs.ll`.
-// That file is mingw-cross-bridge scaffolding (compiled only by the
-// Makefile's `ci-cross-windows` recipe) and its strong definitions
-// duplicated the real Sailfin modules the native source set already
-// carries, so a native MSVC link failed with `LNK2005`.
+// SFN-775: both Windows ABIs now use real Sailfin runtime providers. The
+// retired MinGW bridge stubs would duplicate those definitions and are no
+// longer part of the workspace or installer.
 import {
     build_target_os,
     build_target_triple,
@@ -805,11 +803,11 @@ fn runtime_asm_cache_key(src_path: string, slug: string, compiler_identity: stri
 // otherwise resolve the plain host default regardless of what `--target`
 // the parent build was given. `SAILFIN_TARGET_TRIPLE` closes that gap:
 // the child's OWN `build_target_triple()` reads it ahead of a host probe.
-// This is the like-for-like driver-native replacement for the Makefile's
-// per-module `SAILFIN_TARGET_OS=Windows` re-emit override
-// (`ci-cross-windows`, `Makefile:1249`) — that recipe re-exported the
-// target on exactly three modules; here every runtime sfn-source emit
-// gets it uniformly. `SAILFIN_TARGET_OS` is ALSO kept in the child env
+// This is the like-for-like driver-native replacement for the former
+// Makefile per-module `SAILFIN_TARGET_OS=Windows` re-emit override. That
+// recipe re-exported the target on exactly three modules; here every runtime
+// sfn-source emit gets it uniformly. `SAILFIN_TARGET_OS` is ALSO kept in
+// the child env
 // (not cleared, unlike the four toggles above) so a version-skewed child
 // binary that only understands the legacy alias still resolves the
 // correct target.
@@ -1715,19 +1713,134 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
 // every downstream compile iterates the same list as before. A free
 // function taking `target_os` as a string keeps it pure; the `![io]`
 // caller resolves the target.
-fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: string) -> RuntimeCapsuleArtifacts[] {
-    if !target_os_is_windows(target_os) { return caps; }
+fn _runtime_target_artifacts(targets: RuntimeTargetArtifacts[], triple: string) -> RuntimeTargetArtifacts {
+    let mut i: int = 0;
+    loop {
+        if i >= targets.length { break; }
+        if targets[i].triple == triple { return targets[i]; }
+        i += 1;
+    }
+    let empty: string[] = [];
+    let empty2: string[] = [];
+    let empty3: string[] = [];
+    let empty4: string[] = [];
+    let empty5: string[] = [];
+    let empty6: string[] = [];
+    return RuntimeTargetArtifacts {
+        triple: "",
+        valid: true,
+        sfn_source_replacements: empty,
+        sfn_sources_add: empty2,
+        sfn_sources_drop: empty3,
+        ll_sources_add: empty4,
+        link_libs_add: empty5,
+        link_libs_drop: empty6
+    };
+}
+
+fn _runtime_replace_source(src: string, replacements: string[]) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= replacements.length { break; }
+        let record = replacements[i];
+        let mut tab: int = -1;
+        let mut j: int = 0;
+        loop {
+            if j >= record.length { break; }
+            if substring(record, j, j + 1) == "\t" {
+                tab = j;
+                break;
+            }
+            j += 1;
+        }
+        if tab > 0 && substring(record, 0, tab) == src {
+            return substring(record, tab + 1, record.length);
+        }
+        i += 1;
+    }
+    return src;
+}
+
+fn _runtime_condition_paths(base: string[], replacements: string[], drops: string[], adds: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        let src = _runtime_replace_source(base[i], replacements);
+        if !contains_string(drops, src) && !contains_string(out, src) {
+            out.push(src);
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= adds.length { break; }
+        if !contains_string(drops, adds[i]) && !contains_string(out, adds[i]) {
+            out.push(adds[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _runtime_condition_values(base: string[], drops: string[], adds: string[]) -> string[] {
+    let empty: string[] = [];
+    return _runtime_condition_paths(base, empty, drops, adds);
+}
+
+fn _runtime_drop_source_basename(base: string[], basename: string) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        if _path_basename(base[i]) != basename { out.push(base[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: string, target_triple: string) -> RuntimeCapsuleArtifacts[] {
     let mut out: RuntimeCapsuleArtifacts[] = [];
     let mut i: int = 0;
     loop {
         if i >= caps.length { break; }
         let c = caps[i];
+        let target = _runtime_target_artifacts(c.target_artifacts, target_triple);
+        let mut sfn_sources = c.sfn_sources;
+        let mut ll_sources = c.ll_sources;
+        let mut link_libs = c.link_libs;
+        if target.triple.length > 0 {
+            sfn_sources = _runtime_condition_paths(c.sfn_sources, target.sfn_source_replacements, target.sfn_sources_drop, target.sfn_sources_add);
+            let no_replacements: string[] = [];
+            let no_drops: string[] = [];
+            ll_sources = _runtime_condition_paths(c.ll_sources, no_replacements, no_drops, target.ll_sources_add);
+            link_libs = _runtime_condition_values(c.link_libs, target.link_libs_drop, target.link_libs_add);
+        } else if target_os_is_windows(target_os) {
+            // One-seed migration fallback (SFEP-0068 §3.3): a released seed
+            // that predates `[targets.*]` still selects the Win32 siblings.
+            sfn_sources = target_condition_runtime_sfn_sources(c.sfn_sources, target_os);
+            if target_triple == "x86_64-w64-mingw32" {
+                // MinGW supplies the pthread ABI through winpthreads. Keep the
+                // split Sailfin sysconf provider, but never link the MSVC-only
+                // pthread shim alongside the toolchain's strong definitions.
+                sfn_sources = _runtime_drop_source_basename(sfn_sources, "pthread_windows.sfn");
+                link_libs = _runtime_condition_values(c.link_libs, [], ["-lbcrypt", "-lcrypt32", "-lws2_32"]);
+            }
+        }
         out.push(RuntimeCapsuleArtifacts {
-            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, sfn_source_root: c.sfn_source_root, sfn_module_prefix: c.sfn_module_prefix, capsule_deps: c.capsule_deps, sfn_source_gates: c.sfn_source_gates
+            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: ll_sources, sfn_sources: sfn_sources, include_dirs: c.include_dirs, link_libs: link_libs, prelude_entry: c.prelude_entry, sfn_source_root: c.sfn_source_root, sfn_module_prefix: c.sfn_module_prefix, capsule_deps: c.capsule_deps, sfn_source_gates: c.sfn_source_gates, target_artifacts: c.target_artifacts
         });
         i += 1;
     }
     return out;
+}
+
+// Shared target-conditioning boundary for runtime compilation and every cache
+// identity that represents its outputs. Keeping one transformation prevents a
+// target replacement/addition or link-lib change from compiling one input set
+// while the linked-test cache hashes another.
+fn condition_runtime_capsules_for_target(caps: RuntimeCapsuleArtifacts[], target_os: string, target_triple: string) -> RuntimeCapsuleArtifacts[] {
+    return _condition_runtime_capsules(caps, target_os, target_triple);
 }
 
 fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
@@ -1740,7 +1853,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     // genuinely diverge by ABI (SFN-774).
     let target_os = build_target_os();
     let target_triple = build_target_triple();
-    let capsules = _condition_runtime_capsules(runtime_capsules, target_os);
+    let capsules = condition_runtime_capsules_for_target(runtime_capsules, target_os, target_triple);
     // One resolution feeds every clang phase, preserving the emit pool's
     // CPU/RAM ceiling and the SAILFIN_BUILD_JOBS=1 bisect path (SFN-612).
     let jobs = _cr_resolve_jobs();
@@ -1951,6 +2064,7 @@ export {
     RuntimeSfnObjectPlan,
     assemble_runtime_capsule_link_inputs,
     clean_runtime_object_cache,
+    condition_runtime_capsules_for_target,
     runtime_stamp_identity,
     write_runtime_identity_stamp,
     _runtime_bundle_exists,

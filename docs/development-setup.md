@@ -36,7 +36,7 @@ Install these before running `make compile`:
 | `make` | Top-level build and validation targets. |
 | `curl`, `tar`, `mktemp`, `uname` | Release installer and seed download plumbing. |
 | `jq` | GitHub release JSON parsing in `install.sh` / `make fetch-seed`. |
-| LLVM tools 17+ or 18+ | LLVM IR validation/linking tools such as `llvm-link` and `llvm-as`. |
+| LLVM tools 17+ or 18+ | LLVM IR validation and assembly tools such as `llvm-as`. |
 | `clang` | Assemble LLVM IR and link native executables. |
 | `shasum` or `sha256sum` | Seed/self-host hash checks. `shasum -a 256` is the portable default. |
 
@@ -46,7 +46,7 @@ Optional tools:
 |---|---|
 | GNU `timeout` (`timeout` / `gtimeout`) | Bounds direct compiler invocations and some Makefile validation paths. |
 | `npm` | Required only for `make mcp-server`. |
-| `x86_64-w64-mingw32-gcc` | Required only for `make ci-cross-windows` from Linux. |
+| `x86_64-w64-mingw32-gcc` | Required for `sfn build --target=x86_64-w64-mingw32`. |
 
 ## Install dependencies
 
@@ -158,7 +158,7 @@ install somewhere else.
 | Format touched compiler/runtime files | `build/bin/sfn fmt --write <files>` then `build/bin/sfn fmt --check <files>` |
 | Package release artifacts | `make package` |
 | Build MCP server | `make mcp-server` |
-| Cross-compile Windows artifact from Linux | `make rebuild && make ci-cross-windows` |
+| Cross-compile Windows artifact | `build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe` |
 
 Before committing changes under `compiler/src/` or `runtime/`, run
 `make compile` before test-only validation so tests do not run against a stale
@@ -198,7 +198,6 @@ invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
 | `BENCH_RUNTIME_ARGS` | `make bench-runtime` | empty | Extra args for runtime execution benchmarks. |
 | `ARENA_ARGS` | `make test-arena` | empty | Args forwarded to the native arena IR gate (`sfn dev arena`), e.g. `--all` or a module path. |
 | `KEEP_SEED=0` | `make clean-build` | keep seed | Also removes `build/toolchains/` during cleanup. |
-| `MINGW_CC` | `make ci-cross-windows` | `x86_64-w64-mingw32-gcc` | Windows cross-link compiler from Linux. |
 
 `BUILD_JOBS`, `NATIVE_OPT`, and `SELFHOST1_OPT` still exist in the Makefile for
 legacy/CI compatibility, but the normal self-host build now routes through
@@ -210,13 +209,14 @@ local source build unless you are changing the build driver itself.
 These are the build flags exposed by the compiler CLI:
 
 ```text
-sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--skip-toolchain-check] (<file.sfn> | -p <capsule-path>)
+sfn build [-o OUTPUT] [-p PATH] [--target=<triple>] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--skip-toolchain-check] (<file.sfn> | -p <capsule-path>)
 ```
 
 | Flag | Meaning |
 |---|---|
 | `-o OUTPUT` | Write the built executable to `OUTPUT`. |
 | `-p <capsule-path>` | Build a capsule by path instead of a single file. |
+| `--target=<triple>` | Build for a supported target triple, including `x86_64-w64-mingw32`. |
 | `--no-cache` | Bypass the build artifact cache for this invocation. |
 | `--clean` | Clean build outputs before compiling. |
 | `--cache-trace` | Print cache hit/miss diagnostics. |

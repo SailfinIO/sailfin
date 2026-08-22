@@ -65,7 +65,9 @@ import {
     build_target_triple,
     target_clang_flags,
     target_extra_link_libs,
-    target_filter_link_libs
+    target_filter_link_libs,
+    target_linker_driver,
+    target_linker_driver_flags
 } from "./build/target";
 // `_env_flag` gives `SAILFIN_TRACE_LINK` the same toggle semantics ("",
 // "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs;
@@ -202,8 +204,8 @@ fn _probe_macos_deployment_target() -> string ![io] {
 
 // Build the clang link argv for the `sfn test` layout:
 // `clang -O0 -Wno-override-module <sdk_flags…> -o OUT <objects…> <libs…>`.
-fn _llvm_text_link_test_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
-    let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
+fn _llvm_text_link_test_argv_with_driver(plan: LinkPlan, sdk_flags: string[], driver: string) -> string[] {
+    let mut args: string[] = [driver, plan.opt_flag, "-Wno-override-module"];
     let mut si: int = 0;
     loop {
         if si >= sdk_flags.length { break; }
@@ -227,10 +229,14 @@ fn _llvm_text_link_test_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
     return args;
 }
 
+fn _llvm_text_link_test_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
+    return _llvm_text_link_test_argv_with_driver(plan, sdk_flags, "clang");
+}
+
 // Build the clang link argv for the program/build layout:
 // `clang <opt> -Wno-override-module <sdk_flags…> <link_flags…> <objects…> -o OUT <libs…>`.
-fn _llvm_text_link_program_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
-    let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
+fn _llvm_text_link_program_argv_with_driver(plan: LinkPlan, sdk_flags: string[], driver: string) -> string[] {
+    let mut args: string[] = [driver, plan.opt_flag, "-Wno-override-module"];
     let mut si: int = 0;
     loop {
         if si >= sdk_flags.length { break; }
@@ -260,12 +266,21 @@ fn _llvm_text_link_program_argv(plan: LinkPlan, sdk_flags: string[]) -> string[]
     return args;
 }
 
+fn _llvm_text_link_program_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
+    return _llvm_text_link_program_argv_with_driver(plan, sdk_flags, "clang");
+}
+
 // Both builders are module-private by naming convention; export them so
 // the runtime `link_libs` parity regression guard
 // (`compiler/tests/unit/backend_link_libs_parity_test.sfn`, SFEP-0036 /
 // #1782) can call them directly. Mirrors the `build/clang_argv.sfn`
 // export-of-underscore-helper precedent; no rename, no behavior change.
-export { _llvm_text_link_test_argv, _llvm_text_link_program_argv };
+export {
+    _llvm_text_link_program_argv,
+    _llvm_text_link_program_argv_with_driver,
+    _llvm_text_link_test_argv,
+    _llvm_text_link_test_argv_with_driver
+};
 
 // Env-gated (`SAILFIN_TRACE_LINK`) stderr echo of the resolved clang link
 // argv (#1908): a read-only observability aid that prints exactly the argv
@@ -360,7 +375,8 @@ struct LlvmTextBackend {
         // resolutions are threaded independently.
         let target_os = build_target_os();
         let triple = build_target_triple();
-        let driver_flags = _concat_driver_flags(target_clang_flags(triple), _macos_sdk_link_flags());
+        let link_driver = target_linker_driver(triple);
+        let driver_flags = _concat_driver_flags(target_linker_driver_flags(triple), _macos_sdk_link_flags());
         let eff_plan = _target_conditioned_plan(plan, triple);
         // Sailfin owns Link on Linux x86-64 (SFEP-0066 §3.1 role table):
         // take the direct `ld.lld` path when the link contract resolves,
@@ -381,12 +397,12 @@ struct LlvmTextBackend {
         }
         trace_direct_link_fallback(direct.reason);
         if eff_plan.test_mode {
-            let test_argv = _llvm_text_link_test_argv(eff_plan, driver_flags);
+            let test_argv = _llvm_text_link_test_argv_with_driver(eff_plan, driver_flags, link_driver);
             let test_spawn = link_argv_or_response_file(test_argv, eff_plan.out_path);
             _llvm_text_trace_link(test_argv);
             return process.run(test_spawn);
         }
-        let program_argv = _llvm_text_link_program_argv(eff_plan, driver_flags);
+        let program_argv = _llvm_text_link_program_argv_with_driver(eff_plan, driver_flags, link_driver);
         let program_spawn = link_argv_or_response_file(program_argv, eff_plan.out_path);
         _llvm_text_trace_link(program_argv);
         return process.run(program_spawn);

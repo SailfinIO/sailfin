@@ -122,8 +122,7 @@ extern fn sfn_str_from_codepoint(cp: i64) -> *u8;
 // libc surface for `sailfin_runtime_shell_capture` (popen-based command
 // capture). `popen`/`pclose`/`fread` are provided by glibc on
 // Linux/macOS and by mingw's msvcrt on Windows, so this body links on
-// every target io.sfn is compiled for (it is in both
-// `runtime/capsule.toml` and the cross-windows RUNTIME_MODS).
+// every target for which `io.sfn` is compiled from the runtime manifest.
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;

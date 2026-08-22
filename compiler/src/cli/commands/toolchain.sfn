@@ -281,77 +281,11 @@ fn _download_to(url: string, dest: string) -> boolean ![io, net] {
 }
 
 // True when `url` uses the `https://` scheme.
-fn _is_https_url(url: string) -> boolean {
-    let scheme = "https://";
-    if url.length < scheme.length { return false; }
-    return substring(url, 0, scheme.length) == scheme;
-}
-
-// Explain a download failure beyond "it failed".
-//
-// A failed fetch previously printed only the URL, which reads as "the
-// network is down" or "that asset does not exist" — and on a Windows host
-// both are usually wrong. Windows binaries produced by the mingw
-// cross-build path carry no TLS at all: `tls.sfn` is excluded from
-// `RUNTIME_MODS` (`Makefile`) and the `@tls_*` symbols resolve to the
-// no-op stubs in `runtime/ir/windows_stubs.ll`, where `tls_client_ctx`
-// returns null. Every `https://` request therefore fails before any
-// socket is opened, no matter how healthy the network or how valid the
-// certificate. The release URLs are all `https://`, so `toolchain
-// install` cannot work on such a build — and the user has no way to
-// deduce that from "failed to download".
-//
-// Deliberately phrased as one of two possibilities rather than a
-// diagnosis: this code cannot observe which link produced the running
-// binary, and a natively-built Windows compiler links the real `tls.sfn`
-// and is unaffected. Since SFN-1033 made the native `-msvc` asset
-// reachable, both builds are in circulation simultaneously, so asserting
-// the mingw cause would be actively wrong roughly whenever the reader is
-// on the build we now prefer. The note therefore names the asset that
-// settles it instead of guessing (SFN-1028 tracks making this
-// self-verifying, which is the real fix).
-//
-// Do not reintroduce the discriminator this note used to carry — "plain
-// `http://` still works when only TLS is stubbed". It is not decisive:
-// under SFN-1026 plain `http://` worked and TLS was NOT the cause,
-// because a hostname never resolved. Anything that cannot separate "no
-// TLS" from "never resolved the host" sends the reader at the wrong
-// layer with false confidence, which is the failure this whole note
-// exists to avoid. (It was also, separately, false until SFN-927: the
-// mingw runtime set carried Winsock `recv`/`send` sign-truncation and
-// millisecond/DWORD timeout bugs that broke the `http://` half too.)
-//
-// Removal condition: SFN-58 — this note stops being useful when no shipped
-// Windows binary carries the TLS stubs, i.e. when `runtime/ir/
-// windows_stubs.ll` and the mingw cross path are retired in favour of the
-// native MSVC build, which links the real `tls.sfn`. SFN-923 is a
-// prerequisite rather than the condition: the duplicate
-// `__sfn_type_desc.*` failures that block a cross-Windows link are in
-// `sfn/crypto` itself, so the capsule cannot be staged until that lands —
-// but staging it would not retire this note, because the mingw build
-// would still ship stubs. SFN-927 does not retire this note either: it
-// fixed a different bug on the same runtime-module list. Once SFN-58
-// lands there is only one Windows build and nothing left for the note to
-// distinguish, so it goes away entirely rather than being narrowed.
-fn _download_failure_note(url: string) -> string ![io] {
-    if !_is_https_url(url) { return ""; }
-    if !host_is_windows() { return ""; }
-    return "note: this is an https:// URL, and recent releases ship two Windows\n"
-        + "      builds. The native \"...x86_64-msvc.tar.gz\" asset has working TLS;\n"
-        + "      the legacy mingw \"...x86_64.tar.gz\" asset has none, and on that\n"
-        + "      build every https:// request fails before it reaches the network —\n"
-        + "      regardless of connectivity or certificates. Check which asset this\n"
-        + "      binary came from before suspecting the network. Mingw retirement is\n"
-        + "      SFN-58; this note cannot yet tell the two builds apart (SFN-1028).";
-}
-
 // Print the shared failure preamble for a download that did not land:
-// the message, the URL that failed, and the note when one applies.
+// the message and the URL that failed.
 fn _print_download_failure(what: string, url: string) -> void ![io, io.console] {
     print("error: failed to download " + what);
     print("  " + url);
-    let note = _download_failure_note(url);
-    if note.length > 0 { print(note); }
 }
 
 // `sfn toolchain install` against the user-facing version store
@@ -587,13 +521,12 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
         return 1;
     }
 
-    // The msvc build is the native one with working TLS; the plain asset is
-    // the legacy mingw cross build being retired by SFN-58. Resolving the
-    // choice from the signed manifest (already verified above) costs no
-    // extra request and can't be spoofed by a filename on the wire. The
-    // fallback to the plain asset is mandatory, not defensive: releases
-    // before v0.10.3 have no msvc asset, and arm64 has none at any version
-    // (SFN-1033).
+    // Prefer the ABI-specific MSVC asset when the signed manifest offers it;
+    // the plain Windows asset remains the MinGW build produced by the same
+    // native Sailfin driver. Resolving the choice from the already-verified
+    // manifest costs no extra request and cannot be spoofed by a filename on
+    // the wire. The plain fallback is mandatory: releases before v0.10.3 have
+    // no MSVC asset, and arm64 has none at any version (SFN-1033).
     if os == "windows" {
         let msvc_asset = "sailfin_" + ver + "_" + os + "_" + arch
             + "-msvc.tar.gz";
@@ -913,7 +846,5 @@ export {
     toolchain_lay_out_store_entry,
     _detect_os,
     _detect_arch,
-    _download_failure_note,
-    _is_https_url,
     _toolchain_link_alias
 };

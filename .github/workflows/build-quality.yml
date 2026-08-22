@@ -554,7 +554,7 @@ jobs:
       # partial result written here would lock out the full baseline for this
       # tree state forever (SFN-797). Key matches the PR action's
       # `sailfin-testbin-...` key exactly, including `runtime/capsule.toml` +
-      # `runtime/ir/**` (manifest and cross-windows link stub) so a runtime
+      # `runtime/ir/**` (manifest and prewritten runtime IR) so a runtime
       # edit rolls the key and the baseline can publish a fresh entry.
       # (`runtime/native/**` retired in #823.)
       - name: Save test-bin cache for PR CI

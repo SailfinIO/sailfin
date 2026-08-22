@@ -29,10 +29,16 @@ import {
 import { contains } from "sfn/strings";
 import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
-import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
+import {
+    LinkPlan,
+    _llvm_text_link_program_argv,
+    _llvm_text_link_program_argv_with_driver,
+    _llvm_text_link_test_argv
+} from "../../src/backend";
 import { _llvm_text_assemble_argv } from "../../src/build/clang_argv";
 import { emit_child_argv } from "../../src/build/emit_child_argv";
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { condition_runtime_capsules_for_target } from "../../src/build/runtime_objs";
 import {
     build_host_os,
     build_target_triple,
@@ -45,6 +51,8 @@ import {
     target_extra_link_libs,
     target_filter_link_libs,
     target_forced_linker_flag,
+    target_linker_driver,
+    target_linker_driver_flags,
     target_os_is_windows,
     target_reproducible_link_flag,
     target_uses_gnu_link_gc,
@@ -55,6 +63,7 @@ import {
     triple_target_os
 } from "../../src/build/target";
 import { active_build_target, clear_build_target, set_build_target } from "../../src/build/target_state";
+import { RuntimeCapsuleArtifacts, RuntimeTargetArtifacts } from "../../src/runtime_capsule_resolver";
 
 // Membership check over an emitted argv (`string[]`).
 fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
@@ -65,6 +74,51 @@ fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
         i += 1;
     }
     return false;
+}
+
+test "target: runtime cache identity and linker share the effective target inputs" ![io] {
+    let target = RuntimeTargetArtifacts {
+        triple: "x86_64-w64-mingw32",
+        valid: true,
+        sfn_source_replacements: ["/runtime/sfn/io.sfn\t/runtime/sfn/platform/io_windows.sfn"],
+        sfn_sources_add: ["/runtime/sfn/platform/sysconf_windows.sfn"],
+        sfn_sources_drop: ["/runtime/sfn/assert.sfn"],
+        ll_sources_add: ["/runtime/ir/mingw.ll"],
+        link_libs_add: ["-lws2_32"],
+        link_libs_drop: ["-lpthread"]
+    };
+    let cap = RuntimeCapsuleArtifacts {
+        capsule_name: "sfn/runtime",
+        manifest_dir: "/runtime",
+        c_sources: [],
+        ll_sources: ["/runtime/ir/base.ll"],
+        sfn_sources: ["/runtime/sfn/io.sfn", "/runtime/sfn/assert.sfn"],
+        include_dirs: [],
+        link_libs: ["-lm", "-lpthread"],
+        prelude_entry: "",
+        sfn_source_root: "/runtime/sfn",
+        sfn_module_prefix: "runtime/sfn",
+        capsule_deps: [],
+        sfn_source_gates: [],
+        target_artifacts: [target]
+    };
+
+    let effective = condition_runtime_capsules_for_target([cap], "Windows", "x86_64-w64-mingw32");
+    assert effective.length == 1;
+    assert expect_eq_str_array(effective[0].sfn_sources, ["/runtime/sfn/platform/io_windows.sfn", "/runtime/sfn/platform/sysconf_windows.sfn"]).ok;
+    assert expect_eq_str_array(effective[0].ll_sources, ["/runtime/ir/base.ll", "/runtime/ir/mingw.ll"]).ok;
+    assert expect_eq_str_array(effective[0].link_libs, ["-lm", "-lws2_32"]).ok;
+
+    // Wiring guard: the linked-test identity must invoke this same shared
+    // conditioning boundary before it hashes sources and link values.
+    let cache_src = fs.readFile("compiler/src/cli/commands/test/cache_scratch.sfn");
+    assert contains(cache_src, "let caps = condition_runtime_capsules_for_target(");
+    // The multi-file test parent must stamp the same effective capsules that
+    // its internal warm compiled, or Windows children re-hash every replaced
+    // and added runtime provider despite the invocation stamp.
+    let multi_file_src = fs.readFile("compiler/src/cli/commands/test/multi_file_run.sfn");
+    assert contains(multi_file_src, "let stamp_caps = condition_runtime_capsules_for_target(");
+    assert contains(multi_file_src, "write_runtime_identity_stamp(stamp_caps,");
 }
 
 // An LLVM entrypoint must replace the complete primitive snapshot on every
@@ -163,7 +217,7 @@ test "target: both Windows triples pass their own triple to clang" ![pure] {
     let expected_msvc: string[] = ["-target", "x86_64-pc-windows-msvc"];
     assert expect_eq_str_array(target_clang_flags("x86_64-pc-windows-msvc"), expected_msvc).ok;
     assert expect_eq_str(target_clang_triple("x86_64-w64-mingw32"), "x86_64-w64-mingw32").ok;
-    let expected_gnu: string[] = ["-target", "x86_64-w64-mingw32"];
+    let expected_gnu: string[] = ["-target", "x86_64-w64-mingw32", "-femulated-tls"];
     assert expect_eq_str_array(target_clang_flags("x86_64-w64-mingw32"), expected_gnu).ok;
 }
 
@@ -175,6 +229,16 @@ test "target: msvc forces lld, host targets and windows-gnu do not" ![pure] {
     assert expect_eq_str(target_forced_linker_flag("x86_64-w64-mingw32"), "").ok;
     assert expect_eq_str(target_forced_linker_flag("x86_64-unknown-linux-gnu"), "").ok;
     assert expect_eq_str(target_forced_linker_flag("x86_64-apple-darwin"), "").ok;
+}
+
+test "target: windows-gnu links through the static MinGW driver" ![pure] {
+    assert expect_eq_str(target_linker_driver("x86_64-w64-mingw32"), "x86_64-w64-mingw32-gcc").ok;
+    assert expect_eq_str_array(target_linker_driver_flags("x86_64-w64-mingw32"), ["-static"]).ok;
+    assert expect_eq_str(target_linker_driver("x86_64-unknown-linux-gnu"), "clang").ok;
+    let argv = _llvm_text_link_program_argv_with_driver(_driver_plan(false), ["-static"], target_linker_driver("x86_64-w64-mingw32"));
+    assert expect_eq_str(argv[0], "x86_64-w64-mingw32-gcc").ok;
+    assert expect_eq_bool(_argv_contains(argv, "-static"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-target"), false).ok;
 }
 
 test "target: msvc requests /Brepro, host targets and windows-gnu do not" ![pure] {
@@ -225,10 +289,9 @@ test "target: host runtime module set is unchanged" ![pure] {
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
 }
 
-test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, fs_exec_mode.sfn, and cert_roots.sfn to their Win32 siblings, leaves tls.sfn unconditioned, and appends the six anchor-less siblings" ![pure] {
-    // SFN-549: rlimit.sfn used to be DROPPED here (a no-op stub in
-    // windows_stubs.ll resolved apply_default_mem_limit for the mingw
-    // bridge only); the native MSVC path no longer links that stub, so
+test "target: Windows swaps platform sources and appends native providers" ![pure] {
+    // SFN-549: rlimit.sfn used to be dropped here; the native Windows paths
+    // need the real memory-budget provider, so
     // rlimit.sfn now swaps to its own Win32 sibling instead of vanishing.
     // terminal.sfn swaps to terminal_windows.sfn (`isatty` -> `_isatty`).
     // rand.sfn swaps the same way (BCryptGenRandom in place of
@@ -242,8 +305,8 @@ test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, fs_exec_mode.sfn,
     // (SFN-649). cert_roots.sfn swaps to cert_roots_windows.sfn: Windows
     // has no CA-bundle file anywhere, so the system `ROOT` certificate
     // store reached through Crypt32 is the only trust source there
-    // (SFN-808). The eight anchor-less siblings (realpath_windows.sfn,
-    // clock_windows.sfn, pthread_windows.sfn, popen_windows.sfn,
+    // (SFN-808). The nine anchor-less siblings (realpath_windows.sfn,
+    // clock_windows.sfn, pthread_windows.sfn, sysconf_windows.sfn, popen_windows.sfn,
     // mkstemp_windows.sfn, strcasestr_windows.sfn, opendir_windows.sfn,
     // mkdtemp_windows.sfn) have no POSIX .sfn
     // counterpart to swap FROM (each backs a bare libc/pthreads symbol,
@@ -251,7 +314,7 @@ test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, fs_exec_mode.sfn,
     // replacing a matched basename. Every other module is preserved in
     // order.
     let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/terminal.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/platform/cert_roots.sfn", "/rt/sfn/io.sfn",];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/terminal_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/platform/cert_roots_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn", "/rt/sfn/platform/mkdtemp_windows.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/terminal_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/platform/cert_roots_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/sysconf_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn", "/rt/sfn/platform/mkdtemp_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 
@@ -276,7 +339,7 @@ test "target: Windows append anchors on exec.sfn when rlimit.sfn/rand.sfn/tls.sf
     // The append doesn't require rlimit.sfn/rand.sfn/tls.sfn specifically —
     // any of the four platform/ modules anchors it, exec.sfn included.
     let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn"];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn", "/rt/sfn/platform/mkdtemp_windows.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/sysconf_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn", "/rt/sfn/platform/mkdtemp_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 
@@ -289,27 +352,24 @@ test "target: Windows skips the anchor-less appends with no platform/ anchor pre
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), sources).ok;
 }
 
-test "target: extra link libs — msvc needs bcrypt, crypt32, and ws2_32; windows-gnu needs crypt32 and ws2_32" ![pure] {
+test "target: compiler-global extra link libs are MSVC-only" ![pure] {
     // `-lbcrypt` backs BCryptGenRandom in platform/rand_windows.sfn
-    // (SFN-549) — msvc-only, since windows-gnu resolves it through its
-    // own mingw-w64 import libs. `-lcrypt32` backs
+    // (SFN-549). `-lcrypt32` backs
     // CertOpenSystemStoreA/CertEnumCertificatesInStore/
     // CertFreeCertificateContext/CertCloseStore in
-    // platform/cert_roots_windows.sfn (SFN-808) — required on BOTH
-    // Windows ABIs, unlike bcrypt, because crypt32 is not in mingw-w64's
-    // default auto-linked import-lib set. `-lws2_32` backs the 11 socket
+    // platform/cert_roots_windows.sfn (SFN-808). `-lws2_32` backs the 11 socket
     // symbols the net and websocket adapters declare as bare externs —
     // free from libc on POSIX, exported from ws2_32.dll on BOTH Windows
-    // ABIs (SFN-649). ws2_32 and crypt32 are required even for a program
+    // ABI (SFN-649). ws2_32 and crypt32 are required even for a program
     // that opens no socket and loads no certificate: COFF resolves every
     // external reference before dead-stripping, and those runtime
     // modules are always linked. Every host target keeps the
-    // identity/empty result (#1112).
+    // identity/empty result (#1112). MinGW receives the equivalent policy
+    // from the runtime target manifest, not this compiler-global helper.
     let expected_msvc: string[] = ["-lbcrypt", "-lcrypt32", "-lws2_32"];
     assert expect_eq_str_array(target_extra_link_libs("x86_64-pc-windows-msvc"), expected_msvc).ok;
-    let expected_gnu: string[] = ["-lcrypt32", "-lws2_32"];
-    assert expect_eq_str_array(target_extra_link_libs("x86_64-w64-mingw32"), expected_gnu).ok;
     let none: string[] = [];
+    assert expect_eq_str_array(target_extra_link_libs("x86_64-w64-mingw32"), none).ok;
     assert expect_eq_str_array(target_extra_link_libs("x86_64-unknown-linux-gnu"), none).ok;
     assert expect_eq_str_array(target_extra_link_libs("x86_64-apple-darwin"), none).ok;
 }
