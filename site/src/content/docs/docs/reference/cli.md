@@ -103,7 +103,7 @@ sfn test compiler/tests/unit compiler/tests/integration capsules  # three suites
 | `-k NAME` | Only run tests whose name contains `NAME`. Exits non-zero if it matches no tests. |
 | `--tag TAG` | Only run tests carrying `@tag("TAG")`. Exits non-zero if it matches no tests. |
 | `--update-snapshots` | Re-baseline snapshot golden files. |
-| `--no-test-cache` | Bypass the per-test linked-binary cache. |
+| `--no-test-cache` | Bypass the per-test linked-binary cache and the shared runtime object cache, so the run rebuilds the runtime from source. |
 | `--jobs N` | Run up to `N` per-file test children concurrently. |
 | `--slowest N` | Print the `N` slowest test files after a multi-file run (default `5`; `0` disables the summary; range `[0, 1000]`, out-of-range exits `2`). |
 | `--shard I/N` | Run only the `I`-th of `N` file-count-balanced shards. |

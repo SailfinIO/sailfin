@@ -46,7 +46,7 @@ struct TestLinkResult {
     ran_backend: boolean;
 }
 
-fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string, runtime_demand: string[]) -> TestLinkResult ![io] {
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string, runtime_demand: string[], shared_cache_root: string) -> TestLinkResult ![io] {
     // `-Wno-override-module`: every emitted `.ll` carries its own `target
     // triple`, which clang's link overrides — matching the suppression on
     // every other clang invocation in cli_main.sfn so the test path is not
@@ -136,10 +136,22 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         return TestLinkResult { rc: 1, ran_backend: false };
     }
     _ensure_dir_cmd(rt_cache_dir);
-    // Test link path keeps runtime objects work-dir-local (shared root
-    // empty); the shared content-addressed runtime cache (#1096) is
-    // scoped to the build/run path that feeds the build-quality gate.
-    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir, "");
+    // SFN-1086: assemble against the SAME shared content-addressed runtime
+    // cache the build/run path uses (#1096). That cache was scoped to
+    // build/run as a matter of scope, not safety — a3234818 records the
+    // exclusion as "the `sfn test` link path stays work-dir-local" while
+    // its motivation was restoring the build-quality determinism gate.
+    //
+    // Without it the work-dir-local `.key` sidecars die with the scratch,
+    // so every invocation re-emitted the whole runtime (measured ~40s on
+    // Linux, ~47s on Windows, independent of the test's own size).
+    //
+    // The caller passes "" under `--no-test-cache`, which disables both the
+    // read and the write (`_runtime_obj_shared_cache_fetch`/`_publish`) and
+    // keeps `make check`'s cold suite cold. The CAS is the THIRD probe rung
+    // — behind the invocation stamp and the work-dir sidecar — so no
+    // already-warm path gets slower.
+    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir, shared_cache_root);
     // Pre-backend bailout: runtime object assembly failed; the backend never
     // ran (SFN-212).
     if !rt.success {

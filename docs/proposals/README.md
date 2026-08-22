@@ -115,6 +115,13 @@ Index row. One slate is in review.
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |
 
+**Toolchain / build-performance drafts:**
+
+| Draft | Title | Type |
+|---|---|---|
+| [`draft-nested-build-object-cache-sharing`](./draft-nested-build-object-cache-sharing.md) | Shared runtime/dep object cache for nested builds in the e2e suite | tooling |
+| [`draft-test-path-shared-runtime-object-cache`](./draft-test-path-shared-runtime-object-cache.md) | Cross-invocation runtime-object persistence for the `sfn test` link path | tooling |
+
 The **native-Windows toolchain critical path** design graduated out of this
 slate on 2026-08-15 and now holds an Index row: SFEP-0071 (in-process
 `.tar.gz`), tracked by SFN-753 and groomed into SFN-895/896/897/898/899/900.

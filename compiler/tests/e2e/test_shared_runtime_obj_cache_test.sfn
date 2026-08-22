@@ -1,0 +1,166 @@
+// compiler/tests/e2e/test_shared_runtime_obj_cache_test.sfn
+//
+// Regression coverage for SFN-1086: the `sfn test` link path assembles
+// runtime objects against the shared content-addressed cache
+// (`_clang_link_test_cmd_with_deps` -> `assemble_runtime_capsule_link_inputs`,
+// `compiler/src/cli/commands/test/link.sfn`), so runtime objects persist
+// ACROSS invocations instead of dying with each invocation's scratch.
+//
+// The observable is structural, not timing-based: a runtime module is
+// emitted to `<scratch>/sfn__runtime-native__<slug>-<target>-O0.ll` only
+// when the emit actually runs. A cache hit copies the `.o` into place and
+// never produces the `.ll`. So "did the runtime rebuild?" is exactly
+// "are there any `sfn__runtime-native__*.ll` files in the scratch?" —
+// which is robust to the runtime's module COUNT changing over time, unlike
+// asserting a wall-clock time or a specific number.
+//
+// Two contracts, and the second matters as much as the first:
+//   A. A warm shared cache + a FRESH scratch emits ZERO runtime modules.
+//   B. `--no-test-cache` still rebuilds the runtime into a fresh scratch
+//      even when the shared cache beside it is warm. Precisely: the flag
+//      makes the SCRATCH cold, not the link — a pooled parent still warms
+//      `sub_root` once and its children still hit that. This test runs a
+//      single file into a fresh scratch, where the two coincide.
+//      `make check` passes the flag (`Makefile:741`) to get a cold suite;
+//      if the shared cache leaked past it, the gate would silently start
+//      measuring warm artifacts.
+import { contains, ends_with, starts_with } from "sfn/strings";
+import {
+    clean_runner_env,
+    expect_eq_bool,
+    expect_eq_int,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
+
+// Count runtime-module IR emitted into `dir` this invocation.
+fn _runtime_ll_count(dir: string) -> int ![io] {
+    if !fs.exists(dir) { return 0; }
+    let entries = fs.listDirectory(dir);
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if !ends_with(name, ".ll") { continue; }
+        if !contains(name, "sfn__runtime-native__") { continue; }
+        n += 1;
+    }
+    return n;
+}
+
+// Child env pinned to OUR cache root.
+//
+// `clean_runner_env` strips the pool-managed keys but NOT
+// `SAILFIN_BUILD_CACHE_DIR` / `SAILFIN_NO_CACHE`, so an inherited value
+// would survive and a plain push would land SECOND in the envp. libc
+// `getenv()` returns the FIRST match (`_process_build_cstr_argv`,
+// `runtime/sfn/process.sfn`), so the push would be silently defeated and
+// the test would run against the ambient cache instead of its own —
+// passing or failing for reasons that have nothing to do with the fix.
+// This is the duplicate-key trap SFN-925 records for the target/host keys.
+// Drop both keys, then add exactly one of ours.
+fn _env_with_cache_root(scratch: string, cache_root: string) -> string[] ![io] {
+    let base = clean_runner_env(scratch);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        let entry = base[i];
+        i += 1;
+        if starts_with(entry, "SAILFIN_BUILD_CACHE_DIR=") { continue; }
+        if starts_with(entry, "SAILFIN_NO_CACHE=") { continue; }
+        out.push(entry);
+    }
+    out.push("SAILFIN_BUILD_CACHE_DIR=" + cache_root);
+    return out;
+}
+
+// A minimal test file. The subject under test is the RUNTIME build, which
+// every test binary links regardless of its own body, so the body is kept
+// trivial to keep the fixture's own compile off the measurement.
+fn _write_fixture(path: string, tag: string) ![io] {
+    fs.writeFile(path, "test \"sfn1086 fixture " + tag
+        + "\" {\n    assert 1 + 1 == 2;\n}\n");
+}
+
+// Run a nested single-file `sfn test` and report how many runtime modules
+// it emitted. `extra_flag` empty means "no extra flag".
+fn _run_and_count(label: string, cache_root: string, extra_flag: string) -> int ![io] {
+    let scratch = nested_runner_scratch("sfn1086-" + label);
+    // Wipe first. `nested_runner_scratch` is a pure function of its label,
+    // so two runs sharing a label share a directory, and a stale `.ll` left
+    // by an earlier run would be counted as if this run had emitted it —
+    // which would make the `warm == 0` assertion pass or fail for reasons
+    // unrelated to the cache. Counting is only meaningful over a directory
+    // this run alone populated.
+    let _ = fs.removeDirectory(scratch, true);
+    fs.createDirectory(scratch, true);
+    let fixture = scratch + "/sfn1086_" + label + "_test.sfn";
+    _write_fixture(fixture, label);
+    let mut argv: string[] = [sfn_bin_path(), "test"];
+    if extra_flag.length > 0 { argv.push(extra_flag); }
+    argv.push(fixture);
+    let exit = process.run_capture(argv, _env_with_cache_root(scratch, cache_root));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert expect_eq_int(exit, 0).ok;
+    return _runtime_ll_count(scratch);
+}
+
+// Populate `cache_root` with a full runtime object set, returning the
+// runtime-module count that cold run emitted.
+//
+// Each test passes its OWN `cache_root` and `label` and pays its own cold
+// populate. That is deliberate, not waste: the second test compares its
+// `--no-test-cache` run against this return value, so the value has to come
+// from a genuinely cold run. Sharing one warm cache root between the tests
+// would make the second test's baseline 0 and the comparison vacuous.
+fn _populate_cache(label: string, cache_root: string) -> int ![io] {
+    // Wipe for the same reason `_run_and_count` wipes its scratch, and it
+    // matters more here. `nested_runner_scratch` is a pure function of its
+    // label, so when the OUTER scratch is pinned — seedcheck pins
+    // `SAILFIN_TEST_SCRATCH`, and the pool's per-file scratch is the
+    // index-based `sub-<n>` — this cache root survives the invocation. A
+    // second run landing on the same `sub-<n>` would find it already warm,
+    // emit nothing, and return 0 from a run this file calls "cold",
+    // failing both tests on their baselines.
+    let _ = fs.removeDirectory(cache_root, true);
+    fs.createDirectory(cache_root, true);
+    return _run_and_count(label, cache_root, "");
+}
+
+test "test cache: a warm shared cache serves runtime objects into a fresh scratch" ![io] {
+    let cache_root = nested_runner_scratch("sfn1086-cache-a");
+    // Cold: the shared cache starts empty, so this run must emit the
+    // runtime itself. Guards the test against passing vacuously if the
+    // runtime were somehow never built at all.
+    let cold = _populate_cache("cold-a", cache_root);
+    // Vacuity guard: if the runtime were never emitted at all, the warm
+    // assertion below would pass for the wrong reason.
+    assert expect_eq_bool(cold > 0, true).ok;
+
+    // Warm: a DIFFERENT fixture in a FRESH scratch, same cache root.
+    // Before SFN-1086 this re-emitted every runtime module, because the
+    // work-dir `.key` sidecars died with the previous scratch.
+    let warm = _run_and_count("warm", cache_root, "");
+    assert expect_eq_int(warm, 0).ok;
+}
+
+test "test cache: --no-test-cache still cold-builds against a warm shared cache" ![io] {
+    let cache_root = nested_runner_scratch("sfn1086-cache-b");
+    let cold = _populate_cache("cold-b", cache_root);
+    assert expect_eq_bool(cold > 0, true).ok;
+
+    // `--no-test-cache` must pass an empty shared root, so this run
+    // rebuilds the runtime even though the cache beside it is warm.
+    // Without this the flag would stop meaning "cold" and `make check`
+    // would quietly measure a warm tree.
+    //
+    // Asserted against `cold` rather than `> 0`: the contract is that the
+    // flag rebuilds exactly as much as a genuinely cold run, and equality
+    // states that without pinning the runtime's module count.
+    let still_cold = _run_and_count("nocache", cache_root, "--no-test-cache");
+    assert expect_eq_int(still_cold, cold).ok;
+}
