@@ -1,0 +1,228 @@
+// Unit tests for the E0841 `?`-desugar `value`-shadowing rejection (SFN-901).
+//
+// The emit-stage desugar (`emit_native_desugar_try.sfn`) rewrites the FIRST
+// statement in a block containing a hoistable `?` into a `match`, relocating
+// that statement plus every following statement into the `Result.Ok` arm
+// whose binder is forced to the literal name `value`. There is no
+// binder-rename syntax, so a block that both uses `?` and reads `value` in
+// the relocated region must be rejected rather than silently miscompiled.
+// These drive `check_try_value_shadowing` directly, mirroring the #833
+// typecheck primitive tests (`result_question_typecheck_test.sfn`) and the
+// AST-construction style of `try_desugar_test.sfn`.
+import { check_try_value_shadowing } from "sfn/analyzer/typecheck/try_and_conditional";
+import {
+    Block,
+    Expression,
+    MatchCase,
+    ObjectField,
+    Parameter,
+    Statement,
+    WithClause
+} from "sfn/syntax";
+
+fn _try_of(name: string) -> Expression {
+    return Expression.TryOperator {
+        operand: Expression.Identifier { name: name, span: null },
+        span: null
+    };
+}
+
+fn _ident(name: string) -> Expression {
+    return Expression.Identifier { name: name, span: null };
+}
+
+fn _number(value: string) -> Expression {
+    return Expression.NumberLiteral { value: value, span: null };
+}
+
+fn _let(name: string, initializer: Expression) -> Statement {
+    return Statement.VariableDeclaration {
+        name: name,
+        mutable: false,
+        is_thread_local: false,
+        type_annotation: null,
+        initializer: initializer,
+        span: null,
+        initializer_span: null
+    };
+}
+
+fn _return(expression: Expression) -> Statement {
+    return Statement.ReturnStatement { expression: expression, span: null };
+}
+
+fn _block(statements: Statement[]) -> Block {
+    return Block { tokens: [], text: "", statements: statements };
+}
+
+fn _if(condition: Expression, then_block: Block) -> Statement {
+    return Statement.IfStatement {
+        condition: condition,
+        then_block: then_block,
+        else_branch: null,
+        decorators: [],
+        span: null
+    };
+}
+
+test "try-shadow: `?` plus a later read of `value` fires E0841" {
+    let block = _block([_let("value", _number("7")), _let("x", _try_of("r")), _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0841");
+}
+
+test "try-shadow: continuation free-reads `value` with no local binding fires E0841" {
+    let block = _block([_let("x", _try_of("r")), _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0841");
+}
+
+test "try-shadow: the `?`-bearing statement itself reading `value` fires E0841" {
+    let block = _block([_let("x", Expression.Binary {
+        operator: "+", left: _ident("value"), right: _try_of("r")
+    })]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0841");
+}
+
+test "try-shadow: `?` without any mention of `value` does not fire" {
+    let block = _block([_let("x", _try_of("r")), _return(_ident("x"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 0;
+}
+
+test "try-shadow: `Result.Ok { value: x }` field name is not a read of `value`" {
+    let block = _block([_let("x", _try_of("r")), _return(Expression.Struct {
+        type_name: ["Result", "Ok"], fields: [ObjectField {
+            name: "value", value: _ident("x")
+        }]
+    })]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 0;
+}
+
+test "try-shadow: no `?` at all does not fire even when `value` is read" {
+    let block = _block([_let("value", _number("7")), _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 0;
+}
+
+test "try-shadow: continuation shadows `value` with its own `let` before reading it" {
+    let block = _block([_let("x", _try_of("r")), _let("value", _number("5")), _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 0;
+}
+
+// SFN-901: the guard mirrors `statement_has_hoistable_try`
+// (`emit_native_desugar_try.sfn:509-536`), which recurses into a statement's
+// own expression positions but never into a nested block body. These three
+// pin that boundary — descending into nested blocks would reject valid code.
+test "try-shadow: a `?` confined to a nested block does not fire on the outer block" {
+    // The `?` is hoisted relative to the `if` body, so the Ok-arm scope ends
+    // at that block's `}` and the outer `value` is never shadowed.
+    let block = _block([_let("value", _number("7")), _if(_ident("cond"), _block([_let("x", _try_of("r"))])), _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 0;
+}
+
+test "try-shadow: that nested block is still guarded on its own visit" {
+    // `check_block` visits every nested block in its own right; the read of
+    // the outer `value` from inside the arm scope is the real hazard.
+    let inner = _block([_let("x", _try_of("r")), _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(inner);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0841");
+}
+
+test "try-shadow: a `?` in an `if` condition is hoisted and does fire" {
+    // Unlike the body, the condition IS an expression position the desugar
+    // hoists into the enclosing block, so the continuation is relocated.
+    let block = _block([_let("value", _number("7")), _if(_try_of("r"), _block([])), _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0841");
+}
+
+test "try-shadow: a `.value` member access is not a read of `value`" {
+    // `Member.member` is a plain string (`ast.sfn:79`), so `x.value` never
+    // registers as an identifier read. Guarding it would reject a shape at
+    // least as common as the `Result.Ok { value: x }` field name.
+    let block = _block([_let("x", _try_of("r")), _return(Expression.Member {
+        object: _ident("x"), member: "value", span: null
+    })]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 0;
+}
+
+fn _match_ok(subject: Expression, ok_binder: string, body: Statement[]) -> Statement {
+    return Statement.MatchStatement {
+        expression: subject,
+        cases: [MatchCase {
+            pattern: Expression.Raw {
+                text: "Result.Ok { " + ok_binder + " }", span: null
+            }, guard: null, body: _block(body), span: null
+        }],
+        decorators: [],
+        span: null
+    };
+}
+
+// SFN-901 regression guards. Each of these three pins a defect found in
+// review of the first implementation, which reused the capture analyzer's
+// `walk_block` and stopped at the first `?`.
+test "try-shadow: a `Result.Ok { value }` arm in the continuation does not fire" {
+    // The arm's own binder shadows the desugar's for the whole arm body, so
+    // this is correct today. `walk_block` did not subtract match-arm pattern
+    // binders and rejected shipped `sfn/archive` source over exactly this.
+    let block = _block([_let("x", _try_of("r")), _match_ok(_ident("h"), "value", [_return(_ident("value"))])]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 0;
+}
+
+test "try-shadow: an arm binding another name still fires on a `value` read" {
+    // Same shape, but the arm binds `other`, so `value` in the body really
+    // does resolve to the desugar's binder.
+    let block = _block([_let("x", _try_of("r")), _match_ok(_ident("h"), "other", [_return(_ident("value"))])]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0841");
+}
+
+test "try-shadow: a second `?` after a `let value` still fires" {
+    // `dt_build_match` recurses over the continuation, so the second `?`
+    // mints its own `Result.Ok { value }` arm around `use(value)`. Checking
+    // only the first site missed this and left the miscompile reachable.
+    let block = _block([_let("a", _try_of("f")), _let("value", _number("7")), _let("b", _try_of("g")), _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0841");
+}
+
+test "try-shadow: a `?` in a `with` clause reports without a span" {
+    // `Statement.WithStatement` carries no `span` field, so the span must be
+    // variant-gated; reading it directly is an unguarded field access.
+    let block = _block([Statement.WithStatement {
+        clauses: [WithClause { expression: _try_of("r") }], body: _block([]), decorators: []
+    }, _return(_ident("value"))]);
+    let diags = check_try_value_shadowing(block);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0841");
+}
+
+test "try-shadow: a lambda body reading `value` fires, a shadowing param does not" {
+    // Lambdas capture, so their bodies are part of the hazard region.
+    let capturing = _block([_let("x", _try_of("r")), _return(Expression.Lambda {
+        parameters: [], body: _block([_return(_ident("value"))]), return_type: null, captures: []
+    })]);
+    assert check_try_value_shadowing(capturing).length == 1;
+
+    let shadowed = _block([_let("x", _try_of("r")), _return(Expression.Lambda {
+        parameters: [Parameter {
+            name: "value", type_annotation: null, default_value: null, mutable: false, span: null
+        }], body: _block([_return(_ident("value"))]), return_type: null, captures: []
+    })]);
+    assert check_try_value_shadowing(shadowed).length == 0;
+}

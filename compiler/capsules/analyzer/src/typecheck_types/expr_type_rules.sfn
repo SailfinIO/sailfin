@@ -107,6 +107,32 @@ fn make_try_error_type_mismatch_diagnostic(operand_error: string, fn_error: stri
     };
 }
 
+// E0841 — a block containing a hoistable `?` also reads the name `value`
+// (SFN-901). The emit-stage desugar (`emit_native_desugar_try.sfn`) forces
+// the `Result.Ok` match arm's binder to the literal name `value` and
+// relocates the rest of the block into that arm, so any read of `value` in
+// the hazard region would silently observe the unwrapped payload instead of
+// the user's own binding. No binder-rename form exists anywhere in the
+// pattern grammar, so the binder cannot simply be generated: this rejects
+// the collision outright rather than miscompiling it. Removal condition:
+// SFN-1038 adds the rename and makes the desugaring genuinely hygienic.
+fn make_try_value_shadowing_diagnostic(span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0841",
+        severity: "error",
+        message: "`?` in a block that also uses the name `value`: the `?`"
+            + " operator's desugaring binds the unwrapped payload to `value`"
+            + " and moves the rest of the block into that scope, so later"
+            + " reads of `value` would silently observe the payload instead."
+            + " Rename the binding (for example `byte_value`) until SFN-1038"
+            + " adds a pattern binder rename and makes the desugaring"
+            + " hygienic.",
+        file_path: "",
+        primary: token_from_name("?", span),
+        suggestion: null
+    };
+}
+
 // =============================================================================
 // Ternary `Conditional` type rules (issue #1715, epic #1180)
 // =============================================================================
