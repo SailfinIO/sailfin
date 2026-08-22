@@ -19,6 +19,7 @@ import {
     flag_short,
     flag_value,
     flag_value_short,
+    format_help_for_path,
     help,
     render_help_text,
     render_help_tree,
@@ -27,6 +28,30 @@ import {
     with_subcommand,
     with_version
 } from "../src/mod";
+
+fn _contains(text: string, needle: string) -> boolean {
+    if needle.length > text.length { return false; }
+    let limit = text.length - needle.length;
+    let mut i: int = 0;
+    loop {
+        if i > limit { break; }
+        if strings_equal(substring(text, i, i + needle.length), needle) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// A reference command for `format_help_for_path`: a root with its own
+// flag, a `build` subcommand with its own flag, and a `config`
+// subcommand with its own arg and a nested `get` subcommand.
+fn _descent_fixture() -> Command {
+    let get_cmd = command("get", "Get a value");
+    let config_cmd = with_arg(with_subcommand(command("config", "Manage config"), get_cmd), arg("key", "Config key"));
+    let build_cmd = with_flag(command("build", "Build it"), flag("release", "Build in release mode"));
+    return with_subcommand(with_subcommand(with_flag(command("app", "An app"), flag_short("loud", "l", "Use uppercase")), build_cmd), config_cmd);
+}
 
 // A reference command exercising a description, two subcommands, a
 // required positional, and a short boolean flag.
@@ -157,4 +182,38 @@ test "help tree: render_help_text golden locks every flag-label variant" {
 test "help tree: help() equals render_help_text(render_help_tree())" {
     let cmd = _reference_command();
     assert strings_equal(help(cmd), render_help_text(render_help_tree(cmd)));
+}
+
+// ---- format_help_for_path ----
+test "format_help_for_path: empty path renders the root's own help" {
+    let root = _descent_fixture();
+    let out = format_help_for_path(root, []);
+    assert _contains(out, "usage:");
+    assert _contains(out, "app");
+}
+
+test "format_help_for_path: single-element path uses the full descent label" {
+    let root = _descent_fixture();
+    let out = format_help_for_path(root, ["build"]);
+    assert _contains(out, "app build");
+    assert _contains(out, "release");
+    assert ! _contains(out, "loud");
+}
+
+test "format_help_for_path: nested two-element path renders the deepest command" {
+    let root = _descent_fixture();
+    let out = format_help_for_path(root, ["config", "get"]);
+    assert _contains(out, "app config get");
+}
+
+test "format_help_for_path: unresolvable trailing element stops descent but keeps the full label" {
+    // Pins the contract documented on `format_help_for_path`: a path
+    // element that names no registered subcommand stops the descent at
+    // the last command that did resolve (`config`), while the label
+    // still joins the whole path. A future change to make this total
+    // must be a deliberate choice, not an accident.
+    let root = _descent_fixture();
+    let out = format_help_for_path(root, ["config", "bogus"]);
+    assert _contains(out, "app config bogus");
+    assert _contains(out, "key");
 }
