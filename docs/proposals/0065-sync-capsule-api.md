@@ -78,7 +78,7 @@ cadence seed bump to be pinned. See §5.
 
 ## 2. Motivation
 
-SFEP-0063 Phase 0 made `capsules/sfn/sync/` honest — an empty reserved shell
+SFEP-0063 Phase 0 made `stdlib/sync/` honest — an empty reserved shell
 with `[capabilities] required = []` and a comment pointing at the reason. That
 correction removed a false advertisement but left a real question unanswered:
 when the reclamation gap closes, what should this capsule actually be?
@@ -249,7 +249,7 @@ typecheck, and monomorphize — `compiler/tests/e2e/fixtures/mono_box_int.sfn`,
 `mono_pair_struct.sfn`, and `compiler/tests/unit/monomorphize_generic_fn_test.sfn`
 all exercise `struct Box<T>` / `.fn id<T>` end to end, and `Result<T, E>` is a
 generic prelude enum (`runtime/prelude.sfn:162`) already consumed by shipped
-capsule code (`capsules/sfn/time/src/mod.sfn:34`). `struct Mutex<T>` would
+capsule code (`stdlib/time/src/mod.sfn:34`). `struct Mutex<T>` would
 compile.
 
 **The blocker is that the safety property is unenforceable.** The entire value
@@ -797,7 +797,7 @@ that *defines* it — recorded at `capsules/sfn/bench/src/mod.sfn:18-23` and
 declares only what it uses directly, which is nothing. This is why the
 combinator design imposes no effect-system work at all.
 
-**Manifest.** `capsules/sfn/sync/capsule.toml` keeps `[capabilities] required = []`
+**Manifest.** `stdlib/sync/capsule.toml` keeps `[capabilities] required = []`
 — the value SFEP-0063 Phase 0 just set — through every ungated and
 `Mutex`/`RwLock`/`Semaphore` phase. pthread mutual exclusion is none of `clock`,
 `gpu`, `io`, `model`, `net`, or `rand`, and re-broadening the manifest would
@@ -836,7 +836,7 @@ needs an escape analysis that does not exist and is therefore not proposed here.
 ## 5. Self-hosting impact
 
 **No compiler pass changes. Not one.** Every phase is capsule source under
-`capsules/sfn/sync/src/`, compiled by the existing frontend against existing
+`stdlib/sync/src/`, compiled by the existing frontend against existing
 builtins and existing pthread externs. The lexer, parser, AST, typechecker,
 effect checker, `emit_native.sfn`, and the LLVM lowering are all untouched. The
 compiler's own build graph does not include `capsules/`, so `make compile` is
@@ -936,7 +936,7 @@ applicable; the capsule source must nonetheless clear the same bar as any
 All tests are Sailfin `*_test.sfn` files using `sfn/test`, per
 `.claude/rules/no-bash-e2e.md` — no `.sh` surface exists.
 
-**Capsule tests, `capsules/sfn/sync/tests/`:**
+**Capsule tests, `stdlib/sync/tests/`:**
 
 - `once_test.sfn` — single-threaded `once_do` runs the initializer once and
   returns its value; a second `once_do` on the same handle does not re-run it.
@@ -980,9 +980,9 @@ the only outstanding allocation.
 **Verification commands.**
 
 ```
-sfn fmt --check capsules/sfn/sync/src/*.sfn capsules/sfn/sync/tests/*_test.sfn
-sfn check capsules/sfn/sync/src/mod.sfn
-build/bin/sfn test capsules/sfn/sync/tests/
+sfn fmt --check stdlib/sync/src/*.sfn stdlib/sync/tests/*_test.sfn
+sfn check stdlib/sync/src/mod.sfn
+build/bin/sfn test stdlib/sync/tests/
 build/bin/sfn test compiler/tests/e2e/ -k mutex_shared_spawn
 make compile
 make check
@@ -1029,7 +1029,7 @@ changes — but is run once per phase to confirm that claim rather than assume i
   `compiler/tests/e2e/fixtures/mono_pair_struct.sfn`,
   `compiler/tests/unit/monomorphize_generic_fn_test.sfn` — generic struct and
   generic function monomorphization coverage.
-- `runtime/prelude.sfn:162` (`Result<T, E>`), `capsules/sfn/time/src/mod.sfn:34`
+- `runtime/prelude.sfn:162` (`Result<T, E>`), `stdlib/time/src/mod.sfn:34`
   — generic `Result` in shipped capsule code.
 - `.claude/rules/seed-dependency.md` — the runtime-source carve-out that would
   ordinarily make the seam a `seed-blocker`, and that SFEP-0064's rewrite

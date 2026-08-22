@@ -4,7 +4,7 @@ title: In-Process .tar.gz Reader and Writer (sfn/archive)
 status: Accepted
 type: tooling
 created: 2026-08-15
-updated: 2026-08-15
+updated: 2026-08-22
 author: "agent:compiler-architect; human review"
 tracking: SFN-753
 supersedes:
@@ -413,7 +413,7 @@ only if all of the following hold:
    the "member `a` is a symlink to `/etc`, member `a/b` writes through it" hole
    that rules 1–7 alone do not.
 
-**Deliberately not used: `sfn/path::normalize`** (`capsules/sfn/path/src/mod.sfn:93`).
+**Deliberately not used: `sfn/path::normalize`** (`stdlib/path/src/mod.sfn:93`).
 A normalizer's job is to collapse `..` into a shorter path; the guard's job is
 to notice `..` and refuse. Routing a security check through a convenience
 function that resolves the thing being checked is how these bugs happen. The

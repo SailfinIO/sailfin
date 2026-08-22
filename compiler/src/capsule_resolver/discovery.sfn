@@ -351,7 +351,7 @@ fn enumerate_capsule_sources(project_root: string, runtime_root: string, additio
     }
     let empty_specs: string[] = [];
     let mut runtime_cap_names: string[] = [];
-    // Workspace member map (e.g. "sfn/strings" -> capsules/sfn/strings/src).
+    // Workspace member map (e.g. "sfn/strings" -> stdlib/strings/src).
     // Empty outside a workspace, which keeps end-user `sfn build`/`sfn add`
     // flows byte-identical. Inside a workspace it is the authoritative
     // resolver for a *declared* sibling-capsule dep: `locate_capsule_src`

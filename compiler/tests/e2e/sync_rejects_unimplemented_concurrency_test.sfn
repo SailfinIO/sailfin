@@ -4,7 +4,7 @@
 // `test_sync_rejects_unimplemented_concurrency.sh` (test-infra Phase 3,
 // epic #842; ratchet #1327).
 //
-// Background: `capsules/sfn/sync/src/mod.sfn` used to export untyped
+// Background: `stdlib/sync/src/mod.sfn` used to export untyped
 // `channel(...)`, `parallel(...)`, and `spawn(...)`, and the prelude
 // exposed identically-named wrappers, all delegating to
 // `sailfin_runtime_{channel,parallel,spawn}` C bridges that silently

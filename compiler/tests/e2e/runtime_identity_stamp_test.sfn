@@ -55,6 +55,17 @@ fn _child_env_with_scratch(scratch: string) -> string[] ![io] {
     return e;
 }
 
+fn _child_env_with_scratch_and_home(scratch: string, home: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    e.push("HOME=" + home);
+    e.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    return e;
+}
+
 // Materialize two minimal fixture dirs (A and B) under `base`. Each dir
 // contains one *_test.sfn with a single passing test. Returns [dirA, dirB].
 fn _make_fixture_dirs(base: string, tag: string) -> string[] ![io] {
@@ -234,6 +245,8 @@ test "stamp: garbage nonce falls back to full hashing — no crash, tests pass" 
 test "stamp: out-of-tree runtime root warms and observes a content change" ![io] {
     let scratch = fs.mkdtemp("sfn-stamp-t4-");
     let dirs = _make_fixture_dirs(scratch, "t4");
+    let isolated_home = scratch + "/home";
+    fs.createDirectory(isolated_home, true);
 
     // Copy the repo runtime tree to `runtime-copy` — no `runtime/` path
     // segment, so it exercises the fixed runtime-relative slug derivation
@@ -244,7 +257,8 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     let _ = process.capture_take_stderr();
     assert cp_exit == 0;
 
-    // The capsule tree has to come along. Since `runtime/capsule.toml` gained a
+    // The installed capsule projection has to come along. Since
+    // `runtime/capsule.toml` gained a
     // `[dependencies]` entry (SFN-341), a bare `cp -R runtime` no longer yields
     // a COMPLETE runtime: the runtime's `sfn-sources` call into `sfn/crypto`,
     // which in turn declares `sfn/strings`, and none of it is inside
@@ -254,20 +268,24 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     // beside the copy. Without it the warm fails closed, correctly, with
     // `link-contract: ... sfn/crypto`.
     //
-    // Copied whole rather than closure-by-name on purpose: naming
-    // `crypto` + `strings` here would silently rot the moment that closure
-    // changes, which is the same brittleness that made this test's sibling
-    // assert a hardcoded dep count.
+    // Both source-workspace roots are projected into the stable installed
+    // `capsules/sfn/*` layout. Copying whole roots rather than naming
+    // `crypto` + `strings` keeps the fixture correct when that closure changes.
     let caps_copy = scratch + "/capsules";
     let cp_caps_exit = process.run_capture(["cp", "-R", "capsules", caps_copy], _child_env_with_scratch(scratch));
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert cp_caps_exit == 0;
+    let cp_stdlib_exit = process.run_capture(["cp", "-R", "stdlib/.", caps_copy
+        + "/sfn"], _child_env_with_scratch_and_home(scratch, isolated_home));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_stdlib_exit == 0;
 
     // First warm against the private copy. Pre-#2005 this failed at link
     // (`invalid redefinition of function sfn_type_register__<path-slug>`)
     // during the runtime warm; the fix keeps the slug `runtime/...`.
-    let mut env1 = _child_env_with_scratch(scratch);
+    let mut env1 = _child_env_with_scratch_and_home(scratch, isolated_home);
     env1.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy);
     let exit1 = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], env1);
     let _ = process.capture_take_stdout();
@@ -289,7 +307,7 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     // the `manifest_dir` normalization (SFN-146): a non-canonical root must
     // still yield the stable `runtime/...` slug, otherwise the slug falls
     // back to the full path and the warm fails exactly as pre-fix.
-    let mut env2 = _child_env_with_scratch(scratch);
+    let mut env2 = _child_env_with_scratch_and_home(scratch, isolated_home);
     env2.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy + "/");
     let exit2 = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], env2);
     let _ = process.capture_take_stdout();

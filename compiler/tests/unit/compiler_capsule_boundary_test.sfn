@@ -1276,7 +1276,7 @@ test "capsule diagnostics: new reverse edge identifies importer, importee, and r
     assert contains(message, "importer 'compiler/capsules/ir/src/model.sfn'");
     assert contains(message, "imports 'sfn/analyzer'");
     assert contains(message, "violated rule: IR may not depend on");
-    let stdlib_message = _violation_diagnostic("capsules/sfn/json/src/mod.sfn", "sfn/compiler", ROLE_STDLIB, ROLE_DRIVER);
+    let stdlib_message = _violation_diagnostic("stdlib/json/src/mod.sfn", "sfn/compiler", ROLE_STDLIB, ROLE_DRIVER);
     assert contains(stdlib_message, "violated rule: top-level standard-library capsules must not import internal compiler capsules");
 }
 

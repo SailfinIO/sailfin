@@ -4,7 +4,7 @@
 // accepts the `![pure]` annotation as a no-op effect.
 //
 // Helpers are inlined here to mirror the existing capsule-test
-// pattern (`capsules/sfn/json/tests/json_test.sfn`'s "When `import {
+// pattern (`stdlib/json/tests/json_test.sfn`'s "When `import {
 // ... } from "../src/mod"` is safe, switch to the real capsule API"
 // note). Once cross-capsule imports stabilise for integration tests,
 // these inline copies fold back into a single `import { ... } from
