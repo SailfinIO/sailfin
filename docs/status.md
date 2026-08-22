@@ -635,12 +635,17 @@ here.
   the published v0.10.4 binary: `sfn toolchain install 0.10.3` exits 0
   having selected and digest-verified the msvc asset. SFN-57's
   publish-alongside → verify → swap transition no longer has a
-  network-correctness blocker on the verify leg, but retiring the mingw
-  cross path (SFN-58) remains blocked — on SFN-994 (`seed_source: 'release'`
-  is unimplemented, so all Windows CI still bootstraps from the mingw cross
-  artifact) and on SFEP-0021 §4.5's full-release-cycle soak, which has not
-  run. The Windows gate still runs zero tests (SFN-981), so green there
-  means the build reaches a fixed point, not that it works.
+  network-correctness blocker on the verify leg. SFN-994 has since shipped:
+  `seed_source: 'release'` is implemented in
+  `.github/actions/sailfin-build-windows/action.yml`, signature- and
+  digest-verified, and the nightly `native-build` job already bootstraps
+  from a published native seed rather than a same-run mingw cross artifact.
+  `ci.yml` and `release-tag.yml` still *default* to `seed_source: 'cross'`
+  — a deliberate SFEP-0021 §4.5 soak, not a missing capability. Retiring
+  the mingw cross path (SFN-58) therefore remains blocked only on that
+  full-release-cycle soak and on SFN-1037. The Windows gate still runs zero
+  tests (SFN-981), so green there means the build reaches a fixed point,
+  not that it works.
 - **Structured output.** `sfn build --json` emits a schema-versioned
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP
