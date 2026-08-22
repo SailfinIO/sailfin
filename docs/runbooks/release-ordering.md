@@ -83,13 +83,12 @@ shape as the other three platform legs, none of which run one in the release
 path either (`release-tag.yml:630-645`). Determinism is
 `nightly-selfhost.yml`'s and `windows-native-selfhost.yml`'s job, on every
 push to `main` and daily, so the commit being released has already been
-fixed-point-verified before this leg builds it again. **Unlike the matrix
-legs, this leg is not required** — it is still stabilizing (draft PR undrafts
-only after 3+ consecutive green `windows-native-selfhost.yml` runs). `upload` below waits
-for it to finish but does not gate on its result, and a failure/cancellation
-is reported via the release Slack webhook (`notify-slack-failure`) rather
-than blocking `main`'s bump. This is the one part of stage 2 that is
-allowed to fail without stopping the release; see the accepted-latency note
+fixed-point-verified before this leg builds it again. Its job-level result is
+still not checked by `upload`'s `needs:` (below), but as of SFN-1024 its
+artifact is a required release payload (`scripts/verify-release-payloads.sh`),
+so a failed or missing native leg now blocks publishing via that payload gate
+rather than via `needs:`. A failure/cancellation is also reported via the
+release Slack webhook (`notify-slack-failure`). See the accepted-latency note
 under **Also** below for why it runs in parallel rather than after the
 matrix.
 
@@ -99,14 +98,16 @@ matrix.
 `if: !cancelled() && needs.build.result == 'success'` — a cancelled or
 failed `native-windows-build` cannot hard-skip this job (which a bare
 `needs:` without that override would otherwise do), and its result is
-deliberately not checked, so the native leg's own failures never withhold
-publication of the four required platforms.
+deliberately not checked directly here. That no longer means the native
+leg's failures go unenforced: as of SFN-1024 its payload is required by
+`scripts/verify-release-payloads.sh` (step 7 below), so a failed or missing
+native leg still blocks publication — via the payload gate, not this `if:`.
 
 6. Download every leg's artifacts, normalize the layout, rename installers
    to their final `sailfin_<version>_<os>_<arch>.tar.gz` names (the MSVC
-   asset, when present, gets its own `-msvc` variant suffix via a
-   `*windows-x86_64-msvc*` classifier arm ordered before the broader
-   `*windows-x86_64*` one).
+   asset gets its own `-msvc` variant suffix via a `*windows-x86_64-msvc*`
+   classifier arm ordered before the broader `*windows-x86_64*` one — first
+   match wins, and the mingw pattern also matches the msvc filename).
 7. Verify expected platform payloads are all present
    (`scripts/verify-release-payloads.sh`).
 8. Verify the dependency closure inside every platform tarball
@@ -155,6 +156,15 @@ re-running `release-tag.yml` via `workflow_dispatch` against the existing
 tag (`ref` blank → builds the tag; `promote` is not available on the
 dispatch path, so a manual rebuild can never mutate `main`).
 
+This remediation does **not** work for tags before v0.10.3. A re-run checks
+out the tag's own tree, which predates
+`.github/actions/sailfin-build-windows`, so `native-windows-build` fails,
+no msvc artifact is produced, and — since SFN-1024 made that payload
+required — the payload gate fails before promotion. Those tags are no
+longer re-publishable through this workflow; attach assets with
+`gh release upload` instead. Recent tags re-run normally, because the leg
+rebuilds from a tree that contains it.
+
 **A stale `release-staging/*` branch is left behind.** Expected after any
 failed cut (stage 4 only deletes on success). Harmless — no workflow
 triggers on that branch pattern, and the next cut for the same version
@@ -164,14 +174,14 @@ force-pushes over it. Delete manually with:
 git push origin --delete release-staging/v<version>
 ```
 
-**`native-windows-build` fails or is cancelled.** Does not affect the
-release: `upload` still promotes and publishes the four required platforms
-normally (see stage 3). `notify-slack-failure` still fires — its payload
-distinguishes this case ("release published, but the native MSVC Windows
-seed leg did not produce an asset") from a core build/upload failure, so
-the on-call engineer isn't left guessing whether `main` needs attention.
-Re-run is a plain `workflow_dispatch` of `release-tag.yml` against the
-already-published tag; it does not touch `main` or the tag again.
+**`native-windows-build` fails or is cancelled.** As of SFN-1024, this now
+blocks the release: its artifact is a required payload
+(`scripts/verify-release-payloads.sh`), so a missing or broken MSVC asset
+fails the "verify expected platform payloads" gate (stage 3, step 7) before
+promotion, the same as any other missing platform payload — see **A payload
+gate fails** above. `notify-slack-failure` still fires in this case too.
+Re-run is a plain re-run of the release once the native leg is fixed; nothing
+mutated `main`.
 
 ---
 

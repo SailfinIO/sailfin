@@ -282,7 +282,7 @@ test "aarch64 seed mode: the installer smoke probes never use HEAD" ![io] {
     assert ! contains(workflow, "--head ");
 }
 
-test "release payloads: v0.9.2 shape without ARM64 payloads fails closed" ![io] {
+test "release payloads: a payload set without ARM64 fails closed" ![io] {
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _touch_assets(dir, ["sailfin-native-linux-x86_64-0.9.2.tar.gz", "sailfin_0.9.2_linux_x86_64.tar.gz", "sailfin-native-macos-arm64-0.9.2.tar.gz", "sailfin_0.9.2_macos_arm64.tar.gz", "sailfin_0.9.2_windows_x86_64.tar.gz", "sailfin_0.9.2_windows_x86_64-msvc.tar.gz",]);
         return _run_release_payload_gate(dir, "0.9.2");

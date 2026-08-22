@@ -1,0 +1,216 @@
+// E2E regression coverage for `scripts/verify-payload-dep-closure.sh`'s
+// `_capsule_deps` helper (SFN-1024).
+//
+// `sfn package` on a Windows runner stages manifests with CRLF line
+// endings. Before `_capsule_deps`'s `sub(/\r$/, "")`, the script's awk held
+// `section == "[dependencies]\r"`, never matched the bare `"[dependencies]"`
+// literal, and the walk silently reported "nothing to verify" and exited 0
+// -- passing a payload it never inspected. That is what the published
+// `sailfin_0.10.4_windows_x86_64-msvc.tar.gz` did until this fix. These
+// cases build a real `.tar.gz` with a CRLF-terminated `runtime/capsule.toml`
+// and drive the script as a subprocess, so a regression of the `sub` call
+// fails them the same way it fails a real Windows payload.
+import {
+    CreateOptions,
+    DeflateOptions,
+    DeflateStrategy,
+    LinkPolicy,
+    targz_create
+} from "sfn/archive";
+import { contains } from "sfn/strings";
+import { default_scratch_dir, with_tmp_dir } from "sfn/test";
+
+// Marker files live under `SAILFIN_TEST_SCRATCH` (or the platform default),
+// not inside the `with_tmp_dir` fixture's own directory, so captured stdout
+// survives the fixture's scope-exit teardown and can be read back after the
+// closure returns (mirrors `aarch64_seed_mode_test.sfn::_scratch_marker`).
+fn _scratch_marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    fs.createDirectory(dir, true);
+    let path = dir + "/payload-dep-closure-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// `run_capture`'s env array is the complete child environment, not an
+// overlay -- PATH is mandatory for `bash`/`tar`/`awk`/`find`/`mktemp` to
+// resolve, and TMPDIR/HOME keep `mktemp -d` and any tool config consistent
+// with the parent.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+fn _fixed_opts() -> CreateOptions {
+    return CreateOptions {
+        exec_paths: [],
+        link_policy: LinkPolicy.Preserve,
+        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+    };
+}
+
+// One script invocation over `tarball`, capturing stdout to `marker`
+// (outside the fixture dir so it survives teardown) and returning the exit
+// code.
+fn _run_once(marker: string, tarball: string) -> int ![io] {
+    let exit = process.run_capture(["bash", "scripts/verify-payload-dep-closure.sh", tarball], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.writeFile(marker, out);
+    return exit;
+}
+
+// Build a payload tarball rooted at `dir/staging`, with no wrapping
+// top-level directory -- matching `_package_installer`'s real layout
+// (`compiler/src/cli/commands/package.sfn`), which the script's root-dir
+// resolution (`if [ ! -d "${extract_dir}/runtime" ]`) expects.
+fn _build_payload(dir: string, runtime_manifest: string, crypto_manifest: string) -> string ![io] {
+    let staging = dir + "/staging";
+    fs.createDirectory(staging + "/runtime", true);
+    fs.writeFile(staging + "/runtime/capsule.toml", runtime_manifest);
+    fs.createDirectory(staging + "/capsules/sfn/crypto/src", true);
+    fs.writeFile(staging + "/capsules/sfn/crypto/capsule.toml", crypto_manifest);
+    fs.writeFile(staging + "/capsules/sfn/crypto/src/mod.sfn", "// fixture module for SFN-1024 payload-closure regression coverage\n");
+
+    let tarball = dir + "/payload.tar.gz";
+    let created = targz_create(tarball, staging, [], _fixed_opts());
+    match created {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            print("payload_dep_closure_test: targz_create failed: " + error.message);
+        }
+    }
+    return tarball;
+}
+
+fn _crlf_manifest(name: string, dep: string) -> string {
+    let mut body = "[capsule]\r\n" + "name = \"" + name + "\"\r\n"
+        + "version = \"1.0.0\"\r\n";
+    if dep.length > 0 {
+        body = body + "\r\n[dependencies]\r\n" + "\"" + dep + "\" = \"*\"\r\n";
+    }
+    return body;
+}
+
+fn _lf_manifest(name: string, dep: string) -> string {
+    let mut body = "[capsule]\n" + "name = \"" + name + "\"\n"
+        + "version = \"1.0.0\"\n";
+    if dep.length > 0 {
+        body = body + "\n[dependencies]\n" + "\"" + dep + "\" = \"*\"\n";
+    }
+    return body;
+}
+
+test "payload closure: a CRLF-staged manifest still resolves its dependencies" ![io] {
+    let marker = _scratch_marker("crlf-ok");
+    let runtime_manifest = _crlf_manifest("sfn/runtime-native", "sfn/crypto");
+    let crypto_manifest = _crlf_manifest("sfn/crypto", "");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let tarball = _build_payload(dir, runtime_manifest, crypto_manifest);
+        return _run_once(marker, tarball);
+    });
+
+    let out = fs.readFile(marker);
+    fs.deleteFile(marker);
+    // Asserting exit == 0 alone would not catch a regression: the buggy
+    // `_capsule_deps` (no `sub(/\r$/, "")`) also exits 0, by reporting
+    // "nothing to verify" without ever inspecting the manifest. The stdout
+    // assertion is the actual regression detector.
+    assert exit == 0;
+    assert contains(out, "verified dependency closure");
+    assert contains(out, "sfn/crypto");
+}
+
+test "payload closure: a CRLF manifest with a missing dependency fails closed" ![io] {
+    let marker = _scratch_marker("crlf-missing");
+    let runtime_manifest = _crlf_manifest("sfn/runtime-native", "sfn/crypto");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let staging = dir + "/staging";
+        fs.createDirectory(staging + "/runtime", true);
+        fs.writeFile(staging + "/runtime/capsule.toml", runtime_manifest);
+        // No `capsules/sfn/crypto/` staged -- the declared dependency has no
+        // payload directory to resolve against.
+        let tarball = dir + "/payload.tar.gz";
+        let created = targz_create(tarball, staging, [], _fixed_opts());
+        match created {
+            Result.Ok { value }
+            : { }, Result.Err { error }
+            : {
+                print("payload_dep_closure_test: targz_create failed: " + error.message);
+            }
+        }
+        return _run_once(marker, tarball);
+    });
+
+    fs.deleteFile(marker);
+    // Under the pre-fix script this wrongly exited 0 (the CRLF section
+    // header never matched, so the missing dependency was never checked).
+    // The failure message itself goes to stderr, which `_run_once` does
+    // not capture -- the exit code is the whole assertion here.
+    assert exit != 0;
+}
+
+test "payload closure: an LF-staged manifest still resolves its dependencies" ![io] {
+    let marker = _scratch_marker("lf-ok");
+    let runtime_manifest = _lf_manifest("sfn/runtime-native", "sfn/crypto");
+    let crypto_manifest = _lf_manifest("sfn/crypto", "");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let tarball = _build_payload(dir, runtime_manifest, crypto_manifest);
+        return _run_once(marker, tarball);
+    });
+
+    let out = fs.readFile(marker);
+    fs.deleteFile(marker);
+    assert exit == 0;
+    assert contains(out, "verified dependency closure");
+    assert contains(out, "sfn/crypto");
+}
+
+// The real payload exercises the nested worklist walk too: `runtime`
+// depends on `sfn/crypto`, which itself depends on `sfn/strings`
+// (`runtime/capsule.toml`, `capsules/sfn/crypto/capsule.toml`). Both
+// manifests are CRLF here, since the nested walk reads the dependency's
+// own `capsule.toml` through the same `_capsule_deps` helper.
+test "payload closure: a CRLF-staged manifest resolves a transitive dependency chain" ![io] {
+    let marker = _scratch_marker("crlf-transitive");
+    let runtime_manifest = _crlf_manifest("sfn/runtime-native", "sfn/crypto");
+    let crypto_manifest = _crlf_manifest("sfn/crypto", "sfn/strings");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let staging = dir + "/staging";
+        fs.createDirectory(staging + "/runtime", true);
+        fs.writeFile(staging + "/runtime/capsule.toml", runtime_manifest);
+        fs.createDirectory(staging + "/capsules/sfn/crypto/src", true);
+        fs.writeFile(staging + "/capsules/sfn/crypto/capsule.toml", crypto_manifest);
+        fs.writeFile(staging + "/capsules/sfn/crypto/src/mod.sfn", "// fixture module for SFN-1024 payload-closure regression coverage\n");
+        fs.createDirectory(staging + "/capsules/sfn/strings/src", true);
+        fs.writeFile(staging + "/capsules/sfn/strings/capsule.toml", _crlf_manifest("sfn/strings", ""));
+        fs.writeFile(staging + "/capsules/sfn/strings/src/mod.sfn", "// fixture module for SFN-1024 payload-closure regression coverage\n");
+
+        let tarball = dir + "/payload.tar.gz";
+        let created = targz_create(tarball, staging, [], _fixed_opts());
+        match created {
+            Result.Ok { value }
+            : { }, Result.Err { error }
+            : {
+                print("payload_dep_closure_test: targz_create failed: " + error.message);
+            }
+        }
+        return _run_once(marker, tarball);
+    });
+
+    let out = fs.readFile(marker);
+    fs.deleteFile(marker);
+    assert exit == 0;
+    assert contains(out, "verified dependency closure");
+    assert contains(out, "sfn/crypto");
+    assert contains(out, "sfn/strings");
+}

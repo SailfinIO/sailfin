@@ -479,10 +479,12 @@ jobs:
   #     after it, so its contribution to the critical path is materially
   #     smaller than the transitional cross-seed cost above.
   #
-  # This leg is best-effort while it stabilizes: `upload` below proceeds on a
-  # failed or cancelled native-windows-build (see its `if:` condition) so a
-  # still-shaking Windows leg can never block or silently swallow the release
-  # the other four platforms already produced.
+  # This leg is no longer best-effort (SFN-1024). `upload` below still
+  # proceeds on a failed or cancelled `native-windows-build` — see its `if:`
+  # condition and the comment there — but that is now only so the run reaches
+  # the payload gate and fails there, naming the missing asset, rather than
+  # hard-skipping `upload` and both notify jobs. The msvc payload is required,
+  # so a failed Windows leg blocks the release like any other platform's.
   native-windows-cross-seed:
     name: Build mingw-cross bootstrap seed [native windows leg]
     runs-on: ubuntu-latest
@@ -661,6 +663,24 @@ jobs:
           set -euo pipefail
           "$NATIVE_SFN" package --installer --target windows-x86_64-msvc --compiler-bin "$NATIVE_SFN"
           ls -la dist/installer-windows-x86_64-msvc.tar.gz
+
+      # Every other payload's closure is checked inside the job that builds
+      # it (`:376-380` per matrix leg, `:415-420` for the mingw cross-build).
+      # This leg had no such step, so with the msvc payload now required
+      # (SFN-1024) its first closure check would otherwise happen in `upload`
+      # — ~90 minutes in, past the point where failing is cheap. Checking
+      # here fails the leg instead of aborting the release.
+      #
+      # It also runs the check on Windows, where the payload is produced.
+      # `upload` runs it on Ubuntu against the same tarball, and the two
+      # disagreeing is itself worth knowing: this payload is the only one
+      # staged by a Windows `sfn package`, which is what wrote the CRLF
+      # manifests that made the checker no-op before SFN-1024.
+      - name: Verify native MSVC installer payload dependency closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-payload-dep-closure.sh "dist/installer-windows-x86_64-msvc.tar.gz"
 
       - name: Verify compiler version matches tag
         shell: bash
@@ -1056,10 +1076,13 @@ jobs:
   notify-slack-failure:
     name: Notify Slack on release asset failure
     # `native-windows-build` is in `needs` here even though `upload` (the
-    # only OTHER consumer of its result) deliberately ignores it — this is
-    # the leg's one failure-visibility path. Without it, a native-leg-only
-    # failure/cancellation is invisible: `upload` still runs and succeeds
-    # (by design, so the leg can't block the other four platforms), so
+    # only OTHER consumer of its result) does not check it directly. Since
+    # SFN-1024 the leg's failure is no longer invisible — the required msvc
+    # payload fails the gate and `upload` fails with it — so this job is now
+    # the leg's *attribution* path rather than its only signal: it names the
+    # Windows leg specifically, where the gate failure alone would only say
+    # an asset was missing. Historically (pre-SFN-1024) it was the sole
+    # signal, because `upload` still ran and succeeded, so
     # neither this job's old `failure()` condition nor notify-slack-success's
     # `success()` would ever mention it, and the leg fails silently — the
     # same "nobody notices" rot windows-native-selfhost.yml's own
@@ -1104,9 +1127,10 @@ jobs:
               # On a promoting cut the gates run before anything is public, so the
               # usual outcome of this failure is a clean no-op rather than a
               # half-finished release (SFN-829). Say so: the remediation is "fix and
-              # re-cut", not "go clean up main". Does not apply to a
-              # native-leg-only failure below, since `upload` deliberately
-              # still published in that case.
+              # re-cut", not "go clean up main". Since SFN-1024 made the msvc
+              # payload required, a native-leg failure lands here too: it
+              # fails the payload gate, so `UPLOAD_RESULT` is `failure` and
+              # this branch — not the `else` below — produces the message.
               suffix = (
                   " Payload gates run before promotion, so `main` is most likely unbumped and untagged"
                   " — check the run for whether the Promote step was reached."
