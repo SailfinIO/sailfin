@@ -1,6 +1,6 @@
 import { _ends_with_cmd, _strip_trailing_slashes_cmd } from "../../../build/fs";
 import { condition_runtime_capsules_for_target, runtime_stamp_identity } from "../../../build/runtime_objs";
-import { build_target_os, build_target_triple } from "../../../build/target";
+import { build_target_os, build_target_triple, host_is_windows } from "../../../build/target";
 import { runtime_link_inputs_identity } from "../../../build_cache";
 import { _get_env_cmd } from "../../../build_flags";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
@@ -46,16 +46,31 @@ fn _resolve_test_scratch_root(scratch_env: string) -> TestScratchRoot ![io] {
     }
 
     // Honor TMPDIR (macOS CI points it at /var/folders/..., and
-    // contributors may aim it at tmpfs/quota dirs), falling back to /tmp.
+    // contributors may aim it at tmpfs/quota dirs) on every platform,
+    // falling back to /tmp. TMPDIR is the POSIX/macOS convention; Windows
+    // has no such env var, so a Windows host with no TMPDIR is consulted
+    // separately for TEMP then TMP (SFN-1089) rather than falling through
+    // to the "/tmp" literal, which resolves drive-relative to `C:\tmp` and
+    // hands clang.exe a response-file path it cannot open. When neither
+    // TEMP nor TMP is set on Windows, no `C:\tmp`-style default is
+    // invented — mkdtemp is skipped and the existing build/sailfin
+    // fallback below is used instead.
     // Resolved Sailfin-side via _get_env_cmd rather than shell
     // `${VAR:-default}` expansion because `${` is the reserved
     // parser-pending interpolation sigil and is not safe in a string literal.
     let mut tmp_base = _get_env_cmd("TMPDIR");
-    if tmp_base.length == 0 { tmp_base = "/tmp"; }
-    tmp_base = _strip_trailing_slashes_cmd(tmp_base);
-    let tmp = fs.mkdtemp(tmp_base + "/sfn-test-");
-    if tmp.length > 0 {
-        return TestScratchRoot { root: tmp, owned: true };
+    if tmp_base.length == 0 {
+        if host_is_windows() {
+            tmp_base = _get_env_cmd("TEMP");
+            if tmp_base.length == 0 { tmp_base = _get_env_cmd("TMP"); }
+        } else { tmp_base = "/tmp"; }
+    }
+    if tmp_base.length > 0 {
+        tmp_base = _strip_trailing_slashes_cmd(tmp_base);
+        let tmp = fs.mkdtemp(tmp_base + "/sfn-test-");
+        if tmp.length > 0 {
+            return TestScratchRoot { root: tmp, owned: true };
+        }
     }
 
     return TestScratchRoot { root: _test_scratch_root(), owned: false };
