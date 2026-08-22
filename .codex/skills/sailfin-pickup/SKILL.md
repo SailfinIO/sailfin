@@ -66,9 +66,12 @@ the current pull request lands. Leave uncertain or oversized discoveries in
 
 ## Review
 
-Before review, check every acceptance criterion and run the issue's verification
-commands plus the `sailfin-check` ladder. Prefer targeted tests; use full gates
-only when requested or warranted by structural/high-risk work.
+Before review, check every acceptance criterion and run the fast and targeted
+rungs selected by the `sailfin-check` ladder. If the issue requests `make test`,
+`make check`, or `make check-strict`, or the change qualifies for one of those
+full gates, record it as a deferred final gate rather than running it on a diff
+that review may invalidate. Do not omit the requested gate; run it after the
+change is review-stable.
 
 Then spawn a fresh review subagent before committing or opening the PR. Keep the
 reviewer independent: provide the issue contract, cited design, repository
@@ -80,13 +83,27 @@ Ask the reviewer to inspect correctness, self-hosting and pipeline completeness,
 effect and ownership semantics, LLVM safety when relevant, scope discipline,
 test coverage, documentation, and project conventions. Require findings to cite
 files and lines and to distinguish blocking correctness issues from optional
-improvements.
+improvements. A finding is blocking only when it demonstrates an acceptance,
+correctness, safety, regression, or repository-invariant failure with concrete
+code reasoning or a reproduction. Verify the finding before changing code; the
+reviewer's severity label alone is not conclusive.
 
 Resolve every blocking finding, rerun the affected verification, and request
 another independent review when the fix materially changes behavior. Do not
-commit or publish the PR until the review has no blocking findings. If subagents
-are unavailable, stop and report that the required independent review could not
-be run rather than silently replacing it with a self-review.
+promote optional improvements or unsupported concerns into blocking churn.
+Count the initial review and each re-review as one review pass, and limit the
+autonomous review/remediation loop to three passes. If the third pass still has
+a blocking finding, or a later failure would require another source change,
+stop and report the review history and remaining evidence rather than starting
+a fourth pass.
+
+Once review has no blocking findings, run every deferred full gate on that
+review-stable revision. A source change made to fix a gate failure invalidates
+the review and requires affected targeted verification, another review pass
+within the limit above, and the deferred gate again. Do not commit or publish
+the PR until review is clear and all required gates pass. If subagents are
+unavailable, stop and report that the required independent review could not be
+run rather than silently replacing it with a self-review.
 
 ## Finish
 

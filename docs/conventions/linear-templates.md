@@ -49,6 +49,9 @@ criteria describe observable behavior; verification lists runnable commands.
 - Use `make test`, `make check`, or `make check-strict` only when the issue is
   explicitly a full-suite, release, determinism, self-host fixed-point,
   structural compiler, or high-risk regression gate.
+- When listing a full gate, state the qualifying reason beside it. Do not add a
+  full gate defensively merely because an issue touches compiler/runtime source;
+  pickup defers it until the implementation has no blocking review findings.
 - For docs/config-only work, use `git diff --check` or another cheap
   repo-appropriate check instead of a compiler suite.
 
