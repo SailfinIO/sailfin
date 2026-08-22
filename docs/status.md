@@ -1,7 +1,7 @@
 # Status
 
-Updated: 2026-08-22 (SFN-1040, SFN-1086, SFN-1035, SFN-1033, SFN-1039,
-SFN-1026, SFN-808, SFN-1024). Seed pinned to `0.10.4` (`bootstrap.toml`
+Updated: 2026-08-22 (SFN-1040, SFN-1086, SFN-1035, SFN-1034, SFN-1033,
+SFN-1039, SFN-1026, SFN-808, SFN-1024). Seed pinned to `0.10.4` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -412,10 +412,13 @@ here.
   `site/src/content/docs/docs/getting-started/verify-download.md`, with the PEM
   also served directly from `/.well-known/sailfin-release-signing-key.pem`
   (SFN-203). The bootstrap installers (`install.sh` and `install.ps1`) embed the
-  same public key and verify the signed manifest plus the selected archive's
-  digest before extraction. They warn and continue only when verification is
-  unavailable (an unsigned older release or no suitable OpenSSL), and abort on
-  an invalid signature or digest mismatch (SFN-204). Design: SFEP-0046 §3.5.
+  same trust anchor and fail closed (SFN-1034): `install.ps1` verifies with a
+  self-contained pure-PowerShell Ed25519 implementation (no external tooling),
+  `install.sh` requires a KAT-passing OpenSSL 3.0+. A missing/unreachable
+  manifest, an invalid signature, or a digest mismatch all abort; the loud
+  `SAILFIN_ALLOW_UNVERIFIED=1` opt-in covers only an unsigned historical
+  release, an unpinned local archive, or (POSIX only) no working verifier
+  (SFN-204). Design: SFEP-0046 §3.5, SFEP-0073 §3.7.
 - **CLI dispatch.** `sailfin_cli_main_v2` (`compiler/src/cli/main.sfn`) is the
   sole command router: it builds a root `Command` via the `sfn/cli` capsule
   from each subcommand's `command_def()` and dispatches to per-command
@@ -1397,12 +1400,17 @@ unit; history in the linked issues.
   a tag whose pin predates them; see `docs/build-aarch64-linux.md`. Other
   OS/architecture pairs detected by the bootstrap scripts are not supported
   until a matching release asset is published.
-- The bootstrap installers verify the signed `SHA256SUMS` manifest and selected
-  archive digest before extraction when OpenSSL 1.1.1+ raw-Ed25519 support is
-  available. A missing manifest/signature (for an older unsigned release) or
-  unsuitable OpenSSL produces an explicit warning and continues; malformed or
-  invalid signed metadata, a missing/duplicate asset entry, or a digest
-  mismatch aborts installation.
+- The bootstrap installers (`install.sh`, `install.ps1`) fail closed (SFN-1034,
+  SFEP-0073 §3.7/§3.9 slice 5): `install.ps1` carries a self-contained,
+  KAT-gated Ed25519 verifier and needs no external tooling; `install.sh`
+  requires a KAT-passing OpenSSL 3.0+ (`$SAILFIN_OPENSSL`, `PATH`, or a
+  Homebrew `openssl@3` keg). Three terminal trust states: `VERIFIED_SIGNED`
+  (signature + digest), `DIGEST_PINNED` (local archive matched against
+  `SAILFIN_LOCAL_ARCHIVE_SHA256`), and `UNVERIFIED_EXPLICIT` (requires
+  `SAILFIN_ALLOW_UNVERIFIED=1`; never bypasses a failed signature, a digest
+  mismatch, or an unreachable manifest). See
+  [Verifying Your Download](https://sailfin.dev/docs/getting-started/verify-download)
+  "Bootstrap trust boundary".
 - Linux/macOS installs versioned files under
   `~/.local/share/sailfin/versions/<version>` and exposes `sailfin` plus `sfn`
   in `~/.local/bin` (`INSTALL_BASE` / `GLOBAL_BIN_DIR` overrides). Windows uses

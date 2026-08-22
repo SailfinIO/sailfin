@@ -142,15 +142,45 @@ and install the archive.
 
 ## Bootstrap trust boundary
 
-The one-line `curl ... install.sh | bash` and PowerShell bootstrap scripts embed
-the release-signing public key and verify the signed `SHA256SUMS` manifest plus
-the selected archive's SHA-256 digest **before extracting**, aborting on an
-invalid signature or a digest mismatch. They warn and fall back to TLS trust
-only when verification cannot start: either `SHA256SUMS` or
-`SHA256SUMS.sig` is unavailable (as with an older unsigned release), or the host
-lacks OpenSSL 1.1.1+ raw-Ed25519 support. Once both files and suitable OpenSSL
-are available, a malformed signature, failed signature check, malformed or
-missing/duplicate asset entry, or archive digest mismatch is fatal.
+The one-line `curl ... install.sh | bash` and PowerShell bootstrap scripts
+fail closed (SFN-1034): they verify the signed `SHA256SUMS` manifest and the
+selected archive's SHA-256 digest **before extracting**, and abort on an
+invalid signature, a digest mismatch, or a manifest/signature fetch that could
+not be reached at all — an unreachable manifest is never treated as "this
+release just isn't signed."
+
+Verification tooling differs by platform:
+
+- **Windows (`install.ps1`)** carries a self-contained, verify-only Ed25519
+  implementation (pure PowerShell, `System.Numerics.BigInteger` +
+  `System.Security.Cryptography.SHA512`/`SHA256`) and needs no external
+  tooling. There is no host on which verification silently cannot run.
+- **Linux/macOS (`install.sh`)** requires an OpenSSL 3.0+ build that passes an
+  embedded RFC 8032 known-answer self-test, since raw Ed25519 verification
+  (`pkeyutl -rawin`) requires OpenSSL 3.0. It probes, in order:
+  `$SAILFIN_OPENSSL`, `openssl` on `PATH`, then the Homebrew `openssl@3` keg
+  paths (`/opt/homebrew/opt/openssl@3`, `/usr/local/opt/openssl@3`, or
+  `brew --prefix openssl@3`) — Homebrew's `openssl@3` is keg-only, so `openssl`
+  on `PATH` alone often resolves to Apple's LibreSSL. Digest computation falls
+  back `sha256sum` → `shasum -a 256` → `openssl dgst -sha256 -r`.
+
+Both scripts reach one of three terminal trust states:
+
+| State | Reached by | Requires opt-in? |
+|---|---|---|
+| `VERIFIED_SIGNED` | Signature over `SHA256SUMS` verifies against the pinned key, and the archive's digest matches its manifest entry | No — the only state a network install may reach silently |
+| `DIGEST_PINNED` | `SAILFIN_LOCAL_ARCHIVE` whose SHA-256 matches a caller-supplied `SAILFIN_LOCAL_ARCHIVE_SHA256` | No |
+| `UNVERIFIED_EXPLICIT` | An unsigned historical release, a local archive with no expected digest, or (POSIX only) no KAT-passing verifier on the host | Yes — `SAILFIN_ALLOW_UNVERIFIED=1` |
+
+Set `SAILFIN_ALLOW_UNVERIFIED=1` to consent to installing an artifact whose
+signature chain cannot be established. It **never** bypasses a check that
+could actually run: a failed signature, a digest mismatch, a malformed
+signature or manifest, an unreachable manifest, or a missing/duplicate asset
+entry all abort regardless. In the `UNVERIFIED_EXPLICIT` state the archive
+digest is still checked whenever a digest tool is available, but it is
+reported as matching an *unsigned* manifest — not a trust statement. There is
+no environment variable to override the trust anchor.
+
 The manual steps above are the way to verify explicitly when you want to. After
 a trusted `sfn` is installed, `sfn toolchain install` and automatic toolchain
 dispatch verify signatures and digests fail-closed.

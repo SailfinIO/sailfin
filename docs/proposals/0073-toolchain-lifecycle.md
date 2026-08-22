@@ -6,7 +6,7 @@ type: tooling
 created: 2026-08-22
 updated: 2026-08-22
 author: "agent:compiler-architect; project owner direction + acceptance"
-tracking:
+tracking: SFN-1034
 supersedes:
 superseded-by:
 graduates-to:

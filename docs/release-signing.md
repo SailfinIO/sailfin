@@ -49,8 +49,8 @@ in sync:
 | `.github/release-signing/ed25519-release.pub.hex` | 64 hex chars | Raw 32-byte key, convenience/cross-check copy. |
 | `compiler/src/release_trust.sfn` | `RELEASE_SIGNING_PUBLIC_KEY_HEX` (64 hex) | The copy pinned into the `sfn` binary; read via `release_signing_public_key_hex()`. |
 | `site/public/.well-known/sailfin-release-signing-key.pem` | PEM (SPKI) | HTTPS trust anchor used by the public [verification guide](https://sailfin.dev/docs/getting-started/verify-download). |
-| `install.sh` | `RELEASE_SIGNING_PUBLIC_KEY_PEM` (PEM/SPKI) | Bootstrap installer trust anchor on Unix-like hosts. |
-| `install.ps1` | `$ReleaseSigningPublicKeyPem` (PEM/SPKI) | Bootstrap installer trust anchor on Windows. |
+| `install.sh` | `RELEASE_SIGNING_PUBLIC_KEY_PEM` (PEM/SPKI) | Bootstrap installer trust anchor on Unix-like hosts; verified with a KAT-gated OpenSSL 3.0+ (SFN-1034). |
+| `install.ps1` | `$ReleaseSigningPublicKeyHex` (raw 32-byte hex) | Bootstrap installer trust anchor on Windows, consumed by the embedded pure-PowerShell Ed25519 verifier — no external tooling (SFN-1034). |
 
 The **private** half is **never committed**. It is held only as the
 `SAILFIN_RELEASE_SIGNING_KEY` CI secret (repo/org level; `release.yml` passes
@@ -116,7 +116,15 @@ Then, in one PR:
    and the golden value in `compiler/tests/unit/release_trust_test.sfn`.
 4. Replace `site/public/.well-known/sailfin-release-signing-key.pem` and update
    the raw key and SHA-256 SPKI fingerprint in the public verification guide.
-5. Replace the embedded PEM copies in `install.sh` and `install.ps1`.
+5. Replace the embedded trust anchor in **both** bootstrap installers: the PEM
+   copy (`RELEASE_SIGNING_PUBLIC_KEY_PEM`) in `install.sh`, and the raw
+   32-byte hex copy (`$ReleaseSigningPublicKeyHex`) in `install.ps1` — its
+   embedded Ed25519 verifier consumes the hex form directly, never PEM
+   (SFN-1034). The two forms encode the same key but are not
+   interchangeable text; forgetting `install.ps1` fails closed loudly (every
+   Windows install starts rejecting the newly signed manifests as a
+   verification failure) rather than silently, but it still means Windows was
+   left on the old anchor until caught — sequence both edits in this same PR.
 6. Regenerate the test fixture in
    `capsules/sfn/crypto/tests/release_signing_key_test.sfn` — sign its `MSG`
    with the new private key and paste the new `KEY`/`SIG`:

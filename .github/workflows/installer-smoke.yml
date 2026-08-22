@@ -30,6 +30,10 @@ on:
       # install.ps1 — a fail-closed download verifier — and this is the only
       # job in the repo that parses PowerShell before running it.
       - ".github/actions/sailfin-build-windows/verify-release-seed.ps1"
+      # SFN-1034 S13: the installer-fixtures job's harness lives here, not in
+      # install.sh/.ps1 -- a mirror.js-only change would otherwise not
+      # trigger the job it exists to serve.
+      - ".github/installer-fixtures/**"
   workflow_dispatch:
     inputs: {}
 
@@ -125,7 +129,18 @@ jobs:
           export VERSION="${SEED_VERSION}"
           export INSTALL_BASE="${RUNNER_TEMP}/sailfin/versions"
           export GLOBAL_BIN_DIR="${RUNNER_TEMP}/sailfin/bin"
-          ./install.sh
+          ./install.sh 2>&1 | tee "${RUNNER_TEMP}/install.log"
+          # Assert verification actually RAN. Without this the job passes
+          # whether the installer verified the release or silently skipped
+          # every check -- it only ever inspected the installed artifact, so
+          # the regression this issue fixes would have been green here
+          # (SFN-1034).
+          grep -q 'verified: SHA256SUMS ed25519 signature' "${RUNNER_TEMP}/install.log" \
+            || { echo "::error::installer did not report a verified SHA256SUMS signature"; exit 1; }
+          grep -qE "verified: sailfin_${SEED_VERSION}_.*\.tar\.gz sha256 [0-9a-f]{64}" "${RUNNER_TEMP}/install.log" \
+            || { echo "::error::installer did not report a verified archive digest"; exit 1; }
+          grep -q 'UNVERIFIED' "${RUNNER_TEMP}/install.log" \
+            && { echo "::error::installer reported an unverified install for a signed release"; exit 1; }
           test -x "${GLOBAL_BIN_DIR}/sailfin"
           test -x "${GLOBAL_BIN_DIR}/sfn"
           file -L "${GLOBAL_BIN_DIR}/sfn" | grep -E '${{ matrix.file_pattern }}'
@@ -237,7 +252,23 @@ jobs:
           $env:VERSION = $env:SEED_VERSION
           $env:INSTALL_BASE = Join-Path $env:RUNNER_TEMP "sailfin\versions"
           $env:GLOBAL_BIN_DIR = Join-Path $env:RUNNER_TEMP "sailfin\bin"
-          & ./install.ps1
+          $log = Join-Path $env:RUNNER_TEMP "install.log"
+          & ./install.ps1 *>&1 | Tee-Object -FilePath $log
+          # Assert verification actually RAN, and that it ran through the
+          # embedded verifier rather than some reintroduced OpenSSL shortcut.
+          # windows-latest carries OpenSSL; a stock user host does not, so
+          # pinning the verifier name here keeps CI honest about exercising
+          # the path users actually take (SFN-1034).
+          $logText = Get-Content -Raw $log
+          if ($logText -notmatch 'verified: SHA256SUMS ed25519 signature \(verifier: powershell-ed25519\)') {
+            throw "installer did not report a verified SHA256SUMS signature from the embedded verifier"
+          }
+          if ($logText -notmatch 'verified: sailfin_.*\.tar\.gz sha256 [0-9a-f]{64}') {
+            throw "installer did not report a verified archive digest"
+          }
+          if ($logText -match 'UNVERIFIED') {
+            throw "installer reported an unverified install for a signed release"
+          }
           $sfn = Join-Path $env:GLOBAL_BIN_DIR "sfn.exe"
           $sailfin = Join-Path $env:GLOBAL_BIN_DIR "sailfin.exe"
           if (-not (Test-Path $sfn) -or -not (Test-Path $sailfin)) {
@@ -292,6 +323,397 @@ jobs:
           }
           if ($peText -match '(?i)msvcrt\.dll') {
             throw "Installed sfn.exe imports msvcrt.dll (the legacy mingw CRT); expected the native msvc build (SFN-1033)."
+          }
+
+  # Offline fail-closed fixtures (SFN-1034). The jobs above install a genuine
+  # signed release and can only ever prove the happy path; these drive the
+  # installers through every branch where verification cannot complete, which
+  # is where the vulnerability lived. Seeded from the real pinned release and
+  # then mutated, so there is no test signing key anywhere in the repo.
+  installer-fixtures:
+    name: fail-closed fixtures (${{ matrix.os }})
+    needs: resolve-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            slug: linux_x86_64
+          - os: macos-26
+            slug: macos_arm64
+          - os: windows-latest
+            slug: windows_x86_64-msvc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Seed the offline mirror from the pinned release
+        shell: bash
+        env:
+          SEED_TAG: ${{ needs.resolve-version.outputs.tag }}
+          ASSET: sailfin_${{ needs.resolve-version.outputs.version }}_${{ matrix.slug }}.tar.gz
+        run: |
+          set -euo pipefail
+          base="https://github.com/SailfinIO/sailfin/releases/download/${SEED_TAG}"
+          dir="${RUNNER_TEMP}/mirror/${SEED_TAG}"
+          mkdir -p "$dir"
+          for f in SHA256SUMS SHA256SUMS.sig "${ASSET}"; do
+            curl --fail --silent --show-error --location -o "${dir}/${f}" "${base}/${f}"
+          done
+          ls -l "$dir"
+
+      # POSIX fixtures. `SAILFIN_ALLOW_UNVERIFIED` appears here and nowhere
+      # else in the repo; if it ever shows up in a non-fixture workflow, that
+      # is an opt-out being smuggled into a real install path.
+      - name: Fail-closed fixtures (POSIX)
+        if: ${{ matrix.os != 'windows-latest' }}
+        shell: bash
+        env:
+          SEED_TAG: ${{ needs.resolve-version.outputs.tag }}
+          SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
+          ASSET: sailfin_${{ needs.resolve-version.outputs.version }}_${{ matrix.slug }}.tar.gz
+        run: |
+          set -euo pipefail
+          src="${RUNNER_TEMP}/mirror"
+          port=18400
+          fails=0
+
+          # A no-op `openssl` shim, to simulate a host with no usable verifier
+          # (the stock-macOS LibreSSL case, and any minimal container).
+          shimdir="${RUNNER_TEMP}/noverifier"
+          mkdir -p "$shimdir"
+          printf '#!/bin/sh\nexit 127\n' > "${shimdir}/openssl"
+          chmod +x "${shimdir}/openssl"
+
+          # A stub `openssl` that "verifies" everything unconditionally
+          # (exit 0 no matter the arguments). F9 uses this to prove the KAT's
+          # NEGATIVE half is load-bearing -- see F9 below (SFN-1034 D-01).
+          stubdir="${RUNNER_TEMP}/stubverifier"
+          mkdir -p "$stubdir"
+          printf '#!/bin/sh\nexit 0\n' > "${stubdir}/openssl"
+          chmod +x "${stubdir}/openssl"
+
+          run_fixture() {
+            local name="$1" mutate="$2" expect="$3" must="$4" mustnot="$5"; shift 5
+            port=$((port + 1))
+            local root="${RUNNER_TEMP}/fx/${name}"
+            rm -rf "$root"; mkdir -p "$root"
+            cp -r "${src}/${SEED_TAG}" "${root}/${SEED_TAG}"
+
+            # S12: a mutation that silently no-ops (e.g. a write that happens
+            # to match the byte already there) would make this fixture pass
+            # for the wrong reason -- it never actually exercised rejection
+            # of a mutated artifact. `mutate == "true"` marks the
+            # intentionally-unmutated fixtures (the happy path and the
+            # like); every other mutation is asserted to have actually
+            # changed the mirror.
+            local before="" after="" mutation_ok=1
+            if [ "$mutate" != "true" ]; then
+              before="$(find "${root}/${SEED_TAG}" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
+            fi
+            ( cd "${root}/${SEED_TAG}" && eval "$mutate" )
+            if [ "$mutate" != "true" ]; then
+              after="$(find "${root}/${SEED_TAG}" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
+              [ "$before" = "$after" ] && mutation_ok=0
+            fi
+
+            node .github/installer-fixtures/mirror.js "$root" "$port" &
+            local mpid=$!
+            sleep 1
+
+            local log="${root}/out.log" rc=0
+            env \
+              SAILFIN_RELEASE_BASE="http://127.0.0.1:${port}" \
+              VERSION="${SEED_VERSION}" \
+              INSTALL_BASE="${root}/versions" \
+              GLOBAL_BIN_DIR="${root}/bin" \
+              "$@" \
+              bash install.sh > "$log" 2>&1 || rc=$?
+            kill "$mpid" 2>/dev/null || true
+
+            local ok=1
+            [ "$mutation_ok" = "0" ] && ok=0
+            if [ "$expect" = "0" ] && [ "$rc" -ne 0 ]; then ok=0; fi
+            if [ "$expect" != "0" ] && [ "$rc" -eq 0 ]; then ok=0; fi
+            if [ -n "$must" ] && ! grep -qE "$must" "$log"; then ok=0; fi
+            if [ -n "$mustnot" ] && grep -qE "$mustnot" "$log"; then ok=0; fi
+            # A failing install must leave NOTHING behind in EITHER
+            # directory install.sh writes to. INSTALL_BASE (versions/) is
+            # created before GLOBAL_BIN_DIR (bin/), so an abort between the
+            # two would leave an installed binary under versions/ while
+            # bin/ stays empty -- checking bin/ alone would miss that
+            # regression (S11).
+            if [ "$expect" != "0" ]; then
+              for d in "${root}/bin" "${root}/versions"; do
+                if [ -n "$(find "$d" -type f 2>/dev/null)" ]; then ok=0; fi
+              done
+            fi
+
+            if [ "$ok" = "1" ]; then
+              echo "::notice::${name}: PASS (exit=${rc})"
+            else
+              [ "$mutation_ok" = "0" ] && echo "::error::${name}: mutation was a no-op -- mirror contents unchanged"
+              echo "::error::${name}: FAIL (exit=${rc}, expected=${expect})"
+              sed 's/^/    /' "$log"
+              fails=$((fails + 1))
+            fi
+          }
+
+          run_fixture F1-happy \
+            'true' 0 \
+            'verified: SHA256SUMS ed25519 signature' 'UNVERIFIED'
+          run_fixture F2-missing-manifest \
+            'rm -f SHA256SUMS' 1 \
+            'must publish SHA256SUMS,' ''
+          run_fixture F3-missing-signature \
+            'rm -f SHA256SUMS.sig' 1 \
+            'must publish SHA256SUMS\.sig' ''
+          # Flip to a char that is guaranteed DIFFERENT. A mutation that can
+          # be a no-op (e.g. always writing '0' over a signature that already
+          # starts with '0') would make this fixture silently assert that a
+          # GENUINE signature is rejected -- it would fail loudly here, but the
+          # mirror-image mistake during development had this fixture passing a
+          # forged signature. Never let the mutation depend on luck.
+          run_fixture F4-bad-signature \
+            's=$(tr -d "[:space:]" < SHA256SUMS.sig); f=0; [ "${s:0:1}" = "0" ] && f=1; printf "%s" "${f}${s:1}" > SHA256SUMS.sig' 1 \
+            'signature verification failed' ''
+          run_fixture F5-tampered-archive \
+            "printf 'x' >> \"${ASSET}\"" 1 \
+            'digest mismatch' ''
+          run_fixture F6-optin-unsigned \
+            'rm -f SHA256SUMS.sig' 0 \
+            'WARNING: UNVERIFIED INSTALL' 'verified: SHA256SUMS ed25519' \
+            SAILFIN_ALLOW_UNVERIFIED=1
+          # S4/R-4: SAILFIN_ALLOW_UNVERIFIED is consent to install an
+          # UNSIGNED artifact; it must never paper over a signature that was
+          # actually checked and actually failed. F4 with the opt-in set.
+          run_fixture F10-bad-signature-optin \
+            's=$(tr -d "[:space:]" < SHA256SUMS.sig); f=0; [ "${s:0:1}" = "0" ] && f=1; printf "%s" "${f}${s:1}" > SHA256SUMS.sig' 1 \
+            'signature verification failed' '' \
+            SAILFIN_ALLOW_UNVERIFIED=1
+
+          # F7/F7b/F8/F9 simulate "no usable verifier" by scrubbing PATH, but
+          # install.sh ALSO probes absolute Homebrew keg paths
+          # (/opt/homebrew/opt/openssl@3/bin/openssl,
+          # /usr/local/opt/openssl@3/bin/openssl) and `brew --prefix
+          # openssl@3`, none of which PATH scrubbing can reach. macos-26
+          # ships a real Homebrew openssl@3, so on that runner these
+          # fixtures would find a working verifier anyway: F7 would exit 0
+          # instead of 1, F7b would never see the UNSIGNED-manifest path,
+          # and F9's stub would never even be tried. Restricted to Linux,
+          # where there is no such fallback; the "bare-host verifier
+          # capability" diagnostic group below answers the bare-macOS
+          # question instead (S1).
+          if [ "${RUNNER_OS:-$(uname -s)}" = "Linux" ]; then
+            # The POSIX policy: no KAT-passing verifier is a hard failure, and
+            # the remediation must name what was tried.
+            run_fixture F7-no-verifier \
+              'true' 1 \
+              'known-answer test' '' \
+              PATH="${shimdir}:${PATH}" SAILFIN_OPENSSL=/nonexistent
+            # ...and with consent it proceeds, but the digest is STILL checked
+            # against the (unsigned-trust) manifest. This is the acceptance
+            # criterion that a missing verifier must not disable the digest.
+            run_fixture F7b-no-verifier-optin \
+              'true' 0 \
+              'matched an UNSIGNED manifest' 'verified: SHA256SUMS ed25519' \
+              PATH="${shimdir}:${PATH}" SAILFIN_OPENSSL=/nonexistent SAILFIN_ALLOW_UNVERIFIED=1
+            # The sharp pair: a tampered archive must be rejected on a host with
+            # NO verifier at all, purely by the digest path.
+            run_fixture F8-tampered-no-verifier \
+              "printf 'x' >> \"${ASSET}\"" 1 \
+              'digest mismatch' '' \
+              PATH="${shimdir}:${PATH}" SAILFIN_OPENSSL=/nonexistent SAILFIN_ALLOW_UNVERIFIED=1
+            # D-01's mandatory NEGATIVE assertion. F7's shim exits 127 (not
+            # found), which only proves the KAT's positive half matters --
+            # a regression to a positive-only KAT would still discard that
+            # shim too, and F7 would still pass. This stub "verifies"
+            # everything unconditionally (exit 0 for any arguments,
+            # including the tampered-message half of the KAT); the current
+            # KAT must still reject it. This fixture is what converts D-01
+            # from an argument into an assertion.
+            run_fixture F9-stub-verifier-rejected \
+              'true' 1 \
+              'known-answer test' '' \
+              PATH="${stubdir}:${PATH}" SAILFIN_OPENSSL=/nonexistent
+          fi
+
+          # S4/R-4: an UNREACHABLE manifest (a transient network failure, not
+          # a 404) must be a hard failure with the fetch-failure message even
+          # with the opt-in set -- consent to install an unsigned artifact is
+          # not consent to skip a check that was merely prevented from
+          # running. Points SAILFIN_RELEASE_BASE at a port with nothing
+          # listening so curl sees a connection failure rather than a 404;
+          # the three retries with backoff add roughly 15s to this fixture,
+          # which is expected.
+          run_fixture F11-unreachable-optin \
+            'true' 1 \
+            'could not fetch the release manifest.*after 3 attempts' 'must publish|UNVERIFIED INSTALL' \
+            SAILFIN_ALLOW_UNVERIFIED=1 SAILFIN_RELEASE_BASE="http://127.0.0.1:29999"
+
+          # R-1 data, not an assertion: record whether a BARE host (this
+          # runner's own openssl, no Homebrew keg) can verify. macos-26 has
+          # Homebrew, so a green job does NOT prove a bare Mac works -- this
+          # line is how that question gets an answer instead of an inference.
+          echo "::group::bare-host verifier capability"
+          echo "uname: $(uname -s)"
+          echo "which openssl: $(command -v openssl || echo none)"
+          echo "openssl version: $($(command -v openssl || echo true) version 2>&1 || true)"
+          echo "::endgroup::"
+
+          if [ "$fails" -ne 0 ]; then
+            echo "::error::${fails} installer fixture(s) failed"
+            exit 1
+          fi
+
+      - name: Fail-closed fixtures (Windows)
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        env:
+          SEED_TAG: ${{ needs.resolve-version.outputs.tag }}
+          SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
+          ASSET: sailfin_${{ needs.resolve-version.outputs.version }}_${{ matrix.slug }}.tar.gz
+        run: |
+          $ErrorActionPreference = "Continue"
+          $src = Join-Path $env:RUNNER_TEMP "mirror"
+          $script:port = 18500
+          $script:fails = 0
+          $savedPath = [Environment]::GetEnvironmentVariable("Path", "User")
+
+          # S12: a single digest over every file under a directory, used to
+          # assert a mutation actually changed the mirror rather than
+          # silently no-opping.
+          function Get-DirDigest($Dir) {
+            $hashes = Get-ChildItem -Recurse -File -Path $Dir |
+              Sort-Object FullName |
+              ForEach-Object { (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash }
+            return ($hashes -join '|')
+          }
+
+          function Run-Fixture($Name, $Mutate, $ExpectZero, $Must, $MustNot, $Extra, $UsePS51, $SkipMutationCheck) {
+            $script:port++
+            $root = Join-Path $env:RUNNER_TEMP "fx\$Name"
+            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            Copy-Item -Recurse (Join-Path $src $env:SEED_TAG) (Join-Path $root $env:SEED_TAG)
+            $mirrorDir = Join-Path $root $env:SEED_TAG
+            $before = if (-not $SkipMutationCheck) { Get-DirDigest $mirrorDir } else { $null }
+            & $Mutate $mirrorDir
+            $mutationOk = $true
+            if (-not $SkipMutationCheck) {
+              $after = Get-DirDigest $mirrorDir
+              if ($before -eq $after) { $mutationOk = $false }
+            }
+
+            $mirror = Start-Job -ScriptBlock {
+              param($js, $r, $p) & node $js $r $p
+            } -ArgumentList (Resolve-Path ".github/installer-fixtures/mirror.js").Path, $root, $script:port
+            Start-Sleep -Seconds 1
+
+            # Build the child command. At least one fixture runs under
+            # Windows PowerShell 5.1 rather than pwsh: `#Requires -Version
+            # 5.1` is the declared floor and every other job here is pwsh 7,
+            # so without this leg the floor is never actually exercised.
+            $envSet = ($Extra.GetEnumerator() | ForEach-Object { "`$env:$($_.Key)='$($_.Value)';" }) -join ' '
+            $cmd = "$envSet `$env:SAILFIN_RELEASE_BASE='http://127.0.0.1:$($script:port)';" +
+                   " `$env:VERSION='$env:SEED_VERSION';" +
+                   " `$env:INSTALL_BASE='$root\versions'; `$env:GLOBAL_BIN_DIR='$root\bin';" +
+                   " & '$((Resolve-Path './install.ps1').Path)'"
+            $shell = if ($UsePS51) { "powershell.exe" } else { "pwsh" }
+            $out = & $shell -NoProfile -ExecutionPolicy Bypass -Command $cmd 2>&1 | Out-String
+            $rc = $LASTEXITCODE
+
+            Stop-Job $mirror -ErrorAction SilentlyContinue
+            Remove-Job $mirror -Force -ErrorAction SilentlyContinue
+
+            $ok = $true
+            if (-not $mutationOk) { $ok = $false }
+            if ($ExpectZero -and $rc -ne 0) { $ok = $false }
+            if (-not $ExpectZero -and $rc -eq 0) { $ok = $false }
+            if ($Must -and ($out -notmatch $Must)) { $ok = $false }
+            if ($MustNot -and ($out -match $MustNot)) { $ok = $false }
+            # A failing install must leave NOTHING behind in EITHER
+            # directory install.ps1 writes to. INSTALL_BASE (versions\) is
+            # created before GLOBAL_BIN_DIR (bin\), so an abort between the
+            # two would leave an installed binary under versions\ while
+            # bin\ stays empty -- checking bin\ alone would miss that
+            # regression (S11).
+            if (-not $ExpectZero) {
+              foreach ($d in @("$root\bin", "$root\versions")) {
+                if (Test-Path $d) {
+                  $anyFile = Get-ChildItem -Recurse -File -Path $d -ErrorAction SilentlyContinue
+                  if ($anyFile) { $ok = $false }
+                }
+              }
+            }
+
+            if ($ok) {
+              Write-Host "::notice::${Name} [$shell]: PASS (exit=$rc)"
+            } else {
+              if (-not $mutationOk) { Write-Host "::error::${Name}: mutation was a no-op -- mirror contents unchanged" }
+              Write-Host "::error::${Name} [$shell]: FAIL (exit=$rc)"
+              $out -split "`n" | ForEach-Object { Write-Host "    $_" }
+              $script:fails++
+            }
+          }
+
+          try {
+            Run-Fixture "F1-happy" { param($d) } $true `
+              'verified: SHA256SUMS ed25519 signature \(verifier: powershell-ed25519\)' 'UNVERIFIED' @{} $false $true
+            Run-Fixture "F2-missing-manifest" { param($d) Remove-Item "$d\SHA256SUMS" } $false `
+              'must publish SHA256SUMS,' '' @{} $false $false
+            Run-Fixture "F3-missing-signature" { param($d) Remove-Item "$d\SHA256SUMS.sig" } $false `
+              'must publish SHA256SUMS\.sig' '' @{} $false $false
+            Run-Fixture "F4-bad-signature" { param($d)
+                $p = "$d\SHA256SUMS.sig"
+                $s = (Get-Content -Raw $p).Trim()
+                # Flip to a char guaranteed different; a mutation that can be a
+                # no-op would assert the wrong thing entirely.
+                $f = if ($s[0] -eq '0') { '1' } else { '0' }
+                # WriteAllText, not `Set-Content -NoNewline $p $v`: the latter
+                # silently no-ops under positional binding on 5.1, which made
+                # this fixture pass a FORGED signature during development.
+                [IO.File]::WriteAllText($p, ($f + $s.Substring(1)))
+              } $false 'signature verification FAILED' '' @{} $false $false
+            Run-Fixture "F5-tampered-archive" { param($d)
+                $f = Join-Path $d $env:ASSET
+                $b = [IO.File]::ReadAllBytes($f); $b[1000] = $b[1000] -bxor 0xff
+                [IO.File]::WriteAllBytes($f, $b)
+              } $false 'digest mismatch' '' @{} $false $false
+            Run-Fixture "F6-optin-unsigned" { param($d) Remove-Item "$d\SHA256SUMS.sig" } $true `
+              'WARNING: UNVERIFIED INSTALL' 'verified: SHA256SUMS ed25519' @{ SAILFIN_ALLOW_UNVERIFIED = '1' } $false $false
+            # S4/R-4: SAILFIN_ALLOW_UNVERIFIED is consent to install an
+            # UNSIGNED artifact; it must never paper over a signature that
+            # was actually checked and actually failed. F4 with the opt-in
+            # set.
+            Run-Fixture "F10-bad-signature-optin" { param($d)
+                $p = "$d\SHA256SUMS.sig"
+                $s = (Get-Content -Raw $p).Trim()
+                $f = if ($s[0] -eq '0') { '1' } else { '0' }
+                [IO.File]::WriteAllText($p, ($f + $s.Substring(1)))
+              } $false 'signature verification FAILED' '' @{ SAILFIN_ALLOW_UNVERIFIED = '1' } $false $false
+
+            # The declared floor, and the case every stock Windows host is in:
+            # Windows PowerShell 5.1 with the embedded verifier. A tampered
+            # archive must still be rejected here with no OpenSSL involved.
+            Run-Fixture "F7-happy-ps51" { param($d) } $true `
+              'verified: SHA256SUMS ed25519 signature \(verifier: powershell-ed25519\)' 'UNVERIFIED' @{} $true $true
+            Run-Fixture "F8-tampered-ps51" { param($d)
+                $f = Join-Path $d $env:ASSET
+                $b = [IO.File]::ReadAllBytes($f); $b[1000] = $b[1000] -bxor 0xff
+                [IO.File]::WriteAllBytes($f, $b)
+              } $false 'digest mismatch' '' @{} $true $false
+          } finally {
+            # install.ps1 persists GLOBAL_BIN_DIR into the user PATH; these
+            # fixtures run many installs, so restore it rather than leaving
+            # the runner's environment littered.
+            [Environment]::SetEnvironmentVariable("Path", $savedPath, "User")
+          }
+
+          if ($script:fails -ne 0) {
+            Write-Host "::error::$($script:fails) installer fixture(s) failed"
+            exit 1
           }
 
   site:
