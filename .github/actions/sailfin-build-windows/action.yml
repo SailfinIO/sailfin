@@ -242,9 +242,15 @@ runs:
         # intended stage0 on this leg. `dev.sfn` documents the knob for
         # exactly this seed/pin-skew window.
         #
-        # Removal condition: a native Windows release seed (SFN-57) plus
-        # `seed_source: 'release'` (SFN-994) — then the running toolchain
-        # satisfies the pin here as it does on the other legs.
+        # Applies to `seed_source: 'cross'` only. Under `'release'` the staged
+        # seed IS the pinned release build, so running == pin, the gate is a
+        # no-op, and neither the skew nor the TLS argument above holds — the
+        # setting is harmless there, not load-bearing. It stays unconditional
+        # because `ci.yml` and `release-tag.yml` still pass `'cross'`.
+        #
+        # Removal condition, now half discharged: SFN-57 shipped the native
+        # release seed and SFN-994 implemented `seed_source: 'release'`, so
+        # this retires when the last `'cross'` caller does — which is SFN-58.
         SAILFIN_BOOTSTRAP: "off"
       run: |
         set -euo pipefail

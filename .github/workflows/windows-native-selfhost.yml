@@ -2,15 +2,18 @@
 # fixed point.
 #
 # Executes SFEP-0021 milestones M7 (SFN-53) and M8 (SFN-54) on every push to
-# `main` and once nightly: the `cross-seed` job rebuilds the mingw-cross
-# bootstrap seed on Linux (there is no released native Windows seed yet —
-# that is M11/SFN-57 — so per SFEP-0021 §4.3 the seed comes from `make
-# ci-cross-windows`, uploaded under the same artifact name ci.yml's
-# `build-compiler-linux` uses); `native-build` stages it and drives the SFN-53
+# `main` and once nightly. `native-build` fetches the PUBLISHED native MSVC
+# seed named by `bootstrap.toml [seed].version` — signature- and
+# digest-verified before it is executed (SFN-994) — then drives the SFN-53
 # ladder plus the boot / check / run / R1 (try-throw) / R3 (struct-channel)
 # ABI gates via the shared `.github/actions/sailfin-build-windows` composite,
-# then runs the self-host fixed point: the native compiler rebuilds itself
+# and runs the self-host fixed point: the native compiler rebuilds itself
 # twice and pass-2 must be byte-identical to pass-1.
+#
+# `cross-seed` no longer feeds it. It rebuilds the mingw-cross seed on Linux
+# to keep `make ci-cross-windows` exercised nightly and to keep the
+# `seed_source: cross` escape hatch proven, and the two jobs now run in
+# parallel. SFN-58 deletes both together.
 #
 # This is SFN-55 (SFEP-0021 M9) tier B: the *unconditional* backstop to tier
 # A's path-filtered `build-compiler-windows` job in `ci.yml`. Tier A only
@@ -454,7 +457,24 @@ jobs:
       issues: write
       pull-requests: write
     env:
-      GATE_NAME: ${{ needs.native-build.outputs.gate_name != '' && needs.native-build.outputs.gate_name || 'windows-native-build' }}
+      # `gate` becomes the regression issue's title, and open issues dedup on
+      # that title (see `Identify failed gate`), so a wrong value does not just
+      # mislead — it appends a Linux `make ci-cross-windows` flake onto an open
+      # Windows-compiler regression issue.
+      #
+      # `cross-seed` is checked FIRST, and only when `native-build` did not
+      # itself fail. Since SFN-994 dropped `needs: cross-seed` the two run in
+      # parallel, so "cross-seed broke while the Windows build was green" is
+      # now reachable; previously `native-build` would have been `skipped` and
+      # the fallback produced the same misleading title.
+      GATE_NAME: >-
+        ${{ (needs.cross-seed.result == 'failure' || needs.cross-seed.result == 'cancelled')
+            && needs.native-build.result != 'failure'
+            && needs.native-build.result != 'cancelled'
+            && 'windows-cross-seed'
+            || (needs.native-build.outputs.gate_name != ''
+                && needs.native-build.outputs.gate_name
+                || 'windows-native-build') }}
       FAIL_SHA: ${{ github.sha }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       EVENT_NAME: ${{ github.event_name }}

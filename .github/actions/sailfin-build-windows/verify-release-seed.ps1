@@ -61,23 +61,51 @@ $pubKey   = $PublicKeyPath
 foreach ($f in @(@{u="$base/$asset"; o=$archive},
                  @{u="$base/SHA256SUMS"; o=$manifest},
                  @{u="$base/SHA256SUMS.sig"; o=$sigHex})) {
-  Write-Host "fetching $($f.u)"
-  try {
-    Invoke-WebRequest -Uri $f.u -OutFile $f.o -UseBasicParsing -ErrorAction Stop
-  } catch {
-    throw "SFN-994: could not fetch $($f.u) -- $($_.Exception.Message). A missing signed manifest is a hard failure here, not a reason to continue unverified."
+  # Retry transient failures, but never a 404. This job files a regression
+  # issue when it fails, so a rate-limit blip or a 5xx would otherwise open an
+  # issue describing a compiler break. A 404 is not transient and retrying it
+  # only delays a real verdict.
+  $attempt = 0
+  while ($true) {
+    $attempt++
+    Write-Host "fetching $($f.u) (attempt $attempt)"
+    try {
+      Invoke-WebRequest -Uri $f.u -OutFile $f.o -UseBasicParsing -ErrorAction Stop
+      break
+    } catch {
+      $status = $null
+      if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+
+      if ($status -eq 404) {
+        # Worth spelling out, because the gate name this lands under says
+        # "windows-native-build" and the cause is neither Windows nor a build.
+        # `release-tag.yml`'s MSVC leg is best-effort (SFN-1024) and
+        # `cadence-seed-pin.yml` does not require the asset before advancing
+        # the pin, so the pin can name a release that never published one.
+        throw "SFN-994: $($f.u) does not exist (404). If this is the seed archive, the pinned release v$ver published no native msvc asset -- that is SFN-1024's unguarded path (release-tag.yml's msvc leg is best-effort and the seed pin does not require it), NOT a regression in this checkout. Fix the release or the pin; do not add a mingw fallback here."
+      }
+
+      if ($attempt -ge 3) {
+        throw "SFN-994: could not fetch $($f.u) after $attempt attempts -- $($_.Exception.Message). A missing signed manifest is a hard failure here, not a reason to continue unverified."
+      }
+      Write-Host "  transient failure ($($_.Exception.Message)); retrying"
+      Start-Sleep -Seconds (5 * $attempt)
+    }
   }
 }
 
-# Trust anchor is the committed key, read from this checkout rather than
-# embedded. `docs/release-signing.md` records the copies that must stay
-# in sync; reading the file keeps this step from becoming a seventh one.
 if (-not (Test-Path $pubKey)) { throw "SFN-994: release signing key missing at $pubKey" }
 
+# OpenSSL 3.0+, NOT the `1.1.1|[2-9]` pattern `install.sh` and `install.ps1`
+# use. `pkeyutl -rawin` arrived in 3.0; on 1.1.1 it is an unknown option, so
+# that pattern admits a toolchain which then fails at the verify call and
+# reports a SIGNATURE failure for what is really a missing flag. Rejecting it
+# up front costs nothing here -- the pinned `windows-2025` image carries
+# OpenSSL 3.6.3 -- and keeps the diagnosis honest.
 $ossl = Get-Command openssl -ErrorAction SilentlyContinue
 $osslVersion = if ($ossl) { (& openssl version 2>$null) } else { "" }
-if (-not $ossl -or $osslVersion -notmatch '^OpenSSL (1\.1\.1|[2-9][0-9]*\.)') {
-  throw "SFN-994: OpenSSL 1.1.1+ with raw Ed25519 support is required to verify the release seed, and was not found (got '$osslVersion'). Failing closed -- bootstrap.toml [verify].required = true."
+if (-not $ossl -or $osslVersion -notmatch '^OpenSSL ([3-9]|[1-9][0-9]+)\.') {
+  throw "SFN-994: OpenSSL 3.0+ is required to verify the release seed (pkeyutl -rawin), and was not found (got '$osslVersion'). Failing closed -- bootstrap.toml [verify].required = true. If the runner image dropped OpenSSL, that is the bug; do not relax this check."
 }
 
 $hex = ((Get-Content -Raw $sigHex) -replace '\s', '')
@@ -86,8 +114,21 @@ $sigBytes = New-Object byte[] 64
 for ($i = 0; $i -lt 64; $i++) { $sigBytes[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
 [IO.File]::WriteAllBytes((Join-Path (Resolve-Path -LiteralPath $WorkDir) 'SHA256SUMS.sig.raw'), $sigBytes)
 
-& openssl pkeyutl -verify -pubin -inkey $pubKey -rawin -in $manifest -sigfile $sigRaw 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "SFN-994: SHA256SUMS signature verification FAILED for v$ver; refusing to bootstrap from it." }
+# try/catch, not a bare `$LASTEXITCODE` check. PowerShell 7.4 defaults
+# `$PSNativeCommandUseErrorActionPreference` to true, so with
+# `$ErrorActionPreference = 'Stop'` a non-zero native exit raises a terminating
+# error AT the call, before the next line runs. Either way the step goes red,
+# but without this the log shows PowerShell's generic native-command error
+# instead of saying which check failed -- and "the step died somewhere in
+# verification" is the ambiguity this whole file exists to avoid.
+$sigOk = $false
+try {
+  & openssl pkeyutl -verify -pubin -inkey $pubKey -rawin -in $manifest -sigfile $sigRaw 2>$null | Out-Null
+  $sigOk = ($LASTEXITCODE -eq 0)
+} catch {
+  $sigOk = $false
+}
+if (-not $sigOk) { throw "SFN-994: SHA256SUMS ed25519 signature verification FAILED for v$ver against $pubKey; refusing to bootstrap from it." }
 
 $digests = @()
 foreach ($line in (Get-Content $manifest)) {
