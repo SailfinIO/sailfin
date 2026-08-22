@@ -3,20 +3,34 @@
 // `drain_to_exit` demultiplexes a child's stdout/stderr with an optional
 // wall-clock deadline; `run_bounded` layers `spawn_with_env` on top.
 // POSIX `sh`/`cat` assumed, matching the sibling `handle_framed_stdio_test`.
+import { find } from "sfn/strings";
+import { sfn_bin_abs_path, skip } from "sfn/test";
+
 import {
-    ProcessHandle,
     ProcessDrain,
-    env_empty,
-    spawn_with_env,
-    run_bounded,
+    ProcessHandle,
     drain_to_exit,
+    env_empty,
     handle_kill,
-    handle_wait,
-    handle_read_chunk_stdout,
     handle_read_chunk_stderr,
+    handle_read_chunk_stdout,
+    handle_stderr_at_eof,
     handle_stdout_at_eof,
-    handle_stderr_at_eof
+    handle_wait,
+    run_bounded,
+    spawn_with_env
 } from "../src/mod";
+
+// True when the test runner is a Windows binary. Mirrors the detection
+// idiom in `capsules/sfn/fs/tests/fs_test.sfn:34`: the `OS` / `SYSTEMROOT` /
+// `windir` environment variables Windows always sets.
+fn _is_windows() -> bool ![io] {
+    let os = env.get("OS");
+    if find(os, "Windows", 0) >= 0 { return true; }
+    if env.get("SYSTEMROOT").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    return false;
+}
 
 test "drain_to_exit: collects stdout from a child that exits on its own" ![clock, io] {
     let h = spawn_with_env(["sh", "-c", "printf 'hello'"], env_empty(), "");
@@ -97,6 +111,67 @@ test "handle_kill: kills a live child then handle_wait reaps it" ![io] {
     assert rc == 0;
     let exit = handle_wait(h);
     assert exit == 137;
+}
+
+test "handle_read_chunk_stdout: a live silent child yields empty rather than parking (Windows)" ![clock, io] {
+    // POSIX `handle_read_bytes_stdout` still parks until byte-or-EOF —
+    // unchanged by SFN-1092 design (see the contract note on
+    // `handle_read_chunk_stdout` above). Only the Windows leg gained a
+    // bounded pump (`_pw_h_pump_bounded`,
+    // runtime/sfn/platform/process_windows.sfn), so asserting "returns
+    // empty promptly" anywhere else would hang the suite forever, since
+    // the child below never exits on its own.
+    if !_is_windows() {
+        skip("Windows-only: exercises the bounded chunk-read pump added for SFN-1092");
+    }
+
+    // `sfn login` with no `--token` prints its prompt, then blocks in
+    // `io.read_line(0)` forever. Unlike `run_bounded`/`drain_to_exit`
+    // (which close the child's stdin as their first act, see the note
+    // above `drain_to_exit`), bare `spawn_with_env` never touches stdin,
+    // so the block actually holds — this is the live, silent,
+    // never-exiting child the bounded pump exists to serve.
+    let h = spawn_with_env([sfn_bin_abs_path(), "login"], env_empty(), "");
+    assert h.handle_id != 0;
+
+    // Read until the prompt arrives, proving ordinary reads still work
+    // end-to-end through the new pump — a regression that broke reads
+    // outright would fail here rather than at the assertions below.
+    // Guard counter per .claude/rules/code-style.md: each call returns
+    // within the ~25ms budget even before the prompt lands, so 400
+    // attempts is generous (~10s) without being unbounded.
+    let mut acc: string = "";
+    let mut attempts: int = 0;
+    loop {
+        if find(acc, "enter your registry token:", 0) >= 0 { break; }
+        if attempts >= 400 { break; }
+        attempts += 1;
+        acc = acc + handle_read_chunk_stdout(h, 65536);
+    }
+    assert find(acc, "enter your registry token:", 0) >= 0;
+
+    // The core assertion: the child is alive and now blocked on stdin, so
+    // it will never write again. Before SFN-1092 this single call parked
+    // forever on Windows; the bounded pump now returns promptly with an
+    // empty chunk instead.
+    let start = monotonic_millis();
+    let chunk = handle_read_chunk_stdout(h, 65536);
+    let elapsed = monotonic_millis() - start;
+    assert strings_equal(chunk, "");
+    // Budget is 25ms; 2000ms is a generous ceiling that still catches a
+    // regression back to an unbounded park.
+    assert elapsed < 2000;
+
+    // Contract assertion: empty did NOT mean EOF. `*_at_eof` remains the
+    // sole EOF oracle — a broken implementation that closed the pipe on
+    // timeout would pass the two assertions above and fail only here.
+    assert handle_stdout_at_eof(h) == false;
+
+    // The child never exits on its own; reap it explicitly rather than
+    // leak it. No `drain_to_exit` in play here, so no prior `handle_wait`
+    // to conflict with — kill then wait exactly once each.
+    handle_kill(h);
+    handle_wait(h);
 }
 
 test "handle_read_chunk_stdout: bounded incremental read, empty string at EOF" ![io] {

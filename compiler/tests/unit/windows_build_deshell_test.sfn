@@ -17,6 +17,9 @@
 // Windows too and fail to actually link on a non-Windows runner);
 // the plain suite run takes the POSIX branch and asserts the guards fall
 // through to real behaviour. Both branches keep the normal suite green.
+import { remove_all } from "sfn/fs";
+import { scratch_root, sfn_bin_path } from "sfn/test";
+
 import { _macos_sdk_link_flags } from "../../src/backend";
 import { _mktemp_sibling_cmd, _sha256_of_file } from "../../src/build/fs";
 import { build_target_os, host_is_windows } from "../../src/build/target";
@@ -41,8 +44,9 @@ test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
         assert _mktemp_sibling_cmd("build/sailfin/capsules/x.ll") == "";
         // File hashing is binary-safe and in-process on every host. This is
         // the SFN-660 functional gain that makes toolchain archive digest
-        // verification available on native Windows.
-        assert _sha256_of_file("build/bin/sfn").length == 64;
+        // verification available on native Windows. `sfn_bin_path()`
+        // resolves the host-correct binary name (`.exe` on Windows).
+        assert _sha256_of_file(sfn_bin_path()).length == 64;
         // Job sizing now returns a real core-derived count on a Windows
         // host (SFN-498): `NUMBER_OF_PROCESSORS` replaces the POSIX
         // `nproc`/`sysctl` probe, so the fan-out is native and shell-free
@@ -127,15 +131,16 @@ test "windows-deshell: macOS SDK link flags stay empty off Darwin" ![io] {
 // Host-agnostic by construction: POSIX takes the real `touch` and
 // Windows the gate, and both must report the same thing.
 test "windows-deshell: cache LRU touch succeeds on either host" ![io] {
-    let scratch = "/tmp/sfn_win_cache_touch_test";
-    process.run(["rm", "-rf", scratch]);
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    let scratch = fs.mkdtemp(base + "/sfn_win_cache_touch_test_");
     let root = scratch + "/cache/v1";
     // `_is_valid_digest` demands exactly 64 lowercase hex chars, and it
     // is checked ahead of everything else — a short digest never
     // reaches the host gate at all.
     let digest = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
     let key = CacheKey { digest: digest };
-    process.run(["mkdir", "-p", root + "/ab/" + digest]);
+    fs.createDirectory(root + "/ab/" + digest, true);
 
     assert cache_touch_entry(root, key);
     // The Windows gate sits *after* the entry-existence check, so a
@@ -144,7 +149,7 @@ test "windows-deshell: cache LRU touch succeeds on either host" ![io] {
     let absent = "0000000000000000000000000000000000000000000000000000000000000000";
     assert ! cache_touch_entry(root, CacheKey { digest: absent });
 
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 // SFN-495: `_package_detect_target` used to read `uname -s`/`uname -m` via
