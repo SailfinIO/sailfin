@@ -238,7 +238,7 @@ help:
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e       # Run Sailfin-native end-to-end tests"
-	@echo "  make test-capsules  # Run per-capsule tests under capsules/"
+	@echo "  make test-capsules  # Run workspace member-local capsule tests"
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
 	@echo "  make bench          # Benchmark per-module compile time and memory"

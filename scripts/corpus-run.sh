@@ -2,7 +2,7 @@
 # scripts/corpus-run.sh
 #
 # Nightly corpus run (SFN-92, SFEP-0037 §3.4). Compiles the in-tree corpus
-# (examples/, benchmarks/runtime/, capsules/) with BOTH the candidate
+# (examples/, benchmarks/runtime/, capsules/, stdlib/) with BOTH the candidate
 # (freshly self-hosted) compiler and the pinned seed, records per-entry
 # verdict triples (check / build / run), and fails on any regression or
 # check/build disagreement. Prior art: Rust's crater, Swift's
@@ -41,7 +41,8 @@
 # Usage:
 #   scripts/corpus-run.sh                      # full corpus, candidate vs seed
 #   SAILFIN_BIN=path SAILFIN_SEED_BIN=path scripts/corpus-run.sh
-#   scripts/corpus-run.sh --roots "examples benchmarks/runtime" --capsules capsules
+#   scripts/corpus-run.sh --roots "examples benchmarks/runtime" # capsules derive from workspace.toml
+#   scripts/corpus-run.sh --capsules "scratch/capsules"          # explicit root override
 #   scripts/corpus-run.sh --roots /scratch/drill --capsules -   # a scratch drill
 #   scripts/corpus-run.sh --no-seed            # skip the regression leg (local)
 #   SUMMARY_JSON=out.json scripts/corpus-run.sh --json out.json
@@ -56,7 +57,7 @@ SAILFIN_SEED_BIN="${SAILFIN_SEED_BIN:-build/toolchains/seed/bin/sfn}"
 PER_ENTRY_TIMEOUT="${PER_ENTRY_TIMEOUT:-60}"
 SUMMARY_JSON="${SUMMARY_JSON:-build/corpus-run.json}"
 CORPUS_ROOTS="${CORPUS_ROOTS:-examples benchmarks/runtime}"
-CORPUS_CAPSULES="${CORPUS_CAPSULES:-capsules}"
+CORPUS_CAPSULES="${CORPUS_CAPSULES:-@workspace}"
 USE_SEED=1
 
 while [ $# -gt 0 ]; do
@@ -269,7 +270,7 @@ fmt_check_file() { # path
 # Walk the corpus
 # ---------------------------------------------------------------------------
 echo "== corpus-run: candidate=$SAILFIN_BIN seed=$([ "$USE_SEED" -eq 1 ] && echo "$SAILFIN_SEED_BIN" || echo '(none)') =="
-echo "== roots: $CORPUS_ROOTS  capsules: ${CORPUS_CAPSULES:-(none)} =="
+echo "== roots: $CORPUS_ROOTS  capsule inventory: ${CORPUS_CAPSULES:-(none)} =="
 
 for root in $CORPUS_ROOTS; do
     [ -d "$root" ] || { echo "corpus-run: root '$root' not found, skipping" >&2; continue; }
@@ -279,11 +280,13 @@ for root in $CORPUS_ROOTS; do
     done < <(find "$root" -name '*.sfn' | sort)
 done
 
-# Capsules: libraries (kind = library, no main). The fmt leg covers EVERY
-# capsule .sfn (internals + tests); the verdict diff is per capsule, driven by
-# the declared [build] entry (which pulls in the module graph).
-if [ -n "$CORPUS_CAPSULES" ] && [ -d "$CORPUS_CAPSULES" ]; then
-    while IFS= read -r f; do fmt_check_file "$f"; done < <(find "$CORPUS_CAPSULES" -name '*.sfn' | sort)
+# Capsules: libraries (kind = library, no main). The default derives physical
+# member roots from workspace.toml through the canonical layout inventory.
+# `--capsules` remains an explicit scratch/compatibility override.
+process_capsule_root() { # capsule_root
+    capsule_root="$1"
+    [ -d "$capsule_root" ] || { echo "corpus-run: capsule root '$capsule_root' not found, skipping" >&2; return; }
+    while IFS= read -r f; do fmt_check_file "$f"; done < <(find "$capsule_root" -name '*.sfn' | sort)
     while IFS= read -r toml; do
         dir="$(dirname "$toml")"
         entry="$(awk -F'=' '/^[[:space:]]*entry[[:space:]]*=/{gsub(/[" ]/,"",$2);print $2;exit}' "$toml")"
@@ -291,7 +294,25 @@ if [ -n "$CORPUS_CAPSULES" ] && [ -d "$CORPUS_CAPSULES" ]; then
         f="$dir/$entry"
         [ -f "$f" ] || { echo "corpus-run: capsule entry '$f' missing, skipping" >&2; continue; }
         process_entry "$f" "check-only"
-    done < <(find "$CORPUS_CAPSULES" -name 'capsule.toml' | sort)
+    done < <(find "$capsule_root" -name 'capsule.toml' | sort)
+}
+
+if [ "$CORPUS_CAPSULES" = "@workspace" ]; then
+    if ! workspace_public_members="$(bash scripts/module_layout_fingerprint.sh --public-members)"; then
+        echo "corpus-run: failed to load public workspace members" >&2
+        exit 1
+    fi
+    if [ -z "$workspace_public_members" ]; then
+        echo "corpus-run: workspace inventory contains no public members" >&2
+        exit 1
+    fi
+    while IFS=$'\t' read -r _capsule_name capsule_root _external_entry; do
+        process_capsule_root "$capsule_root"
+    done <<< "$workspace_public_members"
+else
+    for capsule_root in $CORPUS_CAPSULES; do
+        process_capsule_root "$capsule_root"
+    done
 fi
 
 # ---------------------------------------------------------------------------

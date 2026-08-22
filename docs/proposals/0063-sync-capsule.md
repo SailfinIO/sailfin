@@ -4,7 +4,7 @@ title: sfn/sync — scope and blocking predecessor for a synchronization capsule
 status: Accepted
 type: language
 created: 2026-08-01
-updated: 2026-08-02
+updated: 2026-08-22
 author: "agent:compiler-architect; human review"
 tracking:
 supersedes:
@@ -16,9 +16,9 @@ graduates-to:
 
 ## 1. Summary
 
-`capsules/sfn/sync/` is an empty reserved shell left over from the removal of
+`stdlib/sync/` is an empty reserved shell left over from the removal of
 the untyped `channel`/`parallel`/`spawn` exports that once fronted no-op C
-bridges (`capsules/sfn/sync/src/mod.sfn:1-30`). Everything that actually ships
+bridges (`stdlib/sync/src/mod.sfn:1-30`). Everything that actually ships
 today — `spawn`, `parallel`, `routine { }`, `channel(N)` — is language-level,
 not capsule surface. This proposal evaluates what a real `sfn/sync` library
 (`Mutex`, `RwLock`, `Semaphore`, `WaitGroup`, `select`) would need to export and
@@ -36,9 +36,9 @@ itself to a follow-up SFEP that closes the reclamation gap.
 
 ## 2. Motivation
 
-`capsules/sfn/sync/src/mod.sfn` is nothing but a comment: zero exports, zero
+`stdlib/sync/src/mod.sfn` is nothing but a comment: zero exports, zero
 functions. Its capsule manifest nonetheless declares
-`[capabilities] required = ["io"]` (`capsules/sfn/sync/capsule.toml:8-9`) for a
+`[capabilities] required = ["io"]` (`stdlib/sync/capsule.toml:8-9`) for a
 capsule that performs no I/O, and its module comment cites artifacts that no
 longer exist — a deleted C file
 (`runtime/native/src/sailfin_runtime.c`), a retired bash test
@@ -173,14 +173,14 @@ possible at all.
 Phase 0 is purely corrective: it removes inaccurate claims and does not add
 any new surface.
 
-1. Rewrite `capsules/sfn/sync/src/mod.sfn`'s header comment. The current text
+1. Rewrite `stdlib/sync/src/mod.sfn`'s header comment. The current text
    cites a deleted file (`runtime/native/src/sailfin_runtime.c`), a retired
    bash test (superseded by
    `compiler/tests/e2e/sync_rejects_unimplemented_concurrency_test.sfn`), and
    tells readers to wait for a structured-concurrency runtime that has since
    shipped. The rewritten comment should instead point at this SFEP as the
    reason the capsule stays an empty, reserved shell.
-2. Change `capsules/sfn/sync/capsule.toml`'s `[capabilities] required = ["io"]`
+2. Change `stdlib/sync/capsule.toml`'s `[capabilities] required = ["io"]`
    to `required = []`. The capsule has zero lines of code and performs no I/O;
    an empty capsule claiming `io` in its manifest is exactly the kind of
    over-claim that undercuts the Reach pillar's promise that Sailfin's
@@ -292,7 +292,7 @@ effect-free in itself, with blocking not implying `![clock]` or any other
 effect — but that is an implication of SFEP-0049's existing model to note, not
 a decision this proposal makes; the follow-up design that closes §3.1's
 reclamation gap is the one that settles it. Phase 0's only capability change
-is the manifest edit in §3.4: `capsules/sfn/sync/capsule.toml`'s
+is the manifest edit in §3.4: `stdlib/sync/capsule.toml`'s
 `required = ["io"]` becomes `required = []`. This proposal allocates **no**
 diagnostic code. For future reference: `E08xx` is nearly exhausted, `E09xx` is
 the ownership/affine range, and `E1100`-`E1114` already belongs to SFEP-0062 —
@@ -303,7 +303,7 @@ diagnostic at all.
 ## 5. Self-hosting impact
 
 Phase 0 touches no compiler pass. The only `.sfn` file it changes is
-`capsules/sfn/sync/src/mod.sfn`, and that change is comment-only, so
+`stdlib/sync/src/mod.sfn`, and that change is comment-only, so
 `sfn fmt --check` applies to it; everything else in Phase 0 is Markdown
 (`docs/status.md`, the two site pages) and TOML (`capsule.toml`). Per
 `.claude/rules/seed-dependency.md`, the bundling-vs-splitting question that
@@ -359,7 +359,7 @@ touch it.
 
 ## 9. References
 
-- `capsules/sfn/sync/capsule.toml`, `capsules/sfn/sync/src/mod.sfn`
+- `stdlib/sync/capsule.toml`, `stdlib/sync/src/mod.sfn`
 - `compiler/capsules/analyzer/src/ownership_checker.sfn:373` (`_consume_identifier`'s
   `is_owned` gate), `:104-105` (copyable bindings never move-tracked),
   `:438-473` (`_consume_spawn_captures`)

@@ -40,6 +40,7 @@ on:
             - llms.txt
             - 'site/**'
             - 'capsules/**/capsule.toml'
+            - 'stdlib/**/capsule.toml'
 
 concurrency:
     group: ci-branch-${{ github.ref }}

@@ -291,8 +291,8 @@ test "clock-reader: unix ABI emits for every shipped release target" ![io] {
 }
 
 test "clock-reader: unix public surface is scoped to sfn/time" ![io] {
-    let time_source = fs.readFile("capsules/sfn/time/src/mod.sfn");
-    let time_manifest = fs.readFile("capsules/sfn/time/capsule.toml");
+    let time_source = fs.readFile("stdlib/time/src/mod.sfn");
+    let time_manifest = fs.readFile("stdlib/time/capsule.toml");
     let crypto_source = fs.readFile("capsules/sfn/crypto/src/mod.sfn");
     let crypto_manifest = fs.readFile("capsules/sfn/crypto/capsule.toml");
 

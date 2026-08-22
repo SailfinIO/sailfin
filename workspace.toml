@@ -16,7 +16,8 @@
 # expands a trailing `/*` into every immediate subdirectory carrying a
 # `capsule.toml`, sorted (`capsule_resolver/workspace.sfn::_cr_expand_member_globs`),
 # so the historical single-physical-line literal list is no longer required. A
-# new capsule under `capsules/sfn/` is picked up by the glob with no edit here.
+# new capsule under either transitional standard-library root is picked up by
+# its glob with no edit here.
 
 [workspace]
 members = [
@@ -24,6 +25,7 @@ members = [
     "compiler/capsules/*",
     "runtime",
     "capsules/sfn/*",
+    "stdlib/*",
 ]
 
 # Workspace-wide toolchain floor (SFEP-0051 Phase 2, SFN-414 / SFEP-0046

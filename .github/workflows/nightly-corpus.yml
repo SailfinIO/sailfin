@@ -1,7 +1,7 @@
 name: Nightly corpus run
 
 # Whole-program corpus diff (SFN-92, SFEP-0037 §3.4). Compiles the in-tree
-# corpus (examples/, benchmarks/runtime/, capsules/) with BOTH the candidate
+# corpus (examples/, benchmarks/runtime/, capsules/, stdlib/) with BOTH the candidate
 # (freshly self-hosted) compiler and the pinned seed, and fails on:
 #   (a) a regression — the seed accepts an entry but the candidate rejects it;
 #   (b) a check-green/build-red disagreement on the candidate (the #1386/#1389
