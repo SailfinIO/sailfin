@@ -716,6 +716,14 @@ jobs:
             exit 1
           }
 
+          # Explicit success exit. A `pwsh` step ends with `exit $LASTEXITCODE`,
+          # and the last native command here is the child shell running the
+          # final fixture -- which exits NON-ZERO by design, because that
+          # fixture asserts the installer refuses a tampered archive. Without
+          # this line the job inherits a passing fixture's exit code and
+          # reports failure while every fixture printed PASS.
+          exit 0
+
   site:
     name: Astro build and internal links
     runs-on: ubuntu-24.04
