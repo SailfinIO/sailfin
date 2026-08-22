@@ -148,8 +148,8 @@ here.
   `compiler/*` fixture roots therefore produce the same policy classification,
   while a privileged-looking path with a non-compiler manifest gains no role.
   Duplicate names fail through the shared workspace resolver. Physical member
-  discovery and source/entry containment remain manifest-expanded; package
-  staging and the pending source moves remain physical.
+  discovery and source/entry containment remain manifest-expanded; the pending
+  source moves remain physical.
 - **Local automation inventories follow workspace membership** (SFN-935,
   SFEP-0072 §§3.4, 3.7 slice 4). Local formatting, fast checking, compiler
   freshness, module-layout fingerprinting, compiler benchmarking, staged-change
@@ -158,8 +158,7 @@ here.
   the same effective inputs, while transitional and target layouts enumerate
   each logical input once. Workspace and member manifests, `bootstrap.toml`,
   runtime IR, and the three cross-domain compiler test suites remain explicit
-  repository inputs. Package paths and source moves remain pending later
-  SFEP-0072 slices.
+  repository inputs. Source moves remain pending later SFEP-0072 slices.
 - **CI and release automation follows workspace identity** (SFN-936,
   SFEP-0072 §§3.6–3.7 slice 4). Build and test cache generations consume a
   v3 workspace freshness fingerprint covering compiler/runtime members, their
@@ -172,6 +171,21 @@ here.
   manifests exactly, and does not version-bump a byte-identical physical move.
   Cache namespaces, compiler lockstep, capsule versions, artifact paths, and
   the installed `sfn` command remain unchanged.
+- **Package and installed-toolchain staging follows workspace identity**
+  (SFN-937, SFEP-0072 §§3.6–3.7 slice 4). Compiler and installer packaging
+  resolve the `sfn/compiler` driver, its private and standard-library
+  dependency closure, the runtime provider, and the dormant or implicit
+  prelude from expanded workspace members. Archives keep the compatibility
+  layout under `runtime/` and `capsules/<scope>/<name>/`, carry a generated
+  installed-workspace manifest, and reject missing, duplicate, escaping, or
+  unregistered inputs before archive creation. The shell, PowerShell, and
+  native toolchain installers copy the same runtime, capsule, and workspace
+  payload. Copy-based global installs retain the `sfn`/`sfn.exe` artifacts and
+  use an adjacent install-root pointer to recover the versioned payload.
+  Pre-SFN-937 archives retain an installer-owned adjacent runtime/capsule
+  mirror so older compiler binaries continue to run outside a checkout.
+  Logical names, artifact namespaces, and the installed `sfn` command remain
+  unchanged across current, transitional, and target roots.
 - **Implicit workspace capsule graph** (SFN-931, SFEP-0072 §§3.3, 3.7 slice
   2). Workspace libraries with `[build] implicit = true` enter the resolved
   graph and final link exactly once; an ordinary dependency on the same
@@ -544,7 +558,11 @@ here.
   fixed for `sfn toolchain install`). `copy_tree` copies what a symlink
   resolves to rather than preserving it — a stated divergence from `cp -R`,
   not a bug, since neither `is_symlink` nor `lstat` exists yet and no tree in
-  scope contains one. **`sfn package --installer` runs end-to-end on a native
+  scope contains one. Installer staging is workspace-driven (SFN-937): the
+  compiler dependency closure, runtime sources and IR, and prelude contract
+  are copied from resolved member manifests into the stable installed layout,
+  with a bundled workspace manifest making the same inventory discoverable
+  after extraction. **`sfn package --installer` runs end-to-end on a native
   Windows host** — as of 2026-08-21 an observed fact rather than a
   code-reading claim. SFN-753's in-process `.tar.gz` writer retired the
   `tar -czf` shell spawns and an ISO-8601 epoch→civil formatter retired the

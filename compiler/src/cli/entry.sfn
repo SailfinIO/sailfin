@@ -2,6 +2,7 @@
 //
 // Sailfin-native CLI entrypoint invoked by the native C shim.
 import { bold } from "sfn/cli";
+import { trim } from "sfn/strings";
 
 import { sailfin_cli_main_v2, sailfin_cli_main_with_paths } from "./main";
 
@@ -81,6 +82,20 @@ extern fn apply_default_mem_limit() -> i32;
 // the native `sfn toolchain install` fetch path (SFEP-0046 §3.5).
 fn native_cli_main(argv: string[]) -> int ![clock, io, net] {
     return sailfin_cli_main_v2(argv);
+}
+
+// Installers that cannot create a symlink preserve the global `sfn`/`sfn.exe`
+// artifact by copying the compiler and writing this pointer beside it. The
+// pointed-to version directory owns runtime/ and the bundled workspace; using
+// it as the binary-dir anchor keeps dependency discovery compatible without
+// mirroring those trees into a shared global bin directory.
+fn _installed_payload_dir(bin_dir: string) -> string ![io] {
+    let pointer = bin_dir + "/sailfin-install-root";
+    if !fs.exists(pointer) { return ""; }
+    let candidate = trim(fs.readFile(pointer));
+    if candidate.length == 0 { return ""; }
+    if !fs.exists(candidate + "/runtime") { return ""; }
+    return candidate;
 }
 
 // M5.5 (#473): the compiler binary's C-ABI entry point. The LLVM
@@ -227,8 +242,15 @@ fn main(argv: string[]) -> int ![clock, io, net] {
             }
         }
     }
-    let bin_dir: *u8 = binary_dir(exe_str as *u8);
-    let runtime_root: *u8 = resolve_runtime_root(exe_str as *u8);
+    let raw_bin_dir: *u8 = binary_dir(exe_str as *u8);
+    let mut bundle_dir: string = raw_bin_dir as string;
+    let mut runtime_root: *u8 = resolve_runtime_root(exe_str as *u8);
+    let installed_payload = _installed_payload_dir(bundle_dir);
+    if installed_payload.length > 0 {
+        bundle_dir = installed_payload;
+        let payload_exe_anchor = installed_payload + "/sfn";
+        runtime_root = resolve_runtime_root(payload_exe_anchor as *u8);
+    }
     // `sailfin_runtime_argv_to_string_array(argc, argv)` (the @main
     // wrapper synthesized by emission.sfn) preserves argv[0] — the
     // binary path — at index 0. The CLI dispatch reads positional
@@ -242,7 +264,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         tail.push(argv[i]);
         i += 1;
     }
-    let exit_code = sailfin_cli_main_with_paths(tail, runtime_root as string, bin_dir as string, exe_str);
+    let exit_code = sailfin_cli_main_with_paths(tail, runtime_root as string, bundle_dir, exe_str);
     // Exit funnel: dump arena telemetry on every normal completion
     // (replaces the retired C atexit hook). `main` has a single return,
     // so this fires for `sfn run`/`check`/`build`/… alike — the dispatch

@@ -1,0 +1,177 @@
+// compiler/tests/unit/installer_staging_test.sfn
+//
+// Regression coverage for SFN-937's manifest-driven installed-workspace
+// staging. Synthetic current, mixed transitional, and final layouts must
+// converge on the same compatibility destinations and fail closed on invalid
+// workspace inputs.
+import { contains } from "sfn/strings";
+
+import { remove_tree } from "../../src/build/fs_tree";
+import { InstallerStageResult, stage_installer_workspace_assets } from "../../src/installer_staging";
+
+fn _scratch_root(name: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "build/sailfin"; }
+    let root = base + "/installer-staging-" + name;
+    remove_tree(root);
+    fs.createDirectory(root, true);
+    return root;
+}
+
+fn _write_source_member(root: string, path: string, name: string, kind: string, dependencies: string, implicit: boolean) -> void ![io] {
+    fs.createDirectory(root + "/" + path + "/src", true);
+    let mut implicit_line: string = "";
+    if implicit { implicit_line = "implicit = true\n"; }
+    fs.writeFile(root + "/" + path + "/capsule.toml", "[capsule]\n"
+        + "name = \""
+        + name
+        + "\"\nversion = \"0.0.0\"\n\n"
+        + dependencies
+        + "[build]\nkind = \""
+        + kind
+        + "\"\nentry = \"src/mod.sfn\"\n"
+        + implicit_line);
+    fs.writeFile(root + "/" + path + "/src/mod.sfn", "// " + name + " source\n");
+}
+
+fn _write_runtime(root: string, legacy_prelude: boolean) -> void ![io] {
+    fs.createDirectory(root + "/runtime/sfn/platform", true);
+    fs.createDirectory(root + "/runtime/ir", true);
+    let mut prelude_line: string = "";
+    let mut prelude_dependency: string = "";
+    if legacy_prelude { prelude_line = "prelude-entry = \"prelude.sfn\"\n"; }
+    if !legacy_prelude { prelude_dependency = "\"sfn/prelude\" = \"*\"\n"; }
+    fs.writeFile(root + "/runtime/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/runtime-native\"\nversion = \"0.0.0\"\n\n"
+        + "[dependencies]\n\"sfn/strings\" = \"*\"\n"
+        + prelude_dependency
+        + "\n"
+        + "[build]\nkind = \"runtime\"\n"
+        + "sfn-source-root = \"sfn\"\n"
+        + "sfn-module-prefix = \"runtime/sfn\"\n"
+        + "sfn-sources = [\"sfn/mod.sfn\"]\n"
+        + "ll-sources = [\"ir/stub.ll\"]\n"
+        + prelude_line);
+    fs.writeFile(root + "/runtime/sfn/mod.sfn", "// runtime source\n");
+    fs.writeFile(root + "/runtime/sfn/platform/windows.sfn", "// conditioned sibling\n");
+    fs.writeFile(root + "/runtime/ir/stub.ll", "; runtime IR\n");
+    if legacy_prelude {
+        fs.writeFile(root + "/runtime/prelude.sfn", "// dormant prelude\n");
+    }
+}
+
+fn _write_dormant_prelude(root: string, path: string, entry: string) -> void ![io] {
+    fs.createDirectory(root + "/" + path, true);
+    fs.writeFile(root + "/" + path + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/prelude\"\nversion = \"0.0.0\"\n\n"
+        + "[build]\nkind = \"library\"\nentry = \""
+        + entry
+        + "\"\nimplicit = false\n");
+}
+
+fn _create_layout(root: string, layout: string) -> void ![io] {
+    _write_runtime(root, layout != "target");
+    let deps = "[dependencies]\n" + "\"sfn/syntax\" = \"*\"\n"
+        + "\"sfn/runtime-native\" = \"*\"\n"
+        + "\"sfn/strings\" = \"*\"\n\n";
+    if layout == "current" {
+        fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"compiler\", \"compiler/capsules/*\", \"runtime\", \"capsules/sfn/*\"]\n");
+        _write_source_member(root, "compiler", "sfn/compiler", "binary", deps, false);
+        _write_source_member(root, "compiler/capsules/syntax", "sfn/syntax", "library", "", false);
+        _write_source_member(root, "capsules/sfn/strings", "sfn/strings", "library", "", false);
+        _write_dormant_prelude(root, "capsules/sfn/prelude", "../../../runtime/prelude.sfn");
+        return;
+    }
+    if layout == "transitional" {
+        fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"compiler\", \"compiler/capsules/*\", \"compiler/*\", \"runtime\", \"capsules/sfn/*\", \"stdlib/*\"]\n");
+        _write_source_member(root, "compiler", "sfn/compiler", "binary", deps, false);
+        _write_source_member(root, "compiler/syntax", "sfn/syntax", "library", "", false);
+        _write_source_member(root, "stdlib/strings", "sfn/strings", "library", "", false);
+        _write_dormant_prelude(root, "capsules/sfn/prelude", "../../../runtime/prelude.sfn");
+        return;
+    }
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"compiler/*\", \"stdlib/*\", \"runtime\"]\n");
+    _write_source_member(root, "compiler/driver", "sfn/compiler", "binary", deps, false);
+    _write_source_member(root, "compiler/syntax", "sfn/syntax", "library", "", false);
+    _write_source_member(root, "stdlib/strings", "sfn/strings", "library", "", false);
+    _write_source_member(root, "stdlib/prelude", "sfn/prelude", "library", "", true);
+}
+
+fn _assert_complete_stage(stage: InstallerStageResult, destination: string, legacy_prelude: boolean) -> void ![io] {
+    assert stage.ok;
+    assert fs.exists(destination + "/workspace.toml");
+    let workspace = fs.readFile(destination + "/workspace.toml");
+    assert contains(workspace, "\"runtime\"");
+    assert contains(workspace, "\"capsules/sfn/syntax\"");
+    assert contains(workspace, "\"capsules/sfn/strings\"");
+    assert contains(workspace, "\"capsules/sfn/prelude\"");
+    assert fs.exists(destination + "/runtime/capsule.toml");
+    assert fs.exists(destination + "/runtime/sfn/mod.sfn");
+    assert fs.exists(destination + "/runtime/sfn/platform/windows.sfn");
+    assert fs.exists(destination + "/runtime/ir/stub.ll");
+    assert fs.exists(destination + "/runtime/prelude.sfn") == legacy_prelude;
+    assert fs.exists(destination + "/capsules/sfn/syntax/capsule.toml");
+    assert fs.exists(destination + "/capsules/sfn/syntax/src/mod.sfn");
+    assert fs.exists(destination + "/capsules/sfn/strings/src/mod.sfn");
+    assert fs.exists(destination + "/capsules/sfn/prelude/capsule.toml");
+}
+
+test "installer staging: current layout maps to installed compatibility paths" ![io] {
+    let root = _scratch_root("current");
+    _create_layout(root, "current");
+    let destination = root + "/stage";
+    _assert_complete_stage(stage_installer_workspace_assets(root, destination), destination, true);
+}
+
+test "installer staging: transitional layout maps to installed compatibility paths" ![io] {
+    let root = _scratch_root("transitional");
+    _create_layout(root, "transitional");
+    let destination = root + "/stage";
+    _assert_complete_stage(stage_installer_workspace_assets(root, destination), destination, true);
+}
+
+test "installer staging: target layout maps to installed compatibility paths" ![io] {
+    let root = _scratch_root("target");
+    _create_layout(root, "target");
+    let destination = root + "/stage";
+    _assert_complete_stage(stage_installer_workspace_assets(root, destination), destination, false);
+    assert fs.exists(destination + "/capsules/sfn/prelude/src/mod.sfn");
+}
+
+test "installer staging: unrelated runtime provider is not staged" ![io] {
+    let root = _scratch_root("alternate-runtime");
+    _create_layout(root, "target");
+    _write_source_member(root, "alternate-runtime", "vendor/runtime-alt", "runtime", "", false);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"compiler/*\", \"stdlib/*\", \"runtime\", \"alternate-runtime\"]\n");
+    let destination = root + "/stage";
+    let stage = stage_installer_workspace_assets(root, destination);
+    assert stage.ok;
+    let workspace = fs.readFile(destination + "/workspace.toml");
+    assert ! contains(workspace, "vendor/runtime-alt");
+}
+
+test "installer staging: unregistered dependency fails before a workspace is published" ![io] {
+    let root = _scratch_root("unregistered");
+    _create_layout(root, "current");
+    let compiler = root + "/compiler/capsule.toml";
+    fs.writeFile(compiler, "[capsule]\nname = \"sfn/compiler\"\nversion = \"0.0.0\"\n\n"
+        + "[dependencies]\n\"sfn/missing\" = \"*\"\n\n"
+        + "[build]\nkind = \"binary\"\nentry = \"src/mod.sfn\"\n");
+    let destination = root + "/stage";
+    let stage = stage_installer_workspace_assets(root, destination);
+    assert ! stage.ok;
+    assert ! fs.exists(destination + "/workspace.toml");
+}
+
+test "installer staging: escaping ordinary member entry fails closed" ![io] {
+    let root = _scratch_root("escape");
+    _create_layout(root, "current");
+    fs.writeFile(root + "/compiler/capsules/syntax/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/syntax\"\nversion = \"0.0.0\"\n\n"
+        + "[build]\nkind = \"library\"\nentry = \"../../../outside.sfn\"\n");
+    fs.writeFile(root + "/outside.sfn", "// outside\n");
+    let destination = root + "/stage";
+    let stage = stage_installer_workspace_assets(root, destination);
+    assert ! stage.ok;
+    assert ! fs.exists(destination + "/workspace.toml");
+}

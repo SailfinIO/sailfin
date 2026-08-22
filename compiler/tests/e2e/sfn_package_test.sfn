@@ -12,7 +12,7 @@
 // — the shared shell-free presence probe (SFN-840).
 //
 // Run semantics: `run_capture` cannot chdir. The .sh ran compiler/installer
-// mode from the repo root (to find `compiler/capsule.toml`); the test runner
+// mode from the repo root (to find `workspace.toml`); the test runner
 // already starts at the repo root, so the spawned compile inherits that cwd.
 // All `--out` / `--compiler-bin` / `-p` paths are passed absolute.
 //
@@ -26,6 +26,9 @@ import {
     sfn_bin_path,
     tool_present
 } from "sfn/test";
+
+import { compiler_manifest_from_workspace } from "../../src/installer_staging";
+import { toml_get_version } from "../../src/toml_parser";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -100,6 +103,22 @@ fn _listing_contains(listing: string, needle: string) -> bool {
     return contains(listing, needle);
 }
 
+fn _listing_suffix_count(listing: string, suffix: string) -> int {
+    let lines = split(listing, "\n");
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if line.length >= suffix.length {
+            let tail = substring(line, line.length - suffix.length, line.length);
+            if tail == suffix { count += 1; }
+        }
+        i += 1;
+    }
+    return count;
+}
+
 // `sha256sum <file>` -> the 64-char hex (first whitespace-delimited field).
 fn _sha256_hex(file: string) -> string ![io] {
     let exit = process.run_capture(["sha256sum", file], _child_env());
@@ -142,25 +161,11 @@ fn _is_iso8601_utc(bd: string) -> bool {
     return true;
 }
 
-// Read `version = "..."` from compiler/capsule.toml.
+// Read the version from the workspace member named `sfn/compiler`.
 fn _compiler_version() -> string ![io] {
-    let toml = fs.readFile("compiler/capsule.toml");
-    let lines = split(toml, "\n");
-    let mut i = 0;
-    loop {
-        if i >= lines.length { break; }
-        let line = lines[i];
-        let at = find(line, "version", 0);
-        if at == 0 {
-            let q1 = find(line, "\"", 0);
-            if q1 >= 0 {
-                let q2 = find(line, "\"", q1 + 1);
-                if q2 > q1 { return substring(line, q1 + 1, q2); }
-            }
-        }
-        i += 1;
-    }
-    return "";
+    let manifest = compiler_manifest_from_workspace(".");
+    if manifest.length == 0 || !fs.exists(manifest) { return ""; }
+    return toml_get_version(fs.readFile(manifest));
 }
 
 // Discover the single tarball under `dir` whose name starts with `prefix`
@@ -208,7 +213,7 @@ test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
     let version = _compiler_version();
     assert version.length > 0;
 
-    // Run from repo root (the runner's cwd) so compiler/capsule.toml is found.
+    // Run from repo root (the runner's cwd) so workspace.toml is found.
     let exit = process.run_capture([sfn_bin_path(), "package", "--out", dist, "--compiler-bin", bin], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
@@ -391,15 +396,22 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     assert fs.exists(sha_file);
     assert fs.exists(manifest);
 
-    // Contents: bin/{sailfin,sfn} + runtime bundle. Accept an optional
+    // Contents: bin/{sailfin,sfn} + installed workspace. Accept an optional
     // leading `./` the way the .sh did (BSD vs GNU tar): the suffix-anchored
     // check matches both `bin/sailfin` and `./bin/sailfin`.
     let listing = _tar_list(tarball);
     assert _listing_has_suffix(listing, "bin/sailfin");
     assert _listing_has_suffix(listing, "bin/sfn");
+    assert _listing_has_suffix(listing, "workspace.toml");
     assert _listing_has_suffix(listing, "runtime/capsule.toml");
     assert _listing_has_suffix(listing, "runtime/prelude.sfn");
     assert _listing_contains(listing, "runtime/sfn/");
+    assert _listing_has_suffix(listing, "runtime/ir/windows_stubs.ll");
+    assert _listing_has_suffix(listing, "capsules/sfn/prelude/capsule.toml");
+    assert _listing_has_suffix(listing, "capsules/sfn/syntax/capsule.toml");
+    assert _listing_has_suffix(listing, "capsules/sfn/archive/capsule.toml");
+    assert _listing_has_suffix(listing, "capsules/sfn/strings/capsule.toml");
+    assert _listing_suffix_count(listing, "capsules/sfn/strings/capsule.toml") == 1;
 
     // Manifest invariants.
     assert _jq("kind", manifest) == "installer";
@@ -412,6 +424,18 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     assert _is_hex64(sidecar);
     assert _jq("sha256", manifest) == sidecar;
     assert _sha256_hex(tarball) == sidecar;
+
+    // A second checkout-independent stage of the same logical workspace must
+    // produce identical archive bytes; timestamps and absolute roots are not
+    // part of the installed payload.
+    let inst_again = root + "/dist-installer-again";
+    let repeat = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", _jq("target", manifest), "--out", inst_again, "--compiler-bin", bin], _child_env());
+    let _repeat_out = process.capture_take_stdout();
+    let _repeat_err = process.capture_take_stderr();
+    assert repeat == 0;
+    let repeated_tarball = _find_tarball(inst_again, "installer-");
+    assert repeated_tarball.length > 0;
+    assert _sha256_hex(repeated_tarball) == sidecar;
 }
 
 test "sfn package --installer -p errors (mutual exclusion)" ![io] {

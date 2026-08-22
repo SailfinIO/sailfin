@@ -413,6 +413,28 @@ fi
 TARGET_DIR_ABS="$(cd "${TARGET_DIR}" && pwd)"
 LINK_TARGET="${TARGET_DIR_ABS}/${DEST_BASENAME}"
 
+# Global commands normally resolve through a symlink, which preserves the
+# versioned executable path used to discover runtime/ and workspace.toml. On a
+# filesystem that cannot create symlinks, preserve the executable artifact and
+# publish an install-root pointer that gives the copied compiler the same
+# versioned discovery anchor.
+GLOBAL_PAYLOAD_POINTER="${GLOBAL_BIN_DIR}/sailfin-install-root"
+GLOBAL_COPY_FALLBACK=0
+install_global_command() {
+  local destination="$1"
+  if [ -L "$destination" ] || [ -f "$destination" ]; then
+    $MAYBE_SUDO rm -f "$destination"
+  fi
+  if $MAYBE_SUDO ln -s "$LINK_TARGET" "$destination" 2>/dev/null; then
+    log "Linked: ${destination} -> ${LINK_TARGET}"
+    return
+  fi
+  $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$destination"
+  $MAYBE_SUDO chmod 0755 "$destination" || true
+  GLOBAL_COPY_FALLBACK=1
+  log "Installed copy: ${destination}"
+}
+
 if [ -d "${ROOT_DIR}/runtime" ]; then
   log "Installing runtime bundle to ${TARGET_DIR}/runtime…"
   $MAYBE_SUDO rm -rf "${TARGET_DIR}/runtime" 2>/dev/null || true
@@ -421,27 +443,42 @@ else
   log "Warning: runtime bundle not found in archive; sfn run/build will fail without it."
 fi
 
-# The runtime capsule's [dependencies] closure (e.g. sfn/crypto), staged by
-# `sfn package --installer` (SFN-773) as a sibling of runtime/ — the one shape
-# locate_runtime_dep_capsule_src resolves. Absent on releases <= 0.9.3, so no
-# warning here; without it on a newer archive, every user program link-fails.
+# The compiler/runtime workspace dependency closure, staged by
+# `sfn package --installer` (SFN-773, SFN-937) as a sibling of runtime/ — the
+# compatibility shape installed dependency discovery resolves.
 if [ -d "${ROOT_DIR}/capsules" ]; then
   log "Installing runtime capsule dependencies to ${TARGET_DIR}/capsules…"
   $MAYBE_SUDO rm -rf "${TARGET_DIR}/capsules" 2>/dev/null || true
   $MAYBE_SUDO cp -R "${ROOT_DIR}/capsules" "${TARGET_DIR}/capsules"
 fi
 
+# SFN-937: install the generated workspace manifest only after its canonical
+# capsule payload. Older archives have no workspace.toml and keep their
+# runtime-only compatibility behavior.
+$MAYBE_SUDO rm -f "${TARGET_DIR}/workspace.toml"
+if [ -f "${ROOT_DIR}/workspace.toml" ]; then
+  [ -d "${TARGET_DIR}/capsules" ] \
+    || die "Bundled workspace manifest has no installed capsule payload."
+  log "Installing bundled workspace manifest to ${TARGET_DIR}/workspace.toml…"
+  $MAYBE_SUDO cp -f "${ROOT_DIR}/workspace.toml" "${TARGET_DIR}/workspace.toml"
+fi
+
 log "Ensuring global symlink in ${GLOBAL_BIN_DIR}…"
 $MAYBE_SUDO mkdir -p "${GLOBAL_BIN_DIR}"
+GLOBAL_PAYLOAD_OWNED=0
+if [ -f "$GLOBAL_PAYLOAD_POINTER" ]; then
+  GLOBAL_PAYLOAD_OWNED=1
+fi
+# Releases predating SFN-937 do not understand the install-root pointer and
+# were mirrored beside a copied executable. A pointer marks those exact paths
+# as installer-owned, so upgrades can retire the compatibility mirror safely.
+if [ "$GLOBAL_PAYLOAD_OWNED" -eq 1 ]; then
+  $MAYBE_SUDO rm -rf "${GLOBAL_BIN_DIR}/runtime" "${GLOBAL_BIN_DIR}/capsules"
+  $MAYBE_SUDO rm -f "${GLOBAL_BIN_DIR}/workspace.toml"
+fi
+$MAYBE_SUDO rm -f "$GLOBAL_PAYLOAD_POINTER"
 LINK_PATH="${GLOBAL_BIN_DIR}/${DEST_BASENAME}"
-if [ -L "$LINK_PATH" ] || [ -f "$LINK_PATH" ]; then
-  $MAYBE_SUDO rm -f "$LINK_PATH"
-fi
-if ! $MAYBE_SUDO ln -s "${LINK_TARGET}" "$LINK_PATH" 2>/dev/null; then
-  log "Symlink failed; copying binary instead."
-  $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$LINK_PATH"
-  $MAYBE_SUDO chmod 0755 "$LINK_PATH" || true
-fi
+install_global_command "$LINK_PATH"
 
 ALIAS_BASENAME="sfn"
 if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
@@ -449,15 +486,7 @@ if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
 fi
 
 ALIAS_PATH="${GLOBAL_BIN_DIR}/${ALIAS_BASENAME}"
-if [ -L "$ALIAS_PATH" ] || [ -f "$ALIAS_PATH" ]; then
-  $MAYBE_SUDO rm -f "$ALIAS_PATH"
-fi
-if ! $MAYBE_SUDO ln -s "${LINK_TARGET}" "$ALIAS_PATH" 2>/dev/null; then
-  log "Symlink failed for ${ALIAS_BASENAME}; copying binary instead."
-  $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH"
-  $MAYBE_SUDO chmod 0755 "$ALIAS_PATH" || true
-fi
-log "Linked: ${ALIAS_PATH} -> ${LINK_TARGET}"
+install_global_command "$ALIAS_PATH"
 
 SAILFIN_ALIAS_BASENAME="sailfin"
 if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
@@ -465,15 +494,28 @@ if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
 fi
 
 SAILFIN_ALIAS_PATH="${GLOBAL_BIN_DIR}/${SAILFIN_ALIAS_BASENAME}"
-if [ -L "$SAILFIN_ALIAS_PATH" ] || [ -f "$SAILFIN_ALIAS_PATH" ]; then
-  $MAYBE_SUDO rm -f "$SAILFIN_ALIAS_PATH"
+install_global_command "$SAILFIN_ALIAS_PATH"
+
+if [ "$GLOBAL_COPY_FALLBACK" -eq 1 ]; then
+  if [ ! -f "${ROOT_DIR}/workspace.toml" ]; then
+    for legacy_path in runtime capsules workspace.toml; do
+      if [ -e "${GLOBAL_BIN_DIR}/${legacy_path}" ] && [ "$GLOBAL_PAYLOAD_OWNED" -ne 1 ]; then
+        die "Refusing to replace unowned ${GLOBAL_BIN_DIR}/${legacy_path} for legacy installer compatibility."
+      fi
+    done
+    if [ -d "${TARGET_DIR}/runtime" ]; then
+      $MAYBE_SUDO cp -R "${TARGET_DIR}/runtime" "${GLOBAL_BIN_DIR}/runtime"
+    fi
+    if [ -d "${TARGET_DIR}/capsules" ]; then
+      $MAYBE_SUDO cp -R "${TARGET_DIR}/capsules" "${GLOBAL_BIN_DIR}/capsules"
+    fi
+    log "Installed adjacent payload mirror for pre-SFN-937 compiler compatibility."
+  fi
+  PAYLOAD_POINTER_TEMP="${TMPDIR}/sailfin-install-root"
+  printf '%s' "$TARGET_DIR_ABS" > "$PAYLOAD_POINTER_TEMP"
+  $MAYBE_SUDO install -m 0644 "$PAYLOAD_POINTER_TEMP" "$GLOBAL_PAYLOAD_POINTER"
+  log "Installed payload pointer: ${GLOBAL_PAYLOAD_POINTER} -> ${TARGET_DIR_ABS}"
 fi
-if ! $MAYBE_SUDO ln -s "${LINK_TARGET}" "$SAILFIN_ALIAS_PATH" 2>/dev/null; then
-  log "Symlink failed for ${SAILFIN_ALIAS_BASENAME}; copying binary instead."
-  $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH"
-  $MAYBE_SUDO chmod 0755 "$SAILFIN_ALIAS_PATH" || true
-fi
-log "Linked: ${SAILFIN_ALIAS_PATH} -> ${LINK_TARGET}"
 
 RESOLVED_SFN="$(command -v sfn 2>/dev/null || true)"
 if [ -n "$RESOLVED_SFN" ] && [ "$RESOLVED_SFN" != "$ALIAS_PATH" ]; then
@@ -482,7 +524,6 @@ if [ -n "$RESOLVED_SFN" ] && [ "$RESOLVED_SFN" != "$ALIAS_PATH" ]; then
 fi
 
 log "Installed: ${TARGET_DIR_ABS}/${DEST_BASENAME}"
-log "Linked: ${LINK_PATH} -> ${LINK_TARGET}"
 
 if [[ ":$PATH:" != *":${GLOBAL_BIN_DIR}:"* ]]; then
   echo

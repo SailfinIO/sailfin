@@ -1,7 +1,7 @@
 // Unit coverage for `toolchain_lay_out_store_entry`
 // (`compiler/src/cli/commands/toolchain.sfn`, SFN-906), the store-layout
 // tail extracted from `toolchain_install_to_base` — binary copy, `sfn`
-// alias, runtime-bundle copy, `.sha256` marker. This is the exact code
+// alias, runtime/workspace-bundle copy, `.sha256` marker. This is the exact code
 // SFN-906 de-shelled; the pre-existing `toolchain_install_test.sfn` e2e
 // never reaches it, since every leg it drives fails before extraction
 // (fail-closed fetch/verify) or is skipped without a local server. Driving
@@ -29,6 +29,10 @@ fn _fake_extract_root(dir: string) -> string ![io] {
     fs.writeFile(root + "/runtime/prelude.sfn", "// fake prelude");
     fs.createDirectory(root + "/runtime/sfn", true);
     fs.writeFile(root + "/runtime/sfn/io.sfn", "// fake io");
+    fs.createDirectory(root + "/capsules/sfn/strings/src", true);
+    fs.writeFile(root + "/capsules/sfn/strings/capsule.toml", "[capsule]\nname = \"sfn/strings\"\n");
+    fs.writeFile(root + "/capsules/sfn/strings/src/mod.sfn", "// fake strings");
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"runtime\", \"capsules/sfn/strings\"]\n");
     return root;
 }
 
@@ -65,6 +69,10 @@ test "toolchain layout: a complete entry lands the binary, alias, runtime, and m
     assert fs.readFile(store_dir + "/runtime/prelude.sfn") == "// fake prelude";
     assert fs.exists(store_dir + "/runtime/sfn/io.sfn");
     assert fs.readFile(store_dir + "/runtime/sfn/io.sfn") == "// fake io";
+    assert fs.exists(store_dir + "/capsules/sfn/strings/capsule.toml");
+    assert fs.exists(store_dir + "/capsules/sfn/strings/src/mod.sfn");
+    assert fs.exists(store_dir + "/workspace.toml");
+    assert fs.readFile(store_dir + "/workspace.toml") == "[workspace]\nmembers = [\"runtime\", \"capsules/sfn/strings\"]\n";
 
     // The `.sha256` marker exists and contains `expected` + "\n".
     let sha_path = store_dir + "/.sha256";
@@ -113,5 +121,20 @@ test "toolchain layout: an alias path that cannot be replaced fails closed with 
     fs.writeFile(store_dir + "/sfn/blocker", "occupying the alias path");
 
     assert ! toolchain_lay_out_store_entry(root, store_dir, bin_path, expected);
+    assert ! fs.exists(store_dir + "/.sha256");
+}
+
+test "toolchain layout: a workspace manifest without capsules fails before the marker" ![io] {
+    let base = _scratch_dir() + "/workspace-without-capsules";
+    fs.createDirectory(base, true);
+    let root = base + "/root";
+    fs.createDirectory(root + "/runtime", true);
+    fs.writeFile(root + "/sailfin", "fake-toolchain-binary-bytes");
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"runtime\"]\n");
+    let store_dir = base + "/store";
+    let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
+
+    assert ! toolchain_lay_out_store_entry(root, store_dir, store_dir
+        + "/sailfin", expected);
     assert ! fs.exists(store_dir + "/.sha256");
 }
