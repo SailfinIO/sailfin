@@ -2,8 +2,16 @@
 //
 // Type rules for the `?` operator and conditional expressions —
 // result-type derivation and branch compatibility.
-import { Expression, SourceSpan } from "sfn/syntax";
+import {
+    Block,
+    Expression,
+    ObjectField,
+    SourceSpan,
+    Statement,
+    WithClause
+} from "sfn/syntax";
 
+import { LocalBinding, contains_name, walk_block } from "../typecheck_captures";
 import { Diagnostic } from "../typecheck_types";
 import {
     make_conditional_branch_mismatch_diagnostic,
@@ -11,6 +19,7 @@ import {
     make_try_error_type_mismatch_diagnostic,
     make_try_non_result_fn_diagnostic,
     make_try_non_result_operand_diagnostic,
+    make_try_value_shadowing_diagnostic,
     result_type_arguments,
     type_is_result
 } from "../typecheck_types/expr_type_rules";
@@ -66,6 +75,178 @@ fn check_try_operator(operand_type: string, enclosing_return_type: string?, span
 fn try_operator_result_type(operand_type: string) -> string? {
     if !type_is_result(operand_type) { return null; }
     return result_type_arguments(operand_type)[0];
+}
+
+// E0841 (SFN-901) — reject the `?`-desugar `value`-shadowing hazard. The
+// emit-stage desugar (`emit_native_desugar_try.sfn`) rewrites the FIRST
+// statement in a block containing a hoistable `?` into a `match`, relocating
+// that statement plus every following statement into the `Result.Ok` arm
+// whose binder is forced to the literal name `value`. Any read of `value` in
+// that relocated region would then silently resolve to the unwrapped payload
+// instead of the user's own binding. There is no binder-rename syntax, so
+// this fails the collision closed rather than let it miscompile.
+fn check_try_value_shadowing(block: Block) -> Diagnostic[] {
+    let mut hazard_start: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= block.statements.length { break; }
+        if _stmt_contains_try(block.statements[i]) {
+            hazard_start = i;
+            break;
+        }
+        i += 1;
+    }
+    if hazard_start < 0 { return []; }
+
+    // The hazard region includes the `?`-bearing statement itself — it can
+    // read `value` too (`let x = value + f()?;`) since the desugar relocates
+    // it into the Ok arm along with everything after it.
+    let mut hazard_statements: Statement[] = [];
+    let mut j: int = hazard_start;
+    loop {
+        if j >= block.statements.length { break; }
+        hazard_statements.push(block.statements[j]);
+        j += 1;
+    }
+    let hazard_block = Block {
+        tokens: [],
+        text: "",
+        statements: hazard_statements
+    };
+
+    // `walk_block` is already shadowing-aware (it subtracts names bound by
+    // earlier statements from later statements' free sets) and correctly
+    // treats `ObjectField.name` as not a read — so `return Result.Ok { value:
+    // x };` does not false-positive. Reuse it rather than hand-rolling a
+    // second walker that could drift from those semantics.
+    let empty_scope: LocalBinding[] = [];
+    let result = walk_block(empty_scope, hazard_block);
+    if !contains_name(result.free, "value") { return []; }
+
+    let mut diagnostics: Diagnostic[] = [];
+    diagnostics.push(make_try_value_shadowing_diagnostic(block.statements[hazard_start].span));
+    return diagnostics;
+}
+
+// True when `statement` carries a `?` that the desugar would hoist into THIS
+// block. Deliberately mirrors `statement_has_hoistable_try`
+// (`compiler/capsules/codegen/src/emit_native_desugar_try.sfn:509-536`):
+// recurse into the statement's own expression positions only, never into a
+// nested block body.
+//
+// Descending into nested blocks would be wrong, not merely conservative. A
+// `?` inside an `if`/`for`/`loop`/`with`/`match` body is hoisted relative to
+// THAT block, so it relocates only that block's remainder — and `check_block`
+// visits every nested block in its own right, which is where such a `?` is
+// caught. Treating it as hazardous here would reject valid code:
+//
+//     let value = 7;
+//     if cond { let x = f()?; }
+//     use(value);              // not shadowed — the arm scope ends at `}`
+//
+// Within expression positions the predicate may over-fire freely: a `?` in a
+// position the desugar cannot hoist is already rejected by E1017, so a
+// superset there costs nothing. Written fresh in the analyzer capsule rather
+// than imported, because analyzer -> codegen would be a circular capsule
+// dependency (`compiler/capsules/codegen/capsule.toml` depends on
+// `sfn/analyzer`). If a new hoistable position is added to the desugar, it
+// must be mirrored here.
+fn _stmt_contains_try(statement: Statement) -> boolean {
+    if statement.variant == "VariableDeclaration" {
+        if statement.initializer == null { return false; }
+        return _expr_contains_try(statement.initializer);
+    }
+    if statement.variant == "ReturnStatement" {
+        if statement.expression == null { return false; }
+        return _expr_contains_try(statement.expression);
+    }
+    if statement.variant == "ExpressionStatement" {
+        return _expr_contains_try(statement.expression);
+    }
+    if statement.variant == "ThrowStatement" {
+        return _expr_contains_try(statement.expression);
+    }
+    if statement.variant == "IfStatement" {
+        return _expr_contains_try(statement.condition);
+    }
+    if statement.variant == "ForStatement" {
+        return _expr_contains_try(statement.clause.iterable);
+    }
+    if statement.variant == "WithStatement" {
+        return _clauses_contain_try(statement.clauses);
+    }
+    return false;
+}
+
+fn _clauses_contain_try(clauses: WithClause[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= clauses.length { break; }
+        if _expr_contains_try(clauses[index].expression) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _expr_contains_try(expression: Expression) -> boolean {
+    if expression.variant == "TryOperator" { return true; }
+    if expression.variant == "Unary" {
+        return _expr_contains_try(expression.operand);
+    }
+    if expression.variant == "Binary" {
+        if _expr_contains_try(expression.left) { return true; }
+        return _expr_contains_try(expression.right);
+    }
+    if expression.variant == "Member" {
+        return _expr_contains_try(expression.object);
+    }
+    if expression.variant == "Call" {
+        if _expr_contains_try(expression.callee) { return true; }
+        return _expr_list_contains_try(expression.arguments);
+    }
+    if expression.variant == "Index" {
+        if _expr_contains_try(expression.sequence) { return true; }
+        return _expr_contains_try(expression.index);
+    }
+    if expression.variant == "Array" {
+        return _expr_list_contains_try(expression.elements);
+    }
+    if expression.variant == "Object" {
+        return _field_list_contains_try(expression.fields);
+    }
+    if expression.variant == "Struct" {
+        return _field_list_contains_try(expression.fields);
+    }
+    if expression.variant == "Range" {
+        if _expr_contains_try(expression.start) { return true; }
+        return _expr_contains_try(expression.end);
+    }
+    if expression.variant == "Cast" {
+        return _expr_contains_try(expression.operand);
+    }
+    // Lambda is opaque: a `?` inside a lambda body belongs to the lambda's
+    // own function scope, not the enclosing one.
+    return false;
+}
+
+fn _expr_list_contains_try(items: Expression[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= items.length { break; }
+        if _expr_contains_try(items[index]) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _field_list_contains_try(fields: ObjectField[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= fields.length { break; }
+        if _expr_contains_try(fields[index].value) { return true; }
+        index += 1;
+    }
+    return false;
 }
 
 // === Ternary `Conditional` type rules — issue #1715, epic #1180 ===

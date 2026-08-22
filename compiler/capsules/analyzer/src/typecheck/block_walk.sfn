@@ -39,6 +39,7 @@ import { _build_nested_fn_scope, _hoist_nested_fn_names } from "./function_scope
 import { register_match_pattern_bindings } from "./patterns";
 import { check_expected_primitive_type } from "./primitive_rules";
 import { _declared_struct_annotation } from "./symbols";
+import { check_try_value_shadowing } from "./try_and_conditional";
 
 // Walks expressions inside a block — used by `walk_expression`'s Lambda
 // branch so expression positions inside lambda bodies are visited too.
@@ -46,7 +47,10 @@ import { _declared_struct_annotation } from "./symbols";
 // `check_statement`; this helper is only the expression-positions
 // recursion for lambda bodies (which `check_block` never descends into).
 fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
-    let mut diagnostics: Diagnostic[] = [];
+    // E0841 (SFN-901): the lambda-body twin of `check_block`'s shadowing
+    // check — every nested block reaches this function too, so a
+    // top-of-block check here is naturally recursive.
+    let mut diagnostics: Diagnostic[] = check_try_value_shadowing(block);
     // Thread a growing binding scope through the block so a body-local `let`
     // declared earlier is visible to later statements as a call target (else
     // it falsely trips E0420, #1921 — the #1917 parameter-scope sibling gap).

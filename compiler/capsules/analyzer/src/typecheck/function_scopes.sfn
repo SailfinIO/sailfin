@@ -34,6 +34,7 @@ import { walk_expression } from "./expression_walk";
 import { check_expected_primitive_type } from "./primitive_rules";
 import { check_statement } from "./statement_checks";
 import { _decl_type_params, _declared_struct_annotation } from "./symbols";
+import { check_try_value_shadowing } from "./try_and_conditional";
 
 fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));
@@ -253,6 +254,11 @@ fn check_block(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let mut bindings = clone_bindings(ctx.bindings);
     let scope_start = bindings.length;
     let mut diagnostics: Diagnostic[] = [];
+
+    // E0841 (SFN-901): reject the `?`-desugar `value`-shadowing hazard before
+    // walking statements. Every nested block reaches `check_block` too, so a
+    // top-of-block check here is naturally recursive.
+    diagnostics = diagnostics.concat(check_try_value_shadowing(block));
 
     // Block-hoist nested `fn` names before walking any body (SFEP-0042), so a
     // sibling declared later and a nested fn's own name resolve. The per-
