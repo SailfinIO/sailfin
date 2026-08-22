@@ -753,8 +753,15 @@ jobs:
     # 'success'` preserves the pre-existing invariant that a failed matrix
     # leg still blocks publishing (`fail-fast: false` makes the matrix's
     # aggregate result `failure` if any leg fails); `native-windows-build`'s
-    # result is deliberately NOT checked here — this leg is best-effort while
-    # it stabilizes, so its own outcome never gates the other four platforms.
+    # result is deliberately NOT checked here, but that no longer means the
+    # leg is best-effort. As of SFN-1024 its payload is required by
+    # `verify-release-payloads.sh`, so a failed native leg blocks publishing
+    # via the payload gate — the same mechanism as every other platform —
+    # rather than via a bespoke `needs:` condition here. Enforcing it in one
+    # place keeps the "which assets must ship" invariant readable in the
+    # script that owns it, and preserves the `!cancelled()` override above so
+    # a stuck leg still reaches the gate and fails loudly, naming the missing
+    # asset, instead of hard-skipping `upload` and both notify jobs.
     needs: [build, native-windows-build]
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
@@ -900,23 +907,18 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          for label in linux_x86_64 linux_arm64 macos_arm64 windows_x86_64; do
+          # `windows_x86_64-msvc` is in this loop rather than behind an
+          # `if [ -f ]` presence check: the payload is required as of
+          # SFN-1024, so `verify-release-payloads.sh` has already failed the
+          # release if it is absent. It is the payload produced by the
+          # youngest code path, making it the likeliest to carry an
+          # incomplete runtime closure — and a payload that is present but
+          # incomplete link-fails every user program on a fresh install,
+          # which is exactly what this loop exists to catch.
+          for label in linux_x86_64 linux_arm64 macos_arm64 windows_x86_64 windows_x86_64-msvc; do
             bash .release-gates/scripts/verify-payload-dep-closure.sh \
               "dist/sailfin_${version}_${label}.tar.gz"
           done
-          # The native MSVC asset is optional presence (native-windows-build
-          # is best-effort while it stabilizes — see `upload`'s `if:` above),
-          # but never an optional check: skip only when the payload is
-          # absent, verify unconditionally when it is present. It is the one
-          # release payload produced by a code path that has barely executed
-          # anywhere, making it the most likely to have an incomplete
-          # runtime closure — and a payload that is present but incomplete
-          # link-fails every user program on a fresh install, exactly what
-          # this loop exists to catch for every other platform.
-          msvc_payload="dist/sailfin_${version}_windows_x86_64-msvc.tar.gz"
-          if [ -f "$msvc_payload" ]; then
-            bash .release-gates/scripts/verify-payload-dep-closure.sh "$msvc_payload"
-          fi
 
       # Supply-chain root: publish a signed SHA256SUMS manifest over the release
       # assets so `sfn` can verify a fetched toolchain against the public key
