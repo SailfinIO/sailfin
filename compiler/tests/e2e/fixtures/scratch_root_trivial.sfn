@@ -1,0 +1,6 @@
+// Fixture for compiler/tests/e2e/windows_test_scratch_root_test.sfn
+// (SFN-1089). A minimal test file so the nested `sfn test` invocation
+// still exercises the real compile+link+run path (and so
+// `_resolve_test_scratch_root` actually runs and mints a scratch dir)
+// without paying for anything heavier.
+test "trivial: always passes" { assert 1 == 1; }
