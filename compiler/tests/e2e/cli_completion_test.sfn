@@ -100,5 +100,6 @@ test "cli completion: missing shell argument is a usage error" ![io] {
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 2;
-    assert contains(out + err, "usage: sfn completion");
+    assert contains(out + err, "usage:");
+    assert contains(out + err, "sfn completion");
 }

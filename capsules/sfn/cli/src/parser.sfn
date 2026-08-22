@@ -472,6 +472,17 @@ fn parse_error(result: Result<ParseResult, ParseError>) -> ParseError {
     return _empty_parse_error();
 }
 
+fn format_help_for_path(root: Command, path: string[]) -> string {
+    // Render the help text for the command reached by descending `path`
+    // from `root`, labelled with the full invocation (`sfn dev bootstrap`)
+    // rather than the leaf name alone. This is the public entry point for
+    // callers that drive the pure `parse()` themselves instead of the
+    // exiting `run()` below, so they can answer `--help` from the command
+    // tree instead of a hand-maintained literal that drifts out of sync
+    // with the flags a command actually declares (SFN-1074).
+    return _format_help(_resolve_active_path(root, path), _command_label(root.name, path));
+}
+
 fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     // Exiting wrapper around `parse_with_env()`. Prints help/version and
     // exits when --help/-h or --version/-V is given. Prints an error and

@@ -1,0 +1,84 @@
+// End-to-end coverage for SFN-1074: `sfn <cmd> --help` must exit 0 and print
+// the framework-generated help (`sfn/cli`'s `_render_help_text`), never a
+// hand-written literal usage string. Pins the two-line `usage:` shape, full
+// top-level command coverage, and per-command flag/subcommand-group
+// discoverability so a dispatch arm that regresses to a literal string or
+// drops a registered flag/group from its `command_def()` fails here.
+import { contains } from "sfn/strings";
+import { sfn_bin_path } from "sfn/test";
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+// Every registered top-level command from `main.sfn`'s root registry.
+// `guillermo` is deliberately excluded (easter-egg command).
+fn _top_level_commands() -> string[] {
+    return ["version", "init", "login", "add", "publish", "fmt", "test", "config", "toolchain", "dev", "cache", "capabilities", "lock", "package", "emit", "check", "build", "run", "bench", "completion", "symbols",];
+}
+
+test "cli help: every registered command exits 0 for --help" ![io] {
+    let cmds = _top_level_commands();
+    let mut i: int = 0;
+    loop {
+        if i >= cmds.length { break; }
+        let cmd = cmds[i];
+        let exit = process.run_capture([sfn_bin_path(), cmd, "--help"], _child_env());
+        let out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        assert exit == 0;
+        assert contains(out, "usage:");
+        assert contains(out, "sfn " + cmd);
+        i += 1;
+    }
+}
+
+test "cli help: sfn build --help lists every registered build flag" ![io] {
+    let exit = process.run_capture([sfn_bin_path(), "build", "--help"], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "--target");
+    assert contains(out, "--skip-toolchain-check");
+    assert contains(out, "--work-dir");
+    assert contains(out, "--check-determinism");
+    assert contains(out, "--cache-trace");
+    assert contains(out, "--no-cache");
+    assert contains(out, "--clean");
+    assert contains(out, "--json");
+}
+
+test "cli help: sfn dev --help lists every registered subcommand group" ![io] {
+    let exit = process.run_capture([sfn_bin_path(), "dev", "--help"], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "bootstrap");
+    assert contains(out, "shard");
+    assert contains(out, "arena");
+    assert contains(out, "determinism-sweep");
+    assert contains(out, "clean");
+    assert contains(out, "verify");
+    assert contains(out, "inventory");
+}
+
+test "cli help: nested subcommand help exits 0" ![io] {
+    let exit1 = process.run_capture([sfn_bin_path(), "dev", "bootstrap", "--help"], _child_env());
+    let out1 = process.capture_take_stdout();
+    let _err1 = process.capture_take_stderr();
+    assert exit1 == 0;
+    assert contains(out1, "sfn dev bootstrap");
+
+    let exit2 = process.run_capture([sfn_bin_path(), "config", "get", "--help"], _child_env());
+    let out2 = process.capture_take_stdout();
+    let _err2 = process.capture_take_stderr();
+    assert exit2 == 0;
+    assert contains(out2, "sfn config get");
+}
