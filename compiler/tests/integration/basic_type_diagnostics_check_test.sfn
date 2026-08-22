@@ -2,6 +2,8 @@
 // mismatches and unresolved value identifiers before they reach lowering.
 // Each case drives the built CLI so it pins the rendered E-code, source span,
 // and non-zero process exit rather than only exercising a leaf helper.
+import { remove_all } from "sfn/fs";
+
 struct CheckResult {
     exit_code: i64;
     output: string;
@@ -61,7 +63,7 @@ fn _assert_clean_without(result: CheckResult, code: string) {
 
 fn _clean_result(result: CheckResult) ![io] {
     fs.deleteFile(result.path);
-    fs.removeDirectory(result.dir, true);
+    remove_all(result.dir);
 }
 
 test "SFN-675: string initializer cannot satisfy int binding" ![io] {
