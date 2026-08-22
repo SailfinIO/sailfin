@@ -417,489 +417,492 @@ Log "Using version: $Version"
 
 $TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "sailfin-install-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
+try {
 
-$DownloadHeaders = @{
-    "Accept" = "application/octet-stream"
-}
-# Never attach the caller's GitHub credential to a mirror. SAILFIN_RELEASE_BASE
-# redirects these fetches to an operator-supplied host, and before SFN-1034 the
-# token could only ever reach github.com. Verification staying unconditional
-# bounds what a hostile mirror can do to the PAYLOAD; it does nothing to stop
-# one harvesting a token it was handed.
-if ($Token -and -not $ReleaseBase) {
-    $DownloadHeaders["Authorization"] = "token $Token"
-}
-
-# The payload is NOT downloaded here. SFN-1034 moves the download after the
-# signed manifest that judges it has been fetched and verified, so a stripped
-# signature costs a request rather than a full archive, and the code reads in
-# trust order. Asset *resolution* stays exactly where it was -- it carries the
-# msvc-vs-mingw fallback logic from SFN-798 and SFN-1033.
-$AssetId = $null
-if ($LocalArchive) {
-    Log "Installing from local archive: $LocalArchive"
-    $Asset = Split-Path -Leaf $LocalArchive
-    $ArchivePath = $LocalArchive
-} elseif ($ReleaseBase) {
-    # A mirror serves plain files and has no GitHub API, so the asset list is
-    # not available here. The choice is deferred until the verified manifest
-    # can supply it -- authenticated data, which is strictly better than an
-    # unauthenticated asset-list probe.
-    $ArchivePath = $null
-} else {
-    $ReleaseUrl  = "https://api.github.com/repos/$Repo/releases/tags/$Tag"
-    $ReleaseJson = Invoke-RestMethod -Uri $ReleaseUrl -Headers $Headers
-
-    # Resolve the first candidate (msvc preferred, plain as fallback) that is
-    # actually present in this release's asset list.
-    $AssetObj = $null
-    foreach ($Candidate in $AssetCandidates) {
-        $AssetObj = $ReleaseJson.assets | Where-Object { $_.name -eq $Candidate } | Select-Object -First 1
-        if ($AssetObj) {
-            $Asset = $Candidate
-            break
-        }
+    $DownloadHeaders = @{
+        "Accept" = "application/octet-stream"
     }
-    if (-not $AssetObj) {
-        # Name every candidate that was tried, not just the preferred one --
-        # reporting only the msvc name would read as "this release is missing
-        # its native build" when the plain asset is equally absent.
-        Die "Could not find any of [$($AssetCandidates -join ', ')] in release '$Tag'."
-    }
-    Log "Expected asset: $Asset"
-
-    $AssetId = $AssetObj.id
-    $ArchivePath = Join-Path $TmpDir $Asset
-}
-
-# --- Verify signed release manifest -----------------------------------------
-
-# First release that published a signed SHA256SUMS manifest.
-#
-# DIAGNOSTIC ONLY -- it selects between two failure messages and never gates
-# enforcement. Deciding whether verification is required from the version, or
-# from whether a signature happens to be present, would hand an attacker the
-# downgrade: strip the file (or influence which version `latest` resolves to)
-# and the strict path is skipped. Enforcement is therefore version-independent
-# (SFN-1034, SFEP-0073 section 3.7).
-$SigningFloor = "0.8.0"
-
-# Naive MAJOR.MINOR.PATCH compare, prerelease deliberately ignored: this feeds
-# wording, not policy, so prerelease ordering would be precision without
-# purpose.
-function Test-BelowSigningFloor([string]$Candidate, [string]$Floor) {
-    $c = ($Candidate -split '-')[0] -split '\.'
-    $f = $Floor -split '\.'
-    for ($i = 0; $i -lt 3; $i++) {
-        # A non-numeric component becomes 0 rather than throwing: this picks
-        # wording only, so a malformed VERSION must not replace the D-06
-        # diagnostic with a type-conversion error.
-        $cvRaw = if ($i -lt $c.Count) { ($c[$i] -replace '\D', '') } else { "" }
-        $cv = if ($cvRaw) { [int]$cvRaw } else { 0 }
-        $fv = if ($i -lt $f.Count) { [int]$f[$i] } else { 0 }
-        if ($cv -lt $fv) { return $true }
-        if ($cv -gt $fv) { return $false }
-    }
-    return $false
-}
-
-# Fetch one release file, distinguishing "not published" from "could not be
-# reached". Collapsing those is what let a blocked or throttled request read as
-# an unsigned release; a 404 is never retried and a transient failure is never
-# reported as absence.
-function Get-ReleaseFile {
-    param(
-        [string]$Uri,
-        [string]$OutFile,
-        [hashtable]$RequestHeaders
-    )
-
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        try {
-            Invoke-WebRequest -Uri $Uri -Headers $RequestHeaders -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
-            return "ok"
-        } catch {
-            $status = $null
-            if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
-            if ($status -eq 404) { return "missing" }
-            if ($attempt -ge 3) {
-                Die "could not fetch $Uri after $attempt attempts -- $($_.Exception.Message). A signed manifest that cannot be reached is a hard failure, not a reason to continue unverified."
-            }
-            Log "  transient failure fetching $Uri ($($_.Exception.Message)); retrying"
-            Start-Sleep -Seconds (5 * $attempt)
-        }
-    }
-    return "missing"
-}
-
-# Fetch and verify the signed manifest, returning the expected digest for the
-# asset. Runs BEFORE the payload is downloaded.
-function Get-VerifiedManifest {
-    param(
-        [string]$VerificationBase,
-        [string]$ReleaseTag,
-        [string]$WorkDir,
-        [hashtable]$RequestHeaders
-    )
-
-    $ManifestPath = Join-Path $WorkDir "SHA256SUMS"
-    $SignatureHexPath = Join-Path $WorkDir "SHA256SUMS.sig"
-
-    $manifestStatus = Get-ReleaseFile -Uri "$VerificationBase/SHA256SUMS" -OutFile $ManifestPath -RequestHeaders $RequestHeaders
-    $signatureStatus = "missing"
-    if ($manifestStatus -eq "ok") {
-        $signatureStatus = Get-ReleaseFile -Uri "$VerificationBase/SHA256SUMS.sig" -OutFile $SignatureHexPath -RequestHeaders $RequestHeaders
+    # Never attach the caller's GitHub credential to a mirror. SAILFIN_RELEASE_BASE
+    # redirects these fetches to an operator-supplied host, and before SFN-1034 the
+    # token could only ever reach github.com. Verification staying unconditional
+    # bounds what a hostile mirror can do to the PAYLOAD; it does nothing to stop
+    # one harvesting a token it was handed.
+    if ($Token -and -not $ReleaseBase) {
+        $DownloadHeaders["Authorization"] = "token $Token"
     }
 
-    if ($manifestStatus -ne "ok" -or $signatureStatus -ne "ok") {
-        $missing = if ($manifestStatus -ne "ok") { "SHA256SUMS" } else { "SHA256SUMS.sig" }
-        if (-not $AllowUnverified) {
-            if (Test-BelowSigningFloor $Version $SigningFloor) {
-                Die @"
-release '$ReleaseTag' publishes no $missing.
-
-  Releases before v$SigningFloor predate release signing, so nothing about this
-  archive can be verified.
-
-  To install it anyway, set SAILFIN_ALLOW_UNVERIFIED=1 and understand that its
-  contents are not checked against any signature.
-"@
-            }
-            Die @"
-release '$ReleaseTag' must publish $missing, but the fetch returned 404.
-
-  Every release from v$SigningFloor onward is signed, so this is either a broken
-  release or an attempt to strip verification from this install.
-
-  Refusing to install. If you have independently established that this release
-  is genuinely unsigned, set SAILFIN_ALLOW_UNVERIFIED=1.
-"@
-        }
-        return @{ State = "UNVERIFIED_EXPLICIT"; Reason = "release '$ReleaseTag' publishes no $missing" }
-    }
-
-    # Only now is a verifier needed, and it is always present.
-    Assert-Ed25519VerifierUsable
-
-    $SignatureHex = ((Get-Content -Raw $SignatureHexPath) -replace '\s', '')
-    if ($SignatureHex -notmatch '^[0-9a-fA-F]{128}$') {
-        Die "release manifest signature is malformed; refusing to install from '$ReleaseTag'."
-    }
-
-    $PublicKeyBytes = _Ed25519HexToBytes $ReleaseSigningPublicKeyHex
-    $SignatureBytes = _Ed25519HexToBytes $SignatureHex
-    $ManifestBytes = [IO.File]::ReadAllBytes($ManifestPath)
-
-    if (-not (Test-Ed25519Signature $PublicKeyBytes $SignatureBytes $ManifestBytes)) {
-        Die @"
-release manifest signature verification FAILED for '$ReleaseTag'.
-
-  SHA256SUMS is not signed by the Sailfin release key. This means the manifest
-  was modified in transit or the release is not authentic.
-
-  Refusing to install. This is not overridable.
-"@
-    }
-
-    return @{ State = "VERIFIED_SIGNED"; ManifestPath = $ManifestPath }
-}
-
-# Extract the single manifest entry for an asset. Zero or more than one is a
-# hard failure: a duplicated name is an ambiguous claim about which bytes are
-# authentic.
-function Get-ManifestDigest([string]$ManifestPath, [string]$AssetName) {
-    $digests = @()
-    foreach ($Line in (Get-Content $ManifestPath)) {
-        if ($Line -match '^([0-9a-fA-F]{64})\s+\*?(.+)$' -and $Matches[2].Trim() -eq $AssetName) {
-            $digests += $Matches[1].ToLowerInvariant()
-        }
-    }
-    if ($digests.Count -ne 1) {
-        Die "signed release manifest does not contain exactly one entry for '$AssetName' (found $($digests.Count)); refusing to install."
-    }
-    return $digests[0]
-}
-
-function Get-FileSha256([string]$Path) {
-    $Sha256 = [Security.Cryptography.SHA256]::Create()
-    try {
-        $Stream = [IO.File]::OpenRead($Path)
-        try { $DigestBytes = $Sha256.ComputeHash($Stream) } finally { $Stream.Dispose() }
-    } finally {
-        $Sha256.Dispose()
-    }
-    return ([BitConverter]::ToString($DigestBytes) -replace '-', '').ToLowerInvariant()
-}
-
-# --- Establish trust, then fetch the payload ---------------------------------
-# Verification runs before extraction or creation of an install destination, so
-# detected tampering cannot leave an installed binary behind.
-
-$TrustState = "UNVERIFIED_EXPLICIT"
-$UnverifiedReason = ""
-$ExpectedDigest = $null
-
-if ($LocalArchive) {
-    if ($LocalArchiveSha256) {
-        $TrustState = "DIGEST_PINNED"
-        $ExpectedDigest = $LocalArchiveSha256
+    # The payload is NOT downloaded here. SFN-1034 moves the download after the
+    # signed manifest that judges it has been fetched and verified, so a stripped
+    # signature costs a request rather than a full archive, and the code reads in
+    # trust order. Asset *resolution* stays exactly where it was -- it carries the
+    # msvc-vs-mingw fallback logic from SFN-798 and SFN-1033.
+    $AssetId = $null
+    if ($LocalArchive) {
+        Log "Installing from local archive: $LocalArchive"
+        $Asset = Split-Path -Leaf $LocalArchive
+        $ArchivePath = $LocalArchive
+    } elseif ($ReleaseBase) {
+        # A mirror serves plain files and has no GitHub API, so the asset list is
+        # not available here. The choice is deferred until the verified manifest
+        # can supply it -- authenticated data, which is strictly better than an
+        # unauthenticated asset-list probe.
+        $ArchivePath = $null
     } else {
-        $UnverifiedReason = "local archive install with no expected digest"
-    }
-} else {
-    # Files live at <base>/<tag>/, matching the native
-    # SAILFIN_TOOLCHAIN_RELEASE_BASE knob and install.sh, so a mirror laid out
-    # for one is laid out for all three.
-    $VerificationBase = if ($ReleaseBase) { "$($ReleaseBase.TrimEnd('/'))/$Tag" } else { "https://github.com/$Repo/releases/download/$Tag" }
-    $Manifest = Get-VerifiedManifest -VerificationBase $VerificationBase -ReleaseTag $Tag `
-        -WorkDir $TmpDir -RequestHeaders $DownloadHeaders
-    $TrustState = $Manifest.State
+        $ReleaseUrl  = "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+        $ReleaseJson = Invoke-RestMethod -Uri $ReleaseUrl -Headers $Headers
 
-    if ($TrustState -eq "VERIFIED_SIGNED") {
-        # With a mirror the asset list came from no authenticated source, so
-        # resolve the preference-ordered candidates against the verified
-        # manifest instead.
+        # Resolve the first candidate (msvc preferred, plain as fallback) that is
+        # actually present in this release's asset list.
+        $AssetObj = $null
+        foreach ($Candidate in $AssetCandidates) {
+            $AssetObj = $ReleaseJson.assets | Where-Object { $_.name -eq $Candidate } | Select-Object -First 1
+            if ($AssetObj) {
+                $Asset = $Candidate
+                break
+            }
+        }
+        if (-not $AssetObj) {
+            # Name every candidate that was tried, not just the preferred one --
+            # reporting only the msvc name would read as "this release is missing
+            # its native build" when the plain asset is equally absent.
+            Die "Could not find any of [$($AssetCandidates -join ', ')] in release '$Tag'."
+        }
+        Log "Expected asset: $Asset"
+
+        $AssetId = $AssetObj.id
+        $ArchivePath = Join-Path $TmpDir $Asset
+    }
+
+    # --- Verify signed release manifest -----------------------------------------
+
+    # First release that published a signed SHA256SUMS manifest.
+    #
+    # DIAGNOSTIC ONLY -- it selects between two failure messages and never gates
+    # enforcement. Deciding whether verification is required from the version, or
+    # from whether a signature happens to be present, would hand an attacker the
+    # downgrade: strip the file (or influence which version `latest` resolves to)
+    # and the strict path is skipped. Enforcement is therefore version-independent
+    # (SFN-1034, SFEP-0073 section 3.7).
+    $SigningFloor = "0.8.0"
+
+    # Naive MAJOR.MINOR.PATCH compare, prerelease deliberately ignored: this feeds
+    # wording, not policy, so prerelease ordering would be precision without
+    # purpose.
+    function Test-BelowSigningFloor([string]$Candidate, [string]$Floor) {
+        $c = ($Candidate -split '-')[0] -split '\.'
+        $f = $Floor -split '\.'
+        for ($i = 0; $i -lt 3; $i++) {
+            # A non-numeric component becomes 0 rather than throwing: this picks
+            # wording only, so a malformed VERSION must not replace the D-06
+            # diagnostic with a type-conversion error.
+            $cvRaw = if ($i -lt $c.Count) { ($c[$i] -replace '\D', '') } else { "" }
+            $cv = if ($cvRaw) { [int]$cvRaw } else { 0 }
+            $fv = if ($i -lt $f.Count) { [int]$f[$i] } else { 0 }
+            if ($cv -lt $fv) { return $true }
+            if ($cv -gt $fv) { return $false }
+        }
+        return $false
+    }
+
+    # Fetch one release file, distinguishing "not published" from "could not be
+    # reached". Collapsing those is what let a blocked or throttled request read as
+    # an unsigned release; a 404 is never retried and a transient failure is never
+    # reported as absence.
+    function Get-ReleaseFile {
+        param(
+            [string]$Uri,
+            [string]$OutFile,
+            [hashtable]$RequestHeaders
+        )
+
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                Invoke-WebRequest -Uri $Uri -Headers $RequestHeaders -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
+                return "ok"
+            } catch {
+                $status = $null
+                if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+                if ($status -eq 404) { return "missing" }
+                if ($attempt -ge 3) {
+                    Die "could not fetch $Uri after $attempt attempts -- $($_.Exception.Message). A signed manifest that cannot be reached is a hard failure, not a reason to continue unverified."
+                }
+                Log "  transient failure fetching $Uri ($($_.Exception.Message)); retrying"
+                Start-Sleep -Seconds (5 * $attempt)
+            }
+        }
+        return "missing"
+    }
+
+    # Fetch and verify the signed manifest, returning the expected digest for the
+    # asset. Runs BEFORE the payload is downloaded.
+    function Get-VerifiedManifest {
+        param(
+            [string]$VerificationBase,
+            [string]$ReleaseTag,
+            [string]$WorkDir,
+            [hashtable]$RequestHeaders
+        )
+
+        $ManifestPath = Join-Path $WorkDir "SHA256SUMS"
+        $SignatureHexPath = Join-Path $WorkDir "SHA256SUMS.sig"
+
+        $manifestStatus = Get-ReleaseFile -Uri "$VerificationBase/SHA256SUMS" -OutFile $ManifestPath -RequestHeaders $RequestHeaders
+        $signatureStatus = "missing"
+        if ($manifestStatus -eq "ok") {
+            $signatureStatus = Get-ReleaseFile -Uri "$VerificationBase/SHA256SUMS.sig" -OutFile $SignatureHexPath -RequestHeaders $RequestHeaders
+        }
+
+        if ($manifestStatus -ne "ok" -or $signatureStatus -ne "ok") {
+            $missing = if ($manifestStatus -ne "ok") { "SHA256SUMS" } else { "SHA256SUMS.sig" }
+            if (-not $AllowUnverified) {
+                if (Test-BelowSigningFloor $Version $SigningFloor) {
+                    Die @"
+    release '$ReleaseTag' publishes no $missing.
+
+      Releases before v$SigningFloor predate release signing, so nothing about this
+      archive can be verified.
+
+      To install it anyway, set SAILFIN_ALLOW_UNVERIFIED=1 and understand that its
+      contents are not checked against any signature.
+    "@
+                }
+                Die @"
+    release '$ReleaseTag' must publish $missing, but the fetch returned 404.
+
+      Every release from v$SigningFloor onward is signed, so this is either a broken
+      release or an attempt to strip verification from this install.
+
+      Refusing to install. If you have independently established that this release
+      is genuinely unsigned, set SAILFIN_ALLOW_UNVERIFIED=1.
+    "@
+            }
+            return @{ State = "UNVERIFIED_EXPLICIT"; Reason = "release '$ReleaseTag' publishes no $missing" }
+        }
+
+        # Only now is a verifier needed, and it is always present.
+        Assert-Ed25519VerifierUsable
+
+        $SignatureHex = ((Get-Content -Raw $SignatureHexPath) -replace '\s', '')
+        if ($SignatureHex -notmatch '^[0-9a-fA-F]{128}$') {
+            Die "release manifest signature is malformed; refusing to install from '$ReleaseTag'."
+        }
+
+        $PublicKeyBytes = _Ed25519HexToBytes $ReleaseSigningPublicKeyHex
+        $SignatureBytes = _Ed25519HexToBytes $SignatureHex
+        $ManifestBytes = [IO.File]::ReadAllBytes($ManifestPath)
+
+        if (-not (Test-Ed25519Signature $PublicKeyBytes $SignatureBytes $ManifestBytes)) {
+            Die @"
+    release manifest signature verification FAILED for '$ReleaseTag'.
+
+      SHA256SUMS is not signed by the Sailfin release key. This means the manifest
+      was modified in transit or the release is not authentic.
+
+      Refusing to install. This is not overridable.
+    "@
+        }
+
+        return @{ State = "VERIFIED_SIGNED"; ManifestPath = $ManifestPath }
+    }
+
+    # Extract the single manifest entry for an asset. Zero or more than one is a
+    # hard failure: a duplicated name is an ambiguous claim about which bytes are
+    # authentic.
+    function Get-ManifestDigest([string]$ManifestPath, [string]$AssetName) {
+        $digests = @()
+        foreach ($Line in (Get-Content $ManifestPath)) {
+            if ($Line -match '^([0-9a-fA-F]{64})\s+\*?(.+)$' -and $Matches[2].Trim() -eq $AssetName) {
+                $digests += $Matches[1].ToLowerInvariant()
+            }
+        }
+        if ($digests.Count -ne 1) {
+            Die "signed release manifest does not contain exactly one entry for '$AssetName' (found $($digests.Count)); refusing to install."
+        }
+        return $digests[0]
+    }
+
+    function Get-FileSha256([string]$Path) {
+        $Sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $Stream = [IO.File]::OpenRead($Path)
+            try { $DigestBytes = $Sha256.ComputeHash($Stream) } finally { $Stream.Dispose() }
+        } finally {
+            $Sha256.Dispose()
+        }
+        return ([BitConverter]::ToString($DigestBytes) -replace '-', '').ToLowerInvariant()
+    }
+
+    # --- Establish trust, then fetch the payload ---------------------------------
+    # Verification runs before extraction or creation of an install destination, so
+    # detected tampering cannot leave an installed binary behind.
+
+    $TrustState = "UNVERIFIED_EXPLICIT"
+    $UnverifiedReason = ""
+    $ExpectedDigest = $null
+
+    if ($LocalArchive) {
+        if ($LocalArchiveSha256) {
+            $TrustState = "DIGEST_PINNED"
+            $ExpectedDigest = $LocalArchiveSha256
+        } else {
+            $UnverifiedReason = "local archive install with no expected digest"
+        }
+    } else {
+        # Files live at <base>/<tag>/, matching the native
+        # SAILFIN_TOOLCHAIN_RELEASE_BASE knob and install.sh, so a mirror laid out
+        # for one is laid out for all three.
+        $VerificationBase = if ($ReleaseBase) { "$($ReleaseBase.TrimEnd('/'))/$Tag" } else { "https://github.com/$Repo/releases/download/$Tag" }
+        $Manifest = Get-VerifiedManifest -VerificationBase $VerificationBase -ReleaseTag $Tag `
+            -WorkDir $TmpDir -RequestHeaders $DownloadHeaders
+        $TrustState = $Manifest.State
+
+        if ($TrustState -eq "VERIFIED_SIGNED") {
+            # With a mirror the asset list came from no authenticated source, so
+            # resolve the preference-ordered candidates against the verified
+            # manifest instead.
+            if ($ReleaseBase) {
+                $ResolvedAsset = $null
+                foreach ($Candidate in $AssetCandidates) {
+                    if ((Get-Content $Manifest.ManifestPath) -match ("\s\*?" + [regex]::Escape($Candidate) + "\s*$")) {
+                        $ResolvedAsset = $Candidate
+                        break
+                    }
+                }
+                if (-not $ResolvedAsset) {
+                    Die "none of [$($AssetCandidates -join ', ')] appears in the verified manifest for '$Tag'."
+                }
+                $Asset = $ResolvedAsset
+                $ArchivePath = Join-Path $TmpDir $Asset
+                Log "Expected asset: $Asset"
+            }
+            $ExpectedDigest = Get-ManifestDigest $Manifest.ManifestPath $Asset
+            Log "verified: SHA256SUMS ed25519 signature (verifier: powershell-ed25519)"
+        } elseif ($TrustState -eq "UNVERIFIED_EXPLICIT") {
+            $UnverifiedReason = $Manifest.Reason
+            if ($ReleaseBase) {
+                $Asset = $AssetCandidates[0]
+                $ArchivePath = Join-Path $TmpDir $Asset
+            }
+        } else {
+            # Neither known state. Unreachable today, but this is exactly the
+            # silent fail-open shape SFN-1034 exists to remove: falling through
+            # would skip the digest check, skip the warning block, and install
+            # with nothing checked and nothing printed.
+            Die "internal error: unexpected trust state '$TrustState'; refusing to install."
+        }
+
+        # The manifest that will judge these bytes is verified; fetch them now.
         if ($ReleaseBase) {
-            $ResolvedAsset = $null
-            foreach ($Candidate in $AssetCandidates) {
-                if ((Get-Content $Manifest.ManifestPath) -match ("\s\*?" + [regex]::Escape($Candidate) + "\s*$")) {
-                    $ResolvedAsset = $Candidate
-                    break
+            Log "Downloading asset from $VerificationBase..."
+            $status = Get-ReleaseFile -Uri "$VerificationBase/$Asset" -OutFile $ArchivePath -RequestHeaders $DownloadHeaders
+            if ($status -ne "ok" -and $TrustState -eq "UNVERIFIED_EXPLICIT" -and $AssetCandidates.Count -gt 1) {
+                # No signed manifest was available to pick the asset name, so the
+                # preferred (-msvc) candidate may simply not exist for this
+                # release or arch. Fall back the same way the signed path does.
+                foreach ($Candidate in ($AssetCandidates | Select-Object -Skip 1)) {
+                    $ArchivePath = Join-Path $TmpDir $Candidate
+                    $status = Get-ReleaseFile -Uri "$VerificationBase/$Candidate" -OutFile $ArchivePath -RequestHeaders $DownloadHeaders
+                    if ($status -eq "ok") { $Asset = $Candidate; break }
                 }
             }
-            if (-not $ResolvedAsset) {
-                Die "none of [$($AssetCandidates -join ', ')] appears in the verified manifest for '$Tag'."
+            if ($status -ne "ok") { Die "could not download '$Asset' from $VerificationBase." }
+        } else {
+            Log "Downloading asset via GitHub API (id=$AssetId)..."
+            $DownloadUrl = "https://api.github.com/repos/$Repo/releases/assets/$AssetId"
+            Invoke-WebRequest -Uri $DownloadUrl -Headers $DownloadHeaders -OutFile $ArchivePath -UseBasicParsing
+        }
+    }
+
+    # The digest check runs in EVERY state in which an expected digest exists,
+    # including the explicitly unverified one. Nothing about a missing signature
+    # makes a corrupt download acceptable.
+    if ($ExpectedDigest) {
+        $ActualDigest = Get-FileSha256 $ArchivePath
+        if ($ActualDigest -ne $ExpectedDigest) {
+            # Only ever unlink an archive WE downloaded into the temp dir. In
+            # DIGEST_PINNED the path is the caller's own file, and a mistyped
+            # SAILFIN_LOCAL_ARCHIVE_SHA256 must not destroy it.
+            if (-not $LocalArchive) {
+                Remove-Item -Force $ArchivePath -ErrorAction SilentlyContinue
             }
-            $Asset = $ResolvedAsset
-            $ArchivePath = Join-Path $TmpDir $Asset
-            Log "Expected asset: $Asset"
+            Die @"
+    SHA-256 digest mismatch for '$Asset'; refusing to install it.
+
+      expected $ExpectedDigest
+      actual   $ActualDigest
+    "@
         }
-        $ExpectedDigest = Get-ManifestDigest $Manifest.ManifestPath $Asset
-        Log "verified: SHA256SUMS ed25519 signature (verifier: powershell-ed25519)"
-    } elseif ($TrustState -eq "UNVERIFIED_EXPLICIT") {
-        $UnverifiedReason = $Manifest.Reason
-        if ($ReleaseBase) {
-            $Asset = $AssetCandidates[0]
-            $ArchivePath = Join-Path $TmpDir $Asset
+        if ($TrustState -eq "VERIFIED_SIGNED") {
+            Log "verified: $Asset sha256 $ActualDigest"
+        } else {
+            Log "digest-pinned: $Asset sha256 $ActualDigest (matched a caller-supplied digest, not a signature)"
         }
-    } else {
-        # Neither known state. Unreachable today, but this is exactly the
-        # silent fail-open shape SFN-1034 exists to remove: falling through
-        # would skip the digest check, skip the warning block, and install
-        # with nothing checked and nothing printed.
-        Die "internal error: unexpected trust state '$TrustState'; refusing to install."
     }
 
-    # The manifest that will judge these bytes is verified; fetch them now.
-    if ($ReleaseBase) {
-        Log "Downloading asset from $VerificationBase..."
-        $status = Get-ReleaseFile -Uri "$VerificationBase/$Asset" -OutFile $ArchivePath -RequestHeaders $DownloadHeaders
-        if ($status -ne "ok" -and $TrustState -eq "UNVERIFIED_EXPLICIT" -and $AssetCandidates.Count -gt 1) {
-            # No signed manifest was available to pick the asset name, so the
-            # preferred (-msvc) candidate may simply not exist for this
-            # release or arch. Fall back the same way the signed path does.
-            foreach ($Candidate in ($AssetCandidates | Select-Object -Skip 1)) {
-                $ArchivePath = Join-Path $TmpDir $Candidate
-                $status = Get-ReleaseFile -Uri "$VerificationBase/$Candidate" -OutFile $ArchivePath -RequestHeaders $DownloadHeaders
-                if ($status -eq "ok") { $Asset = $Candidate; break }
+    if ($TrustState -eq "UNVERIFIED_EXPLICIT") {
+        Log "WARNING: UNVERIFIED INSTALL"
+        Log "WARNING:   reason: $UnverifiedReason"
+        Log "WARNING:   the release signature was NOT checked"
+        Log "WARNING:   the archive digest was NOT checked against any signed manifest"
+        Log "WARNING:   proceeding only because SAILFIN_ALLOW_UNVERIFIED=1 was set"
+    }
+
+    # --- Extract archive ---------------------------------------------------------
+
+    $ExtractDir = Join-Path $TmpDir "extract"
+    New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
+
+    Log "Extracting $Asset..."
+    tar -xzf $ArchivePath -C $ExtractDir
+    if ($LASTEXITCODE -ne 0) {
+        Die "Failed to extract archive. Ensure 'tar' is available (ships with Windows 10+)."
+    }
+
+    # Locate the root of extracted content.
+    $RootDir = $ExtractDir
+    if (-not (Test-Path (Join-Path $ExtractDir "bin")) -and
+        -not (Test-Path (Join-Path $ExtractDir "$Binary.exe")) -and
+        -not (Test-Path (Join-Path $ExtractDir $Binary))) {
+        $FirstDir = Get-ChildItem -Path $ExtractDir -Directory | Select-Object -First 1
+        if ($FirstDir) { $RootDir = $FirstDir.FullName }
+    }
+
+    # Find the binary.
+    $SrcBinary = $null
+    $Candidates = @(
+        (Join-Path $RootDir "$Binary.exe"),
+        (Join-Path $RootDir "bin\$Binary.exe"),
+        (Join-Path $RootDir $Binary),
+        (Join-Path $RootDir "bin\$Binary")
+    )
+    foreach ($c in $Candidates) {
+        if (Test-Path $c) { $SrcBinary = $c; break }
+    }
+    if (-not $SrcBinary) {
+        Die "Binary '$Binary.exe' not found in archive."
+    }
+
+    # --- Install -----------------------------------------------------------------
+
+    $TargetDir = Join-Path $InstallBase $Version
+    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+
+    $DestName = if ($SrcBinary -match '\.exe$') { "$Binary.exe" } else { $Binary }
+    $DestPath = Join-Path $TargetDir $DestName
+
+    Log "Installing to $TargetDir..."
+    Copy-Item -Path $SrcBinary -Destination $DestPath -Force
+
+    # Install runtime bundle if present.
+    $RuntimeSrc = Join-Path $RootDir "runtime"
+    $RuntimeDest = Join-Path $TargetDir "runtime"
+    if (Test-Path $RuntimeSrc) {
+        Log "Installing runtime bundle to $TargetDir\runtime..."
+        if (Test-Path $RuntimeDest) { Remove-Item -Recurse -Force $RuntimeDest }
+        Copy-Item -Path $RuntimeSrc -Destination $RuntimeDest -Recurse
+    } else {
+        Log "Warning: runtime bundle not found in archive; sfn run/build will fail without it."
+    }
+
+    # The compiler/runtime workspace dependency closure, staged by
+    # `sfn package --installer` (SFN-773, SFN-937) as a sibling of runtime\ -- the
+    # compatibility shape installed dependency discovery resolves.
+    $CapsulesSrc = Join-Path $RootDir "capsules"
+    $CapsulesDest = Join-Path $TargetDir "capsules"
+    if (Test-Path $CapsulesSrc) {
+        Log "Installing runtime capsule dependencies to $TargetDir\capsules..."
+        if (Test-Path $CapsulesDest) { Remove-Item -Recurse -Force $CapsulesDest }
+        Copy-Item -Path $CapsulesSrc -Destination $CapsulesDest -Recurse
+    }
+
+    # SFN-937: publish the generated workspace manifest only after the canonical
+    # capsule payload it names. Older archives have no workspace manifest.
+    $WorkspaceSrc = Join-Path $RootDir "workspace.toml"
+    $WorkspaceDest = Join-Path $TargetDir "workspace.toml"
+    if (Test-Path $WorkspaceDest) { Remove-Item -Force $WorkspaceDest }
+    if (Test-Path $WorkspaceSrc) {
+        if (-not (Test-Path $CapsulesDest)) {
+            throw "Bundled workspace manifest has no installed capsule payload."
+        }
+        Log "Installing bundled workspace manifest to $TargetDir\workspace.toml..."
+        Copy-Item -Path $WorkspaceSrc -Destination $WorkspaceDest -Force
+    }
+
+    # --- Copies in global bin dir ------------------------------------------------
+
+    New-Item -ItemType Directory -Path $GlobalBinDir -Force | Out-Null
+
+    $PointerPath = Join-Path $GlobalBinDir "sailfin-install-root"
+    $GlobalPayloadOwned = Test-Path $PointerPath
+    if ($GlobalPayloadOwned) {
+        foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
+            $LegacyPath = Join-Path $GlobalBinDir $LegacyName
+            if (Test-Path $LegacyPath) { Remove-Item -Recurse -Force $LegacyPath }
+        }
+    }
+    if (Test-Path $PointerPath) { Remove-Item -Force $PointerPath }
+
+    $Aliases = @($DestName)
+    if ($DestName -match '\.exe$') {
+        $Aliases += "sfn.exe"
+        $Aliases += "sailfin.exe"
+    } else {
+        $Aliases += "sfn"
+        $Aliases += "sailfin"
+    }
+
+    foreach ($Alias in ($Aliases | Select-Object -Unique)) {
+        $LinkPath = Join-Path $GlobalBinDir $Alias
+        if (Test-Path $LinkPath) { Remove-Item -Force $LinkPath }
+        Copy-Item -Path $DestPath -Destination $LinkPath -Force
+        Log "Installed: $LinkPath"
+    }
+
+    # Published compilers predating SFN-937 cannot read the install-root pointer.
+    # Their archives have no workspace.toml, so mirror their runtime dependency
+    # payload beside the copied executable. New archives use only the pointer.
+    if (-not (Test-Path $WorkspaceSrc)) {
+        foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
+            $LegacyPath = Join-Path $GlobalBinDir $LegacyName
+            if ((Test-Path $LegacyPath) -and -not $GlobalPayloadOwned) {
+                throw "Refusing to replace unowned $LegacyPath for legacy installer compatibility."
             }
         }
-        if ($status -ne "ok") { Die "could not download '$Asset' from $VerificationBase." }
-    } else {
-        Log "Downloading asset via GitHub API (id=$AssetId)..."
-        $DownloadUrl = "https://api.github.com/repos/$Repo/releases/assets/$AssetId"
-        Invoke-WebRequest -Uri $DownloadUrl -Headers $DownloadHeaders -OutFile $ArchivePath -UseBasicParsing
-    }
-}
-
-# The digest check runs in EVERY state in which an expected digest exists,
-# including the explicitly unverified one. Nothing about a missing signature
-# makes a corrupt download acceptable.
-if ($ExpectedDigest) {
-    $ActualDigest = Get-FileSha256 $ArchivePath
-    if ($ActualDigest -ne $ExpectedDigest) {
-        # Only ever unlink an archive WE downloaded into the temp dir. In
-        # DIGEST_PINNED the path is the caller's own file, and a mistyped
-        # SAILFIN_LOCAL_ARCHIVE_SHA256 must not destroy it.
-        if (-not $LocalArchive) {
-            Remove-Item -Force $ArchivePath -ErrorAction SilentlyContinue
+        if (Test-Path $RuntimeDest) {
+            Copy-Item -Path $RuntimeDest -Destination (Join-Path $GlobalBinDir "runtime") -Recurse
         }
-        Die @"
-SHA-256 digest mismatch for '$Asset'; refusing to install it.
-
-  expected $ExpectedDigest
-  actual   $ActualDigest
-"@
-    }
-    if ($TrustState -eq "VERIFIED_SIGNED") {
-        Log "verified: $Asset sha256 $ActualDigest"
-    } else {
-        Log "digest-pinned: $Asset sha256 $ActualDigest (matched a caller-supplied digest, not a signature)"
-    }
-}
-
-if ($TrustState -eq "UNVERIFIED_EXPLICIT") {
-    Log "WARNING: UNVERIFIED INSTALL"
-    Log "WARNING:   reason: $UnverifiedReason"
-    Log "WARNING:   the release signature was NOT checked"
-    Log "WARNING:   the archive digest was NOT checked against any signed manifest"
-    Log "WARNING:   proceeding only because SAILFIN_ALLOW_UNVERIFIED=1 was set"
-}
-
-# --- Extract archive ---------------------------------------------------------
-
-$ExtractDir = Join-Path $TmpDir "extract"
-New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
-
-Log "Extracting $Asset..."
-tar -xzf $ArchivePath -C $ExtractDir
-if ($LASTEXITCODE -ne 0) {
-    Die "Failed to extract archive. Ensure 'tar' is available (ships with Windows 10+)."
-}
-
-# Locate the root of extracted content.
-$RootDir = $ExtractDir
-if (-not (Test-Path (Join-Path $ExtractDir "bin")) -and
-    -not (Test-Path (Join-Path $ExtractDir "$Binary.exe")) -and
-    -not (Test-Path (Join-Path $ExtractDir $Binary))) {
-    $FirstDir = Get-ChildItem -Path $ExtractDir -Directory | Select-Object -First 1
-    if ($FirstDir) { $RootDir = $FirstDir.FullName }
-}
-
-# Find the binary.
-$SrcBinary = $null
-$Candidates = @(
-    (Join-Path $RootDir "$Binary.exe"),
-    (Join-Path $RootDir "bin\$Binary.exe"),
-    (Join-Path $RootDir $Binary),
-    (Join-Path $RootDir "bin\$Binary")
-)
-foreach ($c in $Candidates) {
-    if (Test-Path $c) { $SrcBinary = $c; break }
-}
-if (-not $SrcBinary) {
-    Die "Binary '$Binary.exe' not found in archive."
-}
-
-# --- Install -----------------------------------------------------------------
-
-$TargetDir = Join-Path $InstallBase $Version
-New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
-
-$DestName = if ($SrcBinary -match '\.exe$') { "$Binary.exe" } else { $Binary }
-$DestPath = Join-Path $TargetDir $DestName
-
-Log "Installing to $TargetDir..."
-Copy-Item -Path $SrcBinary -Destination $DestPath -Force
-
-# Install runtime bundle if present.
-$RuntimeSrc = Join-Path $RootDir "runtime"
-$RuntimeDest = Join-Path $TargetDir "runtime"
-if (Test-Path $RuntimeSrc) {
-    Log "Installing runtime bundle to $TargetDir\runtime..."
-    if (Test-Path $RuntimeDest) { Remove-Item -Recurse -Force $RuntimeDest }
-    Copy-Item -Path $RuntimeSrc -Destination $RuntimeDest -Recurse
-} else {
-    Log "Warning: runtime bundle not found in archive; sfn run/build will fail without it."
-}
-
-# The compiler/runtime workspace dependency closure, staged by
-# `sfn package --installer` (SFN-773, SFN-937) as a sibling of runtime\ -- the
-# compatibility shape installed dependency discovery resolves.
-$CapsulesSrc = Join-Path $RootDir "capsules"
-$CapsulesDest = Join-Path $TargetDir "capsules"
-if (Test-Path $CapsulesSrc) {
-    Log "Installing runtime capsule dependencies to $TargetDir\capsules..."
-    if (Test-Path $CapsulesDest) { Remove-Item -Recurse -Force $CapsulesDest }
-    Copy-Item -Path $CapsulesSrc -Destination $CapsulesDest -Recurse
-}
-
-# SFN-937: publish the generated workspace manifest only after the canonical
-# capsule payload it names. Older archives have no workspace manifest.
-$WorkspaceSrc = Join-Path $RootDir "workspace.toml"
-$WorkspaceDest = Join-Path $TargetDir "workspace.toml"
-if (Test-Path $WorkspaceDest) { Remove-Item -Force $WorkspaceDest }
-if (Test-Path $WorkspaceSrc) {
-    if (-not (Test-Path $CapsulesDest)) {
-        throw "Bundled workspace manifest has no installed capsule payload."
-    }
-    Log "Installing bundled workspace manifest to $TargetDir\workspace.toml..."
-    Copy-Item -Path $WorkspaceSrc -Destination $WorkspaceDest -Force
-}
-
-# --- Copies in global bin dir ------------------------------------------------
-
-New-Item -ItemType Directory -Path $GlobalBinDir -Force | Out-Null
-
-$PointerPath = Join-Path $GlobalBinDir "sailfin-install-root"
-$GlobalPayloadOwned = Test-Path $PointerPath
-if ($GlobalPayloadOwned) {
-    foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
-        $LegacyPath = Join-Path $GlobalBinDir $LegacyName
-        if (Test-Path $LegacyPath) { Remove-Item -Recurse -Force $LegacyPath }
-    }
-}
-if (Test-Path $PointerPath) { Remove-Item -Force $PointerPath }
-
-$Aliases = @($DestName)
-if ($DestName -match '\.exe$') {
-    $Aliases += "sfn.exe"
-    $Aliases += "sailfin.exe"
-} else {
-    $Aliases += "sfn"
-    $Aliases += "sailfin"
-}
-
-foreach ($Alias in ($Aliases | Select-Object -Unique)) {
-    $LinkPath = Join-Path $GlobalBinDir $Alias
-    if (Test-Path $LinkPath) { Remove-Item -Force $LinkPath }
-    Copy-Item -Path $DestPath -Destination $LinkPath -Force
-    Log "Installed: $LinkPath"
-}
-
-# Published compilers predating SFN-937 cannot read the install-root pointer.
-# Their archives have no workspace.toml, so mirror their runtime dependency
-# payload beside the copied executable. New archives use only the pointer.
-if (-not (Test-Path $WorkspaceSrc)) {
-    foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
-        $LegacyPath = Join-Path $GlobalBinDir $LegacyName
-        if ((Test-Path $LegacyPath) -and -not $GlobalPayloadOwned) {
-            throw "Refusing to replace unowned $LegacyPath for legacy installer compatibility."
+        if (Test-Path $CapsulesDest) {
+            Copy-Item -Path $CapsulesDest -Destination (Join-Path $GlobalBinDir "capsules") -Recurse
         }
+        Log "Installed adjacent payload mirror for pre-SFN-937 compiler compatibility."
     }
-    if (Test-Path $RuntimeDest) {
-        Copy-Item -Path $RuntimeDest -Destination (Join-Path $GlobalBinDir "runtime") -Recurse
+
+    # Copied executables report GLOBAL_BIN_DIR as their own directory. Publish the
+    # canonical version root after all executable copies so compiler startup can
+    # recover the runtime/workspace discovery anchor without changing sfn.exe.
+    $TargetDirResolved = (Resolve-Path -LiteralPath $TargetDir).Path
+    $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($PointerPath, $TargetDirResolved, $Utf8NoBom)
+    Log "Installed payload pointer: $PointerPath -> $TargetDirResolved"
+
+    # --- Update user PATH --------------------------------------------------------
+
+    $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($UserPath -split ";" -notcontains $GlobalBinDir) {
+        Log "Adding $GlobalBinDir to user PATH..."
+        [Environment]::SetEnvironmentVariable("Path", "$GlobalBinDir;$UserPath", "User")
+        # Also update current session so the binary is immediately available.
+        $env:Path = "$GlobalBinDir;$env:Path"
+        Log "PATH updated. You may need to restart your terminal for the change to take effect."
+    } else {
+        Log "$GlobalBinDir is already in PATH."
     }
-    if (Test-Path $CapsulesDest) {
-        Copy-Item -Path $CapsulesDest -Destination (Join-Path $GlobalBinDir "capsules") -Recurse
-    }
-    Log "Installed adjacent payload mirror for pre-SFN-937 compiler compatibility."
+
+    # --- Cleanup -----------------------------------------------------------------
+
+} finally {
+    Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
 }
-
-# Copied executables report GLOBAL_BIN_DIR as their own directory. Publish the
-# canonical version root after all executable copies so compiler startup can
-# recover the runtime/workspace discovery anchor without changing sfn.exe.
-$TargetDirResolved = (Resolve-Path -LiteralPath $TargetDir).Path
-$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText($PointerPath, $TargetDirResolved, $Utf8NoBom)
-Log "Installed payload pointer: $PointerPath -> $TargetDirResolved"
-
-# --- Update user PATH --------------------------------------------------------
-
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($UserPath -split ";" -notcontains $GlobalBinDir) {
-    Log "Adding $GlobalBinDir to user PATH..."
-    [Environment]::SetEnvironmentVariable("Path", "$GlobalBinDir;$UserPath", "User")
-    # Also update current session so the binary is immediately available.
-    $env:Path = "$GlobalBinDir;$env:Path"
-    Log "PATH updated. You may need to restart your terminal for the change to take effect."
-} else {
-    Log "$GlobalBinDir is already in PATH."
-}
-
-# --- Cleanup -----------------------------------------------------------------
-
-Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
 
 Log "Installed: $DestPath"
 Log "Ready! Run 'sfn version' to verify."

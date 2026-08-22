@@ -321,11 +321,20 @@ fn handle_read_line_stdout(h: ProcessHandle) -> string? ![io] {
 
 // Read at most `n` bytes from the child's stdout into a fresh
 // caller-owned `OwnedBuf`, preserving any unconsumed remainder for the
-// next call. A short read returns fewer than `n`; a zero-length buffer
-// signals EOF (or `n <= 0`). Bounded incremental read for a live child
-// that never closes its pipe. The underlying builtin already returns a
-// string, so this `OwnedBuf` form provides no additional byte-fidelity
-// over `handle_read_chunk_stdout` — it exists for callers who want a
+// next call. A short read returns fewer than `n`. Bounded incremental
+// read for a live child that never closes its pipe.
+//
+// A zero-length buffer means "no bytes available right now", NOT
+// necessarily EOF — `handle_stdout_at_eof` is the sole EOF oracle. On
+// POSIX an empty return still only occurs at EOF (or `n <= 0`); on
+// Windows it also occurs for a live-but-silent child, because the read
+// is bounded so a caller's wall-clock deadline stays observable
+// (SFN-1092, `runtime/sfn/platform/process_windows.sfn`). A loop that
+// treats empty as EOF terminates early against a slow child on Windows.
+//
+// The underlying builtin already returns a string, so this `OwnedBuf`
+// form provides no additional byte-fidelity over
+// `handle_read_chunk_stdout` — it exists for callers who want a
 // libc-backed buffer to hand to C.
 fn handle_read_bytes_stdout(h: ProcessHandle, n: int) -> OwnedBuf ![io] {
     let chunk = process.handle_read_bytes_stdout(h.handle_id, n);
@@ -391,10 +400,16 @@ fn handle_stderr_fd(h: ProcessHandle) -> int ![io] {
 
 // Read at most `n` bytes from the child's stdout, returned directly as
 // a string (no `OwnedBuf`) — preserving any unconsumed remainder for
-// the next call. A short read returns fewer than `n`; an empty string
-// means EOF or `n <= 0`. This is the recommended chunked read;
-// `handle_read_bytes_stdout` is the owned-buffer form for callers that
-// need a libc-backed allocation to hand to C.
+// the next call. A short read returns fewer than `n`.
+//
+// An empty string means "no bytes available right now", NOT necessarily
+// EOF — `handle_stdout_at_eof` is the sole EOF oracle. See
+// `handle_read_bytes_stdout` above for the platform detail; the same
+// contract applies here.
+//
+// This is the recommended chunked read; `handle_read_bytes_stdout` is
+// the owned-buffer form for callers that need a libc-backed allocation
+// to hand to C.
 fn handle_read_chunk_stdout(h: ProcessHandle, n: int) -> string ![io] {
     return process.handle_read_bytes_stdout(h.handle_id, n);
 }

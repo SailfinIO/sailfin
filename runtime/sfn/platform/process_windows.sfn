@@ -128,6 +128,23 @@ extern fn GetCurrentProcess() -> i64;
 
 extern fn Sleep(ms: i32) -> void;
 
+// ── Monotonic clock for the bounded pipe pump (SFN-1092). Redeclared here
+// rather than imported from `clock_windows.sfn`, per the file-header
+// self-containment note above `PwGrowBuf`: this module is a wholesale
+// target replacement for `sfn/process.sfn` and owns its own link
+// contracts. `clock_windows.sfn:43-45` declares the same two symbols; a
+// Win32 import declared by two modules resolves to one thunk at link.
+//
+// Deliberately NOT the `monotonic_millis()` builtin: that lowers to the
+// runtime-helper descriptor `runtime_monotonic_millis_fn`, and the
+// runtime's own pipe pump must not depend on a helper the pinned seed
+// resolves for it. `QueryPerformanceCounter` is a bare Win32 call the
+// seed compiles as an ordinary extern, which is what keeps SFN-1092
+// free of a seed gate.
+extern fn QueryPerformanceCounter(out_count: *i64) -> i32;
+
+extern fn QueryPerformanceFrequency(out_freq: *i64) -> i32;
+
 // ── Win32 async-handle family (SFN-497). `WriteFile` feeds the child's
 // stdin pipe; `TerminateProcess` is the `handle_kill` primitive (Windows
 // has no signals). Both implicitly linked by mingw.
@@ -968,19 +985,67 @@ fn _pw_h_pump_once(h: *PwProcHandle, buf: *u8, cap: i64) -> i64 ![io] {
     return got;
 }
 
+// Ticks of the Win32 performance counter, or 0 when unavailable. A 0
+// return is the caller's signal to treat the budget as unbounded rather
+// than to fail: a missing monotonic clock must degrade to the historical
+// park-until-a-byte behaviour, never to a spin.
+fn _pw_qpc_now() -> i64 ![io] {
+    let mut counter: i64 = 0;
+    let counter_ptr: *i64 = & counter;
+    let ok: i32 = QueryPerformanceCounter(counter_ptr);
+    if ok == 0 { return 0; }
+    return sailfin_intrinsic_pointer_read_i64(counter_ptr);
+}
+
+// Performance-counter ticks per second, or 0 when unavailable. Same
+// degrade-to-unbounded contract as `_pw_qpc_now`.
+fn _pw_qpc_freq() -> i64 ![io] {
+    let mut freq: i64 = 0;
+    let freq_ptr: *i64 = & freq;
+    let ok: i32 = QueryPerformanceFrequency(freq_ptr);
+    if ok == 0 { return 0; }
+    return sailfin_intrinsic_pointer_read_i64(freq_ptr);
+}
+
 // `_pw_h_pump(h, want_err, to_eof)` — pump both pipes until the requested
 // stream (`want_err` 0 = stdout, 1 = stderr) is satisfied: to EOF when
 // `to_eof` is 1 (the full-drain reads), or until its stash holds at least
 // one byte when `to_eof` is 0 (the framed reads).
 //
+// Unbounded: parks until a byte or EOF. Preserved verbatim as the
+// historical contract for `sfn_process_handle_read_line_stdout` and the
+// full-drain reads, whose framing must never observe a spurious empty
+// return. Only the two chunk readers take a budget (SFN-1092).
+fn _pw_h_pump(h: *PwProcHandle, want_err: i64, to_eof: i64) -> void ![io] {
+    _pw_h_pump_bounded(h, want_err, to_eof, -1);
+}
+
+// `_pw_h_pump_bounded(h, want_err, to_eof, budget_ms)` — as `_pw_h_pump`,
+// but returns after at most `budget_ms` of waiting when `budget_ms >= 0`.
+// A negative budget is unbounded and reproduces the original loop exactly.
+//
 // This is where the POSIX blocking `read(2)` is reconstructed. Win32 has
 // no blocking-with-EOF pipe read that is also safe to interleave, so the
-// non-blocking `PeekNamedPipe` probe is looped with a `Sleep(1)` on an
-// idle pass. Sleeping (rather than returning empty) is what keeps the
-// POSIX contract: a framed read must not report "no bytes" for a live
-// child that simply has not written yet, or a caller framing until
-// `*_at_eof` would spin at 100% CPU instead of parking.
-fn _pw_h_pump(h: *PwProcHandle, want_err: i64, to_eof: i64) -> void ![io] {
+// non-blocking `PeekNamedPipe` probe is looped with a `Sleep` on an idle
+// pass. Sleeping (rather than returning empty) is what keeps the POSIX
+// contract for the unbounded callers: a framed read must not report "no
+// bytes" for a live child that simply has not written yet, or a caller
+// framing until `*_at_eof` would spin at 100% CPU instead of parking.
+//
+// A bounded caller accepts exactly that empty return in exchange for
+// getting control back, which is what makes a wall-clock deadline
+// observable on Windows at all (SFN-1092). On budget exhaustion the stash
+// and BOTH pipe handles are left untouched, so the call is a pure
+// no-progress return: no byte is consumed, no EOF is synthesized, and the
+// next call resumes where this one stopped.
+//
+// The idle `Sleep` backs off 1 → 2 → 4 → 8 ms, capped, and resets to 1 ms
+// on any pass that appended bytes. A flat `Sleep(1)` against the 900 s
+// default deadline (`compiler/src/cli/commands/test/exec.sfn`) is ~900k
+// wakeups per silent child; the cap makes it ~112k while a chatty child
+// still gets sub-millisecond turnaround, because the first idle pass
+// after data always sleeps 1 ms.
+fn _pw_h_pump_bounded(h: *PwProcHandle, want_err: i64, to_eof: i64, budget_ms: i64) -> void ![io] {
     // Already at EOF: nothing to pump. Checked before the buffer alloc so the
     // common already-drained call costs nothing.
     if want_err != 0 {
@@ -1009,6 +1074,21 @@ fn _pw_h_pump(h: *PwProcHandle, want_err: i64, to_eof: i64) -> void ![io] {
     }
     let ogb: *PwGrowBuf = _pw_h_out_gb(h);
     let egb: *PwGrowBuf = _pw_h_err_gb(h);
+    // A zero frequency means the counter is unusable; fall back to
+    // unbounded rather than treating every pass as expired, which would
+    // turn a bounded caller's park into a spin.
+    let freq: i64 = _pw_qpc_freq();
+    let mut bounded: i64 = 0;
+    let mut started: i64 = 0;
+    if budget_ms >= 0 && freq > 0 {
+        started = _pw_qpc_now();
+        // `started == 0` is the counter read failing. Staying unbounded
+        // is the only safe degrade: a zero baseline would make the first
+        // successful read measure ticks-since-boot as "elapsed", expire
+        // instantly, and turn the caller's park into a 100% CPU spin.
+        if started > 0 { bounded = 1; }
+    }
+    let mut idle_sleep_ms: i32 = 1;
     loop {
         let mut open: i64 = 0;
         let mut have: i64 = 0;
@@ -1025,7 +1105,21 @@ fn _pw_h_pump(h: *PwProcHandle, want_err: i64, to_eof: i64) -> void ![io] {
             if have > 0 { break; }
         }
         let n: i64 = _pw_h_pump_once(h, buf, cap);
-        if n == 0 { Sleep(1); }
+        if n > 0 { idle_sleep_ms = 1; } else {
+            // Budget is checked only on an idle pass. A pass that moved
+            // bytes is progress and is never cut short, so a bounded
+            // caller draining a fast child behaves exactly as before.
+            if bounded == 1 {
+                let elapsed_ticks: i64 = _pw_qpc_now() - started;
+                // Multiply the ELAPSED tick delta, not the absolute
+                // counter: the counter is ticks-since-boot and would
+                // overflow i64 when scaled by 1000, while the delta is
+                // bounded by the budget.
+                if (elapsed_ticks * 1000) / freq >= budget_ms { break; }
+            }
+            Sleep(idle_sleep_ms);
+            if idle_sleep_ms < 8 { idle_sleep_ms = idle_sleep_ms * 2; }
+        }
     }
     free(buf);
 }
@@ -1519,17 +1613,38 @@ fn sfn_process_handle_stdout_fd(handle_id: i64) -> i64 ![io] { return -1; }
 
 fn sfn_process_handle_stderr_fd(handle_id: i64) -> i64 ![io] { return -1; }
 
+// How long a chunk read waits on a silent child before returning empty.
+//
+// This is the Windows deadline-observation latency: a drain loop reads
+// both streams per iteration, so a caller's wall-clock deadline is seen
+// within ~2x this plus scheduler slop. Against the 900 s default
+// (`compiler/src/cli/commands/test/exec.sfn`) that is ~0.006%. The idle
+// cost is ~80 `PeekNamedPipe` pairs/s per silent child — paid only by a
+// child producing nothing.
+let PW_FRAMED_POLL_BUDGET_MS: i64 = 25;
+
 // Framed reads (SFN-153 stdout twins, SFEP-0050 stderr twins): return AT
 // MOST `n` bytes, stashing the remainder for the next call. When the stash
-// is empty the pipes are pumped until the requested stream yields a byte or
-// hits EOF, so a short return is possible but an empty return means genuine
-// EOF — the distinction `*_at_eof` reports.
+// is empty the pipes are pumped until the requested stream yields a byte,
+// hits EOF, or `PW_FRAMED_POLL_BUDGET_MS` elapses.
+//
+// An empty return therefore does NOT mean EOF on Windows (SFN-1092): it
+// means "nothing yet", and `*_at_eof` is the sole EOF oracle. That is
+// already the contract every in-tree drain loop follows — each re-checks
+// `*_at_eof` at the top of its iteration — and it is what makes a
+// wall-clock deadline observable here at all. Before SFN-1092 these reads
+// parked indefinitely, so a wholly silent child could never be killed.
+//
+// `sfn_process_handle_read_line_stdout` below is deliberately NOT bounded:
+// its line framing treats an empty return as EOF.
 fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> *u8 ![io] {
     if handle_id == 0 { return _pw_empty_cstr(); }
     if n <= 0 { return _pw_empty_cstr(); }
     let h: *PwProcHandle = handle_id as *PwProcHandle;
     let gb: *PwGrowBuf = _pw_h_out_gb(h);
-    if gb.len == 0 { _pw_h_pump(h, 0, 0); }
+    if gb.len == 0 {
+        _pw_h_pump_bounded(h, 0, 0, PW_FRAMED_POLL_BUDGET_MS);
+    }
     let mut take: i64 = n;
     if take > gb.len { take = gb.len; }
     if take <= 0 { return _pw_empty_cstr(); }
@@ -1570,7 +1685,9 @@ fn sfn_process_handle_read_bytes_stderr(handle_id: i64, n: i64) -> *u8 ![io] {
     if n <= 0 { return _pw_empty_cstr(); }
     let h: *PwProcHandle = handle_id as *PwProcHandle;
     let gb: *PwGrowBuf = _pw_h_err_gb(h);
-    if gb.len == 0 { _pw_h_pump(h, 1, 0); }
+    if gb.len == 0 {
+        _pw_h_pump_bounded(h, 1, 0, PW_FRAMED_POLL_BUDGET_MS);
+    }
     let mut take: i64 = n;
     if take > gb.len { take = gb.len; }
     if take <= 0 { return _pw_empty_cstr(); }
