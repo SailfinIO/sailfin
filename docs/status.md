@@ -1,7 +1,7 @@
 # Status
 
-Updated: 2026-08-22 (SFN-1040, SFN-1086, SFN-1035, SFN-1034, SFN-1033,
-SFN-1039, SFN-1026, SFN-808, SFN-1024). Seed pinned to `0.10.4` (`bootstrap.toml`
+Updated: 2026-08-23 (SFN-1107, SFN-1040, SFN-1086, SFN-1035, SFN-1034,
+SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024). Seed pinned to `0.10.4` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -920,7 +920,11 @@ here.
   compiler boundary and are outside the first-party clang-free claim. No target
   is reported clang-independent until its native cold fixed point and released
   asset both pass with clang unavailable, followed by a clang-independent seed
-  pin before compatibility code is deleted.
+  pin before compatibility code is deleted. **Optional C test oracle
+  (SFN-1107):** C-harness/differential E2E tests resolve their configured
+  compiler, Apple SDK environment, and invocation through `sfn/test`; absence
+  is a reported skip, and this test-only helper is not imported by production
+  compiler, runtime, bootstrap, package, or link paths.
 - **Native TLS 1.3 (SFEP-0036/SFEP-0048, SFN-341).** The `sfn/crypto` capsule
   and `runtime/sfn/platform/tls_record.sfn` replace the OpenSSL-linked TLS
   stack; the toolchain links no `-lssl`/`-lcrypto`, and OpenSSL is no longer a

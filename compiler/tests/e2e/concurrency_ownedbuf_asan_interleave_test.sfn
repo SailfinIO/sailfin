@@ -43,23 +43,28 @@
 // Skip discipline (`.claude/rules/compiler-safety.md`). ASAN reserves
 // ~16 TB of virtual address space for its shadow at startup, which the
 // toolchain's 8 GiB self-cap aborts before `main()`. The ASAN legs run
-// with `SAILFIN_MEM_LIMIT=unlimited`; a relink that fails (no clang
-// compiler-rt AND no gcc libasan) or a run that aborts at startup under a
-// vmem cap is a SKIP, not a failure — only a genuine `ERROR:
+// with `SAILFIN_MEM_LIMIT=unlimited`; a relink that fails because the
+// configured oracle has no sanitizer runtime, or a run that aborts at startup
+// under a vmem cap, is a SKIP, not a failure — only a genuine `ERROR:
 // AddressSanitizer:` line fails. The plain (uninstrumented) legs always
 // run and carry the concurrent-result coverage (AC2) on their own.
 //
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured output with
 // `sfn/strings` predicates instead.
-import { contains, find } from "sfn/strings";
-import { default_scratch_dir, first_present_tool, sfn_bin_path } from "sfn/test";
+import { contains, ends_with, find } from "sfn/strings";
+import {
+    default_scratch_dir,
+    first_present_tool,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
 
-// The build + relink LINK a binary (clang/gcc + ld), needing the full
-// toolchain environment; `run_capture`'s empty array is the EMPTY
-// environment, not "inherit", so snapshot the parent's environment
-// (`SAILFIN_TEST_SCRATCH` is already in there — the runner sets it —
-// keeping the nested build cache per-invocation under the parallel pool).
+// The nested build and produced binaries need the full toolchain environment;
+// `run_capture`'s empty array is the EMPTY environment, not "inherit", so
+// snapshot the parent (`SAILFIN_TEST_SCRATCH` is already present, keeping the
+// nested build cache per invocation under the parallel pool). The optional
+// compiler oracle separately owns the full relink environment.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
 // ASAN child env: `SAILFIN_MEM_LIMIT=unlimited` so the instrumented
@@ -85,59 +90,61 @@ fn _scratch_dir() -> string ![io] {
 // every RUNTIME object (`sfn__runtime-native__*.o`). A capsule dependency
 // (e.g. `sfn/http`) is compiled transiently during the real link and is
 // NOT persisted in the work-dir, so its IR must be supplied separately via
-// `extra_ll_glob` (the stable per-capsule `build/capsules/<name>/ir/*.ll`)
+// `extra_ll_dir` (the stable per-capsule `build/capsules/<name>/ir` directory)
 // — "" when the program has no capsule dependency.
 //
-// Strategy: compile `program.ll` and each `extra_ll_glob` IR into objects
-// INSIDE the work-dir's `sailfin/` with the build toolchain's clang (plain
-// — ASAN's allocator interception is a link-time, whole-process concern),
-// so a single uniform `sailfin/*.o` glob then links the whole program. Try
-// clang's compiler-rt first; fall back to gcc's libasan, so the leg runs
-// wherever EITHER sanitizer runtime is present. Returns the binary path,
-// or "" when the compile/link cannot complete (→ skip the ASAN leg). The
-// globs need a shell, so the steps go through `bash -c` vehicles
-// (`run_capture` argv has no glob expansion) — a supported external-tool
-// idiom (`.claude/rules/no-bash-e2e.md`).
-fn _asan_relink(work_dir: string, extra_ll_glob: string, bin: string) -> string ![io] {
+// Strategy: compile `program.ll` and each module in `extra_ll_dir` into the
+// work-dir, enumerate the resulting objects without a shell, and link them
+// through the one optional external-C oracle boundary.
+fn _asan_relink(work_dir: string, extra_ll_dir: string, bin: string) -> string ![io] {
     let saildir = work_dir + "/sailfin";
     let prog_ll = saildir + "/program.ll";
     if !fs.exists(prog_ll) { return ""; }
 
     let prog_o = saildir + "/program.o";
-    let cexit = process.run_capture(["clang", "-c", "-Wno-override-module", prog_ll, "-o", prog_o], _child_env());
+    let cexit = run_external_c_oracle(["-c", "-Wno-override-module", prog_ll, "-o", prog_o]);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if cexit != 0 { return ""; }
 
-    // Compile any capsule IR into the work-dir so the uniform glob below
-    // picks the objects up. A failure to compile an extra leaves the link
-    // with undefined capsule symbols → it fails → skip.
-    if extra_ll_glob.length > 0 {
-        let compile_extras = "n=0; for f in " + extra_ll_glob
-            + "; do clang -c -Wno-override-module \"$f\" -o \""
-            + saildir
-            + "/xcap_$n.o\" || exit 1; n=$((n+1)); done";
-        let xexit = process.run_capture(["bash", "-c", compile_extras], _child_env());
-        let _xo = process.capture_take_stdout();
-        let _xe = process.capture_take_stderr();
-        if xexit != 0 { return ""; }
+    if extra_ll_dir.length > 0 {
+        let modules = fs.listDirectory(extra_ll_dir);
+        let mut i: int = 0;
+        loop {
+            if i >= modules.length { break; }
+            if ends_with(modules[i], ".ll") {
+                let xexit = run_external_c_oracle(["-c", "-Wno-override-module", extra_ll_dir
+                    + "/"
+                    + modules[i], "-o", saildir
+                    + "/xcap_"
+                    + number_to_string(i)
+                    + ".o"]);
+                let _xo = process.capture_take_stdout();
+                let _xe = process.capture_take_stderr();
+                if xexit != 0 { return ""; }
+            }
+            i += 1;
+        }
     }
 
-    let link_clang = "clang -fsanitize=address -Wno-override-module " + saildir
-        + "/*.o -lpthread -lm -o "
-        + bin;
-    let lexit = process.run_capture(["bash", "-c", link_clang], _child_env());
+    let mut link_args: string[] = ["-fsanitize=address", "-Wno-override-module"];
+    let objects = fs.listDirectory(saildir);
+    let mut j: int = 0;
+    loop {
+        if j >= objects.length { break; }
+        if ends_with(objects[j], ".o") {
+            link_args.push(saildir + "/" + objects[j]);
+        }
+        j += 1;
+    }
+    link_args.push("-lpthread");
+    link_args.push("-lm");
+    link_args.push("-o");
+    link_args.push(bin);
+    let lexit = run_external_c_oracle(link_args);
     let _lo = process.capture_take_stdout();
     let _le = process.capture_take_stderr();
     if lexit == 0 { return bin; }
-
-    let link_gcc = "gcc -fsanitize=address " + saildir
-        + "/*.o -lpthread -lm -o "
-        + bin;
-    let gexit = process.run_capture(["bash", "-c", link_gcc], _child_env());
-    let _go = process.capture_take_stdout();
-    let _ge = process.capture_take_stderr();
-    if gexit == 0 { return bin; }
     return "";
 }
 
@@ -224,8 +231,8 @@ test "asan: concurrent channel producer/consumer over the moved-OwnedBuf seam is
     // the runtime objects + program.ll alone.
     let relinked = _asan_relink(work_dir, "", asan_bin);
     if relinked.length == 0 {
-        // Neither clang compiler-rt nor gcc libasan available — skip. The
-        // plain leg above still pins the concurrent round-trip.
+        // The configured oracle's sanitizer runtime is unavailable — skip.
+        // The plain leg above still pins the concurrent round-trip.
         assert true;
         return;
     }
@@ -538,7 +545,7 @@ test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-
     let asan_bin = dir + "/server_asan";
     // The serve program depends on the `sfn/http` capsule, whose IR is
     // persisted (per build) at the stable `build/capsules/sfn/http/ir/`.
-    let relinked = _asan_relink(work_dir, "build/capsules/sfn/http/ir/*.ll", asan_bin);
+    let relinked = _asan_relink(work_dir, "build/capsules/sfn/http/ir", asan_bin);
     let mut server_bin = plain_bin;
     let mut server_env = _child_env();
     let mut asan_active = false;

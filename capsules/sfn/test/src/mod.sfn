@@ -449,6 +449,23 @@ export { report_child_failure } from "./child_diag";
 export { first_present_tool, tool_present } from "./tool_probe";
 
 // ---------------------------------------------------------------------------
+// Optional external C test oracle (SFN-1107)
+// ---------------------------------------------------------------------------
+// This boundary is exclusively for C-harness and differential-oracle tests.
+// It resolves an explicit `SAILFIN_TEST_C_COMPILER` first, selects Apple
+// clang through the active Xcode/Command Line Tools contract on Darwin, and
+// preserves the complete host environment (including SDK inputs). Missing or
+// poisoned compilers become voluntary skips through
+// `require_external_c_oracle` / `run_external_c_oracle`; no production build,
+// bootstrap, runtime, package, or link path may import this helper.
+export {
+    ExternalCOracle,
+    external_c_oracle,
+    require_external_c_oracle,
+    run_external_c_oracle
+} from "./external_c_oracle";
+
+// ---------------------------------------------------------------------------
 // The binary under test (SFN-977)
 // ---------------------------------------------------------------------------
 // `sfn_bin_path()` is the `sfn` binary a test should spawn: `SAILFIN_BIN`

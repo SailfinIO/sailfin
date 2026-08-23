@@ -14,7 +14,12 @@ import {
     substring,
     trim_right
 } from "sfn/strings";
-import { clean_runner_env, sfn_bin_path, with_tmp_dir } from "sfn/test";
+import {
+    clean_runner_env,
+    run_external_c_oracle,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 fn _run(path: string) -> string ![io] {
     let mut output: string = "";
@@ -103,7 +108,7 @@ test "hof: direct-only named call emits no function-value adapter or pair" ![io]
 }
 
 test "hof: named function value adapter is frame-free at O2" ![io] {
-    let clang_probe = process.run_capture(["clang", "--version"], process.environ());
+    let clang_probe = run_external_c_oracle(["--version"]);
     let _probe_out = process.capture_take_stdout();
     let _probe_err = process.capture_take_stderr();
     if clang_probe != 0 {
@@ -125,7 +130,7 @@ test "hof: named function value adapter is frame-free at O2" ![io] {
             + _adapter_symbol());
         fs.writeFile(probe_ll, probe_ir);
         let assembly_path = dir + "/adapter-probe.s";
-        let clang_exit = process.run_capture(["clang", "-O2", "-S", "-Wno-override-module", "--target=x86_64-unknown-linux-gnu", probe_ll, "-o", assembly_path], process.environ());
+        let clang_exit = run_external_c_oracle(["-O2", "-S", "-Wno-override-module", "--target=x86_64-unknown-linux-gnu", probe_ll, "-o", assembly_path]);
         let _clang_out = process.capture_take_stdout();
         let _clang_err = process.capture_take_stderr();
         assert clang_exit == 0;

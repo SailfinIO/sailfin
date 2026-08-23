@@ -15,7 +15,7 @@
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
 import { contains, find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -195,7 +195,7 @@ test "linked fan-out/join: all tasks run, results in input order, empty returns 
                 + "}\n");
 
             let bin = dir + "/roundtrip";
-            let clang_exit = process.run_capture(["clang", "-Wno-override-module", harness, pll, fll, sll, nll, "-o", bin, "-lpthread", "-lm"], _env());
+            let clang_exit = run_external_c_oracle(["-Wno-override-module", harness, pll, fll, sll, nll, "-o", bin, "-lpthread", "-lm"]);
             let clang_out = process.capture_take_stdout();
             let clang_err = process.capture_take_stderr();
             if clang_exit != 0 {
