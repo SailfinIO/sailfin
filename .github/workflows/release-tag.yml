@@ -401,9 +401,22 @@ jobs:
         shell: bash
         run: x86_64-w64-mingw32-gcc --version | head -1
 
+      # `SAILFIN_BOOTSTRAP: "off"` is load-bearing here, not hygiene
+      # (SFN-1108). This ref carries the release version bump, so the running
+      # compiler no longer matches `bootstrap.toml [seed].version` and
+      # `bootstrap_gate_or_dispatch` would re-exec the PINNED SEED, replaying
+      # `--target` into a binary whose target conditioning is frozen at its
+      # cut. Seed 0.10.4 omitted `-lbcrypt` for the gnu ABI, which is exactly
+      # how v0.10.5 failed with `undefined reference to BCryptGenRandom`.
+      # Stage0 purity is unaffected: the compiler binary above is still
+      # self-hosted from the pinned seed by `make rebuild`; this step is a
+      # consumer build that needs current-tree target conditioning.
+      # Remove when the pinned seed carries the target-aware gate (SFN-1111).
       - name: Cross-compile for Windows (Linux)
         if: matrix.package_label == 'linux-x86_64'
         shell: bash {0}
+        env:
+          SAILFIN_BOOTSTRAP: "off"
         run: |
           set -euo pipefail
           build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
@@ -557,8 +570,13 @@ jobs:
         shell: bash
         run: x86_64-w64-mingw32-gcc --version | head -1
 
+      # See the identical note on `Cross-compile for Windows (Linux)` in the
+      # `build` matrix above: the version bump on this ref would otherwise
+      # hand this cross build to the pinned seed (SFN-1108).
       - name: Cross-compile the bootstrap seed (Linux)
         shell: bash
+        env:
+          SAILFIN_BOOTSTRAP: "off"
         run: |
           set -euo pipefail
           build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe

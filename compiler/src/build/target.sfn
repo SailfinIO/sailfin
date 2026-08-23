@@ -224,6 +224,31 @@ fn _host_default_triple(os: string) -> string ![io] {
     return "x86_64-unknown-linux-gnu";
 }
 
+// The triple this host builds for absent a `--target` flag. Distinct from
+// `build_target_triple()` below, which additionally honours the flag cell,
+// `SAILFIN_TARGET_TRIPLE`, and `SAILFIN_TARGET_OS`. Callers deciding "is
+// this a cross build?" compare the resolved target against this baseline;
+// comparing `build_target_os()` to `build_host_os()` instead is NOT
+// equivalent, because a Windows host cross-building the mingw ABI resolves
+// the same OS on both sides (SFN-1108).
+//
+// Two limitations inherited from `_host_default_triple` above, both of which
+// move this answer:
+//
+//   - `SAILFIN_TARGET_ARCH` is read here despite being a TARGET override, so
+//     it shifts the host baseline too. That keeps host and target in step for
+//     the aarch64 cross-emit leg (which passes no `--target`), but it means a
+//     genuine `--target` cross on a leg that sets it would read as a host
+//     build.
+//   - Darwin is hardcoded to `x86_64-apple-darwin` (SFN-774, Slice A1), so an
+//     Apple Silicon host misreports itself: `--target=arm64-apple-darwin`
+//     there classifies as cross and `--target=x86_64-apple-darwin` as host —
+//     each the inverse of the truth. No in-tree invocation passes `--target`
+//     on Darwin today.
+fn host_target_triple() -> string ![io] {
+    return _host_default_triple(build_host_os());
+}
+
 // The resolved build target TRIPLE (SFN-774 / SFEP-0068 §3.2). Resolution
 // order: the explicit `--target` process cell (`set_build_target`,
 // `./target_state`) wins first, then the `SAILFIN_TARGET_TRIPLE` override,
@@ -638,6 +663,7 @@ export {
     host_is_windows,
     build_target_os,
     build_target_triple,
+    host_target_triple,
     target_os_is_windows,
     target_exe_name,
     host_exe_name,

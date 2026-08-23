@@ -1,0 +1,72 @@
+// Unit coverage for the cross-build carve-out in
+// `bootstrap_gate_or_dispatch` (`compiler/src/cli/commands/dev.sfn`,
+// SFN-1108).
+//
+// The gate re-execs the pinned seed whenever the running compiler's version
+// differs from `bootstrap.toml [seed].version`, replaying the original argv
+// — `--target` included. That hands a cross build to a binary whose target
+// conditioning is frozen at its cut: seed 0.10.4 omitted `-lbcrypt` for the
+// gnu ABI and could not read `[targets.*]` from the runtime manifest at all,
+// so both v0.10.5 mingw legs failed with `undefined reference to
+// BCryptGenRandom` while the identical command on `main` — where the
+// versions match and the gate short-circuits — was green.
+//
+// The predicate is asserted here rather than the gate itself because the
+// gate ends in `process.exec`; a test that reached the dispatch would
+// replace the test process. Its inputs are supplied as parameters for the
+// same reason — `active_build_target()` is a process-global cell owned by
+// `cli/commands/build.sfn:run`, and a unit test must not write it.
+import { expect_eq_bool } from "sfn/test";
+
+import { build_target_triple, host_target_triple, triple_is_supported } from "../../src/build/target";
+import { _bootstrap_target_is_cross } from "../../src/cli/commands/dev";
+
+// The regression. A non-host `--target` must NOT reach the seed.
+test "bootstrap gate: a non-host target is a cross build" {
+    assert expect_eq_bool(_bootstrap_target_is_cross("x86_64-w64-mingw32", "x86_64-unknown-linux-gnu"), true).ok;
+    assert expect_eq_bool(_bootstrap_target_is_cross("x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"), true).ok;
+    assert expect_eq_bool(_bootstrap_target_is_cross("aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"), true).ok;
+}
+
+// The carve-out must stay narrow: a bare `-p compiler` build is the stage0
+// self-host the gate exists for, and an empty cell is exactly how
+// `target_state.sfn` spells "no explicit --target".
+test "bootstrap gate: no explicit target still dispatches" {
+    assert expect_eq_bool(_bootstrap_target_is_cross("", "x86_64-unknown-linux-gnu"), false).ok;
+    assert expect_eq_bool(_bootstrap_target_is_cross("", "x86_64-pc-windows-msvc"), false).ok;
+}
+
+// `--target=<host triple>` is a host build spelled explicitly, not a cross
+// build — it must keep dispatching, or `sfn dev bootstrap build --target`
+// on the host would quietly stop self-hosting from the pinned seed.
+test "bootstrap gate: an explicit host target still dispatches" {
+    assert expect_eq_bool(_bootstrap_target_is_cross("x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"), false).ok;
+    assert expect_eq_bool(_bootstrap_target_is_cross("x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc"), false).ok;
+}
+
+// A Windows host cross-building the mingw ABI resolves Windows on BOTH
+// sides of an OS comparison, so `build_target_os() != build_host_os()` would
+// classify it as a host build and dispatch it to the seed. The triple is the
+// only axis that separates the two Windows ABIs.
+test "bootstrap gate: the two Windows ABIs are distinguished by triple" {
+    assert expect_eq_bool(_bootstrap_target_is_cross("x86_64-w64-mingw32", "x86_64-pc-windows-msvc"), true).ok;
+    assert expect_eq_bool(_bootstrap_target_is_cross("x86_64-pc-windows-msvc", "x86_64-w64-mingw32"), true).ok;
+}
+
+// The baseline the gate compares against must be a real member of the closed
+// triple set. `_host_default_triple` ends in a bare `return`, so a host it
+// does not recognise would yield a triple no ABI branch matches — and the
+// predicate would then read every build on that host as cross, silently
+// disabling stage0 dispatch there.
+test "target: the host baseline triple is in the supported set" ![io] {
+    assert expect_eq_bool(triple_is_supported(host_target_triple()), true).ok;
+}
+
+// With no `--target` flag and no `SAILFIN_TARGET_*` override in the test
+// environment, the two resolvers must agree — this is the property that makes
+// the gate's ordinary host path provably unchanged by the carve-out. A pooled
+// runner sets neither override (`sfn/test` scrubs the child environment), so
+// this holds under `--jobs N` as well as serially.
+test "target: with no override the resolved target equals the host baseline" ![io] {
+    assert expect_eq_bool(_bootstrap_target_is_cross(build_target_triple(), host_target_triple()), false).ok;
+}
