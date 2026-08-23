@@ -29,39 +29,16 @@
 //      volatile qualifier (not some other property of the loop) is what
 //      defeats the optimizer.
 //
-// `clang` is probed first and the test skips (does not fail) when it is
-// absent, per `docs/conventions/sanitizer-tests.md` /
-// `docs/conventions/e2e-tests.md` ("External tools ... skip when
-// absent"). Drives the compiler-under-test and `clang` as subprocesses
-// per `.claude/rules/no-bash-e2e.md`.
+// The compiler oracle resolves through `sfn/test` and records a real skip
+// when absent. It remains separate from Sailfin's production providers.
 import { contains, replace } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
+    run_external_c_oracle,
     sfn_bin_path,
     with_tmp_dir
 } from "sfn/test";
-
-// Minimal env for a direct `clang` invocation (not a nested Sailfin
-// runner, so `clean_runner_env` does not apply — see its doc comment:
-// that helper is for nested `sfn test`/`build`/`run` only).
-fn _clang_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    return e;
-}
-
-fn _find_clang() -> boolean ![io] {
-    let exit = process.run_capture(["clang", "--version"], _clang_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    return exit == 0;
-}
 
 // SFN-782 review: the lowering terminates its incoming block and opens
 // `secure_zero_pre_`/`_body_`/`_done_` blocks of its own, so the risky part
@@ -130,24 +107,14 @@ fn _wipe_source() -> string {
 // `target triple`/`datalayout`, and clang warns on the mismatch with
 // `-target` otherwise.
 fn _optimize_for_triple(ll_path: string, out_path: string, triple: string) -> int ![io] {
-    let exit = process.run_capture(["clang", "-O2", "-S", "-emit-llvm", "-Wno-override-module", "--target="
-        + triple, ll_path, "-o", out_path], _clang_env());
+    let exit = run_external_c_oracle(["-O2", "-S", "-emit-llvm", "-Wno-override-module", "--target="
+        + triple, ll_path, "-o", out_path]);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return exit;
 }
 
 test "secure zero optimized ir: volatile store survives -O2 on linux, darwin, and windows targets" ![io] {
-    if !_find_clang() {
-        // clang unavailable on this host — skip rather than fail, matching
-        // the established external-tool-probe convention. Announce the
-        // skip: a silent one is indistinguishable from a passing run, and
-        // this test is the only gate on the SFN-782 non-elision claim, so
-        // a host that quietly never runs it must be visible in the log.
-        print.warn("secure zero optimized ir: clang not found — skipping the -O2 retention gate");
-        return;
-    }
-
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/wipe.sfn";
         let raw_ll = dir + "/raw.ll";
@@ -156,8 +123,8 @@ test "secure zero optimized ir: volatile store survives -O2 on linux, darwin, an
         // `sfn emit` writes a per-module build-cache artifact under
         // `SAILFIN_TEST_SCRATCH` internally (mirrors `coff_comdat_link_test.sfn`),
         // so route it through a nested-runner-clean environment: unlike the
-        // minimal `_clang_env()` above (a bare external tool, not a nested
-        // Sailfin runner), this spawns the compiler-under-test itself and
+        // external-C oracle helper (a bare external tool, not a nested Sailfin
+        // runner), this spawns the compiler-under-test itself and
         // must not leak the parent pool's orchestration keys.
         let emit_env = clean_runner_env(nested_runner_scratch("secure-zero-emit"));
         let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", raw_ll, "llvm", src], emit_env);
@@ -195,7 +162,7 @@ test "secure zero optimized ir: volatile store survives -O2 on linux, darwin, an
         let non_volatile_ir = replace(raw_ir, "store volatile i8 0", "store i8 0");
         fs.writeFile(control_ll, non_volatile_ir);
         let control_opt_ll = dir + "/control-opt.ll";
-        let control_exit = process.run_capture(["clang", "-O2", "-S", "-emit-llvm", "-Wno-override-module", control_ll, "-o", control_opt_ll], _clang_env());
+        let control_exit = run_external_c_oracle(["-O2", "-S", "-emit-llvm", "-Wno-override-module", control_ll, "-o", control_opt_ll]);
         let _co = process.capture_take_stdout();
         let _ce = process.capture_take_stderr();
         assert control_exit == 0;

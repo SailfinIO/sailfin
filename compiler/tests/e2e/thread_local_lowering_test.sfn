@@ -26,7 +26,7 @@
 // The pthread roundtrips skip (not fail) when clang/pthread is
 // unavailable; the IR-shape pins still carry the contract.
 import { contains, find, starts_with } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -51,12 +51,6 @@ fn _scratch_dir() -> string ![io] {
 
 fn _fixture() -> string {
     return "compiler/tests/e2e/fixtures/thread_local_basic.sfn";
-}
-
-fn _which_clang() -> string ![io] {
-    let configured = env.get("CLANG");
-    if configured.length > 0 { return configured; }
-    return "clang";
 }
 
 // The whole line of `ir` that starts (at a line boundary) with `prefix`,
@@ -208,12 +202,11 @@ test "two pthreads bumping a thread_local i64 head do not interfere" ![io] {
     assert bump_sym.length > 0;
     assert read_sym.length > 0;
 
-    let clang = _which_clang();
     let harness = dir + "/pthread_harness.c";
     fs.writeFile(harness, _pthread_harness_c(bump_sym, read_sym));
     let bin = dir + "/pthread_roundtrip";
     if fs.exists(bin) { fs.deleteFile(bin); }
-    let link = process.run_capture([clang, "-Wno-override-module", harness, ll, "-o", bin, "-lm", "-lpthread"], _child_env());
+    let link = run_external_c_oracle(["-Wno-override-module", harness, ll, "-o", bin, "-lm", "-lpthread"]);
     let _l1 = process.capture_take_stdout();
     let _l2 = process.capture_take_stderr();
     // clang / pthread linkage unavailable → skip (IR pins still hold).
@@ -277,8 +270,6 @@ test "two pthreads pushing exception.sfn frames see isolated chain heads" ![io] 
     assert ir.length > 0;
     assert fs.exists(ll);
 
-    let clang = _which_clang();
-
     // exception.sfn defines a struct → M2.10 emits a type-init constructor
     // calling @sfn_type_register; stage a type_meta object. Skip if it
     // can't be built (IR pins still hold).
@@ -290,7 +281,7 @@ test "two pthreads pushing exception.sfn frames see isolated chain heads" ![io] 
     if tm_emit != 0 { return; }
     let tm_o = dir + "/type_meta.o";
     if fs.exists(tm_o) { fs.deleteFile(tm_o); }
-    let tm_cc = process.run_capture([clang, "-Wno-override-module", "-c", tm_ll, "-o", tm_o], _child_env());
+    let tm_cc = run_external_c_oracle(["-Wno-override-module", "-c", tm_ll, "-o", tm_o]);
     let _c1 = process.capture_take_stdout();
     let _c2 = process.capture_take_stderr();
     if tm_cc != 0 { return; }
@@ -299,7 +290,7 @@ test "two pthreads pushing exception.sfn frames see isolated chain heads" ![io] 
     fs.writeFile(harness, _exception_tls_harness_c());
     let bin = dir + "/exception_tls_roundtrip";
     if fs.exists(bin) { fs.deleteFile(bin); }
-    let link = process.run_capture([clang, "-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm", "-lpthread"], _child_env());
+    let link = run_external_c_oracle(["-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm", "-lpthread"]);
     let _l1 = process.capture_take_stdout();
     let _l2 = process.capture_take_stderr();
     if link != 0 { return; }

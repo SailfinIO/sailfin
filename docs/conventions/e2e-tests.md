@@ -234,7 +234,9 @@ pushes it onto the returned array after the call.
 This is orthogonal to the hand-built minimal envs above (`PATH`/`HOME`/
 `TMPDIR` + a few explicit keys) — those never call raw `process.environ()`
 in the first place, so they carry no pool-key leak and don't need
-`clean_runner_env`.
+`clean_runner_env`. Do not use such a minimal env for an external C compiler:
+it silently drops Darwin SDK/toolchain inputs. The optional C-oracle contract
+below owns that distinct case.
 
 ## Driving shells and external tools from a `*_test.sfn`
 
@@ -243,7 +245,7 @@ everything the old hold-out scripts did by spawning the tool via
 `process.run_capture`. Established patterns (all in-tree as of the #840
 migration):
 
-- **External tools** (`tar`, `jq`, `sha256sum`, `readlink`, `ln`, `clang`):
+- **External tools** (`tar`, `jq`, `sha256sum`, `readlink`, `ln`):
   call them as the subprocess argv and parse the captured stdout with
   `sfn/strings` — e.g. `sfn_package_test.sfn` shells `tar -tzf` / `jq -r`,
   `llms_txt_sync_test.sfn` shells `readlink -f`. Guard with the shared
@@ -269,9 +271,23 @@ migration):
   `fs.writeFile`, `chmod +x` it via `run_capture(["chmod","+x",path], env)`,
   then prepend its dir to the child's `PATH` entry — see `publish_test.sfn`
   (curl shim) and `clock_monotonic_id_sentinel_test.sfn` (uname shim).
-- **C harnesses** (link against emitted `.ll`, fork/pthread, ASAN):
-  `fs.writeFile` the `.c`, `run_capture(["clang", ...])`, run the binary —
-  see `runtime_memory_arena_test.sfn` and `escape_promotion_channel_send_test.sfn`.
+- **Optional external C test oracles** (C harnesses, differential LLVM
+  comparisons, ASAN relinks): import `run_external_c_oracle` from `sfn/test`,
+  write the `.c`, call the helper with compiler arguments only, then consume
+  `process.capture_take_*` and run the binary. The helper resolves
+  `SAILFIN_TEST_C_COMPILER` when explicitly configured; otherwise it selects
+  Apple clang through `/usr/bin/xcrun` on Darwin and `clang` on other hosts.
+  It passes the complete parent environment and materializes `SDKROOT` from
+  the active Apple toolchain when needed, so Homebrew LLVM earlier on `PATH`
+  cannot hide the macOS SDK. An absent or deterministically poisoned compiler
+  is an explicit `skip`. A compile/link failure after successful resolution is
+  returned to the caller: required harness legs fail it, while explicitly
+  best-effort capability legs such as sanitizer and cross-target probes may
+  skip it. This boundary is a test oracle only: it does not own or participate
+  in Sailfin's production Assemble or Link roles, foreign `c-sources`,
+  bootstrap, packaging, or released-asset paths. The source ratchet in
+  `no_shell_tool_probe_test.sfn` rejects new direct `clang`, `gcc`, or `cc`
+  subprocesses in E2E tests.
 - **`cwd` control**: use the native cwd argument — `process.run_capture_cwd(argv,
   env, cwd)` (or `os::run_capture(args, env, cwd)` / the `sfn/test` fixture
   `with_cwd(args, env, cwd, body)` that wraps it), not a spawned shell.

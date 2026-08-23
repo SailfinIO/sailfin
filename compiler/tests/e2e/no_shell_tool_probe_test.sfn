@@ -170,3 +170,51 @@ test "no-bash rule: no shell-spawned tool-presence probes in the test tree" ![io
     }
     assert offenders.length == 0;
 }
+
+// C-harness and differential-oracle compiler invocations must cross the
+// optional `sfn/test::run_external_c_oracle` boundary. Build the needles at
+// runtime so this ratchet can scan itself without an allowlist.
+fn _has_direct_compiler_invocation(body: string, compiler: string) -> boolean {
+    let capture = "process.run_capture([\"" + compiler + "\"";
+    let run = "process.run([\"" + compiler + "\"";
+    let returned = "return \"" + compiler + "\";";
+    let shell_loop = "do " + compiler + " -c";
+    let shell_link = "= \"" + compiler + " -fsanitize";
+    return contains(body, capture) || contains(body, run) || contains(body, returned)
+        || contains(body, shell_loop)
+        || contains(body, shell_link);
+}
+
+fn _has_direct_c_oracle_invocation(body: string) -> boolean {
+    let clang = "cl" + "ang";
+    let gcc = "g" + "cc";
+    let cc = "c" + "c";
+    return _has_direct_compiler_invocation(body, clang)
+        || _has_direct_compiler_invocation(body, gcc)
+        || _has_direct_compiler_invocation(body, cc);
+}
+
+test "external C oracle: no ad hoc required compiler subprocesses in e2e tests" ![io] {
+    let files = _collect_test_files("compiler/tests/e2e", []);
+    assert files.length > 0;
+    let mut offenders: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= files.length { break; }
+        let path = files[i];
+        if _has_direct_c_oracle_invocation(fs.readFile(path)) {
+            offenders.push(path);
+        }
+        i += 1;
+    }
+    if offenders.length > 0 {
+        let mut j: int = 0;
+        loop {
+            if j >= offenders.length { break; }
+            print.err(offenders[j]);
+            j += 1;
+        }
+        print.err("fix: route optional C-harness/differential work through run_external_c_oracle from sfn/test");
+    }
+    assert offenders.length == 0;
+}

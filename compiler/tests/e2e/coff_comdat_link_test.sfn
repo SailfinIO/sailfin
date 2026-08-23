@@ -26,6 +26,7 @@ import {
     clean_runner_env,
     default_scratch_dir,
     nested_runner_scratch,
+    run_external_c_oracle,
     sfn_bin_path
 } from "sfn/test";
 
@@ -148,7 +149,7 @@ test "coff comdat link: two modules sharing a type link cleanly with lld-link" !
     let entry_c = dir + "/coff_entry.c";
     let entry_obj = dir + "/coff_entry.obj";
     fs.writeFile(entry_c, _entry_c_source());
-    let entry_exit = process.run_capture(["clang", "-target", "x86_64-pc-windows-msvc", "-c", entry_c, "-o", entry_obj], _base_env());
+    let entry_exit = run_external_c_oracle(["-target", "x86_64-pc-windows-msvc", "-c", entry_c, "-o", entry_obj]);
     let _eo = process.capture_take_stdout();
     let _ee = process.capture_take_stderr();
     if entry_exit != 0 {

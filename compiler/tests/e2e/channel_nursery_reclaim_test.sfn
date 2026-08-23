@@ -24,6 +24,7 @@
 //      teardown would move.
 import {
     contains,
+    ends_with,
     find,
     parse_int,
     trim
@@ -32,15 +33,14 @@ import {
     clean_runner_env,
     default_scratch_dir,
     nested_runner_scratch,
+    run_external_c_oracle,
     sfn_bin_path
 } from "sfn/test";
 
-// Full ambient environment — used ONLY for the clang/bash relink steps and
-// for running the produced native binaries below. Neither is a nested `sfn`
-// invocation, so the SFN-401 pool-key leak `sfn/test`'s `clean_runner_env`
-// guards against does not apply here; this mirrors
-// `concurrency_ownedbuf_asan_interleave_test.sfn`'s `_child_env`, which the
-// toolchain link needs in full (PATH for clang/ld, HOME/TMPDIR, etc).
+// Full ambient environment for running produced native binaries below. This
+// is not a nested `sfn` invocation, so the SFN-401 pool-key leak guarded by
+// `sfn/test`'s `clean_runner_env` does not apply. The optional compiler oracle
+// separately owns the complete environment used for relinking.
 fn _relink_env() -> string[] ![io] { return process.environ(); }
 
 // ASAN + LeakSanitizer child env: `SAILFIN_MEM_LIMIT=unlimited` so the
@@ -123,37 +123,35 @@ fn _asan_relink(work_dir: string, extra_ll_glob: string, bin: string) -> string 
     if !fs.exists(prog_ll) { return ""; }
 
     let prog_o = saildir + "/program.o";
-    let cexit = process.run_capture(["clang", "-c", "-Wno-override-module", prog_ll, "-o", prog_o], _relink_env());
+    let cexit = run_external_c_oracle(["-c", "-Wno-override-module", prog_ll, "-o", prog_o]);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if cexit != 0 { return ""; }
 
     if extra_ll_glob.length > 0 {
-        let compile_extras = "n=0; for f in " + extra_ll_glob
-            + "; do clang -c -Wno-override-module \"$f\" -o \""
-            + saildir
-            + "/xcap_$n.o\" || exit 1; n=$((n+1)); done";
-        let xexit = process.run_capture(["bash", "-c", compile_extras], _relink_env());
-        let _xo = process.capture_take_stdout();
-        let _xe = process.capture_take_stderr();
-        if xexit != 0 { return ""; }
+        // No current caller supplies extra capsule IR. Keep the parameter as
+        // a guard against silently reviving the former shell-glob path.
+        return "";
     }
 
-    let link_clang = "clang -fsanitize=address -Wno-override-module " + saildir
-        + "/*.o -lpthread -lm -o "
-        + bin;
-    let lexit = process.run_capture(["bash", "-c", link_clang], _relink_env());
+    let mut link_args: string[] = ["-fsanitize=address", "-Wno-override-module"];
+    let objects = fs.listDirectory(saildir);
+    let mut i: int = 0;
+    loop {
+        if i >= objects.length { break; }
+        if ends_with(objects[i], ".o") {
+            link_args.push(saildir + "/" + objects[i]);
+        }
+        i += 1;
+    }
+    link_args.push("-lpthread");
+    link_args.push("-lm");
+    link_args.push("-o");
+    link_args.push(bin);
+    let lexit = run_external_c_oracle(link_args);
     let _lo = process.capture_take_stdout();
     let _le = process.capture_take_stderr();
     if lexit == 0 { return bin; }
-
-    let link_gcc = "gcc -fsanitize=address " + saildir
-        + "/*.o -lpthread -lm -o "
-        + bin;
-    let gexit = process.run_capture(["bash", "-c", link_gcc], _relink_env());
-    let _go = process.capture_take_stdout();
-    let _ge = process.capture_take_stderr();
-    if gexit == 0 { return bin; }
     return "";
 }
 
@@ -258,7 +256,7 @@ test "channel nursery reclaim: ASAN leak growth stays bounded across churn scale
     let high_asan = dir + "/high_asan";
     let high_relinked = _asan_relink(high_wd, "", high_asan);
     if low_relinked.length == 0 || high_relinked.length == 0 {
-        // Neither clang compiler-rt nor gcc libasan available — skip.
+        // The configured oracle's sanitizer runtime is unavailable — skip.
         assert true;
         return;
     }

@@ -66,7 +66,7 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. The roundtrip legs spawn `clang` (and a
@@ -411,7 +411,7 @@ test "create → alloc → realloc → reset → destroy exercises every entry p
     fs.writeFile(harness, _lifecycle_harness_c());
 
     let bin = dir + "/lifecycle_roundtrip";
-    let clang_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let clang_exit = run_external_c_oracle(["-Wno-override-module", harness, ll, "-o", bin, "-lm"]);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if clang_exit != 0 {
@@ -459,7 +459,7 @@ test "arena ASAN: driver-instrumented lifecycle is corruption-clean (best-effort
     // the bump allocator's intra-page sub-allocation must not be
     // ASAN-instrumented — only the C driver is.
     let arena_o = dir + "/arena_plain.o";
-    let obj_exit = process.run_capture(["clang", "-c", "-Wno-override-module", ll, "-o", arena_o], _child_env());
+    let obj_exit = run_external_c_oracle(["-c", "-Wno-override-module", ll, "-o", arena_o]);
     let _oo = process.capture_take_stdout();
     let _oe = process.capture_take_stderr();
     if obj_exit != 0 {
@@ -469,23 +469,17 @@ test "arena ASAN: driver-instrumented lifecycle is corruption-clean (best-effort
         return;
     }
 
-    // Link the ASAN-instrumented driver against the plain arena object. Try
-    // clang's compiler-rt first (the CI norm), fall back to gcc's libasan so
-    // the leg runs wherever EITHER sanitizer runtime is present.
+    // Link the ASAN-instrumented driver against the plain arena object through
+    // the configured optional compiler oracle. A failed link means that
+    // oracle's sanitizer runtime is unavailable, so this best-effort leg skips.
     let bin = dir + "/lifecycle_asan";
-    let clang_link = process.run_capture(["clang", "-fsanitize=address", "-Wno-override-module", harness, arena_o, "-o", bin, "-lm"], _child_env());
-    let _clo = process.capture_take_stdout();
-    let _cle = process.capture_take_stderr();
-    let mut linked = clang_link == 0;
+    let link_exit = run_external_c_oracle(["-fsanitize=address", "-Wno-override-module", harness, arena_o, "-o", bin, "-lm"]);
+    let _link_out = process.capture_take_stdout();
+    let _link_err = process.capture_take_stderr();
+    let linked = link_exit == 0;
     if !linked {
-        let gcc_link = process.run_capture(["gcc", "-fsanitize=address", harness, arena_o, "-o", bin, "-lm"], _child_env());
-        let _glo = process.capture_take_stdout();
-        let _gle = process.capture_take_stderr();
-        linked = gcc_link == 0;
-    }
-    if !linked {
-        // No sanitizer runtime on this host (clang without compiler-rt AND no
-        // gcc libasan) — skip. Phase 8 already ran the plain lifecycle.
+        // No sanitizer runtime for the configured oracle — skip. Phase 8
+        // already ran the plain lifecycle.
         assert true;
         return;
     }
@@ -559,7 +553,7 @@ test "SAILFIN_USE_ARENA env semantics + probe recursion guard (C harness via cla
     fs.writeFile(harness, _env_harness_c());
 
     let bin = dir + "/env_probe";
-    let clang_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let clang_exit = run_external_c_oracle(["-Wno-override-module", harness, ll, "-o", bin, "-lm"]);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if clang_exit != 0 {
