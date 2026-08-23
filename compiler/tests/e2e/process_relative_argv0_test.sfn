@@ -1,0 +1,81 @@
+// compiler/tests/e2e/process_relative_argv0_test.sfn
+//
+// SFN-1104: `process.run` and `process.run_capture` could not spawn a
+// working-directory-relative `argv[0]` on a native Windows host.
+//
+// The Windows bodies called `CreateProcessA` with a NULL `lpApplicationName`
+// (`runtime/sfn/platform/process_windows.sfn`), which makes it parse the
+// module out of `lpCommandLine` and resolve it through a search that does NOT
+// include the process working directory. Measured on a native Windows host
+// before the fix, spawning one binary four ways: `build/bin/sfn.exe` and
+// `build\bin\sfn.exe` both failed with `ERROR_FILE_NOT_FOUND` (2), while
+// `./build/bin/sfn.exe` and the absolute path both succeeded — the leading
+// `./` anchored it, not the slash direction.
+//
+// That is not a corner case here. `sfn_bin_path()`'s own unoverridden default
+// IS this relative path, and `built_program_path()`
+// (`compiler/src/build/source_fingerprint.sfn`) returns one too, so the
+// post-build smoke check discarded a perfectly good compiler with exit 127
+// and the rung-2 self-host gate could not be run on Windows at all.
+//
+// POSIX has always resolved this: `posix_spawnp` searches `PATH` only for a
+// name with no separator and resolves anything else against the working
+// directory. So this test passes on POSIX before and after, and is a Windows
+// regression catcher — which is exactly the shape that would have caught it,
+// since no test spawned a relative path on a Windows host.
+//
+// The other half of the fix — a BARE name still searching `PATH` — is not
+// asserted here because no single bare executable name is guaranteed on all
+// three CI hosts. It is covered continuously instead: every build in the
+// repo spawns `clang` and `llvm-link` by bare name, so a regression there
+// fails the build before it could reach a test.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives the compiler binary as
+// a subprocess through the os capsule, with no shell.
+import {
+    clean_runner_env,
+    expect_eq_bool,
+    expect_eq_int,
+    nested_runner_scratch
+} from "sfn/test";
+
+// The compiler binary named RELATIVE to the working directory.
+//
+// Deliberately not `sfn_bin_path()`: that honours `SAILFIN_BIN`, which the
+// pooled runner and every CI leg set to an absolute path, so reusing it would
+// make this test silently vacuous in exactly the environments that gate
+// merges. Probing for the suffix keeps it host-conditioned without importing
+// the driver's `host_exe_name` across the capsule boundary that
+// `compiler/tests/unit/compiler_capsule_boundary_test.sfn` ratchets.
+fn _rel_sfn() -> string ![io] {
+    if fs.exists("build/bin/sfn.exe") { return "build/bin/sfn.exe"; }
+    return "build/bin/sfn";
+}
+
+// Not a skip-guard. Every `sfn/test` consumer already depends on a repo-root
+// working directory, because `sfn_bin_path()`'s unoverridden default is this
+// same relative path — so if this assertion ever fails, the cwd contract has
+// moved under the whole e2e tier, not just under this file, and a silent skip
+// here would hide that.
+test "process: the relative compiler path this test spawns exists" ![io] {
+    assert expect_eq_bool(fs.exists(_rel_sfn()), true).ok;
+}
+
+// The passthrough spawn — the path `built_program_path()`'s smoke check and
+// `sfn run` both take.
+test "process: run spawns a working-directory-relative argv[0]" ![io] {
+    let rc = process.run([_rel_sfn(), "--version"]);
+    assert expect_eq_int(rc as i64, 0).ok;
+}
+
+// The captured spawn takes an independent `CreateProcessA` call site, and
+// failed the same way before the fix (it returns its own `-1` sentinel rather
+// than 127), so it needs its own assertion rather than riding on the above.
+test "process: run_capture spawns a working-directory-relative argv[0]" ![io] {
+    let scratch = nested_runner_scratch("sfn1104-capture");
+    fs.createDirectory(scratch, true);
+    let rc = process.run_capture([_rel_sfn(), "--version"], clean_runner_env(scratch));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert expect_eq_int(rc, 0).ok;
+}
