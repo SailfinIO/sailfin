@@ -470,18 +470,54 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         }
 
         // ── Emit trailing comments ──
+        //
+        // Every comment ends its own line. A `//` comment runs to end of line
+        // and Sailfin has no block-comment form, so ANY text emitted after one
+        // on the same line is swallowed into it — which makes the newline a
+        // correctness requirement, not layout.
+        //
+        // It used to be absent, and the only line-enders below are a
+        // `semicolon` or a `separator` at `paren_depth == 0`. A trailing
+        // comment inside a call, an array literal, or a wrapped operator chain
+        // was therefore followed by the rest of the construct on the same
+        // line, collapsing `_sum(<nl> 1, // one<nl> 2,<nl>)` into
+        // `_sum(1,  // one 2,);` — which no longer parses, so
+        // `sfn fmt --write` silently destroyed source (SFN-1105).
+        //
+        // The loop rather than one newline afterwards matters for the second
+        // and later entries. A token collects more than one trailing comment
+        // only at EOF, where `strip_and_classify` folds leftover
+        // `pending_comments` onto the last token (`tokens.sfn`); concatenating
+        // those would fuse a run of trailing comment LINES into one, so every
+        // comment but the first would end up inside the first. No source
+        // destroyed, but a one-way collapse of the file's comments, and `fmt`
+        // is a fixed point so it would never come back.
+        //
+        // Deliberately NOT gated on `!in_inline`. The block inliner already
+        // refuses any construct carrying comments (`_measure_inline_block`
+        // above returns -1 on a non-empty `trailing_comment`), so inline mode
+        // cannot reach this; and were that guard ever relaxed, breaking the
+        // line is still right, because losing the inline layout beats losing
+        // the code.
         let mut tci = 0;
         loop {
             if tci >= ft.trailing_comment.length { break; }
             let tc = ft.trailing_comment[tci];
-            out = out + "  " + tc.lexeme;
+            // The first comment trails the token it is attached to; any
+            // further ones start their own line and need the block's indent,
+            // matching how leading comments are emitted above.
+            if at_line_start { out = out + _emit_indent(indent); } else {
+                out = out + "  ";
+            }
+            out = out + tc.lexeme + "\n";
+            at_line_start = true;
             tci += 1;
         }
 
         // ── Emit newline after statement-ending tokens (not in inline mode) ──
         if !in_inline {
             if strings_equal(role, "semicolon") {
-                out = out + "\n";
+                if !at_line_start { out = out + "\n"; }
                 at_line_start = true;
                 wrap_operators = false;
             }
@@ -489,7 +525,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             // ── Newline after comma at statement level ──
             if strings_equal(role, "separator") {
                 if paren_depth == 0 {
-                    out = out + "\n";
+                    if !at_line_start { out = out + "\n"; }
                     at_line_start = true;
                 }
             }

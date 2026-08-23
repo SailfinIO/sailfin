@@ -293,6 +293,45 @@ fn _pw_close_dup(h: i64) -> void ![io] {
     let _c: i32 = CloseHandle(h);
 }
 
+// `_pw_app_name(argv0)` — the `lpApplicationName` `CreateProcessA` needs for
+// `argv0`, or `null` to leave that parameter NULL and let it parse the module
+// out of `lpCommandLine` itself.
+//
+// With a NULL `lpApplicationName`, `CreateProcessA` resolves the module
+// through a search that does NOT include the process working directory, so a
+// working-directory-relative path fails with `ERROR_FILE_NOT_FOUND` (2) even
+// though the file is there. Measured on a native Windows host, spawning the
+// same binary four ways: `build/bin/sfn.exe` and `build\bin\sfn.exe` both
+// fail, while `./build/bin/sfn.exe` and the absolute path both succeed. The
+// leading `./` is what anchors it, not the slash direction (SFN-1104).
+//
+// The os-capsule contract is the POSIX one: `posix_spawnp` searches `PATH`
+// only for a name with no separator, and resolves anything else against the
+// working directory. So a name carrying a separator is handed over as
+// `lpApplicationName`, which `CreateProcessA` uses verbatim relative to the
+// working directory, and a bare name keeps the NULL so the `PATH` search
+// still runs. The split is load-bearing in both directions: `clang`, `cmp`,
+// and `cp` are bare names that must keep searching, and naming one in
+// `lpApplicationName` would break them twice over, since it also suppresses
+// the implicit `.exe` suffix a bare name would otherwise receive.
+//
+// Arena-backed via `sfn_str_to_cstr`, so the caller must NOT free it — the
+// same discipline every other `sfn_str_to_cstr` result in this file follows,
+// as against the `malloc`'d `cmdline` beside it, which is freed.
+fn _pw_app_name(argv0: string) -> *u8 {
+    let a: *u8 = sfn_str_to_cstr(argv0 as *u8, argv0.length, null);
+    let n: i64 = strlen(a) as i64;
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        // 47 = '/', 92 = '\'. Both are Win32 path separators.
+        let b: i64 = load_byte((a as i64) + i);
+        if b == 47 || b == 92 { return a; }
+        i = i + 1;
+    }
+    return 0 as *u8;
+}
+
 // `sfn_process_run(argv)` — real Windows spawn. Mirrors the retired
 // `sailfin_runtime.c:5564` `CreateProcessA` body: build a single quoted
 // command line (`"arg0" "arg1" ...`), spawn, block until exit, return
@@ -417,7 +456,8 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
         inherit = 1;
     }
 
-    let ok: i32 = CreateProcessA(null, cmdline, null, null, inherit, 0, null, null, si, pi);
+    let app: *u8 = _pw_app_name(argv[0]);
+    let ok: i32 = CreateProcessA(app, cmdline, null, null, inherit, 0, null, null, si, pi);
     free(cmdline);
     _pw_close_dup(h_in);
     _pw_close_dup(h_out);
@@ -812,7 +852,8 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
 
     // bInheritHandles=TRUE(1) so the child inherits the redirected write
     // ends; flags=0 (ANSI environment block).
-    let ok: i32 = CreateProcessA(null, cmdline, null, null, 1, 0, env_block, null, si, pi);
+    let app: *u8 = _pw_app_name(argv[0]);
+    let ok: i32 = CreateProcessA(app, cmdline, null, null, 1, 0, env_block, null, si, pi);
     free(cmdline);
     free(env_block);
     free(sa);
@@ -1401,7 +1442,8 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
     // bInheritHandles=TRUE(1) so the child inherits the three redirected
     // ends; flags=0 (ANSI environment block). The file-level inheritance
     // lock is held until the parent closes its child-side pipe ends below.
-    let ok: i32 = CreateProcessA(null, cmdline, null, null, 1, 0, env_block, null, si, pi);
+    let app: *u8 = _pw_app_name(argv[0]);
+    let ok: i32 = CreateProcessA(app, cmdline, null, null, 1, 0, env_block, null, si, pi);
     free(cmdline);
     free(env_block);
     free(sa);
