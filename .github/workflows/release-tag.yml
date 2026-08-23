@@ -18,6 +18,9 @@ env:
   # verified before `main` is bumped and before the tag exists at all
   # (SFN-829; docs/runbooks/release-ordering.md).
   BUILD_REF: ${{ inputs.ref || inputs.tag }}
+  # Stable discovery path under the same release base used for per-version
+  # assets: <base>/toolchain-index-v1/toolchain-index.json{,.sig}.
+  TOOLCHAIN_INDEX_TAG: toolchain-index-v1
 
 on:
   workflow_call:
@@ -36,6 +39,11 @@ on:
         required: false
         type: string
         default: ""
+      channel:
+        description: "Release channel (stable, rc, beta, or alpha). Blank infers it from the exact tag."
+        required: false
+        type: string
+        default: ""
       ref:
         description: "Ref to check out and build (blank → the tag itself). release.yml passes the pre-tag staging branch."
         required: false
@@ -48,6 +56,11 @@ on:
         default: ""
       promote:
         description: "Fast-forward main onto the built commit and push the tag, after every payload gate passes and before publishing."
+        required: false
+        type: boolean
+        default: false
+      bootstrap_index:
+        description: "Explicitly authorize the first toolchain-index publication. Refused if any versioned release already carries an index."
         required: false
         type: boolean
         default: false
@@ -64,6 +77,10 @@ on:
         description: "Optional previous release tag used as the generated-notes start point."
         required: false
         default: ""
+      channel:
+        description: "Optional release channel override; blank infers it from the exact tag."
+        required: false
+        default: ""
       ref:
         description: "Ref to check out and build (blank → the tag itself)."
         required: false
@@ -72,12 +89,20 @@ on:
         description: "Commit the checkout must resolve to (blank → unchecked)."
         required: false
         default: ""
+      bootstrap_index:
+        description: "Authorize only the first toolchain-index publication; leave false for ordinary releases and repairs."
+        required: false
+        type: boolean
+        default: false
 
 # `promote` is deliberately absent from workflow_dispatch: a manual rebuild
 # must never be able to mutate `main` or move a tag. `inputs.promote` is empty
 # on this path, so the promotion step is skipped (SFN-829).
 concurrency:
-  group: "release-tag-${{ inputs.tag }}"
+  # The canonical index has one global monotonic sequence. Serialize even
+  # manual repairs for different tags so two runs cannot sign the same prior
+  # sequence and race to replace the reserved discovery release.
+  group: release-publication
   cancel-in-progress: false
 
 jobs:
@@ -832,6 +857,8 @@ jobs:
           ref: main
           path: .release-gates
           sparse-checkout: |
+            .github/release-signing/toolchain-index-state.json
+            scripts/publish-toolchain-index.py
             scripts/verify-release-payloads.sh
             scripts/verify-payload-dep-closure.sh
           sparse-checkout-cone-mode: false
@@ -971,6 +998,152 @@ jobs:
           set -euo pipefail
           bash scripts/sign-release-manifest.sh dist
 
+      # The cross-release index is signed independently because it authenticates
+      # the location and digest of SHA256SUMS itself. It is deliberately built
+      # after SHA256SUMS so no circular digest relationship is introduced.
+      # The previous canonical index is mandatory once its reserved release
+      # exists; only the first publication may bootstrap sequence 1.
+      - name: Build and sign canonical toolchain index
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          INDEX_BOOTSTRAP_INPUT: ${{ inputs.bootstrap_index }}
+          INDEX_CHANNEL_INPUT: ${{ inputs.channel }}
+          SAILFIN_RELEASE_SIGNING_KEY: ${{ secrets.SAILFIN_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          channel="${INDEX_CHANNEL_INPUT:-}"
+          if [ -z "$channel" ]; then
+            case "$version" in
+              *-alpha.*) channel=alpha ;;
+              *-beta.*) channel=beta ;;
+              *-rc.*) channel=rc ;;
+              *-*)
+                echo "[toolchain-index][error] cannot infer channel from ${version}" >&2
+                exit 1
+                ;;
+              *) channel=stable ;;
+            esac
+          fi
+
+          previous_args=()
+          previous_dir="${RUNNER_TEMP}/toolchain-index-previous"
+          mkdir -p "$previous_dir"
+          candidate_count=0
+          mapfile -t indexed_release_tags < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name != "toolchain-index-v1") | select(([.assets[].name] | index("toolchain-index.json")) != null and ([.assets[].name] | index("toolchain-index.json.sig")) != null) | .tag_name'
+          )
+          for indexed_tag in "${indexed_release_tags[@]}"; do
+            candidate_dir="${RUNNER_TEMP}/toolchain-index-versioned-${candidate_count}"
+            mkdir -p "$candidate_dir"
+            gh release download "$indexed_tag" \
+              --pattern toolchain-index.json \
+              --pattern toolchain-index.json.sig \
+              --dir "$candidate_dir" \
+              --clobber
+            previous_args+=(
+              --candidate-previous "$candidate_dir/toolchain-index.json" \
+              "$candidate_dir/toolchain-index.json.sig"
+            )
+            candidate_count=$((candidate_count + 1))
+          done
+          set +e
+          canonical_release_probe="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TOOLCHAIN_INDEX_TAG}" \
+            2>&1)"
+          canonical_release_status=$?
+          set -e
+          if [ "$canonical_release_status" -eq 0 ]; then
+            canonical_pair_count="$(gh release view "$TOOLCHAIN_INDEX_TAG" \
+              --json assets \
+              --jq '[.assets[].name | select(. == "toolchain-index.json" or . == "toolchain-index.json.sig")] | length')"
+            backup_count="$(gh release view "$TOOLCHAIN_INDEX_TAG" \
+              --json assets \
+              --jq '[.assets[].name | select(. == "toolchain-index.previous.json" or . == "toolchain-index.previous.json.sig")] | length')"
+            if [ "$canonical_pair_count" -eq 2 ]; then
+              gh release download "$TOOLCHAIN_INDEX_TAG" \
+                --pattern toolchain-index.json \
+                --pattern toolchain-index.json.sig \
+                --dir "$previous_dir" \
+                --clobber
+              previous_args=(
+                --previous-index "$previous_dir/toolchain-index.json"
+                --previous-signature "$previous_dir/toolchain-index.json.sig"
+                "${previous_args[@]}"
+              )
+            else
+              echo "[toolchain-index][warning] canonical release has an incomplete public pair; recovering from authenticated candidates" >&2
+            fi
+            if [ "$backup_count" -eq 2 ]; then
+              gh release download "$TOOLCHAIN_INDEX_TAG" \
+                --pattern toolchain-index.previous.json \
+                --pattern toolchain-index.previous.json.sig \
+                --dir "$previous_dir" \
+                --clobber
+              previous_args+=(
+                --candidate-previous "$previous_dir/toolchain-index.previous.json" \
+                "$previous_dir/toolchain-index.previous.json.sig"
+              )
+            elif [ "$backup_count" -eq 1 ]; then
+              echo "[toolchain-index][warning] ignoring incomplete preserved previous pair; authenticated candidates will repair it" >&2
+            fi
+            if [ "${#previous_args[@]}" -eq 0 ]; then
+              echo "[toolchain-index][error] canonical release has no complete authenticated candidate pair" >&2
+              exit 1
+            fi
+          elif [[ "$canonical_release_probe" == *"HTTP 404"* ]]; then
+            if [ "${#previous_args[@]}" -eq 0 ]; then
+              if [ "${INDEX_BOOTSTRAP_INPUT}" != "true" ]; then
+                echo "[toolchain-index][error] canonical index tag is absent; bootstrap requires the explicit bootstrap_index input" >&2
+                exit 1
+              fi
+              set +e
+              git ls-remote --exit-code --tags origin \
+                "refs/tags/${TOOLCHAIN_INDEX_TAG}" >/dev/null 2>&1
+              bootstrap_tag_status=$?
+              set -e
+              if [ "$bootstrap_tag_status" -eq 0 ]; then
+                echo "[toolchain-index][error] reserved index tag already exists; restore signed history instead of bootstrapping sequence 1" >&2
+                exit 1
+              elif [ "$bootstrap_tag_status" -ne 2 ]; then
+                echo "[toolchain-index][error] could not verify first-publication tag absence" >&2
+                exit "$bootstrap_tag_status"
+              fi
+              prior_index_asset="$(gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                --jq '.[] | select(.tag_name != "toolchain-index-v1") | select(.draft == false or .published_at != null) | .assets[]? | select(.name == "toolchain-index.json" or .name == "toolchain-index.json.sig") | .url')"
+              if [ -n "$prior_index_asset" ]; then
+                echo "[toolchain-index][error] a versioned release already carries a signed index; restore the canonical release instead of resetting history" >&2
+                exit 1
+              fi
+              previous_args=(--allow-bootstrap)
+            fi
+          else
+            echo "[toolchain-index][error] could not query the canonical index release: ${canonical_release_probe}" >&2
+            exit "$canonical_release_status"
+          fi
+
+          generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          expires_at="$(date -u -d "${generated_at} +35 days" '+%Y-%m-%dT%H:%M:%SZ')"
+          python3 .release-gates/scripts/publish-toolchain-index.py \
+            --state .release-gates/.github/release-signing/toolchain-index-state.json \
+            --manifest dist/SHA256SUMS \
+            --version "$version" \
+            --channel "$channel" \
+            --generated-at "$generated_at" \
+            --expires-at "$expires_at" \
+            "${previous_args[@]}" \
+            --authenticated-previous-output dist/toolchain-index.previous.json \
+            --authenticated-previous-signature-output dist/toolchain-index.previous.json.sig \
+            --output dist/toolchain-index.json \
+            --signature-output dist/toolchain-index.json.sig
+
+          test -s dist/toolchain-index.json
+          test "$(wc -c < dist/toolchain-index.json.sig | tr -d ' ')" = 128
+          grep -Eq '^[0-9a-f]{128}$' dist/toolchain-index.json.sig
+
       # SFN-829: the first and only mutation of `main` in a cut, and the point
       # at which the tag comes into existence. Every gate above has already
       # passed against these exact bits — per-leg smoke, compiler-version,
@@ -1060,6 +1233,8 @@ jobs:
             dist/sailfin_*.tar.gz.sha256
             dist/SHA256SUMS
             dist/SHA256SUMS.sig
+            dist/toolchain-index.json
+            dist/toolchain-index.json.sig
           )
           if [ "${#files[@]}" -eq 0 ]; then
             echo "[ci][error] no release assets found after payload verification" >&2
@@ -1090,6 +1265,63 @@ jobs:
               --generate-notes \
               "${notes_start_args[@]}" \
               "${prerelease_args[@]}"
+          fi
+
+      # GitHub's release download layout requires a tag between the configured
+      # base and an asset. Keep one reserved, non-latest release as the stable
+      # discovery endpoint. Drafting during replacement makes clients see a
+      # temporary miss rather than a JSON/signature pair from different
+      # sequences; the versioned release above retains the same signed bytes.
+      - name: Publish canonical index under the release base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets=(dist/toolchain-index.json dist/toolchain-index.json.sig)
+          set +e
+          canonical_release_probe="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TOOLCHAIN_INDEX_TAG}" \
+            2>&1)"
+          canonical_release_status=$?
+          set -e
+          if [ "$canonical_release_status" -eq 0 ]; then
+            test -s dist/toolchain-index.previous.json
+            test -s dist/toolchain-index.previous.json.sig
+            # Preserve the last authenticated pair while the public pair is
+            # replaced. A failed backup upload leaves the existing public pair
+            # untouched; a failed public upload is repaired from this backup.
+            gh release upload "$TOOLCHAIN_INDEX_TAG" \
+              dist/toolchain-index.previous.json \
+              dist/toolchain-index.previous.json.sig \
+              --clobber
+            gh release edit "$TOOLCHAIN_INDEX_TAG" --draft=true
+            gh release upload "$TOOLCHAIN_INDEX_TAG" "${assets[@]}" --clobber
+            gh release edit "$TOOLCHAIN_INDEX_TAG" \
+              --draft=false --prerelease --latest=false
+          elif [[ "$canonical_release_probe" == *"HTTP 404"* ]]; then
+            set +e
+            git ls-remote --exit-code --tags origin \
+              "refs/tags/${TOOLCHAIN_INDEX_TAG}" >/dev/null 2>&1
+            index_tag_status=$?
+            set -e
+            canonical_target="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+            create_args=(--target "$canonical_target")
+            if [ "$index_tag_status" -eq 0 ]; then
+              create_args=(--verify-tag)
+            elif [ "$index_tag_status" -ne 2 ]; then
+              echo "[toolchain-index][error] could not determine whether the canonical index tag exists" >&2
+              exit "$index_tag_status"
+            fi
+            gh release create "$TOOLCHAIN_INDEX_TAG" "${assets[@]}" \
+              "${create_args[@]}" \
+              --title "Sailfin signed toolchain index" \
+              --notes "Canonical signed discovery metadata; artifact verification remains release-specific." \
+              --prerelease \
+              --latest=false
+          else
+            echo "[toolchain-index][error] could not query the canonical index release: ${canonical_release_probe}" >&2
+            exit "$canonical_release_status"
           fi
   notify-slack-failure:
     name: Notify Slack on release asset failure

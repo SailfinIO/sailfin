@@ -1,0 +1,17 @@
+{
+  "schema_version": "sailfin-toolchain-index-state/1",
+  "trusted_root_keys": [
+    {
+      "key_id": "ed25519:c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9",
+      "public_key": "c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9"
+    }
+  ],
+  "signing_key": {
+    "key_id": "ed25519:c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9",
+    "public_key": "c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9"
+  },
+  "key_transitions": [],
+  "yanks": [],
+  "revocations": [],
+  "advisories": []
+}

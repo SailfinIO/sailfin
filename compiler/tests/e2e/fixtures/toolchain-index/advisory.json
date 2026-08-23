@@ -1,0 +1,8 @@
+{
+  "affected": ">=1.2.0 <1.2.4",
+  "fixed_version": "1.2.4",
+  "id": "SFN-SA-2026-0001",
+  "severity": "high",
+  "summary": "Fixture advisory for signed-index producer coverage",
+  "url": "https://sailfin.dev/security/SFN-SA-2026-0001"
+}

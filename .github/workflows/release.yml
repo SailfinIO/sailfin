@@ -58,6 +58,11 @@ on:
         required: false
         type: string
         default: ""
+      bootstrap_index:
+        description: "Authorize the first signed toolchain-index publication only. Ordinary releases and repairs leave this false."
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -461,10 +466,12 @@ jobs:
     uses: ./.github/workflows/release-tag.yml
     with:
       tag: ${{ needs.release.outputs.tag }}
+      channel: ${{ inputs.channel }}
       previous_tag: ${{ needs.release.outputs.prev_tag }}
       ref: ${{ needs.release.outputs.staging_ref }}
       expect_sha: ${{ needs.release.outputs.staging_sha }}
       promote: true
+      bootstrap_index: ${{ inputs.bootstrap_index }}
     secrets: inherit
 
   # The staging branch is scaffolding, not history. Delete it once the cut has

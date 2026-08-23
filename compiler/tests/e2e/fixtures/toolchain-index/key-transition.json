@@ -1,0 +1,7 @@
+{
+  "effective_sequence": 2,
+  "from_key_id": "@FROM_KEY_ID@",
+  "signature": "@TRANSITION_SIGNATURE@",
+  "to_key_id": "@TO_KEY_ID@",
+  "to_public_key": "@TO_PUBLIC_KEY@"
+}

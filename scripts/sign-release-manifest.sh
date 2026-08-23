@@ -42,6 +42,7 @@ if ! command -v sha256sum >/dev/null 2>&1; then sumtool="shasum -a 256"; fi
   # breaks BSD/macOS `find` for local validation/rotation).
   files="$(find . -maxdepth 1 -type f \
       ! -name 'SHA256SUMS' ! -name 'SHA256SUMS.sig' ! -name '*.sha256' \
+      ! -name 'toolchain-index.json' ! -name 'toolchain-index.json.sig' \
       -print | sed 's|^\./||' | LC_ALL=C sort)"
   [ -n "$files" ] || { echo "[sign] no assets to hash in $dir" >&2; exit 1; }
   while IFS= read -r f; do

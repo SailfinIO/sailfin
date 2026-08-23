@@ -423,6 +423,28 @@ here.
   `SAILFIN_ALLOW_UNVERIFIED=1` opt-in covers only an unsigned historical
   release, an unpinned local archive, or (POSIX only) no working verifier
   (SFN-204). Design: SFEP-0046 §3.5, SFEP-0073 §3.7.
+- **Signed toolchain discovery index (producer side).** Every release now also
+  publishes canonical `toolchain-index.json` bytes plus a detached Ed25519
+  `toolchain-index.json.sig`, and the release workflow replaces the same pair
+  under the reserved `toolchain-index-v1` release-base path (SFN-1062). The
+  versioned schema carries generated/expiry times, a monotonic sequence, exact
+  stable/rc/beta/alpha candidates per supported host, each release-specific
+  `SHA256SUMS` location and digest, distinct yank/revocation/advisory records,
+  the active signing-key identifier, and old-key-authenticated transition
+  proofs. `scripts/publish-toolchain-index.py` rejects malformed hosts/digests,
+  invalid release-manifest signatures, expired output, rollback, rewritten
+  revocation/transition history, and invalid transition proofs before signing;
+  identical unexpired release state reuses the prior canonical bytes and
+  sequence. Bootstrap is explicit and refused once a versioned index exists;
+  canonical replacement selects the globally highest authenticated canonical,
+  preserved, or versioned candidate, rejects equal-sequence byte divergence,
+  and preserves the last pair for interrupted upload recovery. This is discovery metadata
+  only: it does not replace the signed per-release manifest or archive-digest
+  check. Client parsing, cache/anti-rollback enforcement, channel resolution,
+  and yank/revocation/advisory policy remain unshipped pending SFN-1069, so
+  today's exact install behavior remains SFEP-0046 release-manifest-only.
+  Schema and operations: `docs/reference/toolchain-index-schema.md` and
+  `docs/release-signing.md`; design: SFEP-0073 §3.7 and §3.9 slice 4.
 - **CLI dispatch.** `sailfin_cli_main_v2` (`compiler/src/cli/main.sfn`) is the
   sole command router: it builds a root `Command` via the `sfn/cli` capsule
   from each subcommand's `command_def()` and dispatches to per-command
