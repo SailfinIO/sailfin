@@ -614,10 +614,6 @@ clean-all: clean clean-build
 compile:
 	@$(AGENT_REPORT) --target compile -- $(MAKE) compile-impl
 
-.PHONY: bootstrap-aarch64-linux
-bootstrap-aarch64-linux:
-	@SEED_X86_64="$(SEED_X86_64)" scripts/bootstrap-aarch64-linux.sh
-
 compile-impl:
 	@# SFN-679: a $(NATIVE_BIN) predating `dev bootstrap fingerprint` (the
 	@# native replacement for scripts/compiler_source_fingerprint.sh) falls
