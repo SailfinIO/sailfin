@@ -4,9 +4,9 @@ title: Codegen Provider Ownership — Which Toolchain Roles Sailfin Owns
 status: Draft
 type: tooling
 created: 2026-08-05
-updated: 2026-08-05
-author: "agent:Sailbot (drafted); project owner (redistribution decision 2026-08-05)"
-tracking:
+updated: 2026-08-23
+author: "agent:Sailbot (drafted); project owner (redistribution decision 2026-08-05); agent:Codex (cross-platform clang-independence amendment 2026-08-23)"
+tracking: https://linear.app/sailfin/project/cross-platform-clang-independence-baeafe4f0a9a
 supersedes: 15
 superseded-by:
 graduates-to:
@@ -15,353 +15,637 @@ graduates-to:
 # SFEP-0066 — Codegen Provider Ownership
 
 > **Provenance.** This proposal is the normative successor to the retired
-> SFEP-0015 ("Toolchain Independence — Sailfin-Native Backend"), which mixed a
-> strategy survey, a roadmap, and a 660-line IR contract in one document and
-> never conformed to SFEP-0001 §6. Its survey moved to
-> `docs/backend-independence.md`; its Typed SSA v0 contract moved to SFEP-0059
-> §10. What remains — and what this proposal decides — is the **provider
-> boundary**: which roles Sailfin owns, where a replacement code generator
-> plugs in, and what may honestly be claimed at each step.
->
-> The *direction* here was accepted as SFEP-0015. Three things are **new and
-> require a design gate**: the seam rescoping in §3.2, the `llc` disclosure rule
-> in §3.4, and the dependency correction in §3.5.
+> SFEP-0015 ("Toolchain Independence — Sailfin-Native Backend"). Its survey
+> moved to `docs/backend-independence.md`; its Typed SSA v0 contract moved to
+> SFEP-0059 §10. This document owns the provider boundary, the cross-platform
+> clang-independent LLVM contract, and the rules for making role-ownership
+> claims.
 
 ## 1. Summary
 
-Sailfin's path from source to running process has five distinct roles — emit,
-select, assemble, link, and load — and "do we own the backend?" is not answerable
-about any of them. This proposal makes **the role, not the toolchain, the unit of
-account**: it fixes a normative role table with a named owner for each, requires
-every independence claim to name the role it concerns, and locates the seam where
-a replacement code generator plugs in. That seam is the **capsule boundary**
-established by SFEP-0020, not the `Backend` interface in
-`compiler/src/backend.sfn` — which is an external-tool invocation seam and cannot
-carry a native code generator in its present shape. The proposal also records two
-disclosures that prevent overclaiming: dropping clang from the assemble role does
-not remove the LLVM toolchain, and owning the syscall layer does not depend on
-owning code generation.
+Sailfin's path from an analyzed program to a running process has five roles:
+Emit, Select, Assemble/object emission, Link, and Load. This proposal makes the
+role and native target pair the unit of ownership. For Linux x86-64, Linux
+aarch64, macOS arm64, and Windows x86-64, the destination contract keeps LLVM
+as the Select and object-emission provider through a coherent
+`llvm-as`/`opt`/`llc` tool family, invokes the platform linker directly, and
+never discovers or falls back to clang on the first-party path. Sailfin owns
+tool selection, target identity, artifact publication, cache identity,
+prerequisite discovery, diagnostics, and linker argv. A supported-platform
+claim requires a native cold self-host fixed point and released-asset smoke test
+with clang unavailable or poisoned.
+
+This is clang independence, not LLVM independence, libc independence, or a
+Sailfin-written native backend. The seal-sufficient `sfn/codegen-native`
+provider reserved by SFEP-0020 remains a peer of `sfn/codegen-llvm`; it neither
+blocks nor is displaced by this contract.
 
 ## 2. Motivation
 
-Three concrete failures, all traceable to the missing role distinction.
+The existing design records a Linux-centric snapshot rather than a complete
+provider contract. In the current tree, every first-party LLVM or C input can
+reach `clang -c`; Linux direct linking falls back to clang when prerequisites
+are missing; and macOS and Windows delegate their final link to the clang
+driver. The driver therefore rents several responsibilities from clang without
+recording the inputs clang inferred on Sailfin's behalf.
 
-**Claims drift from the tree.** SFEP-0015 asserted through its final revision
-that Sailfin "shells out to `clang` to turn `.ll` into a binary" and listed
-"remove clang as the Linux x86-64 linker driver" as the recommended next step.
-Both were already false: `compiler/src/build/direct_link.sfn` (339 lines) builds a
-bare `ld.lld` invocation with no clang in the argv, and `LlvmTextBackend.link`
-tries it *first* on Linux x86-64 and aarch64. Meanwhile `docs/status.md:416`
-still describes the seam as "every codegen/link `clang` invocation." Without a
-role table, the shipped state and the design record drifted in opposite
-directions and neither noticed.
+That ambiguity causes four concrete failures.
 
-**The named seam cannot hold the thing it was built for.** SFEP-0015 §6 presented
-the provider interface as:
+1. **Claims are not portable.** A successful direct Linux link says nothing
+   about Darwin SDK discovery, Windows CRT/import libraries, or even a second
+   Linux host whose CRT layout differs.
+2. **The compatibility oracle is also the production fallback.** A missing
+   linker or startup object can silently change the provider that executed.
+   Cache identity and diagnostics then describe a best-effort route rather than
+   a support contract.
+3. **LLVM and foreign C are conflated.** `clang_argv.sfn` accepts both `.ll` and
+   `.c` inputs plus C include flags. A pure Sailfin build can therefore inherit
+   a C-compiler dependency from an abstraction it never asked to use.
+4. **Clang owns hidden target knowledge.** It selects optimization/codegen
+   passes, object format, relocation model, startup objects, system-library
+   roots, SDK/deployment metadata, and default libraries. Removing its argv
+   without assigning those decisions would replace one ambient contract with
+   another.
 
-```sfn
-interface Backend {
-    fn lower(module: NativeModule) -> ObjectArtifact ![io];
-    fn link(objects: ObjectArtifact[], out: string, libs: string[]) -> int ![io];
-}
-```
-
-The shipped interface (`compiler/src/backend.sfn:106-111`) is:
-
-```sfn
-interface Backend {
-    fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io];
-    fn link(self, plan: LinkPlan) -> int ![io];
-}
-```
-
-`assemble` takes **a string of LLVM IR text**. A native code generator has no
-meaningful implementation of that signature — it does not consume `.ll`. The seam
-that was documented as "where a native backend plugs in" is shaped so that a
-native backend cannot. Compounding it, the driver constructs `LlvmTextBackend {}`
-concretely and calls methods on the concrete type; `compiler/src` does not yet
-self-host interface-typed values, so the interface is conformance documentation
-rather than dispatch. "Stage 0 shipped" overstated what exists.
-
-**The longest pole was scheduled in front of the shortest.** SFEP-0015 and
-SFEP-0016 both asserted that owning the syscall layer depends on owning the
-backend. `compiler/capsules/codegen-llvm/src/syscall.sfn` (156 lines) already emits raw,
-register-constrained `syscall` instructions via LLVM inline asm, contract-gated to
-one permitted caller. The dependency does not exist, and asserting it deferred a
-tractable piece of work behind an intractable one.
+The goal is not to eliminate external tools. It is to make every external tool
+an explicit provider selected by Sailfin, with complete inputs, deterministic
+identity, actionable failure, and an honest claim boundary.
 
 ## 3. Design
 
-### 3.1 The normative role table
+### 3.1 Roles and claim language
 
-Five roles. Each has exactly one owner at a given target and version. This table
-is the accounting unit; `docs/status.md` reports movement in it, and
-`docs/backend-independence.md` tracks the arc.
+The five roles are normative:
 
-| Role | Input → output | Owner (2026-08-05, tier-1 Linux x86-64) |
+| Role | Input → output | Meaning of ownership |
 |---|---|---|
-| **Emit** | analyzed program → target-neutral IR | Sailfin (`.sfn-asm`; typed SSA per SFEP-0059) |
-| **Select** | target-neutral IR → machine instructions | **LLVM** |
-| **Assemble** | machine instructions → object file | **clang** (`clang -c`) |
-| **Link** | objects → executable image | **Sailfin** (`ld.lld` direct; clang fallback) |
-| **Load** | executable image → process | OS loader (dynamic libc) |
+| **Emit** | analyzed program → verified Sailfin/LLVM IR | Sailfin determines program semantics and renders provider input |
+| **Select** | LLVM IR → target machine instructions | the selected LLVM family owns optimization, instruction selection, register allocation, and machine lowering |
+| **Assemble/object emission** | selected instructions → native object | LLVM MC through `llc -filetype=obj` encodes and writes the target object |
+| **Link** | ordered native objects/libraries → executable image | Sailfin resolves every prerequisite and invokes the named platform linker directly |
+| **Load** | executable image → process | the target OS loader and system runtime load the image |
 
-Three normative rules follow:
+An independence claim must name a role and target. "Sailfin is
+toolchain-independent" is prohibited. "The default macOS arm64 path is
+clang-independent; LLVM owns Select/object emission and Sailfin invokes Apple
+`ld` directly" is a valid claim after the gates in §5.2 pass.
 
-1. **An independence claim must name its role.** "Sailfin owns the link on Linux
-   x86-64" is a claim. "Sailfin is toolchain-independent" is not, and must not
-   appear in `docs/status.md`, release notes, or external material.
-2. **A role's owner is per-target.** macOS and Windows own no role beyond Emit.
-   A tier-1 advance is never reported as a general one.
-3. **Fallback is not ownership.** `direct_link.sfn` falls back to clang when any
-   precondition misses. A role is owned at a target only when the owned path is
-   the one that executes, and the fallback must trace its reason
-   (`trace_direct_link_fallback`) rather than degrade silently.
+Fallback is not ownership. A target owns Link only when missing prerequisites
+fail closed instead of selecting another linker driver. Likewise, LLVM owns
+object emission only when the default path cannot execute clang. An explicitly
+selected migration oracle is reported as the provider that executed and never
+counts toward an ownership claim.
 
-### 3.2 The provider seam is a capsule boundary
+### 3.2 Supported native matrix
 
-**Decision: `Backend` in `compiler/src/backend.sfn` is the external-tool
-invocation seam, not the code-generation provider seam. A replacement code
-generator plugs in at the capsule boundary defined by SFEP-0020.**
+This proposal governs exactly four native host/target pairs. Cross-compilation
+may exercise the same artifact contracts, but it cannot establish native
+support.
 
-SFEP-0020 §3.4 already places `llvm/` in `sfn/codegen-llvm`, target-neutral
-lowering in `sfn/codegen`, the IR data models in `sfn/ir`, and `backend.sfn` in
-`sfn/compiler` — explicitly because "generating LLVM and invoking a host linker
-are separate responsibilities." That is the correct decomposition, and it gives
-the provider boundary three properties the interface never had:
+| Native platform | Target triple | Object | Destination Link provider | Load owner |
+|---|---|---|---|---|
+| Linux x86-64 | `x86_64-unknown-linux-gnu` | ELF | `ld.lld` in ELF mode | glibc ELF loader/kernel |
+| Linux aarch64 | `aarch64-unknown-linux-gnu` | ELF | `ld.lld` in AArch64 ELF mode | glibc ELF loader/kernel |
+| macOS arm64 | `arm64-apple-darwin` | Mach-O | Apple `ld`, resolved through the active Xcode/Command Line Tools selection | Darwin `dyld`/kernel |
+| Windows x86-64 | `x86_64-pc-windows-msvc` | COFF | `lld-link.exe` | Windows PE loader/kernel |
 
-- **It is enforced.** SFEP-0020 §3.3 makes the dependency rules build/test
-  invariants, including "`sfn/codegen-llvm` never reparses source or invokes
-  semantic analysis." A static import-boundary test can fail a violation; an
-  interface the driver does not dispatch on cannot.
-- **It is provider-neutral by construction.** `sfn/codegen-llvm` depends only on
-  `sfn/ir`. A future `sfn/codegen-native` capsule takes the same dependency and
-  sits beside it, consuming verified Sailfin IR rather than a string of `.ll`.
-- **It keeps authority honest.** Per SFEP-0020 §4 the codegen capsules target
-  `required = []`; only `sfn/compiler` holds `![io]`. A code generator returns
-  bytes and diagnostics; the driver writes them.
+Linux is glibc/PIE-only in this proposal. Musl, static/`-nostdlib`, MinGW,
+macOS x86-64, and every other target remain outside the clang-independent
+support claim even if the compiler can emit or cross-link some of them.
+`arm64-apple-darwin` is the user-facing logical triple; §3.5 resolves it to a
+versioned `arm64-apple-macosx<deployment>.0` LLVM object triple before IR
+validation or optimization.
 
-Accordingly, **SFEP-0020 gains a named empty slot**: `sfn/codegen-native`, peer
-to `sfn/codegen-llvm`, same `sfn/ir`-only dependency, created when it owns a
-usable contract and a real consumer (SFEP-0020 §3.7's no-placeholder rule).
+Ownership before and after this migration is:
 
-`Backend`'s own shape is corrected rather than removed, since something must own
-argv construction and `process.run`:
+| Role | Current/default route (all four targets unless narrowed) | Destination route (all four targets) |
+|---|---|---|
+| Emit | Sailfin | Sailfin |
+| Select | LLVM reached through clang's driver | coherent LLVM CLI family selected by Sailfin |
+| Assemble/object emission | clang (`clang -c`) | LLVM MC through `llc -filetype=obj` |
+| Link — Linux x86-64/aarch64 | Sailfin-authored direct `ld.lld` route with clang fallback | required direct `ld.lld`; fail closed |
+| Link — macOS arm64 | clang driver | required direct Apple `ld`; fail closed |
+| Link — Windows x86-64 | clang driver selecting LLD | required direct `lld-link`; fail closed |
+| Load | target OS loader/system runtime | unchanged |
 
-- `assemble` must stop taking provider-specific text. Its input becomes a
-  provider-produced artifact reference; whether that artifact is LLVM IR text,
-  textual assembly, or an object is the provider's business, and the driver's job
-  is to invoke the right external tool for it or none at all.
-- The interface becomes real dispatch when `compiler/src` self-hosts
-  interface-typed values. Until then it is documented as a conformance contract,
-  and `docs/status.md` must not describe it as pluggable dispatch.
-- Renaming it to name its actual job (external toolchain invocation and link
-  planning) is endorsed and left to the SFEP-0020 migration, which already
-  anticipates a "driver-oriented name."
+The current Linux route is an implemented direct-link capability, but the
+fallback means it is not yet the final required-owned contract defined here.
 
-### 3.3 What ownership of each remaining role buys
+### 3.3 Provider boundary and artifact kinds
 
-| Advance | Buys |
-|---|---|
-| Own **Link** (done, tier-1) | hermeticity; a place for the seal's link-time admission rule (SFEP-0016 §3.4) |
-| Own **Assemble** | assembler/object-format muscle; removes the clang driver — see §3.4 |
-| Own **Select** (seal-sufficient) | capability metadata survives lowering: **auditability** |
-| Own **Select** (perf-parity) | general-purpose competitiveness; nothing for the seal |
-| Own **Load** (`-nostdlib`) | the *fully sealed* claim (SFEP-0016) |
+The code-generation provider seam is the capsule boundary from SFEP-0020, not
+the `Backend` interface in `compiler/src/backend.sfn`.
+`sfn/codegen-llvm` consumes verified `sfn/ir` values and returns LLVM provider
+input plus diagnostics. A future `sfn/codegen-native` consumes the same verified
+IR and returns native-provider artifacts. Neither provider parses source,
+performs workspace discovery, writes persistent artifacts, spawns processes, or
+links.
 
-### 3.4 Disclosure: dropping clang from Assemble does not drop LLVM
+`sfn/compiler` owns the provider-neutral external-tool boundary. Its requests
+and results distinguish these artifact kinds:
 
-What Sailfin owns in the Select role is a textual-IR **printer**, not a code
-generator. Because LLVM's MC layer performs encoding *and* object writing, an ELF
-writer cannot slot underneath LLVM's instruction selection with nothing in
-between. Without linking LLVM as a library, the only seam that exists is
-**textual assembly** — which means an owned assembler consumes the output of
-`llc -S`.
+| Kind | Required metadata | Permitted consumer |
+|---|---|---|
+| `LlvmText` | path/content digest, target triple, data layout, producer identity | LLVM validation/optimization request |
+| `LlvmBitcode` | path/content digest, LLVM family identity, target triple | LLVM optimizer or object-emission request |
+| `NativeObject` | path/content digest, object format, target triple, provider identity | final link plan |
+| `ForeignCSource` | capsule/source identity, target, include roots, configured compiler identity | foreign-C request only |
+| `ExecutableImage` | target, ordered link-plan digest, linker/platform identity | package/run/test consumers |
 
-**Normative:** owning the Assemble role while Select remains LLVM's replaces the
-clang *driver* with another LLVM *tool*. It is a real gain in hermeticity and it
-builds the assembler and object-format capability that Select ownership later
-needs. It is **not** toolchain independence, and reporting it as such is
-prohibited by §3.1 rule 1. The alternative reading — replacing LLVM's
-`MCObjectWriter` in-process — requires the LLVM C-API binding, which deepens the
-dependency this arc exists to reduce.
+An LLVM request cannot carry C include roots or select C language mode. A
+foreign-C request cannot carry LLVM IR. The namespaces and cache schemas for the
+two requests cannot alias. Final `LinkPlan` values contain native objects and
+libraries only; raw `.ll`, `.bc`, or `.c` is rejected before linker selection.
 
-### 3.5 Correction: the syscall layer does not depend on code generation
+External tools are invoked without a shell. Each request contains an executable
+path, argv vector, explicit environment allowlist, input/output paths, target,
+timeout class, and diagnostic context. Results contain exit classification,
+captured diagnostic text, and produced-artifact identity. Only
+`sfn/compiler` performs the `![io]` operations to resolve, spawn, and publish.
 
-**Decision: owning the syscall layer (Axis 3, SFEP-0060) has no dependency on
-owning the Select role.** The evidence is in the tree.
-`compiler/capsules/codegen-llvm/src/syscall.sfn` recognises `syscall1`..`syscall6` and lowers them
-to a register-constrained `call i64 asm sideeffect "syscall"` per the SysV AMD64
-ABI on Linux x86-64. `syscall_contract_error` restricts these builtins to exactly
-one caller module, `runtime/sfn/platform/syscall_linux.sfn` — **which does not
-exist.** The primitive ships and self-hosts; the consumer is unwritten.
+### 3.4 Coherent LLVM tool family
 
-Two consequences are normative:
+The default object provider is one coherent `llvm-as`/`opt`/`llc` family. On
+Linux and Windows the family also supplies `ld.lld`/`lld-link`; Apple `ld` is a
+platform tool and is identified separately.
 
-1. SFEP-0016's dependency chain is corrected: the seal's enforcement chokepoint
-   is reachable on the LLVM Select path. A seal-sufficient native backend is an
-   **enhancement** to the seal (auditability), not a prerequisite of it.
-2. No proposal, issue, or status entry may cite "we do not own the backend" as
-   the reason Axis 3 is unstarted. The reason is that
-   `runtime/sfn/platform/syscall_linux.sfn` has not been written.
+Resolution order is deterministic:
 
-This does not weaken the case for owning Select — see
-`docs/backend-independence.md` §3, where concurrency (safepoints, stack maps,
-growable stacks) is the load-bearing long-term argument. It re-paces it.
+1. `SAILFIN_LLVM_ROOT`, when set, is authoritative. All required executables
+   must exist below its `bin` directory. A missing or skewed member fails; the
+   resolver never falls through to `PATH`.
+2. Otherwise, inspect the exact unsuffixed family visible on `PATH`, then the
+   release-supported version-suffixed family (for example `llvm-as-<major>`,
+   `opt-<major>`, `llc-<major>`). Candidates are evaluated as complete families,
+   never tool by tool.
+3. The family is accepted only when every member reports the one LLVM major
+   supported by that Sailfin release, their full version/build identities are
+   compatible, and a probe can validate IR and emit the requested target/object
+   format. The supported major is release metadata, not "newest found" policy;
+   changing it is an explicit toolchain/release change.
+
+The resolver uses native filesystem/process APIs. It does not use `sh`,
+`command -v`, `where`, batch activation scripts, or POSIX null-device paths.
+Windows `.exe` conventions and path quoting are data in the resolver rather
+than shell behavior.
+
+The LLVM family fingerprint includes canonical executable paths, executable
+content digests, complete `--version` outputs, selected major, successful
+target/object capability probe, and the provider-pipeline schema version. A
+path, binary, version, capability, or schema change invalidates affected
+caches. Resolution occurs once per command; trace, cache, and diagnostic
+consumers reuse that structured result rather than rerunning probes.
+
+### 3.5 Normative LLVM CLI pipeline
+
+For each `LlvmText` module the driver runs these stages:
+
+```text
+LlvmText
+  -- llvm-as --> verified LlvmBitcode
+  -- opt     --> optimized LlvmBitcode
+  -- llc     --> NativeObject (ELF, Mach-O, or COFF)
+```
+
+The argv schema is normative even where a tool permits shortcuts:
+
+1. `llvm-as <input.ll> -o <verified.bc>` validates the text and creates the
+   bitcode boundary. Invalid IR is not retried with another tool.
+2. `opt -passes=default<O0|O2> <verified.bc> -o <optimized.bc>` applies the
+   release-supported default pipeline matching the Sailfin optimization level.
+   `-verify-each` is enabled in verification/debug gates, not production
+   release builds.
+3. `llc -O0|-O2 -mtriple=<target> -filetype=obj
+   -relocation-model=<profile> <optimized.bc> -o <object>` performs target
+   lowering, register allocation, MC encoding, and object writing.
+
+The initial target profiles are fixed as follows. `none` means the corresponding
+`-mattr` list is empty; it does not mean host autodetection.
+
+| Target | CPU / features / ABI | Codegen profile |
+|---|---|---|
+| Linux x86-64 | `x86-64` / none / SysV AMD64 | PIC PIE, small code model, native TLS, `default` EH, frame pointers `all` at O0 and `none` at O2 |
+| Linux aarch64 | `generic` / `+neon,+v8a` / AAPCS | PIC PIE, small code model, native TLS, `default` EH, `non-leaf` frame pointers at O0 and O2 |
+| macOS arm64 | `apple-m1` / CPU-defined baseline / DarwinPCS | PIC, small code model, native TLS, `default` EH, `non-leaf` frame pointers at O0 and O2 |
+| Windows x86-64 MSVC | `x86-64` / none / Win64 MSVC | PIC, small code model, native TLS, WinEH, `none` frame pointers at O0 and O2, incremental-linker-compatible COFF |
+
+All four profiles enable function and data sections, use the target-default
+COMDAT selection kind, and preserve unwind tables by applying `uwtable(sync)`
+to every defined function. Floating-point semantics are strict:
+`fp-contract=on`; unsafe
+FP, fast math, approximate functions, no-NaN, no-Inf, no-signed-zero, and
+no-trapping assumptions are false. Stack-protector insertion is not inferred by
+the LLVM CLI provider; it occurs only when Sailfin IR carries an explicit
+function attribute. Emulated TLS is false for these four profiles (the retired
+MinGW path is the separate case that required it).
+
+Darwin target resolution precedes the LLVM pipeline, not merely final linking.
+The driver resolves one SDK version and one deployment target. An explicit
+`MACOSX_DEPLOYMENT_TARGET` is authoritative; release workflows must set it to
+the release's supported minimum, while an interactive build with no override
+uses the native host major/minor. The provider materializes
+`arm64-apple-macosx<deployment>.0` as the module `target triple` and passes
+that same versioned triple to `opt -mtriple` and `llc -mtriple`. The module
+data layout, Mach-O build-version load command, Apple `ld -platform_version`
+minimum, selected SDK version, cache identity, tool-role report, and capability
+probe must all agree. An unversioned object triple or disagreement between the
+object and link deployment/SDK contract fails before publication.
+
+Every profile field must affect output through one of two normative mechanisms:
+
+- `opt` receives `-mtriple`, `-mcpu`, any non-empty `-mattr`, and
+  `-passes=default<O0|O2>`, so target-library and target-transform analysis use
+  the same baseline as code generation.
+- `llc` receives the same triple/CPU/features plus `-O0|-O2`,
+  `-filetype=obj`, `-relocation-model=pic`, `-code-model=small`,
+  `-function-sections`, `-data-sections`, `-frame-pointer=<profile>`,
+  `-exception-model=<profile>`, and `-fp-contract=on`; Windows additionally
+  receives `-incremental-linker-compatible`. A profile ABI that LLVM does not
+  derive uniquely from the triple is passed through `-target-abi`.
+- Unwind, target CPU/features, frame-pointer, strict-FP, stack-protector, and
+  other function-scoped requirements that LLVM represents as IR attributes are
+  emitted in the provider's canonical function attribute group before
+  `llvm-as`. Triple and data layout are emitted in the module header. The
+  validator rejects a module whose header or attributes disagree with the
+  resolved target profile.
+
+Omitting a flag is permitted only when the accepted LLVM major has no spelling
+for it and a checked capability probe plus object/IR-shape test demonstrates
+that the tool default equals the table. Recording a desired value only in a
+request or cache key is not implementation. The profile schema, materialized
+argv, canonical IR attributes, and tool capability probe all enter the cache
+fingerprint. The provider must probe that `opt` and `llc` accept every
+materialized setting and that `llc` emits the requested target/object format
+before accepting the family.
+
+Program, dependency, runtime Sailfin, runtime `ll-sources`, test, self-host, and
+cross-target LLVM modules all use this pipeline. Serial and bounded-parallel
+execution must produce the same ordered object plan and use atomic cache
+publication. There is no first-party alternate path that skips `opt`, asks
+clang to assemble, or sends LLVM input to the final link.
+
+#### Compatibility and performance oracle
+
+During migration, the exact legacy `clang -O0`/`clang -O2` route is the
+differential oracle. Its executable path, content/version identity, target
+trace, and complete argv are recorded per platform; the oracle is never assumed
+to be interchangeable with a similarly numbered upstream LLVM release. It is
+never a fallback. A developer or CI job must select it explicitly through the
+migration-only `SAILFIN_OBJECT_PROVIDER=clang-oracle` switch and provide its
+executable through authoritative `SAILFIN_CLANG_ORACLE`. The default and only
+supported first-party value is `llvm-cli`; an invalid value or missing oracle
+executable fails without falling through to `PATH`. Tool-role output must label
+the selected result `clang-oracle`.
+
+The new pipeline replaces the oracle only after all of these hold per target:
+
+- **Behavior:** the same source corpus produces the same exit status, stdout,
+  stderr class, files/network-visible effects, exceptions, atomics, TLS,
+  concurrency behavior, ABI results, COMDAT resolution, and determinism. Object
+  bytes and unspecified symbol order need not match.
+- **Optimization:** O0 uses `default<O0>` plus `llc -O0`; O2 uses
+  `default<O2>` plus `llc -O2`. Target/CPU, relocation, TLS, section, unwind,
+  and floating-point semantics match the corresponding accepted clang trace.
+- **Performance:** on the repository's compiler and consumer benchmark sets,
+  the three-run median O2 runtime and emitted-image size may not regress by more
+  than 5% from the recorded clang oracle without a separately accepted and
+  documented exception. Provider wall time and peak RSS are recorded; a
+  regression over 10% requires an explicit issue before the default flips.
+- **Diagnostics:** tool absence, invalid IR, optimization failure, target
+  lowering failure, and object-publication failure retain their distinct
+  Sailfin classifications. Raw clang wording is not an equality requirement.
+
+The accepted target-profile argv and its benchmark/oracle evidence are checked
+in. Upgrading the LLVM major reruns the differential and performance gates
+instead of inheriting parity from a previous major.
+
+### 3.6 Direct-link ownership
+
+One target-profile-driven link dispatcher serves program, test, self-host, and
+package layouts. Differences are link-plan data, not separate selection logic.
+Every platform resolver returns either a complete `ResolvedLinkContract` or one
+structured failure. It never returns "try clang."
+
+#### ELF/glibc Linux
+
+Sailfin invokes `ld.lld` directly for x86-64 and aarch64 PIE executables. It
+owns deterministic discovery and ordering of:
+
+- linker executable/emulation, target triple, entry point, and ELF interpreter;
+- `Scrt1.o`, `crti.o`, `crtbeginS.o`, ordered objects/libraries,
+  `crtendS.o`, and `crtn.o` from one compatible target/sysroot family;
+- compiler-support/runtime libraries, glibc search roots, `libc`, required
+  system libraries, rpaths, retain roots, and section garbage collection;
+- PIE, dynamic-linker, build-id/reproducibility, response-file, and output flags.
+
+An explicit sysroot/linker override is authoritative and cannot mix with
+ambient CRT objects. Candidate version directories are enumerated and sorted
+natively; ambiguous or mismatched CRT families fail closed. Musl, static, and
+`-nostdlib` are separate contracts.
+
+#### Darwin/macOS arm64
+
+Sailfin invokes Apple `ld` directly. It resolves the active developer directory,
+linker, macOS SDK root/version, and deployment target through the supported
+Xcode/Command Line Tools contract, then passes architecture, platform/minimum
+OS version, syslibroot/search roots, entry/startup behavior, `libSystem`,
+required libraries/frameworks, retain roots, dead-strip, response-file, and
+output flags explicitly.
+
+An SDK/linker override is authoritative. The resolver cannot combine a Homebrew
+LLVM-inferred target with an Apple SDK, cannot infer a stale deployment target,
+and cannot proceed when SDK/platform metadata or a required system library is
+missing. Link identity includes the canonical developer directory, linker
+binary identity, SDK path/version, deployment target, and library/framework
+inputs. Existing signing/notarization behavior is preserved but is not owned by
+this proposal.
+
+#### MSVC/COFF Windows x86-64
+
+Sailfin invokes the coherent family's `lld-link.exe` directly. It owns native,
+shell-free discovery and selection of the Windows SDK/UCRT and MSVC toolset,
+then supplies machine, subsystem, entry/startup contract, object/library order,
+UCRT/VCRuntime and Windows import-library roots, default libraries, COMDAT/dead
+strip, TLS/unwind, response-file quoting, reproducible timestamp, retain-root,
+and output/PDB policy explicitly.
+
+The selected Windows SDK, UCRT, and MSVC libraries must form one compatible
+x86-64 contract. A missing or mixed toolset, startup/default library, import
+library, or unsupported response-file/path encoding fails before spawn when it
+can be detected. `LIB`, `PATH`, or a developer-command-prompt environment may
+be inputs to discovery but are not sufficient provenance: the resolved roots
+and versions are validated and recorded. MinGW is outside this contract.
+
+The coherent LLVM family also owns the compiler-support builtins that `llc`
+may reference. For MSVC x86-64 the resolver must locate the matching
+`clang_rt.builtins-x86_64.lib` (or the same family's per-target-runtime-dir
+equivalent) beneath that family's Clang resource directory, prove that its
+version/target match `llc`, and place it after Sailfin objects and before the
+UCRT/VCRuntime/default-library tail in the `lld-link` response file. The
+capability probe links a COFF object that requires `__extendhfsf2`,
+`__truncsfhf2`, `__truncdfhf2`, and `__floatsihf`; a missing library or
+symbol fails the resolved-link contract before normal builds. Its canonical
+path, content digest, resource version, ordered position, and probe result enter
+link/cache/provenance identity. This is the direct-link replacement for the
+current clang `--rtlib=compiler-rt` responsibility, not an MSVC/UCRT library.
+
+### 3.7 Fail-closed diagnostics and reporting
+
+Missing `llvm-as`, `opt`, `llc`, target support, object format, linker, SDK,
+sysroot, CRT/startup object, loader, search root, system/import library, or
+deployment metadata produces a Sailfin diagnostic and a non-zero result. No
+required path discovers or invokes clang after such a failure.
+
+Diagnostics name:
+
+- the failed role and stage;
+- target triple/object format and source artifact when applicable;
+- requested and resolved tool/SDK/CRT identities;
+- the exact missing, skewed, ambiguous, or unsupported prerequisite;
+- the authoritative configuration knob when one was supplied; and
+- retained artifact/log paths plus bug-report context for provider failures.
+
+One tool-role report exposes the resolved validator, optimizer, object emitter,
+linker, target profile, SDK/sysroot/CRT identity, default versus migration
+oracle selection, and foreign-C state. Its human form is concise; its versioned
+machine form is deterministic and suitable for CI without parsing argv traces.
+Secrets and unrelated environment values are never included.
+
+### 3.8 Cache and provenance identity
+
+Every object and executable cache key includes:
+
+- input content and ordered dependency/object identities;
+- target triple, object format, optimization level, and complete target profile;
+- LLVM family fingerprint and pipeline-schema version;
+- linker executable identity and full structured link-plan flags;
+- selected sysroot/SDK/CRT/startup/library identities;
+- compiler/runtime/source-closure identities already required by the cache; and
+- foreign-C compiler/request identity when and only when foreign objects exist.
+
+Resolved paths alone are insufficient; executable and prerequisite content or
+version identity is included. A default LLVM object and a `clang-oracle` object
+cannot share a namespace. A foreign-C object cannot alias an LLVM object even
+when source basenames and contents coincide. Provenance cards and tool-role
+reports reuse these exact identities.
+
+### 3.9 Foreign `c-sources`
+
+Manifest `c-sources` are a foreign-tool integration, not part of Sailfin's
+first-party clang-free claim. The resolved source closure is checked before any
+C-compiler discovery. If it contains no C sources, the driver does not inspect
+`PATH`, run a probe, or require C-related configuration.
+
+If C sources exist, `SAILFIN_FOREIGN_C_COMPILER` is the v1 explicit
+configuration contract. It selects a compiler executable for that request; it
+does not change the LLVM object provider or final linker. An unset value fails
+before spawning with a diagnostic naming the capsule, source, target, and this
+configuration knob. Sailfin does not promise a compiler brand. It passes the
+isolated request's target, optimization, include roots, output kind, and ABI
+requirements, and records executable/version/content identity plus all flags in
+the foreign-object cache and link provenance.
+
+Optional C-harness/differential test oracles use a separate test-owned helper.
+They skip explicitly when no external compiler is configured and cannot be
+imported by production build, runtime, bootstrap, package, or link paths. Users
+may configure clang as their foreign compiler; doing so does not weaken or
+participate in the first-party no-clang claim.
 
 ## 4. Effect & capability impact
 
-No change to Sailfin's effect semantics — no new effect, no change to
-`effect_taxonomy.sfn::canonical_effects()`, no change to how `![io]` is checked.
+No language effect or capability changes. The pure provider capsules remain
+`required = []` under SFEP-0020. `sfn/compiler` already owns the `![io]`
+authority needed for environment/filesystem discovery, process execution,
+atomic artifact publication, and diagnostics. The amendment narrows authority
+by preventing `sfn/codegen-llvm` or a future provider from executing tools.
 
-The capability impact is structural and favourable. Concentrating external-tool
-invocation in `backend.sfn` inside `sfn/compiler` means a code-generation provider
-never needs `![io]`: it accepts verified IR and returns bytes plus diagnostics,
-and the driver performs the effectful write. Under SFEP-0020 §4 that keeps
-`sfn/codegen`, `sfn/codegen-llvm`, and a future `sfn/codegen-native` at
-`required = []`, so importing a code generator does not implicitly grant the
-authority to execute a linker.
-
-For the capability seal specifically, this proposal's contribution is
-**auditability, not enforcement** (§3.3). Enforcement lives in the syscall layer
-(SFEP-0060), the link-time admission rule (SFEP-0016 §3.4), and the `-nostdlib`
-link. Metadata surviving lowering is what makes a sealed binary *inspectable* by
-a third party — which is the Reach pillar's actual claim, and worth having — but
-it is not what makes the gate hold. Conflating the two is what produced the
-scheduling error in §3.5.
+External-tool selection is not a user-program capability. Foreign C provenance
+is nevertheless explicit because its object enters the trusted link inputs. For
+the capability seal, this proposal supplies auditable provider/link ownership;
+enforcement remains the owned syscall layer and link-time admission contract.
 
 ## 5. Self-hosting impact
 
-No language surface changes, so the lexer, parser, AST, typechecker, and effect
-checker are untouched. The affected surface is the build driver and the codegen
-capsule graph:
+### 5.1 Bootstrap, release, and seed transition
 
-- `compiler/src/backend.sfn` — the `assemble` signature rescoping in §3.2.
-- `compiler/src/build/{clang_argv,direct_link}.sfn` — role-owner reporting.
-- The SFEP-0020 migration — adding the `sfn/codegen-native` slot to the accepted
-  capsule set and its dependency rules.
+The current pinned seed (`v0.10.4` when this amendment was written) predates the
+clang-independent provider contract. The transition is deliberately staged:
 
-The self-hosting invariant is preserved by the ordinary path: `make compile`
-before targeted tests, and `make clean-build` first for any structural capsule
-move, per SFEP-0020 §5. Two specific hazards:
+1. **Compatibility build.** The current seed may use the legacy clang route to
+   compile the first compiler containing the LLVM/direct-link paths. This is a
+   bootstrap fact, not a supported-platform claim.
+2. **Candidate fixed points.** The freshly built compiler becomes the default
+   provider. Native Linux x86-64/aarch64, macOS arm64, and Windows x86-64 jobs
+   reach the ordinary self-host fixed point with clang unavailable or a poison
+   executable. The legacy route runs only in explicitly selected differential
+   jobs.
+3. **Release proof.** Candidate native release assets are installed in clean
+   native environments and compile, link, run, test, and package representative
+   Sailfin programs with clang unavailable. Tool-role reports and poison logs
+   are retained as evidence.
+4. **Seed advance.** The first release passing the complete matrix is pinned in
+   `bootstrap.toml [seed].version`, with checksums/provenance verified for all
+   four native assets. A clean source bootstrap from that pinned seed then
+   reaches the fixed point with clang unavailable.
+5. **Deletion and ratchet.** Only after step 4 passes may production clang
+   validator/object/link fallbacks, flags, shims, cache identities, and active
+   bootstrap recipes be deleted. The repository then adds static invocation
+   census checks plus dynamic cold native no-clang jobs. Narrow exceptions are
+   limited to historical fixtures/docs and explicitly configured foreign-C or
+   optional test-oracle boundaries.
 
-**Seed dependency.** A change to the Select or Assemble role alters the compiler
-binary's behaviour, so per `.claude/rules/seed-dependency.md` it bundles with its
-consumer by default: `make compile` builds the new compiler from the old seed and
-that fresh compiler compiles the consumer in one pass, with no seed cut. The
-carve-out applies if and when the syscall layer lands — a compiler capability
-that **runtime source calls** must exist in the pinned seed, because the seed
-compiles the working-tree runtime. `runtime/sfn/platform/syscall_linux.sfn`
-calling `syscall1`..`syscall6` is exactly that case. **It is already satisfied:**
-the builtins landed 2026-07-30 and are contained in `v0.9.0`/`v0.9.1`, and
-`bootstrap.toml [seed].version` is `0.9.1` — so writing the runtime consumer
-needs no seed cut. Any *change* to the syscall builtins does, and lands alone as
-a `seed-blocker` per `.claude/rules/seed-dependency.md`.
+A source change needed after a platform fixed-point or release gate invalidates
+that gate for the affected platform. Pinning a release that merely cross-builds
+a target is prohibited. The clang compatibility code may not be deleted merely
+because the new provider is default; the clang-independent seed pin and clean
+bootstrap are the deletion gate.
 
-**Determinism.** Capsule and module names affect symbol mangling and artifact
-paths (SFEP-0020 §5), so adding a codegen provider capsule requires the
-determinism checks before and after, with mechanical renames explained.
+This is ordinary compiler-source evolution under
+`.claude/rules/seed-dependency.md`: the provider capability and its compiler
+consumers can land together because the old seed compiles the new compiler,
+which then exercises the new path. No runtime source calls a new compiler
+builtin, so the runtime-source carve-out does not apply.
+
+### 5.2 Supported-platform claim gate
+
+A platform/architecture pair may be called clang-independent only when one
+native cold job proves all of the following with clang absent or deterministically
+poisoned:
+
+1. bootstrap from the then-pinned released seed;
+2. pass-1/pass-2 self-host fixed point and the existing determinism contract;
+3. representative compiler, runtime, exception, concurrency, atomic, TLS,
+   COMDAT/ABI, and target-link tests;
+4. package/release-asset installation plus compile-link-run smoke;
+5. tool-role output naming `llvm-as`, `opt`, `llc`, and the direct platform
+   linker with complete target/SDK/CRT identity; and
+6. a hard failure on any attempted clang invocation, with no fallback branch.
+
+All four rows must pass before Sailfin makes an unqualified "supported native
+platforms are clang-independent" claim. A cross-target object or link test is
+useful coverage but cannot substitute for a native cold fixed point.
+
+### 5.3 Relationship to the seal-sufficient native backend
+
+The Cross-Platform Clang Independence Project retains LLVM for Select and
+object emission. The Seal-Sufficient Native Backend Project builds a different
+peer provider that can eventually perform Select/object emission without LLVM
+on its gated tier-1 path. The two projects share the verified-IR capsule seam
+and provider-neutral `NativeObject`/link contracts; neither project imports or
+wraps the other provider.
+
+The default optimized release path may remain `sfn/codegen-llvm` indefinitely.
+The native provider can satisfy capability auditability and fast-dev goals
+without becoming the performance oracle. Conversely, a clang-independent LLVM
+release path does not satisfy the native project's no-LLVM or sealed-runtime
+claim. This is the same provider boundary SFEP-0020 reserves:
+`sfn/codegen-llvm` and `sfn/codegen-native` are peers depending on `sfn/ir`, and
+only `sfn/compiler` owns external tools and final linking.
 
 ## 6. Alternatives considered
 
-**Keep SFEP-0015 and fact-correct it in place.** Rejected. It failed SFEP-0001
-§6 on five required sections, and 65% of its body was an IR contract belonging to
-SFEP-0059. Correcting the facts would have left a document whose genre still
-mismatched its filing and whose length hid its normative content — the exact
-condition that let the seam mismatch in §2 go unnoticed through several
-revisions.
+**Keep clang for object emission but invoke linkers directly.** Rejected. It
+leaves every first-party LLVM module dependent on a C compiler driver and does
+not provide a coherent tool/cache identity.
 
-**Make `Backend` the real provider seam by widening it.** Rejected. Widening
-`assemble` to accept either LLVM text or a native module makes the interface a
-tagged union of two providers' internals, which is how LLVM assumptions smeared
-across 137 files in the first place. SFEP-0020's capsule boundary is enforced by
-import tests and requires no such union. Keeping `Backend` narrow — external tool
-invocation only — is what lets both providers exist without either knowing about
-the other.
+**Call `llc` directly on `.ll` and omit `llvm-as`/`opt`.** Rejected. Although
+`llc` accepts textual IR, the shortcut erases the validation boundary and does
+not reproduce clang O2's middle-end optimization intent.
 
-**Bind the LLVM C-API now as the provider.** Rejected as a priority, not as a
-design. Under §3.2 it is simply a second provider behind `sfn/codegen-llvm` and
-conflicts with nothing, but it pins Sailfin's ABI to a specific LLVM version and
-deepens the dependency being reduced. It should not precede the Assemble and
-syscall work.
+**Let each LLVM executable resolve independently.** Rejected. Mixed LLVM majors
+can accept different bitcode, flags, targets, or object behavior and make a
+cache fingerprint meaningless.
 
-**Bind Cranelift instead of building a native provider.** Rejected for the
-tier-1 sealed path. SFEP-0016 §3.4 makes Cranelift's output a digest-vetted
-foreign object — permanently part of the trusted computing base and permanently
-incapable of yielding a *fully sealed* binary. It also trades LLVM-dependence for
-Cranelift-dependence plus an FFI surface. It remains a legitimate design
-reference.
+**Use `ld64.lld` on Darwin.** Rejected for the supported default. Apple `ld`
+and the active SDK/deployment contract are the release-compatibility oracle.
+`ld64.lld` remains a possible separately qualified linker provider, not an
+ambient substitute.
 
-**Drop the role table and track "percent independent."** Rejected. A single
-scalar is what allowed a shipped tier-1 link advance to coexist with a design
-record claiming clang still drove the link. Per-role, per-target accounting is
-the smallest structure that makes drift visible.
+**Treat missing prerequisites as a reason to retry clang.** Rejected. A hidden
+provider change invalidates ownership, diagnostics, and cache/provenance claims.
+
+**Require all `c-sources` to be clang-free.** Rejected. Foreign C is explicitly
+outside the first-party source/tool claim. Requiring a bundled C compiler would
+expand the project without improving pure Sailfin builds.
+
+**Make `Backend` the code-generation provider seam.** Rejected. Its current
+shape is driver/tool invocation over LLVM text and cannot express a pure native
+provider. SFEP-0020's capsule boundary is enforced and provider-neutral.
+
+**Replace LLVM with the native backend in this project.** Rejected. It conflicts
+with the project's bounded goal and would couple a cross-platform distribution
+dependency cleanup to a separate, longer instruction-selection/object-emission
+arc.
 
 ## 7. Stage1 readiness mapping
 
-This proposal changes toolchain structure and reporting discipline, not language
-behaviour. The checklist is interpreted as preservation, following SFEP-0020 §7.
+This proposal changes toolchain structure and reporting, not Sailfin language
+semantics. The design is complete; implementation remains intentionally
+pending while the proposal is Draft.
 
-- [x] Parses — no language surface change.
+- [x] Parses — no language syntax change.
 - [x] Type-checks / effect-checks — no effect semantics change (§4).
 - [x] Emits valid `.sfn-asm` — unchanged.
-- [x] Lowers to LLVM IR — unchanged; LLVM remains the Select owner.
-- [ ] Regression coverage — §8; the role-claim and provider-boundary guards do
-      not exist yet.
-- [x] Self-hosts — the shipped direct-link path self-hosts today.
-- [ ] `sfn fmt --check` clean — pending the `backend.sfn` rescoping in §3.2.
-- [ ] Documented in `docs/status.md` — pending; the seam description at
-      `docs/status.md:416` is currently stale per §2.
+- [x] Lowers to LLVM IR — existing provider remains the production basis.
+- [ ] Regression coverage — the differential, resolver, linker, no-clang, and
+      release gates in §8 are implementation work.
+- [ ] Self-hosts under this contract — current seed may still require clang
+      (§5.1).
+- [ ] `sfn fmt --check` clean — applies to implementation leaves.
+- [x] Design status documented — `docs/backend-independence.md` and
+      `docs/status.md` distinguish current state from this destination.
 
-The proposal stays `Draft` until the owner gates §3.2, §3.4, and §3.5, and
-`Accepted` does not become `Implemented` until the role table is the reported
-accounting unit and its guards are green.
+The SFEP stays Draft until review accepts this provider contract. It becomes
+Implemented only after the complete four-platform claim gate and
+clang-independent seed/deletion ratchet pass; landing one provider or linker
+leaf is not sufficient.
 
 ## 8. Test plan
 
-**Already covered** — the direct-link path has real regression coverage:
-`compiler/tests/e2e/direct_link_test.sfn`,
-`compiler/tests/unit/direct_link_argv_test.sfn`, and
-`compiler/tests/e2e/sailfin_trace_link_test.sfn` (asserts the final link is a
-direct `ld.lld` invocation).
+The implementation project must provide these layers:
 
-**To add:**
+- **Structured unit tests:** coherent LLVM-family/root/PATH/version resolution,
+  target/object probes, exact O0/O2 argv, artifact routing, cache namespace and
+  fingerprint changes, each platform link argv/prerequisite resolver, response
+  files, and deterministic tool-role JSON.
+- **Failure classification:** missing/skewed tool family, invalid IR,
+  optimization/lowering failure, unsupported triple/object, missing or mixed
+  loader/SDK/CRT/startup/import library, authoritative override failure, absent
+  foreign compiler, and poisoned clang.
+- **Differential execution:** recorded clang oracle versus the LLVM pipeline
+  for numerical behavior, ABI/COMDAT, exceptions/unwind, TLS, atomics,
+  concurrency, filesystem/network-visible effects, and O0/O2 determinism.
+- **Performance oracle:** three-run median compiler/consumer benchmarks and
+  image-size comparisons under §3.5's thresholds on each supported target.
+- **Direct-link integration:** program, test, runtime, self-host, response-file,
+  packaging, and installed-toolchain layouts through the single dispatcher.
+- **Native fixed points:** Linux x86-64, Linux aarch64, macOS arm64, and Windows
+  x86-64 with clang absent/poisoned, preserving tool-role and attempted-spawn
+  evidence.
+- **Release and seed:** downloaded-asset smoke on all four targets, then clean
+  bootstrap and full self-host verification from the newly pinned seed.
+- **Permanent ratchet:** static executable-reference census plus the dynamic
+  native cold matrix, with narrow reviewed exceptions for foreign C and
+  optional test oracles only.
 
-- **Role-owner reporting.** A unit test that the resolved owner of each role is
-  reported per target, and an e2e test that a fallback to clang emits its traced
-  reason rather than degrading silently (§3.1 rule 3).
-- **Provider boundary.** Under SFEP-0020's boundary-test family, assert that a
-  codegen capsule imports no driver, filesystem, or process module, and that
-  `sfn/codegen-native`'s slot — once populated — takes no dependency
-  `sfn/codegen-llvm` does not.
-- **`assemble` input neutrality.** A unit guard that `Backend.assemble` receives
-  an artifact reference and not provider-specific text, so a second provider
-  cannot be blocked by the signature again (§3.2).
-- **Differential oracle.** Per SFEP-0059 §10.9, any construct handled by a second
-  provider is compared against the LLVM path on the same source fixture: same
-  exit status, stdout, stderr, and externally visible state on Linux x86-64.
-  Object bytes, symbol ordering not fixed by the runtime ABI, and optimization
-  quality are not equality requirements.
-- **Syscall contract.** A guard that `syscall1`..`syscall6` remain rejected
-  outside `runtime/sfn/platform/syscall_linux.sfn`, so §3.5's chokepoint claim
-  cannot erode once that module exists.
+Each implementation leaf updates `docs/status.md` when its behavior becomes the
+default for a target. The tracker reports partial progress per role/target and
+never rounds a green cross-target test up to native support.
 
 ## 9. References
 
-- **SFEP-0020** — Role-Oriented Compiler Capsules (the provider seam; gains the
-  `sfn/codegen-native` slot per §3.2)
-- **SFEP-0059** — Typed SSA Activation, incl. the normative v0 contract (§10) and
-  the differential-testing seams (§10.9)
-- **SFEP-0060** — The Owned Syscall Layer (Axis 3; the consumer of the shipped
-  primitive in §3.5)
-- **SFEP-0016** — The Capability-Sealed Runtime (the link-time admission rule;
-  dependency order corrected by §3.5)
-- **SFEP-0025** — Native Runtime Architecture (the `extern fn` contract)
-- **SFEP-0006** — Unified Build Architecture (build-cost analysis)
-- **SFEP-0003** — The Toolchain Surface (`sfn emit` output contracts)
-- `docs/backend-independence.md` — the axis taxonomy, cost argument, and staging
-- `docs/proposals/design-notes/1112-backend-interface-seam.md` — the original
-  seam design note
+- [Cross-Platform Clang Independence Project](https://linear.app/sailfin/project/cross-platform-clang-independence-baeafe4f0a9a)
+- **SFEP-0020** — Role-Oriented Compiler Capsules (provider boundary)
+- **SFEP-0059** — Typed SSA Activation (verified-IR and differential seams)
+- **SFEP-0060** — The Owned Syscall Layer (orthogonal libc/syscall axis)
+- **SFEP-0016** — The Capability-Sealed Runtime
+- **SFEP-0025** — Native Runtime Architecture
+- `docs/backend-independence.md` — living architecture tracker
+- `docs/status.md` — shipped state
+- `.claude/rules/seed-dependency.md` — compiler/runtime seed policy
+- [LLVM `llvm-as` command guide](https://llvm.org/docs/CommandGuide/llvm-as.html)
+- [LLVM `opt` command guide](https://llvm.org/docs/CommandGuide/opt.html)
+- [LLVM `llc` command guide](https://llvm.org/docs/CommandGuide/llc.html)
+- [LLD Windows support](https://lld.llvm.org/windows_support.html)
+- [Microsoft command-line build tools](https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line)
 - Retired: `docs/proposals/archive/0015-llvm-independence.md`
-- Prior art: Go's owned backend (safepoints and stack maps as the motivation),
-  Zig's self-hosted backend, Cranelift (fast-tier philosophy)

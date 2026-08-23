@@ -1,6 +1,6 @@
 # Toolchain independence — architecture tracker
 
-Updated: 2026-08-05.
+Updated: 2026-08-23.
 
 This document is the **living tracker** for Sailfin's long arc away from a
 borrowed toolchain: which parts of the path from source text to a running
@@ -32,7 +32,7 @@ in citations across the repo.
 | Axis | Goal | State |
 |---|---|---|
 | **1 — C-source elimination** | No `.c` in the runtime; every line we author is Sailfin | **Done.** `runtime/native/` deleted (SFEP-0025) |
-| **2 — Toolchain independence** | No borrowed toolchain in the codegen and link path | **Partial.** Link is owned on Linux; assemble is not (§2) |
+| **2 — Toolchain independence** | No borrowed toolchain in the codegen and link path | **Partial.** Linux has a direct-link path with fallback; all supported targets still require clang for object emission (§2) |
 | **3 — libc independence** | Reach the kernel directly, not through libc | **Primitive shipped, consumer unwritten** (§2) |
 
 Axis 1 finished on its own terms and deliberately kept libc: SFEP-0025's contract
@@ -68,31 +68,45 @@ each role." Measured against the tree on 2026-08-05:
 |---|---|---|
 | Lex / parse / typecheck / effect-check | **Sailfin** | `compiler/src/` |
 | Mid-level IR | **Split.** `.sfn-asm` is the live artifact; typed SSA exists but is off the build path | `native_ir.sfn` (342); `typed_ssa.sfn` (1160) + `_verify` (993) + `_render` (366) + `_produce` (284) |
-| Instruction selection, register allocation, optimization | **LLVM** | `compiler/capsules/codegen-llvm/src/` — 137 files, 62,830 lines of textual-IR printer |
+| Instruction selection, register allocation, optimization | **LLVM through clang's driver** | `compiler/capsules/codegen-llvm/src/` — 137 files, 62,830 lines of textual-IR printer |
 | Assemble (`.ll` → `.o`) | **clang, 100%** | `compiler/src/build/clang_argv.sfn` |
-| Link | **Sailfin on Linux x86-64/aarch64**, clang elsewhere | `compiler/src/build/direct_link.sfn` (339) |
+| Link | **Sailfin direct route with clang fallback on Linux x86-64/aarch64; clang elsewhere** | `compiler/src/build/direct_link.sfn` (339) |
 | Raw syscall emission | **Sailfin primitive, no consumer** | `compiler/capsules/codegen-llvm/src/syscall.sfn` (156) |
 | Platform access | **libc/POSIX via `extern fn`** | 528 `extern fn` under `runtime/` |
 | TLS / crypto | **Sailfin (native TLS 1.3, SFEP-0036/SFEP-0048, SFN-341)** | `runtime/sfn/platform/tls_record.sfn` |
 
 Three entries in that table are routinely misread, so they are stated plainly:
 
-**Link is already ours on tier-1.** `resolve_direct_ld_lld` builds a bare
+**Linux already has a Sailfin-authored direct-link route.**
+`resolve_direct_ld_lld` builds a bare
 `ld.lld` invocation — CRT objects, `-dynamic-linker`, search dirs, libc tail — with
 no clang in the argv, and `LlvmTextBackend.link` tries it *first*. It is gated on
 target OS, arch, `SAILFIN_LINKER`, `ld.lld` on `PATH`, and every CRT object being
 present on disk; any miss falls back to clang with a traced reason, never
-silently. This means the frequently repeated claim "Sailfin shells out to clang to
-produce a binary" is now wrong for the tier-1 target.
+silently. This means many Linux invocations link without clang, but the fallback
+prevents the required-owned claim until SFEP-0066's fail-closed gate lands.
 
-**The remaining clang role is assemble, and dropping it does not drop LLVM.**
-Every `.ll` → `.o` still goes through `clang -c`. Because what Sailfin owns is a
-textual-IR *printer* and not a code generator, the only seam that exists without
-linking LLVM as a library is textual assembly — which means the next step
-consumes the output of `llc -S`. That trades the clang *driver* for another LLVM
-*tool*. It is real progress on hermeticity and on the assembler/object-format
-muscle; it is not toolchain independence, and SFEP-0066 records the distinction
-so nobody reports it as one.
+**The remaining first-party clang roles are LLVM validation/object emission and
+non-Linux link driving.** Every `.ll` → `.o` still goes through `clang -c`.
+SFEP-0066 replaces that driver route with a coherent
+`llvm-as` → `opt` → `llc -filetype=obj` family: LLVM keeps optimization,
+instruction selection, register allocation, MC encoding, and object writing,
+while Sailfin owns tool/target selection, cache identity, publication, and
+diagnostics. This removes clang, not LLVM, and is separate from the
+seal-sufficient `sfn/codegen-native` provider.
+
+The destination native ownership matrix is explicit and fail-closed:
+
+| Target | Select/object owner | Link provider invoked directly by Sailfin |
+|---|---|---|
+| Linux x86-64 / aarch64 | coherent LLVM CLI family | `ld.lld` |
+| macOS arm64 | coherent LLVM CLI family | Apple `ld` with explicit SDK/deployment inputs |
+| Windows x86-64 MSVC | coherent LLVM CLI family | `lld-link` with explicit UCRT/MSVC/SDK inputs |
+
+This table is the SFEP-0066 destination, not shipped status. A target earns the
+clang-independent claim only after a native cold fixed point and released-asset
+smoke with clang unavailable; a missing tool, SDK, CRT, startup object, loader,
+or library must produce a Sailfin diagnostic rather than a clang fallback.
 
 **The raw-syscall primitive already ships.** `llvm/syscall.sfn` recognises
 `syscall1`..`syscall6` and emits a register-constrained
@@ -191,7 +205,7 @@ So the accurate accounting is:
 
 | Conquest | Buys the seal | Buys otherwise |
 |---|---|---|
-| Owned link (Axis 2, done on tier-1) | the admission rule has somewhere to live | hermeticity, determinism |
+| Sailfin-authored direct link (available on Linux; required-owned only after fallback removal) | the admission rule has somewhere to live | hermeticity, determinism |
 | Owned syscall layer (Axis 3) | **the enforcement chokepoint** | static binaries |
 | `-nostdlib` static link | the *fully sealed* claim | true hermeticity |
 | Native backend, seal-sufficient | metadata survives lowering — **auditability** | independence from `llc` |
@@ -209,16 +223,17 @@ as a blocker for something it does not block.
 Each is independently valuable and none needs a flag day. This is a dependency
 sketch, not a schedule; Linear owns sequencing.
 
-- **Own the link** — *done on Linux x86-64/aarch64.* macOS and Windows keep the
-  clang path until their object/startup/library contracts have dedicated work.
+- **Require the direct link** — Linux x86-64/aarch64 have a direct `ld.lld`
+  route but still fall back to clang. Make it fail closed, and add direct Apple
+  `ld` and `lld-link` contracts for macOS arm64 and Windows x86-64.
 - **Make typed SSA load-bearing** — the model, verifier, and renderer exist; the
   producer emits signatures only and nothing consumes it. SFEP-0059 owns this,
   including the normative contract (§10 there). Worth doing even if a native
   backend never ships: it de-strings the LLVM path and gives the effect and
   ownership analyses a real substrate.
-- **Own the assembler and object emission** — an x86-64 encoder plus an ELF
-  writer, consuming textual assembly. Establishes the assembler/object-format
-  muscle without isel or regalloc risk. Note the `llc` wrinkle in §2.
+- **Remove clang from LLVM object emission** — route every first-party LLVM
+  input through the coherent `llvm-as`/`opt`/`llc -filetype=obj` provider on
+  all supported targets. LLVM remains the owner of MC/object writing.
 - **Own the syscall layer** — write `runtime/sfn/platform/syscall_linux.sfn`
   against the shipped primitive. SFEP-0060 owns the design. Independent of the
   items above.

@@ -888,8 +888,10 @@ here.
   roles no longer share one invocation. A read-only shared object cache falls
   back to ephemeral objects beside the IR, never to raw `.ll` at final link.
   **Independence status:** the external-tool invocation seam and the
-  object-only link boundary are complete; Link is owned on Linux
-  x86-64/aarch64 (`docs/backend-independence.md` §7). Typed SSA's L1
+  object-only link boundary are complete; Linux x86-64/aarch64 have a
+  Sailfin-authored direct-link route, but its clang fallback means Link is not
+  yet required-owned under SFEP-0066's claim rule
+  (`docs/backend-independence.md` §7). Typed SSA's L1
   declaration producer is also reachable through
   `sfn emit typed-ssa`: scalar signatures, linkage, and canonical effect sets
   are parsed from `.sfn-asm`, verified, and rendered deterministically; an
@@ -908,6 +910,17 @@ here.
   self-hosting are not shipped. #343's mold/lld selection still runs behind
   clang on the fallback path and is not itself an owned link path
   (`docs/backend-independence.md` §7).
+  **Proposed destination contract (SFEP-0066 Draft, not shipped):** the supported
+  native matrix is Linux x86-64, Linux aarch64, macOS arm64, and Windows
+  x86-64. First-party LLVM inputs will use one coherent
+  `llvm-as` → `opt` → `llc -filetype=obj` family; Sailfin will invoke
+  `ld.lld`, Apple `ld`, or `lld-link` directly with explicit
+  sysroot/SDK/CRT/startup/library inputs and fail closed instead of falling back
+  to clang. Foreign manifest `c-sources` remain an optional configured external
+  compiler boundary and are outside the first-party clang-free claim. No target
+  is reported clang-independent until its native cold fixed point and released
+  asset both pass with clang unavailable, followed by a clang-independent seed
+  pin before compatibility code is deleted.
 - **Native TLS 1.3 (SFEP-0036/SFEP-0048, SFN-341).** The `sfn/crypto` capsule
   and `runtime/sfn/platform/tls_record.sfn` replace the OpenSSL-linked TLS
   stack; the toolchain links no `-lssl`/`-lcrypto`, and OpenSSL is no longer a
