@@ -12,6 +12,9 @@
 //
 // Each test uses its own `/tmp` namespace so parallel runs don't collide,
 // and cleans up on exit.
+import { remove_all } from "sfn/fs";
+import { scratch_root } from "sfn/test";
+
 import {
     CacheKey,
     cache_store_artifact,
@@ -28,15 +31,12 @@ import { CapsuleSource } from "../../src/capsule_resolver/types";
 // Fixture helpers
 // --------------------------------------------------------------
 fn _ssc_tmp_root(label: string) -> string ![io] {
-    let root = "/tmp/sfn_stage_shared_cache_test_" + label;
-    process.run(["rm", "-rf", root]);
-    process.run(["mkdir", "-p", root]);
-    return root;
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn_stage_shared_cache_test_" + label + "_");
 }
 
-fn _ssc_cleanup(path: string) ![io] {
-    process.run(["rm", "-rf", path]);
-}
+fn _ssc_cleanup(path: string) ![io] { remove_all(path); }
 
 fn _ssc_source(path: string, slug: string) -> CapsuleSource {
     return CapsuleSource {

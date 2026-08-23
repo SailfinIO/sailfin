@@ -6,19 +6,19 @@
 // already has for `cache_key_for`, scoped to `stage_cache_key_for`'s
 // narrower input set (no dep manifests — see the function's doc comment
 // for why).
+import { remove_all } from "sfn/fs";
+import { scratch_root } from "sfn/test";
+
 import { cache_key_for, is_valid_digest, stage_cache_key_for } from "../../src/build_cache";
 import { SourceIdentityOwner, source_identity_for, source_role_library } from "../../src/module_paths";
 
 fn _sck_tmp_root(label: string) -> string ![io] {
-    let root = "/tmp/sfn_stage_cache_key_test_" + label;
-    process.run(["rm", "-rf", root]);
-    process.run(["mkdir", "-p", root]);
-    return root;
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn_stage_cache_key_test_" + label + "_");
 }
 
-fn _sck_cleanup(path: string) ![io] {
-    process.run(["rm", "-rf", path]);
-}
+fn _sck_cleanup(path: string) ![io] { remove_all(path); }
 
 fn _sck_write(path: string, content: string) ![io] {
     fs.writeFile(path, content);
@@ -55,8 +55,8 @@ test "stage_cache_key_for: physical move with stable manifest identity reuses di
     let scratch = _sck_tmp_root("manifest_identity_move");
     let old_root = scratch + "/old/src";
     let new_root = scratch + "/new/src";
-    process.run(["mkdir", "-p", old_root]);
-    process.run(["mkdir", "-p", new_root]);
+    fs.createDirectory(old_root, true);
+    fs.createDirectory(new_root, true);
     let old_source = old_root + "/mod.sfn";
     let new_source = new_root + "/mod.sfn";
     _sck_write(old_source, "fn hello() -> string { return \"world\"; }");
@@ -84,7 +84,7 @@ test "stage_cache_key_for: physical move with stable manifest identity reuses di
 test "stage_cache_key_for: manifest rename invalidates digest" ![io] {
     let scratch = _sck_tmp_root("manifest_identity_rename");
     let source_root = scratch + "/src";
-    process.run(["mkdir", "-p", source_root]);
+    fs.createDirectory(source_root, true);
     let source = source_root + "/mod.sfn";
     _sck_write(source, "fn hello() -> string { return \"world\"; }");
     let first = source_identity_for(source, SourceIdentityOwner {

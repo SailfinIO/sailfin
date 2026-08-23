@@ -63,11 +63,14 @@ test "lowering: runtime/sfn/clock.sfn wraps @nanosleep in an EINTR loop (#397/#6
     // …and the EINTR-resume machinery occurs AFTER the call: the bounded
     // retry's conditional back-edge (`br i1`, #693) and the errno read
     // via the host-aware locator sentinel (#887), dereferenced by the
-    // pointer-read load (#875). Accept either host spelling of the
-    // locator (`@__errno_location` on glibc, `@__error` on Darwin).
+    // pointer-read load (#875). Accept any of the three host spellings of
+    // the locator: `@__errno_location` on glibc, `@__error` on Darwin, and
+    // `@_errno` on the MinGW target (`intrinsic.errno_location.mingw`,
+    // compiler/capsules/codegen-llvm/src/runtime_helpers/registry_platform.sfn).
     assert index_of(after_call, "br i1") >= 0;
     let has_locator = index_of(after_call, "@__errno_location(") >= 0
-        || index_of(after_call, "@__error(") >= 0;
+        || index_of(after_call, "@__error(") >= 0
+        || index_of(after_call, "@_errno(") >= 0;
     assert has_locator;
     assert index_of(after_call, "load i32, i32* %") >= 0;
 }

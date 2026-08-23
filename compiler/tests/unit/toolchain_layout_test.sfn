@@ -7,6 +7,7 @@
 // (fail-closed fetch/verify) or is skipped without a local server. Driving
 // this helper directly needs no network, no release signature, and no
 // binary fixture — it operates on a hand-built fake extract root.
+import { host_exe_name } from "../../src/build/target";
 import { toolchain_lay_out_store_entry } from "../../src/cli/commands/toolchain";
 
 // Same scratch shape as the sibling `toolchain_alias_test.sfn`.
@@ -57,7 +58,7 @@ test "toolchain layout: a complete entry lands the binary, alias, runtime, and m
     // The `sfn` alias exists and is either a relative symlink to
     // "sailfin" or, on a host where `fs.symlink` refuses, a
     // byte-identical copy — `_toolchain_link_alias`'s two legs.
-    let alias_path = store_dir + "/sfn";
+    let alias_path = host_exe_name(store_dir + "/sfn");
     assert fs.exists(alias_path);
     let link_target = fs.read_link(alias_path);
     if link_target.length > 0 { assert link_target == "sailfin"; } else {
@@ -117,8 +118,9 @@ test "toolchain layout: an alias path that cannot be replaced fails closed with 
 
     // Pre-create the alias path as a non-empty directory so nothing can
     // replace it with a file or a link.
-    fs.createDirectory(store_dir + "/sfn", true);
-    fs.writeFile(store_dir + "/sfn/blocker", "occupying the alias path");
+    let blocker_dir = host_exe_name(store_dir + "/sfn");
+    fs.createDirectory(blocker_dir, true);
+    fs.writeFile(blocker_dir + "/blocker", "occupying the alias path");
 
     assert ! toolchain_lay_out_store_entry(root, store_dir, bin_path, expected);
     assert ! fs.exists(store_dir + "/.sha256");

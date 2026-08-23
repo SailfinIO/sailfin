@@ -10,6 +10,9 @@
 //
 // Each test uses its own `/tmp` namespace so parallel runs don't collide and
 // cleans up on exit.
+import { remove_all } from "sfn/fs";
+import { scratch_root } from "sfn/test";
+
 import { resolve_workspace_lock_entries } from "../../src/capsule_resolver/capability";
 import { _cr_path_join } from "../../src/capsule_resolver/paths";
 import { _LockEntry } from "../../src/lock";
@@ -20,20 +23,19 @@ import { _LockEntry } from "../../src/lock";
 fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
 
 fn _wl_tmp_root(label: string) -> string ![io] {
-    let root = "/tmp/sfn_ws_lock_test_" + label;
-    process.run(["rm", "-rf", root]);
-    process.run(["mkdir", "-p", root]);
-    return root;
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn_ws_lock_test_" + label + "_");
 }
 
-fn _wl_cleanup(path: string) ![io] { process.run(["rm", "-rf", path]); }
+fn _wl_cleanup(path: string) ![io] { remove_all(path); }
 
 // Create `<root>/<member>/capsule.toml` with the given name + version.
 // An empty name omits the `name` key so the member parses as "unnamed"
 // and must be skipped.
 fn _wl_member(root: string, member: string, name: string, version: string) ![io] {
     let dir = _cr_path_join(root, member);
-    process.run(["mkdir", "-p", dir]);
+    fs.createDirectory(dir, true);
     let mut body: string = "[capsule]\n";
     if name.length > 0 { body = body + "name = \"" + name + "\"\n"; }
     body = body + "version = \"" + version + "\"\n";
@@ -45,7 +47,7 @@ fn _wl_member(root: string, member: string, name: string, version: string) ![io]
 // (unquoted — the raw TOML form a member author writes).
 fn _wl_member_inherit(root: string, member: string, name: string) ![io] {
     let dir = _cr_path_join(root, member);
-    process.run(["mkdir", "-p", dir]);
+    fs.createDirectory(dir, true);
     let body = "[capsule]\nname = \"" + name
         + "\"\nversion = { workspace = true }\n";
     fs.writeFile(_cr_path_join(dir, "capsule.toml"), body);

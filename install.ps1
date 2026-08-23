@@ -418,6 +418,18 @@ Log "Using version: $Version"
 $TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "sailfin-install-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
 
+# Every abnormal exit from here down is a terminating error: `Die` throws, and
+# `$ErrorActionPreference = "Stop"` promotes cmdlet failures to throws too. A
+# `trap` therefore covers the same ground a script-wide try/finally would, and
+# it does so without re-indenting the body -- which matters more than style
+# here, because four of the fail-closed messages below are here-strings whose
+# terminators must stay at column 0 and whose bodies are literal text.
+# `break` re-throws after cleanup, so the installer still exits non-zero.
+trap {
+    Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
+    break
+}
+
 $DownloadHeaders = @{
     "Accept" = "application/octet-stream"
 }

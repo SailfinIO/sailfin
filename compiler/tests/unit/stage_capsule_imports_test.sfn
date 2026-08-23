@@ -17,6 +17,9 @@
 //
 // Each test uses its own `/tmp` namespace so parallel runs don't collide,
 // and cleans up on exit.
+import { remove_all } from "sfn/fs";
+import { scratch_root } from "sfn/test";
+
 import { BuildCacheConfig, sha256_of_file } from "../../src/build_cache";
 import { _cr_ensure_dir, _cr_import_context_root } from "../../src/capsule_resolver/paths";
 import { capsule_origin_local, capsule_origin_workspace } from "../../src/capsule_resolver/provenance";
@@ -35,15 +38,12 @@ import { CapsuleSource } from "../../src/capsule_resolver/types";
 // Fixture helpers
 // --------------------------------------------------------------
 fn _sct_tmp_root(label: string) -> string ![io] {
-    let root = "/tmp/sfn_stage_cache_test_" + label;
-    process.run(["rm", "-rf", root]);
-    process.run(["mkdir", "-p", root]);
-    return root;
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn_stage_cache_test_" + label + "_");
 }
 
-fn _sct_cleanup(path: string) ![io] {
-    process.run(["rm", "-rf", path]);
-}
+fn _sct_cleanup(path: string) ![io] { remove_all(path); }
 
 // These tests exercise the local `.srchash`-gated cache exclusively; the
 // SFN-861 shared cache is covered by `stage_cache_key_test.sfn`.
@@ -213,8 +213,8 @@ test "capsule resolver: splitting a dependency module changes its dependents' de
     // Perform the split: delete `dep.sfn`, replace with `dep/mod.sfn`
     // (re-exporting) + `dep/impl.sfn` (the real definition). `a.sfn`
     // is left byte-identical.
-    process.run(["rm", "-f", dep_path]);
-    process.run(["mkdir", "-p", root + "/dep"]);
+    fs.deleteFile(dep_path);
+    fs.createDirectory(root + "/dep", true);
     let dep_mod_path = root + "/dep/mod.sfn";
     let dep_impl_path = root + "/dep/impl.sfn";
     fs.writeFile(dep_impl_path, "export fn helper() -> int { return 1; }\n");

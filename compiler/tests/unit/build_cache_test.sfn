@@ -23,7 +23,8 @@
 // because Sailfin's runtime has no `setenv` primitive — the env
 // var contract is intentionally read-only. Each test cleans up
 // its tmp tree on exit.
-import { expect_eq_bool, expect_eq_str } from "sfn/test";
+import { remove_all } from "sfn/fs";
+import { expect_eq_bool, expect_eq_str, scratch_root } from "sfn/test";
 
 import {
     BuildCacheConfig,
@@ -61,16 +62,16 @@ import { _strip_build_metadata } from "../../src/version";
 // --------------------------------------------------------------
 // Fixture helpers
 // --------------------------------------------------------------
-// Each test block gets its own tmp namespace so parallel test
-// runs don't collide on `/tmp/sfn_build_cache_test_<X>`.
+// Each test block gets its own tmp namespace under the portable
+// scratch root (SFN-978); `mkdtemp` mints a unique directory per
+// call so parallel test runs never collide.
 fn _test_tmp_root(label: string) -> string ![io] {
-    let root = "/tmp/sfn_build_cache_test_" + label;
-    process.run(["rm", "-rf", root]);
-    process.run(["mkdir", "-p", root]);
-    return root;
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn_build_cache_test_" + label + "_");
 }
 
-fn _cleanup(path: string) ![io] { process.run(["rm", "-rf", path]); }
+fn _cleanup(path: string) ![io] { remove_all(path); }
 
 fn _write_file(path: string, content: string) ![io] {
     fs.writeFile(path, content);
@@ -435,8 +436,8 @@ test "build_cache: test_bin_cache_key changes when compiler identity changes" ![
     let key1 = test_bin_cache_key(test_src, [dep_ll], nt, identity_a, "rt0", "[\"-O0\"]", "tbk_id_1", "x86_64-unknown-linux-gnu");
     let key2 = test_bin_cache_key(test_src, [dep_ll], nt, identity_b, "rt0", "[\"-O0\"]", "tbk_id_2", "x86_64-unknown-linux-gnu");
     assert key1.digest != key2.digest;
-    process.run(["rm", "-rf", bin_a]);
-    process.run(["rm", "-rf", bin_b]);
+    remove_all(bin_a);
+    remove_all(bin_b);
     _cleanup(scratch);
 }
 
@@ -444,8 +445,8 @@ test "build_cache: test-bin compiler identity is content-addressed" ![io] {
     let bin_a = _identity_tmp("test_bin_stable_a", "same-compiler-bytes\n");
     let bin_b = _identity_tmp("test_bin_stable_b", "same-compiler-bytes\n");
     assert test_bin_compiler_identity("0.7.0", bin_a) == test_bin_compiler_identity("0.7.0", bin_b);
-    process.run(["rm", "-rf", bin_a]);
-    process.run(["rm", "-rf", bin_b]);
+    remove_all(bin_a);
+    remove_all(bin_b);
 }
 
 test "build_cache: test-bin compiler identity fails closed" ![io] {
@@ -579,7 +580,7 @@ test "build_cache: cache_store + cache_lookup_complete round-trips" ![io] {
     // Source artifacts — the four files the driver would produce
     // for one module's compile.
     let src_dir = scratch + "/build";
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     let sfn_asm = src_dir + "/ir.sfn-asm";
     let layout = src_dir + "/layout.manifest";
     let ll = src_dir + "/mod.ll";
@@ -643,7 +644,7 @@ test "build_cache: cache_store returns false on invalid digest without polluting
     let scratch = _test_tmp_root("invalid_store");
     let cache_root = scratch + "/cache/v1";
     let src_dir = scratch + "/build";
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     let sfn_asm = src_dir + "/ir.sfn-asm";
     let layout = src_dir + "/layout.manifest";
     let ll = src_dir + "/mod.ll";
@@ -689,7 +690,7 @@ test "build_cache: cache_lookup_complete returns false on partial entry" ![io] {
         digest: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
     };
     let entry_dir = cache_root + "/fe/" + key.digest;
-    process.run(["mkdir", "-p", entry_dir]);
+    fs.createDirectory(entry_dir, true);
 
     // Populate only three of the four expected artifacts.
     let paths = cache_paths_for(cache_root, key);
@@ -714,7 +715,7 @@ test "build_cache: cache_store_artifact + cache_lookup_artifact round-trip ll" !
     let scratch = _test_tmp_root("artifact_ll");
     let cache_root = scratch + "/cache/v1";
     let src_dir = scratch + "/build";
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     let ll = src_dir + "/mod.ll";
     _write_file(ll, "; ModuleID = 'foo'");
 
@@ -739,7 +740,7 @@ test "build_cache: cache_copy_artifact_to materialises cached ll" ![io] {
     let scratch = _test_tmp_root("artifact_copy");
     let cache_root = scratch + "/cache/v1";
     let src_dir = scratch + "/build";
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     let original = src_dir + "/mod.ll";
     _write_file(original, "; ModuleID = 'cached'");
 
@@ -766,7 +767,7 @@ test "build_cache: cache_copy_artifact_to creates dst dir on demand" ![io] {
     let scratch = _test_tmp_root("artifact_copy_mkdir");
     let cache_root = scratch + "/cache/v1";
     let src_dir = scratch + "/build";
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     let original = src_dir + "/mod.ll";
     _write_file(original, "; ModuleID = 'cached'");
 
@@ -803,7 +804,7 @@ test "build_cache: cache_store_artifact publishes atomically, no temp residue" !
     let scratch = _test_tmp_root("artifact_atomic");
     let cache_root = scratch + "/cache/v1";
     let src_dir = scratch + "/build";
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     let ll = src_dir + "/mod.ll";
     _write_file(ll, "; ModuleID = 'atomic'");
 
@@ -832,7 +833,7 @@ test "build_cache: cache_store publishes four artifacts with no temp residue" ![
     let scratch = _test_tmp_root("store_atomic");
     let cache_root = scratch + "/cache/v1";
     let src_dir = scratch + "/build";
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     let sfn_asm = src_dir + "/ir.sfn-asm";
     let layout = src_dir + "/layout.manifest";
     let ll = src_dir + "/mod.ll";
@@ -872,7 +873,7 @@ test "build_cache: cache_store_artifact rejects unknown kind" ![io] {
     let scratch = _test_tmp_root("artifact_unknown_kind");
     let cache_root = scratch + "/cache/v1";
     let src_dir = scratch + "/build";
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     let f = src_dir + "/anything";
     _write_file(f, "anything");
     let key = CacheKey {
@@ -959,7 +960,7 @@ test "build_cache: empty_build_cache_config defaults are enabled+quiet" {
 test "build_cache: cache_clean wipes the schema-versioned tree" ![io] {
     let scratch = _test_tmp_root("clean_wipe");
     let cache_root = scratch + "/cache/v1";
-    process.run(["mkdir", "-p", cache_root + "/ab/abcdef"]);
+    fs.createDirectory(cache_root + "/ab/abcdef", true);
     let f = cache_root + "/ab/abcdef/mod.ll";
     _write_file(f, "; bytes");
     assert fs.exists(f);
@@ -1030,8 +1031,10 @@ test "is_valid_digest: 64 chars with non-hex letter rejected" {
 // `.dirty` key so a rebuilt compiler busts the cache; tagged and
 // clean-commit stamps stay hash-free (reproducible across machines).
 fn _identity_tmp(label: string, bytes: string) -> string ![io] {
-    let path = "/tmp/sfn_identity_test_" + label;
-    process.run(["rm", "-rf", path]);
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    let dir = fs.mkdtemp(base + "/sfn_identity_test_" + label + "_");
+    let path = dir + "/bin";
     fs.writeFile(path, bytes);
     return path;
 }
@@ -1043,7 +1046,7 @@ test "cache_compiler_identity: dirty stamp mixes in the binary hash" ![io] {
     // The dirty identity must differ from the raw stamp (so two dirty
     // builds at the same commit get distinct cache keys).
     assert identity != raw;
-    process.run(["rm", "-rf", bin]);
+    remove_all(bin);
 }
 
 test "cache_compiler_identity: different binaries yield different identities" ![io] {
@@ -1057,8 +1060,8 @@ test "cache_compiler_identity: different binaries yield different identities" ![
     // fix prevents: a rebuilt compiler must not reuse the prior
     // build's cached IR.
     assert id_a != id_b;
-    process.run(["rm", "-rf", bin_a]);
-    process.run(["rm", "-rf", bin_b]);
+    remove_all(bin_a);
+    remove_all(bin_b);
 }
 
 test "cache_compiler_identity: identical binary content is stable" ![io] {
@@ -1069,8 +1072,8 @@ test "cache_compiler_identity: identical binary content is stable" ![io] {
     // two paths must produce the same identity so a clean rebuild that
     // reproduces the binary still hits the cache.
     assert cache_compiler_identity(raw, bin_a) == cache_compiler_identity(raw, bin_b);
-    process.run(["rm", "-rf", bin_a]);
-    process.run(["rm", "-rf", bin_b]);
+    remove_all(bin_a);
+    remove_all(bin_b);
 }
 
 test "cache_compiler_identity: tagged stamp is left unchanged" ![io] {
@@ -1080,7 +1083,7 @@ test "cache_compiler_identity: tagged stamp is left unchanged" ![io] {
     // identity must stay hash-free — CI cache sharing across machines
     // depends on this.
     assert cache_compiler_identity(raw, bin) == raw;
-    process.run(["rm", "-rf", bin]);
+    remove_all(bin);
 }
 
 test "cache_compiler_identity: clean-commit dev stamp is left unchanged" ![io] {
@@ -1089,7 +1092,7 @@ test "cache_compiler_identity: clean-commit dev stamp is left unchanged" ![io] {
     // `+dev.<hash>` without `.dirty` is reproducible from the commit,
     // so it stays hash-free too.
     assert cache_compiler_identity(raw, bin) == raw;
-    process.run(["rm", "-rf", bin]);
+    remove_all(bin);
 }
 
 test "cache_compiler_identity: empty binary path falls back to raw stamp" ![io] {

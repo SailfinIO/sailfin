@@ -418,9 +418,14 @@ fn _cr_reap_child(handle: int) -> int ![io] {
         let mut read_err: boolean = false;
         if fds.length == 0 {
             // Windows: the accessors are -1 by design and `io.poll_any` is
-            // a -1 stub. Each framed read blocks until a byte or EOF, which
-            // is what keeps this from spinning; termination stays the
-            // both-at-EOF check above.
+            // a -1 stub. Termination stays the both-at-EOF check above.
+            //
+            // This loop carries no deadline, so what bounds it is the
+            // both-at-EOF break, not the read. Since SFN-1092 each read
+            // returns after `PW_FRAMED_POLL_BUDGET_MS` rather than parking
+            // on a silent child, so an idle child costs a ~20 Hz poll here
+            // instead of a parked wait — bounded and cheap, but no longer
+            // the blocking-read anti-spin this note used to claim.
             read_out = !process.handle_stdout_at_eof(handle);
             read_err = !process.handle_stderr_at_eof(handle);
         } else {

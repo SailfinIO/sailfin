@@ -14,18 +14,21 @@
 // before and after a content edit and asserting key (in)equality.
 // The key is content-addressed, not mtime-addressed: a pure
 // rewrite-with-identical-bytes must reproduce the same key.
+import { remove_all } from "sfn/fs";
+import { scratch_root } from "sfn/test";
+
 import { runtime_object_cache_key, runtime_object_cache_key_with_identity } from "../../src/build_cache";
 
-// Each test gets its own tmp namespace so parallel runs don't
-// collide on `/tmp/sfn_c_source_cache_test_<X>`.
+// Each test gets its own tmp namespace under the portable scratch
+// root (SFN-978); `mkdtemp` mints a unique directory per call so
+// parallel runs never collide.
 fn _tmp_root(label: string) -> string ![io] {
-    let root = "/tmp/sfn_c_source_cache_test_" + label;
-    process.run(["rm", "-rf", root]);
-    process.run(["mkdir", "-p", root]);
-    return root;
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn_c_source_cache_test_" + label + "_");
 }
 
-fn _cleanup(path: string) ![io] { process.run(["rm", "-rf", path]); }
+fn _cleanup(path: string) ![io] { remove_all(path); }
 
 // A content edit to the source must change the cache key, so the
 // next build misses and recompiles. This is the exact regression
