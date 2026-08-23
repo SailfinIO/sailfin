@@ -1,0 +1,145 @@
+// compiler/src/toolchain/dispatch.sfn
+//
+// Toolchain floor dispatch. Canonical host-qualified entries are preferred;
+// the flat pre-SFEP-0073 store is a read-only compatibility fallback.
+import { diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
+
+import { _env_flag } from "../build_flags";
+import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../capsule_resolver/toolchain";
+import { CliContext } from "../cli/context";
+import { starts_with, strings_equal, substring } from "../string_utils";
+import { render_terminal_diagnostic } from "../terminal_output";
+import { toolchain_current_host } from "./host";
+import { toolchain_install_to_user_store, toolchain_is_valid_install_version } from "./install";
+import {
+    ToolchainStoreEntry,
+    toolchain_resolve_compatible_store_entry,
+    toolchain_store_diagnostic,
+    toolchain_versions_base
+} from "./store";
+
+fn _dispatch_normalize_ver(version: string) -> string {
+    if version.length == 0 { return ""; }
+    if starts_with(version, "v") {
+        return substring(version, 1, version.length);
+    }
+    return version;
+}
+
+fn _dispatch_work_root() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let temp = env.get("TMPDIR");
+    if temp.length > 0 { return temp; }
+    return "/tmp";
+}
+
+fn _dispatch_knob_is_mode(knob: string) -> boolean {
+    if knob.length == 0 { return true; }
+    if strings_equal(knob, "auto") { return true; }
+    if strings_equal(knob, "local") { return true; }
+    if strings_equal(knob, "off") { return true; }
+    return strings_equal(knob, "0");
+}
+
+fn _print_store_error() -> void ![io] {
+    let empty_lines: string[] = [];
+    print.err(render_terminal_diagnostic(diagnostic_to_diag(toolchain_store_diagnostic(), "toolchain"), empty_lines, "toolchain"));
+}
+
+fn _dispatch_entry(versions_base: string, version: string) -> ToolchainStoreEntry ![io] {
+    return toolchain_resolve_compatible_store_entry(versions_base, toolchain_current_host(), version);
+}
+
+fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![clock, io, net] {
+    let decision: ToolchainDecision = toolchain_decide(entry_hint, ctx.binary_dir);
+    if !decision.pinned || decision.satisfied { return 0; }
+
+    let knob = env.get("SAILFIN_TOOLCHAIN");
+    let knob_off = strings_equal(knob, "off") || strings_equal(knob, "0");
+    if skip_flag || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK") || knob_off {
+        print.err("warning: toolchain mismatch — this project pins "
+            + decision.pin_desc
+            + " ("
+            + decision.pin_source
+            + " [toolchain]) but the running toolchain is "
+            + decision.running_str
+            + "; proceeding (--skip-toolchain-check / SAILFIN_TOOLCHAIN=off)");
+        return 0;
+    }
+
+    let dispatched = env.get("SAILFIN_TOOLCHAIN_DISPATCHED");
+    if dispatched.length > 0 {
+        print.err("error: toolchain dispatch loop — the dispatched toolchain "
+            + dispatched
+            + " still does not satisfy the pin ("
+            + decision.pin_desc
+            + ")");
+        print.err("  the stored toolchain for " + dispatched
+            + " is the wrong version or corrupt");
+        print.err("  reinstall it: sfn toolchain install " + dispatched);
+        return 1;
+    }
+    if strings_equal(knob, "local") {
+        toolchain_print_mismatch(decision);
+        return 1;
+    }
+
+    let mut target = decision.pin_sfn;
+    if !_dispatch_knob_is_mode(knob) { target = knob; }
+    target = _dispatch_normalize_ver(target);
+    if !toolchain_is_valid_install_version(target) {
+        print.err("error: toolchain mismatch and no concrete version to fetch");
+        print.err("  this project pins " + decision.pin_desc + " (" + decision.pin_source
+            + " [toolchain])");
+        print.err("  set SAILFIN_TOOLCHAIN=<version>, or install manually: sfn toolchain install <version>");
+        return 1;
+    }
+
+    let versions_base = toolchain_versions_base();
+    if versions_base.length == 0 {
+        _print_store_error();
+        return 1;
+    }
+    let mut entry = _dispatch_entry(versions_base, target);
+    // A complete legacy entry is used as-is and never promoted, moved, or
+    // marked verified. An explicit install performs the authenticated online
+    // migration into the qualified store.
+    if !entry.ready {
+        let rc = toolchain_install_to_user_store(target, versions_base, _dispatch_work_root());
+        if rc != 0 {
+            print.err("error: could not obtain the pinned toolchain " + target);
+            print.err("  run: sfn toolchain install " + target);
+            return 1;
+        }
+        entry = _dispatch_entry(versions_base, target);
+        if !entry.ready || entry.legacy {
+            print.err("error: the pinned toolchain " + target
+                + " is still not available after install");
+            print.err("  run: sfn toolchain install " + target);
+            return 1;
+        }
+    }
+    if entry.legacy {
+        print.err("warning: dispatching unverified legacy toolchain " + target);
+        print.err("  " + entry.dir);
+        print.err("  run 'sfn toolchain install " + target
+            + "' online to install a verified host-qualified entry");
+    }
+
+    let mut exec_argv: string[] = [entry.binary];
+    let mut i: int = 0;
+    loop {
+        if i >= ctx.orig_args.length { break; }
+        exec_argv.push(ctx.orig_args[i]);
+        i += 1;
+    }
+    let mut exec_env: string[] = process.environ();
+    exec_env.push("SAILFIN_TOOLCHAIN_DISPATCHED=" + target);
+    let _rc = process.exec(exec_argv, exec_env);
+    print.err("error: failed to re-exec the pinned toolchain at " + entry.binary);
+    print.err("  run: sfn toolchain install " + target);
+    return 1;
+}
+
+export { toolchain_gate_or_dispatch };

@@ -1,0 +1,337 @@
+// compiler/src/toolchain/install.sfn
+//
+// Native fail-closed toolchain acquisition. User installs are host-qualified;
+// the explicit bootstrap API retains bootstrap.toml's flat repo-local store.
+import { ExtractOptions, targz_extract } from "sfn/archive";
+import { ed25519_verify_utf8 } from "sfn/crypto";
+
+import { _mktemp_from_template_cmd, _sha256_of_file, _toml_trim_cmd } from "../build/fs";
+import { ensure_dir_p, remove_tree } from "../build/fs_tree";
+import { host_exe_name, host_is_windows } from "../build/target";
+import { _is_safe_capsule_version_cmd } from "../cli/commands/cmd_shared";
+import { release_signing_public_key_hex } from "../release_trust";
+import {
+    char_code,
+    ends_with,
+    find_char_local,
+    starts_with,
+    strings_equal,
+    substring
+} from "../string_utils";
+import {
+    ToolchainHostIdentity,
+    toolchain_asset_host_triple,
+    toolchain_current_host
+} from "./host";
+import {
+    toolchain_binary_path,
+    toolchain_commit_staged_entry,
+    toolchain_discard_staged_entry,
+    toolchain_find_extracted_root,
+    toolchain_host_store_base,
+    toolchain_lay_out_store_entry,
+    toolchain_staging_dir,
+    toolchain_store_ready,
+    toolchain_version_dir
+} from "./store";
+
+let TOOLCHAIN_RELEASE_BASE = "https://github.com/SailfinIO/sailfin/releases/download";
+
+fn _release_base() -> string ![io] {
+    let override_base = env.get("SAILFIN_TOOLCHAIN_RELEASE_BASE");
+    if override_base.length > 0 {
+        let mut base = override_base;
+        loop {
+            if base.length == 0 { break; }
+            if !strings_equal(substring(base, base.length - 1, base.length), "/") {
+                break;
+            }
+            base = substring(base, 0, base.length - 1);
+        }
+        if base.length > 0 { return base; }
+    }
+    return TOOLCHAIN_RELEASE_BASE;
+}
+
+fn _is_version_digit(ch: string) -> boolean {
+    let code = char_code(ch);
+    return code >= 48 && code <= 57;
+}
+
+fn _is_version_char(ch: string) -> boolean {
+    let code = char_code(ch);
+    if code >= 48 && code <= 57 { return true; }
+    if code >= 65 && code <= 90 { return true; }
+    if code >= 97 && code <= 122 { return true; }
+    return code == 46 || code == 45 || code == 43;
+}
+
+fn toolchain_is_valid_install_version(version: string) -> boolean {
+    if version.length == 0 { return false; }
+    if !_is_safe_capsule_version_cmd(version) { return false; }
+    if !_is_version_digit(substring(version, 0, 1)) { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= version.length { break; }
+        if !_is_version_char(substring(version, i, i + 1)) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _parse_sums_line(line: string, asset: string) -> string {
+    let space = find_char_local(line, " ", 0);
+    if space <= 0 { return ""; }
+    let digest = substring(line, 0, space);
+    if digest.length != 64 { return ""; }
+    let mut i: int = space;
+    loop {
+        if i >= line.length { break; }
+        if !strings_equal(substring(line, i, i + 1), " ") { break; }
+        i += 1;
+    }
+    if i < line.length && strings_equal(substring(line, i, i + 1), "*") {
+        i += 1;
+    }
+    let mut name = substring(line, i, line.length);
+    if ends_with(name, "\r") {
+        name = substring(name, 0, name.length - 1);
+    }
+    if strings_equal(name, asset) { return digest; }
+    return "";
+}
+
+fn _digest_for_asset(sums_text: string, asset: string) -> string {
+    let length = sums_text.length;
+    let mut i: int = 0;
+    let mut line_start: int = 0;
+    loop {
+        if i > length { break; }
+        let mut boundary = i == length;
+        if i < length && strings_equal(substring(sums_text, i, i + 1), "\n") {
+            boundary = true;
+        }
+        if boundary {
+            let digest = _parse_sums_line(substring(sums_text, line_start, i), asset);
+            if digest.length > 0 { return digest; }
+            line_start = i + 1;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _download_to(url: string, destination: string) -> boolean ![io, net] {
+    let _ = http.download(url, destination);
+    return fs.exists(destination);
+}
+
+fn _print_download_failure(what: string, url: string) -> void ![io] {
+    print("error: failed to download " + what);
+    print("  " + url);
+}
+
+fn _install_work_dir(work_root: string, version: string) -> string ![io] {
+    ensure_dir_p(work_root);
+    let path = _mktemp_from_template_cmd(work_root + "/.sfn-toolchain-"
+        + version
+        + ".XXXXXX");
+    if path.length == 0 { return ""; }
+    fs.deleteFile(path);
+    fs.createDirectory(path, true);
+    if !fs.exists(path) { return ""; }
+    return path;
+}
+
+// Resolve the actual Windows ABI from the verified manifest. Historical
+// releases without MSVC keep their MinGW host identity.
+fn _select_asset(host: ToolchainHostIdentity, version: string, sums_text: string) -> string {
+    let plain = "sailfin_" + version + "_" + host.release_os + "_" + host.release_arch
+        + ".tar.gz";
+    if host.release_os != "windows" { return plain; }
+    let msvc = "sailfin_" + version + "_windows_" + host.release_arch
+        + "-msvc.tar.gz";
+    if _digest_for_asset(sums_text, msvc).length > 0 { return msvc; }
+    return plain;
+}
+
+fn _resolved_store_dir(store_base: string, version: string, host: ToolchainHostIdentity, asset: string, qualify_user_store: boolean) -> string {
+    if !qualify_user_store {
+        return toolchain_version_dir(store_base, version);
+    }
+    let triple = toolchain_asset_host_triple(host, asset);
+    return toolchain_version_dir(toolchain_host_store_base(store_base, triple), version);
+}
+
+// Core pipeline: signed manifest, selected host asset, digest, extraction,
+// complete sibling staging, then atomic directory commit.
+fn _toolchain_install(version_arg: string, store_base: string, work_root: string, qualify_user_store: boolean) -> int ![io, net] {
+    if version_arg.length == 0 {
+        print("error: sfn toolchain install requires a <version>");
+        print("usage: sfn toolchain install <version>");
+        return 2;
+    }
+    let mut version = version_arg;
+    if starts_with(version, "v") {
+        version = substring(version, 1, version.length);
+    }
+    if !toolchain_is_valid_install_version(version) {
+        print("error: not a valid version: \"" + version_arg + "\"");
+        return 1;
+    }
+
+    let host = toolchain_current_host();
+    if host.release_os.length == 0 {
+        print("error: unsupported host OS (SAILFIN_HOST_OS override not linux/macos/windows)");
+        return 1;
+    }
+    if host.release_arch.length == 0 || host.triple.length == 0 {
+        print("error: unsupported host architecture (uname -m not x86_64/arm64)");
+        return 1;
+    }
+
+    let tag = "v" + version;
+    let release_base = _release_base() + "/" + tag;
+    let sums_url = release_base + "/SHA256SUMS";
+    let sig_url = release_base + "/SHA256SUMS.sig";
+    let temp = _install_work_dir(work_root, version);
+    if temp.length == 0 {
+        print("error: could not create toolchain download staging directory");
+        return 1;
+    }
+
+    let sums_path = temp + "/SHA256SUMS";
+    let sig_path = temp + "/SHA256SUMS.sig";
+    if !_download_to(sums_url, sums_path) {
+        _print_download_failure("release manifest", sums_url);
+        remove_tree(temp);
+        return 1;
+    }
+    if !_download_to(sig_url, sig_path) {
+        _print_download_failure("release manifest signature", sig_url);
+        remove_tree(temp);
+        return 1;
+    }
+    let sums_text = fs.readFile(sums_path);
+    let signature = _toml_trim_cmd(fs.readFile(sig_path));
+    if sums_text.length == 0 || signature.length == 0 {
+        print("error: downloaded release manifest or signature is empty for "
+            + tag);
+        print("  the fetch returned no content (transport error or unfollowed redirect)");
+        remove_tree(temp);
+        return 1;
+    }
+    if !ed25519_verify_utf8(release_signing_public_key_hex(), sums_text, signature) {
+        print("error: SHA256SUMS signature verification failed for " + tag);
+        print("  the release manifest is unsigned or tampered; refusing to install");
+        remove_tree(temp);
+        return 1;
+    }
+
+    let asset = _select_asset(host, version, sums_text);
+    let expected = _digest_for_asset(sums_text, asset);
+    if expected.length == 0 {
+        print("error: asset not listed in the signed manifest: " + asset);
+        remove_tree(temp);
+        return 1;
+    }
+    let store_dir = _resolved_store_dir(store_base, version, host, asset, qualify_user_store);
+    let sha_path = store_dir + "/.sha256";
+    if toolchain_store_ready(store_dir) {
+        let recorded = _toml_trim_cmd(fs.readFile(sha_path));
+        if strings_equal(recorded, expected) {
+            print("sfn toolchain: " + version
+                + " already installed; release signature re-verified");
+            print("  " + store_dir);
+            remove_tree(temp);
+            return 0;
+        }
+    }
+    let asset_url = release_base + "/" + asset;
+    let archive = temp + "/" + asset;
+    if !_download_to(asset_url, archive) {
+        _print_download_failure("toolchain asset", asset_url);
+        remove_tree(temp);
+        return 1;
+    }
+    let actual = _sha256_of_file(archive);
+    if actual.length == 0 {
+        print("error: could not compute sha256 of the downloaded asset");
+        remove_tree(temp);
+        return 1;
+    }
+    if !strings_equal(actual, expected) {
+        print("error: digest mismatch for " + asset + " — refusing to install");
+        print("  expected " + expected);
+        print("  actual   " + actual);
+        remove_tree(temp);
+        return 1;
+    }
+
+    let extract_dir = temp + "/extract";
+    ensure_dir_p(extract_dir);
+    let extracted = targz_extract(archive, extract_dir, ExtractOptions {
+        copy_instead_of_link: host_is_windows(), apply_modes: true, max_total_bytes: 1073741824, max_members: 65536, host_is_windows: host_is_windows()
+    });
+    match extracted {
+        Result.Ok { value }
+        : { },
+        Result.Err { error }
+        : {
+            print("error [E0615]: failed to extract " + asset);
+            print("  " + error.message);
+            if error.member.length > 0 {
+                print("  member: " + error.member);
+            }
+            remove_tree(temp);
+            return 1;
+        }
+    }
+    let root = toolchain_find_extracted_root(extract_dir);
+    if root.length == 0 {
+        print("error: no sailfin binary found in " + asset);
+        remove_tree(temp);
+        return 1;
+    }
+
+    let staged_dir = toolchain_staging_dir(store_dir);
+    if staged_dir.length == 0 {
+        print("error: failed to create atomic toolchain staging directory beside "
+            + store_dir);
+        remove_tree(temp);
+        return 1;
+    }
+    let staged_bin = host_exe_name(staged_dir + "/sailfin");
+    if !toolchain_lay_out_store_entry(root, staged_dir, staged_bin, expected) {
+        toolchain_discard_staged_entry(staged_dir);
+        remove_tree(temp);
+        return 1;
+    }
+    if !toolchain_commit_staged_entry(staged_dir, store_dir) {
+        print("error: failed to atomically commit the verified toolchain to "
+            + store_dir);
+        remove_tree(temp);
+        return 1;
+    }
+    remove_tree(temp);
+    print("sfn toolchain: installed " + version + " to " + store_dir);
+    print("  verified signature + sha256 " + expected);
+    return 0;
+}
+
+// Bootstrap compatibility API: store_base/<version>, exactly as
+// bootstrap.toml and sfn dev bootstrap expect.
+fn toolchain_install_to_base(version_arg: string, store_base: string, work_root: string) -> int ![io, net] {
+    return _toolchain_install(version_arg, store_base, work_root, false);
+}
+
+// Per-user API: store_base/<asset-host-triple>/<version>.
+fn toolchain_install_to_user_store(version_arg: string, store_base: string, work_root: string) -> int ![io, net] {
+    return _toolchain_install(version_arg, store_base, work_root, true);
+}
+
+export {
+    toolchain_install_to_base,
+    toolchain_install_to_user_store,
+    toolchain_is_valid_install_version
+};

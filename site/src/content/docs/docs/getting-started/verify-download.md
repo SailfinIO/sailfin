@@ -16,14 +16,16 @@ Once `sfn` is installed, let it download and verify another toolchain version:
 
 ```console
 $ sfn toolchain install 0.8.0
-sfn toolchain: installed 0.8.0 to /home/you/.local/share/sailfin/versions/0.8.0
+sfn toolchain: installed 0.8.0 to /home/you/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.8.0
   verified signature + sha256 <asset digest>
 ```
 
 `sfn` downloads the platform tarball, `SHA256SUMS`, and `SHA256SUMS.sig`. It
 verifies the Ed25519 signature against the public key embedded in the compiler,
-then verifies the tarball's SHA-256 before extracting it. A missing or invalid
-signature or digest aborts the install.
+then verifies the tarball's SHA-256 before extracting it. The complete payload
+is atomically committed under `versions/<host-triple>/<version>/`; a missing or
+invalid signature or digest aborts without publishing or changing a legacy
+flat entry.
 
 Capsules and workspaces can pin a minimum compiler version in `[toolchain]`.
 With the default `SAILFIN_TOOLCHAIN=auto` mode, `sfn build`, `run`, `check`, and

@@ -1,5 +1,5 @@
 // Unit coverage for the de-shelled `sfn`-alias step inside
-// `toolchain_install_to_base` (`compiler/src/cli/commands/toolchain.sfn`,
+// `toolchain_install_to_base` (`compiler/src/toolchain/install.sfn`,
 // SFN-906), which replaced the `ln -sfn` / `rm -f` / `chmod` spawns with
 // `_toolchain_link_alias`.
 //
@@ -17,7 +17,7 @@
 // leg — delete, symlink, and `_copy_file`'s `fopen` — the same way).
 import { _copy_file } from "../../src/build/fs";
 import { host_is_windows } from "../../src/build/target";
-import { _toolchain_link_alias } from "../../src/cli/commands/toolchain";
+import { _toolchain_link_alias } from "../../src/toolchain/store";
 
 // Same scratch shape as `dev_bootstrap_alias_test.sfn`: the per-invocation
 // test scratch when the pool provides one, else a repo-relative path

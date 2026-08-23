@@ -604,12 +604,14 @@ That diagnostic is what you see under `SAILFIN_TOOLCHAIN=local` (verify-only) or
 
 | `SAILFIN_TOOLCHAIN` | Behavior |
 |---|---|
-| `auto` (**default**) | Ensure the pinned toolchain is present in the version store — fetching it via `sfn toolchain install` (Ed25519-signature + SHA-256 verified, fail-closed) if it isn't — then transparently **re-exec** it with the original argv. A fresh clone plus `sfn build` just works with zero manual steps. |
+| `auto` (**default**) | Ensure the pinned toolchain is present in the host-qualified version store — fetching it via `sfn toolchain install` (Ed25519-signature + SHA-256 verified, fail-closed) if it isn't — then transparently **re-exec** it with the original argv. A fresh clone plus `sfn build` just works with zero manual steps. |
 | `local` | Verify only, never fetch: print the mismatch diagnostic above and exit non-zero. |
 | `<version>` | Force that exact version as the dispatch target, regardless of the pin. |
 | `off` (or `0`) | Skip the gate entirely — same as `--skip-toolchain-check`: warn and proceed on the running toolchain. |
 
-Auto-dispatch (`auto`) is the default because verification is mandatory and fail-closed whenever a toolchain is fetched or dispatched — `sfn` never silently runs unverified code. A **re-entrancy guard** (`SAILFIN_TOOLCHAIN_DISPATCHED=<version>`) is set before re-exec, so a dispatched toolchain that still doesn't satisfy its own pin hard-fails loudly instead of looping. Offline, an already-stored toolchain still dispatches (its completeness marker is re-verified locally, no network needed); offline with nothing stored, `sfn` falls back to the diagnostic above naming the exact `sfn toolchain install <version>` command to run once back online.
+New installs land at `versions/<host-triple>/<version>/`, so a shared home can hold the same release for multiple hosts. Auto-dispatch prefers that qualified entry. A pre-SFEP-0073 flat `versions/<version>/` entry is a read-only legacy fallback only when no qualified entry exists; its archive marker does not authenticate the extracted files, so it is treated as unverified and is never moved or blessed. Running `sfn toolchain install <version>` online migrates safely by downloading and normally verifying a fresh host asset, building a complete sibling staging directory, and atomically committing the qualified entry while leaving the legacy entry untouched.
+
+Auto-dispatch (`auto`) is the default because every newly fetched toolchain is verified and published fail-closed. A **re-entrancy guard** (`SAILFIN_TOOLCHAIN_DISPATCHED=<version>`) is set before re-exec, so a dispatched toolchain that still doesn't satisfy its own pin hard-fails loudly instead of looping. Offline, an already-stored qualified toolchain — or the explicit read-only legacy fallback above — still dispatches without a network request; offline with nothing stored, `sfn` falls back to the diagnostic above naming the exact `sfn toolchain install <version>` command to run once back online.
 
 **Escape hatches** — any one of the following downgrades the hard error to a one-line warning on stderr and lets the command proceed on the running toolchain, without dispatching:
 

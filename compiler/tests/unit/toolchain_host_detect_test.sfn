@@ -1,7 +1,7 @@
 // compiler/tests/unit/toolchain_host_detect_test.sfn
 //
 // Regression for SFN-857: `sfn toolchain install` could not run at all on
-// a native Windows host. `_detect_os()` (`cli/commands/toolchain.sfn`)
+// a native Windows host. `_detect_os()` (`toolchain/host.sfn`)
 // shelled `uname -s` via `_shell_read_cmd`, which self-disables on Windows
 // (`host_is_windows()` guard, `build/fs.sfn`) and always returned "" there
 // — before the network, before `tar`, before anything. `_detect_os` now
@@ -16,7 +16,55 @@
 //   SAILFIN_HOST_OS=Darwin build/bin/sfn test compiler/tests/unit/toolchain_host_detect_test.sfn
 // The plain suite run (no override) takes the Linux leg on a Linux runner.
 import { build_host_os } from "../../src/build/target";
-import { _detect_arch, _detect_os } from "../../src/cli/commands/toolchain";
+import {
+    _detect_arch,
+    _detect_os,
+    toolchain_asset_host_triple,
+    toolchain_host_identity_for
+} from "../../src/toolchain/host";
+import {
+    toolchain_host_store_base,
+    toolchain_resolve_compatible_store_entry,
+    toolchain_version_dir
+} from "../../src/toolchain/store";
+
+test "toolchain-host-detect: canonical release hosts map to index triples" {
+    let linux_x64 = toolchain_host_identity_for("linux", "x86_64");
+    assert linux_x64.triple == "x86_64-unknown-linux-gnu";
+    let linux_arm = toolchain_host_identity_for("linux", "arm64");
+    assert linux_arm.triple == "aarch64-unknown-linux-gnu";
+    let mac_arm = toolchain_host_identity_for("macos", "arm64");
+    assert mac_arm.triple == "aarch64-apple-darwin";
+    let unsupported = toolchain_host_identity_for("plan9", "mips64");
+    assert unsupported.triple == "";
+}
+
+test "toolchain-host-detect: Windows asset ABI selects its canonical triple" {
+    let windows = toolchain_host_identity_for("windows", "x86_64");
+    assert toolchain_asset_host_triple(windows, "sailfin_0.10.4_windows_x86_64-msvc.tar.gz") == "x86_64-pc-windows-msvc";
+    assert toolchain_asset_host_triple(windows, "sailfin_0.9.5_windows_x86_64.tar.gz") == "x86_64-w64-mingw32";
+}
+
+test "toolchain-host-detect: equal versions for different hosts have distinct paths" {
+    let base = "/fixtures/versions";
+    let version = "0.10.4";
+    let linux = toolchain_version_dir(toolchain_host_store_base(base, "x86_64-unknown-linux-gnu"), version);
+    let mac = toolchain_version_dir(toolchain_host_store_base(base, "aarch64-apple-darwin"), version);
+    assert linux == "/fixtures/versions/x86_64-unknown-linux-gnu/0.10.4";
+    assert mac == "/fixtures/versions/aarch64-apple-darwin/0.10.4";
+    assert linux != mac;
+    assert linux != "/fixtures/versions/0.10.4";
+    assert mac != "/fixtures/versions/0.10.4";
+}
+
+test "toolchain-host-detect: unsupported host cannot bless a flat entry" ![io] {
+    let base = "/fixtures/versions";
+    let version = "0.10.4";
+    let unsupported = toolchain_host_identity_for("plan9", "mips64");
+    let entry = toolchain_resolve_compatible_store_entry(base, unsupported, version);
+    assert entry.legacy;
+    assert entry.dir == base + "/" + version;
+}
 
 test "toolchain-host-detect: OS token matches the running host leg" ![io] {
     let host = build_host_os();
@@ -26,7 +74,7 @@ test "toolchain-host-detect: OS token matches the running host leg" ![io] {
                 // An unrecognised SAILFIN_HOST_OS override reaches every
                 // consumer unvalidated (`build/target.sfn` verbatim-override
                 // contract) — `_detect_os` must degrade to "" rather than
-                // guess, matching `toolchain_install_to_base`'s fail-closed
+                // guess, matching the install pipeline's fail-closed
                 // "unsupported host OS" gate.
                 assert _detect_os() == "";
             }
