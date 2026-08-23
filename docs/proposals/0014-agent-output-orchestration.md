@@ -6,7 +6,7 @@ type: tooling
 created: 2026-06-05
 updated: 2026-08-23
 author: "agent:compiler-architect (original sketch); agent:Sailbot (2026-08 rewrite); human review"
-tracking: SFN-726
+tracking: SFN-725, SFN-726
 supersedes:
 superseded-by:
 graduates-to:
@@ -146,8 +146,10 @@ Two corrections to this document's own record:
   (`build/agent-report.<target>.json`), not the single `build/agent-report.json`
   the original text proposed, so concurrent CI shards do not clobber. The
   implementation chose correctly; the design text was never updated.
-- **Open Question 1 is resolved.** The verdict block is always on; the report file
-  is gated behind `JSON=1`. CI has run this shape since 2026-06 without objection.
+- **Open Question 1 is resolved.** The verdict block is always on. The report file
+  was gated behind `JSON=1` under the bash producer; `sfn dev verify` writes it
+  unconditionally, since §3.8 makes it the durable record rather than an opt-in
+  artefact. CI has run this shape since 2026-06 without objection.
 
 ### 3.3 The regression: the phase ledger is dead
 

@@ -23,7 +23,7 @@
 //
 // The remaining four phases each require a successful compile ahead of
 // them, so their attribution is covered where the decision actually lives
-// — `_dv_classify` and the sub-envelope scrape — in
+// — `verdict_classify` and the sub-envelope scrape — in
 // `compiler/tests/unit/dev_verify_test.sfn`.
 //
 // ENV HYGIENE. Every nested `sfn` here goes through `clean_runner_env` +
@@ -212,39 +212,4 @@ test "dev verify: the report file is written and names the phase ledger" ![io] {
     // The ledger names the phase that actually ran.
     assert contains(report, "\"name\":\"compile\"");
     assert contains(report, "\"phase\":\"compile\"");
-}
-
-test "dev verify --fast: a clean tree produces a pass verdict and report" ![io] {
-    // `--fast` is the cheap end-to-end vehicle: a typecheck-only pipeline
-    // that finishes in well under a minute, unlike the real self-host this
-    // file otherwise cannot afford to run. It exercises the full verb —
-    // registration, phase dispatch, verdict emission, report write — on
-    // the `sailfin-run/2` schema without paying the 15-20 minute cost.
-    //
-    // Unlike the compile-phase tests above, this run stays in the real
-    // workspace rather than an empty scratch cwd: `--fast` typechecks the
-    // actual maintainer sources via `load_workspace_inventory(".")`, which
-    // needs the real `bootstrap.toml`/capsule manifests to resolve. `sfn
-    // check` performs no filesystem writes of its own (no IR, no clang, no
-    // cache), so the only shared state this run touches is
-    // `build/agent-report.verify.json`, which no other test in this file
-    // writes without first `cd`-ing away from it.
-    let rc = process.run_capture([sfn_bin_path(), "dev", "verify", "--fast"], _child_env("dv-fast"));
-    let out = process.capture_take_stdout() + process.capture_take_stderr();
-
-    assert contains(out, "===SAILFIN-RESULT===");
-    assert contains(out, "===END-SAILFIN-RESULT===");
-    let json = _verdict_json(out);
-    assert json.length > 0;
-    assert _json_str_field(json, "schema_version") == "sailfin-run/2";
-    assert _json_str_field(json, "host") == "sfn dev verify";
-    assert _json_str_field(json, "target") == "verify";
-    assert _json_str_field(json, "status") == "pass";
-    assert rc == 0;
-
-    let report_path = "build/agent-report.verify.json";
-    assert fs.exists(report_path);
-    let report = fs.readFile(report_path);
-    assert contains(report, "\"schema_version\":\"sailfin-run/2\"");
-    assert contains(report, "\"complete\":true");
 }

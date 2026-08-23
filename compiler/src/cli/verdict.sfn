@@ -22,7 +22,7 @@
 // Hand-rolled JSON, like every other emitter under `compiler/src`
 // (`diagnostics_json.sfn`, `build_report.sfn`, `bench_json.sfn`): the
 // compiler cannot import its own stdlib capsules without a build cycle.
-// The one schema literal in the tree.
+// The sole copy of the `sailfin-run/2` schema literal.
 //
 // The number stays monotonic across the rename from the `make`-hosted
 // generation that preceded it, so a consumer that has seen the old
@@ -30,8 +30,9 @@
 // (SFEP-0014 §3.6).
 let VERDICT_SCHEMA: string = "sailfin-run/2";
 
-// One verdict. Every field but `host` and `target` is nullable, using ""
-// as the null sentinel because Sailfin has no option type in this dialect.
+// One verdict. Every field but `host`, `target` and `status` is nullable,
+// using "" as the null sentinel because Sailfin has no option type in this
+// dialect.
 //
 // `host` names the invocation that produced the verdict (`sfn dev verify`).
 // It is what lets a consumer tell its own verdict from one a child emitted
@@ -47,7 +48,7 @@ struct Verdict {
     report: string;
 }
 
-fn verdict_json_escape(s: string) -> string {
+fn _verdict_json_escape(s: string) -> string {
     let mut out: string = "";
     let mut i: int = 0;
     loop {
@@ -64,7 +65,7 @@ fn verdict_json_escape(s: string) -> string {
 }
 
 fn verdict_json_quote(s: string) -> string {
-    return "\"" + verdict_json_escape(s) + "\"";
+    return "\"" + _verdict_json_escape(s) + "\"";
 }
 
 // A string field that renders as JSON `null` when empty.

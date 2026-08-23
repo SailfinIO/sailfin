@@ -619,17 +619,6 @@ compile:
 	fi
 
 check:
-
-# Strict variant of `make check` (#1830): a stage2/stage3 fixed-point
-# mismatch is fatal (non-zero exit, no promotion) instead of
-# warn-and-promote. CI/nightly (Linux leg) runs this so a compiler that
-# cannot reproduce itself byte-for-byte fails the gate. A command-line
-# SELFHOST_STRICT=1 propagates through `check`
-# via MAKEFLAGS, so the `--strict` flag reaches the `sfn selfhost`
-# invocation.
-check-strict:
-	@$(MAKE) check SELFHOST_STRICT=1
-
 	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
 	@seed="build/bin/sfn$(EXE_EXT)"; \
 	if [ ! -x "$$seed" ]; then \
@@ -708,6 +697,16 @@ endif
 		$(SELFHOST_STRICT_FLAG)
 	@echo "[check] running full test suite with seedcheck binary (cold backstop, jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
 	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn-seedcheck$(EXE_EXT) TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+
+# Strict variant of `make check` (#1830): a stage2/stage3 fixed-point
+# mismatch is fatal (non-zero exit, no promotion) instead of
+# warn-and-promote. CI/nightly (Linux leg) runs this so a compiler that
+# cannot reproduce itself byte-for-byte fails the gate. A command-line
+# SELFHOST_STRICT=1 propagates through `check`
+# via MAKEFLAGS, so the `--strict` flag reaches the `sfn selfhost`
+# invocation.
+check-strict:
+	@$(MAKE) check SELFHOST_STRICT=1
 
 # Fast PR-feedback gate: run `sfn check` against the compiler tree and
 # the runtime prelude. No codegen, no clang, just parse + typecheck +

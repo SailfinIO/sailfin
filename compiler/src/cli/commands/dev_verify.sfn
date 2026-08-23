@@ -36,8 +36,8 @@
 // an atomic rename after every phase completes, carrying `"complete":
 // false` and the in-flight phase name until the verdict lands. A SIGKILL
 // of this supervisor therefore still leaves the last completed phase
-// readable — today's `write_report_file` runs only from the bash `EXIT`
-// trap, so a hard kill loses the verdict and the report together.
+// readable — the retired bash producer wrote its report only from an
+// `EXIT` trap, so a hard kill lost the verdict and the report together.
 //
 // Seed-gated, and it bundles. Like `sfn dev bootstrap install` (SFN-679)
 // and `sfn dev clean` (SFN-680), this verb is executed BY the pinned seed,
@@ -99,8 +99,8 @@ let _DV_HOST: string = "sfn dev verify";
 let _DV_SMOKE_DEADLINE_MS: int = 60000;
 
 // Per-test-file deadline for the two full-suite phases, in seconds. This is
-// `make check`'s `CHECK_TEST_TIMEOUT` (`Makefile:202`, applied to both
-// full-suite legs at `Makefile:662,710`) rather than the test runner's own
+// `make check`'s `CHECK_TEST_TIMEOUT`, applied to both of its full-suite
+// legs, rather than the test runner's own
 // 900s default, and the difference is load-bearing: `work_dir_parity_test`
 // runs two cold `sfn build -p compiler` builds serially inside one pooled
 // child, which exceeds 900s under `--no-test-cache` plus pool CPU
@@ -457,11 +457,8 @@ fn _dv_write_report(phases: VerifyPhase[], status: string, failure: string, phas
 // Verdict block
 // -------------------------------------------------------------------
 //
-// Deliberately additive rather than `--json`-exclusive (SFEP-0014 §3.9):
-// it is a framed trailer, not the primary output document, and its whole
-// value is surviving a truncated tail — which requires it to be present in
-// human mode too, the mode an agent actually gets when a phase fails
-// noisily. Consumers read the LAST occurrence of the sentinel.
+// This verb's fixed identity, filled into every verdict it emits. The
+// trailer itself is rendered by `cli/verdict.sfn::verdict_emit`.
 fn _dv_verdict(status: string, failure: string, phase: string, first_error: string) -> Verdict {
     return Verdict {
         host: _DV_HOST,

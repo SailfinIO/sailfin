@@ -1,0 +1,83 @@
+// compiler/tests/e2e/make_recipe_integrity_test.sfn
+//
+// Guards the nine `make` targets that SFN-726 folded when it deleted the
+// bash verdict wrapper. Each target had been split into a wrapping recipe
+// and a `<target>-impl:` recipe carrying the real body; the fold deleted
+// the wrapper and renamed the body back to the public name.
+//
+// Why this test exists. A fold that drops a target's recipe leaves a
+// declared, `.PHONY`, prerequisite-less target — which `make` reports as
+// "Nothing to be done" and exits 0. `make -n <target>` still succeeds,
+// because the Makefile parses; the target is simply silent. That is not
+// hypothetical: the SFN-726 fold shipped `check:` with an empty recipe
+// past `sfn fmt`, `sfn check`, a clean self-host build, and three
+// targeted test runs before review caught it. `make check` is the
+// nightly self-host gate (`.github/workflows/nightly-selfhost.yml`) and
+// a release-train prerequisite, so an empty recipe there is a green gate
+// that verified nothing.
+//
+// A blank line between a target and its body is exactly how that
+// happens, because `make` ignores blank lines inside a recipe: the body
+// silently reattaches to whichever target was declared above it.
+//
+// Static and millisecond-cheap, per SFEP-0014 §5's Phase 5 lesson —
+// assert the marker is present in the producer rather than replaying a
+// recorded transcript that becomes the next fossil.
+import { find } from "sfn/strings";
+import { expect_eq_bool } from "sfn/test";
+
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    return ".";
+}
+
+// The line immediately following `<target>:` must be a recipe line (tab
+// indented). Anything else — a blank line, a comment, another target —
+// means the target has no body of its own.
+fn _has_immediate_recipe(text: string, target: string) -> boolean {
+    let needle = "\n" + target + ":";
+    let at = find(text, needle, 0);
+    if at < 0 { return false; }
+    let after_colon = at + needle.length;
+    let nl = find(text, "\n", after_colon);
+    if nl < 0 { return false; }
+    return substring(text, nl + 1, nl + 2) == "\t";
+}
+
+test "make: every folded target still owns a non-empty recipe" ![io] {
+    let text = fs.readFile(_repo_root() + "/Makefile");
+    assert expect_eq_bool(text.length > 0, true).ok;
+
+    assert expect_eq_bool(_has_immediate_recipe(text, "test"), true).ok;
+    assert expect_eq_bool(_has_immediate_recipe(text, "test-unit"), true).ok;
+    assert expect_eq_bool(_has_immediate_recipe(text, "test-integration"), true).ok;
+    assert expect_eq_bool(_has_immediate_recipe(text, "test-e2e"), true).ok;
+    assert expect_eq_bool(_has_immediate_recipe(text, "test-capsules"), true).ok;
+    assert expect_eq_bool(_has_immediate_recipe(text, "compile"), true).ok;
+    assert expect_eq_bool(_has_immediate_recipe(text, "check"), true).ok;
+    assert expect_eq_bool(_has_immediate_recipe(text, "check-fast"), true).ok;
+    assert expect_eq_bool(_has_immediate_recipe(text, "rebuild"), true).ok;
+}
+
+test "make: the retired wrapper and its -impl split are gone" ![io] {
+    let text = fs.readFile(_repo_root() + "/Makefile");
+    // The wrapper variable and every `<target>-impl` name went with the
+    // bash producer. `SAILFIN_AGENT_REPORT` is deliberately NOT checked
+    // here: despite the confusable name it is a separate `JSON=1`
+    // sidecar-artifact gate that CI still depends on.
+    assert expect_eq_bool(find(text, "$(AGENT_REPORT)", 0) < 0, true).ok;
+    assert expect_eq_bool(find(text, "-impl", 0) < 0, true).ok;
+}
+
+test "make: check still reaches the self-host validator it gates on" ![io] {
+    let text = fs.readFile(_repo_root() + "/Makefile");
+    // `check` is the nightly gate; its value is entirely in reaching
+    // `sfn selfhost`. A recipe that no longer does is a green no-op.
+    let at = find(text, "\ncheck:", 0);
+    assert expect_eq_bool(at >= 0, true).ok;
+    let ends = find(text, "\ncheck-strict:", at);
+    assert expect_eq_bool(ends > at, true).ok;
+    let body = substring(text, at, ends);
+    assert expect_eq_bool(find(body, "selfhost", 0) >= 0, true).ok;
+}
