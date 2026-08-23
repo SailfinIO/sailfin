@@ -4,9 +4,9 @@ title: Agent-Legible Build/Test Output
 status: Accepted
 type: tooling
 created: 2026-06-05
-updated: 2026-08-08
+updated: 2026-08-23
 author: "agent:compiler-architect (original sketch); agent:Sailbot (2026-08 rewrite); human review"
-tracking:
+tracking: SFN-726
 supersedes:
 superseded-by:
 graduates-to:
@@ -22,8 +22,8 @@ graduates-to:
 > First, it named the wrong host as durable. Its keystone is a bash wrapper around
 > `make`, and it justified that with "the Makefile is explicitly sanctioned
 > orchestration" — a claim SFEP-0006 Stage D contradicts by *deleting* the Makefile
-> ([§3.4](#34-the-host-is-being-deleted)). Its envelope is named `sailfin-make/1`
-> after a host with a scheduled end date.
+> ([§3.4](#34-the-host-is-being-deleted)). Its envelope's schema string itself
+> names `make`, binding it to a host with a scheduled end date.
 >
 > Second, its headline deliverable has silently regressed to non-functional. The
 > phase ledger — "`make check` reports which of its seven phases failed" — is
@@ -54,20 +54,20 @@ versioned verdict block emitted as the final lines of every agent-facing target*
 plus a per-target JSON report and a closed failure taxonomy that maps each class to
 a distinct correct response.
 
-That contract is right and is in use. Its **mechanism** is the defect. The verdict
-is assembled by `scripts/agent_report.sh`, which reconstructs pipeline state by
+That contract is right and is in use. Its **mechanism** was the defect. The verdict
+was assembled by a bash wrapper around `make`, which reconstructed pipeline state by
 grepping another process's *human* output. When `#1502` moved the self-host stages
 out of Makefile shell into `sfn selfhost`, the banners changed and the ledger died
 without a single test going red.
 
-This rewrite keeps the contract and moves the host. The verdict becomes something
-`sfn` **produces** rather than something bash **infers**: a new maintainer verb
+This rewrite kept the contract and moved the host. The verdict became something
+`sfn` **produces** rather than something bash **infers**: the maintainer verb
 `sfn dev verify` owns the multi-phase pipeline, emits phase results from the
 children's own `--json` envelopes, and derives classification from exit status and
-signals instead of regexes. The envelope is renamed `sailfin-run/2` to retire the
-`make` in its name alongside the Makefile. The bash detector gets one interim
-repair so the window before the seed carries the native verb is not a blind one,
-then is deleted with its host.
+signals instead of regexes. The envelope was renamed `sailfin-run/2` to retire the
+`make` in its name alongside the Makefile. The bash detector got one interim
+repair (Phase 5, SFN-724) so the window before the seed carried the native verb was
+not a blind one, then was deleted with its host at cutover (Phase 7, SFN-726).
 
 ## 2. Problem
 
@@ -129,16 +129,16 @@ inventory is the precondition for the rest of this document.
 
 | Surface | State | Location |
 |---|---|---|
-| `===SAILFIN-RESULT===` verdict block | Shipped | `scripts/agent_report.sh:504-512`, emitted from `trap emit_verdict EXIT` (`:518`) |
-| Wrapping of agent-facing targets | Shipped, 9 targets | `$(AGENT_REPORT) --target <t> -- $(MAKE) <t>-impl`: `Makefile:269,352,373,393,416,612,651,749,886` |
-| Nesting guard | Shipped | `SAILFIN_INNER` (`agent_report.sh:64-72`) — suppresses the inner sentinel when `check` invokes `make test` |
-| Schema document | Shipped | `docs/reference/make-result-schema.md` |
-| Schema-lock tests | Shipped | `compiler/tests/e2e/make_result_contract_test.sfn`, `make_report_contract_test.sfn` |
-| Per-target report file | Shipped | `build/agent-report.<target>.json` (`write_report_file`, `:462-475`) |
-| Failure taxonomy | Shipped, **7** classes | `classify()` (`:144-221`) — added `crash` beyond the six proposed, for signal-killed test children |
-| `JSON=1` / `SAILFIN_AGENT_REPORT=1` passthrough | Shipped | `Makefile:955-981` (compile tees `BuildReport`), `:360-425` (test), `:758-767` (check-fast) |
-| Phase ledger for `check` | **Regressed — see §3.3** | `detect_check_phase()` (`:121-134`), `compose_check_phases()` (`:335-352`) |
-| Agent-facing surfacing (Phase 4) | **Not started** | no `SAILFIN-RESULT` reference under `.claude/` or in `CLAUDE.md`; no `sailfin_make` MCP tool |
+| `===SAILFIN-RESULT===` verdict block | Shipped, then re-hosted at Phase 7 | Originally emitted from the retired bash wrapper's own `EXIT` trap; now emitted by `compiler/src/cli/verdict.sfn::verdict_emit` |
+| Wrapping of agent-facing targets | **Historical — retired at Phase 7 (SFN-726).** Shipped, 9 targets | The `<target>-impl` split and its wrapping macro are deleted; `<target>-impl` recipes are folded back into `<target>`, and no `make` target produces a verdict any more |
+| Nesting guard | **Historical — retired at Phase 7 (SFN-726).** Shipped | An env-var-based guard suppressed the inner sentinel when `check` invoked `make test`; deleted outright with the wrapper it guarded, since it addressed a Make-recursion shape nothing left in the tree still has |
+| Schema document | Shipped, renamed at Phase 7 | `docs/reference/run-result-schema.md` (renamed from its prior filename) |
+| Schema-lock tests | **Historical — retired at Phase 7 (SFN-726).** Shipped | Four e2e tests locking the bash producer and its ledger scraping were deleted with it; `compiler/tests/e2e/dev_verify_test.sfn` is the replacement schema lock |
+| Per-target report file | **Historical — retired at Phase 7 (SFN-726).** Shipped | The 9-target `build/agent-report.<target>.json` composition lived in the retired wrapper; `sfn dev verify`'s analogous, always-on `build/agent-report.verify.json` is documented in `docs/reference/run-result-schema.md` |
+| Failure taxonomy | Shipped, **7** classes | `compiler/src/cli/verdict.sfn::verdict_classify` — added `crash` beyond the six proposed, for signal-killed test children |
+| `JSON=1` / `SAILFIN_AGENT_REPORT=1` passthrough | Shipped for the underlying tools' own `--json` tee-ing (`BuildReport`, test jsonl, `check-fast`); the verdict-composition half retired with Phase 7 | `Makefile:955-981` (compile tees `BuildReport`), `:360-425` (test), `:758-767` (check-fast) |
+| Phase ledger for `check` | **Regressed, then superseded** — see §3.3 | Repaired at Phase 5 (SFN-724), replaced outright by `sfn dev verify`'s structural ledger at Phase 6 (SFN-725) |
+| Agent-facing surfacing (Phase 4) | **Not started** | no `SAILFIN-RESULT` reference under `.claude/` or in `CLAUDE.md`; no `sailfin_verify` MCP tool |
 
 Two corrections to this document's own record:
 
@@ -151,24 +151,27 @@ Two corrections to this document's own record:
 
 ### 3.3 The regression: the phase ledger is dead
 
-> **Resolved by Phase 5 (SFN-724).** The diagnosis below is kept as written —
-> it is the record of how a scraping layer goes dark silently. What changed:
-> `agent_report.sh` now carries one `CHECK_PHASE_MARKERS` table (fixed-string
-> literals, real pipeline order, a `pass1-smoke` entry) driving both
-> `detect_check_phase` and `compose_check_phases`, and
-> `check_phase_ledger_test.sfn` asserts every literal in it still appears
-> verbatim in its producer — so the next reword fails the suite instead of
-> going unnoticed. The "all live on `main`" consequences below no longer are.
-> The layer is still banner-scraping, and still interim: §5 Phase 6 (SFN-725)
-> replaces it with a native verb that cannot drift.
+> **Resolved by Phase 5 (SFN-724), then the whole layer retired by Phase 7
+> (SFN-726).** The diagnosis below is kept as written — it is the record of
+> how a scraping layer goes dark silently. What changed at Phase 5: the bash
+> wrapper carried one `CHECK_PHASE_MARKERS` table (fixed-string literals, real
+> pipeline order, a `pass1-smoke` entry) driving both `detect_check_phase` and
+> `compose_check_phases`, and `check_phase_ledger_test.sfn` asserted every
+> literal in it still appeared verbatim in its producer — so the next reword
+> would fail the suite instead of going unnoticed. The "all live on `main`"
+> consequences below no longer were. The layer was still banner-scraping, and
+> still interim: §5 Phase 6 (SFN-725) replaced it with a native verb that
+> cannot drift, and Phase 7 (SFN-726) then deleted the wrapper outright —
+> `check_phase_ledger_test.sfn` was retired with it, replaced by
+> `compiler/tests/e2e/dev_verify_test.sfn`.
 
 `#1502` (design note `docs/proposals/design-notes/1502-selfhost-check.md`) moved the
 stage2/stage3 build, viability smoke, and fixed-point diff out of ~90 lines of
 Makefile shell into `sfn selfhost` (`compiler/src/cli_selfhost.sfn`). The new verb
-prints its own `[selfhost]`-prefixed banners. `agent_report.sh` still greps the
-strings the Makefile printed in June.
+prints its own `[selfhost]`-prefixed banners. The bash wrapper still grepped the
+strings the Makefile had printed in June.
 
-| `agent_report.sh` expects | Emitted today | Match |
+| The bash wrapper expected | Emitted at the time | Match |
 |---|---|---|
 | `[check] running test suite on first-pass binary` | `[check] pass1 smoke gate: hello-world + sfn/test capsule tests` (`Makefile:686`); `running full suite on first-pass binary` only under `CHECK_FULL_PASS1=1` (`:683`) | no |
 | `proceeding to seedcheck build` \| `verifying seed selfhost (stage2)` | `[check] pass1 smoke passed — validating self-host (stage2/stage3 fixed point)` (`:699`); `[selfhost] building stage2 (seedcheck)...` (`cli_selfhost.sfn:578`) | no |
@@ -178,10 +181,10 @@ strings the Makefile printed in June.
 | `comparing stage2 vs stage3` | never printed | no |
 | `[check][WARN] stage2 != stage3` | `[selfhost] stage2 != stage3: compiler output is not yet a fixed point` (`:668`) | no |
 
-Consequences, all live on `main`:
+Consequences, all live on `main` at the time:
 
 - `detect_check_phase()` always falls through to its `"compile"` default
-  (`agent_report.sh:132`), so **every** `check` failure is attributed to the first
+  (the bash wrapper, line 132), so **every** `check` failure is attributed to the first
   phase regardless of where it occurred.
 - `compose_check_phases()` marks the other six phases `skipped`, so the report file
   asserts a run that did not happen.
@@ -189,8 +192,8 @@ Consequences, all live on `main`:
   `[check][WARN] stage2 != stage3` literal is its only trigger (`:147-149`) and no
   longer exists in any producer.
 
-**Why CI is green.** `compiler/tests/e2e/check_phase_ledger_test.sfn:94-114` drives
-`agent_report.sh` with `echo` stubs that reproduce the June banners verbatim. The
+**Why CI is green.** `compiler/tests/e2e/check_phase_ledger_test.sfn:94-114` drove
+the bash wrapper with `echo` stubs that reproduce the June banners verbatim. The
 test validates the classifier against a fossil of its own assumptions, so drift
 between the classifier and the pipeline is structurally untestable. This is the
 defect to fix first, ahead of the regexes: a test that manufactures its inputs
@@ -224,12 +227,13 @@ the plan of record:
   cover nearly every target. What remains in the Makefile is sequencing, seed
   acquisition, and `ci-cross-windows`.
 
-Only **two** genuine capability gaps stand between the tree and Stage D. One is
+Only **two** genuine capability gaps stood between the tree and Stage D. One is
 `sfn build --target=x86_64-w64-mingw32`, which SFEP-0021 owns and which
 `Makefile:1113` already names as `ci-cross-windows`'s removal condition. The other
-is **this SFEP's**: nothing native sequences `compile → smoke → test → selfhost →
-test`. That gap is why the verdict layer is still bash, so closing it and rehosting
-the verdict are the same piece of work.
+was **this SFEP's**: nothing native sequenced `compile → smoke → test → selfhost →
+test`. That gap was why the verdict layer had been bash; closing it and rehosting
+the verdict were the same piece of work, delivered by `sfn dev verify` (Phase 6,
+SFN-725) with the cutover completed at Phase 7 (SFN-726).
 
 ### 3.5 The target host: `sfn dev verify`
 
@@ -278,7 +282,7 @@ observability carve-out in [§4](#4-non-goals) and out of
 
 ### 3.6 The envelope: `sailfin-run/2`
 
-`sailfin-make/1` is renamed and bumped in one coordinated break.
+The envelope's prior `make`-hosted generation is renamed and bumped in one coordinated break.
 
 ```
 ===SAILFIN-RESULT===
@@ -286,13 +290,13 @@ observability carve-out in [§4](#4-non-goals) and out of
 ===END-SAILFIN-RESULT===
 ```
 
-| Field | Change from `sailfin-make/1` |
+| Field | Change from the prior `make`-hosted generation |
 |---|---|
-| `schema_version` | `"sailfin-run/2"`. Renamed; **the number stays monotonic across the rename** so a consumer that has seen `sailfin-make/1` cannot mistake `sailfin-run/2` for an earlier generation. |
+| `schema_version` | `"sailfin-run/2"`. Renamed; **the number stays monotonic across the rename** so a consumer that has seen the prior generation cannot mistake `sailfin-run/2` for an earlier one. |
 | `host` | **New.** The invocation that produced the verdict (`sfn dev verify`, or `make check` during the transition). Lets one consumer read both hosts across the cutover. |
 | `target`, `status`, `failure`, `phase`, `first_error`, `report` | Unchanged in meaning. `phase` now draws from the corrected ledger in [§3.5](#35-the-target-host-sfn-dev-verify). |
 
-Consumers requiring coordination: `docs/reference/make-result-schema.md` (renamed to
+Consumers requiring coordination: the schema doc (renamed to
 `run-result-schema.md`), `make_result_contract_test.sfn`,
 `make_report_contract_test.sfn`, `check_phase_ledger_test.sfn`, and SFEP-0003's
 five-envelope inventory (`0003:42,235`). SFEP-0003 is accurate *today* and should be
@@ -346,8 +350,8 @@ of the tool it wraps. Moving the verdict inside `sfn` must not lose that.
   verdict lands. An agent that gets no sentinel reads the file and sees the last
   completed phase plus the one in flight.
 
-This is a net gain over today, where `write_report_file` is called only from inside
-the `EXIT` trap (`agent_report.sh:498`), so a `SIGKILL` of the process group loses
+This was a net gain over the retired bash wrapper, where `write_report_file` was
+called only from inside its `EXIT` trap, so a `SIGKILL` of the process group lost
 the verdict *and* the report together.
 
 ### 3.9 Relationship to the SFEP-0003 envelope pattern
@@ -378,19 +382,20 @@ distinction is worth stating so nobody reads it as one:
 
 ## 5. Phasing
 
-Phases 1–3 are historical and shipped except where noted. Phase 4 is deliberately
-**resequenced behind the cutover**: telling every agent to read a sentinel whose
-host and schema version are about to change would teach one contract in order to
-retract it.
+Phases 1–3, 5, 6, and 7 are historical and shipped except where noted. Phase 4 was
+deliberately **resequenced behind the cutover**: telling every agent to read a
+sentinel whose host and schema version were about to change would have taught one
+contract only to retract it. That gate cleared at Phase 7 (SFN-726); Phase 4
+remains unstarted because nobody has picked it up yet, not because it is blocked.
 
 | Phase | Size | Status | Scope | Deliverable |
 |---|---|---|---|---|
-| **1 — keystone** | S | **Shipped** | `Makefile`, `scripts/agent_report.sh`, `docs/reference/make-result-schema.md` | Always-last `===SAILFIN-RESULT===` block on 9 targets, with `status` + `failure` |
+| **1 — keystone** | S | **Shipped, then retired at Phase 7** | `Makefile`, the retired bash producer, `docs/reference/run-result-schema.md` (renamed from its prior filename) | Always-last `===SAILFIN-RESULT===` block on 9 targets, with `status` + `failure` |
 | **2 — full report** | M | **Shipped** | `JSON=1` passthrough; per-target report composition | `build/agent-report.<target>.json` with a `phases[]` array |
 | **3 — taxonomy + first-error** | S | **Partial** | `classify()`; schema lock | Taxonomy shipped (7 classes). **Phase ledger regressed — [§3.3](#33-the-regression-the-phase-ledger-is-dead)** |
-| **5 — interim ledger repair** | S | Not started | `check_phase_ledger_test.sfn` first, then `agent_report.sh` detectors | **Fix the test before the regexes.** Replace the `echo`-stub fixtures with a *marker-presence assertion*: every literal the detectors grep must appear verbatim in a producer (`Makefile` or `cli_selfhost.sfn`). Static, milliseconds, and it would have failed on `#1502` — where driving a real 15–20 min `make check` from a test is unaffordable and a recorded transcript would become the next fossil. Then re-sync detectors to the `[selfhost]` banners and the corrected phase *order*, restoring the `nondeterminism` warn path. Closes the blind window before a seed carries Phase 6. |
+| **5 — interim ledger repair** | S | **Shipped** (SFN-724) | `check_phase_ledger_test.sfn` first, then the bash producer's detectors | **Fix the test before the regexes.** Replace the `echo`-stub fixtures with a *marker-presence assertion*: every literal the detectors grep must appear verbatim in a producer (`Makefile` or `cli_selfhost.sfn`). Static, milliseconds, and it would have failed on `#1502` — where driving a real 15–20 min `make check` from a test is unaffordable and a recorded transcript would become the next fossil. Then re-sync detectors to the `[selfhost]` banners and the corrected phase *order*, restoring the `nondeterminism` warn path. Closes the blind window before a seed carries Phase 6. |
 | **6 — native verb** | M | **Shipped** | new `cli/commands/dev_verify.sfn`; `sfn selfhost --json` sub-envelope; incremental report writes | `sfn dev verify [--fast] [--full-pass1] [--json]` runs the pipeline and emits the verdict from child envelopes and exit status. Ledger and classification per [§3.5](#35-the-target-host-sfn-dev-verify)/[§3.7](#37-classification-becomes-producer-emitted). Ships with the Phase 5 test repointed at the native verb. |
-| **7 — cutover** | M | Not started | rename schema doc; bump tests; delete `agent_report.sh` and the `$(AGENT_REPORT)` wrapping; amend SFEP-0003 §3.2 | `sailfin-run/2` is the sole envelope. `make check` becomes a wrapper over `sfn dev verify` or is deleted with the Makefile, whichever Stage D reaches first. |
+| **7 — cutover** | M | **Shipped** (SFN-726) | rename schema doc; bump tests; delete the bash producer and its `Makefile` wrapping; amend SFEP-0003 §3.2 | `sailfin-run/2` is the sole envelope, produced only by `sfn dev verify`. `make check` was **not** re-plumbed onto `sfn dev verify` — it keeps its own pipeline and emits no verdict at all now — because that rehost is `SFN-60` (Makefile retirement), out of this SFEP's scope; see the resolved [Open Question 1](#8-open-questions). |
 | **4 — surfacing** | S | Not started, gated on 7 | `CLAUDE.md` + `.claude/agents/*`; `sailfin_verify` MCP tool; `llms.txt` | Agents are told to read the sentinel. MCP clients get it as `structuredContent` — which also closes the gap where `sailfin_build` and `sailfin_test` pass `--json` through as raw text (`tools/mcp-server/src/index.ts:388-447`) while `sailfin_diagnostics` parses it properly. |
 
 **Phase 6 is seed-gated.** Like SFN-679 and SFN-680, `sfn dev verify` is executed
@@ -417,9 +422,11 @@ precisely so the intervening window is observable.
 - **(low) Sentinel collision.** A test printing the sentinel would confuse a naive
   grep. Consumers read the *last* occurrence; the schema-lock test guards the exact
   delimiter.
-- **(low) Double-counting nested runs.** `SAILFIN_INNER` handles this today for
-  `check` → `make test`; the native verb must carry the equivalent guard so a
-  spawned `sfn test` does not emit its own top-level verdict.
+- **(low) Double-counting nested runs.** An env-var-based guard handled this for the
+  retired `check` → `make test` nesting; the native verb needs no equivalent —
+  none of the children it spawns (`sfn test`, `sfn build`, `sfn dev bootstrap
+  build`) emit a verdict trailer natively, so only `sfn dev verify` itself ever
+  produces one.
 - **(none) Self-hosting.** Phases 1–3 and 5 touch no `compiler/src`. Phase 6 does,
   and clears the full Stage1 readiness gate like any other compiler change.
 
@@ -448,10 +455,13 @@ failure could not be recorded as success:
 
 ## 8. Open questions
 
-1. **Does `make check` become a wrapper or disappear?** Phase 7 can leave a 3-line
-   `check: ; sfn dev verify` shim for muscle memory, or delete the target and update
-   `CLAUDE.md`'s validation ladder to name `sfn dev verify` at rung 4. Depends on
-   how much of the Makefile survives Stage D; defer to the cutover PR.
+1. **Does `make check` become a wrapper or disappear?** **Resolved at Phase 7
+   (SFN-726): neither, yet.** `make check` was **not** re-plumbed onto `sfn dev
+   verify` — it keeps sequencing its own pipeline directly, and since Phase 7
+   deleted the bash producer and the `Makefile`'s `<target>-impl` wrapping, it
+   emits no verdict of any kind. Re-plumbing `make check` onto `sfn dev verify`
+   (or deleting the target outright) is `SFN-60` (Makefile retirement), which
+   this SFEP does not own.
 2. **Should the CI shard legs consume `sailfin-run/2` directly?**
    `build-quality.yml` already gates on `BuildReport`'s `cache.hit_rate`
    (`.github/workflows/build-quality.yml:250-256`). A composed run envelope could
@@ -482,8 +492,8 @@ failure could not be recorded as success:
   schema is unchanged by it
 - `docs/proposals/design-notes/1502-selfhost-check.md` — the refactor that broke the
   ledger
-- `docs/reference/make-result-schema.md` — the shipped `sailfin-make/1` contract,
-  renamed at Phase 7
+- `docs/reference/run-result-schema.md` — the shipped `sailfin-run/2` contract,
+  renamed from its `make`-hosted predecessor at Phase 7
 - `.claude/rules/seed-dependency.md` — why Phase 6 bundles rather than splits
 - `.claude/rules/compiler-safety.md` — the `RLIMIT_AS` self-cap behind the `oom`
   class
