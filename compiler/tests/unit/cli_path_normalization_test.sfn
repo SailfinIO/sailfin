@@ -9,8 +9,8 @@
 // CI. This unit test gates the same logic in milliseconds, so the
 // e2e test now runs the canonical scenario exactly once.
 import { remove_all } from "sfn/fs";
-import { find, starts_with } from "sfn/strings";
-import { scratch_root, skip } from "sfn/test";
+import { starts_with } from "sfn/strings";
+import { scratch_root } from "sfn/test";
 
 import {
     _atomic_rename_into_place,
@@ -185,29 +185,7 @@ fn _cpn_tmp_root(label: string) -> string ![io] {
     return fs.mkdtemp(base + "/sfn_" + label + "_");
 }
 
-// True when the test runner is a Windows binary. Mirrors the detection
-// idiom in `capsules/sfn/fs/tests/fs_test.sfn:31-40`: the `OS` /
-// `SYSTEMROOT` / `windir` environment variables Windows always sets.
-// Deliberately does NOT honor `SAILFIN_HOST_OS` — the tests below gate on
-// whether `_mktemp_sibling_cmd` actually degrades, which depends on the
-// real host, not a simulated one.
-fn _cpn_is_windows() -> bool ![io] {
-    let os = env.get("OS");
-    if find(os, "Windows", 0) >= 0 { return true; }
-    if env.get("SYSTEMROOT").length > 0 { return true; }
-    if env.get("windir").length > 0 { return true; }
-    return false;
-}
-
 test "atomic-publish: temp lives in dest dir and rename round-trips" ![io] {
-    // `_mktemp_sibling_cmd` returns "" on Windows by design
-    // (`compiler/src/build/fs.sfn:180`): the caller degrades to a direct,
-    // non-atomic write instead. `windows_build_deshell_test.sfn` pins that
-    // `""` return as expected. This test asserts the POSIX atomic-rename
-    // path, which does not exist on this host.
-    if _cpn_is_windows() {
-        skip("_mktemp_sibling_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); no atomic-rename temp to test");
-    }
     let scratch = _cpn_tmp_root("atomic_publish_test");
     let dst = scratch + "/artifact.ll";
 
@@ -240,12 +218,6 @@ test "atomic-publish: temp lives in dest dir and rename round-trips" ![io] {
 // through `sfn_rename_replace`, whose Windows sibling uses
 // `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING`.
 test "atomic-publish: a second publish REPLACES an existing destination" ![io] {
-    // See the skip comment on the "temp lives in dest dir" test above:
-    // `_mktemp_sibling_cmd` returns "" on Windows by design
-    // (`compiler/src/build/fs.sfn:180`).
-    if _cpn_is_windows() {
-        skip("_mktemp_sibling_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); no atomic-rename temp to test");
-    }
     let scratch = _cpn_tmp_root("atomic_republish_test");
     let dst = scratch + "/artifact.ll";
 
@@ -283,12 +255,6 @@ test "atomic-publish: a second publish REPLACES an existing destination" ![io] {
 // the `length > 0` and dirname checks above, so pin the exact length
 // and the `O_EXCL` uniqueness contract directly (SFN-490).
 test "atomic-publish: temp name is template-length and unique per call" ![io] {
-    // See the skip comment on "temp lives in dest dir" above:
-    // `_mktemp_sibling_cmd` returns "" on Windows by design
-    // (`compiler/src/build/fs.sfn:180`).
-    if _cpn_is_windows() {
-        skip("_mktemp_sibling_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); no minted temp name to pin");
-    }
     let scratch = _cpn_tmp_root("mktemp_sibling_test");
     let dst = scratch + "/artifact.ll";
 
@@ -310,13 +276,6 @@ test "atomic-publish: temp name is template-length and unique per call" ![io] {
 // hold for a shell `mktemp` too, so they cannot tell the two
 // implementations apart — these pin the libc contract itself.
 test "temp-mint: explicit template yields an exact-length unique file" ![io] {
-    // `_mktemp_from_template_cmd` returns "" on Windows by design
-    // (`compiler/src/build/fs.sfn:180`) — there is no POSIX `mkstemp` on
-    // this host, so there is no minted file to pin the length/uniqueness
-    // of. `windows_build_deshell_test.sfn` pins the `""` return itself.
-    if _cpn_is_windows() {
-        skip("_mktemp_from_template_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); no minted temp file to test");
-    }
     let scratch = _cpn_tmp_root("mktemp_template_test");
 
     let template = scratch + "/probe.XXXXXX";
@@ -501,15 +460,6 @@ test "publish-lines: destination in a missing directory is reported as failure" 
 }
 
 test "publish-lines: a failed rename is reported and leaves no residue" ![io] {
-    // `_publish_lines_atomic` (`compiler/src/build/fs.sfn:338-372`) routes
-    // through `_mktemp_sibling_cmd`, which returns "" on Windows by design
-    // (`compiler/src/build/fs.sfn:180`), so on this host the function takes
-    // the direct in-place-write degrade branch instead of the sibling-mint
-    // + rename path this test exercises — it never reaches the EISDIR
-    // rename failure the assertions below pin.
-    if _cpn_is_windows() {
-        skip("_mktemp_sibling_cmd returns \"\" on Windows by design (compiler/src/build/fs.sfn:180); _publish_lines_atomic takes the degrade branch, not the atomic-rename path under test");
-    }
     let scratch = _cpn_tmp_root("publish_lines_rename_fail_test");
     let dst = scratch + "/artifact.ll";
 

@@ -1,0 +1,110 @@
+// SFN-1096: regression for the assert-pairing defect. When a test file had
+// 2+ bare-assert failures, the runner reported the FIRST failing test's
+// `file:line:col` for EVERY subsequent failure — the classifier matched a
+// failure to a location by MESSAGE TEXT (`reporting.sfn`'s old
+// `strings_equal(failure.message, r.message)` gate), and every bare
+// `assert cond;` bakes the identical literal message `"assertion failed"`
+// at parse time (`compiler/capsules/syntax/src/parser/statements/special.sfn:404`),
+// so the gate matched every failure in the file. `_test_hook_records`
+// (`compiler/src/cli/commands/test/exec.sfn`) now pairs each `assert`
+// SFTR record with the very next fail record in stream order instead.
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`: the fixture must itself
+// contain failing tests, so it is driven as a subprocess via
+// `process.run_capture` and its `--json` stdout is asserted on — mirrors
+// `harness_stream_records_test.sfn`.
+import { find, int_to_string } from "sfn/strings";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
+
+// Three failing tests on distinct, known lines: "a"'s assert lands on
+// source line 2, "b"'s on line 6, "c"'s on line 10. Every bare assert
+// shares the identical literal message "assertion failed" — this is
+// exactly the shape that defeated the old message-equality gate, so no
+// separate "custom message" fixture is needed to exercise it.
+fn _three_failures_src() -> string {
+    return "test \"a: first fails\" {\n" + "    assert 1 == 2;\n" + "}\n" + "\n"
+        + "test \"b: second fails\" {\n"
+        + "    assert 2 == 3;\n"
+        + "}\n"
+        + "\n"
+        + "test \"c: third fails\" {\n"
+        + "    assert 3 == 4;\n"
+        + "}\n";
+}
+
+// One passing test, then a failing test whose assert lands on line 6.
+fn _one_failure_src() -> string {
+    return "test \"a: passes\" {\n" + "    assert 1 == 1;\n" + "}\n" + "\n"
+        + "test \"b: fails\" {\n"
+        + "    assert 5 == 6;\n"
+        + "}\n";
+}
+
+// The `--json` stream is jsonl (one event per line); slice out the event
+// line that names `test_name` so the `"line":N,"col"` search below can't
+// accidentally match a sibling event's assertion.
+fn _event_line_for(combined: string, test_name: string) -> string {
+    let name_idx = find(combined, "\"name\":\"" + test_name + "\"", 0);
+    assert name_idx >= 0;
+    let nl = find(combined, "\n", name_idx);
+    if nl < 0 { return substring(combined, name_idx, combined.length); }
+    return substring(combined, name_idx, nl);
+}
+
+// True when this event's `assertion` object carries exactly `line`. Field
+// order is fixed by `render_assert_failure_json` (file, line, col,
+// message), so `"line":<N>,"col"` is unambiguous — the OUTER `test` event
+// also has a `"line"` field (the test's declaration line), but it is
+// followed by `"status"`, never `"col"` (`render_test_event`).
+fn _event_has_assert_line(event_line: string, line: int) -> boolean {
+    return find(event_line, "\"line\":" + int_to_string(line) + ",\"col\"", 0) >= 0;
+}
+
+test "harness stream: distinct assert failures report their own, distinct lines" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let fixture = dir + "/three_failures_test.sfn";
+        fs.writeFile(fixture, _three_failures_src());
+        let scratch = nested_runner_scratch("assert-pairing-three");
+        let exit = process.run_capture([sfn_bin_path(), "test", fixture, "--json"], clean_runner_env(scratch));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let combined = out + err;
+
+        assert exit != 0;
+
+        let a_line = _event_line_for(combined, "a: first fails");
+        let b_line = _event_line_for(combined, "b: second fails");
+        let c_line = _event_line_for(combined, "c: third fails");
+
+        // Each failure carries its OWN assert location, not the first
+        // test's (the exact defect: pre-fix, all three would show line 2).
+        assert _event_has_assert_line(a_line, 2);
+        assert _event_has_assert_line(b_line, 6);
+        assert _event_has_assert_line(c_line, 10);
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "harness stream: a single failure still reports its correct line" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let fixture = dir + "/one_failure_test.sfn";
+        fs.writeFile(fixture, _one_failure_src());
+        let scratch = nested_runner_scratch("assert-pairing-one");
+        let exit = process.run_capture([sfn_bin_path(), "test", fixture, "--json"], clean_runner_env(scratch));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let combined = out + err;
+
+        assert exit != 0;
+        let b_line = _event_line_for(combined, "b: fails");
+        assert _event_has_assert_line(b_line, 6);
+        return 0;
+    });
+    assert code == 0;
+}

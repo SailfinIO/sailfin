@@ -77,8 +77,38 @@ let MOVEFILE_REPLACE_EXISTING: i32 = 1;
 // Move `src` onto `dst`, replacing `dst` if present. Returns 0 on
 // success and non-zero on failure, matching `rename(2)`'s convention —
 // note this INVERTS `MoveFileExA`, which returns non-zero for success.
+// `GetFileAttributesA` backs the directory guard on the fallback below.
+// Decimal constants for the same reason as `MOVEFILE_REPLACE_EXISTING`
+// above: hex integer literals fold to 0 on the pinned seed.
+// `FILE_ATTRIBUTE_DIRECTORY` = 16; `INVALID_FILE_ATTRIBUTES` is
+// `0xFFFFFFFF`, which is -1 in the `i32` this returns.
+extern fn GetFileAttributesA(path: *u8) -> i32;
+
+let FILE_ATTRIBUTE_DIRECTORY: i32 = 16;
+
+let INVALID_FILE_ATTRIBUTES: i32 = 0 - 1;
+
+// True only for a path that exists AND is a directory. A missing path
+// reports `INVALID_FILE_ATTRIBUTES` and is NOT a directory — the caller
+// wants "is a directory standing in the way", not "does it exist".
+fn _rw_is_directory(path: *u8) -> boolean {
+    let attrs: i32 = GetFileAttributesA(path);
+    if attrs == INVALID_FILE_ATTRIBUTES { return false; }
+    return (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
 fn sfn_rename_replace(src: *u8, dst: *u8) -> i32 {
     if MoveFileExA(src, dst, MOVEFILE_REPLACE_EXISTING) != 0 { return 0; }
+
+    // `MoveFileExA` renames a DIRECTORY aside as readily as a file, so
+    // without this guard the displace-then-publish fallback below would
+    // move a directory standing at `dst` to `<dst>.old` and report the
+    // publish as SUCCEEDED — while POSIX `rename(2)` refuses the same
+    // call with EISDIR. That divergence silently relocates a directory
+    // tree on a path the caller believes it is merely failing to publish
+    // to. Checked here rather than before the direct attempt above so the
+    // common success path pays no extra syscall (SFN-1102).
+    if _rw_is_directory(dst) { return 0 - 1; }
 
     // Per the cast-quirk note in `exec.sfn`'s module header: route the
     // destination through a `string`-typed local before concatenating,
