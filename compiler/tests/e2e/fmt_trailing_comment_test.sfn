@@ -1,0 +1,141 @@
+// End-to-end regression for SFN-1105: `sfn fmt` must never emit a token after
+// a `//` comment on the same line.
+//
+// The formatter collapses multi-line expressions onto one line, and
+// `emitter.sfn` only ended a line on a `semicolon`, or on a `separator` at
+// `paren_depth == 0`. A trailing comment inside a call, an array literal, or a
+// wrapped operator chain was therefore followed by the rest of the construct
+// on the same line, where the comment swallowed it:
+//
+//     let x = _sum(          ->   let x = _sum(1,  // the first operand 2,);
+//         1, // the first operand
+//         2,
+//     );
+//
+// That output does not parse (E0505), so `sfn fmt --write` silently destroyed
+// source — in a tool `.claude/rules/formatting.md` mandates running before
+// every commit.
+//
+// Kept in its own file rather than appended to `fmt_test.sfn` because the
+// invariant under test is different in kind from that file's canonical-form
+// assertions: this one is about `fmt` never producing source the compiler
+// cannot read back, which no other test encodes.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives `sfn fmt` and
+// `sfn check` as subprocesses. Both are pure frontend passes with no
+// `clang`/link step, so an empty child env is sufficient — the same reasoning
+// `fmt_test.sfn` documents.
+import { trim_right } from "sfn/strings";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+
+// Per-test scratch dir. Duplicated from `fmt_test.sfn` rather than shared:
+// both copies are five lines over an exported `sfn/test` primitive, and
+// `sfn/test` is a narrow-stdlib library that should not grow a
+// formatter-specific helper.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Format `src` in place and return the file's trailing-newline-normalized
+// contents.
+//
+// Reads the formatted FILE rather than capturing `fmt`'s stdout, which
+// `fmt_test.sfn` does. That is not a style preference: on a native Windows
+// host the child's stdout is text-mode translated, so `sfn fmt <file>` emits
+// CRLF while `sfn fmt --write` puts LF on disk. A stdout comparison against an
+// LF expectation therefore cannot pass on Windows, and `--write` is also the
+// mode that actually mutates a contributor's source — the thing this file
+// exists to keep safe.
+fn _fmt(name: string, src: string) -> string ![io] {
+    let path = _scratch_dir() + "/fmt1105-" + name + ".sfn";
+    fs.writeFile(path, src);
+    let _exit = process.run_capture([sfn_bin_path(), "fmt", "--write", path], []);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    let formatted = fs.readFile(path);
+    if fs.exists(path) { fs.deleteFile(path); }
+    return trim_right(formatted);
+}
+
+// Format `src` in place, then typecheck the result. This is the invariant the
+// defect actually violated: whatever layout `fmt` chooses, the compiler must
+// still be able to read it back. Asserted separately from the exact-output
+// test below so that improving continuation indentation later does not
+// weaken the safety guarantee to a layout comparison.
+fn _formats_and_parses(name: string, src: string) -> boolean ![io] {
+    let path = _scratch_dir() + "/fmt1105-rt-" + name + ".sfn";
+    fs.writeFile(path, src);
+    let _fexit = process.run_capture([sfn_bin_path(), "fmt", "--write", path], []);
+    let _fout = process.capture_take_stdout();
+    let _ferr = process.capture_take_stderr();
+    let check_exit = process.run_capture([sfn_bin_path(), "check", path], []);
+    let _cout = process.capture_take_stdout();
+    let _cerr = process.capture_take_stderr();
+    if fs.exists(path) { fs.deleteFile(path); }
+    return check_exit == 0;
+}
+
+let CALL_ARGS: string = "fn _sum(a: i64, b: i64) -> i64 { return a + b; }\n\nfn call_args() -> i64 {\n    let x = _sum(\n        1, // the first operand\n        2,\n    );\n    return x;\n}";
+
+let ARRAY_LIT: string = "fn arr() -> i64[] {\n    let v = [\n        10, // ten\n        20,\n        30,\n    ];\n    return v;\n}";
+
+let BINOP_CHAIN: string = "fn binop() -> i64 {\n    let y = 1 + // leading term\n        2 +\n        3;\n    return y;\n}";
+
+let IF_CONDITION: string = "fn cond(a: i64) -> boolean {\n    if a > 0 && // positive\n        a < 10 {\n        return true;\n    }\n    return false;\n}";
+
+// All four shapes collapse onto one line, so all four could swallow. Each is
+// asserted independently: they reach the collapse through different roles
+// (`separator` inside `paren_open`, inside `bracket_open`, and an `operator`
+// wrap), and fixing one would not have fixed the others.
+test "fmt: a call with a trailing comment still parses after formatting" ![io] {
+    assert _formats_and_parses("call", CALL_ARGS);
+}
+
+test "fmt: an array literal with a trailing comment still parses after formatting" ![io] {
+    assert _formats_and_parses("array", ARRAY_LIT);
+}
+
+test "fmt: an operator chain with a trailing comment still parses after formatting" ![io] {
+    assert _formats_and_parses("binop", BINOP_CHAIN);
+}
+
+test "fmt: an if condition with a trailing comment still parses after formatting" ![io] {
+    assert _formats_and_parses("cond", IF_CONDITION);
+}
+
+// Pins the emitted form for the canonical case, in the exact-output style
+// `fmt_test.sfn` uses. The continuation line is deliberately NOT indented to
+// the open paren: the formatter tracks `paren_depth` but does not fold it into
+// the indent, and widening that was out of scope for a fix whose point is to
+// stop destroying source. If continuation indenting is improved later, this
+// expectation is the thing that should change — the four assertions above
+// must not.
+test "fmt: a trailing comment ends its line rather than swallowing the rest" ![io] {
+    let want = "fn _sum(a: i64, b: i64) -> i64 { return a + b; }\n\nfn call_args() -> i64 {\n    let x = _sum(1,  // the first operand\n    2,);\n    return x;\n}";
+    assert _fmt("call_exact", CALL_ARGS) == want;
+}
+
+// Formatting is a fixed point, so the wrapped form must survive a second pass
+// unchanged. Without this, a fix that merely moved the swallow one pass later
+// would still look green above.
+test "fmt: the wrapped trailing-comment form is idempotent" ![io] {
+    let once = _fmt("idem_1", CALL_ARGS);
+    let twice = _fmt("idem_2", once);
+    assert once == twice;
+}
+
+// The one place a single token collects MORE than one trailing comment: at
+// EOF, `strip_and_classify` folds the leftover `pending_comments` onto the
+// last token rather than dropping them (`compiler/src/tools/fmt/tokens.sfn`).
+// Emitting the group with one newline after it — rather than one per comment —
+// would fuse a run of comment LINES into the first comment. No source is
+// destroyed, but it is a one-way collapse of the file's trailing comments, and
+// `fmt` is a fixed point, so nothing would ever bring them back.
+test "fmt: a run of comments at EOF keeps one line each" ![io] {
+    let src = "fn f() -> i64 { return 1; }\n// tail one\n// tail two\n// tail three";
+    let want = "fn f() -> i64 {\n    return 1;\n}  // tail one\n// tail two\n// tail three";
+    assert _fmt("eof_run", src) == want;
+}
