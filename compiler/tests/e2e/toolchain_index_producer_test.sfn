@@ -1,0 +1,25 @@
+// compiler/tests/e2e/toolchain_index_producer_test.sfn
+//
+// Offline producer contract for SFN-1062. The release workflow runs on Linux,
+// where Python and OpenSSL are both required by the producer; keep this test on
+// that same host contract rather than treating platform verifier differences as
+// release-index failures.
+import { find } from "sfn/strings";
+import { skip } from "sfn/test";
+
+import { build_host_os } from "../../src/build/target";
+
+test "toolchain index producer: signed offline fixture matrix" ![io] {
+    if build_host_os() != "Linux" {
+        skip("toolchain-index publication runs on Linux release workers");
+    }
+    let path = env.get("PATH");
+    let mut child_env: string[] = [];
+    if path.length > 0 { child_env.push("PATH=" + path); }
+    let exit = process.run_capture(["python3", "scripts/test_publish_toolchain_index.py"], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "all offline producer fixtures passed", 0) >= 0;
+    assert err.length == 0;
+}

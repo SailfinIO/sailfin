@@ -138,7 +138,7 @@ jobs:
                 reason="workspace member or manifest input changed: $path"
               fi
               case "$path" in
-                compiler/tests/*|scripts/*|Makefile|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
+                compiler/tests/*|scripts/*|Makefile|.github/release-signing/toolchain-index-state.json|.github/workflows/ci.yml|.github/workflows/release-tag.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
                   source=true
                   reason="compiler/runtime/build-system path changed: $path"
                   ;;
@@ -345,6 +345,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Verify signed toolchain-index producer fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/test_publish_toolchain_index.py
 
       - name: Resolve seed version from bootstrap.toml
         id: seed

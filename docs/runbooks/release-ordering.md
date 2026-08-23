@@ -114,14 +114,27 @@ native leg still blocks publication — via the payload gate, not this `if:`.
    (`scripts/verify-payload-dep-closure.sh`).
 9. Sign the `SHA256SUMS` manifest (`scripts/sign-release-manifest.sh`),
    which self-verifies against the committed public key.
-10. **Promote** — the first and only mutation of `main`. A single
+10. Fetch the canonical, preserved, and complete versioned toolchain-index
+    pairs; authenticate them, require equal-sequence byte identity, select the
+    globally highest sequence, and validate/advance it from the final assets
+    and `SHA256SUMS`,
+    then sign and self-verify canonical `toolchain-index.json` bytes. This is
+    still pre-promotion and fails closed on expiry, rollback, host/digest,
+    release-state, signature, or key-transition errors.
+11. **Promote** — the first and only mutation of `main`. A single
     `git push --atomic` pushes both `<staging_sha>:refs/heads/main` and the
     annotated tag, non-force. Atomic means `main` and the tag land together
     or not at all; non-force means the push is rejected outright if `main`
     advanced during the build.
-11. Publish the GitHub Release atomically via `gh release create
+12. Publish the GitHub Release atomically via `gh release create
     --verify-tag` (creates a draft internally, uploads every asset,
-    publishes only once all uploads succeed).
+    including the signed index pair, and publishes only once all uploads
+    succeed).
+13. Preserve the last authenticated pair as
+    `toolchain-index.previous.json{,.sig}`, then replace the public signed pair
+    under the reserved `toolchain-index-v1` release-base path. The reserved
+    release stays draft while both public assets are replaced, then becomes
+    public and non-latest again.
 
 ### Stage 4 — `release.yml`, job `cleanup-staging`
 
@@ -133,28 +146,52 @@ command printed in the run log.
 
 ## Failure modes
 
-**A payload gate fails (stages 2–3, steps 6–9).** `main` is unbumped, no
+**A payload/index gate fails (stages 2–3, steps 6–10).** `main` is unbumped, no
 tag exists, no release was created. Fix the packaging defect and re-run the
 release; the version number is not burned. This is the case SFN-829 exists
 to produce.
 
-**The promotion push is rejected (step 10).** `main` advanced while
+**The promotion push is rejected (step 11).** `main` advanced while
 payloads were building, so the staged bump is no longer a fast-forward.
 Nothing was mutated — re-run the release workflow; the next attempt rebases
 onto the newer `main`. This is the accepted cost of tagging exactly the
 commit that was built: the tag's tree is always byte-identical to what
 produced the published binaries, never a rebased approximation. The window
 is the full build duration (up to 240 minutes on the `linux-arm64` leg), so
-a cut racing an active merge stream can lose the race. `concurrency: group:
-release` only serialises releases against each other — it does not
-serialise a release against ordinary merges to `main`.
+a cut racing an active merge stream can lose the race. The parent `release`
+group serialises cuts, and `release-publication` also serialises direct tag
+repairs so index sequences cannot race; neither group serialises a release
+against ordinary merges to `main`.
 
-**Publication fails after promotion (step 11).** `main` is bumped and the
+**Versioned publication fails after promotion (step 12).** `main` is bumped and the
 tag exists, but no public release was published — the one residual window,
 now narrowed to the `gh release create` call itself. Remediate by
 re-running `release-tag.yml` via `workflow_dispatch` against the existing
 tag (`ref` blank → builds the tag; `promote` is not available on the
 dispatch path, so a manual rebuild can never mutate `main`).
+
+**Canonical index replacement fails (step 13).** The versioned release still
+carries the newly signed index pair, but the stable discovery endpoint is left
+unchanged or draft. Re-run `release-tag.yml` for the exact existing tag. The
+producer selects the globally highest authenticated canonical, preserved, or
+versioned candidate, republishes identical versioned assets, and then repairs
+the reserved endpoint. An incomplete preserved backup is ignored and replaced
+from an authenticated candidate. Do not hand-edit the payload or upload only
+one member of the pair.
+
+**The reserved index tag is missing.** Ordinary releases fail instead of
+inferring a new sequence-1 history. For the very first publication only,
+manually run `release.yml` (or `release-tag.yml` for an existing tag) with
+`bootstrap_index: true`; the workflow also proves that no versioned release
+has published either toolchain-index asset and that the reserved Git tag does
+not already exist. When complete versioned pairs
+exist, the workflow authenticates all of them and restores from the globally
+highest sequence regardless of which release tag was dispatched. Never use
+bootstrap to repair a deleted endpoint.
+
+The same recovery applies when the reserved Git tag still exists but its
+GitHub Release object was deleted: the workflow detects the missing release
+object through the API and recreates it against the existing verified tag.
 
 This remediation does **not** work for tags before v0.10.3. A re-run checks
 out the tag's own tree, which predates
@@ -204,7 +241,7 @@ mutated `main`.
   it ignores the result), so a slow-but-not-failing run can still stretch
   the pre-`Promote` window well past the ~12-minute baseline. Every added
   minute in that window raises the odds of the non-force `git push
-  --atomic` in step 10 being rejected because `main` advanced during the
+  --atomic` in step 11 being rejected because `main` advanced during the
   build — accepted deliberately (SFEP-0021 M11 / SFN-57) rather than
   discovered as a surprise regression.
 

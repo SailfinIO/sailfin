@@ -4,21 +4,25 @@ Sailfin's toolchain auto-fetch (Go-`GOTOOLCHAIN`-style transparent download +
 re-exec of a pinned compiler) is only safe if a downloaded toolchain can be
 verified before it is executed. This document describes the supply-chain root
 that makes that verification possible: a signed release-digest manifest plus a
-public key pinned into the `sfn` binary.
+public key pinned into the `sfn` binary. The same release pipeline also signs
+the cross-release discovery index described by SFEP-0073 §3.7.
 
 Design record: **SFEP-0046** (`docs/proposals/0046-toolchain-pinning.md`) §3.5.
-This is the **producer** side (SFN-171 — sign releases + embed the key). The
+This is the **producer** side (SFN-171 for per-release manifests and SFN-1062
+for signed cross-release discovery). The
 **consumer** side (native fetch that downloads and verifies, SFN-168) is
 separate.
 
 ## What a release publishes
 
-Every release uploads, alongside the per-platform tarballs, two extra assets:
+Every release uploads, alongside the per-platform tarballs, four trust assets:
 
 | Asset | Contents |
 |---|---|
 | `SHA256SUMS` | One `sha256sum`-format line (`<hex>  <basename>`) per release asset, sorted. |
 | `SHA256SUMS.sig` | Detached Ed25519 signature over the raw bytes of `SHA256SUMS`, encoded as exactly 128 lowercase hex chars (a raw 64-byte signature), no trailing newline. A consumer passes it verbatim to `ed25519_verify_utf8` (trim defensively if a transport adds whitespace). |
+| `toolchain-index.json` | Canonical `sailfin-toolchain-index/1` discovery metadata: exact channel/host candidates, release-manifest bindings, sequence/expiry, release states, advisories, and signing-key transitions. |
+| `toolchain-index.json.sig` | Detached Ed25519 signature over the exact canonical index bytes, in the same 128-lowercase-hex/no-newline representation. |
 
 The signature is produced by `scripts/sign-release-manifest.sh`, invoked from
 the `Sign release manifest (SHA256SUMS)` step in
@@ -36,17 +40,49 @@ If no signing key is configured the manifest is still written but left
 unsigned; consumers fail closed on a missing/invalid signature, so an unsigned
 release is simply unusable by auto-fetch — never silently trusted.
 
+After `SHA256SUMS` is complete, `scripts/publish-toolchain-index.py` hashes its
+raw bytes, verifies its signature, validates every supported host asset
+against its manifest digest,
+advances the prior authenticated index, serializes canonical JSON, signs it,
+and self-verifies the detached signature. Unlike the historical manifest
+helper, the index producer requires the signing key: a release cannot publish
+discovery metadata without its signature. The index pair is uploaded twice
+with identical bytes:
+
+- on the versioned release, beside `SHA256SUMS`; and
+- under `<release-base>/toolchain-index-v1/toolchain-index.json` and
+  `toolchain-index.json.sig`, using a reserved non-latest GitHub release as the
+  stable cross-release endpoint. Mirrors preserve this `<tag>/<asset>` shape.
+
+The reserved release is drafted while both assets are replaced, so a client
+can observe a temporary miss but not an intentionally published mixed-sequence
+JSON/signature pair. It also retains the last authenticated pair under
+`toolchain-index.previous.json{,.sig}` so a retry can recover if replacement
+stops after only one public asset changes. Recovery authenticates all complete
+versioned pairs and selects the highest sequence; equal-sequence payloads must
+be byte-identical, while mixed JSON/signature upload remnants are ignored. See
+`docs/reference/toolchain-index-schema.md` for the locked payload and
+transition-proof format.
+
+The index is **discovery metadata, not artifact verification**. It selects an
+exact release and authenticates that release's `SHA256SUMS` location/digest;
+an installer must still verify `SHA256SUMS.sig`, then the selected archive's
+digest, before extraction. SFN-1062 ships this producer. Client-side index
+verification and enforcement remain SFN-1069; until that lands, existing exact
+installs retain their release-specific SFEP-0046 verification behavior.
+
 ## The verification key (pinned, no trust-on-first-use)
 
 The signing key is an **Ed25519** keypair. The **public** half is committed and
 embedded in the `sfn` binary at build time — there is no trust-on-first-use and
-no network step in establishing trust. It lives in six places that must stay
+no network step in establishing trust. It lives in seven places that must stay
 in sync:
 
 | Location | Form | Role |
 |---|---|---|
 | `.github/release-signing/ed25519-release.pub.pem` | PEM (SPKI) | Canonical committed public key; the release script self-verifies against it. |
 | `.github/release-signing/ed25519-release.pub.hex` | 64 hex chars | Raw 32-byte key, convenience/cross-check copy. |
+| `.github/release-signing/toolchain-index-state.json` | Canonical producer policy | Trusted roots, active signing key, authenticated transitions, and current yank/revocation/advisory records. |
 | `compiler/src/release_trust.sfn` | `RELEASE_SIGNING_PUBLIC_KEY_HEX` (64 hex) | The copy pinned into the `sfn` binary; read via `release_signing_public_key_hex()`. |
 | `site/public/.well-known/sailfin-release-signing-key.pem` | PEM (SPKI) | HTTPS trust anchor used by the public [verification guide](https://sailfin.dev/docs/getting-started/verify-download). |
 | `install.sh` | `RELEASE_SIGNING_PUBLIC_KEY_PEM` (PEM/SPKI) | Bootstrap installer trust anchor on Unix-like hosts; verified with a KAT-gated OpenSSL 3.0+ (SFN-1034). |
@@ -90,8 +126,9 @@ rotated key only verifies for toolchains built from a compiler that already
 carries it. So the rotation must reach the **pinned seed** (`/pin-seed`) before
 the first release is signed with the new key — otherwise an older toolchain
 cannot verify that release. Sequence the seed bump ahead of the first signed
-cut. A release built before the secret is configured is still published
-unsigned, and consumers fail closed on it (never silently trusted).
+cut. The legacy manifest helper still emits unsigned `SHA256SUMS` when the
+secret is absent, but the signed-index producer now fails before promotion, so
+the complete release pipeline cannot publish a modern release without the key.
 
 ## Key generation & rotation
 
@@ -107,6 +144,12 @@ openssl pkey -in release-priv.pem -pubout -out ed25519-release.pub.pem
 openssl pkey -in release-priv.pem -pubout -outform DER | tail -c 32 \
   | od -An -v -tx1 | tr -d ' \n'; echo
 ```
+
+Before replacing the old key, create the canonical transition message defined
+in `docs/reference/toolchain-index-schema.md` and sign those exact bytes with
+the **old** private key. That proof is the only part of a rotation that lets an
+already-pinned old client authenticate the new public key; signing it with the
+new key is circular and is rejected by the producer.
 
 Then, in one PR:
 
@@ -125,7 +168,12 @@ Then, in one PR:
    Windows install starts rejecting the newly signed manifests as a
    verification failure) rather than silently, but it still means Windows was
    left on the old anchor until caught — sequence both edits in this same PR.
-6. Regenerate the test fixture in
+6. Append the old-key-signed transition to
+   `.github/release-signing/toolchain-index-state.json`, retain the old key in
+   `trusted_root_keys`, and set `signing_key` to the new raw public key/key ID.
+   Transition `effective_sequence` values are strictly increasing and the new
+   one must equal the first index sequence signed by the new key.
+7. Regenerate the test fixture in
    `capsules/sfn/crypto/tests/release_signing_key_test.sfn` — sign its `MSG`
    with the new private key and paste the new `KEY`/`SIG`:
    ```bash
@@ -133,8 +181,8 @@ Then, in one PR:
    openssl pkeyutl -sign -inkey release-priv.pem -rawin -in /tmp/msg -out /tmp/sig
    od -An -v -tx1 /tmp/sig | tr -d ' \n'; echo   # -> new SIG
    ```
-7. Store the new private key PEM as the `SAILFIN_RELEASE_SIGNING_KEY` secret.
-8. **Securely destroy** the local private key material.
+8. Store the new private key PEM as the `SAILFIN_RELEASE_SIGNING_KEY` secret.
+9. **Securely destroy** the local private key material.
 
 Because the embedded key is pinned at build time, a rotated key only takes
 effect for toolchains built from a compiler that carries it — plan rotations
@@ -147,5 +195,6 @@ around a seed bump so consumers have a verifier for the new key.
 - Verification is mandatory and fail-closed on the consumer; it is never skipped
   except by the explicit `SAILFIN_TOOLCHAIN=off` air-gapped escape (SFEP-0046
   §3.5).
-- The signing key is single-purpose (release manifests only) and lives solely in
-  CI secrets; compromise is bounded by rotating the embedded key.
+- The signing key is single-purpose (release manifests and the authenticated
+  toolchain discovery index) and lives solely in CI secrets; compromise is
+  bounded by an authenticated rotation and revocation record.
