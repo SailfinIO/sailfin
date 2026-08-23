@@ -13,66 +13,65 @@
 import { expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import {
-    _dv_classify,
     _dv_env_without,
-    _dv_json_or_null,
     _dv_last_line_containing,
     _dv_scrape_scalar,
     _dv_test_argv
 } from "../../src/cli/commands/dev_verify";
+import { verdict_classify, verdict_json_or_null } from "../../src/cli/verdict";
 import { load_workspace_inventory } from "../../src/workspace_inventory";
 
 // --------------------------------------------------------------
-// _dv_classify — producer-emitted failure taxonomy
+// verdict_classify — producer-emitted failure taxonomy
 // --------------------------------------------------------------
 test "dev verify: a clean exit classifies as no failure" {
-    expect_eq_str(_dv_classify(0, "build"), "");
-    expect_eq_str(_dv_classify(0, "test"), "");
+    expect_eq_str(verdict_classify(0, "build"), "");
+    expect_eq_str(verdict_classify(0, "test"), "");
 }
 
 test "dev verify: exit 2 is a setup error in every phase kind" {
     // SFEP-0003 §3.3 point 6: `2` means the tool never ran.
-    expect_eq_str(_dv_classify(2, "build"), "setup-error");
-    expect_eq_str(_dv_classify(2, "test"), "setup-error");
+    expect_eq_str(verdict_classify(2, "build"), "setup-error");
+    expect_eq_str(verdict_classify(2, "test"), "setup-error");
 }
 
 test "dev verify: a supervisor deadline classifies as timeout, not oom" {
     // `_dv_run_bounded` remaps its own SIGKILL (137) to 124 before this
     // ever sees it, so 124 is unambiguously OUR deadline.
-    expect_eq_str(_dv_classify(124, "build"), "timeout");
-    expect_eq_str(_dv_classify(124, "test"), "timeout");
+    expect_eq_str(verdict_classify(124, "build"), "timeout");
+    expect_eq_str(verdict_classify(124, "test"), "timeout");
 }
 
 test "dev verify: an unsolicited SIGKILL classifies as oom" {
     // 137 that reaches the classifier was not sent by this supervisor —
     // it is the 8 GiB RLIMIT_AS self-cap or the host OOM killer.
-    expect_eq_str(_dv_classify(137, "build"), "oom");
-    expect_eq_str(_dv_classify(137, "test"), "oom");
+    expect_eq_str(verdict_classify(137, "build"), "oom");
+    expect_eq_str(verdict_classify(137, "test"), "oom");
 }
 
 test "dev verify: fatal signals classify as crash" {
-    expect_eq_str(_dv_classify(139, "test"), "crash");
-    expect_eq_str(_dv_classify(135, "test"), "crash");
-    expect_eq_str(_dv_classify(136, "test"), "crash");
-    expect_eq_str(_dv_classify(132, "test"), "crash");
+    expect_eq_str(verdict_classify(139, "test"), "crash");
+    expect_eq_str(verdict_classify(135, "test"), "crash");
+    expect_eq_str(verdict_classify(136, "test"), "crash");
+    expect_eq_str(verdict_classify(132, "test"), "crash");
 }
 
 test "dev verify: SIGABRT is a test failure, never a crash" {
     // A clean `assert` aborts 134. Classifying it as a crash would send an
     // agent chasing a fault that does not exist.
-    expect_eq_str(_dv_classify(134, "test"), "test-failure");
+    expect_eq_str(verdict_classify(134, "test"), "test-failure");
 }
 
 test "dev verify: a plain non-zero exit splits by phase kind" {
-    expect_eq_str(_dv_classify(1, "build"), "compile-error");
-    expect_eq_str(_dv_classify(1, "test"), "test-failure");
+    expect_eq_str(verdict_classify(1, "build"), "compile-error");
+    expect_eq_str(verdict_classify(1, "test"), "test-failure");
 }
 
 test "dev verify: a failed spawn is a setup error, not a phase failure" {
     // `run_capture` reports -1 and the handle path reports 127 when no
     // process was ever created. Neither is the tool disagreeing with you.
-    expect_eq_str(_dv_classify(0 - 1, "build"), "setup-error");
-    expect_eq_str(_dv_classify(127, "test"), "setup-error");
+    expect_eq_str(verdict_classify(0 - 1, "build"), "setup-error");
+    expect_eq_str(verdict_classify(127, "test"), "setup-error");
 }
 
 // --------------------------------------------------------------
@@ -156,19 +155,19 @@ test "dev verify: no match yields empty" {
 }
 
 // --------------------------------------------------------------
-// _dv_json_or_null — the "" null sentinel
+// verdict_json_or_null — the "" null sentinel
 // --------------------------------------------------------------
 test "dev verify: empty strings render as JSON null" {
-    expect_eq_str(_dv_json_or_null(""), "null");
-    expect_eq_str(_dv_json_or_null("compile"), "\"compile\"");
+    expect_eq_str(verdict_json_or_null(""), "null");
+    expect_eq_str(verdict_json_or_null("compile"), "\"compile\"");
 }
 
 // --------------------------------------------------------------
 // _dv_env_without — child-env scrubbing
 // --------------------------------------------------------------
 test "dev verify: drops an exact key without touching prefixed siblings" {
-    let src: string[] = ["PATH=/usr/bin", "SAILFIN_INNER=1", "SAILFIN_INNERMOST=keep", "HOME=/root"];
-    expect_eq_str_array(_dv_env_without(src, "SAILFIN_INNER"), ["PATH=/usr/bin", "SAILFIN_INNERMOST=keep", "HOME=/root"]);
+    let src: string[] = ["PATH=/usr/bin", "SAILFIN_TEST_TIMEOUT=1", "SAILFIN_TEST_TIMEOUTX=keep", "HOME=/root"];
+    expect_eq_str_array(_dv_env_without(src, "SAILFIN_TEST_TIMEOUT"), ["PATH=/usr/bin", "SAILFIN_TEST_TIMEOUTX=keep", "HOME=/root"]);
 }
 
 test "dev verify: scrubbing an absent key is a no-op" {
