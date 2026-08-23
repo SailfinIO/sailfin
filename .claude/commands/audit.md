@@ -4,7 +4,7 @@ Quick sanity check of the current workspace. Designed to be run on its own (`/au
 
 ## Steps
 
-1. If `make check` has not completed in this session, run the `check` skill. Do not re-run it if a successful run is already on record.
+1. If `sfn dev verify` has not completed in this session, run the `check` skill. Do not re-run it if a successful run is already on record.
 
 2. If tests **fail**: diagnose exactly one failure. Identify the pipeline stage and the root cause using `references/pipeline-stages.md` from the `debug-compile` skill. **Do not attempt fixes autonomously** — just report the failure, the stage, and the suspected cause.
 

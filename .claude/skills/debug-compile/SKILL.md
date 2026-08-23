@@ -1,6 +1,6 @@
 ---
 name: debug-compile
-description: Systematically diagnose why a Sailfin source file or self-hosting build step fails to compile. Isolates the failure, identifies the pipeline stage, escalates to seed-stabilizer or compiler-architect when the fix is non-trivial, and verifies via test-runner. Use whenever `make compile` fails, a .sfn file won't build, or LLVM rejects generated IR.
+description: Systematically diagnose why a Sailfin source file or self-hosting build step fails to compile. Isolates the failure, identifies the pipeline stage, escalates to seed-stabilizer or compiler-architect when the fix is non-trivial, and verifies via test-runner. Use whenever `sfn dev bootstrap build` fails, a .sfn file won't build, or LLVM rejects generated IR.
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -24,7 +24,7 @@ This emits both `.sfn-asm` and LLVM IR under `build/debug/<basename>.{asm,ll,std
 .claude/skills/debug-compile/scripts/tail-build.sh
 ```
 
-Captures the full `make compile` log, prints the last 80 lines, and saves the full log for later grep.
+Captures the full `sfn dev bootstrap build` log, prints the last 80 lines, and saves the full log for later grep.
 
 ## Phase 2 — TRACE
 
@@ -51,17 +51,17 @@ If the proposed fix touches multiple passes or requires a migration, spawn `comp
 Edit the canonical source file under `compiler/src/` or `compiler/capsules/`. After the fix:
 
 ```bash
-make compile
-make test-unit
+sfn dev bootstrap build
+sfn test compiler/tests/unit
 ```
 
 If the bug represents a pattern that could recur, add a regression test under `compiler/tests/unit/`.
 
 ## Phase 5 — VERIFY
 
-Spawn `test-runner` for the full suite, including `make compile`. For
+Spawn `test-runner` for the full suite, including `sfn dev bootstrap build`. For
 structural fixes, also run the `check` skill.
 
 ## Constraints
 
-- If the fix is structural, run `make clean-build` before rebuilding.
+- If the fix is structural, run `sfn dev clean build` before rebuilding.

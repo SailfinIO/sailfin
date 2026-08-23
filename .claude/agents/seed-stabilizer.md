@@ -61,7 +61,7 @@ See `docs/proposals/0006-build-architecture.md` for the full root cause analysis
 
 ### For performance regressions:
 
-1. **Profile the build** — `make bench` for per-module timing and memory
+1. **Profile the build** — `sfn bench --compiler` for per-module timing and memory
 2. **Identify the hotspot** — which modules are slow? Which functions dominate?
 3. **Trace the hot path** — follow the code from the entry point through the expensive operations
 4. **Check for known antipatterns**: filesystem IPC, array copying, import re-parsing
@@ -87,9 +87,9 @@ See `docs/proposals/0006-build-architecture.md` for the full root cause analysis
 
 - **Minimize blast radius.** Prefer a targeted fix in one file over a sweeping
   refactor across many.
-- **Performance fixes must be measurable.** `make bench` before and after.
+- **Performance fixes must be measurable.** `sfn bench --compiler` before and after.
 
-Invariants (memory cap, `timeout 60`, the `make compile` self-host gate, and
+Invariants (memory cap, `timeout 60`, the `sfn dev bootstrap build` self-host gate, and
 "every fix lands in canonical compiler source — the driver is pure orchestration")
 are in `CLAUDE.md` and `.claude/rules/`.
 

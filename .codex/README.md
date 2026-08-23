@@ -41,14 +41,14 @@ The hooks are intentionally conservative:
 - `UserPromptSubmit` adds branch, dirty-file count, and unpushed commit count.
 - There is no `PreToolUse` ulimit guard: the compiler self-applies its 8 GiB Linux memory budget at startup (`SAILFIN_MEM_LIMIT` overrides; Darwin cannot enforce `RLIMIT_AS`).
 
-The remaining guardrail is time, not caller memory: wrap direct single-file compiler invocations with `timeout 60`; `make` targets handle their own timeouts.
+The remaining guardrail is time, not caller memory: wrap direct single-file compiler invocations with `timeout 60`; native pipeline commands handle their own timeouts.
 
 ## Current project facts Codex must preserve
 
 - The native compiler is self-hosted from the released seed pinned by `bootstrap.toml [seed].version`.
 - The runtime is Sailfin-native (`runtime/prelude.sfn` and `runtime/sfn/`); the old C runtime is gone.
 - `sfn check` is the fast parse/type/effect inner loop but does not prove codegen or self-hosting.
-- `make compile` is required before declaring compiler-source changes under `compiler/src/` or `compiler/capsules/` done; `make check` is the full gate.
+- `sfn dev bootstrap build` is required before declaring compiler-source changes under `compiler/src/` or `compiler/capsules/` done; `sfn dev verify` is the full gate.
 - Forward-looking design decisions use the SFEP process in `docs/proposals/0001-sfep-process.md` and the registry in `docs/proposals/README.md`.
 
 ## Linear planning workflow

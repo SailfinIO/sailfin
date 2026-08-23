@@ -5,13 +5,13 @@ description: Systematically diagnose Sailfin compilation, self-hosting, or LLVM 
 
 # Sailfin Debug Compile Skill
 
-Use this skill whenever `sfn check`, `make compile`, a single `.sfn` build, or LLVM/linking fails.
+Use this skill whenever `sfn check`, `sfn dev bootstrap build`, a single `.sfn` build, or LLVM/linking fails.
 
 ## Phase 1 — Isolate
 
 - For frontend errors, start with `sfn check <file>` or `build/bin/sfn check <file>`.
 - For a direct compile/run reproduction, wrap the compiler invocation with `timeout 60`.
-- For self-hosting failures, capture the failing `make compile` output and preserve the log path.
+- For self-hosting failures, capture the failing `sfn dev bootstrap build` output and preserve the log path.
 
 ## Phase 2 — Trace
 
@@ -36,12 +36,12 @@ If a similar construct works elsewhere, compare emitted `.sfn-asm` or `.ll` and 
 
 - Run `sfn check <touched .sfn files>` for the fast parse/type/effect loop.
 - Run `sfn fmt --write` and `sfn fmt --check` on touched `.sfn` files under `compiler/src/`, `compiler/capsules/`, or `runtime/`.
-- Run `make compile` for compiler-source changes.
-- Run targeted tests. Use `make test` or `make check` only when the issue asks
+- Run `sfn dev bootstrap build` for compiler-source changes.
+- Run targeted tests. Use `sfn test` or `sfn dev verify` only when the issue asks
   for a full gate or the fix is structural, release-facing, or high-risk.
 
 ## Constraints
 
 - The compiler self-caps memory on Linux; no `ulimit` prefix is needed.
 - Timeouts still apply to direct single-file compiler invocations.
-- Structural compiler changes should use `make clean-build` before rebuilding.
+- Structural compiler changes should use `sfn dev clean build` before rebuilding.

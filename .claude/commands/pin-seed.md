@@ -1,7 +1,7 @@
 # Pin the Seed Version
 
 Bump `bootstrap.toml [seed].version` (the repo-root seed pin consumed by
-`make fetch-seed`, `ci.yml`, `nightly-selfhost.yml`, and
+`sfn dev bootstrap fetch`, `ci.yml`, `nightly-selfhost.yml`, and
 `release-branches.yml`) — and the compiler `[toolchain].sfn` floor — to a
 newer Sailfin release.
 
@@ -68,15 +68,16 @@ Before committing, confirm the target binary actually downloads and
 smoke-verify it:
 
 ```bash
-SEED_VERSION="<target>" make fetch-seed
+.claude/skills/pin-seed/scripts/pin.sh "<target>"
+sfn dev bootstrap fetch
 build/toolchains/seed/bin/sfn version
 ```
 
-`make fetch-seed` is non-destructive — it installs into
-`build/toolchains/seed/versions/` and doesn't touch `bootstrap.toml`. If the
-fetch fails (404, checksum, network), abort. If the smoke-verify mismatches
-the expected version string, abort — don't trust a fetch that downloaded the
-wrong binary.
+`pin.sh` updates `bootstrap.toml [seed].version` and the compiler toolchain floor
+before the native fetch reads the new pin. `sfn dev bootstrap fetch` installs
+into `build/toolchains/seed/versions/`. If the fetch fails (404, checksum,
+network), restore both edited manifests and abort. If the smoke-verify
+mismatches the expected version string, restore both manifests and abort.
 
 If `--dry-run`, skip this phase.
 
@@ -111,7 +112,6 @@ No branch, no PR — pin directly on the current branch, mirroring
 `.claude/skills/pin-seed/SKILL.md`.
 
 ```bash
-.claude/skills/pin-seed/scripts/pin.sh <TARGET>
 git add bootstrap.toml compiler/capsule.toml
 git commit -m "$(cat <<'EOF'
 chore: bump seed to v<TARGET>
@@ -129,7 +129,7 @@ EOF
 )"
 ```
 
-`pin.sh` rewrites `bootstrap.toml [seed].version` and the compiler
+Phase 2's `pin.sh` invocation rewrites `bootstrap.toml [seed].version` and the compiler
 `[toolchain].sfn` floor in lockstep (SFEP-0047 §3.4). It leaves
 `[capsule].version` alone (a release-time bump) and prints a reminder.
 
@@ -138,7 +138,7 @@ If `--dry-run`, stop here without committing.
 Report:
 - The current → target version bump and the commit hash.
 - Any closed/open `seed-blocker` issues surfaced in Phase 3.
-- A reminder to run `make compile` locally before pushing, per the
+- A reminder to run `sfn dev bootstrap build` locally before pushing, per the
   failure-handling table below.
 
 ---
@@ -151,14 +151,14 @@ Report:
 | GitHub release not found / 0 assets | Abort, don't pin |
 | Fetch failure (404, checksum, network) | Restore old `bootstrap.toml` / `compiler/capsule.toml`, surface error |
 | Binary version mismatch on smoke-verify | Restore old `bootstrap.toml` / `compiler/capsule.toml`, surface error |
-| `make compile` failure after pin | Leave pin in place, surface error for investigation |
+| `sfn dev bootstrap build` failure after pin | Leave pin in place, surface error for investigation |
 
 ---
 
 ## Constraints
 
 - **Never bump the pin to a version whose binary hasn't uploaded.**
-  This breaks `make fetch-seed` for everyone. Phase 1 step 3 enforces
+  This breaks `sfn dev bootstrap fetch` for everyone. Phase 1 step 3 enforces
   this.
 - **Don't bundle other changes.** The pin is its own commit. If the
   user wants to drag in other fixes, they do so separately.

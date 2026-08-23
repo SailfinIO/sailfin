@@ -18,9 +18,9 @@ Use this skill when asked to update the seed pin in `bootstrap.toml`.
    ' bootstrap.toml
    ```
 3. Update `bootstrap.toml [seed].version` and the compiler `compiler/capsule.toml [toolchain].sfn` floor in lockstep (SFEP-0047 §3.4). Leave `[capsule].version` (the compiler source version) alone — that is a release-time bump.
-4. Run `make fetch-seed` to download the matching release binary (it reads `bootstrap.toml [seed].version`).
+4. Run `sfn dev bootstrap fetch` to download the matching release binary (it reads `bootstrap.toml [seed].version`).
 5. Run `build/toolchains/seed/bin/sfn version` and confirm it reports the expected version.
-6. If requested or needed before merge, run `make compile`.
+6. If requested or needed before merge, run `sfn dev bootstrap build`.
 7. Commit only `bootstrap.toml` and `compiler/capsule.toml` with `chore(seed): pin seed to <VERSION>`.
 
 ## Failure handling

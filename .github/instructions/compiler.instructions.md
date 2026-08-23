@@ -8,7 +8,7 @@ When working in the compiler directory:
 
 - The compiler is self-hosted in Sailfin (`.sfn`). Driver sources live in `compiler/src/`; role-oriented implementation capsules live in `compiler/capsules/`.
 - Follow the pipeline order: lexer → parser → AST → type check → effect check → emit → LLVM lowering.
-- Every change must preserve self-hosting: `make compile` must succeed after your edits.
+- Every change must preserve self-hosting: `sfn dev bootstrap build` must succeed after your edits.
 - Add regression tests in `compiler/tests/` for every change.
 - Spell effects explicitly and list them alphabetically: `fn foo() -> Bar ![io, model]`.
 - Coding conventions (naming, comments, error handling, file-size budgets) are defined in `docs/style-guide.md` — follow it; `PascalCase` types, `snake_case` functions/locals, `_underscore` private helpers.

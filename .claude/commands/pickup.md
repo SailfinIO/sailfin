@@ -82,7 +82,7 @@ add work."
 
 If the issue body has a `## Required in pinned seed` section listing
 predecessor PRs, verify each predecessor's merge commit is actually present in
-the binary `make compile` uses — this catches the "merged but not seeded"
+the binary `sfn dev bootstrap build` uses — this catches the "merged but not seeded"
 failure mode that broke the original #489 attempt. (`git` is available; use it.)
 
 ```bash
@@ -215,13 +215,13 @@ Walk every acceptance criterion in the body. Each must pass before opening the P
 
 ```bash
 # issue-specific commands from ## Verification
-make compile    # when the issue touches compiler self-hosting surface
+sfn dev bootstrap build    # when the issue touches compiler self-hosting surface
 build/bin/sfn test path/to/relevant_test.sfn
 ```
 
 Do not substitute the full suite for a targeted issue unless the issue asks for
 it or the implementation turns out to be structural/high-risk. Route a failing
-`make compile` or targeted test through `test-runner` (sonnet) to classify
+`sfn dev bootstrap build` or targeted test through `test-runner` (sonnet) to classify
 before escalating; don't spend Opus on a formatting error. If a criterion turns
 out impossible or wrong, comment on the Linear issue and pause — do not declare
 done with unmet criteria.

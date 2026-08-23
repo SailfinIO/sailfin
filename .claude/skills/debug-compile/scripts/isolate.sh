@@ -22,7 +22,7 @@ fi
 cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 if [[ ! -x build/bin/sfn ]]; then
-  echo "build/bin/sfn missing — run \`make compile\` first" >&2
+  echo "build/bin/sfn missing — run \`sfn dev bootstrap build\` first" >&2
   exit 69
 fi
 

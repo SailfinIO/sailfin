@@ -10,22 +10,21 @@
 ## Build, Test, and Development Commands
 
 - `sfn check <files>` (or `build/bin/sfn check <files>`) is the fast inner loop for parse/type/effect checking; it does not prove codegen, linking, or self-hosting.
-- `make compile` self-hosts the compiler from the released seed pinned by `bootstrap.toml [seed].version`.
-- `make rebuild` forces a rebuild from the seed.
-- `make check` compiles if needed and runs the full validation gate, including seedcheck self-host validation.
-- `make test`, `make test-unit`, `make test-integration`, and `make test-e2e` run Sailfin-native test suites.
+- `sfn dev bootstrap build` self-hosts the compiler from the released seed pinned by `bootstrap.toml [seed].version`; add `--force` to rebuild even when the source fingerprint is unchanged.
+- `sfn dev verify` compiles if needed and runs the full validation gate, including seedcheck self-host validation; add `--fast` for the parse/type/effect-only rung.
+- `sfn test [path]` runs Sailfin-native test suites; use `compiler/tests/unit`, `compiler/tests/integration`, or `compiler/tests/e2e` for a single compiler tier.
 - `build/bin/sfn test <path> [-k <name>]` runs targeted test directories, individual `*_test.sfn` files, or named tests. Prefer this for issue acceptance unless the issue explicitly needs a full suite.
-- `make bench` measures compile time and memory.
-- `make fetch-seed` downloads the pinned seed; `make install` installs the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
-- `make clean` removes packaged artifacts (`dist/`); `make clean-build` removes build artifacts while keeping the seed and is destructive enough to call out before use.
+- `sfn bench --compiler` measures compiler time and memory; `sfn bench --consumer` measures consumer builds.
+- `sfn dev bootstrap fetch` downloads the pinned seed. System installation writes outside the repository and is not an agent-default workflow.
+- `sfn dev clean dist` removes packaged artifacts (`dist/`); `sfn dev clean build` removes build artifacts while keeping the seed and is destructive enough to call out before use.
 - If you need scratch scripts or reproductions, place them under `/scratch`.
 
 ## Compiler Safety & Self-Hosting Invariants
 
 - The compiler self-applies an 8 GiB Linux `RLIMIT_AS` at startup (`SAILFIN_MEM_LIMIT` overrides; `unlimited`/`off`/`0` disables it). Do **not** add caller-side `ulimit` guards or Codex/Claude pre-tool hooks for ordinary compiler runs.
-- Timeouts still matter: wrap direct single-file compiler invocations with `timeout 60`; `make` targets manage their own timeouts.
-- Before committing changes to `compiler/src/*.sfn` or `compiler/capsules/**/*.sfn`, run `make compile` (or `make check`) before test-only validation so targeted tests do not run against a stale compiler binary.
-- If a change is structural (file splits, module graph changes, renamed exports), run `make clean-build` before rebuilding.
+- Timeouts still matter: wrap direct single-file compiler invocations with `timeout 60`; native pipeline commands manage their own timeouts.
+- Before committing changes to `compiler/src/*.sfn` or `compiler/capsules/**/*.sfn`, run `sfn dev bootstrap build` (or `sfn dev verify`) before test-only validation so targeted tests do not run against a stale compiler binary.
+- If a change is structural (file splits, module graph changes, renamed exports), run `sfn dev clean build` before rebuilding.
 - Fix compiler failures in `compiler/src/*.sfn`; the build driver (`compiler/src/cli/` + `compiler/src/capsule_resolver.sfn`) is pure orchestration and must not grow fixups.
 
 ## Style, Tests, and Documentation

@@ -42,8 +42,8 @@ self-host gate; a green `sfn check` is not a build guarantee (#1389). -->
 
 - [ ] `sfn fmt --check` clean on every touched `.sfn` file
 - [ ] `sfn check` (fast static analysis) passes
-- [ ] `make compile` — compiler self-hosts (required for `.sfn` changes under `compiler/src/` or `compiler/capsules/`; `make clean-build` first for structural changes)
-- [ ] `make check` — full suite + seedcheck (for shipped features / releases / structural changes)
+- [ ] `sfn dev bootstrap build` — compiler self-hosts (required for `.sfn` changes under `compiler/src/` or `compiler/capsules/`; `sfn dev clean build` first for structural changes)
+- [ ] `sfn dev verify` — full suite + seedcheck (for shipped features / releases / structural changes)
 - [ ] Regression coverage added or updated under `compiler/tests/`
 - [ ] N/A — docs/config-only change (no `.sfn` touched)
 

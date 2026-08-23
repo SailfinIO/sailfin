@@ -95,9 +95,9 @@ Create or promote only leaf issues. Each proposed issue must include:
 - Goal in one or two sentences.
 - Semantic `In`/`Out` scope, not a brittle file checklist.
 - Acceptance criteria with observable behavior.
-- Verification commands or test expectations. Prefer `make compile` plus the
+- Verification commands or test expectations. Prefer `sfn dev bootstrap build` plus the
   narrowest relevant `build/bin/sfn test <path>` / `-k` / `--tag` command for a
-  compiler leaf. Reserve `make test`, `make check`, and `make check-strict` for
+  compiler leaf. Reserve `sfn test`, `sfn dev verify`, and `sfn dev verify --strict` for
   full-suite, release, determinism, self-host fixed-point, structural compiler,
   or high-risk regression gates.
 - Estimate on the Sailfin scale: `1` = XS, `2` = S, `3` = M.

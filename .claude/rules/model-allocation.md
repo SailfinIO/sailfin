@@ -32,7 +32,7 @@ than its output, that gap is the delegation win.
 definition carries `maxTurns`. A cap cannot tell "finished cheaply" from "cut
 off mid-edit": the subagent just stops, the orchestrator gets a truncated
 report, and the work is re-spawned or absorbed onto Opus — costing more than
-the cap saved. Sailfin agents need long tool chains (`make compile` alone is
+the cap saved. Sailfin agents need long tool chains (`sfn dev bootstrap build` alone is
 many round-trips), so any defensible number sits above where a cap would help.
 Bound cost with `model:`/`effort:` and a narrow spec instead, and rely on the
 prompt's stop-and-report contract for early exit.

@@ -124,7 +124,7 @@ sed -n '/^| SFEP/,/^$/p' docs/proposals/README.md
 - **Don't duplicate the design into issues.** Issues cite the SFEP
   (`Design: SFEP-NNNN`); the SFEP's `tracking:` lists the issues.
 - **SFEP files are Markdown, not `.sfn`** — no `sfn fmt`, no self-host gate.
-  Editing them does not require `make compile`.
+  Editing them does not require `sfn dev bootstrap build`.
 - **Scope discipline:** only design decisions become SFEPs. Conventions, RCAs,
   runbooks, living trackers, and single-issue design gates keep their own homes
   (see `.claude/rules/proposals.md` and SFEP-0001 §1).

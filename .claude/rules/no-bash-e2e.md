@@ -1,7 +1,8 @@
 E2E tests are Sailfin `*_test.sfn` files using the `sfn/test` capsule — **never**
 bash scripts. The `compiler/tests/e2e/*.sh` surface grew 38 → 122 because
 dropping in a new `.sh` "just works"; that era is closed (#842 / #840). There is
-no `.sh` surface, no `make test-e2e-sh`, no allowlist that would make a new one
+no `.sh` surface, no shell-e2e compatibility command, and no allowlist that
+would make a new one
 acceptable. Everything the old hold-outs needed bash for — `curl`/`uname` shims,
 tar/jq inspection, `ulimit`/`cwd` control — is reachable from an `![io]` test
 that drives the subprocess via `process.run_capture`.

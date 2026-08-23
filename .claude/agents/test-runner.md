@@ -21,17 +21,17 @@ For single-file compiler invocations, wrap with `timeout 60` (hang guard):
 timeout 60 build/bin/sfn run path/to/file.sfn
 ```
 
-For `make` targets, the Makefile handles its own timeouts:
+Native pipeline commands manage their own timeouts:
 
 ```bash
-make test
+sfn test
 ```
 
-Do not choose `make test` just because a change is complete. For ordinary issue
+Do not choose `sfn test` just because a change is complete. For ordinary issue
 acceptance, run the verification commands from the issue body: usually
-`make compile` when compiler self-hosting surface changed, followed by targeted
-`build/bin/sfn test <path>` / `-k <name>` commands. Use full-suite `make test` or
-`make check` only when the issue asks for a full gate, the change is structural
+`sfn dev bootstrap build` when compiler self-hosting surface changed, followed by targeted
+`build/bin/sfn test <path>` / `-k <name>` commands. Use full-suite `sfn test` or
+`sfn dev verify` only when the issue asks for a full gate, the change is structural
 or release-facing, or the orchestrator explicitly requests it.
 
 Follow the validation ladder in CLAUDE.md — use the cheapest rung that catches
@@ -74,4 +74,3 @@ To run a specific example:
 ```bash
 timeout 60 build/bin/sfn run examples/basics/hello-world.sfn
 ```
-
