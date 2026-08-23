@@ -21,3 +21,24 @@ scripts/** linguist-vendored
 .claude/** linguist-vendored
 .codex/** linguist-vendored
 install.sh linguist-vendored
+
+# --- Line endings ---
+# `.sfn` and `.toml` check out LF on every host, overriding a contributor's
+# `core.autocrlf=true` (the Git for Windows default).
+#
+# `sfn fmt` canonicalizes to LF, so a CRLF working tree makes `sfn fmt --check`
+# report EVERY file as needing reformatting. That is the exact gate CI runs on
+# `compiler/src/`, `compiler/capsules/`, and `runtime/`, so on Windows it is
+# both unpassable and uninformative — it names every file and explains none of
+# them (SFN-1106).
+#
+# `.toml` is here for a second, independent reason: the compiler reads capsule
+# manifests as bytes, and tests anchor on their exact text.
+# `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn` asserts a
+# `"sfn-sources-add = [\n    ..."` substring against `runtime/capsule.toml`,
+# which no CRLF checkout can satisfy.
+#
+# Attributes apply on checkout, so an existing Windows clone needs a one-time
+# `git add --renormalize .` (or a fresh clone) to pick this up.
+*.sfn text eol=lf
+*.toml text eol=lf
