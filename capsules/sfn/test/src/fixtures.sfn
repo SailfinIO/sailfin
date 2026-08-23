@@ -234,13 +234,34 @@ fn nested_runner_scratch(label: string) -> string ![io] {
 // Use with the raw `process.run_capture(argv, env)` builtin the e2e tests
 // call.
 fn clean_runner_env(nested_scratch: string) -> string[] ![io] {
+    let none: string[] = [];
+    return clean_runner_env_without(nested_scratch, none);
+}
+
+// `clean_runner_env` plus a caller-supplied strip list, for a test that pushes
+// its own value for a key the outer environment may also carry (SFN-1114).
+//
+// This exists because of the first-match rule `clean_runner_env` documents
+// above: `env.get` resolves through libc `getenv`, which returns the FIRST
+// matching entry, so an inherited `KEY=old` earlier in the array silently
+// defeats a caller's later `KEY=new` push. `_caller_override_keys` hard-codes
+// the two keys SFN-925 found this way; every other seam a test invents — a
+// probe-only toggle, a fixture registry URL, a forced HOME — has the same
+// exposure and no fixed list can anticipate it. Naming the keys at the push
+// site keeps the strip and the push in one place, where they cannot drift.
+//
+// Pass the bare key names, no `=`. A key absent from the environment costs a
+// scan and nothing else, so over-listing is safe and under-listing is the
+// failure — when in doubt, name every key the helper goes on to push.
+fn clean_runner_env_without(nested_scratch: string, also_strip: string[]) -> string[] ![io] {
     let all = process.environ();
     let mut out: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= all.length { break; }
-        if !_is_pool_managed(all[i]) && !_is_caller_override(all[i]) {
-            out.push(all[i]);
+        let entry = all[i];
+        if !_is_pool_managed(entry) && !_is_caller_override(entry) && !_matches_any_key(entry, also_strip) {
+            out.push(entry);
         }
         i += 1;
     }

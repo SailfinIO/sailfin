@@ -414,8 +414,13 @@ export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compi
 // pool-orchestration keys the parent runner set (which otherwise bind the
 // nested run to the parent's private state under `--jobs N>1`) and re-point
 // `SAILFIN_TEST_SCRATCH` at an isolated subdir. See `fixtures.sfn`.
+// `clean_runner_env_without(nested_scratch, also_strip)` (SFN-1114) is the
+// same thing plus a caller-named strip list, for a helper that goes on to push
+// its own value for a key the outer environment may also carry — `getenv`
+// returns the first match, so an inherited entry would shadow the push.
 export {
     clean_runner_env,
+    clean_runner_env_without,
     nested_runner_scratch,
     with_cwd,
     with_env,
