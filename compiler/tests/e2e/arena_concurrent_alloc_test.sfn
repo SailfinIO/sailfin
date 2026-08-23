@@ -29,8 +29,8 @@
 // scratch dir and driven through `sfn build` / the compiled binary as
 // subprocesses; `SAILFIN_TEST_SCRATCH` isolates the nested build's cache
 // under the parallel pool (`docs/conventions/e2e-tests.md`).
-import { contains, find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { contains, ends_with, find } from "sfn/strings";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
 
 // Empty `run_capture` env is the EMPTY environment, not "inherit"; a
 // nested `sfn build` spawns clang + linker (needs PATH) and routes its
@@ -223,26 +223,29 @@ fn _asan_relink(work_dir: string, bin: string) -> string ![io] {
     if !fs.exists(prog_ll) { return ""; }
 
     let prog_o = saildir + "/program.o";
-    let cexit = process.run_capture(["clang", "-c", "-Wno-override-module", prog_ll, "-o", prog_o], _child_env());
+    let cexit = run_external_c_oracle(["-c", "-Wno-override-module", prog_ll, "-o", prog_o]);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if cexit != 0 { return ""; }
 
-    let link_clang = "clang -fsanitize=address -Wno-override-module " + saildir
-        + "/*.o -lpthread -lm -o "
-        + bin;
-    let lexit = process.run_capture(["bash", "-c", link_clang], _child_env());
+    let mut link_args: string[] = ["-fsanitize=address", "-Wno-override-module"];
+    let objects = fs.listDirectory(saildir);
+    let mut i: int = 0;
+    loop {
+        if i >= objects.length { break; }
+        if ends_with(objects[i], ".o") {
+            link_args.push(saildir + "/" + objects[i]);
+        }
+        i += 1;
+    }
+    link_args.push("-lpthread");
+    link_args.push("-lm");
+    link_args.push("-o");
+    link_args.push(bin);
+    let lexit = run_external_c_oracle(link_args);
     let _lo = process.capture_take_stdout();
     let _le = process.capture_take_stderr();
     if lexit == 0 { return bin; }
-
-    let link_gcc = "gcc -fsanitize=address " + saildir
-        + "/*.o -lpthread -lm -o "
-        + bin;
-    let gexit = process.run_capture(["bash", "-c", link_gcc], _child_env());
-    let _go = process.capture_take_stdout();
-    let _ge = process.capture_take_stderr();
-    if gexit == 0 { return bin; }
     return "";
 }
 
@@ -265,7 +268,7 @@ test "arena ASAN: concurrent struct-alloc workers are corruption-clean under san
     let asan_bin = dir + "/arena_conc_asan";
     let relinked = _asan_relink(work_dir, asan_bin);
     if relinked.length == 0 {
-        print.err("[arena-conc-asan] SKIP: neither clang compiler-rt nor gcc libasan relinked");
+        print.err("[arena-conc-asan] SKIP: configured oracle sanitizer runtime did not relink");
         assert true;
         return;
     }

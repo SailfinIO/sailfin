@@ -30,7 +30,7 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. `emit` / `check` neither link nor spawn
@@ -230,7 +230,8 @@ fn _mem_harness_c() -> string {
 
 // Functional roundtrip: link the emitted `.ll` against the C harness and
 // run it. The harness binds only the symbols the contract exercises;
-// `clang` and its linker resolve through PATH (threaded via _child_env).
+// The optional external compiler and its host environment resolve through
+// `sfn/test`; this oracle does not participate in production linking.
 // (No sanitizer leg in the original — nothing omitted here.)
 test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io] {
     let dir = _scratch_dir();
@@ -245,7 +246,7 @@ test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io
     let bin = dir + "/roundtrip";
     // `-Wno-override-module` for the emitted target-triple mismatch;
     // `-lm` because the seed lowers integer literals through libm.
-    let link_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let link_exit = run_external_c_oracle(["-Wno-override-module", harness, ll, "-o", bin, "-lm"]);
     let _lo = process.capture_take_stdout();
     let lerr = process.capture_take_stderr();
     assert find(lerr, "doesn't exist", 0) < 0;

@@ -31,7 +31,7 @@
 // IR assertions use `sfn/strings` predicates — the `sfn/test` `expect_*`
 // matchers are `![pure]` and cannot be called from an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs (PATH for clang/nm, SAILFIN_TEST_SCRATCH
@@ -304,20 +304,12 @@ fn _harness_c() -> string {
         + "}\n";
 }
 
-fn _which_clang() -> string ![io] {
-    let configured = env.get("CLANG");
-    if configured.length > 0 { return configured; }
-    return "clang";
-}
-
 test "cross-frame unwind: inline setjmp + sfn_throw round-trips message" ![io] {
     let ir = _emit_exception();
     assert ir.length > 0;
     let dir = _scratch_dir();
     let ll = dir + "/exception.ll";
     assert fs.exists(ll);
-
-    let clang = _which_clang();
 
     // Stage type_meta object; skip the roundtrip if it can't be built.
     let tm_ll = dir + "/type_meta.ll";
@@ -331,7 +323,7 @@ test "cross-frame unwind: inline setjmp + sfn_throw round-trips message" ![io] {
     }
     let tm_o = dir + "/type_meta.o";
     if fs.exists(tm_o) { fs.deleteFile(tm_o); }
-    let tm_cc = process.run_capture([clang, "-Wno-override-module", "-c", tm_ll, "-o", tm_o], _child_env());
+    let tm_cc = run_external_c_oracle(["-Wno-override-module", "-c", tm_ll, "-o", tm_o]);
     let _c1 = process.capture_take_stdout();
     let _c2 = process.capture_take_stderr();
     if tm_cc != 0 {
@@ -343,7 +335,7 @@ test "cross-frame unwind: inline setjmp + sfn_throw round-trips message" ![io] {
     fs.writeFile(harness, _harness_c());
     let bin = dir + "/roundtrip";
     if fs.exists(bin) { fs.deleteFile(bin); }
-    let link = process.run_capture([clang, "-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm"], _child_env());
+    let link = run_external_c_oracle(["-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm"]);
     let _l1 = process.capture_take_stdout();
     let _l2 = process.capture_take_stderr();
     // A link that fails for missing toolchain is a skip, not a failure.

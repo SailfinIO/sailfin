@@ -40,7 +40,7 @@
 // NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test; assert on captured stdout / IR with `sfn/strings`.
 import { contains, find, split } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the EMPTY environment, not "inherit".
 // Thread the toolchain vars: nested emit/run/clang resolve through PATH;
@@ -278,7 +278,7 @@ test "asan: capturing-spawn env alloc/free is balanced under ASAN+LSAN (#1475)" 
     let harness = dir + "/asan_harness.c";
     fs.writeFile(harness, _asan_harness_c());
     let bin_asan = dir + "/cap_spawn_asan_bin";
-    let link = process.run_capture(["clang", "-fsanitize=address", "-Wno-override-module", harness, ll, "-o", bin_asan], _child_env());
+    let link = run_external_c_oracle(["-fsanitize=address", "-Wno-override-module", harness, ll, "-o", bin_asan]);
     let _lo = process.capture_take_stdout();
     let _le = process.capture_take_stderr();
     if link != 0 {

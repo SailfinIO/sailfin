@@ -1,0 +1,146 @@
+// capsules/sfn/test/src/external_c_oracle.sfn
+//
+// Optional external C compiler oracle (SFN-1107).
+//
+// C-harness and differential tests sometimes need a host C compiler to
+// compile a small harness or ask LLVM's optimizer a comparison question.
+// That compiler is a test oracle only: it is not an Assemble or Link provider
+// for Sailfin's production build, bootstrap, package, or runtime paths.
+//
+// `SAILFIN_TEST_C_COMPILER` is the explicit override. When it is unset,
+// Darwin resolves Apple clang through the active Xcode / Command Line Tools
+// selection with `/usr/bin/xcrun`; other hosts probe `clang` on `PATH`.
+// Darwin also materializes `SDKROOT` through the same `xcrun` contract when
+// the parent did not already provide one. Every oracle subprocess inherits
+// the complete parent environment, so platform SDK and toolchain inputs are
+// never lost to a file-local PATH/HOME/TMPDIR allowlist.
+//
+// The result is deliberately optional. `external_c_oracle()` lets tests
+// inspect availability; `require_external_c_oracle()` turns absence or a
+// deterministically poisoned override into a real test skip; and
+// `run_external_c_oracle(args)` is the normal boundary for invocation.
+import { trim } from "sfn/strings";
+
+import { skip } from "./skip";
+
+// ExternalCOracle describes the resolved optional compiler and its child environment.
+struct ExternalCOracle {
+    available: boolean;
+    compiler: string;
+    environment: string[];
+    unavailable_reason: string;
+}
+
+fn _host_is_darwin() -> boolean ![io] {
+    let host_override = env.get("SAILFIN_HOST_OS");
+    if host_override.length > 0 { return host_override == "Darwin"; }
+    return fs.exists("/System/Library/CoreServices");
+}
+
+fn _env_key_matches(entry: string, name: string) -> boolean {
+    let prefix = name + "=";
+    if entry.length < prefix.length { return false; }
+    return substring(entry, 0, prefix.length) == prefix;
+}
+
+fn _set_environment(entries: string[], name: string, value: string) -> string[] {
+    let mut out: string[] = [];
+    let mut replaced = false;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if _env_key_matches(entries[i], name) {
+            if !replaced {
+                out.push(name + "=" + value);
+                replaced = true;
+            }
+        } else { out.push(entries[i]); }
+        i += 1;
+    }
+    if !replaced { out.push(name + "=" + value); }
+    return out;
+}
+
+fn _capture_first_line(argv: string[], child_env: string[]) -> string ![io] {
+    let exit = process.run_capture(argv, child_env);
+    let out = trim(process.capture_take_stdout());
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return out;
+}
+
+fn _is_oracle_available(compiler: string, child_env: string[]) -> boolean ![io] {
+    if compiler.length == 0 { return false; }
+    let exit = process.run_capture([compiler, "--version"], child_env);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return exit == 0;
+}
+
+// external_c_oracle resolves the optional external C test oracle and its
+// complete child environment without skipping or failing the test itself.
+fn external_c_oracle() -> ExternalCOracle ![io] {
+    let mut child_env = process.environ();
+    let configured = env.get("SAILFIN_TEST_C_COMPILER");
+    let darwin = _host_is_darwin();
+
+    let mut compiler = configured;
+    if compiler.length == 0 {
+        if darwin {
+            compiler = _capture_first_line(["/usr/bin/xcrun", "--find", "clang"], child_env);
+        } else { compiler = "clang"; }
+    }
+
+    if darwin && env.get("SDKROOT").length == 0 {
+        let sdkroot = _capture_first_line(["/usr/bin/xcrun", "--show-sdk-path"], child_env);
+        if sdkroot.length > 0 {
+            child_env = _set_environment(child_env, "SDKROOT", sdkroot);
+        }
+    }
+
+    if !_is_oracle_available(compiler, child_env) {
+        let mut reason = "optional external C test oracle is unavailable";
+        if configured.length > 0 {
+            reason = reason + ": SAILFIN_TEST_C_COMPILER=" + configured;
+        } else if darwin {
+            reason = reason + ": Apple clang was not resolved by /usr/bin/xcrun";
+        } else { reason = reason + ": clang was not found on PATH"; }
+        return ExternalCOracle {
+            available: false,
+            compiler: compiler,
+            environment: child_env,
+            unavailable_reason: reason
+        };
+    }
+
+    return ExternalCOracle {
+        available: true,
+        compiler: compiler,
+        environment: child_env,
+        unavailable_reason: ""
+    };
+}
+
+// require_external_c_oracle resolves the oracle or records an explicit
+// voluntary test skip. `skip` does not return; the fallback return only
+// satisfies the function's static shape.
+fn require_external_c_oracle() -> ExternalCOracle ![io] {
+    let oracle = external_c_oracle();
+    if !oracle.available { skip(oracle.unavailable_reason); }
+    return oracle;
+}
+
+// run_external_c_oracle runs the optional oracle with `args` appended after
+// its resolved executable. Callers consume stdout/stderr through the ordinary
+// `process.capture_take_*` builtins, matching `process.run_capture`'s idiom.
+fn run_external_c_oracle(args: string[]) -> int ![io] {
+    let oracle = require_external_c_oracle();
+    let mut argv: string[] = [oracle.compiler];
+    let mut i: int = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i += 1;
+    }
+    return process.run_capture(argv, oracle.environment);
+}

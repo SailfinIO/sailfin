@@ -28,7 +28,7 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
@@ -154,7 +154,7 @@ test "cstr boundary copies carried len + NUL, no over-read (C harness via clang)
     let harness = dir + "/cstr_harness.c";
     fs.writeFile(harness, _harness_c());
     let bin = dir + "/cstr_roundtrip";
-    let clang_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let clang_exit = run_external_c_oracle(["-Wno-override-module", harness, ll, "-o", bin, "-lm"]);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if clang_exit != 0 {
