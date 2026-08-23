@@ -32,13 +32,32 @@ install.sh linguist-vendored
 # both unpassable and uninformative — it names every file and explains none of
 # them (SFN-1106).
 #
+# The fmt gate is not the whole cost. Windows-only runtime source is guarded by
+# static `contains` assertions against whole-file text, because
+# `runtime/sfn/platform/process_windows.sfn` is selected only by the runtime
+# manifest's Windows target table and no Linux or macOS leg compiles it. Several
+# of those pins span a newline in order to guard placement rather than presence,
+# and no CRLF checkout can satisfy any of them — measured, 2 of the 3 failures
+# in `compiler/tests/e2e/process_run_stdio_passthrough_test.sfn` on a native
+# Windows host were line-ending artifacts alone.
+#
 # `.toml` is here for a second, independent reason: the compiler reads capsule
 # manifests as bytes, and tests anchor on their exact text.
 # `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn` asserts a
 # `"sfn-sources-add = [\n    ..."` substring against `runtime/capsule.toml`,
 # which no CRLF checkout can satisfy.
 #
-# Attributes apply on checkout, so an existing Windows clone needs a one-time
-# `git add --renormalize .` (or a fresh clone) to pick this up.
+# A fresh clone picks this up automatically. An existing Windows clone does NOT,
+# and `git add --renormalize .` will not fix it: the committed blobs are already
+# LF (`git ls-files --eol` reports `i/lf`), so there is nothing to renormalize,
+# and because `text eol=lf` normalizes CRLF->LF on the way in, git considers a
+# CRLF working tree clean — which makes `git checkout` and
+# `git checkout-index -f` no-ops on it too. The CRs have to come off the working
+# tree directly (`dos2unix`, an editor, or):
+#
+#   git ls-files --eol -- '*.sfn' '*.toml' | grep 'w/crlf' | sed 's/^.*\t//' \
+#     | while IFS= read -r f; do sed -i 's/\r$//' "$f"; done
+#
+# `git diff` stays empty afterwards, since the content already matched the index.
 *.sfn text eol=lf
 *.toml text eol=lf
