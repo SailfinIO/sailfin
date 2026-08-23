@@ -129,28 +129,16 @@ WORKSPACE_INVENTORY_CMD := $(NATIVE_BIN) dev inventory
 
 .PHONY: rebuild mcp-server
 
-# Agent-facing targets (#1059) wrap their real `<target>-impl` body in the
-# verdict-block emitter so a single greppable `===SAILFIN-RESULT===` block is
-# always the last output, on success and failure alike. The wrapper also
-# carries the SAILFIN_INNER guard so a `make check` that calls `make test`
-# internally emits only the outer verdict. See scripts/agent_report.sh and
-# docs/reference/make-result-schema.md.
-.PHONY: compile-impl rebuild-impl check-impl check-fast-impl
-.PHONY: test-impl test-unit-impl test-integration-impl test-e2e-impl test-capsules-impl
-#
 # Report-file gate (#1119). `JSON=1 make <target>` (or SAILFIN_AGENT_REPORT=1 in
 # the environment) activates a per-target full report file at
 # build/agent-report.<target>.json and points the verdict block's `report`
 # field at it. The gate is off by default: no file is written and `report`
-# stays null. The flag is exported (not threaded through each callsite) so
-# agent_report.sh reads it from the environment; nested SAILFIN_INNER runs still
-# emit no sentinel and write no file.
+# stays null.
 JSON ?=
 ifeq ($(JSON),1)
 SAILFIN_AGENT_REPORT := 1
 endif
 export SAILFIN_AGENT_REPORT
-AGENT_REPORT := bash scripts/agent_report.sh
 
 # Extra flags appended to every `$(NATIVE_BIN) test ...` invocation
 # (#1230). Empty by default so the local `make test` inner loop uses the
@@ -187,7 +175,7 @@ CHECK_TEST_JOBS ?= $(TEST_JOBS)
 
 # Per-test wall-clock cap for the `make check` cold full-suite run.
 # `make check` runs the whole suite in ONE parallel pool with
-# `--no-test-cache` (Makefile check-impl), so the sole e2e test that does
+# `--no-test-cache` (Makefile check), so the sole e2e test that does
 # full `sfn build -p compiler` self-host builds (work_dir_parity_test.sfn:
 # two cold builds, serially, in one child) is CPU-contended by the pool and
 # its two cold builds together exceed the runner's 300s default per-test cap
@@ -275,9 +263,6 @@ endif
 # fully migrated to `*_test.sfn` peers (Phase 3.1, epic #840), so the
 # bash branch and its allowlist/ratchet are gone.
 test:
-	@$(AGENT_REPORT) --target test -- $(MAKE) test-impl
-
-test-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -361,9 +346,6 @@ fetch-seed:
 # Makefile loops used to emit now comes from `_emit_suite_banners`
 # in `handle_test_command`.
 test-unit:
-	@$(AGENT_REPORT) --target test-unit -- $(MAKE) test-unit-impl
-
-test-unit-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-unit] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -382,14 +364,11 @@ test-unit-impl:
 	fi
 
 test-integration:
-	@$(AGENT_REPORT) --target test-integration -- $(MAKE) test-integration-impl
-
-test-integration-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-integration] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@# JSON=1 gate (#1121) — see test-unit-impl for the rationale.
+	@# JSON=1 gate (#1121) — see test-unit for the rationale.
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
@@ -402,9 +381,6 @@ test-integration-impl:
 # scripts were migrated and deleted — Phase 3.1, epic #840), so this
 # is a plain alias over the unified runner on `compiler/tests/e2e`.
 test-e2e:
-	@$(AGENT_REPORT) --target test-e2e -- $(MAKE) test-e2e-impl
-
-test-e2e-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -423,14 +399,11 @@ test-e2e-impl:
 # directory. The current public-capsule members resolve to the same 102 files
 # formerly discovered by recursively passing `capsules`.
 test-capsules:
-	@$(AGENT_REPORT) --target test-capsules -- $(MAKE) test-capsules-impl
-
-test-capsules-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-capsules] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@# JSON=1 gate (#1121) — see test-unit-impl for the rationale.
+	@# JSON=1 gate (#1121) — see test-unit for the rationale.
 	@member_tests=(); \
 	while IFS= read -r path; do member_tests+=("$$path"); done < <($(WORKSPACE_INVENTORY_CMD) member-tests); \
 	if [ "$${#member_tests[@]}" -eq 0 ]; then echo "[test-capsules] empty workspace member-test inventory" >&2; exit 2; fi; \
@@ -611,14 +584,11 @@ clean-build:
 # Full cleanup for a CI-like fresh start.
 clean-all: clean clean-build
 
-compile:
-	@$(AGENT_REPORT) --target compile -- $(MAKE) compile-impl
-
 .PHONY: bootstrap-aarch64-linux
 bootstrap-aarch64-linux:
 	@SEED_X86_64="$(SEED_X86_64)" scripts/bootstrap-aarch64-linux.sh
 
-compile-impl:
+compile:
 	@# SFN-679: a $(NATIVE_BIN) predating `dev bootstrap fingerprint` (the
 	@# native replacement for scripts/compiler_source_fingerprint.sh) falls
 	@# through its subcommand dispatch to a usage line on STDOUT, so
@@ -649,19 +619,17 @@ compile-impl:
 	fi
 
 check:
-	@$(AGENT_REPORT) --target check -- $(MAKE) check-impl
 
 # Strict variant of `make check` (#1830): a stage2/stage3 fixed-point
 # mismatch is fatal (non-zero exit, no promotion) instead of
 # warn-and-promote. CI/nightly (Linux leg) runs this so a compiler that
 # cannot reproduce itself byte-for-byte fails the gate. A command-line
-# SELFHOST_STRICT=1 propagates through the recursive `check` → `check-impl`
-# makes via MAKEFLAGS, so the `--strict` flag reaches the `sfn selfhost`
+# SELFHOST_STRICT=1 propagates through `check`
+# via MAKEFLAGS, so the `--strict` flag reaches the `sfn selfhost`
 # invocation.
 check-strict:
 	@$(MAKE) check SELFHOST_STRICT=1
 
-check-impl:
 	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
 	@seed="build/bin/sfn$(EXE_EXT)"; \
 	if [ ! -x "$$seed" ]; then \
@@ -757,9 +725,6 @@ endif
 # (the triple-pass selfhost validator). Naming mirrors what end users
 # of the language will eventually run on their own capsules.
 check-fast:
-	@$(AGENT_REPORT) --target check-fast -- $(MAKE) check-fast-impl
-
-check-fast-impl:
 	@if [ ! -x "$(NATIVE_BIN)" ] && [ ! -f "$(NATIVE_BIN)" ]; then \
 		echo "[check-fast] missing $(NATIVE_BIN); run: make compile"; \
 		exit 1; \
@@ -894,9 +859,6 @@ ci-package:
 #   seed ignores the env, whereas the --skip-toolchain-check flag would be
 #   rejected as unknown by an older seed. Not needed while pin == seed version.
 rebuild:
-	@$(AGENT_REPORT) --target rebuild -- $(MAKE) rebuild-impl
-
-rebuild-impl:
 	@mkdir -p build
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
@@ -945,7 +907,7 @@ rebuild-impl:
 	@# freshness record entirely when no well-formed snapshot is present.
 	@#
 	@# SFN-918: this used to probe only $(NATIVE_BIN), which does not exist on
-	@# a cold build, so a cold self-host published no fingerprint. compile-impl's
+	@# a cold build, so a cold self-host published no fingerprint. compile's
 	@# `-n "$$stored_fingerprint"` guard then failed and the NEXT `make compile`
 	@# burned a full redundant rebuild — which the two Make-contract e2e files
 	@# fired concurrently under the default test pool, racing the shared build/
