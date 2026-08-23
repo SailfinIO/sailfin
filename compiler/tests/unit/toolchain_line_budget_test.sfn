@@ -1,0 +1,36 @@
+// The SFN-1063 decomposition exists so store, install, dispatch, and CLI
+// orchestration can evolve independently without another oversized module.
+import { find_char_local } from "../../src/string_utils";
+
+let TOOLCHAIN_MODULE_LINE_BUDGET: int = 750;
+
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut position: int = 0;
+    loop {
+        let index = find_char_local(source, "\n", position);
+        if index < 0 { break; }
+        count += 1;
+        position = index + 1;
+    }
+    return count;
+}
+
+fn _assert_under_budget(path: string) -> void ![io] {
+    let source = fs.readFile(path);
+    assert source.length > 0;
+    let lines = _count_newlines(source);
+    assert lines > 0;
+    assert lines < TOOLCHAIN_MODULE_LINE_BUDGET;
+}
+
+test "toolchain: every command module stays under 750 lines" ![io] {
+    _assert_under_budget("compiler/src/cli/commands/toolchain.sfn");
+    let modules: string[] = ["dispatch", "host", "install", "store"];
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        _assert_under_budget("compiler/src/toolchain/" + modules[i] + ".sfn");
+        i += 1;
+    }
+}

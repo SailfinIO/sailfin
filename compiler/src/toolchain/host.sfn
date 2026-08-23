@@ -1,0 +1,82 @@
+// compiler/src/toolchain/host.sfn
+//
+// Canonical installed-toolchain host identity. The release asset selector and
+// the per-user store path must resolve from the same host observation so a
+// verified asset cannot land under another host's key (SFEP-0073 §3.5).
+import { _shell_read_cmd } from "../build/fs";
+import { build_host_os, host_is_windows } from "../build/target";
+import { ends_with } from "../string_utils";
+
+struct ToolchainHostIdentity {
+    triple: string;
+    release_os: string;
+    release_arch: string;
+}
+
+// Canonical release OS token ("" if unrecognised). This uses the shared,
+// non-shelling host-OS resolver, including its SAILFIN_HOST_OS test seam.
+fn _detect_os() -> string ![io] {
+    let os = build_host_os();
+    if os == "Linux" { return "linux"; }
+    if os == "Darwin" { return "macos"; }
+    if os == "Windows" { return "windows"; }
+    return "";
+}
+
+// Canonical release arch token ("" if unrecognised). Windows has only an
+// x86_64 release host today. POSIX keeps the real uname probe so Apple Silicon
+// and aarch64 Linux do not inherit build/target.sfn's target-axis defaults.
+fn _detect_arch() -> string ![io] {
+    if host_is_windows() { return "x86_64"; }
+    let arch = _shell_read_cmd("uname -m");
+    if arch == "x86_64" || arch == "amd64" { return "x86_64"; }
+    if arch == "aarch64" || arch == "arm64" { return "arm64"; }
+    return "";
+}
+
+// Map release-asset identity to the canonical host key shared with the signed
+// toolchain index. Unknown pairs fail closed with an empty triple.
+fn toolchain_host_identity_for(release_os: string, release_arch: string) -> ToolchainHostIdentity {
+    let mut triple = "";
+    if release_os == "linux" && release_arch == "x86_64" {
+        triple = "x86_64-unknown-linux-gnu";
+    }
+    if release_os == "linux" && release_arch == "arm64" {
+        triple = "aarch64-unknown-linux-gnu";
+    }
+    if release_os == "macos" && release_arch == "x86_64" {
+        triple = "x86_64-apple-darwin";
+    }
+    if release_os == "macos" && release_arch == "arm64" {
+        triple = "aarch64-apple-darwin";
+    }
+    if release_os == "windows" && release_arch == "x86_64" {
+        triple = "x86_64-pc-windows-msvc";
+    }
+    return ToolchainHostIdentity {
+        triple: triple,
+        release_os: release_os,
+        release_arch: release_arch
+    };
+}
+
+fn toolchain_current_host() -> ToolchainHostIdentity ![io] {
+    return toolchain_host_identity_for(_detect_os(), _detect_arch());
+}
+
+// Windows publishes two ABI-distinct assets. The preferred native asset is
+// MSVC; the plain compatibility fallback is MinGW and must not be mislabeled.
+fn toolchain_asset_host_triple(host: ToolchainHostIdentity, asset: string) -> string {
+    if host.release_os != "windows" { return host.triple; }
+    if ends_with(asset, "-msvc.tar.gz") { return "x86_64-pc-windows-msvc"; }
+    return "x86_64-w64-mingw32";
+}
+
+export {
+    ToolchainHostIdentity,
+    _detect_arch,
+    _detect_os,
+    toolchain_asset_host_triple,
+    toolchain_current_host,
+    toolchain_host_identity_for
+};

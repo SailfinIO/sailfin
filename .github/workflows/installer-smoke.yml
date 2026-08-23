@@ -141,6 +141,15 @@ jobs:
             || { echo "::error::installer did not report a verified archive digest"; exit 1; }
           grep -q 'UNVERIFIED' "${RUNNER_TEMP}/install.log" \
             && { echo "::error::installer reported an unverified install for a signed release"; exit 1; }
+          case '${{ matrix.slug }}' in
+            linux_x86_64) expected_host='x86_64-unknown-linux-gnu' ;;
+            linux_arm64) expected_host='aarch64-unknown-linux-gnu' ;;
+            macos_arm64) expected_host='aarch64-apple-darwin' ;;
+            *) echo "::error::unmapped installer host ${{ matrix.slug }}"; exit 1 ;;
+          esac
+          test -x "${INSTALL_BASE}/${expected_host}/${SEED_VERSION}/sailfin"
+          test -s "${INSTALL_BASE}/${expected_host}/${SEED_VERSION}/.sha256"
+          test ! -e "${INSTALL_BASE}/${SEED_VERSION}"
           test -x "${GLOBAL_BIN_DIR}/sailfin"
           test -x "${GLOBAL_BIN_DIR}/sfn"
           file -L "${GLOBAL_BIN_DIR}/sfn" | grep -E '${{ matrix.file_pattern }}'
@@ -268,6 +277,22 @@ jobs:
           }
           if ($logText -match 'UNVERIFIED') {
             throw "installer reported an unverified install for a signed release"
+          }
+          $expectedHost = if ($env:HAS_MSVC -eq 'True') {
+            'x86_64-pc-windows-msvc'
+          } else {
+            'x86_64-w64-mingw32'
+          }
+          $qualifiedPayload = Join-Path $env:INSTALL_BASE "$expectedHost\$env:SEED_VERSION\sailfin.exe"
+          if (-not (Test-Path $qualifiedPayload)) {
+            throw "Expected qualified payload at $qualifiedPayload"
+          }
+          $qualifiedMarker = Join-Path $env:INSTALL_BASE "$expectedHost\$env:SEED_VERSION\.sha256"
+          if (-not (Test-Path $qualifiedMarker)) {
+            throw "Expected qualified completeness marker at $qualifiedMarker"
+          }
+          if (Test-Path (Join-Path $env:INSTALL_BASE $env:SEED_VERSION)) {
+            throw "Installer wrote the retired flat version-store shape"
           }
           $sfn = Join-Path $env:GLOBAL_BIN_DIR "sfn.exe"
           $sailfin = Join-Path $env:GLOBAL_BIN_DIR "sailfin.exe"

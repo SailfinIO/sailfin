@@ -348,7 +348,7 @@ fetch-seed:
 	@mkdir -p build/toolchains/seed
 	@REPO="$(SEED_REPO)" VERSION="$(SEED_VERSION)" EXCLUDE_TAG="$(SEED_EXCLUDE_TAG)" \
 		GLOBAL_BIN_DIR="$(SEED_GLOBAL_BIN_DIR)" INSTALL_BASE="$(SEED_INSTALL_BASE)" \
-		BINARY="sailfin" ./install.sh
+		SAILFIN_BOOTSTRAP_SEED_STORE=1 BINARY="sailfin" ./install.sh
 	@if [ ! -x "$(FETCHED_SEED)" ]; then \
 		echo "[fetch-seed][error] missing fetched seed compiler: $(FETCHED_SEED)" >&2; \
 		exit 1; \

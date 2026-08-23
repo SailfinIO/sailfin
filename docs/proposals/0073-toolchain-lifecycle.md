@@ -4,9 +4,9 @@ title: Installed Toolchain Lifecycle, Exact Selection, and Update Policy
 status: Accepted
 type: tooling
 created: 2026-08-22
-updated: 2026-08-22
+updated: 2026-08-23
 author: "agent:compiler-architect; project owner direction + acceptance"
-tracking: SFN-1034
+tracking: https://linear.app/sailfin/project/installed-toolchain-lifecycle-e6024b4498bb
 supersedes:
 superseded-by:
 graduates-to:
@@ -37,12 +37,13 @@ never silently changes the compiler used by a project.
 
 ### 2.1 The infrastructure is ahead of the UX
 
-The installer and SFEP-0046 already converge on a version store under
-`~/.local/share/sailfin/versions/<version>/`. `sfn toolchain install <version>`
-downloads a release natively, verifies its signed `SHA256SUMS` and archive
-digest, extracts it with the in-process path guard, and writes the completeness
-marker last. `sfn build`, `run`, `check`, and `test` can then fetch and re-exec a
-project's missing floor version automatically.
+The installer and SFEP-0046 originally converged on a flat version store under
+`~/.local/share/sailfin/versions/<version>/`. SFEP-0073 supersedes that writer
+layout with the host-qualified identity defined in §3.5. `sfn toolchain
+install <version>` downloads a release natively, verifies its signed
+`SHA256SUMS` and archive digest, extracts it with the in-process path guard, and
+atomically publishes a complete entry. `sfn build`, `run`, `check`, and `test`
+can then fetch and re-exec a project's missing floor version automatically.
 
 The public management surface has only one leaf, however:
 
@@ -777,7 +778,6 @@ because selection and self-dispatch sit on every compiler command's startup path
 - [TypeScript project-local installation](https://www.typescriptlang.org/download/)
 - [Zig signed release archives](https://ziglang.org/download/)
 
-`tracking:` is intentionally empty at acceptance: implementation work has not
-started, and the project owner will groom this accepted design into Linear
-issues. Once the implementing slice or 1:1 Project exists, its identifiers or
-Project URL must be added under SFEP-0001 §3.1.
+Implementation is tracked by the Linear project named in `tracking:`. SFN-1063
+establishes the host-qualified store and module seams used by the remaining
+lifecycle slices.

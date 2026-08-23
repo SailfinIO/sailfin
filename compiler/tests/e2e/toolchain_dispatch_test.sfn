@@ -25,6 +25,9 @@
 import { contains } from "sfn/strings";
 import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
+import { toolchain_current_host } from "../../src/toolchain/host";
+import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
+
 // A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
 // under the parallel pool; `/tmp` is the standalone fallback.
 fn _scratch_root() -> string ![io] {
@@ -51,13 +54,13 @@ fn _env_with(extra: string[]) -> string[] ![io] {
     return e;
 }
 
-// Seed a store entry `<store>/<ver>/sailfin` as an executable stub that
+// Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a stub that
 // echoes `marker` and exits 0, regardless of the argv it is re-exec'd
 // with. When `complete` is true the `.sha256` completeness marker is
 // written last (the installer's commit-point contract), so the entry
 // reads as dispatch-ready; when false the entry is left partial.
 fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> void ![io] {
-    let dir = store + "/" + ver;
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
     process.run(["rm", "-rf", dir]);
     fs.createDirectory(dir, true);
     let bin = dir + "/sailfin";
@@ -66,6 +69,16 @@ fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> 
     if complete {
         fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
     }
+}
+
+fn _seed_legacy_stub(store: string, ver: string, marker: string) -> void ![io] {
+    let dir = store + "/" + ver;
+    process.run(["rm", "-rf", dir]);
+    fs.createDirectory(dir, true);
+    let bin = dir + "/sailfin";
+    fs.writeFile(bin, "#!/bin/sh\necho \"" + marker + "\"\nexit 0\n");
+    process.run(["chmod", "+x", bin]);
+    fs.writeFile(dir + "/.sha256", "legacy-archive-marker\n");
 }
 
 // Seed a project whose `[toolchain]` pin is `pin_ver` and a trivial
@@ -190,4 +203,47 @@ test "toolchain dispatch: an explicit version forces that dispatch target" ![io]
     let err = process.capture_take_stderr();
     assert contains(out + err, forced_marker);
     assert exit == 0;
+}
+
+test "toolchain dispatch: qualified entry wins over the legacy fallback" ![io] {
+    let store = _scratch_root() + "/qualified-wins-store";
+    let proj = _scratch_root() + "/qualified-wins-proj";
+    process.run(["rm", "-rf", store]);
+    let qualified_marker = "DISPATCH_QUALIFIED_WINS_3c71";
+    let legacy_marker = "DISPATCH_LEGACY_LOSES_9f20";
+    _seed_stub(store, "999.0.0", qualified_marker, true);
+    _seed_legacy_stub(store, "999.0.0", legacy_marker);
+    let src = _seed_project(proj, "999.0.0");
+
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, qualified_marker);
+    assert ! contains(out + err, legacy_marker);
+}
+
+test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
+    let store = _scratch_root() + "/legacy-fallback-store";
+    let proj = _scratch_root() + "/legacy-fallback-proj";
+    process.run(["rm", "-rf", store]);
+    let legacy_marker = "DISPATCH_LEGACY_READ_ONLY_54da";
+    _seed_legacy_stub(store, "999.0.0", legacy_marker);
+    let legacy_dir = store + "/999.0.0";
+    let before_bin = fs.readFile(legacy_dir + "/sailfin");
+    let before_sha = fs.readFile(legacy_dir + "/.sha256");
+    let src = _seed_project(proj, "999.0.0");
+
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, legacy_marker);
+    assert contains(err, "warning: dispatching unverified legacy toolchain 999.0.0");
+    assert fs.readFile(legacy_dir + "/sailfin") == before_bin;
+    assert fs.readFile(legacy_dir + "/.sha256") == before_sha;
+    let qualified = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), "999.0.0");
+    assert ! fs.exists(qualified);
 }

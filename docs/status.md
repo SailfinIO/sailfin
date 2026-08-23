@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-23 (SFN-1107, SFN-1040, SFN-1086, SFN-1035, SFN-1034,
+Updated: 2026-08-23 (SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035, SFN-1034,
 SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024). Seed pinned to `0.10.4` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
@@ -243,7 +243,7 @@ here.
   URL, which the native HTTP client now follows (SFN-213). It verifies the
   manifest signature against the embedded release key
   (`sfn/crypto::ed25519_verify_utf8`) and the asset's SHA-256 against the
-  manifest, then extracts into the version store. Artifact SHA-256 is computed
+  manifest, then extracts into fresh staging. Artifact SHA-256 is computed
   by the binary-safe in-process build hasher (SFN-660), so verification no
   longer depends on a host `sha256sum`/`shasum` command and the same fail-closed
   install path is functional on native Windows. **Extraction is in-process**
@@ -251,17 +251,19 @@ here.
   tar_read.sfn:500`) composes gzip → inflate → ustar decode → the mandatory
   path-traversal guard (`path_guard.sfn`, 8 rules enforced on every member
   before any filesystem call) → filesystem write, replacing the `tar`
-  subprocess `cli/commands/toolchain.sfn:418` used to shell out to; a
-  rejected or malformed archive aborts the install with `E0615` and nothing
-  written (`cli/commands/toolchain.sfn:605-618`).
+  subprocess the installer used to shell out to; a rejected or malformed
+  archive aborts the install with `E0615` and nothing is published.
   `ExtractOptions.copy_instead_of_link` forces `host_is_windows()` on, so a
   Windows install materializes a symlink member as a regular-file copy rather
   than needing elevation. `sfn/archive`'s tar **writer** is not implemented —
   see the `sfn/archive` row below and the `sfn package` note further down;
   SFEP-0071 stays `Accepted`, not `Implemented`, until that half ships. The
-  installer writes under
-  `~/.local/share/sailfin/versions/<version>/{sailfin,sfn,runtime/,.sha256}`,
-  honoring `INSTALL_BASE`/`SAILFIN_HOME`). Verification is **fail-closed** —
+  per-user installer writes under
+  `~/.local/share/sailfin/versions/<host-triple>/<version>/{sailfin,sfn,runtime/,.sha256}`,
+  honoring `INSTALL_BASE`/`SAILFIN_HOME`. It builds the complete entry in a
+  unique sibling directory and atomically commits it after `.sha256` is written
+  last (SFN-1063, SFEP-0073 §3.5). The repo-local bootstrap seed API remains
+  flat under the `bootstrap.toml`-selected store. Verification is **fail-closed** —
   any signature/digest failure aborts before extraction with nothing written;
   a re-install re-verifies the signed manifest without re-downloading the
   tarball. `SAILFIN_TOOLCHAIN_RELEASE_BASE` overrides the release host for
@@ -275,9 +277,15 @@ here.
   that exact dispatch target; `off`/`0` skips the gate. A re-entrancy guard
   (`SAILFIN_TOOLCHAIN_DISPATCHED=<version>`) hard-fails loudly rather than
   looping if a dispatched toolchain still doesn't satisfy the pin. Offline, an
-  already-stored toolchain dispatches after re-verifying its completeness
-  marker; offline with no stored toolchain prints the `sfn toolchain install
-  <version>` hint. SFEP-0046 tracks six issues (SFN-167–172); with pin/verify,
+  host-qualified toolchain dispatches after re-verifying its completeness
+  marker. A pre-SFEP-0073 flat entry is a read-only legacy fallback only when
+  no qualified entry exists: dispatch may run it with its existing archive
+  marker, but never moves it or marks its extracted payload verified. An
+  explicit online install migrates by downloading and normally verifying a
+  fresh host asset into qualified staging, atomically committing it, and
+  leaving the legacy entry untouched. Offline with no stored toolchain prints
+  the `sfn toolchain install <version>` hint. SFEP-0046 tracks six issues
+  (SFN-167–172); with pin/verify,
   install, and dispatch now shipped, the proposal stays `Accepted` pending the
   remaining tracked issues.
 - **Compiler bootstrap manifest — `bootstrap.toml` + `sfn dev bootstrap`**
@@ -1459,9 +1467,10 @@ unit; history in the linked issues.
   [Verifying Your Download](https://sailfin.dev/docs/getting-started/verify-download)
   "Bootstrap trust boundary".
 - Linux/macOS installs versioned files under
-  `~/.local/share/sailfin/versions/<version>` and exposes `sailfin` plus `sfn`
-  in `~/.local/bin` (`INSTALL_BASE` / `GLOBAL_BIN_DIR` overrides). Windows uses
-  `%LOCALAPPDATA%\sailfin\versions\<version>` and
+  `~/.local/share/sailfin/versions/<host-triple>/<version>` and exposes
+  `sailfin` plus `sfn` in `~/.local/bin` (`INSTALL_BASE` / `GLOBAL_BIN_DIR`
+  overrides). Windows uses
+  `%LOCALAPPDATA%\sailfin\versions\<host-triple>\<version>` and
   `%LOCALAPPDATA%\sailfin\bin`, adding the bin directory to the user `PATH`.
 - Current release: `v0.10.3` (see `bootstrap.toml` `[seed].version`
   for the pinned self-host seed, which may trail the latest release).

@@ -8,7 +8,14 @@
 // this helper directly needs no network, no release signature, and no
 // binary fixture — it operates on a hand-built fake extract root.
 import { host_exe_name } from "../../src/build/target";
-import { toolchain_lay_out_store_entry } from "../../src/cli/commands/toolchain";
+import {
+    toolchain_commit_staged_entry,
+    toolchain_discard_staged_entry,
+    toolchain_host_store_base,
+    toolchain_lay_out_store_entry,
+    toolchain_staging_dir,
+    toolchain_version_dir
+} from "../../src/toolchain/store";
 
 // Same scratch shape as the sibling `toolchain_alias_test.sfn`.
 fn _scratch_dir() -> string ![io] {
@@ -139,4 +146,79 @@ test "toolchain layout: a workspace manifest without capsules fails before the m
     assert ! toolchain_lay_out_store_entry(root, store_dir, store_dir
         + "/sailfin", expected);
     assert ! fs.exists(store_dir + "/.sha256");
+}
+
+test "toolchain layout: two hosts atomically hold the same exact version" ![io] {
+    let base = _scratch_dir() + "/two-hosts";
+    process.run(["rm", "-rf", base]);
+    fs.createDirectory(base, true);
+    let root = _fake_extract_root(base);
+    let version = "0.10.4";
+    let hosts: string[] = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"];
+    let mut i: int = 0;
+    loop {
+        if i >= hosts.length { break; }
+        let store_dir = toolchain_version_dir(toolchain_host_store_base(base, hosts[i]), version);
+        let staged = toolchain_staging_dir(store_dir);
+        assert staged.length > 0;
+        let bin = host_exe_name(staged + "/sailfin");
+        let digest = "host-digest-" + hosts[i];
+        assert toolchain_lay_out_store_entry(root, staged, bin, digest);
+        assert ! fs.exists(store_dir);
+        assert toolchain_commit_staged_entry(staged, store_dir);
+        assert fs.readFile(store_dir + "/.sha256") == digest + "\n";
+        assert fs.readFile(host_exe_name(store_dir + "/sailfin")) == "fake-toolchain-binary-bytes";
+        i += 1;
+    }
+    assert ! fs.exists(base + "/" + version);
+}
+
+test "toolchain layout: failed qualified staging leaves legacy untouched" ![io] {
+    let base = _scratch_dir() + "/legacy-preserved";
+    process.run(["rm", "-rf", base]);
+    let version = "0.10.4";
+    let legacy = base + "/" + version;
+    fs.createDirectory(legacy, true);
+    fs.writeFile(legacy + "/sailfin", "legacy-extracted-bytes");
+    fs.writeFile(legacy + "/.sha256", "legacy-archive-marker\n");
+
+    let qualified = toolchain_version_dir(toolchain_host_store_base(base, "x86_64-unknown-linux-gnu"), version);
+    let staged = toolchain_staging_dir(qualified);
+    assert staged.length > 0;
+    let missing_root = base + "/missing-extract-root";
+    fs.createDirectory(missing_root, true);
+    assert ! toolchain_lay_out_store_entry(missing_root, staged, host_exe_name(staged
+        + "/sailfin"), "fresh-digest");
+    toolchain_discard_staged_entry(staged);
+
+    assert ! fs.exists(qualified);
+    assert ! fs.exists(staged);
+    assert fs.readFile(legacy + "/sailfin") == "legacy-extracted-bytes";
+    assert fs.readFile(legacy + "/.sha256") == "legacy-archive-marker\n";
+}
+
+test "toolchain layout: commit failure preserves an existing qualified entry" ![io] {
+    let base = _scratch_dir() + "/qualified-preserved";
+    process.run(["rm", "-rf", base]);
+    let store_dir = toolchain_version_dir(toolchain_host_store_base(base, "x86_64-unknown-linux-gnu"), "0.10.4");
+    fs.createDirectory(store_dir, true);
+    fs.writeFile(host_exe_name(store_dir + "/sailfin"), "existing-bytes");
+    fs.writeFile(store_dir + "/.sha256", "existing-digest\n");
+
+    let staged = toolchain_staging_dir(store_dir);
+    assert staged.length > 0;
+    process.run(["rm", "-rf", staged]);
+    assert ! toolchain_commit_staged_entry(staged, store_dir);
+
+    assert ! fs.exists(staged);
+    assert fs.readFile(host_exe_name(store_dir + "/sailfin")) == "existing-bytes";
+    assert fs.readFile(store_dir + "/.sha256") == "existing-digest\n";
+
+    let replacement = toolchain_staging_dir(store_dir);
+    assert replacement.length > 0;
+    fs.writeFile(host_exe_name(replacement + "/sailfin"), "replacement-bytes");
+    fs.writeFile(replacement + "/.sha256", "replacement-digest\n");
+    assert toolchain_commit_staged_entry(replacement, store_dir);
+    assert fs.readFile(host_exe_name(store_dir + "/sailfin")) == "replacement-bytes";
+    assert fs.readFile(store_dir + "/.sha256") == "replacement-digest\n";
 }

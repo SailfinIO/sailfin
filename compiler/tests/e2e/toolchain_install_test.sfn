@@ -61,7 +61,16 @@ fn _env_with(extra: string[]) -> string[] ![io] {
 // just the binary) catches a partial install where the binary was copied but
 // the marker was never written, matching the installer's fail-closed contract.
 fn _installed(store: string, ver: string) -> boolean ![io] {
-    return fs.exists(store + "/" + ver + "/.sha256");
+    let hosts: string[] = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu", "x86_64-w64-mingw32"];
+    let mut i: int = 0;
+    loop {
+        if i >= hosts.length { break; }
+        if fs.exists(store + "/" + hosts[i] + "/" + ver + "/.sha256") {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
 }
 
 test "toolchain install: missing version is a usage error" ![io] {
@@ -216,6 +225,14 @@ test "toolchain install: a signed manifest refuses an asset digest mismatch" ![i
     let store = _scratch_root() + "/digest-mismatch-store";
     process.run(["rm", "-rf", srv]);
     process.run(["rm", "-rf", store]);
+    // A legacy entry must never short-circuit or seed a qualified install.
+    // The command still downloads and verifies the fresh host asset below.
+    let legacy = store + "/" + ver;
+    fs.createDirectory(legacy, true);
+    fs.writeFile(legacy + "/sailfin", "legacy-extracted-bytes");
+    fs.writeFile(legacy + "/.sha256", "legacy-archive-marker\n");
+    let legacy_bin_before = fs.readFile(legacy + "/sailfin");
+    let legacy_sha_before = fs.readFile(legacy + "/.sha256");
     let release_dir = srv + "/" + tag;
     fs.createDirectory(release_dir, true);
     let fixture = "compiler/tests/e2e/fixtures/toolchain_v0.9.5_SHA256SUMS";
@@ -255,6 +272,8 @@ test "toolchain install: a signed manifest refuses an asset digest mismatch" ![i
     assert exit != 0;
     assert contains(out + err, "digest mismatch");
     assert ! _installed(store, ver);
+    assert fs.readFile(legacy + "/sailfin") == legacy_bin_before;
+    assert fs.readFile(legacy + "/.sha256") == legacy_sha_before;
 }
 
 test "toolchain install: a windows host with no msvc entry falls back to the plain asset" ![io] {
@@ -274,7 +293,7 @@ test "toolchain install: a windows host with no msvc entry falls back to the pla
     // that makes `_detect_os`/`_detect_arch` resolve windows/x86_64 on this
     // Linux runner without an actual Windows host. The signed manifest
     // lists only the plain windows asset, so the msvc-preference check in
-    // `toolchain.sfn` finds no digest for the msvc name and falls back —
+    // `toolchain/install.sfn` finds no digest for the msvc name and falls back —
     // this asserts that fallback fired by asserting the resolved asset
     // named in the digest-mismatch error is the plain name, not the msvc
     // one.

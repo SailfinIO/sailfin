@@ -1,0 +1,278 @@
+// compiler/src/toolchain/store.sfn
+//
+// Host-qualified per-user store identity plus the read-only legacy fallback
+// and atomic complete-entry publication seam (SFEP-0073 §3.5).
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+
+import {
+    _atomic_rename_into_place,
+    _copy_file,
+    _mktemp_sibling_cmd,
+    _toml_trim_cmd
+} from "../build/fs";
+import { copy_tree, ensure_dir_p, remove_tree } from "../build/fs_tree";
+import { _dirname, _path_basename } from "../build/paths";
+import { host_exe_name } from "../build/target";
+import { _get_home_cmd } from "../build_flags";
+import { ToolchainHostIdentity } from "./host";
+
+struct ToolchainStoreEntry {
+    dir: string;
+    binary: string;
+    legacy: boolean;
+    ready: boolean;
+}
+
+fn toolchain_store_diagnostic() -> Diagnostic {
+    return Diagnostic {
+        code: "E0616",
+        severity: "error",
+        message: "could not determine the toolchain store (set INSTALL_BASE or HOME)",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+// INSTALL_BASE names the versions root. Host qualification is appended by
+// user-store callers only; bootstrap.toml's repo-local seed base stays flat.
+fn toolchain_versions_base() -> string ![io] {
+    let install_base = env.get("INSTALL_BASE");
+    if install_base.length > 0 { return install_base; }
+    let sfn_home = env.get("SAILFIN_HOME");
+    if sfn_home.length > 0 { return sfn_home + "/versions"; }
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    return home + "/.local/share/sailfin/versions";
+}
+
+fn toolchain_host_store_base(versions_base: string, host_triple: string) -> string {
+    return versions_base + "/" + host_triple;
+}
+
+fn toolchain_version_dir(store_base: string, version: string) -> string {
+    return store_base + "/" + version;
+}
+
+fn toolchain_legacy_version_dir(versions_base: string, version: string) -> string {
+    return toolchain_version_dir(versions_base, version);
+}
+
+fn toolchain_binary_path(store_dir: string) -> string ![io] {
+    return host_exe_name(store_dir + "/sailfin");
+}
+
+fn toolchain_store_ready(store_dir: string) -> boolean ![io] {
+    if !fs.exists(toolchain_binary_path(store_dir)) { return false; }
+    let sha_path = store_dir + "/.sha256";
+    if !fs.exists(sha_path) { return false; }
+    return _toml_trim_cmd(fs.readFile(sha_path)).length > 0;
+}
+
+// Qualified entries always win. A legacy entry is considered only when the
+// qualified directory is absent, never when a qualified entry is partial.
+fn toolchain_resolve_store_entry(versions_base: string, host_triple: string, version: string) -> ToolchainStoreEntry ![io] {
+    if host_triple.length > 0 {
+        let qualified_dir = toolchain_version_dir(toolchain_host_store_base(versions_base, host_triple), version);
+        if fs.exists(qualified_dir) {
+            return ToolchainStoreEntry {
+                dir: qualified_dir,
+                binary: toolchain_binary_path(qualified_dir),
+                legacy: false,
+                ready: toolchain_store_ready(qualified_dir)
+            };
+        }
+    }
+    let legacy_dir = toolchain_legacy_version_dir(versions_base, version);
+    return ToolchainStoreEntry {
+        dir: legacy_dir,
+        binary: toolchain_binary_path(legacy_dir),
+        legacy: true,
+        ready: toolchain_store_ready(legacy_dir)
+    };
+}
+
+// Resolve every host-qualified payload executable on the current host. Native
+// Windows prefers MSVC but can still run the historical MinGW fallback. Only
+// after both qualified identities are absent may the flat legacy entry run.
+fn toolchain_resolve_compatible_store_entry(versions_base: string, host: ToolchainHostIdentity, version: string) -> ToolchainStoreEntry ![io] {
+    if host.triple.length > 0 {
+        let primary_dir = toolchain_version_dir(toolchain_host_store_base(versions_base, host.triple), version);
+        if fs.exists(primary_dir) {
+            return ToolchainStoreEntry {
+                dir: primary_dir,
+                binary: toolchain_binary_path(primary_dir),
+                legacy: false,
+                ready: toolchain_store_ready(primary_dir)
+            };
+        }
+        if host.release_os == "windows" {
+            let mingw_dir = toolchain_version_dir(toolchain_host_store_base(versions_base, "x86_64-w64-mingw32"), version);
+            if fs.exists(mingw_dir) {
+                return ToolchainStoreEntry {
+                    dir: mingw_dir,
+                    binary: toolchain_binary_path(mingw_dir),
+                    legacy: false,
+                    ready: toolchain_store_ready(mingw_dir)
+                };
+            }
+        }
+    }
+    let legacy_dir = toolchain_legacy_version_dir(versions_base, version);
+    return ToolchainStoreEntry {
+        dir: legacy_dir,
+        binary: toolchain_binary_path(legacy_dir),
+        legacy: true,
+        ready: toolchain_store_ready(legacy_dir)
+    };
+}
+
+fn _binary_in_root(root: string) -> string ![io] {
+    if fs.exists(root + "/sailfin") { return root + "/sailfin"; }
+    if fs.exists(root + "/bin/sailfin") { return root + "/bin/sailfin"; }
+    if fs.exists(root + "/sailfin.exe") { return root + "/sailfin.exe"; }
+    if fs.exists(root + "/bin/sailfin.exe") { return root + "/bin/sailfin.exe"; }
+    return "";
+}
+
+fn toolchain_find_extracted_root(extract_dir: string) -> string ![io] {
+    if _binary_in_root(extract_dir).length > 0 { return extract_dir; }
+    let entries = fs.listDirectory(extract_dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let candidate = extract_dir + "/" + entries[i];
+        if _binary_in_root(candidate).length > 0 { return candidate; }
+        i += 1;
+    }
+    return "";
+}
+
+fn _toolchain_link_alias(bin_path: string, alias_path: string) -> boolean ![io] {
+    fs.deleteFile(alias_path);
+    if fs.symlink(_path_basename(bin_path), alias_path) { return true; }
+    if !_copy_file(bin_path, alias_path) { return false; }
+    fs.set_perms(alias_path, 493);
+    return true;
+}
+
+// Populate a staging directory. The marker is written last inside staging;
+// callers publish the whole complete directory atomically afterward.
+fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: string, expected: string) -> boolean ![io] {
+    let sha_path = store_dir + "/.sha256";
+    let src_bin = _binary_in_root(root);
+    ensure_dir_p(store_dir);
+    if !_copy_file(src_bin, bin_path) {
+        print("error: failed to install the toolchain binary into " + store_dir);
+        return false;
+    }
+    fs.set_perms(bin_path, 493);
+
+    let alias_path = host_exe_name(store_dir + "/sfn");
+    if !_toolchain_link_alias(bin_path, alias_path) {
+        print("error: failed to create the sfn alias in " + store_dir);
+        return false;
+    }
+    if fs.exists(root + "/runtime") {
+        remove_tree(store_dir + "/runtime");
+        if !copy_tree(root + "/runtime", store_dir + "/runtime") {
+            print("error: failed to install the runtime bundle into "
+                + store_dir);
+            return false;
+        }
+    }
+    if fs.exists(root + "/capsules") {
+        remove_tree(store_dir + "/capsules");
+        if !copy_tree(root + "/capsules", store_dir + "/capsules") {
+            print("error: failed to install the workspace capsules into "
+                + store_dir);
+            return false;
+        }
+    }
+    if fs.exists(root + "/workspace.toml") {
+        if !fs.exists(store_dir + "/capsules") {
+            print("error: installed workspace manifest has no capsule payload in "
+                + store_dir);
+            return false;
+        }
+        if !_copy_file(root + "/workspace.toml", store_dir + "/workspace.toml") {
+            print("error: failed to install the workspace manifest into "
+                + store_dir);
+            return false;
+        }
+    }
+    fs.writeFile(sha_path, expected + "\n");
+    if !fs.exists(sha_path) {
+        print("error: failed to write the store marker " + sha_path);
+        return false;
+    }
+    return true;
+}
+
+// Mint a unique same-filesystem directory so the final rename is atomic.
+fn toolchain_staging_dir(store_dir: string) -> string ![io] {
+    ensure_dir_p(_dirname(store_dir));
+    let staged = _mktemp_sibling_cmd(store_dir);
+    if staged.length == 0 { return ""; }
+    fs.deleteFile(staged);
+    fs.createDirectory(staged, true);
+    if !fs.exists(staged) { return ""; }
+    return staged;
+}
+
+// Commit a fully populated staging directory. A prior qualified entry is first
+// displaced to a sibling backup, then restored if publication fails. This is
+// the portable directory replacement/repair path; legacy targets are forbidden.
+fn toolchain_commit_staged_entry(staged_dir: string, store_dir: string) -> boolean ![io] {
+    if !fs.exists(store_dir) {
+        if _atomic_rename_into_place(staged_dir, store_dir) { return true; }
+        remove_tree(staged_dir);
+        return false;
+    }
+
+    let backup_dir = _mktemp_sibling_cmd(store_dir);
+    if backup_dir.length == 0 {
+        remove_tree(staged_dir);
+        return false;
+    }
+    fs.deleteFile(backup_dir);
+    if !_atomic_rename_into_place(store_dir, backup_dir) {
+        remove_tree(staged_dir);
+        return false;
+    }
+    if _atomic_rename_into_place(staged_dir, store_dir) {
+        remove_tree(backup_dir);
+        return true;
+    }
+    let restored = _atomic_rename_into_place(backup_dir, store_dir);
+    remove_tree(staged_dir);
+    if !restored {
+        print("error: failed to restore the prior toolchain entry at "
+            + store_dir);
+        print("  preserved backup: " + backup_dir);
+    }
+    return false;
+}
+
+fn toolchain_discard_staged_entry(staged_dir: string) -> void ![io] {
+    if staged_dir.length > 0 { remove_tree(staged_dir); }
+}
+
+export {
+    ToolchainStoreEntry,
+    _toolchain_link_alias,
+    toolchain_binary_path,
+    toolchain_commit_staged_entry,
+    toolchain_discard_staged_entry,
+    toolchain_find_extracted_root,
+    toolchain_host_store_base,
+    toolchain_lay_out_store_entry,
+    toolchain_legacy_version_dir,
+    toolchain_resolve_compatible_store_entry,
+    toolchain_resolve_store_entry,
+    toolchain_staging_dir,
+    toolchain_store_diagnostic,
+    toolchain_store_ready,
+    toolchain_version_dir,
+    toolchain_versions_base
+};

@@ -12,7 +12,8 @@ set -euo pipefail
 #   REPO=owner/repo          (default: SailfinIO/sailfin)
 #   VERSION=latest|<ver>     (default: latest; accepts optional leading v)
 #   BINARY=sailfin           (default: sailfin)
-#   INSTALL_BASE=...         (default: ~/.local/share/sailfin/versions)
+#   INSTALL_BASE=...         (default: ~/.local/share/sailfin/versions; payloads
+#                            land under <canonical-host-triple>/<version>)
 #   GLOBAL_BIN_DIR=...       (default: ~/.local/bin)
 #   GITHUB_TOKEN=...         (optional; increases API rate limits)
 #   SAILFIN_RELEASE_BASE=... (default: https://github.com/<REPO>/releases/download;
@@ -711,6 +712,7 @@ if [ -n "$LOCAL_ARCHIVE" ]; then
     fi
     log "digest-pinned: ${ASSET} sha256 ${actual_digest} (digest-pinned via SAILFIN_LOCAL_ARCHIVE_SHA256, not signature-verified)"
     TRUST_STATE="DIGEST_PINNED"
+    CHECKED_DIGEST="$expected_digest"
   else
     [ "${SAILFIN_ALLOW_UNVERIFIED:-0}" = "1" ] \
       || die "SAILFIN_LOCAL_ARCHIVE has no SAILFIN_LOCAL_ARCHIVE_SHA256 to pin against, so it cannot be verified. Set SAILFIN_LOCAL_ARCHIVE_SHA256=<sha256 of the archive>, or SAILFIN_ALLOW_UNVERIFIED=1 to install it anyway (forfeits all integrity checking of this archive)."
@@ -777,9 +779,36 @@ else
   fi
 fi
 
+# SFEP-0073: key the per-user store by the canonical host triple before the
+# exact version. Windows identity follows the asset that was actually selected:
+# the preferred native archive is MSVC, while the plain compatibility fallback
+# is MinGW. Resolve this only after every signed-manifest/mirror fallback has
+# finalized ASSET so producer and store identity cannot disagree.
+case "${OS}/${ARCH}" in
+  linux/x86_64) HOST_TRIPLE="x86_64-unknown-linux-gnu" ;;
+  linux/arm64) HOST_TRIPLE="aarch64-unknown-linux-gnu" ;;
+  macos/x86_64) HOST_TRIPLE="x86_64-apple-darwin" ;;
+  macos/arm64) HOST_TRIPLE="aarch64-apple-darwin" ;;
+  windows/x86_64)
+    case "$ASSET" in
+      *-msvc.tar.gz) HOST_TRIPLE="x86_64-pc-windows-msvc" ;;
+      *) HOST_TRIPLE="x86_64-w64-mingw32" ;;
+    esac
+    ;;
+  *) die "Unsupported canonical host for toolchain storage: ${OS}/${ARCH}" ;;
+esac
+log "Detected host triple: $HOST_TRIPLE"
+
 INSTALL_BASE="${INSTALL_BASE:-$HOME/.local/share/sailfin/versions}"
 GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR:-$HOME/.local/bin}"
-TARGET_DIR="${INSTALL_BASE}/${VERSION}"
+if [ "${SAILFIN_BOOTSTRAP_SEED_STORE:-0}" = "1" ]; then
+  # Internal Makefile compatibility seam: bootstrap.toml remains the sole
+  # authority for the repo-local flat seed store.
+  TARGET_DIR="${INSTALL_BASE}/${VERSION}"
+  log "Using flat bootstrap seed-store layout"
+else
+  TARGET_DIR="${INSTALL_BASE}/${HOST_TRIPLE}/${VERSION}"
+fi
 
 MAYBE_SUDO=""
 if [ ! -d "${INSTALL_BASE}" ]; then
@@ -791,6 +820,9 @@ fi
 
 log "Installing to ${TARGET_DIR}…"
 $MAYBE_SUDO mkdir -p "${TARGET_DIR}"
+# A prior marker must not describe bytes while this direct installer writer is
+# refreshing them. A new marker is published only after the payload is complete.
+$MAYBE_SUDO rm -f "${TARGET_DIR}/.sha256"
 
 DEST_BASENAME="$BINARY"
 if [ "$OS" = "windows" ] && [[ "$SRC_BINARY" == *.exe ]]; then
@@ -877,6 +909,15 @@ if [ -f "${ROOT_DIR}/workspace.toml" ]; then
     || die "Bundled workspace manifest has no installed capsule payload."
   log "Installing bundled workspace manifest to ${TARGET_DIR}/workspace.toml…"
   $MAYBE_SUDO cp -f "${ROOT_DIR}/workspace.toml" "${TARGET_DIR}/workspace.toml"
+fi
+
+# Native dispatch uses this archive-digest marker only as the completeness
+# commit point. Explicitly unverified installs remain runnable entry payloads
+# but are not eligible as host-qualified dispatch candidates.
+if [ -n "$CHECKED_DIGEST" ]; then
+  STORE_MARKER_TEMP="${TMPDIR}/toolchain-store.sha256"
+  printf '%s\n' "$CHECKED_DIGEST" > "$STORE_MARKER_TEMP"
+  $MAYBE_SUDO install -m 0644 "$STORE_MARKER_TEMP" "${TARGET_DIR}/.sha256"
 fi
 
 log "Ensuring global symlink in ${GLOBAL_BIN_DIR}…"

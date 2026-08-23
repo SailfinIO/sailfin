@@ -4,14 +4,14 @@
 // extensionless literals (`store_dir + "/sailfin"`), so on a native Windows
 // host — where `install.ps1` writes `sailfin.exe` — nothing extensionless
 // exists to find, and spawning the relative extensionless path fails
-// `ERROR_FILE_NOT_FOUND`. Six call sites across `dev.sfn` and
-// `toolchain.sfn` now route through `host_exe_name`
+// `ERROR_FILE_NOT_FOUND`. Store call sites across `dev.sfn` and the
+// toolchain command modules now route through `host_exe_name`
 // (`compiler/src/build/target.sfn:277`), which is
 // `target_exe_name(name, build_host_os())`.
 //
 // Two complementary tests: the naming RULE itself (`target_exe_name` /
-// `host_exe_name`), and a source-scan GUARD over the two files this bug's
-// sites live in, so a future edit that reintroduces a bare literal at any
+// `host_exe_name`), and a source-scan GUARD over the files this bug's sites
+// live in, so a future edit that reintroduces a bare literal at any
 // of those sites — or a new one alongside them — fails here instead of
 // silently regressing on the next native-Windows run.
 import {
@@ -25,7 +25,7 @@ import {
 import { build_host_os, host_exe_name, target_exe_name } from "../../src/build/target";
 
 let _dev_path: string = "compiler/src/cli/commands/dev.sfn";
-let _toolchain_path: string = "compiler/src/cli/commands/toolchain.sfn";
+let _toolchain_paths: string[] = ["compiler/src/cli/commands/toolchain.sfn", "compiler/src/toolchain/dispatch.sfn", "compiler/src/toolchain/host.sfn", "compiler/src/toolchain/install.sfn", "compiler/src/toolchain/store.sfn"];
 
 // True for a line whose first non-whitespace characters are `//`.
 fn _is_comment_line(line: string) -> boolean {
@@ -101,7 +101,7 @@ test "seed store naming: host_exe_name follows target_exe_name's Windows/POSIX s
     assert host_exe_name("store/1.2.3/sailfin") == target_exe_name("store/1.2.3/sailfin", host);
 }
 
-test "seed store naming: dev.sfn and toolchain.sfn route every store literal through host_exe_name" ![io] {
+test "seed store naming: dev and toolchain modules route store literals through host_exe_name" ![io] {
     let mut offenders: string[] = [];
     let dev_offenders = _bare_literal_offenders(_dev_path);
     let mut d: int = 0;
@@ -110,12 +110,17 @@ test "seed store naming: dev.sfn and toolchain.sfn route every store literal thr
         offenders.push(dev_offenders[d]);
         d += 1;
     }
-    let toolchain_offenders = _bare_literal_offenders(_toolchain_path);
-    let mut t: int = 0;
+    let mut p: int = 0;
     loop {
-        if t >= toolchain_offenders.length { break; }
-        offenders.push(toolchain_offenders[t]);
-        t += 1;
+        if p >= _toolchain_paths.length { break; }
+        let toolchain_offenders = _bare_literal_offenders(_toolchain_paths[p]);
+        let mut t: int = 0;
+        loop {
+            if t >= toolchain_offenders.length { break; }
+            offenders.push(toolchain_offenders[t]);
+            t += 1;
+        }
+        p += 1;
     }
 
     // A non-empty list means a seed-store binary/alias path was spelled as a

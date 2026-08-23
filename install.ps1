@@ -18,7 +18,8 @@
       REPO           (default: SailfinIO/sailfin)
       VERSION        (default: latest; accepts optional leading v)
       BINARY         (default: sailfin)
-      INSTALL_BASE   (default: $env:LOCALAPPDATA\sailfin\versions)
+      INSTALL_BASE   (default: $env:LOCALAPPDATA\sailfin\versions; payloads
+                      land under <canonical-host-triple>\<version>)
       GLOBAL_BIN_DIR (default: $env:LOCALAPPDATA\sailfin\bin)
       GITHUB_TOKEN   (optional; increases API rate limits)
       SAILFIN_RELEASE_BASE
@@ -293,6 +294,9 @@ switch ($RawArch) {
 }
 
 $OS = "windows"
+if ($Arch -ne "x86_64") {
+    Die "Unsupported canonical Windows host for toolchain storage: $Arch"
+}
 Log "Detected OS: $OS"
 Log "Detected ARCH: $Arch"
 
@@ -795,8 +799,23 @@ if (-not $SrcBinary) {
 
 # --- Install -----------------------------------------------------------------
 
-$TargetDir = Join-Path $InstallBase $Version
+# SFEP-0073: use the ABI of the archive that final asset resolution actually
+# selected. The preferred native archive is MSVC; the plain compatibility
+# fallback is MinGW. This runs after signed-manifest and mirror fallback logic.
+$HostTriple = if ($Asset -match '-msvc\.tar\.gz$') {
+    "x86_64-pc-windows-msvc"
+} else {
+    "x86_64-w64-mingw32"
+}
+Log "Detected host triple: $HostTriple"
+
+$HostInstallBase = Join-Path $InstallBase $HostTriple
+$TargetDir = Join-Path $HostInstallBase $Version
 New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+$StoreMarker = Join-Path $TargetDir ".sha256"
+# Never leave a prior completeness marker visible while refreshing payload
+# bytes. A trusted/digest-pinned marker is published after layout completes.
+if (Test-Path $StoreMarker) { Remove-Item -Force $StoreMarker }
 
 $DestName = if ($SrcBinary -match '\.exe$') { "$Binary.exe" } else { $Binary }
 $DestPath = Join-Path $TargetDir $DestName
@@ -837,6 +856,14 @@ if (Test-Path $WorkspaceSrc) {
     }
     Log "Installing bundled workspace manifest to $TargetDir\workspace.toml..."
     Copy-Item -Path $WorkspaceSrc -Destination $WorkspaceDest -Force
+}
+
+# The marker is a completeness commit point, not a hash of extracted files.
+# Explicitly unverified installs remain entry payloads but are not candidates
+# for automatic host-qualified dispatch.
+if ($ExpectedDigest -and $TrustState -in @("VERIFIED_SIGNED", "DIGEST_PINNED")) {
+    $MarkerEncoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($StoreMarker, "$ExpectedDigest`n", $MarkerEncoding)
 }
 
 # --- Copies in global bin dir ------------------------------------------------
