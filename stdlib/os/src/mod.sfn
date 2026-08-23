@@ -509,12 +509,16 @@ fn drain_to_exit(h: ProcessHandle, deadline_ms: int) -> ProcessDrain ![clock, io
             // `-1` when it drained nothing, so both fds are `-1` only once
             // both stashes are empty, which the check above already broke
             // on. Drive the framed reads directly: each pumps both pipes,
-            // so neither stream can wedge the other, and each blocks until
-            // a byte or EOF, which is what keeps this from spinning.
-            // Termination stays the both-at-EOF check above. The deadline
-            // is therefore only observed between reads here — an untimed
-            // read cannot be interrupted, so a wholly silent hung child on
-            // Windows is not killed mid-read.
+            // so neither stream can wedge the other. Termination stays the
+            // both-at-EOF check above.
+            //
+            // The deadline IS observable here (SFN-1092): each read is
+            // bounded by `PW_FRAMED_POLL_BUDGET_MS`, so a live-but-silent
+            // child returns empty rather than parking and this loop
+            // reaches the deadline check above, making `timed_out` real on
+            // Windows. That is also why an empty read must not be read as
+            // EOF — `*_at_eof` is the oracle, as the chunk-read contract
+            // above states.
             read_out = !process.handle_stdout_at_eof(h.handle_id);
             read_err = !process.handle_stderr_at_eof(h.handle_id);
         } else {

@@ -177,7 +177,20 @@ test "handle_read_chunk_stdout: a live silent child yields empty rather than par
 test "handle_read_chunk_stdout: bounded incremental read, empty string at EOF" ![io] {
     let h = spawn_with_env(["sh", "-c", "printf 'abcdefgh'"], env_empty(), "");
     assert h.handle_id != 0;
-    let p1 = handle_read_chunk_stdout(h, 3);
+    // Retried rather than read once. Since SFN-1092 the Windows chunk
+    // reads are bounded, so a single read can return empty simply because
+    // the child has not been scheduled yet — process spawn under a loaded
+    // pool routinely exceeds the budget. Retrying until the first bytes
+    // land keeps what this test is actually about: that `n` caps the
+    // return and the remainder is preserved for the next call.
+    let mut p1: string = "";
+    let mut spins: int = 0;
+    loop {
+        if p1.length > 0 { break; }
+        if spins >= 400 { break; }
+        spins += 1;
+        p1 = handle_read_chunk_stdout(h, 3);
+    }
     assert strings_equal(p1, "abc");
     let p2 = handle_read_chunk_stdout(h, 10);
     assert strings_equal(p2, "defgh");
@@ -190,7 +203,16 @@ test "handle_read_chunk_stdout: bounded incremental read, empty string at EOF" !
 test "handle_read_chunk_stderr: reads the stderr twin" ![io] {
     let h = spawn_with_env(["sh", "-c", "printf 'oops' >&2"], env_empty(), "");
     assert h.handle_id != 0;
-    let p1 = handle_read_chunk_stderr(h, 4);
+    // Retried for the same reason as the stdout twin above: a bounded read
+    // can return empty before the child has written (SFN-1092).
+    let mut p1: string = "";
+    let mut spins: int = 0;
+    loop {
+        if p1.length > 0 { break; }
+        if spins >= 400 { break; }
+        spins += 1;
+        p1 = handle_read_chunk_stderr(h, 4);
+    }
     assert strings_equal(p1, "oops");
     let p2 = handle_read_chunk_stderr(h, 4);
     assert strings_equal(p2, "");
@@ -205,12 +227,26 @@ test "handle_stdout_at_eof / handle_stderr_at_eof: false mid-stream, true after 
     assert handle_stdout_at_eof(h) == false;
     assert handle_stderr_at_eof(h) == false;
     // Drain both to EOF before reaping — `handle_wait` frees the handle.
-    // A read with content does not itself flip the EOF flag; the
-    // following empty read is what observes the closed fd.
-    handle_read_chunk_stdout(h, 65536);
-    handle_read_chunk_stdout(h, 65536);
-    handle_read_chunk_stderr(h, 65536);
-    handle_read_chunk_stderr(h, 65536);
+    // A read with content does not itself flip the EOF flag; only a read
+    // that finds the pipe closed does.
+    //
+    // Drained in a loop rather than with a fixed pair of reads. Two reads
+    // sufficed while every read parked until byte-or-EOF, but since
+    // SFN-1092 the Windows chunk reads are bounded
+    // (`PW_FRAMED_POLL_BUDGET_MS`), so a read can return empty with the
+    // child merely slow to exit rather than finished — and `*_at_eof`
+    // would still be false. On a loaded host that is a real race, not a
+    // theoretical one. Looping until the EOF oracle flips tests the
+    // property this cares about; the guard counter keeps it bounded, per
+    // `.claude/rules/code-style.md`.
+    let mut drains: int = 0;
+    loop {
+        if handle_stdout_at_eof(h) && handle_stderr_at_eof(h) { break; }
+        if drains >= 400 { break; }
+        drains += 1;
+        if !handle_stdout_at_eof(h) { handle_read_chunk_stdout(h, 65536); }
+        if !handle_stderr_at_eof(h) { handle_read_chunk_stderr(h, 65536); }
+    }
     assert handle_stdout_at_eof(h) == true;
     assert handle_stderr_at_eof(h) == true;
     let exit = handle_wait(h);

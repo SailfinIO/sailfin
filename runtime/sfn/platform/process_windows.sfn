@@ -1012,7 +1012,10 @@ fn _pw_qpc_freq() -> i64 ![io] {
 // `to_eof` is 1 (the full-drain reads), or until its stash holds at least
 // one byte when `to_eof` is 0 (the framed reads).
 //
-// Unbounded: parks until a byte or EOF. Preserved verbatim as the
+// Unbounded: parks until a byte or EOF. The framing CONTRACT is
+// preserved exactly — an empty return still cannot occur — though the
+// idle sleep schedule is now shared with the bounded form, so noticing a
+// byte after an idle gap can cost up to 8 ms rather than 1 ms. Kept as the
 // historical contract for `sfn_process_handle_read_line_stdout` and the
 // full-drain reads, whose framing must never observe a spurious empty
 // return. Only the two chunk readers take a budget (SFN-1092).
@@ -1104,19 +1107,29 @@ fn _pw_h_pump_bounded(h: *PwProcHandle, want_err: i64, to_eof: i64, budget_ms: i
         if to_eof == 0 {
             if have > 0 { break; }
         }
+        // Checked before the pump pass, NOT only on an idle one.
+        // `_pw_h_pump_once` sums BOTH pipes, so a child that is silent on
+        // the requested stream while streaming the other keeps returning
+        // `n > 0` — gating the check on an idle pass would starve it and
+        // leave a hung-but-noisy child unkillable, the narrowed form of
+        // the very bug this bounds (SFN-1092). That shape is the common
+        // one, not an edge case: the test runner's frame protocol rides
+        // the child's stderr while stdout is often empty.
+        //
+        // Already-stashed bytes are never abandoned — the `have > 0`
+        // break above fires first. A pass that WOULD have fetched new
+        // bytes can be skipped, but `_pw_h_pump_once` never ran, so
+        // nothing was consumed from the pipe and the next call retrieves
+        // them. That is the no-progress-return invariant in the header.
+        if bounded == 1 {
+            // Multiply the ELAPSED tick delta, not the absolute counter:
+            // the counter is ticks-since-boot and would overflow i64 when
+            // scaled by 1000, while the delta spans one pump call.
+            let elapsed_ticks: i64 = _pw_qpc_now() - started;
+            if (elapsed_ticks * 1000) / freq >= budget_ms { break; }
+        }
         let n: i64 = _pw_h_pump_once(h, buf, cap);
         if n > 0 { idle_sleep_ms = 1; } else {
-            // Budget is checked only on an idle pass. A pass that moved
-            // bytes is progress and is never cut short, so a bounded
-            // caller draining a fast child behaves exactly as before.
-            if bounded == 1 {
-                let elapsed_ticks: i64 = _pw_qpc_now() - started;
-                // Multiply the ELAPSED tick delta, not the absolute
-                // counter: the counter is ticks-since-boot and would
-                // overflow i64 when scaled by 1000, while the delta is
-                // bounded by the budget.
-                if (elapsed_ticks * 1000) / freq >= budget_ms { break; }
-            }
             Sleep(idle_sleep_ms);
             if idle_sleep_ms < 8 { idle_sleep_ms = idle_sleep_ms * 2; }
         }
@@ -1618,9 +1631,19 @@ fn sfn_process_handle_stderr_fd(handle_id: i64) -> i64 ![io] { return -1; }
 // This is the Windows deadline-observation latency: a drain loop reads
 // both streams per iteration, so a caller's wall-clock deadline is seen
 // within ~2x this plus scheduler slop. Against the 900 s default
-// (`compiler/src/cli/commands/test/exec.sfn`) that is ~0.006%. The idle
-// cost is ~80 `PeekNamedPipe` pairs/s per silent child — paid only by a
-// child producing nothing.
+// (`compiler/src/cli/commands/test/exec.sfn`) that is ~0.006%.
+//
+// A budgeted pump actually spans ~31 ms, not 25: the backoff sleeps
+// 1+2+4+8+8+8 before the pass that observes the budget spent. Idle cost
+// is therefore ~7 `PeekNamedPipe` pairs per pump call, and with two pump
+// calls per caller iteration ~225 pairs/s per silent child — paid only
+// by a child producing nothing, and negligible either way.
+//
+// MUST stay positive. The budget is checked before the pump pass, so
+// `budget_ms == 0` breaks on the first iteration and returns empty
+// without ever probing the pipe — even with bytes already sitting in it.
+// Nothing enforces this at the type level; the two call sites below are
+// the only ones that pass it.
 let PW_FRAMED_POLL_BUDGET_MS: i64 = 25;
 
 // Framed reads (SFN-153 stdout twins, SFEP-0050 stderr twins): return AT
