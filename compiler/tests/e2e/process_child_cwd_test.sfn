@@ -1,0 +1,114 @@
+// compiler/tests/e2e/process_child_cwd_test.sfn
+//
+// SFN-1113: `process.run_capture_cwd` and `process.spawn_with_env_cwd`
+// accepted a per-child working directory and silently discarded it on native
+// Windows, running the child in the PARENT's cwd and returning success.
+//
+// That is a fail-open, and it failed open onto `git add -A` + `git commit`:
+// `compiler_capsule_release_lockstep_test.sfn` and
+// `precommit_inventory_test.sfn` both build a throwaway git repo in a scratch
+// directory and commit inside it. With `cwd` discarded, both ran in the
+// repository the suite was launched from and wrote two commits containing the
+// developer's entire working tree — 4,566 files — during a local e2e run.
+//
+// The assertion below is deliberately NOT "the call returns 0". A test of that
+// shape passes against the stub, which is how this survived: the stub returns
+// the child's real exit code, it just runs the child somewhere else. What
+// distinguishes fixed from broken is WHERE the child ran, so the child is
+// given a job that can only succeed from the intended directory.
+//
+// `sfn_bin_abs_path()` rather than `sfn_bin_path()` is load-bearing. The
+// relative default resolves against the cwd, and on POSIX `posix_spawn` runs
+// its file actions — including the `chdir` — BEFORE resolving the executable,
+// so a relative `argv[0]` would be looked up under the scratch dir and fail
+// there. That asymmetry is the documented divergence recorded at
+// `_pw_cwd_arg` in `runtime/sfn/platform/process_windows.sfn`; using an
+// absolute path keeps this test measuring cwd rather than measuring it.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): the child is our own compiler
+// running `check`, a pure frontend pass with no `clang` or link step, so an
+// empty child environment is sufficient.
+import {
+    clean_runner_env,
+    expect_eq_bool,
+    expect_eq_int,
+    nested_runner_scratch,
+    sfn_bin_abs_path
+} from "sfn/test";
+
+// A trivially valid program. Its only job is to exist at a RELATIVE path that
+// resolves solely from the scratch directory, so `sfn check probe.sfn`
+// succeeds there and fails anywhere else.
+let PROBE_SRC: string = "fn main() {\n    return;\n}\n";
+
+fn _scratch_with_probe(label: string) -> string ![io] {
+    let dir = nested_runner_scratch("sfn1113-" + label);
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/probe.sfn", PROBE_SRC);
+    return dir;
+}
+
+// The regression. `probe.sfn` exists ONLY in the scratch directory, so exit 0
+// proves the child resolved it from there. Before the fix the child ran in the
+// repo root, where no `probe.sfn` exists, and `check` failed.
+test "process: run_capture_cwd runs the child in the given directory" ![io] {
+    let dir = _scratch_with_probe("capture");
+    let rc = process.run_capture_cwd([sfn_bin_abs_path(), "check", "probe.sfn"], clean_runner_env(dir
+        + "/runner"), dir);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert expect_eq_int(rc, 0).ok;
+}
+
+// The same guarantee for the non-blocking spawn, which reaches a different
+// `CreateProcessA` call site and was stubbed independently. Asserted through
+// the child's own exit code rather than a handle predicate so a spawn that
+// merely STARTS somewhere wrong cannot pass.
+test "process: spawn_with_env_cwd starts the child in the given directory" ![io] {
+    let dir = _scratch_with_probe("spawn");
+    let h = process.spawn_with_env_cwd([sfn_bin_abs_path(), "check", "probe.sfn"], clean_runner_env(dir
+        + "/runner"), dir);
+    assert expect_eq_bool(h != 0, true).ok;
+    assert expect_eq_int(process.handle_wait(h), 0).ok;
+}
+
+// The other half of the contract: an EMPTY cwd must still inherit the parent's
+// directory. Without this, "honour cwd" could be implemented by always moving
+// the child somewhere, which would break every existing `run_capture` caller.
+//
+// Asserted as the exact INVERSE of the first test, against the same probe:
+// the scratch dir holds `probe.sfn` and the repo root does not, so an empty
+// cwd must make `check probe.sfn` FAIL. Pairing the two directions is what
+// makes this meaningful — a lone non-zero exit would also be produced if the
+// child had been moved to some third directory, whereas the pair pins it to
+// one of exactly two and tells them apart.
+//
+// An earlier draft asserted that `check compiler/capsule.toml` NAMED the file
+// in its output. It does not — it prints `[check] no .sfn files found` and
+// never echoes the path — so that assertion could not pass regardless of cwd
+// behaviour. Recorded because the failure looked like a defect in the fix and
+// was not.
+test "process: an empty cwd still inherits the parent working directory" ![io] {
+    let dir = _scratch_with_probe("inherit");
+    let rc = process.run_capture_cwd([sfn_bin_abs_path(), "check", "probe.sfn"], clean_runner_env(dir
+        + "/runner"), "");
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert expect_eq_bool(rc != 0, true).ok;
+}
+
+// A per-child cwd must move only the CHILD. A process-global `chdir` would
+// satisfy every assertion above while corrupting every subsequent test in the
+// same runner process — the failure mode that makes this defect class so
+// destructive in a pooled run.
+test "process: a per-child cwd does not move the parent" ![io] {
+    let dir = _scratch_with_probe("noglobal");
+    let before = fs.exists("compiler/capsule.toml");
+    let rc = process.run_capture_cwd([sfn_bin_abs_path(), "check", "probe.sfn"], clean_runner_env(dir
+        + "/runner"), dir);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert expect_eq_int(rc, 0).ok;
+    assert expect_eq_bool(before, true).ok;
+    assert expect_eq_bool(fs.exists("compiler/capsule.toml"), true).ok;
+}

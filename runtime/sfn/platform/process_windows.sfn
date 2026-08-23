@@ -332,6 +332,37 @@ fn _pw_app_name(argv0: string) -> *u8 {
     return 0 as *u8;
 }
 
+// `_pw_cwd_arg(cwd)` — the `lpCurrentDirectory` `CreateProcessA` needs for a
+// per-child working directory, or `null` to leave the child in the parent's.
+//
+// `CreateProcessA`'s 8th parameter has always been in the extern declaration
+// above; it was simply never wired, so `run_capture_cwd` and
+// `spawn_with_env_cwd` accepted a directory, discarded it, and reported
+// success while running the command in the parent's cwd. That is a fail-open,
+// and it failed open onto `git add -A` + `git commit`: the two git fixtures in
+// `compiler/tests/e2e/` committed the developer's entire repository twice
+// during a native-Windows e2e run (SFN-1113).
+//
+// The POSIX contract this mirrors is `posix_spawn_file_actions_addchdir_np`
+// (`runtime/sfn/process.sfn:1014`): an empty cwd inherits the parent, a
+// non-empty one moves the child only — never a process-global `chdir`. Win32
+// resolves a relative `lpCurrentDirectory` against the parent's cwd, which is
+// what `chdir` does, so relative directories agree across platforms.
+//
+// One divergence, documented rather than hidden: `posix_spawn` runs its file
+// actions BEFORE resolving the executable, so a relative `argv[0]` resolves
+// against the NEW cwd. `lpApplicationName` (argument 1, SFN-1104) is resolved
+// against the PARENT's. `run_capture_cwd(["./foo"], env, "sub")` therefore
+// runs `sub/./foo` on POSIX and `./foo` on Windows. No in-tree caller relies
+// on it — every one passes a bare name or an absolute path — and closing it
+// would mean resolving `argv[0]` against `cwd` ourselves, which would break
+// the bare-name `PATH` search `_pw_app_name` deliberately preserves.
+fn _pw_cwd_arg(cwd: *u8) -> *u8 {
+    if (cwd as i64) == 0 { return 0 as *u8; }
+    if strlen(cwd) as i64 == 0 { return 0 as *u8; }
+    return cwd;
+}
+
 // `sfn_process_run(argv)` — real Windows spawn. Mirrors the retired
 // `sailfin_runtime.c:5564` `CreateProcessA` body: build a single quoted
 // command line (`"arg0" "arg1" ...`), spawn, block until exit, return
@@ -704,7 +735,7 @@ fn _pw_drain(out_rd: i64, err_rd: i64, gb_out: *PwGrowBuf, gb_err: *PwGrowBuf) -
 // POSIX `run_capture` contract, `process.sfn:740`). Modeled on that body
 // with `CreatePipe`/`CreateProcessA`/`ReadFile` in place of
 // `pipe`/`posix_spawnp`/`read`.
-fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
+fn _pw_run_capture_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
     // Drop any capture left pending from a previous call.
     if pw_capture_stdout_addr != 0 {
         free(pw_capture_stdout_addr as *u8);
@@ -853,7 +884,7 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
     // bInheritHandles=TRUE(1) so the child inherits the redirected write
     // ends; flags=0 (ANSI environment block).
     let app: *u8 = _pw_app_name(argv[0]);
-    let ok: i32 = CreateProcessA(app, cmdline, null, null, 1, 0, env_block, null, si, pi);
+    let ok: i32 = CreateProcessA(app, cmdline, null, null, 1, 0, env_block, _pw_cwd_arg(cwd), si, pi);
     free(cmdline);
     free(env_block);
     free(sa);
@@ -932,12 +963,18 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
     return code as i64;
 }
 
-// `process.run_capture_cwd` (#1167): `cwd` is accepted for ABI parity
-// with the posix runtime but ignored — per-child cwd is a posix-only
-// feature (the issue scopes Windows cwd support Out). The child always
-// inherits the parent's working directory here.
+// `process.run_capture` — no per-child directory, so the child inherits the
+// parent working directory (a null `lpCurrentDirectory`).
+fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
+    return _pw_run_capture_impl(argv, env_flat, 0 as *u8);
+}
+
+// `process.run_capture_cwd` (#1167): runs the child in `cwd`. An empty or
+// null `cwd` inherits the parent working directory, matching the POSIX
+// contract at `runtime/sfn/process.sfn:1119`. See `_pw_cwd_arg` for the
+// `lpApplicationName` divergence this deliberately does not close (SFN-1113).
 fn sfn_process_run_capture_cwd(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
-    return sfn_process_run_capture(argv, env_flat);
+    return _pw_run_capture_impl(argv, env_flat, cwd);
 }
 
 // Hand off the captured stream stashed by the preceding `run_capture`,
@@ -1267,7 +1304,7 @@ fn _pw_framed_find_newline(gb: *PwGrowBuf) -> i64 {
     return -1;
 }
 
-// `_pw_spawn_impl(argv, env_flat)` — real Windows non-blocking spawn. Three
+// `_pw_spawn_impl(argv, env_flat, cwd)` — real Windows non-blocking spawn. Three
 // anonymous pipes (stdin/stdout/stderr) are wired to the child through
 // `STARTUPINFOA`, the child is launched, and a live `PwProcHandle` address
 // is returned as the id. Unlike `run_capture` this does NOT wait: the
@@ -1278,7 +1315,7 @@ fn _pw_framed_find_newline(gb: *PwGrowBuf) -> i64 {
 // — the family's universal failure sentinel, `0` rather than `-1` to match
 // the POSIX peer and the retired C `_WIN32` contract
 // (`sailfin_runtime.c:8195`).
-fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
+fn _pw_spawn_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
     let len: i64 = argv.length;
     if len <= 0 { return 0; }
 
@@ -1443,7 +1480,7 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
     // ends; flags=0 (ANSI environment block). The file-level inheritance
     // lock is held until the parent closes its child-side pipe ends below.
     let app: *u8 = _pw_app_name(argv[0]);
-    let ok: i32 = CreateProcessA(app, cmdline, null, null, 1, 0, env_block, null, si, pi);
+    let ok: i32 = CreateProcessA(app, cmdline, null, null, 1, 0, env_block, _pw_cwd_arg(cwd), si, pi);
     free(cmdline);
     free(env_block);
     free(sa);
@@ -1481,17 +1518,18 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
     return h as i64;
 }
 
+// No per-child directory, so the child inherits the parent working
+// directory (a null `lpCurrentDirectory`).
 fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
-    return _pw_spawn_impl(argv, env_flat);
+    return _pw_spawn_impl(argv, env_flat, 0 as *u8);
 }
 
-// `process.spawn_with_env_cwd` (#1167): `cwd` is accepted for ABI parity
-// with the posix runtime but ignored, exactly as `run_capture_cwd` ignores
-// it — per-child cwd stays a posix-only feature (SFN-497 scopes Windows cwd
-// support Out). The spawn itself is real; the child inherits the parent's
-// working directory.
+// `process.spawn_with_env_cwd` (#1167): spawns the child in `cwd`. An empty
+// or null `cwd` inherits the parent working directory, matching the POSIX
+// contract at `runtime/sfn/process.sfn:1359`. See `_pw_cwd_arg` for the
+// `lpApplicationName` divergence this deliberately does not close (SFN-1113).
 fn sfn_process_spawn_with_env_cwd(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
-    return _pw_spawn_impl(argv, env_flat);
+    return _pw_spawn_impl(argv, env_flat, cwd);
 }
 
 // Write the whole NUL-terminated `data` to the child's stdin, resuming on
