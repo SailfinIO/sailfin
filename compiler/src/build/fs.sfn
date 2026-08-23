@@ -325,17 +325,18 @@ fn _write_lines_or_empty(target: string, lines: string[]) -> void ![io] {
 // write, which is why the cache publishes via `_atomic_rename_into_place`
 // directly.
 //
-// With no temp mintable (`host_is_windows()`) the write degrades to the
-// direct in-place form — crash atomicity is lost, the artifact is still
-// produced, and the failure is still reported.
+// With no temp mintable the write degrades to the direct in-place form —
+// crash atomicity is lost, the artifact is still produced, and the failure
+// is still reported. Since SFN-1099 that degrade is no longer the whole
+// Windows leg: `mkstemp` resolves there, so the mint only fails for a
+// missing parent directory or an allocation failure, on any host.
 fn _publish_lines_atomic(path: string, lines: string[]) -> boolean ![io] {
     let tmp = _mktemp_sibling_cmd(path);
     if tmp.length == 0 {
         // The degrade leg writes the destination in place, so `fs.exists`
         // only means "this write produced a file" once any prior artifact
         // is gone — otherwise a failed write reports the previous build's
-        // output as success. This is the whole native-Windows leg, where
-        // the mint always returns "" (SFN-578).
+        // output as success (SFN-578).
         if fs.exists(path) { fs.deleteFile(path); }
         _write_lines_or_empty(path, lines);
         return fs.exists(path);

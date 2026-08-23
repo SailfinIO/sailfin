@@ -245,15 +245,49 @@ fn _first_assert_failure(all: TestResultRecord[]) -> AssertFailure {
 }
 
 // The `test`/`hook` classification records, assert-location records split
-// out — the analog of `results.log`'s `T`/`H` records.
+// out and paired onto the failing record they belong to — the analog of
+// `results.log`'s `T`/`H` records, plus a per-record location (SFN-1096).
+//
+// SFN-1096: `_first_assert_failure` picks the FIRST assert record in the
+// whole stream, so every failure after the first one in a file inherited
+// that first test's `file:line:col`. Stream order is reliable for pairing
+// instead — `sailfin_assert_fail` writes its `A` record and THEN raises in
+// the same synchronous call (`runtime/sfn/assert.sfn:397-412`), caught
+// immediately by that test's own `setjmp` region, so under the harness's
+// single-threaded execution an `A` record is always immediately followed
+// by the fail record it caused, with no other test's records able to
+// interleave. Walk in order, stashing each `A` and consuming it on the
+// very next fail record; a fail record with no preceding stash (an
+// uncaught crash/exception, not an assert) keeps an empty location rather
+// than borrowing a stale one. The stash is cleared after every non-assert
+// record, consumed or not, so it can never leak past the test/hook it
+// belongs to.
 fn _test_hook_records(all: TestResultRecord[]) -> TestResultRecord[] {
     let mut out: TestResultRecord[] = [];
+    let mut has_stash: boolean = false;
+    let mut stash_file: string = "";
+    let mut stash_line: int = 0;
+    let mut stash_col: int = 0;
     let mut i: int = 0;
     loop {
         if i >= all.length { break; }
-        if !strings_equal(all[i].kind, _STREAM_ASSERT_KIND) {
-            out.push(all[i]);
+        let r = all[i];
+        if strings_equal(r.kind, _STREAM_ASSERT_KIND) {
+            stash_file = r.file;
+            stash_line = r.line;
+            stash_col = r.col;
+            has_stash = true;
+            i += 1;
+            continue;
         }
+        let mut rec = r;
+        if has_stash && strings_equal(r.status, "fail") {
+            rec.file = stash_file;
+            rec.line = stash_line;
+            rec.col = stash_col;
+        }
+        has_stash = false;
+        out.push(rec);
         i += 1;
     }
     return out;

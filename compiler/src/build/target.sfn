@@ -321,9 +321,18 @@ fn target_linker_driver(triple: string) -> string {
     return "clang";
 }
 
+// windows-msvc only (SFN-1097): clang's default `-rtlib=platform` resolves
+// to nothing carrying the soft-float builtins there, so `fpext half` /
+// `fptrunc … to half` libcalls (`__extendhfsf2`, `__truncsfhf2`,
+// `__truncdfhf2`, `__floatsihf`) are undefined at link. compiler-rt ships
+// them; Linux resolves the same symbols via the `-lgcc` tail in
+// `direct_link.sfn` and macOS via Apple clang's default, so neither needs
+// this flag.
 fn target_linker_driver_flags(triple: string) -> string[] {
     if triple == "x86_64-w64-mingw32" { return ["-static"]; }
-    return target_clang_flags(triple);
+    let mut flags = target_clang_flags(triple);
+    if triple_abi(triple) == "msvc" { flags.push("--rtlib=compiler-rt"); }
+    return flags;
 }
 
 // The `-fuse-ld=` flag a target forces regardless of host auto-detection.

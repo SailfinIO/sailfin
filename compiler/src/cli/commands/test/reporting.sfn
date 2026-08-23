@@ -39,13 +39,38 @@ fn _records_have_failure(records: TestResultRecord[]) -> boolean {
     return false;
 }
 
+// SFN-1096: `records` now carries the paired assert location directly
+// (`_test_hook_records` in `exec.sfn` stamps it onto the failing record in
+// stream order), so a failure's location is read off the record itself
+// rather than matched by message-text equality against the file's FIRST
+// assert failure — the prior gate stamped every failure after the first
+// with the first one's location. `r.line > 0` is the "have a location"
+// signal, matching the `_synthetic_assert_failure` convention that an
+// unpinned failure carries `line: 0`.
+fn _record_assert_failure(test_path: string, r: TestResultRecord) -> AssertFailure {
+    if r.line > 0 {
+        return AssertFailure {
+            present: true,
+            file: r.file,
+            line: r.line,
+            col: r.col,
+            message: r.message
+        };
+    }
+    return _synthetic_assert_failure(test_path, r.message);
+}
+
 // SFN-17: structured per-test/hook classification from `results.log`.
 // Replaces the fail.bin index-inference when the recoverable harness
 // produced real per-test records — each test is classified by its own
 // record (source of truth), and hook failures surface as distinct
-// events (JSON) / lines (human). `failure` (the first fail.bin SFAF
-// record) enriches the first failing test's assertion with file:line:col.
-// Returns pass/fail/skip packed as `_emit_file_test_events` does.
+// events (JSON) / lines (human). Per-failure file:line:col comes from
+// `_record_assert_failure` reading the record's own paired location
+// (SFN-1096); the `failure` param is unused in this function's body now,
+// left on the signature unchanged since `TestBinResult.failure` is still
+// the crash-fallback location for the no-records case in
+// `single_process_run.sfn`. Returns pass/fail/skip packed as
+// `_emit_file_test_events` does.
 fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failure: AssertFailure, json_output: boolean, elapsed_ms: int, test_path: string) -> int ![io] {
     let t_records = _collect_test_records(records);
     // --- Counting from the records (source of truth). This must not
@@ -114,11 +139,7 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
                 } else {
                     status = "fail";
                     skip_kind = "";
-                    if failure.present && strings_equal(failure.message, r.message) {
-                        event_failure = failure;
-                    } else {
-                        event_failure = _synthetic_assert_failure(test_path, r.message);
-                    }
+                    event_failure = _record_assert_failure(test_path, r);
                 }
             }
             print(render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure, skip_kind));
@@ -130,10 +151,7 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
             if tri >= t_records.length { break; }
             let r = t_records[tri];
             if strings_equal(r.status, "fail") {
-                let mut ef: AssertFailure = _synthetic_assert_failure(test_path, r.message);
-                if failure.present && strings_equal(failure.message, r.message) {
-                    ef = failure;
-                }
+                let ef = _record_assert_failure(test_path, r);
                 print("[test] FAIL: " + r.name + " (" + _format_assert_failure(test_path, ef)
                     + ")");
             } else if strings_equal(r.status, "skip") {
