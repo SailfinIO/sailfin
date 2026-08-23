@@ -18,6 +18,8 @@
 // `mode = "warn"` turns the same drift into a report that does not fail.
 import { find, split } from "sfn/strings";
 import {
+    clean_runner_env,
+    clean_runner_env_without,
     default_scratch_dir,
     sfn_bin_abs_path,
     sfn_bin_path,
@@ -36,16 +38,10 @@ fn _first_line(text: string) -> string {
     return lines[0];
 }
 
-// Minimal env carrying PATH so the OS can resolve `bash` for the cd vehicle.
-// The audit does not compile, so no clang toolchain env is needed.
-fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    return e;
-}
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114). No nested scratch: the audit does not
+// compile, so no build-cache routing is needed.
+fn _child_env() -> string[] ![io] { return clean_runner_env(""); }
 
 // Build a two-member fixture workspace under `root`. `clean` stays within the
 // `allow = ["clock", "io"]` envelope; `drifter` declares `net`, which drifts.
@@ -317,8 +313,10 @@ fn _make_implicit_override_toolchain(root: string) -> string ![io] {
     return compiler;
 }
 
+// SAILFIN_RUNTIME_ROOT is named in the strip list so an inherited outer
+// value cannot shadow the push below.
 fn _implicit_override_env() -> string[] ![io] {
-    let mut child = _child_env();
+    let mut child = clean_runner_env_without("", ["SAILFIN_RUNTIME_ROOT"]);
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();

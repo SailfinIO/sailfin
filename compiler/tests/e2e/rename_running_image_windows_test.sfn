@@ -43,24 +43,11 @@ fn _is_windows() -> bool ![io] {
     return false;
 }
 
-// Per-child environment for spawning the compiled fixtures: threads the
-// parent's Windows essentials so a spawned native binary resolves its
-// runtime. `spawn_with_env`'s `env` is the child's whole environment
-// (empty array == empty environment, never "inherit"), so the vars the
-// child needs must be passed explicitly.
+// Per-child environment for spawning the compiled fixtures: derived by
+// subtraction from the real environment rather than a hand-rolled
+// allowlist (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let sysroot = env.get("SYSTEMROOT");
-    if sysroot.length > 0 { e.push("SYSTEMROOT=" + sysroot); }
-    let windir = env.get("windir");
-    if windir.length > 0 { e.push("windir=" + windir); }
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let temp = env.get("TEMP");
-    if temp.length > 0 { e.push("TEMP=" + temp); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Per-invocation scratch directory for the fixture sources/binaries.

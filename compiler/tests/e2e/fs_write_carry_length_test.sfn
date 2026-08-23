@@ -21,21 +21,18 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
+import {
+    c_math_link_flags,
+    clean_runner_env,
+    default_scratch_dir,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
 
-// `run_capture`'s empty array is the *empty* environment; thread what the
-// toolchain needs. Mirrors `_child_env` in `runtime_adapter_filesystem_test.sfn`.
+// Derived by subtraction from the real environment via `clean_runner_env`,
+// not built up key-by-key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _scratch_dir() -> string ![io] {
@@ -167,7 +164,15 @@ test "sfn_fs_write_file_lv / sfn_fs_append_file_lv carry the caller's byte lengt
     // The shared optional-oracle boundary skips only when no configured host
     // compiler can run. A compile/link failure after resolution remains a
     // hard regression rather than silently disabling this soundness gate.
-    let clang_exit = run_external_c_oracle(["-Wno-override-module", harness, ll, "-o", bin, "-lm"]);
+    //
+    // libm comes from `c_math_link_flags()` rather than a literal `-lm`
+    // (SFN-1114): that spelling has no MSVC counterpart — the Microsoft CRT has
+    // no separate math library, so `lld-link` fails with
+    // `could not open 'm.lib'` — and the helper answers with the empty array
+    // there, which is why it returns a list rather than a string.
+    let mut oracle_argv: string[] = ["-Wno-override-module", harness, ll, "-o", bin];
+    for flag in c_math_link_flags() { oracle_argv.push(flag); }
+    let clang_exit = run_external_c_oracle(oracle_argv);
     let _co = process.capture_take_stdout();
     let clang_err = process.capture_take_stderr();
     if clang_exit != 0 {

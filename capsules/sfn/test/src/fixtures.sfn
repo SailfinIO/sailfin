@@ -208,6 +208,28 @@ fn nested_runner_scratch(label: string) -> string ![io] {
     return fs.mkdtemp("sfn-nested-runner-");
 }
 
+// True when the test process is running on a Windows host (SFN-1114).
+//
+// For a test whose EXPECTED VALUE differs by host — the errno accessor the
+// emitter picks, the link flags a C harness needs — as opposed to one that
+// merely needs a platform-shaped input, which belongs in a `SAILFIN_TARGET_OS`
+// override instead. Reach for the override first: a forced target asserts the
+// same thing on every runner, while this predicate makes an assertion that
+// only one platform ever evaluates.
+//
+// Mirrors `build_host_os`'s Windows rungs rather than importing them: a capsule
+// cannot import compiler-internal modules, so this is a deliberate paired copy,
+// the same arrangement `_pool_managed_keys` documents above. `NUL` backstops
+// the environment variable for the reason SFN-1114 exists — a child spawned
+// with a curated envp need not carry `SystemRoot`, and test helpers run inside
+// exactly such children. Deliberately has no POSIX-vs-Darwin split: no caller
+// has needed one, and a three-way answer invites a two-way `if` that silently
+// files Darwin under Linux.
+fn host_is_windows() -> boolean ![io] {
+    if env.get("SystemRoot").length > 0 { return true; }
+    return fs.exists("NUL");
+}
+
 // Build a clean top-level child environment for spawning a nested `sfn test`
 // (or `sfn build` / `sfn run`) subprocess. Returns `process.environ()` with
 // every pool-managed key (see `_pool_managed_keys`) and every caller-override

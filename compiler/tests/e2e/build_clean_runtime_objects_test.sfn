@@ -26,21 +26,13 @@
 // from an `![io]` test (#842). The summary prints to stderr (#915);
 // `run_capture` splits the streams so we concatenate stdout+stderr.
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, sfn_bin_path } from "sfn/test";
 
-// Child env for a nested build: PATH (clang/linker), HOME, TMPDIR, the
-// inherited SAILFIN_TEST_SCRATCH, plus a dedicated shared cache root so the
-// run is genuinely cold and never touches the repo's `build/cache/` tree.
+// Child env for a nested build, derived by subtraction from the real
+// environment (SFN-1114), plus a dedicated shared cache root so the run is
+// genuinely cold and never touches the repo's `build/cache/` tree.
 fn _build_env(cache_dir: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_BUILD_CACHE_DIR"]);
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
     return e;
 }

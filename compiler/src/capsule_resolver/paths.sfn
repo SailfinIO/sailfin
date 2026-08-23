@@ -11,22 +11,59 @@ import { test_runner_scratch_root } from "../test_runner_state";
 import { CapsuleSource, ResolverConsumer } from "./types";
 
 // ---- Path helpers ----
+// True iff `ch` is a path separator. Windows accepts `/` and `\`
+// interchangeably in every Win32 file API, and the paths reaching this module
+// carry `\`: `--binary-dir` is derived from `GetModuleFileNameA`, which hands
+// back a fully backslashed path. Unconditional on host, matching the two
+// in-tree precedents this rule already has — `_is_path_sep`
+// (`compiler/src/build/paths.sfn`, SFN-919) and `_rcr_is_sep`
+// (`compiler/src/runtime_capsule_resolver.sfn`, SFN-642).
+fn _cr_is_path_sep(ch: string) -> boolean { return ch == "/" || ch == "\\"; }
+
+// Scanning for `/` alone made this return `"."` for every backslashed input,
+// which on Windows is every absolute path (SFN-1114).
+//
+// `"."` is not a harmless default here. `discover_workspace_root(binary_dir)`
+// (`./workspace.sfn`) walks parents looking for `workspace.toml`, and
+// `dedupe.sfn` calls that walk "the one anchor deliberately independent of the
+// CWD". Given `C:\...\build\bin` this yielded `"."` on the first step, so the
+// probe read `./workspace.toml` — turning the CWD-independent anchor into a
+// probe OF the CWD, and then terminating, since `_cr_dirname(".") == "."`.
+//
+// With no workspace root there is no member map, and the member map is the
+// only thing that knows `stdlib/`: `workspace.toml [workspace].members`
+// carries `"stdlib/*"`, expanded into `sfn/strings` -> `<ws>/stdlib/strings/src`.
+// Both fallback locators (`./locate.sfn`) know only
+// `capsules/<scope>/<name>/src`, so `sfn/strings` became unfindable, and
+// `sfn/crypto` — which declares it — failed to lower with 72 fatals blaming
+// `split` and `int_to_string`, symbols that exist and are correct.
+//
+// Measured: with the CWD outside the repo the compiler read a decoy
+// `workspace.toml` planted in the CWD, an ancestor of neither the entry file
+// nor the compiler binary. The same build from the repo root retained 34 of 34
+// modules; from a scratch dir, 33 of 33 — the missing one being
+// `sfn/strings/mod`.
+//
+// Every other `_cr_dirname` call site was returning `"."` for a backslashed
+// input too, so widening the scan can only make more things resolve.
 fn _cr_dirname(path: string) -> string {
     let mut last_slash: int = -1;
     let mut i: int = 0;
     loop {
         if i >= path.length { break; }
-        if path[i] == "/" { last_slash = i; }
+        if _cr_is_path_sep(path[i]) { last_slash = i; }
         i += 1;
     }
     if last_slash < 0 { return "."; }
-    if last_slash == 0 { return "/"; }
+    // Preserve the separator the caller actually used, so a Windows root keeps
+    // its `\` spelling rather than being rewritten to `/`.
+    if last_slash == 0 { return substring(path, 0, 1); }
     return substring(path, 0, last_slash);
 }
 
 fn _cr_path_join(base: string, name: string) -> string {
     if base.length == 0 { return name; }
-    if base[base.length - 1] == "/" { return base + name; }
+    if _cr_is_path_sep(base[base.length - 1]) { return base + name; }
     return base + "/" + name;
 }
 

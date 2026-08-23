@@ -24,22 +24,12 @@ import {
     tensor_parameter,
     tensor_reduce_sum
 } from "sfn/ir";
-import { snapshot_match_in, with_tmp_dir } from "sfn/test";
+import { clean_runner_env, snapshot_match_in, with_tmp_dir } from "sfn/test";
 
-// A minimal child environment for the tool probe / invocation: only PATH is
-// load-bearing (locating `stablehlo-opt`), with HOME/TMPDIR carried for the
-// tool's own scratch. `run_capture`'s empty `env` is the *empty* environment,
-// not an inherited one, so PATH must be threaded explicitly.
-fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    return e;
-}
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114). No nested scratch: this emitter never
+// spawns a build.
+fn _child_env() -> string[] ![io] { return clean_runner_env(""); }
 
 // The spike module: one function exercising every op in the set. Shapes chain
 // so the IR is well-formed — add/multiply over 2x3, matmul 2x3·3x4 -> 2x4,

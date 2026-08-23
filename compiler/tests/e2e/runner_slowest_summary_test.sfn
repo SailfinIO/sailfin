@@ -26,24 +26,12 @@ import {
     parse_int,
     substring
 } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
-// env-safe (SFN-401): hand-built minimal child env — no raw
-// process.environ() pool-key leak. The build spawns nested clang +
-// linker, so the child needs PATH; SAILFIN_TEST_SCRATCH routes
-// program.ll per invocation so the parallel pool does not collide on
-// build/sailfin (#1333).
+// env-safe (SFN-1114): derived by subtraction from the real environment
+// rather than a hand-rolled allowlist.
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // A scratch directory with 3 trivially-passing test files.

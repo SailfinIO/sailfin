@@ -34,35 +34,19 @@
 // `.claude/rules/no-bash-e2e.md` pattern. See `guillermo_test.sfn` for
 // the canonical sfn_bin_path() / child-env shape.
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { clean_runner_env, clean_runner_env_without, sfn_bin_path } from "sfn/test";
 
-// Thread PATH/HOME/TMPDIR through to the nested `sfn test` child with an
-// explicit SAILFIN_TEST_SCRATCH override. `run_capture`'s empty-array env
-// is the FULL empty environment (not "inherit"), so clang/linker are
-// unreachable without PATH; the per-test scratch isolates each test's
-// objdir (the stamp lands under it) from sibling tests in the parallel
-// pool (#1333).
-// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak; nested SAILFIN_TEST_SCRATCH is isolated per call.
+// Derived by subtraction from the real environment rather than a
+// hand-rolled allowlist (SFN-1114).
 fn _child_env_with_scratch(scratch: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    e.push("SAILFIN_TEST_SCRATCH=" + scratch);
-    return e;
+    return clean_runner_env(scratch);
 }
 
+// HOME is named to `clean_runner_env_without` so an inherited entry cannot
+// shadow this forced override (SFN-1114).
 fn _child_env_with_scratch_and_home(scratch: string, home: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let mut e = clean_runner_env_without(scratch, ["HOME"]);
     e.push("HOME=" + home);
-    e.push("SAILFIN_TEST_SCRATCH=" + scratch);
     return e;
 }
 
@@ -285,7 +269,10 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     // First warm against the private copy. Pre-#2005 this failed at link
     // (`invalid redefinition of function sfn_type_register__<path-slug>`)
     // during the runtime warm; the fix keeps the slug `runtime/...`.
-    let mut env1 = _child_env_with_scratch_and_home(scratch, isolated_home);
+    // SAILFIN_RUNTIME_ROOT is named explicitly (alongside HOME) so an
+    // inherited entry cannot shadow this push (SFN-1114).
+    let mut env1 = clean_runner_env_without(scratch, ["HOME", "SAILFIN_RUNTIME_ROOT"]);
+    env1.push("HOME=" + isolated_home);
     env1.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy);
     let exit1 = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], env1);
     let _ = process.capture_take_stdout();
@@ -307,7 +294,8 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     // the `manifest_dir` normalization (SFN-146): a non-canonical root must
     // still yield the stable `runtime/...` slug, otherwise the slug falls
     // back to the full path and the warm fails exactly as pre-fix.
-    let mut env2 = _child_env_with_scratch_and_home(scratch, isolated_home);
+    let mut env2 = clean_runner_env_without(scratch, ["HOME", "SAILFIN_RUNTIME_ROOT"]);
+    env2.push("HOME=" + isolated_home);
     env2.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy + "/");
     let exit2 = process.run_capture([sfn_bin_path(), "test", dirs[0], dirs[1]], env2);
     let _ = process.capture_take_stdout();

@@ -30,23 +30,20 @@
 // subprocesses; `SAILFIN_TEST_SCRATCH` isolates the nested build's cache
 // under the parallel pool (`docs/conventions/e2e-tests.md`).
 import { contains, ends_with, find } from "sfn/strings";
-import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    clean_runner_env_without,
+    default_scratch_dir,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
 
 // Empty `run_capture` env is the EMPTY environment, not "inherit"; a
 // nested `sfn build` spawns clang + linker (needs PATH) and routes its
 // program.ll build-cache under SAILFIN_TEST_SCRATCH so the parallel pool
 // does not collide on the fixed build/sailfin (#1333).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _scratch_dir() -> string ![io] {
@@ -199,7 +196,7 @@ test "arena: concurrent struct-alloc workers on the pool never alias a bump slot
 // self-cap; `detect_leaks=0` because the corruption gate here is
 // cross-thread aliasing / heap corruption from the racing bump, not leaks.
 fn _asan_env() -> string[] ![io] {
-    let mut e = _child_env();
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["ASAN_OPTIONS", "SAILFIN_MEM_LIMIT"]);
     e.push("SAILFIN_MEM_LIMIT=unlimited");
     e.push("ASAN_OPTIONS=detect_leaks=0");
     return e;

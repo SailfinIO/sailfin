@@ -12,22 +12,18 @@
 //      raw IR never crosses the final-link boundary.
 //
 // Follows the `guillermo_test.sfn` shape: `sfn_bin_path()` honours `SAILFIN_BIN`,
-// `_child_env()` threads PATH/HOME/TMPDIR/SAILFIN_TEST_SCRATCH and the
-// parent cache knobs per the build-and-run isolation rule
-// (`.claude/rules/no-bash-e2e.md`). env-safe (SFN-401): hand-built minimal
-// env, no raw process.environ() pool-key leak.
+// `_child_env()` derives its base from `clean_runner_env` (SFN-1114) and
+// re-threads the parent cache knobs per the build-and-run isolation rule
+// (`.claude/rules/no-bash-e2e.md`).
 import { contains, find, split } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
+// Base env derived by subtraction via `clean_runner_env` (SFN-1114).
+// `SAILFIN_TEST_RUNTIME_OBJDIR` is pool-managed, so it is always stripped
+// from that base regardless of the outer environment, and the push below
+// re-adds it with the caller's fresh `objdir`.
 fn _child_env(scratch: string, objdir: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut e = clean_runner_env(scratch);
     let build_cache = env.get("SAILFIN_BUILD_CACHE_DIR");
     if build_cache.length > 0 {
         e.push("SAILFIN_BUILD_CACHE_DIR=" + build_cache);

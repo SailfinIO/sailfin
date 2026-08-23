@@ -6,19 +6,17 @@
 // output, command coverage, target-shell syntax validity, and the
 // unsupported-/missing-shell error paths (SFN-130, SFEP-0027 Phase D).
 import { contains } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path, tool_present } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    sfn_bin_path,
+    tool_present
+} from "sfn/test";
 
+// Derived by subtraction from the real environment via `clean_runner_env`,
+// not built up key-by-key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _scratch_dir() -> string ![io] {

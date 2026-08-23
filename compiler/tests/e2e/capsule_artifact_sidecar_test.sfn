@@ -22,19 +22,15 @@
 // full JSON parser (sfn/json::parse hangs on complex input when imported
 // transitively via the workspace resolver in the compiler test context).
 import { contains, find, split } from "sfn/strings";
-import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Library capsule fixture (demo/widget, uses sfn/math).

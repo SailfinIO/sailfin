@@ -1,0 +1,71 @@
+// Separator rules for the capsule resolver's leaf path helpers (SFN-1114).
+//
+// `_cr_dirname` scanned for `/` alone, so every backslashed input — which on
+// Windows is every absolute path — fell through to its `"."` default. That is
+// not a harmless default: `discover_workspace_root(binary_dir)` walks parents
+// looking for `workspace.toml`, and `dedupe.sfn` calls that walk "the one
+// anchor deliberately independent of the CWD". Given
+// `C:\...\build\bin` it produced `"."` on the first step, so the probe read
+// `./workspace.toml` — the CWD — and then terminated, since
+// `_cr_dirname(".") == "."`. No workspace root means no member map, and the
+// member map is the only thing that knows `stdlib/*`, so `sfn/strings` became
+// unfindable and `sfn/crypto` failed to lower with 72 fatals blaming symbols
+// that exist and are correct.
+//
+// Asserted as pure string logic with no filesystem and no Windows host, so the
+// rule is guarded on every runner rather than only where it broke. That is the
+// same arrangement `_rcr_normalize_path` documents in
+// `compiler/src/runtime_capsule_resolver.sfn` (SFN-642): a module-private
+// helper reachable as a test seat precisely because the platform that exercises
+// it is not the platform CI runs on.
+import { expect_eq_bool, expect_eq_str } from "sfn/test";
+
+import { _cr_dirname, _cr_is_path_sep, _cr_path_join } from "../../src/capsule_resolver/paths";
+
+test "capsule resolver: both separators are recognized" ![pure] {
+    assert expect_eq_bool(_cr_is_path_sep("/"), true).ok;
+    assert expect_eq_bool(_cr_is_path_sep("\\"), true).ok;
+    assert expect_eq_bool(_cr_is_path_sep("a"), false).ok;
+    assert expect_eq_bool(_cr_is_path_sep(":"), false).ok;
+}
+
+// The regression. Before the fix every one of these returned `"."`.
+test "capsule resolver: dirname walks a backslashed path" ![pure] {
+    assert expect_eq_str(_cr_dirname("C:\\repo\\build\\bin"), "C:\\repo\\build").ok;
+    assert expect_eq_str(_cr_dirname("C:\\repo\\build"), "C:\\repo").ok;
+    assert expect_eq_str(_cr_dirname("C:\\repo"), "C:").ok;
+}
+
+// The forward-slash behaviour is unchanged — this is the half that already
+// worked, pinned so the widening cannot regress it.
+test "capsule resolver: dirname walks a slash path" ![pure] {
+    assert expect_eq_str(_cr_dirname("/repo/build/bin"), "/repo/build").ok;
+    assert expect_eq_str(_cr_dirname("/repo"), "/").ok;
+    assert expect_eq_str(_cr_dirname("relative/dir"), "relative").ok;
+}
+
+// A root keeps the separator the caller actually used rather than being
+// rewritten to `/`, so a Windows path stays spellable by Win32 callers that
+// compare it against another backslashed string.
+test "capsule resolver: dirname preserves the caller's root separator" ![pure] {
+    assert expect_eq_str(_cr_dirname("\\abs"), "\\").ok;
+    assert expect_eq_str(_cr_dirname("/abs"), "/").ok;
+}
+
+// The `"."` default survives, but now only for input that genuinely carries no
+// separator. `_cr_dirname(".") == "."` is what terminates the upward walk, so
+// this pins the loop's stop condition as much as the default itself.
+test "capsule resolver: dirname defaults to dot only without a separator" ![pure] {
+    assert expect_eq_str(_cr_dirname("hello.sfn"), ".").ok;
+    assert expect_eq_str(_cr_dirname("."), ".").ok;
+    assert expect_eq_str(_cr_dirname(""), ".").ok;
+}
+
+// `_cr_path_join` gets the same widening for the same reason: a base ending in
+// `\` would otherwise be handed a `/` and produce a `\/` seam.
+test "capsule resolver: path join does not double a backslash separator" ![pure] {
+    assert expect_eq_str(_cr_path_join("C:\\repo\\", "src"), "C:\\repo\\src").ok;
+    assert expect_eq_str(_cr_path_join("/repo/", "src"), "/repo/src").ok;
+    assert expect_eq_str(_cr_path_join("C:\\repo", "src"), "C:\\repo/src").ok;
+    assert expect_eq_str(_cr_path_join("", "src"), "src").ok;
+}

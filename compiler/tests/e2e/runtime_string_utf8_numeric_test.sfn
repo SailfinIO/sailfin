@@ -7,7 +7,7 @@
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
 import { contains, find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -17,17 +17,10 @@ fn _scratch(tag: string) -> string ![io] {
     return dir;
 }
 
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114).
 fn _env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _repo_root() -> string ![io] {

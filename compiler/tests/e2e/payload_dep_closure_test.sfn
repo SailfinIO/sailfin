@@ -18,7 +18,7 @@ import {
     targz_create
 } from "sfn/archive";
 import { contains } from "sfn/strings";
-import { default_scratch_dir, with_tmp_dir } from "sfn/test";
+import { clean_runner_env, default_scratch_dir, with_tmp_dir } from "sfn/test";
 
 // Marker files live under `SAILFIN_TEST_SCRATCH` (or the platform default),
 // not inside the `with_tmp_dir` fixture's own directory, so captured stdout
@@ -33,20 +33,9 @@ fn _scratch_marker(name: string) -> string ![io] {
     return path;
 }
 
-// `run_capture`'s env array is the complete child environment, not an
-// overlay -- PATH is mandatory for `bash`/`tar`/`awk`/`find`/`mktemp` to
-// resolve, and TMPDIR/HOME keep `mktemp -d` and any tool config consistent
-// with the parent.
-fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    return e;
-}
+// The child environment for the `bash` subprocess: derived by subtraction
+// from the real environment rather than a hand-rolled allowlist (SFN-1114).
+fn _child_env() -> string[] ![io] { return clean_runner_env(""); }
 
 fn _fixed_opts() -> CreateOptions {
     return CreateOptions {

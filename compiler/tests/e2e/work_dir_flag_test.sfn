@@ -18,25 +18,14 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
 // an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
-import { scratch_root, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, scratch_root, sfn_bin_path } from "sfn/test";
 
 import { build_target_os, target_exe_name } from "../../src/build/target";
 
-// The build spawns a nested clang + linker, so the child needs PATH
-// (+ HOME, TMPDIR). SAILFIN_TEST_SCRATCH routes the program.ll
-// build-cache per invocation so the parallel pool does not collide on
-// build/sailfin.
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Host-OS probe (via `uname -s`). Reproducible-build byte-identity is a

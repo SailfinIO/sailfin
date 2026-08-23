@@ -25,6 +25,8 @@ import { Env, env_from_current, env_set } from "sfn/os";
 import { contains, find, split } from "sfn/strings";
 import {
     Background,
+    clean_runner_env,
+    clean_runner_env_without,
     default_scratch_dir,
     sfn_bin_path,
     wait_until,
@@ -48,20 +50,11 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
-// Base child env: PATH/HOME/TMPDIR + SAILFIN_TEST_SCRATCH. Callers build
-// the real per-test env by hand (one PATH entry only) so they can set HOME
-// / registry-override vars explicitly.
+// Base child env, derived by subtraction from the real environment rather
+// than a hand-rolled allowlist (SFN-1114). Callers that need HOME / a
+// registry override forced use `_env_for` instead.
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Per-test scratch subdir under SAILFIN_TEST_SCRATCH (or /tmp).
@@ -98,17 +91,13 @@ fn _write_credentials(home: string) -> void ![io] {
     fs.writeFile(home + "/.sfn/credentials", "fake-token\n");
 }
 
-// Build a child env with a single PATH entry, HOME forced to `home`, and
-// any extra `KEY=value` entries appended.
+// Build a child env with HOME forced to `home` and any extra `KEY=value`
+// entries appended (this file only ever passes SFN_REGISTRY). Both keys are
+// named to `clean_runner_env_without` so an inherited entry earlier in the
+// array cannot shadow the caller's push (SFN-1114).
 fn _env_for(home: string, extra: string[]) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["HOME", "SFN_REGISTRY"]);
     e.push("HOME=" + home);
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
     let mut i = 0;
     loop {
         if i >= extra.length { break; }

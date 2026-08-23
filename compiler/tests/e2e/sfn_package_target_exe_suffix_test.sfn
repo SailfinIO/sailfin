@@ -42,6 +42,7 @@
 // (`--compiler-bin` pointed at the host binary regardless of `--target`).
 import { contains, split } from "sfn/strings";
 import {
+    clean_runner_env,
     default_scratch_dir,
     sfn_bin_abs_path,
     sfn_bin_path,
@@ -61,17 +62,10 @@ fn _test_root(tag: string) -> string ![io] {
     return root;
 }
 
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // `tar -tvzf <tarball>` -> full verbose listing text (permission bits +

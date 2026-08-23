@@ -33,22 +33,17 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
 
-// `run_capture`'s empty array is the *empty* environment; thread the
-// variables the toolchain needs. The roundtrip leg spawns `clang` (and a
-// nested `emit` for type_meta), which resolve through PATH.
+// Derived by subtraction from the real environment rather than a
+// hand-rolled allowlist (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _scratch_dir() -> string ![io] {

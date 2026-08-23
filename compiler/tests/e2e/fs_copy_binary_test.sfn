@@ -25,26 +25,15 @@
 // sibling `runtime_adapter_filesystem_test.sfn` does.
 import { copy, free_bytes, read_bytes } from "sfn/fs";
 import { contains } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 import { sha256_hex_of_bytes } from "../../src/build/hash";
 
-// `run_capture`'s empty array is the *empty* environment; thread what the
-// toolchain needs. The probe below spawns a full build (clang + linker
-// resolve through PATH) and routes its `program.ll` build cache under
-// SAILFIN_TEST_SCRATCH (#1333) — both mandatory under the parallel pool.
-// Mirrors `_child_env` in `runtime_adapter_filesystem_test.sfn`.
+// The probe below spawns a full build (clang + linker resolve through
+// PATH). Derived by subtraction from the real environment via
+// `clean_runner_env`, not built up key-by-key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _scratch_dir() -> string ![io] {

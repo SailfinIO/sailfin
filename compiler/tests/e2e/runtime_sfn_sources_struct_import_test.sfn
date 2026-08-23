@@ -38,24 +38,15 @@
 // `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
-import { scratch_root, sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, scratch_root, sfn_bin_path } from "sfn/test";
 
 import { build_target_triple, target_artifact_tag } from "../../src/build/target";
 
-// The build spawns a nested clang + linker, so the child needs PATH (an
-// empty `run_capture` env is the *empty* environment, not "inherit").
-// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
-// under the parallel pool. `extra` appends per-test env (the disable gate).
+// Derived by subtraction (SFN-1114), not assembled key by key. `extra`
+// appends per-test env (the disable gate); its key is named in the strip
+// list so an inherited outer value cannot shadow the push.
 fn _child_env_with(extra: string[]) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_DISABLE_RUNTIME_SFN_SOURCES"]);
     let mut i = 0;
     loop {
         if i >= extra.length { break; }

@@ -15,7 +15,7 @@
 // cannot be called from an `![io]` test like this. Assert on captured stdout
 // with `sfn/strings::contains` instead.
 import { contains } from "sfn/strings";
-import { default_scratch_dir } from "sfn/test";
+import { clean_runner_env, clean_runner_env_without, default_scratch_dir } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -30,33 +30,17 @@ fn _script() -> string ![io] {
     return "scripts/bootstrap-aarch64-linux.sh";
 }
 
-// Base child env for the probe: PATH/HOME/TMPDIR plus the probe-only seam
-// vars. `run_capture`'s env array is the complete child environment, so PATH
-// is mandatory for `bash`/`grep`/`ls`/`tr` to resolve.
+// Base child env for the probe, derived by subtraction from the real
+// environment (SFN-1114) plus the probe-only seam vars.
 fn _child_env(binfmt_dir: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let mut e = clean_runner_env_without("", ["SAILFIN_BINFMT_DIR", "SAILFIN_BINFMT_PROBE_ONLY"]);
     e.push("SAILFIN_BINFMT_PROBE_ONLY=1");
     e.push("SAILFIN_BINFMT_DIR=" + binfmt_dir);
     return e;
 }
 
-// Plain PATH/HOME/TMPDIR env, for the `chmod` shell-outs.
-fn _plain_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    return e;
-}
+// Child env for the `chmod` shell-outs, derived by subtraction (SFN-1114).
+fn _plain_env() -> string[] ![io] { return clean_runner_env(""); }
 
 fn _test_root(tag: string) -> string ![io] {
     let dir = fs.mkdtemp(_scratch_dir() + "/binfmt-" + tag + "-");

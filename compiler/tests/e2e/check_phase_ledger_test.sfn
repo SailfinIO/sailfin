@@ -61,7 +61,7 @@
 // the original falls back to. The `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from this `![io]` test. (#842.)
 import { contains, find, split } from "sfn/strings";
-import { default_scratch_dir } from "sfn/test";
+import { clean_runner_env, default_scratch_dir } from "sfn/test";
 
 // Absolute repo root. The vehicle `cd`s into the per-run subdir before
 // invoking the wrapper, so a relative `./scripts/agent_report.sh` would not
@@ -84,20 +84,12 @@ fn _wrapper() -> string ![io] {
     return _repo_root() + "/scripts/agent_report.sh";
 }
 
-// Child env for the `bash -c` vehicle. SAILFIN_INNER / SAILFIN_AGENT_REPORT
-// are deliberately omitted here AND cleared inside the vehicle via
-// `env -u` (the wrapper sets SAILFIN_AGENT_REPORT=1 itself for the run).
+// Child env for the `bash -c` vehicle, derived by subtraction via
+// `clean_runner_env` (SFN-1114). SAILFIN_INNER / SAILFIN_AGENT_REPORT are
+// still cleared inside the vehicle via `env -u` regardless of what this
+// envp carries (the wrapper sets SAILFIN_AGENT_REPORT=1 itself for the run).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _scratch_base() -> string ![io] {

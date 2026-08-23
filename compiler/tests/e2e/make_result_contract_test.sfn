@@ -28,15 +28,17 @@
 // — which would make a nested target run transparently and emit NO
 // sentinel. `process.run_capture(argv, env)` takes the COMPLETE child
 // environment (empty array == empty env), so we reproduce the bash
-// `env -u SAILFIN_INNER` by BUILDING the child env WITHOUT SAILFIN_INNER
-// (and without SAILFIN_AGENT_REPORT). run_capture does not cd, so make is
+// `env -u SAILFIN_INNER` by deriving the child env via
+// `clean_runner_env_without` (SFN-1114), naming SAILFIN_INNER and
+// SAILFIN_AGENT_REPORT in the strip list so neither leaks through even
+// when the outer process carries them. run_capture does not cd, so make is
 // invoked with `-C <repo_root> --no-print-directory`.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
 // they cannot be called from an `![io]` test. Assert on the captured
 // output text with `sfn/strings` predicates instead. (#842.)
 import { contains, find, split } from "sfn/strings";
-import { default_scratch_dir } from "sfn/test";
+import { clean_runner_env_without, default_scratch_dir } from "sfn/test";
 
 fn _repo_root() -> string ![io] {
     let root = env.get("SAILFIN_REPO_ROOT");
@@ -46,20 +48,10 @@ fn _repo_root() -> string ![io] {
 
 // Build the child environment WITHOUT SAILFIN_INNER and WITHOUT
 // SAILFIN_AGENT_REPORT (the bash `env -u SAILFIN_INNER` restoration of
-// outer-target behavior). Only PATH/HOME/TMPDIR/SAILFIN_TEST_SCRATCH are
-// threaded — the nested make/clang/linker resolve through PATH, and
-// SAILFIN_TEST_SCRATCH keeps the per-invocation build cache isolated.
+// outer-target behavior) via `clean_runner_env_without` (SFN-1114) — the
+// nested make/clang/linker resolve through PATH from the subtracted base.
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_INNER", "SAILFIN_AGENT_REPORT"]);
 }
 
 fn _scratch_dir() -> string ![io] {

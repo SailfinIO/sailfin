@@ -21,21 +21,15 @@
 // `![io]` test). The original grepped the combined log; we do the same
 // over captured stdout+stderr.
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, sfn_bin_path } from "sfn/test";
 
-// Child env: PATH/HOME/TMPDIR (the nested compile runs clang + linker),
-// a fresh per-invocation SAILFIN_TEST_SCRATCH, plus any extra entries
-// (e.g. a trace flag). An empty array is the *empty* environment, not
-// "inherit", so everything the child needs is threaded explicitly.
-// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak; nested SAILFIN_TEST_SCRATCH is isolated per call.
+// Child env, derived by subtraction from the real environment rather than a
+// hand-rolled allowlist (SFN-1114), with a fresh per-invocation
+// SAILFIN_TEST_SCRATCH plus any extra entries (e.g. a trace flag). The two
+// trace keys this file's callers push are named to `clean_runner_env_without`
+// so an inherited entry cannot shadow them.
 fn _child_env(scratch: string, extra: string[]) -> string[] ![io] {
-    let mut e: string[] = ["SAILFIN_TEST_SCRATCH=" + scratch];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let mut e = clean_runner_env_without(scratch, ["SAILFIN_TRACE_TEST_RUNNER", "SAILFIN_TRACE_LOWERING"]);
     let mut i = 0;
     loop {
         if i >= extra.length { break; }

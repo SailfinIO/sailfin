@@ -421,6 +421,11 @@ export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compi
 export {
     clean_runner_env,
     clean_runner_env_without,
+    // `host_is_windows()` (SFN-1114) is for a test whose EXPECTED VALUE differs
+    // by host — the errno accessor the emitter picks, a C harness's link flags.
+    // A test that merely needs platform-shaped INPUT should force it with the
+    // `SAILFIN_TARGET_OS` override instead, so the assertion runs everywhere.
+    host_is_windows,
     nested_runner_scratch,
     with_cwd,
     with_env,
@@ -465,6 +470,7 @@ export { first_present_tool, tool_present } from "./tool_probe";
 // bootstrap, runtime, package, or link path may import this helper.
 export {
     ExternalCOracle,
+    c_math_link_flags,
     external_c_oracle,
     require_external_c_oracle,
     run_external_c_oracle

@@ -18,7 +18,7 @@
 // unusable from an `![io]` test (#842); assert on captured output with
 // `sfn/strings::find` / `.length` instead.
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { clean_runner_env, sfn_bin_path } from "sfn/test";
 
 // True when the test runner is a Windows binary (the only platform whose
 // process-handle family comes from `process_windows.sfn`).
@@ -30,23 +30,10 @@ fn _is_windows() -> bool ![io] {
     return false;
 }
 
-// Per-child environment: thread the parent's Windows essentials so the
-// spawned compiler resolves its runtime. `spawn_with_env`'s `env` is the
-// child's whole environment (empty array == empty environment, never
-// "inherit"), so the vars the child needs must be passed explicitly.
+// Per-child environment: derived by subtraction from the real environment
+// rather than a hand-rolled allowlist (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let sysroot = env.get("SYSTEMROOT");
-    if sysroot.length > 0 { e.push("SYSTEMROOT=" + sysroot); }
-    let windir = env.get("windir");
-    if windir.length > 0 { e.push("windir=" + windir); }
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let temp = env.get("TEMP");
-    if temp.length > 0 { e.push("TEMP=" + temp); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Per-invocation scratch directory for the malformed-source fixture.
