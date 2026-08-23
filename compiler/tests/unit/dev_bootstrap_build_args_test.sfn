@@ -1,0 +1,26 @@
+// Regression coverage for SFN-1076: `sfn dev bootstrap build -- <args...>`
+// preserves the seed build's fixed prefix and forwards the trailing arguments
+// byte-for-byte and in command-line order.
+import {
+    parse,
+    parse_is_ok,
+    parse_matches,
+    positionals
+} from "sfn/cli";
+import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
+
+import { _bootstrap_compiler_build_argv, command_def } from "../../src/cli/commands/dev";
+
+test "dev-bootstrap: build tail reaches the seed argv verbatim" {
+    let parsed = parse(command_def(), ["dev", "bootstrap", "build", "--", "--no-cache", "--cache-trace"]);
+    assert expect_eq_bool(parse_is_ok(parsed), true).ok;
+
+    let argv = _bootstrap_compiler_build_argv("/seed/sfn", positionals(parse_matches(parsed), "build-arg"));
+    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--no-cache", "--cache-trace"]).ok;
+}
+
+test "dev-bootstrap: bare build argv is unchanged" {
+    let no_build_args: string[] = [];
+    let argv = _bootstrap_compiler_build_argv("/seed/sfn", no_build_args);
+    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler"]).ok;
+}

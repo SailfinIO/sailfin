@@ -317,6 +317,10 @@ here.
   retries instead of wedging on a false "up to date". New leaves: `sfn dev
   bootstrap fingerprint [<root>...]` prints the digest; `sfn dev bootstrap
   install [--from <path>]` publishes an already-built binary and records it.
+  `sfn dev bootstrap build -- <build-arg>...` forwards the trailing arguments
+  verbatim to the pinned seed's `build -p compiler` invocation (SFN-1076), so
+  native self-host diagnostics can use `--no-cache`, `--cache-trace`, and
+  future build flags without a Makefile passthrough.
   Overrides: `--force` on `build`, `SAILFIN_BOOTSTRAP_FORCE=1` (also accepts
   `true`/`yes`); `make compile` additionally honours `FORCE=1`.
   `scripts/compiler_source_fingerprint.sh` is retired — `make compile` /

@@ -39,7 +39,7 @@ Both gates run inside one second-pass invocation. Reproducing locally
 is a single command; everything else is reading its output.
 
 ```bash
-make compile                             # self-host from the pinned seed
+sfn dev bootstrap build                 # self-host from the pinned seed
 
 # First pass — warm the cache. Mirrors the workflow.
 build/bin/sfn build -p compiler \
@@ -78,7 +78,7 @@ binary paths.
 
 Determinism regressions are almost always introduced by a single
 commit that lands a non-canonical artifact in the emit pipeline. The
-canonical bisect harness is `make compile` + the two passes above;
+canonical bisect harness is `sfn dev bootstrap build` + the two passes above;
 mark a commit good when both passes match, bad when they diverge.
 
 ```bash
@@ -88,7 +88,7 @@ git bisect good <known-good-sha>          # last successful build-quality.yml ru
 
 git bisect run bash -c '
   set -euo pipefail
-  make compile >/dev/null 2>&1 || exit 125    # 125 = skip (build broken here)
+  sfn dev bootstrap build >/dev/null 2>&1 || exit 125    # 125 = skip (build broken here)
   build/bin/sfn build -p compiler \
     --work-dir build/det-pass1 --json >/dev/null
   build/bin/sfn build -p compiler \
@@ -96,6 +96,17 @@ git bisect run bash -c '
   jq -se ".[] | select(.check == \"determinism\") | .matches" pass2.json | grep -q true
 '
 ```
+
+When the self-host build itself looks cache-dependent, force the native
+bootstrap step to run and place seed-build flags after the `--` separator:
+
+```bash
+sfn dev bootstrap build -- --no-cache --cache-trace
+```
+
+Supplying seed-build arguments bypasses the fingerprint short-circuit. Every
+token after `--` is forwarded verbatim to the pinned seed's `build -p compiler`
+invocation; `--force`, when needed separately, belongs before the separator.
 
 Cache-hit-rate regressions usually have a wider blast radius (cache
 key drift from any new sidecar dependency), so bisect with the same
