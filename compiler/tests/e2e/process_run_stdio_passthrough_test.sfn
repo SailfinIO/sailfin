@@ -125,7 +125,14 @@ test "process.run: the Windows spawn keeps its inheritable-stdio wiring (SFN-546
     // discarded the child's output. This exact argument list occurs only in
     // `sfn_process_run` — `run_capture` and `_pw_spawn_impl` pass a literal
     // `1` and an `env_block`.
-    assert contains(src, "CreateProcessA(null, cmdline, null, null, inherit,");
+    //
+    // `lpApplicationName` is `app`, not `null`: SFN-1104 resolves a
+    // separator-bearing `argv[0]` itself, because `CreateProcessA` parses a
+    // NULL one out of `lpCommandLine` through a search that excludes the
+    // process working directory. That parameter is orthogonal to the stdio
+    // wiring this test guards, but it sits in the same argument list, so it
+    // is pinned here rather than matched loosely.
+    assert contains(src, "CreateProcessA(app, cmdline, null, null, inherit,");
 
     // The parent's stdout/stderr are the handles being passed down.
     // `GetStdHandle(-11)` / `(-12)` (STD_OUTPUT_HANDLE / STD_ERROR_HANDLE)
