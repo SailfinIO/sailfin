@@ -67,7 +67,7 @@ import {
     source_fingerprint_path,
     write_fingerprint
 } from "../../build/source_fingerprint";
-import { host_exe_name } from "../../build/target";
+import { build_target_triple, host_exe_name, host_target_triple } from "../../build/target";
 import {
     is_absolute_path,
     starts_with,
@@ -242,6 +242,27 @@ fn _bootstrap_resolve_manifest() -> BootstrapManifest ![io] {
     return read_bootstrap_manifest(BOOTSTRAP_MANIFEST_PATH);
 }
 
+// Whether the resolved build target is something other than the host, and so
+// must not be dispatched to the pinned seed. Equal triples mean a host build,
+// which still dispatches — including a `--target` that names the host
+// explicitly. Empty `target` is defensive only: the caller resolves through
+// `build_target_triple()`, which always answers.
+//
+// A cross build is not a stage0 self-host. The seed's target conditioning is
+// frozen at its cut, so replaying `--target=<non-host>` into it builds with
+// that seed's link libs, runtime source set, and ABI flags instead of the
+// working tree's. Seed 0.10.4 omitted `-lbcrypt` for the gnu ABI and could
+// not read `[targets.*]` at all, which is what left `BCryptGenRandom`
+// undefined on both v0.10.5 mingw legs (SFN-1108).
+//
+// Split out as a pure predicate so the decision is testable without a
+// process re-exec; the gate below is `![clock, io, net]` and ends in
+// `process.exec`.
+fn _bootstrap_target_is_cross(target: string, host: string) -> boolean {
+    if target.length == 0 { return false; }
+    return !strings_equal(target, host);
+}
+
 // ---- The build-command gate (steady-state `sfn build -p compiler`) ----
 //
 // Turn `sfn build -p compiler` into the smooth contributor path: when the
@@ -263,6 +284,17 @@ fn bootstrap_gate_or_dispatch(ctx: CliContext) -> int ![clock, io, net] {
 
     let knob = env.get("SAILFIN_BOOTSTRAP");
     if strings_equal(knob, "off") || strings_equal(knob, "0") { return 0; }
+
+    // `build_target_triple()` rather than the `--target` cell alone: it also
+    // covers the `SAILFIN_TARGET_TRIPLE` and `SAILFIN_TARGET_OS` overrides,
+    // which select a cross target just as really as the flag does. With none
+    // of the three set it resolves to the identical call
+    // `host_target_triple()` makes, so the ordinary host path is provably
+    // unchanged. The `--target` cell is seeded before this gate runs
+    // (`set_build_target`, `cli/commands/build.sfn`).
+    if _bootstrap_target_is_cross(build_target_triple(), host_target_triple()) {
+        return 0;
+    }
 
     let m = _bootstrap_resolve_manifest();
     if !m.ok {
@@ -775,5 +807,6 @@ export {
     // Exported for regression coverage (compiler/tests/unit).
     _bootstrap_alias,
     _bootstrap_compiler_build_argv,
-    _bootstrap_is_absolute
+    _bootstrap_is_absolute,
+    _bootstrap_target_is_cross
 };

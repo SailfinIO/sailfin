@@ -113,8 +113,17 @@ jobs:
         shell: bash
         run: x86_64-w64-mingw32-gcc --version | head -1
 
+      # `SAILFIN_BOOTSTRAP: "off"` is load-bearing, not hygiene (SFN-1108) —
+      # see the fuller note on the same step in `ci.yml`. This job triggers on
+      # push to `main`, and `main` carries a version-skew window between
+      # `release.yml`'s fast-forward of the version bump and
+      # `cadence-seed-pin.yml`'s separate seed-pin PR; inside it this step
+      # would cross-build with the previous seed and fail to link.
+      # Remove when the pinned seed carries the target-aware gate (SFN-1111).
       - name: Cross-compile the bootstrap seed (Linux)
         shell: bash
+        env:
+          SAILFIN_BOOTSTRAP: "off"
         run: |
           build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
           build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe

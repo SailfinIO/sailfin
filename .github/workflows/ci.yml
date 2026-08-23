@@ -522,9 +522,23 @@ jobs:
             || sudo apt-get install -y --no-install-recommends -f
           x86_64-w64-mingw32-gcc --version | head -1
 
+      # `SAILFIN_BOOTSTRAP: "off"` is load-bearing, not hygiene (SFN-1108).
+      # `bootstrap_gate_or_dispatch` re-execs the pinned seed whenever the
+      # running compiler's version differs from `bootstrap.toml
+      # [seed].version`, replaying `--target` into a binary whose target
+      # conditioning is frozen at its cut. `main` is normally version-equal,
+      # but there is a real skew window on trunk: `release.yml` fast-forwards
+      # `main` onto the version bump, while `cadence-seed-pin.yml` lands the
+      # matching `[seed].version` bump in a SEPARATE auto-merged PR and
+      # refuses to pin ahead of `compiler/capsule.toml`. Between those two
+      # merges this step would cross-build with the previous seed — which is
+      # how v0.10.5 failed with `undefined reference to BCryptGenRandom`.
+      # Remove when the pinned seed carries the target-aware gate (SFN-1111).
       - name: Cross-compile for Windows (Linux)
         if: ${{ github.event_name != 'schedule' }}
         shell: bash {0}
+        env:
+          SAILFIN_BOOTSTRAP: "off"
         run: |
           set -euo pipefail
           build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
