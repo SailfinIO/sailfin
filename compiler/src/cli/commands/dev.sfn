@@ -7,7 +7,7 @@
 // Sailfin application authors never see them.
 //
 //   sfn dev bootstrap fetch              acquire + verify the pinned seed only
-//   sfn dev bootstrap build              fetch if needed, then build the
+//   sfn dev bootstrap build [-- <args>]  fetch if needed, then build the
 //                                        compiler with the exact seed
 //   sfn dev bootstrap check              build + smoke-verify the built
 //                                        compiler
@@ -354,9 +354,20 @@ fn _dev_bootstrap_fetch() -> int ![io, net] {
 // binary is the exact stage0; the `SAILFIN_BOOTSTRAP_DISPATCHED` guard is not
 // needed because the invoked binary IS the seed (its core version satisfies
 // the pin, so its own gate is a no-op).
-fn _bootstrap_run_compiler_build(m: BootstrapManifest) -> int ![io] {
+fn _bootstrap_compiler_build_argv(seed_bin: string, build_args: string[]) -> string[] {
+    let mut argv: string[] = [seed_bin, "build", "-p", "compiler"];
+    let mut i: int = 0;
+    loop {
+        if i >= build_args.length { break; }
+        argv.push(build_args[i]);
+        i += 1;
+    }
+    return argv;
+}
+
+fn _bootstrap_run_compiler_build(m: BootstrapManifest, build_args: string[]) -> int ![io] {
     let seed_bin = _bootstrap_seed_bin(m.install_base, m.version);
-    return process.run([seed_bin, "build", "-p", "compiler"]);
+    return process.run(_bootstrap_compiler_build_argv(seed_bin, build_args));
 }
 
 // A `local-path` seed has no release to fetch; the seed must already be in
@@ -388,7 +399,7 @@ fn _bootstrap_force_env() -> boolean ![io] {
 // promoted after the binary is installed — never before — so an
 // interrupted run cannot leave a stored fingerprint claiming a binary
 // that was never installed.
-fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
+fn _dev_bootstrap_build(force: boolean, build_args: string[]) -> int ![io, net] {
     let m = _bootstrap_resolve_manifest();
     if !m.ok {
         print.err("error: " + m.error);
@@ -407,7 +418,10 @@ fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
     }
 
     let out = native_install_path();
-    if !force {
+    // Explicit seed-build arguments are diagnostic intent: skipping here
+    // would accept them without ever forwarding them to the pinned seed.
+    // The empty-tail path keeps the existing fingerprint behavior exactly.
+    if !force && build_args.length == 0 {
         let stored = read_stored_fingerprint(source_fingerprint_path());
         if fs.is_executable(out) && stored.length > 0 && stored == pre {
             print("sfn dev bootstrap: " + out
@@ -426,7 +440,7 @@ fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
         return ensured;
     }
     print("sfn dev bootstrap: building compiler with seed " + m.version);
-    let rc = _bootstrap_run_compiler_build(m);
+    let rc = _bootstrap_run_compiler_build(m, build_args);
     if rc != 0 {
         fs.deleteFile(pending_fingerprint_path());
         print.err("error: compiler build failed (seed " + m.version + ", exit "
@@ -615,7 +629,8 @@ fn _dev_bootstrap_check() -> int ![io, net] {
     let ensured = _bootstrap_ensure_seed(m);
     if ensured != 0 { return ensured; }
     print("sfn dev bootstrap: building compiler with seed " + m.version);
-    let build_rc = _bootstrap_run_compiler_build(m);
+    let no_build_args: string[] = [];
+    let build_rc = _bootstrap_run_compiler_build(m, no_build_args);
     if build_rc != 0 {
         print.err("error: compiler build failed (seed " + m.version + ", exit "
             + int_to_string(build_rc)
@@ -675,7 +690,9 @@ fn _dev_bootstrap_pin(new_version: string) -> int ![io] {
 fn command_def() -> Command {
     let mut bootstrap: Command = command("bootstrap", "Compiler seed bootstrap (reads bootstrap.toml)");
     bootstrap = with_subcommand(bootstrap, command("fetch", "Acquire and verify the pinned seed"));
-    bootstrap = with_subcommand(bootstrap, with_flag(command("build", "Build the compiler with the exact seed"), flag("force", "Rebuild even when the source fingerprint is unchanged")));
+    let mut build = with_flag(command("build", "Build the compiler with the exact seed"), flag("force", "Rebuild even when the source fingerprint is unchanged"));
+    build = with_arg(build, arg_variadic("build-arg", "Arguments forwarded to the seed build after --"));
+    bootstrap = with_subcommand(bootstrap, build);
     bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
     bootstrap = with_subcommand(bootstrap, with_arg(command("pin", "Update the pinned seed version"), arg("version", "Seed version to pin (e.g. 0.8.0-alpha.4)")));
     bootstrap = with_subcommand(bootstrap, with_arg(command("fingerprint", "Print the compiler source fingerprint"), arg_variadic("root", "Source roots to hash (default: workspace maintainer + explicit inputs)")));
@@ -735,7 +752,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }
     if strings_equal(sub, "build") {
         let force = has_flag(matches, "force") || _bootstrap_force_env();
-        return _dev_bootstrap_build(force);
+        return _dev_bootstrap_build(force, positionals(matches, "build-arg"));
     }
     if strings_equal(sub, "check") { return _dev_bootstrap_check(); }
     if strings_equal(sub, "pin") {
@@ -757,5 +774,6 @@ export {
     run,
     // Exported for regression coverage (compiler/tests/unit).
     _bootstrap_alias,
+    _bootstrap_compiler_build_argv,
     _bootstrap_is_absolute
 };

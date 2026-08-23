@@ -75,10 +75,10 @@ so the cache serves stale IR" — is **outdated**. A dirty working tree produces
 binary's SHA-256** into the cache identity for `.dirty` stamps. The wiring lives
 at the `.ll` module-cache call site in `compiler/src/capsule_resolver/compile.sfn`
 (`cache_compiler_identity(resolve_compiler_version_for_cache(""), sailfin_exe)`),
-so every fresh `make compile` — which rebuilds the binary — changes that hash and
+so every fresh `sfn dev bootstrap build` — which rebuilds the binary — changes that hash and
 misses the cache for all downstream capsule modules.
 
-Verified end-to-end (warm the cache, edit an LLVM lowering pass, `make compile`,
+Verified end-to-end (warm the cache, edit an LLVM lowering pass, `sfn dev bootstrap build`,
 rebuild the same unchanged capsule against the same cache):
 
 ```
@@ -89,7 +89,7 @@ rebuild the same unchanged capsule against the same cache):
 ```
 
 The dirty rebuild re-emitted all eight `sfn/cli` modules. **No manual cache
-clear is needed for the normal `sfn build -p` / `make compile` loop.**
+clear is needed for the normal `sfn build -p` / `sfn dev bootstrap build` loop.**
 
 That guarantee is about the **`.ll` module cache**, and it extends to every
 cache tier that folds compiler identity — all of them but two, plus one leg.
@@ -200,7 +200,7 @@ cross-module import context, so it is a pure function of that tuple
 > **This key governs the shared tier only.** The local tier is not keyed by it.
 > `_cr_stage_cache_hit` (`staging.sfn:82-91`) gates purely on
 > `recorded == sha256_of_file(src)` — **no compiler identity, no target
-> triple**. A dirty `make compile` therefore does **not** invalidate locally
+> triple**. A dirty `sfn dev bootstrap build` therefore does **not** invalidate locally
 > staged `.sfn-asm` / `.layout-manifest`; an unchanged source is served the
 > artifact the *previous* compiler emitted. The compiler source states this
 > outright at `capsule_resolver/mod.sfn:364-370` — "an artifact emitted by a
@@ -297,10 +297,16 @@ whole cache.
 **Module cache (`.ll` / `.o`):**
 
 ```bash
+sfn dev bootstrap build -- --no-cache --cache-trace  # diagnose the pinned-seed self-host
 sfn build -p <capsule> --no-cache     # bypass lookup + store for this build
 sfn build -p <capsule> --clean        # wipe the schema-versioned cache subtree first
 SAILFIN_BUILD_CACHE_DIR=$(mktemp -d) sfn build -p <capsule>   # fresh, isolated cache
 ```
+
+For the native bootstrap form, supplying seed-build arguments bypasses the
+source-fingerprint short-circuit. The `--` separator ends bootstrap flag
+parsing; all later tokens reach the pinned seed's `build -p compiler`
+invocation verbatim.
 
 `sfn test` does not yet accept `--no-cache` / `--clean`, so for the small-closure
 test residual in §3 the lever is a fresh cache root:

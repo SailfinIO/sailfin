@@ -385,6 +385,27 @@ sfn cache clean --all-schemas            # also remove stale prior-schema trees
 
 ---
 
+### `sfn dev bootstrap build [--force] [-- <build-arg>...]`
+
+Build and install the compiler with the exact released seed pinned by
+`bootstrap.toml`. By default, an unchanged source fingerprint and an existing
+`build/bin/sfn` allow the command to return without rebuilding.
+
+```bash
+sfn dev bootstrap build
+sfn dev bootstrap build --force
+sfn dev bootstrap build -- --no-cache --cache-trace
+```
+
+`--force` is consumed by the bootstrap command and bypasses its fingerprint
+short-circuit. Supplying seed-build arguments also bypasses that short-circuit.
+A bare `--` ends bootstrap option parsing; every later token is appended
+unchanged to the pinned seed's `build -p compiler` invocation. This provides
+the native cache-diagnostic and future build-flag passthrough without the
+Makefile's `BUILD_ARGS` variable.
+
+---
+
 ### `sfn dev clean <build|dist|all>`
 
 Remove the **repo-local** build artifacts of a compiler checkout — the native
