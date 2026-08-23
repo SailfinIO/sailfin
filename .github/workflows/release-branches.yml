@@ -232,7 +232,7 @@ jobs:
                   target: ${{ matrix.package_label }}
                   clang: ${{ matrix.clang }}
                   seed_version: ${{ steps.seed.outputs.seed_version }}
-                  arm_seed_mode: ${{ steps.arm_seed.outputs.mode || 'qemu' }}
+                  arm_seed_mode: ${{ steps.arm_seed.outputs.mode }}
 
             - name: Report compiler metadata
               shell: bash {0}

@@ -1,5 +1,9 @@
 # Bootstrapping a native aarch64-Linux compiler
 
+> This document is the **procedure**. For why the qemu fallback still exists,
+> what it is exempt from, and the condition that retires it, see
+> [`conventions/aarch64-qemu-bootstrap.md`](conventions/aarch64-qemu-bootstrap.md).
+
 Two paths produce a native aarch64-Linux compiler for a release leg, and
 `release-tag.yml` / `release-branches.yml` choose between them automatically
 per pinned seed (SFN-580):
@@ -12,10 +16,13 @@ per pinned seed (SFN-580):
   (`make fetch-seed` installs the `sailfin_<version>_linux_arm64.tar.gz`
   installer asset; the probe below requires the `sailfin-native-…` tarball to
   be present too because a release publishes the pair both-or-neither, so a
-  half set means a corrupted release rather than a buildable one.) This is SFEP-0056 §3.4 Stage 4 realized for release legs: the
-  pinned seed is `0.9.1`, which carries both assets, so this is the path a
-  release build takes today. See "Release-leg seed selection" below for how
-  the mode is chosen and verified.
+  half set means a corrupted release rather than a buildable one.) This is
+  SFEP-0056 §3.4 Stage 4 realized for release legs: every release from
+  **v0.9.3** forward publishes both assets — SFN-799 gates publication and
+  cadence seed pinning on the pair — so this is the path a current-tag release
+  build takes. Read the pin from `bootstrap.toml [seed].version` rather than
+  from a version quoted in prose here. See "Release-leg seed selection" below
+  for how the mode is chosen and verified.
 - **x86_64-seed-under-qemu bootstrap — the fallback.** Rebuilding a tag whose
   pinned seed predates arm64 release assets has no native seed to fetch, so
   the leg falls back to the original SFEP-0056 §3.4 / SFN-472 bring-up: the
@@ -47,9 +54,15 @@ publish a partial arm64 payload. The script fails closed (exit 1) on that
 case, and also on a missing or `latest` `SEED_VERSION`: the probe needs a
 concrete pinned version to check, never the moving `latest` tag.
 
-Run it by hand to predict which path a given pin will take:
+Run it by hand to predict which path a given pin will take. The v0.9.3 floor
+is the dividing line — a pin below it has no arm64 assets to fetch:
 
 ```bash
+# The current pin -> `native`.
+SEED_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' bootstrap.toml | head -1)" \
+  scripts/select-aarch64-seed-mode.sh
+
+# A pre-v0.9.3 pin -> `qemu`.
 SEED_VERSION=0.9.1 scripts/select-aarch64-seed-mode.sh
 ```
 
@@ -71,15 +84,20 @@ Env:
 
 The two release workflows run this probe in a `Select aarch64 seed mode`
 step and feed its output into `.github/actions/sailfin-build/action.yml`'s
-`arm_seed_mode` input (`native` | `qemu`, default `qemu` for back-compat).
+`arm_seed_mode` input (`native` | `qemu`, **no default**). That step is the
+single place the qemu fallback is chosen: it is also what covers a checkout
+predating SFN-580, which has no probe to run. An arm64 caller that passes
+nothing reaches the action's `Reject unknown aarch64 seed mode` guard and
+fails loudly, rather than silently spending ~30 minutes under emulation
+(SFN-1078).
 
 - On `native`, the arm64 leg takes the ordinary `make fetch-seed` + `make
   rebuild` path, then runs a `Verify native aarch64 seed` step asserting the
   fetched binary is an AArch64 ELF that reports the pinned version —
   `make fetch-seed`'s SHA256SUMS check proves the download is authentic, not
   that it is the right architecture.
-- On `qemu`, the leg fetches the pinned x86_64 seed and runs `make
-  bootstrap-aarch64-linux` (below). The `qemu-user`/multiarch apt install
+- On `qemu`, the leg fetches the pinned x86_64 seed and runs
+  `scripts/bootstrap-aarch64-linux.sh` (below). The `qemu-user`/multiarch apt install
   (the emulated amd64 sysroot) is gated on the same mode output, so the
   native path never installs emulation packages it does not use.
 
@@ -89,9 +107,10 @@ The first native aarch64 compiler — and any release-leg rebuild of a tag
 whose pin predates arm64 assets — is bootstrapped on an aarch64 host from the
 pinned x86_64 seed. This is the executable procedure for SFEP-0056 §3.4 and
 SFN-472. Run by hand it is not itself a CI or release-publishing workflow,
-but `.github/actions/sailfin-build/action.yml` drives the same script
-(`scripts/bootstrap-aarch64-linux.sh`, via `make bootstrap-aarch64-linux`)
-for the `qemu` mode selected above.
+but `.github/actions/sailfin-build/action.yml` invokes the same script
+directly for the `qemu` mode selected above. There is no `make` target for it:
+SFN-1078 removed the wrapper so SFN-60 can delete the Makefile without
+deleting this capability.
 
 ## Host prerequisites
 
