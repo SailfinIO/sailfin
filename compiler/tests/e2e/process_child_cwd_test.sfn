@@ -61,15 +61,32 @@ test "process: run_capture_cwd runs the child in the given directory" ![io] {
 }
 
 // The same guarantee for the non-blocking spawn, which reaches a different
-// `CreateProcessA` call site and was stubbed independently. Asserted through
-// the child's own exit code rather than a handle predicate so a spawn that
-// merely STARTS somewhere wrong cannot pass.
+// `CreateProcessA` call site and was stubbed independently.
+//
+// The proof is a FILESYSTEM side effect, not the child's exit code, and that
+// is not a stylistic choice. `spawn_with_env` wires the child's streams to
+// pipes, and `sfn_process_handle_wait` closes the parent's READ ends before it
+// reaps (`runtime/sfn/process.sfn:1863-1872`) — so a child still writing at
+// that moment takes `EPIPE`/`SIGPIPE` and dies non-zero through no fault of
+// the spawn. An earlier draft asserted `handle_wait(h) == 0` against a child
+// running `check`, which prints on success: it won that race on Windows and
+// lost it on macOS. Racing the child's own stdout is not a cwd measurement.
+//
+// `fmt --write` on a deliberately mis-formatted probe leaves proof on disk
+// instead. If `cwd` were discarded the child would look for `probe.sfn` in the
+// parent's directory, find nothing, and the scratch copy would come back
+// byte-identical — so the assertion fails closed against the stub.
+let UNFORMATTED_SRC: string = "fn main(){return;}\n";
+
 test "process: spawn_with_env_cwd starts the child in the given directory" ![io] {
-    let dir = _scratch_with_probe("spawn");
-    let h = process.spawn_with_env_cwd([sfn_bin_abs_path(), "check", "probe.sfn"], clean_runner_env(dir
+    let dir = nested_runner_scratch("sfn1113-spawn");
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/probe.sfn", UNFORMATTED_SRC);
+    let h = process.spawn_with_env_cwd([sfn_bin_abs_path(), "fmt", "--write", "probe.sfn"], clean_runner_env(dir
         + "/runner"), dir);
     assert expect_eq_bool(h != 0, true).ok;
-    assert expect_eq_int(process.handle_wait(h), 0).ok;
+    let _rc = process.handle_wait(h);
+    assert expect_eq_bool(fs.readFile(dir + "/probe.sfn") != UNFORMATTED_SRC, true).ok;
 }
 
 // The other half of the contract: an EMPTY cwd must still inherit the parent's
