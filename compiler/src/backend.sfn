@@ -6,10 +6,10 @@
 // clang path is the sole implementation (`LlvmTextBackend`); it
 // reproduces every existing clang invocation byte-for-byte (zero
 // behaviour change — `--check-determinism` must still pass with no
-// rebaseline), with the one deliberate exception that on Darwin the link
-// now self-supplies an explicit `-isysroot`/`-L<sdk>/usr/lib` (see the
-// `_macos_sdk_link_flags` note below, #1914); the Linux invocation is
-// unchanged and the addition is memoized/deterministic per machine.
+// rebaseline), with two deliberate Darwin link exceptions: the driver is
+// Apple's `/usr/bin/clang` (or the explicit `SAILFIN_CC` override), and the
+// argv self-supplies `-isysroot`/`-L<sdk>/usr/lib` (see the helpers below,
+// #1914 and SFN-1077). The Linux invocation is unchanged.
 //
 // Later codegen/link work plugs in here instead of re-hardcoding LLVM
 // assumptions across the driver: the LLVM C-API binding (#347) lands as
@@ -61,6 +61,7 @@ import { link_argv_or_response_file } from "./build/link_response";
 // the build target once and threads the `-target` triple + POSIX-lib
 // filtering through both link layouts. All identity/empty on Linux/macOS.
 import {
+    build_host_os,
     build_target_os,
     build_target_triple,
     target_clang_flags,
@@ -114,6 +115,36 @@ interface Backend {
     fn link(self, plan: LinkPlan) -> int ![io];
 }
 
+// Resolve the clang DRIVER for the final link, not the clang used for the
+// Assemble role (`build/clang_argv.sfn`). Homebrew LLVM belongs early on a
+// macOS contributor's PATH so `llvm-link`, `llvm-as`, and a matching clang can
+// assemble LLVM IR. Its clang driver is not the platform-default owner of the
+// Darwin SDK/linker contract, though, so a native Darwin final link must not
+// inherit whichever `clang` happens to be first on PATH (SFN-1077).
+//
+// `SAILFIN_CC` preserves the existing Makefile shim's explicit escape hatch.
+// The fallback to bare `clang` is deliberate for a non-Darwin target, a
+// non-Darwin host, or a Darwin host without Command Line Tools installed; only
+// the native Darwin case has a canonical `/usr/bin/clang` to prefer.
+fn _clang_link_driver_for(target_os: string, host_os: string, override: string, apple_clang_available: boolean) -> string {
+    if target_os != "Darwin" { return "clang"; }
+    if host_os != "Darwin" { return "clang"; }
+    if override.length > 0 { return override; }
+    if apple_clang_available { return "/usr/bin/clang"; }
+    return "clang";
+}
+
+fn _clang_link_driver(target_os: string) -> string ![io] {
+    let host_os = build_host_os();
+    let mut apple_clang_available: boolean = false;
+    if host_os == "Darwin" {
+        apple_clang_available = fs.exists("/usr/bin/clang");
+    }
+    return _clang_link_driver_for(target_os, host_os, _get_env_cmd("SAILFIN_CC"), apple_clang_available);
+}
+
+export { _clang_link_driver_for };
+
 // macOS SDK link flags (#1914). The driver invokes `clang` by bare name
 // and, on Darwin, has historically leaned on the *ambient* environment
 // (`SDKROOT` / `LIBRARY_PATH`) for the linker to locate the platform
@@ -126,9 +157,10 @@ interface Backend {
 // macOS-arm64 e2e failures because whether a nested build's link resolved
 // depended on load-timed SDK re-detection rather than on the source.
 // Passing an explicitly-probed `-isysroot`/`-L<sdk>/usr/lib` makes the
-// link self-sufficient regardless of which clang is on PATH or whether the
-// SDK env is present. Non-Darwin returns [] (no-op); additive only when a
-// real SDK is found, so a working Apple-clang link is byte-unchanged.
+// link self-sufficient without ambient SDK env. SFN-1077 additionally resolves
+// the final-link driver above so a Homebrew clang earlier on PATH cannot own
+// the Darwin link implicitly. Non-Darwin returns [] (no-op); additive only
+// when a real SDK is found, so a working Apple-clang link is byte-unchanged.
 //
 // Probed once and cached (a link may recur per test binary in one process;
 // caching also avoids re-running `xcrun` under load, the very race this
@@ -375,7 +407,10 @@ struct LlvmTextBackend {
         // resolutions are threaded independently.
         let target_os = build_target_os();
         let triple = build_target_triple();
-        let link_driver = target_linker_driver(triple);
+        let mut link_driver = target_linker_driver(triple);
+        if link_driver == "clang" {
+            link_driver = _clang_link_driver(target_os);
+        }
         let driver_flags = _concat_driver_flags(target_linker_driver_flags(triple), _macos_sdk_link_flags());
         let eff_plan = _target_conditioned_plan(plan, triple);
         // Sailfin owns Link on Linux x86-64 (SFEP-0066 §3.1 role table):

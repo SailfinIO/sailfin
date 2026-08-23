@@ -31,6 +31,7 @@ import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import {
     LinkPlan,
+    _clang_link_driver_for,
     _llvm_text_link_program_argv,
     _llvm_text_link_program_argv_with_driver,
     _llvm_text_link_test_argv
@@ -78,6 +79,17 @@ fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
         i += 1;
     }
     return false;
+}
+
+test "target: native Darwin final links prefer Apple clang over PATH" ![pure] {
+    assert expect_eq_str(_clang_link_driver_for("Darwin", "Darwin", "", true), "/usr/bin/clang").ok;
+    assert expect_eq_str(_clang_link_driver_for("Darwin", "Darwin", "/custom/clang", true), "/custom/clang").ok;
+    assert expect_eq_str(_clang_link_driver_for("Darwin", "Darwin", "", false), "clang").ok;
+}
+
+test "target: Apple clang resolution does not leak into cross or non-Darwin links" ![pure] {
+    assert expect_eq_str(_clang_link_driver_for("Windows", "Darwin", "", true), "clang").ok;
+    assert expect_eq_str(_clang_link_driver_for("Darwin", "Linux", "", false), "clang").ok;
 }
 
 test "target: runtime cache identity and linker share the effective target inputs" ![io] {

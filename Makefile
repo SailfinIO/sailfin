@@ -54,12 +54,13 @@ TIMEOUT_CMD ?= $(shell command -v gtimeout 2>/dev/null)
 # Apple's clang on PATH, but it cannot drive Apple's `ld` to the macOS SDK
 # system libs — linking the self-hosted compiler then fails with
 # `ld: library 'm' not found`. Only Apple's `/usr/bin/clang` links system libs
-# here. The seed and the built compiler invoke a bare `clang` via PATH
-# (`process.run(["clang", ...])`), so a make variable cannot steer them;
-# instead expose a one-symlink dir that redirects ONLY `clang` to the chosen
-# compiler and put it first on PATH for every recipe. Minimal blast radius: no
-# other tool is shadowed. Override the target with `SAILFIN_CC=/path/to/clang`;
-# no-ops (empty dir, harmless PATH prefix) if the target does not exist.
+# here. The released seed and the compiler's Assemble role invoke a bare
+# `clang` via PATH, so keep the transitional one-symlink dir for bootstrap and
+# object assembly. Current compiler source resolves native Darwin final links
+# to `SAILFIN_CC` or `/usr/bin/clang` itself (SFN-1077), which is what survives
+# this Makefile's retirement. Minimal blast radius: no other tool is shadowed.
+# Override with `SAILFIN_CC=/path/to/clang`; no-ops (empty dir, harmless PATH
+# prefix) if the target does not exist.
 SAILFIN_CC ?= /usr/bin/clang
 CLANG_SHIM_DIR := $(CURDIR)/build/.toolchain-shim
 $(shell mkdir -p $(CLANG_SHIM_DIR) >/dev/null 2>&1; [ -x "$(SAILFIN_CC)" ] && ln -sf "$(SAILFIN_CC)" "$(CLANG_SHIM_DIR)/clang" 2>/dev/null)

@@ -94,11 +94,13 @@ available:
 export PATH="$(brew --prefix llvm)/bin:$PATH"
 ```
 
-The Makefile creates a local shim so the seed and built compiler use Apple's
-`/usr/bin/clang` by default on macOS. That avoids Homebrew clang trying to link
-against the macOS SDK with the wrong defaults. Override with
-`SAILFIN_CC=/path/to/clang` only when you know the replacement can link system
-libraries.
+The native build driver uses the PATH-selected LLVM tools for object assembly,
+but resolves final Darwin links through Apple's `/usr/bin/clang`. This lets
+Homebrew LLVM stay first on `PATH` without handing its clang driver ownership of
+the macOS SDK/linker contract, and it survives the Makefile's retirement.
+Override the final-link driver with `SAILFIN_CC=/path/to/clang` only when you
+know the replacement can link system libraries. The Makefile's transitional
+shim applies the same default while it still exists.
 
 ## Build and verify
 
@@ -185,7 +187,7 @@ invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
 | `NATIVE_BIN` | test/bench/check targets | `build/bin/sfn` | Select which built compiler binary those targets run. |
 | `NATIVE_OUT` | `make rebuild` | `build/bin/sfn` | Destination path for the rebuilt compiler. |
 | `CLANG` | Makefile clang calls | `clang` | Clang executable for Makefile-owned compilation/link steps. On Linux CI this is often `clang-18`. |
-| `SAILFIN_CC` | macOS build recipes | `/usr/bin/clang` | Target of the macOS clang shim used by seed/built compiler subprocesses. |
+| `SAILFIN_CC` | Native macOS final links and transitional Makefile recipes | `/usr/bin/clang` | Explicit Darwin clang-driver override; object assembly still follows `PATH`. |
 | `CLANG_LL_FLAGS` | LLVM IR compilation | empty | Extra flags when compiling `.ll`; use only for platform quirks such as opaque-pointer mode. |
 | `NATIVE_LL_TIMEOUT_SECONDS` | LLVM IR compilation | `600` | Wall-clock cap for individual clang jobs when `timeout` is available. |
 | `TEST_JOBS` | `make test*` | auto-detected | Parallel `sfn test --jobs N` children. Lower it on memory-constrained hosts. |

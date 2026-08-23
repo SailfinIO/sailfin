@@ -21,6 +21,12 @@
 // `backend.sfn`'s `LlvmTextBackend.assemble` delegates here too, so the argv
 // shape stays defined in exactly one place.
 //
+// The Assemble role deliberately keeps a bare `clang` resolved through PATH.
+// On macOS, Homebrew LLVM is placed there so `llvm-link`, `llvm-as`, and clang
+// come from one compatible toolchain; compiling LLVM IR to a Mach-O object does
+// not ask clang to own the Darwin SDK/linker contract. The final Link role is
+// separate and resolves Apple's driver in `backend.sfn` (SFN-1077).
+//
 // Importing `./target` (a struct-free leaf over `build_flags`/`paths`) does
 // not reintroduce the `LlvmTextBackend` vtable hazard the module note above
 // warns about — `target.sfn` declares no interface-implementing struct.
