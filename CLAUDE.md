@@ -37,7 +37,7 @@ never language syntax.
 
 ## The validation ladder
 
-The one thing worth reading twice. `sfn check` and `make check` are **different
+The one thing worth reading twice. `sfn check` and `sfn dev verify` are **different
 tools**, not fast/slow versions of the same one. Use the cheapest rung that
 catches the error.
 
@@ -47,19 +47,20 @@ catches the error.
    still pass `check` — green is not a build guarantee** (#1389; the known
    module-global instance #1386 is fixed and guarded by
    `compiler/tests/e2e/check_build_agree_module_global_test.sfn`).
-2. **`make compile`** — self-hosts. **Required before any `.sfn` change under
+2. **`sfn dev bootstrap build`** — self-hosts. **Required before any `.sfn` change under
    `compiler/src/` or `compiler/capsules/` is done.** Structural changes (file splits, new modules, renamed
-   exports) need `make clean-build` first.
+   exports) need `sfn dev clean build` first.
 3. **Targeted tests** — `build/bin/sfn test <path>`, `-k <name>` for one test.
    Issue acceptance should name these narrow commands.
-4. **`make check`** — full triple-pass self-host + suite. **Over an hour** —
+4. **`sfn dev verify`** — full triple-pass self-host + suite. **Over an hour** —
    the nightly measures ~70 min on Linux x86_64 and ~130 min on macOS arm64
    (`.github/workflows/nightly-selfhost.yml`, `timeout-minutes: 180`). Reserve
    for shipping a feature, cutting a release, or after a structural change.
 
-Never burn `make check` to discover what rung 1 or 3 would have caught. Run
-`make help` for the full target list; `sailfin_*` MCP tools are passthroughs to
-the same subcommands and do not replace `make compile`.
+Never burn `sfn dev verify` to discover what rung 1 or 3 would have caught. Run
+`sfn --help` and `sfn dev --help` for the full command list; `sailfin_*` MCP
+tools are passthroughs to the same subcommands and do not replace
+`sfn dev bootstrap build`.
 
 ## Pipeline and critical files
 
@@ -158,7 +159,7 @@ roadmap (it isn't pickable — Linear `Todo`, then `Ready`, is).
 
 ## Approval gates
 
-Most work proceeds autonomously, including `make clean-build` (it only touches
+Most work proceeds autonomously, including `sfn dev clean build` (it only touches
 the repo's own `build/`/`dist/`), pushing to `claude/*`, and opening PRs. Pause
 for explicit approval only before genuinely irreversible or high-blast-radius
 actions: cutting releases, merging or closing PRs, and history-destructive git

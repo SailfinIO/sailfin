@@ -67,8 +67,8 @@ definition — if the work needs one, that is real scope growth, not drift.
 
 <!-- Specific, verifiable outcomes. Each one must be objectively pass/fail. -->
 - [ ]
-- [ ] `make compile` passes (compiler self-hosts)
-- [ ] `make test` passes (no regressions)
+- [ ] `sfn dev bootstrap build` passes (compiler self-hosts)
+- [ ] `sfn test <relevant-path>` passes (no regressions)
 
 ## Files Affected (advisory map — non-binding, expected to drift)
 
@@ -129,7 +129,7 @@ product/post-1.0 polish lower.
 List issue/PR numbers that must close before this can start. Empty if unblocked.
 
 If the dependency is a compiler-source change that this issue must
-self-host on (i.e. `make compile` will fail without it baked into
+self-host on (i.e. `sfn dev bootstrap build` will fail without it baked into
 the seed binary), use the "Required in pinned seed" section below
 *instead of or in addition to* this one — merging the PR is not enough.
 -->

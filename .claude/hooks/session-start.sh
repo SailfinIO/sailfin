@@ -3,12 +3,11 @@
 # environment snapshot so the model starts grounded on build state. Stdout is
 # injected as additional context.
 #
-# The toolchain install is the native path, not `make fetch-seed`: once any
-# `sfn` exists it is `sfn dev bootstrap fetch` (SFEP-0047), which reads the
+# The toolchain install uses `sfn dev bootstrap fetch` once any `sfn` exists
+# (SFEP-0047), which reads the
 # same `bootstrap.toml [seed]` pin and reconciles the repo-local store. Only a
 # cold container with no `sfn` at all falls back to `./install.sh` — the
-# curlable installer `make fetch-seed` itself shells out to. Nothing here goes
-# through the Makefile, so retiring it does not touch this hook.
+# curlable installer remains the no-toolchain bootstrap path.
 #
 # Never fatal: a failed fetch degrades to a reported status line rather than
 # blocking session start. `SAILFIN_SESSION_BOOTSTRAP=off` skips the install.
@@ -74,7 +73,7 @@ install_seed() {
       timeout 300 ./install.sh 2>&1); then
     echo "  installed $("$SEED_BIN_DIR/sfn" version 2>/dev/null | head -n1)"
   else
-    echo "  install FAILED — run \`sfn dev bootstrap fetch\` (or \`make fetch-seed\`) manually"
+    echo "  install FAILED — run \`sfn dev bootstrap fetch\` manually"
     echo "$out" | tail -n 5 | sed 's/^/  /'
   fi
 }
@@ -87,16 +86,15 @@ if [[ -x build/bin/sfn ]]; then
   version=$(timeout 5 build/bin/sfn version 2>/dev/null | head -n1 || echo "(version probe failed)")
   echo "- compiler: build/bin/sfn present — $version"
 else
-  # `make compile`, not `sfn dev bootstrap build`: the native command stops at
-  # build/sailfin/program, and the Makefile still owns installing that to
-  # build/bin/sfn plus the fingerprint/stamp bookkeeping.
-  echo "- compiler: build/bin/sfn MISSING — run \`make compile\` to self-host from the seed"
+  # The native bootstrap command owns the seed build, build/bin/sfn
+  # installation, and source-fingerprint bookkeeping.
+  echo "- compiler: build/bin/sfn MISSING — run \`sfn dev bootstrap build\` to self-host from the seed"
 fi
 
 if [[ -x build/bin/sfn-seedcheck ]]; then
   echo "- seedcheck: build/bin/sfn-seedcheck present"
 else
-  echo "- seedcheck: not built (only needed for \`make check\`)"
+  echo "- seedcheck: not built (only needed for \`sfn dev verify\`)"
 fi
 
 if [[ ! -f tools/mcp-server/dist/index.js ]]; then

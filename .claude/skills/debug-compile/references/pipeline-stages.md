@@ -25,7 +25,7 @@ Use this table to map a compiler diagnostic to the file(s) most likely to contai
 
 Escalate to the `seed-stabilizer` agent (Opus) when:
 
-- The failure is in a self-hosting build (`make check` breaks but `make compile` works, or vice versa).
+- The failure is in a self-hosting build (`sfn dev verify` breaks but `sfn dev bootstrap build` works, or vice versa).
 - The same source compiles correctly under the seed but fails under seedcheck.
 - LLVM rejects generated IR and the defect isn't obvious from a line-level diff against a working module.
 - Memory use spikes >4GB for a single module during compilation.

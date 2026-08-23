@@ -36,10 +36,10 @@ The script rewrites `bootstrap.toml [seed].version` and `compiler/capsule.toml [
 ### 4. Fetch the new seed
 
 ```bash
-make fetch-seed
+sfn dev bootstrap fetch
 ```
 
-`make fetch-seed` reads `bootstrap.toml [seed].version` and downloads the binary into `build/toolchains/seed/bin/sfn`. If the release does not exist on GitHub, the fetch fails — restore the previous pin and surface the error to the user.
+`sfn dev bootstrap fetch` reads `bootstrap.toml [seed].version` and downloads the binary into `build/toolchains/seed/bin/sfn`. If the release does not exist on GitHub, the fetch fails — restore the previous pin and surface the error to the user.
 
 ### 5. Smoke-verify the new seed
 
@@ -54,7 +54,7 @@ Confirm the binary prints the expected version string. If it mismatches, abort a
 If the user asked for a full compile verify (`--compile` flag or equivalent):
 
 ```bash
-make compile
+sfn dev bootstrap build
 ```
 
 This takes ~13 minutes and is optional for a pin-only change. Recommend it before merging the PR.
@@ -81,5 +81,5 @@ Do NOT commit build artifacts. Only `bootstrap.toml` and `compiler/capsule.toml`
 ## Notes
 
 - The version in `bootstrap.toml [seed].version` must match a published GitHub release tag (with or without `v` prefix — `install.sh` accepts both).
-- CI reads `bootstrap.toml [seed].version` to pin its own seed download; keeping one key in sync means the Makefile and every workflow never drift from each other.
-- After pinning, run `make fetch-seed && make compile` locally before pushing to avoid a CI surprise.
+- CI and native bootstrap commands read `bootstrap.toml [seed].version`; keeping one key in sync prevents local and workflow seed selection from drifting.
+- After pinning, run `sfn dev bootstrap fetch && sfn dev bootstrap build` locally before pushing to avoid a CI surprise.

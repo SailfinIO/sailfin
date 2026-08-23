@@ -17,7 +17,7 @@ The argument can be:
 Capture the current performance profile **before any changes**:
 
 ```bash
-make bench 2>&1 | tee build/bench-baseline.txt
+sfn bench --compiler 2>&1 | tee build/bench-baseline.txt
 ```
 
 Record:
@@ -26,7 +26,7 @@ Record:
 - Per-module peak RSS for the heaviest 10 modules
 - Any module-specific metrics from the issue
 
-If the target is a hot path that's not directly visible in `make bench`, write a focused micro-benchmark — a small `.sfn` file that exercises the path heavily — and time it:
+If the target is a hot path that's not directly visible in `sfn bench --compiler`, write a focused micro-benchmark — a small `.sfn` file that exercises the path heavily — and time it:
 
 ```bash
 /usr/bin/time -v build/bin/sfn emit native /tmp/bench_hotpath.sfn 2>&1 | tee build/bench-baseline-hotpath.txt
@@ -67,7 +67,7 @@ Apply the fix. Keep the change minimal — perf fixes that also refactor are har
 
 After every meaningful change:
 ```bash
-make compile    # self-hosts
+sfn dev bootstrap build    # self-hosts
 ```
 
 If a step breaks self-hosting, stop and diagnose before continuing.
@@ -79,7 +79,7 @@ If a step breaks self-hosting, stop and diagnose before continuing.
 Capture the post-fix profile **with the same methodology as Phase 1**:
 
 ```bash
-make bench 2>&1 | tee build/bench-after.txt
+sfn bench --compiler 2>&1 | tee build/bench-after.txt
 # plus any micro-benchmark you ran in Phase 1
 ```
 
@@ -104,14 +104,14 @@ Compute the deltas:
 Spawn the **test-runner** agent:
 
 ```bash
-make test
+sfn test
 ```
 
 Performance fixes that break tests are net negative. Full suite must pass.
 
 Also run `/check` for the full self-hosting validation:
 ```bash
-make check
+sfn dev verify
 ```
 
 ---

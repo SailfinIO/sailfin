@@ -43,7 +43,8 @@ orchestrator's job, not yours.
   surrounding logic.** Keep the diff minimal and focused
   (`.claude/rules/change-discipline.md`).
 - **Never declare the work done, shipped, or self-hosting.** You do not run
-  `make compile`/`make check`, you do not commit, and you do not open PRs. The
+  `sfn dev bootstrap build`/`sfn dev verify`, you do not commit, and you do not
+  open PRs. The
   orchestrator runs the self-host gate and the Opus `code-reviewer` adjudicates
   correctness — `sfn check` green is not a build guarantee (CLAUDE.md
   ## The validation ladder) — say "ready for review", never "done".

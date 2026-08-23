@@ -38,7 +38,7 @@ build/bin/sfn test <relevant_test_file.sfn>
 
 After all stages are complete, verify self-hosting:
 ```bash
-make compile
+sfn dev bootstrap build
 ```
 
 If any step fails, diagnose the root cause before proceeding. Do not skip stages or batch multiple stages without testing.
@@ -70,10 +70,10 @@ build/bin/sfn test <relevant_test_file_or_dir>
 
 Then verify self-hosting still works:
 ```bash
-make compile
+sfn dev bootstrap build
 ```
 
-Use `make test` or `make check` here only when the issue explicitly asks for a
+Use `sfn test` or `sfn dev verify` here only when the issue explicitly asks for a
 full gate, the feature is being declared shipped, or the change is structural or
 release-facing. If tests fail, diagnose and fix. Do not proceed to documentation
 with failing tests.
@@ -94,6 +94,6 @@ Spawn the **docs-updater** agent to update documentation in this order:
 
 ## Constraints
 
-- The compiler must self-host after every stage (`make compile` must pass)
+- The compiler must self-host after every stage (`sfn dev bootstrap build` must pass)
 - Never proceed past the design gate without user approval
 - If the feature requires a self-hosting migration (new syntax used by the compiler itself), the architect's plan must include the seed transition strategy

@@ -20,7 +20,7 @@ Run targeted tests for a specific compiler feature or area.
    change is structural/high-risk, run the relevant broader gate per
    CLAUDE.md's `## The validation ladder`:
    ```
-   make test
+   sfn test
    ```
 
 4. Otherwise, stop at the targeted run and report why that scope is sufficient.

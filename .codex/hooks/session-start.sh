@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Codex SessionStart hook: emit dynamic build state. Durable project guidance
 # belongs in AGENTS.md and task-specific skills.
+# shellcheck disable=SC2016 # Markdown backticks in status text are literal.
 
 set -euo pipefail
 
@@ -17,25 +18,25 @@ if [[ -x build/bin/sfn ]]; then
     printf -- '- compiler: build/bin/sfn present — version probe failed\n'
   fi
 else
-  printf -- '- compiler: build/bin/sfn MISSING — run `make compile` to self-host from the seed\n'
+  printf -- '- compiler: build/bin/sfn MISSING — run `sfn dev bootstrap build` to self-host from the seed\n'
 fi
 
 if compgen -G 'build/toolchains/seed/*' >/dev/null; then
   printf -- '- seed: build/toolchains/seed present\n'
 else
-  printf -- '- seed: MISSING — run `make fetch-seed` if a build needs the released seed\n'
+  printf -- '- seed: MISSING — run `sfn dev bootstrap fetch` if a build needs the released seed\n'
 fi
 
 if [[ -x build/bin/sfn-seedcheck ]]; then
   printf -- '- seedcheck: build/bin/sfn-seedcheck present\n'
 else
-  printf -- '- seedcheck: not built (only needed for `make check`)\n'
+  printf -- '- seedcheck: not built (only needed for `sfn dev verify`)\n'
 fi
 
 if [[ -f tools/mcp-server/dist/index.js ]]; then
   printf -- '- mcp-server: tools/mcp-server/dist present\n'
 elif [[ -d tools/mcp-server ]]; then
-  printf -- '- mcp-server: not built — run `make mcp-server` if MCP tools are needed\n'
+  printf -- '- mcp-server: not built — run `(cd tools/mcp-server && npm ci --no-audit --no-fund && npm run build)` if MCP tools are needed\n'
 fi
 
 branch=$(git branch --show-current 2>/dev/null || printf '(detached)')

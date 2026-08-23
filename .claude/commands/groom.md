@@ -178,7 +178,7 @@ Field mapping (canonical — see `docs/conventions/linear-workflow.md`):
 
 ## Acceptance Criteria
 - [ ] ...
-- [ ] make compile passes
+- [ ] sfn dev bootstrap build passes
 - [ ] targeted tests named under Verification pass
 
 ## Files Affected (advisory map — non-binding, expected to drift)
@@ -186,7 +186,7 @@ Field mapping (canonical — see `docs/conventions/linear-workflow.md`):
 
 ## Verification
 ```bash
-make compile                  # for compiler/src, self-hosting, or runtime ABI changes
+sfn dev bootstrap build        # for compiler/src, self-hosting, or runtime ABI changes
 build/bin/sfn test path/to/relevant_test.sfn
 build/bin/sfn test compiler/tests/unit -k "relevant test name"
 ```
@@ -232,7 +232,7 @@ emitting a body:
 ### Seed dependencies
 
 For each leaf, evaluate whether a predecessor must be **in the pinned seed
-binary**, not just merged. `make compile` runs against the seed pinned in
+binary**, not just merged. `sfn dev bootstrap build` runs against the seed pinned in
 `bootstrap.toml`, so a
 compiler-source dependency merged but not seeded fails to self-host.
 

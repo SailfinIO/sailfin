@@ -67,8 +67,8 @@ the current pull request lands. Leave uncertain or oversized discoveries in
 ## Review
 
 Before review, check every acceptance criterion and run the fast and targeted
-rungs selected by the `sailfin-check` ladder. If the issue requests `make test`,
-`make check`, or `make check-strict`, or the change qualifies for one of those
+rungs selected by the `sailfin-check` ladder. If the issue requests `sfn test`,
+`sfn dev verify`, or `sfn dev verify --strict`, or the change qualifies for one of those
 full gates, record it as a deferred final gate rather than running it on a diff
 that review may invalidate. Do not omit the requested gate; run it after the
 change is review-stable.

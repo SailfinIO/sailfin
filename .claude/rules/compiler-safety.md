@@ -33,7 +33,7 @@ theory that the self-cap will catch it; it will not, and the failure mode is a
 hard host kill, not an `sfn` error.
 
 **Timeouts still apply** — the memory budget does not guard against hangs. Wrap
-single-file invocations with `timeout 60`; `make` targets handle their own.
+single-file invocations with `timeout 60`; native pipeline commands handle their own.
 
 **Sanitizers are incompatible with any finite address-space cap** — ASAN reserves
 ~16 TB of virtual address space and aborts before `main()` under the cap. A

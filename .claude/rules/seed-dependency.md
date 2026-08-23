@@ -4,13 +4,14 @@ split only when it has multiple consumers or is genuinely independent.** This is
 the single source of truth for that call — cite it, don't re-derive it. Design
 record: SFEP-0026 (`docs/proposals/0026-delivery-process.md`) WS-B.
 
-**Why bundling is the default — the seed-cut tax.** `make compile` self-hosts
+**Why bundling is the default — the seed-cut tax.** `sfn dev bootstrap build` self-hosts
 against the binary pinned by `bootstrap.toml [seed].version`, not against `main`.
 A compiler-source capability (lowering, parse, typecheck, intrinsic, or
 runtime-prelude change that alters the compiler binary's behaviour) landing in a
 *separate* PR from its consumer cannot self-host until it reaches the pinned
-seed — forcing a seed cut between the two merges. Bundled in one PR, `make
-compile` builds the new compiler from the *old* seed and that fresh compiler
+seed — forcing a seed cut between the two merges. Bundled in one PR,
+`sfn dev bootstrap build` builds the new compiler from the *old* seed and that
+fresh compiler
 compiles the consumer in the same pass: no seed cut, no `/pin-seed`. **Splitting
 a capability from its only consumer manufactures a release cycle that bundling
 would not need.**
@@ -23,7 +24,7 @@ into a predecessor → groom → separate-PR → seed-cut → re-pickup chain (t
 failure mode).
 
 **The one carve-out: a capability consumed by *runtime* source.** Bundling works
-because `make compile` builds the new compiler from the old seed, and that fresh
+because `sfn dev bootstrap build` builds the new compiler from the old seed, and that fresh
 compiler then compiles the consumer. That chain breaks when the consumer is
 runtime source: the **pinned seed** compiles the working-tree runtime
 (`runtime/capsule.toml` `sfn-sources`, via `_compile_runtime_sfn_sources` in

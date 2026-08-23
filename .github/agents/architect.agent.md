@@ -28,7 +28,7 @@ You are the Sailfin Architect agent. Your role is to review design decisions, ev
 ## When Reviewing
 
 - Check that new features follow the full pipeline: parser → AST → type check → effect check → emit → LLVM lowering → tests → docs
-- Verify the change won't break self-hosting (`make compile` must still succeed)
+- Verify the change won't break self-hosting (`sfn dev bootstrap build` must still succeed)
 - Evaluate whether the change moves toward or away from the 1.0 goal (pure Sailfin toolchain)
 - Consider effect system implications — does the change respect capability boundaries?
 - Check for ownership/borrowing implications (move-by-default, `Affine<T>`, `Linear<T>`)

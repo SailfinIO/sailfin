@@ -10,13 +10,14 @@ mkdir -p build/debug
 ts=$(date -u +%Y%m%dT%H%M%SZ)
 log="build/debug/compile-${ts}.log"
 
-if make compile >"$log" 2>&1; then
-  echo "make compile succeeded — nothing to debug. Log at $log"
+if sfn dev bootstrap build >"$log" 2>&1; then
+  echo "sfn dev bootstrap build succeeded — nothing to debug. Log at $log"
   exit 0
+else
+  status=$?
 fi
 
-status=$?
-echo "make compile FAILED (exit $status). Tail of $log:"
+echo "sfn dev bootstrap build FAILED (exit $status). Tail of $log:"
 echo "----"
 tail -n 80 "$log"
 echo "----"

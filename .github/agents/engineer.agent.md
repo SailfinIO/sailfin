@@ -25,8 +25,8 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 1. Read the relevant source files before making changes
 2. Implement changes in the canonical module under `compiler/src/` or `compiler/capsules/`
 3. Add tests in `compiler/tests/` (unit, integration, or e2e as appropriate)
-4. Run `make compile` to verify self-hosting
-5. Run `make test` to verify all tests pass
+4. Run `sfn dev bootstrap build` when compiler sources changed to verify self-hosting
+5. Run targeted `sfn test <path>` coverage; use the full workspace `sfn test` only when the issue or risk requires it
 6. Update docs: `docs/status.md` first, then the language spec (`site/src/content/docs/docs/reference/spec/` or `.../reference/preview/`) and `site/src/pages/roadmap.astro` (the [roadmap](https://sailfin.dev/roadmap))
 
 ## Adding a Language Feature

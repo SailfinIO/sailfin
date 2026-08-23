@@ -38,17 +38,26 @@ Deferred features (parsed but not enforced, post-1.0):
 
 ```bash
 sfn check <files>     # Fast static analysis (parse + typecheck + effect-check) — the inner loop
-make compile          # Build the compiler by self-hosting from a released seed (preferred)
-make install          # Install the built compiler into PREFIX/bin (default: /usr/local/bin)
-make rebuild          # Force a rebuild from a released seed
-make check            # Triple-pass self-host validation + full test suite (the heavyweight gate)
-make test             # Run unit + integration + e2e suites
-make test-unit        # Run Sailfin-native unit tests
-make test-integration # Run Sailfin-native integration tests
-make clean            # Remove dist/ artifacts
-make clean-build      # Remove build/* artifacts (keeps build/toolchains/seed by default)
-sfn dev clean dist|build|all  # Native equivalent (--include-seed, --dry-run)
+sfn dev bootstrap build         # Build the compiler by self-hosting from a released seed
+sfn dev bootstrap build --force # Rebuild even when the source fingerprint is unchanged
+sfn dev verify                  # Triple-pass self-host validation + full test suite
+sfn test                        # Run workspace tests
+sfn test compiler/tests/unit    # Run Sailfin-native unit tests
+sfn test compiler/tests/integration # Run Sailfin-native integration tests
+sfn dev clean dist              # Remove dist/ artifacts
+sfn dev clean build             # Remove build/* artifacts; keep the seed by default
+sfn dev clean all --dry-run     # Preview cleaning build/ and dist/
 ```
+
+System installation writes outside the repository and is not an agent-default
+workflow.
+
+Use the validation ladder consistently: `sfn check <files>` for the fast
+parse/type/effect loop; `sfn dev bootstrap build` for compiler self-hosting;
+targeted `build/bin/sfn test <path>` / `-k <name>` for issue acceptance; and
+`sfn dev verify` only for shipped, release, structural, or otherwise high-risk
+work. Run `sfn dev clean build` before rebuilding after structural compiler
+changes.
 
 For debugging, place scripts in `/scratch`.
 
@@ -127,7 +136,7 @@ test "parser: parses effectful fn" {
 }
 ```
 
-While iterating, run `sfn check <the-files-you-touched>` for immediate parse / typecheck / effect-check feedback (seconds, no rebuild). Run `make test` before submitting and capture reproduction steps for regressions. `sfn check` is a fast static lint, not a self-host gate — it does not replace `make compile` (self-host invariant) or `make check` (full validation).
+While iterating, run `sfn check <the-files-you-touched>` for immediate parse / typecheck / effect-check feedback (seconds, no rebuild). Run targeted `sfn test <path>` coverage before submitting; reserve the full workspace `sfn test` and `sfn dev verify` for explicit full-gate or high-risk work. `sfn check` is a fast static lint, not a self-host gate — it does not replace `sfn dev bootstrap build` when compiler sources change.
 
 ## Documentation
 
@@ -143,7 +152,7 @@ Update documents in this order when behaviour changes:
 - Use Conventional Commit prefixes: `feat(compiler): …`, `fix(bootstrap): …`, etc.
 - PR titles completing a Linear leaf append the issue id: `feat(compiler): … (SFN-NNN)` so `SFN-NNN` is visible in the PR list (omit the suffix only when there's no backing issue; see `docs/conventions/issue-naming.md` § 1); the body still carries `Fixes SFN-NNN`.
 - Keep commits atomic; mention touched capsules; co-author doc changes in the same PR.
-- PRs must include: scope summary, verification commands (`make test`, targeted runs), and notes on doc updates.
+- PRs must include: scope summary, exact verification commands (`sfn test <path>` for targeted runs), and notes on doc updates.
 - Releases are manually triggered via `.github/workflows/release.yml` (pure bash) — use `fix:` or `feat:` prefixes in commit messages.
 
 ## Source of Truth Documents
@@ -169,8 +178,8 @@ Update documents in this order when behaviour changes:
 **Self-hosting invariant:** the compiler must always compile itself. Breaking changes require:
 
 1. Implement in Sailfin (`compiler/src/` or `compiler/capsules/`)
-2. Verify selfhost build (`make compile`)
-3. Verify integration coverage (`make test-integration`)
+2. Verify selfhost build (`sfn dev bootstrap build`)
+3. Verify integration coverage (`sfn test compiler/tests/integration`)
 
 **Do not use the Python bootstrap (Stage0)** — all new development goes through the self-hosted native compiler.
 
