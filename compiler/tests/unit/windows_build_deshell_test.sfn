@@ -21,7 +21,7 @@ import { remove_all } from "sfn/fs";
 import { scratch_root, sfn_bin_path } from "sfn/test";
 
 import { _macos_sdk_link_flags } from "../../src/backend";
-import { _mktemp_sibling_cmd, _sha256_of_file } from "../../src/build/fs";
+import { _dirname_cmd, _mktemp_sibling_cmd, _sha256_of_file } from "../../src/build/fs";
 import { build_target_os, host_is_windows } from "../../src/build/target";
 import { CacheKey, cache_touch_entry } from "../../src/build_cache";
 import { _cr_jobs_from_probe, _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
@@ -37,11 +37,24 @@ test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
         // helper returns its graceful-degradation value and spawns no
         // POSIX subprocess (AC-2).
         //
-        // mktemp -> "" so the emit consumer takes the non-atomic in-place
-        // write. Safe under the concurrent fan-out (SFN-498): each emit
-        // task owns a distinct output path and no peer child reads
-        // another's in-flight output.
-        assert _mktemp_sibling_cmd("build/sailfin/capsules/x.ll") == "";
+        // mkstemp resolves on native Windows via
+        // `runtime/sfn/platform/mkstemp_windows.sfn` (SFN-549), so the
+        // mint now succeeds here too: a non-empty sibling path in the
+        // destination's own directory.
+        //
+        // Minted under the test's own scratch root rather than a literal
+        // `build/...` path for two reasons: `_mktemp_sibling_cmd` requires
+        // the destination's directory to already EXIST (so a build path
+        // that happens not to be materialized would fail the mint and read
+        // as a regression), and `mkstemp` CREATES the file it names, so a
+        // shared path would accumulate one artifact per run.
+        let mint_base = scratch_root();
+        fs.createDirectory(mint_base, true);
+        let mint_dir = fs.mkdtemp(mint_base + "/sfn_deshell_mint_");
+        let win_tmp = _mktemp_sibling_cmd(mint_dir + "/x.ll");
+        assert win_tmp.length > 0;
+        assert _dirname_cmd(win_tmp) == mint_dir;
+        remove_all(mint_dir);
         // File hashing is binary-safe and in-process on every host. This is
         // the SFN-660 functional gain that makes toolchain archive digest
         // verification available on native Windows. `sfn_bin_path()`

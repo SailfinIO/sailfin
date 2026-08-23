@@ -23,16 +23,18 @@ import { host_is_windows } from "./target";
 // makes that spelling either compile or fail loudly.
 //
 // `mkstemp` and `close` are POSIX spellings absent from the MSVC UCRT
-// (which exports `_close`). The `host_is_windows()` guard below stops
-// them being *called* at runtime, but `host_is_windows()` is itself a
-// runtime check, not a compile-time one, so both `call`s are still
-// emitted and must resolve at link regardless of which branch executes.
+// (which exports `_close`).
 // `mkstemp` resolves against `runtime/sfn/platform/mkstemp_windows.sfn`
 // (SFN-549, appended by `target_condition_runtime_sfn_sources`) — the
 // same sibling-module treatment `@realpath` gets from
-// `platform/realpath_windows.sfn`. `close` has no such sibling yet and
-// remains an unresolved symbol on the native MSVC leg; out of scope for
-// SFN-549's link-bridge slice, tracked separately.
+// `platform/realpath_windows.sfn`. `close` has no such sibling and
+// needs none: it resolves on the native MSVC leg via `oldnames.lib`
+// aliasing to `_close` (verified, SFN-671 —
+// `runtime/sfn/platform/socket_ops.sfn:34-43`). That note also
+// documents `close`/`_close` as FATAL on a Windows `SOCKET` handle,
+// which is not an index into the CRT's low-fd table — the fd closed
+// here comes from `mkstemp_windows.sfn:49`'s `_open`, a genuine CRT
+// descriptor, so this call site is not that hazard.
 extern fn mkstemp(template: *u8) -> i32;
 
 extern fn close(fd: i32) -> i32;
@@ -166,18 +168,9 @@ fn _dirname_cmd(path: string) -> string {
 // `$SAILFIN_BUILD_CACHE_DIR` or a capsule path with shell
 // metacharacters is no longer a quoting or injection concern.
 fn _mktemp_from_template_cmd(template: string) -> string ![io] {
-    // A Windows host has no POSIX `mkstemp`; return "" so the caller
-    // degrades to a direct, non-atomic in-place write. Safe under the
-    // concurrent emit fan-out — which SFN-498 made real on Windows too
-    // — because each emit task owns a distinct output path and no peer
-    // child reads another's in-flight output: the `native` round passes
-    // no `--import-context`, and the `llvm` round's context root is the
-    // already-complete `native` stage output. What the degrade gives up
-    // is crash atomicity: a build killed mid-emit leaves a truncated
-    // artifact, which the next build treats as a cache miss (the
-    // source-hash sidecar / cache key is written only after a
-    // successful emit).
-    if host_is_windows() { return ""; }
+    // `mkstemp` resolves on a native Windows host via
+    // `runtime/sfn/platform/mkstemp_windows.sfn` (SFN-549), so no
+    // `host_is_windows()` degrade is needed here.
     let n: i64 = template.length as i64;
     let buf: *u8 = calloc((n + 1) as usize, 1 as usize);
     if buf as i64 == 0 { return ""; }
