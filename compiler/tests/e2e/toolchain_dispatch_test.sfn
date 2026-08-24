@@ -23,7 +23,14 @@
 //   5. `off` (and `--skip-toolchain-check`) skips the gate and proceeds.
 //   6. an explicit `<version>` knob forces that version as the target.
 import { contains } from "sfn/strings";
-import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
+import {
+    default_scratch_dir,
+    host_is_windows,
+    report_child_failure,
+    run_external_c_oracle,
+    sfn_bin_path,
+    skip
+} from "sfn/test";
 
 import { toolchain_current_host } from "../../src/toolchain/host";
 import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
@@ -54,6 +61,42 @@ fn _env_with(extra: string[]) -> string[] ![io] {
     return e;
 }
 
+
+// The store entry's binary name. `toolchain_store_ready`
+// (`compiler/src/toolchain/store.sfn`) probes `host_exe_name(dir +
+// "/sailfin")`, so on Windows it looks for `sailfin.exe`. Seeding a
+// suffix-less `sailfin` left every pre-seeded entry reading as NOT ready,
+// the dispatcher concluded it had to fetch, and these tests reached the
+// public internet for a deliberately nonexistent `v999.0.0` instead of
+// exercising the local store (SFN-1115).
+fn _stub_bin(dir: string) -> string ![io] {
+    if host_is_windows() { return dir + "/sailfin.exe"; }
+    return dir + "/sailfin";
+}
+
+// Write a stub at `_stub_bin(dir)` that prints `marker` and exits 0.
+//
+// On POSIX that is a `#!/bin/sh` script, which costs nothing. Windows has
+// no shebang: `CreateProcessA` cannot launch a script at all, so the stub
+// has to be a real PE image. The external C oracle already exists for
+// exactly this (`sfn/test`, SFN-1107) and compiles a `<stdio.h>` harness
+// cleanly here — the `<stdlib.h>` SDK conflict its header documents does
+// not reach this stub. A host without a usable C compiler SKIPS rather
+// than fails, which is the honest outcome: nothing about toolchain
+// dispatch can be proven there.
+fn _write_marker_stub(dir: string, marker: string) -> void ![io] {
+    let bin = _stub_bin(dir);
+    if !host_is_windows() {
+        fs.writeFile(bin, "#!/bin/sh\necho \"" + marker + "\"\nexit 0\n");
+        process.run(["chmod", "+x", bin]);
+        return;
+    }
+    let csrc = dir + "/stub.c";
+    fs.writeFile(csrc, "#include <stdio.h>\nint main(void){ puts(\"" + marker
+        + "\"); return 0; }\n");
+    let rc = run_external_c_oracle([csrc, "-o", bin]);
+    assert rc == 0;
+}
 // Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a stub that
 // echoes `marker` and exits 0, regardless of the argv it is re-exec'd
 // with. When `complete` is true the `.sha256` completeness marker is
@@ -63,9 +106,7 @@ fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> 
     let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
     process.run(["rm", "-rf", dir]);
     fs.createDirectory(dir, true);
-    let bin = dir + "/sailfin";
-    fs.writeFile(bin, "#!/bin/sh\necho \"" + marker + "\"\nexit 0\n");
-    process.run(["chmod", "+x", bin]);
+    _write_marker_stub(dir, marker);
     if complete {
         fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
     }
@@ -75,12 +116,30 @@ fn _seed_legacy_stub(store: string, ver: string, marker: string) -> void ![io] {
     let dir = store + "/" + ver;
     process.run(["rm", "-rf", dir]);
     fs.createDirectory(dir, true);
-    let bin = dir + "/sailfin";
-    fs.writeFile(bin, "#!/bin/sh\necho \"" + marker + "\"\nexit 0\n");
-    process.run(["chmod", "+x", bin]);
+    _write_marker_stub(dir, marker);
     fs.writeFile(dir + "/.sha256", "legacy-archive-marker\n");
 }
 
+
+// Skip on a host where a successful re-exec is impossible.
+//
+// `sfn_process_exec` is a documented Windows STUB that always returns the
+// exec-failed sentinel -1 (`runtime/sfn/platform/process_windows.sfn`):
+// Windows has no `execve(2)` image replacement, and the CRT `_exec*` family
+// spawns a child and terminates the parent, so exit codes do not pass
+// through transparently. `dispatch.sfn` therefore falls through to its
+// actionable "failed to re-exec the pinned toolchain" error by design.
+//
+// Every leg below asserts the dispatched stub's marker reached the parent's
+// output, which cannot happen until a native Windows re-exec lands. Skipping
+// is the honest result — the legs that do NOT require a dispatch (the
+// re-entrancy guard, `local`, the incomplete-entry fall-through, and `off`)
+// still run here and still carry their weight (SFN-1115).
+fn _require_reexec() -> void ![io] {
+    if host_is_windows() {
+        skip("process.exec is a Windows stub (-1); toolchain re-exec cannot succeed");
+    }
+}
 // Seed a project whose `[toolchain]` pin is `pin_ver` and a trivial
 // source file the gate's entry hint points at. Returns the source path.
 fn _seed_project(root: string, pin_ver: string) -> string ![io] {
@@ -95,6 +154,7 @@ fn _seed_project(root: string, pin_ver: string) -> string ![io] {
 }
 
 test "toolchain dispatch: auto re-execs a complete pre-seeded store entry" ![io] {
+    _require_reexec();
     let store = _scratch_root() + "/auto-store";
     let proj = _scratch_root() + "/auto-proj";
     _seed_stub(store, "999.0.0", _marker(), true);
@@ -190,6 +250,7 @@ test "toolchain dispatch: off skips the gate and proceeds" ![io] {
 }
 
 test "toolchain dispatch: an explicit version forces that dispatch target" ![io] {
+    _require_reexec();
     let store = _scratch_root() + "/forced-store";
     let proj = _scratch_root() + "/forced-proj";
     // Pin is 999.0.0, but the knob forces 888.0.0 — only that stub is
@@ -209,6 +270,7 @@ test "toolchain dispatch: an explicit version forces that dispatch target" ![io]
 }
 
 test "toolchain dispatch: qualified entry wins over the legacy fallback" ![io] {
+    _require_reexec();
     let store = _scratch_root() + "/qualified-wins-store";
     let proj = _scratch_root() + "/qualified-wins-proj";
     process.run(["rm", "-rf", store]);
@@ -229,13 +291,14 @@ test "toolchain dispatch: qualified entry wins over the legacy fallback" ![io] {
 }
 
 test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
+    _require_reexec();
     let store = _scratch_root() + "/legacy-fallback-store";
     let proj = _scratch_root() + "/legacy-fallback-proj";
     process.run(["rm", "-rf", store]);
     let legacy_marker = "DISPATCH_LEGACY_READ_ONLY_54da";
     _seed_legacy_stub(store, "999.0.0", legacy_marker);
     let legacy_dir = store + "/999.0.0";
-    let before_bin = fs.readFile(legacy_dir + "/sailfin");
+    let before_bin = fs.readFile(_stub_bin(legacy_dir));
     let before_sha = fs.readFile(legacy_dir + "/.sha256");
     let src = _seed_project(proj, "999.0.0");
 
@@ -247,7 +310,7 @@ test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
     assert exit == 0;
     assert contains(out + err, legacy_marker);
     assert contains(err, "warning: dispatching unverified legacy toolchain 999.0.0");
-    assert fs.readFile(legacy_dir + "/sailfin") == before_bin;
+    assert fs.readFile(_stub_bin(legacy_dir)) == before_bin;
     assert fs.readFile(legacy_dir + "/.sha256") == before_sha;
     let qualified = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), "999.0.0");
     assert ! fs.exists(qualified);
