@@ -1313,10 +1313,10 @@ here.
 
 ## Standard Library Capsules (Current)
 
-During the SFEP-0072 transition, dependency-free foundation and host-support
-capsules ship from `stdlib/*` while the remaining standard-library capsules
-stay under `capsules/sfn/*`. Their manifest identities and imports are
-unchanged (for example, `from "strings"`).
+During the SFEP-0072 transition, dependency-free foundation, host-support, and
+ML capsules ship from `stdlib/*` while the remaining standard-library capsules
+stay under `capsules/sfn/*`. Their manifest identities and imports are unchanged
+(for example, `from "strings"`).
 
 | Capsule | Import | Status | Effects | Description |
 |---------|--------|--------|---------|-------------|

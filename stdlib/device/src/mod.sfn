@@ -1,4 +1,4 @@
-// capsules/sfn/device/src/mod.sfn
+// stdlib/device/src/mod.sfn
 //
 // Capability-gated accelerator device dispatch for Sailfin. `![gpu]` is the
 // capability to dispatch work to a device backend — it is NOT a claim that an
