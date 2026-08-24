@@ -156,8 +156,11 @@ fn _implicit_build_env(label: string) -> string[] ![io] {
     return child;
 }
 
+// `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
+// dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
+// absent on a native Windows host (SFN-1114).
 fn _defined_symbol_count(binary: string, symbol: string, label: string) -> int ![io] {
-    let exit = process.run_capture(["nm", binary], _implicit_build_env(label));
+    let exit = process.run_capture(["llvm-nm", binary], _implicit_build_env(label));
     let output = process.capture_take_stdout();
     let _error = process.capture_take_stderr();
     if exit != 0 { return -1; }
@@ -241,7 +244,8 @@ fn _build_implicit_provenance_fixture(root: string, label: string) -> int ![io] 
         print.err(build_out + build_err);
         return 91;
     }
-    let nm_exit = process.run_capture(["nm", output], _implicit_build_env(label
+    // `llvm-nm` rather than `nm` (SFN-1114) — see `_defined_symbol_count` above.
+    let nm_exit = process.run_capture(["llvm-nm", output], _implicit_build_env(label
         + "-nm"));
     let symbols = process.capture_take_stdout();
     let _nm_err = process.capture_take_stderr();

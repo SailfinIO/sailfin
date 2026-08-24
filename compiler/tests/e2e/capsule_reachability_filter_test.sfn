@@ -58,8 +58,10 @@ import { contains, ends_with, split } from "sfn/strings";
 import {
     clean_runner_env,
     default_scratch_dir,
+    host_is_windows,
     nested_runner_scratch,
-    sfn_bin_path
+    sfn_bin_path,
+    skip
 } from "sfn/test";
 
 // In-tree fixture root (CWD-relative = repo root).
@@ -209,8 +211,12 @@ fn _symbol_defined(syms: string, mangled: string) -> boolean {
 }
 
 // Capture the symbol table of the binary once. Returns "" on nm failure.
+//
+// `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
+// dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
+// absent on a native Windows host (SFN-1114).
 fn _dump_symbols(binary: string, child_env: string[]) -> string ![io] {
-    let exit = process.run_capture(["nm", binary], child_env);
+    let exit = process.run_capture(["llvm-nm", binary], child_env);
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -288,6 +294,13 @@ test "capsule reachability: dependency-free check retains no capsule sources" ![
 
 // ---- Test 1: an unreached submodule is excluded from the link ----
 test "capsule reachability: an unreached submodule is excluded from the link" ![io] {
+    // `lld-link` strips the PE symbol table entirely, and more to the
+    // point, exclusion from the link here is a dead-strip-adjacent claim
+    // this guard cannot observe on msvc the same way it does via ELF/Mach-O
+    // `T`/`t` symbols (SFN-943; see `runtime/sfn/platform/fd_io.sfn:37-39`).
+    if host_is_windows() {
+        skip("SFN-943: linked PE carries no symbol table for llvm-nm to inspect on msvc");
+    }
     let out_bin = _bin_path("unreached");
     let build = _build_consumer(out_bin, []);
     assert build.exit == 0;
@@ -311,6 +324,10 @@ test "capsule reachability: an unreached submodule is excluded from the link" ![
 
 // ---- Test 2: a declared-but-never-imported dependency contributes nothing ----
 test "capsule reachability: a declared-but-never-imported dependency contributes nothing" ![io] {
+    // See the Windows skip rationale on Test 1 above (SFN-943).
+    if host_is_windows() {
+        skip("SFN-943: linked PE carries no symbol table for llvm-nm to inspect on msvc");
+    }
     let out_bin = _bin_path("neverused");
     let build = _build_consumer(out_bin, []);
     assert build.exit == 0;
@@ -330,6 +347,10 @@ test "capsule reachability: a declared-but-never-imported dependency contributes
 
 // ---- Test 3: the disable toggle restores the unfiltered set ----
 test "capsule reachability: the disable toggle restores the unfiltered set" ![io] {
+    // See the Windows skip rationale on Test 1 above (SFN-943).
+    if host_is_windows() {
+        skip("SFN-943: linked PE carries no symbol table for llvm-nm to inspect on msvc");
+    }
     let out_bin = _bin_path("toggle-off");
     let build = _build_consumer(out_bin, ["SAILFIN_CAPSULE_FILTER=off"]);
     assert build.exit == 0;

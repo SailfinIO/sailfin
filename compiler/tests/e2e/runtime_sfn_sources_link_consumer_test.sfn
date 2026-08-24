@@ -201,9 +201,13 @@ fn _clock_ll(build_dir: string) -> string ![io] {
 
 // nm <binary> | grep ' [Tt] _?sym' — true if `sym` is a defined text
 // symbol (optional `_` prefix for macOS Mach-O).
+//
+// `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
+// dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
+// absent on a native Windows host (SFN-1114).
 fn _nm_has_defined(obj: string, sym: string) -> boolean ![io] {
     let no_extra: string[] = [];
-    let exit = process.run_capture(["nm", obj], _child_env_with("", no_extra));
+    let exit = process.run_capture(["llvm-nm", obj], _child_env_with("", no_extra));
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return false; }

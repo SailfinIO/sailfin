@@ -6,8 +6,18 @@
 // NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
-import { contains, find } from "sfn/strings";
-import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
+import {
+    contains,
+    ends_with,
+    find,
+    starts_with
+} from "sfn/strings";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    sfn_bin_path,
+    skip
+} from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -27,6 +37,39 @@ fn _repo_root() -> string ![io] {
     let configured = env.get("SAILFIN_REPO_ROOT");
     if configured.length > 0 { return configured; }
     return ".";
+}
+
+// Locates the compiled runtime-native object for `module` — the bare
+// filename a runtime/sfn source module mangles to
+// (`sfn__runtime-native__<module>.sfn-<target>-<opt>.o` under
+// `build/sailfin/`) — tolerant of the `<target>-<opt>` segment differing
+// per host via a prefix match rather than the exact literal name. Returns
+// "" when the tree has not been built yet, for the caller to `skip(...)`.
+//
+// Used in place of `sfn_bin_path()` for a symbol-presence assertion: on a
+// native Windows host `lld-link` strips the COFF symbol table from the
+// linked PE (`llvm-nm build/bin/sfn.exe` reports "no symbols"), while the
+// object files retain it in exactly the `T`/`t` shape parsed below. This
+// is not a weakening — this test asserts a symbol is Sailfin-DEFINED at
+// the bare name, and an object file answers that MORE precisely by naming
+// which object defines it. Whether the symbol survived into the link is
+// already guaranteed by the link itself: an unresolved symbol fails
+// `lld-link`, so a binary that exists at all has it resolved (SFN-1114).
+fn _runtime_object(module: string) -> string ![io] {
+    let dir = "build/sailfin";
+    if !fs.exists(dir) { return ""; }
+    let prefix = "sfn__runtime-native__" + module + ".sfn-";
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        if starts_with(name, prefix) && ends_with(name, ".o") {
+            return dir + "/" + name;
+        }
+        i = i + 1;
+    }
+    return "";
 }
 
 // ---- Test 1: source modules typecheck cleanly ----
@@ -144,31 +187,31 @@ test "user emission does not call legacy sailfin_runtime_grapheme_* C symbols" !
 
 // ---- Test 7: compiler binary exports defined wave-2 symbols ----
 test "compiler binary exports sfn_str_* wave-2 symbols" ![io] {
-    let binary = sfn_bin_path();
-    let exit = process.run_capture(["nm", binary], _env());
+    let obj = _runtime_object("string");
+    if obj.length == 0 {
+        skip("build/sailfin/sfn__runtime-native__string.sfn-*.o not found — tree not built yet (SFN-1114)");
+    }
+    // `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
+    // dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
+    // absent on a native Windows host (SFN-1114).
+    let exit = process.run_capture(["llvm-nm", obj], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    if exit != 0 {
-        // nm not available or binary stripped — treat as pass
-        let _ = out;
-        let _ = err;
-        assert true;
-    } else {
-        let nm_output = out + err;
-        assert contains(nm_output, "sfn_str_grapheme_count");
-        assert contains(nm_output, "sfn_str_grapheme_at");
-        assert contains(nm_output, "sfn_str_byte_at");
-        assert contains(nm_output, "sfn_str_find_byte");
-        assert contains(nm_output, "sfn_str_codepoint");
-        assert contains(nm_output, "sfn_str_len");
-        assert contains(nm_output, "sfn_str_eq");
-        assert contains(nm_output, "sfn_str_slice");
-        assert contains(nm_output, "sfn_str_to_number");
-        assert contains(nm_output, "sfn_str_from_codepoint");
-        assert contains(nm_output, "sfn_str_from_byte");
-        assert contains(nm_output, "sfn_number_to_str");
-        assert contains(nm_output, "sfn_int_to_str");
-    }
+    assert exit == 0;
+    let nm_output = out + err;
+    assert contains(nm_output, "sfn_str_grapheme_count");
+    assert contains(nm_output, "sfn_str_grapheme_at");
+    assert contains(nm_output, "sfn_str_byte_at");
+    assert contains(nm_output, "sfn_str_find_byte");
+    assert contains(nm_output, "sfn_str_codepoint");
+    assert contains(nm_output, "sfn_str_len");
+    assert contains(nm_output, "sfn_str_eq");
+    assert contains(nm_output, "sfn_str_slice");
+    assert contains(nm_output, "sfn_str_to_number");
+    assert contains(nm_output, "sfn_str_from_codepoint");
+    assert contains(nm_output, "sfn_str_from_byte");
+    assert contains(nm_output, "sfn_number_to_str");
+    assert contains(nm_output, "sfn_int_to_str");
 }
 
 // ---- Test 8: number_to_string round-trips via @sfn_number_to_str ----

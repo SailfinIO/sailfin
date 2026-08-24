@@ -28,7 +28,13 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test. (#842.)
 import { contains, ends_with, split } from "sfn/strings";
-import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    host_is_windows,
+    sfn_bin_path,
+    skip
+} from "sfn/test";
 
 // The build spawns a nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
@@ -104,8 +110,12 @@ fn _symbol_defined(syms: string, bare: string) -> boolean {
 }
 
 // Capture the symbol table of the binary once. Returns "" on nm failure.
+//
+// `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
+// dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
+// absent on a native Windows host (SFN-1114).
 fn _dump_symbols(binary: string) -> string ![io] {
-    let exit = process.run_capture(["nm", binary], _child_env());
+    let exit = process.run_capture(["llvm-nm", binary], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -139,6 +149,13 @@ test "dead-strip guard: consumer importing one capsule symbol builds and runs" !
 // Without this check the absence assertions in Test 3 could pass vacuously
 // if the whole capsule failed to link or got dropped.
 test "dead-strip guard: used capsule symbol (abs) is present in the linked binary" ![io] {
+    // `lld-link` strips the PE symbol table entirely (msvc dead-strip is
+    // `/OPT:REF`, not the POSIX `-ffunction-sections`/`--gc-sections`/
+    // `-dead_strip` flags this guard pins — see `runtime/sfn/platform/
+    // fd_io.sfn:37-39`, SFN-943), so `llvm-nm` has nothing to check here.
+    if host_is_windows() {
+        skip("SFN-943: msvc dead-strip is /OPT:REF, not the POSIX flags this guard pins; the linked PE carries no symbol table for llvm-nm to inspect");
+    }
     let out_bin = _bin_path("present");
     let build_exit = _build_consumer(out_bin);
     assert build_exit == 0;
@@ -152,6 +169,12 @@ test "dead-strip guard: used capsule symbol (abs) is present in the linked binar
 // `clamp` and `mean` are never reachable from `abs`; a correct dead-strip
 // drops them. If #1047's strip flags regress, these functions reappear.
 test "dead-strip guard: unreferenced capsule symbols (clamp, mean) are stripped" ![io] {
+    // See the Windows skip rationale on the sibling "used capsule symbol"
+    // test above (SFN-943): this guard pins a POSIX-only dead-strip
+    // mechanism, and the linked PE has no symbol table to inspect either way.
+    if host_is_windows() {
+        skip("SFN-943: msvc dead-strip is /OPT:REF, not the POSIX flags this guard pins; the linked PE carries no symbol table for llvm-nm to inspect");
+    }
     let out_bin = _bin_path("strip");
     let build_exit = _build_consumer(out_bin);
     assert build_exit == 0;
