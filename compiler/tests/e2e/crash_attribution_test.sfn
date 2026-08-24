@@ -2,15 +2,21 @@
 //
 // Regression for #1206: a test child that CRASHES (SIGSEGV, exit 139)
 // must
-//   (a) be named in a `[test] FAIL:` line in human output, and
-//   (c) classify as `failure:"crash"` in the agent verdict block
-//       (`scripts/agent_report.sh`) — never `setup-error` (the original
-//       observed symptom) and never `test-failure`.
+//   (a) be named in a `[test] FAIL:` line in human output,
+//   (b) leave an in-flight `RUN  <test>` breadcrumb on stderr, and
+//   (c) classify as `crash` via the shared classifier
+//       (`compiler/src/cli/verdict.sfn::verdict_classify`) — never
+//       `setup-error` (the original observed symptom) and never
+//       `test-failure`.
 //
-// Parts (a)/(b) — file attribution plus the in-flight `RUN  <test>`
-// stderr breadcrumb — were delivered by #1303's `_emit_crash_diagnostic`
-// / `_is_signal_exit`; this test pins both the attribution and the new
-// classifier `crash` arm so neither regresses.
+// Parts (a)/(b) were delivered by #1303's `_emit_crash_diagnostic` /
+// `_is_signal_exit`; this test pins the attribution and the classifier's
+// `crash` arm so neither regresses.
+//
+// (c) is asserted as two composed halves rather than through a verdict
+// block, because observing a real crash *through* one required the bash
+// wrapper SFN-726 deleted, and no native verb emits a trailer for `sfn
+// test` yet. The end-to-end form returns once one does.
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`: drives subprocesses via
 // `process.run_capture` and asserts on captured output with `sfn/strings`.
@@ -21,6 +27,8 @@ import {
     sfn_bin_path,
     with_tmp_dir
 } from "sfn/test";
+
+import { verdict_classify } from "../../src/cli/verdict";
 
 // A fixture whose second test overflows the stack — non-tail recursion
 // (work after the call) defeats TCO, so it faults with SIGSEGV (exit
@@ -41,16 +49,14 @@ fn _crash_fixture_src() -> string {
         + "}\n";
 }
 
-// Per-child environment for the nested `sailfin test` / `agent_report.sh`
-// spawn. Builds a clean top-level child environment via `clean_runner_env`
-// (ambient PATH/HOME/TMPDIR for clang/linker, minus the parallel pool's
-// per-child orchestration keys, with an isolated nested
-// `SAILFIN_TEST_SCRATCH` — SFN-401), then:
-//   - strips `SAILFIN_INNER` / `SAILFIN_AGENT_REPORT`: when THIS suite
-//     runs under `make test` the wrapper exports them, and an inherited
-//     `SAILFIN_INNER` makes the nested `agent_report.sh` run
-//     transparently (no verdict block) — so the classifier assertion
-//     would never see `===SAILFIN-RESULT===`.
+// Per-child environment for the nested `sailfin test` spawn. Builds a clean
+// top-level child environment via `clean_runner_env` (ambient
+// PATH/HOME/TMPDIR for clang/linker, minus the parallel pool's per-child
+// orchestration keys, with an isolated nested `SAILFIN_TEST_SCRATCH` —
+// SFN-401), then:
+//   - strips `SAILFIN_AGENT_REPORT`: when THIS suite runs under a parent
+//     test invocation the pool exports it, and an inherited value would
+//     change the nested child's own output shape.
 //   - disables the signal-kill retry (`SAILFIN_TEST_RETRY=0`) so the
 //     crash is observed once, deterministically (no doubled wall-clock).
 fn _child_env() -> string[] ![io] {
@@ -60,17 +66,16 @@ fn _child_env() -> string[] ![io] {
     loop {
         if i >= raw.length { break; }
         let entry = raw[i];
-        let is_inner = find(entry, "SAILFIN_INNER=", 0) == 0;
         let is_report = find(entry, "SAILFIN_AGENT_REPORT=", 0) == 0;
         let is_retry = find(entry, "SAILFIN_TEST_RETRY=", 0) == 0;
-        if !is_inner && !is_report && !is_retry { e.push(entry); }
+        if !is_report && !is_retry { e.push(entry); }
         i += 1;
     }
     e.push("SAILFIN_TEST_RETRY=0");
     return e;
 }
 
-test "crash #1206: SIGSEGV names the crashed file in a [test] FAIL line" ![io] {
+test "crash #1206: SIGSEGV names the crashed file and classifies as crash" ![io] {
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/crash_signal_probe.sfn";
         fs.writeFile(src, _crash_fixture_src());
@@ -81,28 +86,13 @@ test "crash #1206: SIGSEGV names the crashed file in a [test] FAIL line" ![io] {
         // (a) the crash is reported as a FAIL naming the crashed file.
         assert find(combined, "[test] FAIL:", 0) >= 0;
         assert find(combined, "crash_signal_probe.sfn", 0) >= 0;
-        // a fault is a non-zero exit (139 = SIGSEGV), not a clean run.
-        assert exit != 0;
-        return 0;
-    });
-    assert code == 0;
-}
-
-test "crash #1206: agent verdict classifies a SIGSEGV as crash, not setup-error" ![io] {
-    let code = with_tmp_dir(fn (dir: string) -> int {
-        let src = dir + "/crash_signal_probe.sfn";
-        fs.writeFile(src, _crash_fixture_src());
-        let _exit = process.run_capture(["bash", "scripts/agent_report.sh", "--target", "test", "--", sfn_bin_path(), "test", src], _child_env());
-        let out = process.capture_take_stdout();
-        let err = process.capture_take_stderr();
-        let combined = out + err;
-        // (c) the verdict block is emitted and classifies the crash as
-        // `crash` — never `setup-error` (the observed symptom) or
-        // `test-failure`.
-        assert find(combined, "===SAILFIN-RESULT===", 0) >= 0;
-        assert find(combined, "\"failure\":\"crash\"", 0) >= 0;
-        assert find(combined, "\"failure\":\"setup-error\"", 0) < 0;
-        assert find(combined, "\"failure\":\"test-failure\"", 0) < 0;
+        // (c) the crashed child's status reaches the caller intact — 139,
+        // not merely non-zero, since the exact signal status is what the
+        // classifier reads ...
+        assert exit == 139;
+        // ... and the shared classifier maps it to `crash`, never
+        // `setup-error` (the #1206 symptom) or `test-failure`.
+        assert verdict_classify(exit, "test") == "crash";
         return 0;
     });
     assert code == 0;

@@ -23,7 +23,7 @@
 //
 // The remaining four phases each require a successful compile ahead of
 // them, so their attribution is covered where the decision actually lives
-// — `_dv_classify` and the sub-envelope scrape — in
+// — `verdict_classify` and the sub-envelope scrape — in
 // `compiler/tests/unit/dev_verify_test.sfn`.
 //
 // ENV HYGIENE. Every nested `sfn` here goes through `clean_runner_env` +
@@ -176,7 +176,8 @@ test "dev verify: a failing compile phase names itself in the verdict block" ![i
     assert contains(out, "===END-SAILFIN-RESULT===");
     let json = _verdict_json(out);
     assert json.length > 0;
-    assert _json_str_field(json, "schema_version") == "sailfin-make/1";
+    assert _json_str_field(json, "schema_version") == "sailfin-run/2";
+    assert _json_str_field(json, "host") == "sfn dev verify";
     assert _json_str_field(json, "target") == "verify";
     assert _json_str_field(json, "status") == "fail";
     assert _json_str_field(json, "phase") == "compile";
@@ -201,7 +202,8 @@ test "dev verify: the report file is written and names the phase ledger" ![io] {
     let report_path = dir + "/build/agent-report.verify.json";
     assert fs.exists(report_path);
     let report = fs.readFile(report_path);
-    assert contains(report, "\"schema_version\":\"sailfin-make/1\"");
+    assert contains(report, "\"schema_version\":\"sailfin-run/2\"");
+    assert contains(report, "\"host\":\"sfn dev verify\"");
     assert contains(report, "\"target\":\"verify\"");
     // The run terminated at its own verdict, so the record is complete and
     // nothing is in flight.

@@ -1,0 +1,342 @@
+// E2E coverage for the SessionStart hook's seed install (SFN-1118).
+//
+// The hook used to treat the native `sfn dev bootstrap fetch` path as
+// terminal: if *any* `sfn` existed it ran the fetch with that binary and
+// returned, whatever the outcome. A container image that bakes a stale seed
+// into the gitignored store therefore satisfied the "any sfn exists" test, ran
+// the upgrade with the very binary needing upgrading, failed, printed a bare
+// `rc=`, and left every session on the stale seed. Nothing anywhere compared
+// the installed version against `bootstrap.toml [seed].version` — the success
+// line echoed the pin straight from the manifest, so it reported what *should*
+// be installed rather than what was.
+//
+// These cases drive the real hook against a scratch `CLAUDE_PROJECT_DIR`
+// holding a stub `bootstrap.toml`, a stub `sfn`, and a stub `install.sh`. The
+// hook `cd`s to `CLAUDE_PROJECT_DIR` and invokes `./install.sh` relatively, so
+// the scratch dir controls every input: no network, no real toolchain, no
+// dependency on the host's own seed store.
+//
+// `SAILFIN_SESSION_SEED_PROBE_ONLY=1` runs the seed install alone and exits
+// with its verdict (0 = store matches the pin), skipping the environment
+// snapshot.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on captured stdout
+// with `sfn/strings::contains` instead.
+import { contains } from "sfn/strings";
+import { scratch_root } from "sfn/test";
+
+// The pin every fixture below writes into its scratch `bootstrap.toml`.
+// Deliberately not a real release: nothing here may reach the network.
+fn _pin() -> string { return "9.9.9"; }
+
+fn _hook() -> string ![io] {
+    let configured = env.get("SAILFIN_SESSION_START_HOOK");
+    if configured.length > 0 { return configured; }
+    return ".claude/hooks/session-start.sh";
+}
+
+// A fresh scratch project root. `mkdtemp` returns "" on failure; an empty root
+// would be threaded through as `CLAUDE_PROJECT_DIR=`, silently pointing the
+// hook at the real repository and making these cases destructive.
+fn _project_root(tag: string) -> string ![io] {
+    let dir = fs.mkdtemp(scratch_root() + "/session-seed-" + tag + "-");
+    assert dir.length > 0;
+    return dir;
+}
+
+fn _plain_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+fn _chmod_x(path: string) -> void ![io] {
+    let exit = process.run_capture(["chmod", "+x", path], _plain_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    // Asserted, not discarded: a `noexec` scratch mount or a failed chmod
+    // leaves every candidate non-executable, `command -v sfn` then resolves
+    // the host's REAL compiler, and the hook fetches against a bootstrap.toml
+    // pinning 9.9.9 — a live network call for a release that does not exist.
+    assert exit == 0;
+}
+
+// `run_capture`'s env array is the complete child environment, not an overlay,
+// so PATH is mandatory for `bash`/`awk`/`timeout` to resolve at all.
+fn _hook_env(project: string, probe_only: boolean) -> string[] ![io] {
+    let mut e: string[] = [];
+    // A fixture-owned `bin/` is prepended so `_any_sfn`'s PATH fallback can
+    // only ever resolve inside the scratch project. The parent PATH carries
+    // the real compiler (this hook exports build/bin onto it), and the
+    // fixture's bootstrap.toml pins a version that does not exist, so an
+    // escape here would mean a live fetch for a bogus release.
+    let path = env.get("PATH");
+    e.push("PATH=" + project + "/fixture-bin:" + path);
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    // CLAUDE_ENV_FILE is deliberately absent: the hook appends a PATH export
+    // to it, and threading the real one would have these cases write into the
+    // live session environment.
+    e.push("CLAUDE_PROJECT_DIR=" + project);
+    if probe_only { e.push("SAILFIN_SESSION_SEED_PROBE_ONLY=1"); }
+    return e;
+}
+
+// A stub `sfn` on the fixture's PATH that fails its health probe, so the
+// hook's PATH fallback rejects it rather than reaching outside the fixture.
+fn _write_path_guard(project: string) -> void ![io] {
+    fs.createDirectory(project + "/fixture-bin", true);
+    fs.writeFile(project + "/fixture-bin/sfn",
+        "#!/usr/bin/env bash\necho 'fixture guard: no sfn outside the scratch project' >&2\nexit 127\n");
+    _chmod_x(project + "/fixture-bin/sfn");
+}
+
+fn _write_manifest(project: string) -> void ![io] {
+    fs.writeFile(project + "/bootstrap.toml",
+        "[seed]\nversion = \"" + _pin() + "\"\n"
+        + "repo = \"SailfinIO/sailfin\"\nasset_prefix = \"sailfin\"\n\n"
+        + "[store]\ninstall_base = \"" + _install_base() + "\"\n"
+        + "bin_dir = \"" + _bin_dir() + "\"\n");
+}
+
+// A stub `sfn` reporting `version` and exiting `fetch_rc` for
+// `dev bootstrap fetch` — the two subcommands the hook drives.
+fn _write_sfn(path: string, version: string, fetch_rc: string) -> void ![io] {
+    fs.writeFile(path,
+        "#!/usr/bin/env bash\n"
+        + "if [ \"$1\" = \"version\" ]; then echo \"sfn " + version + "\"; exit 0; fi\n"
+        + "if [ \"$1\" = \"dev\" ]; then exit " + fetch_rc + "; fi\n"
+        + "exit 0\n");
+    _chmod_x(path);
+}
+
+// A stub installer that touches `marker` and installs a seed reporting
+// `installs`. The hook passes VERSION/GLOBAL_BIN_DIR through the environment;
+// `marker` is baked in absolute because the hook passes no such variable.
+// A stub installer that records the seed-store seam into `marker` and installs
+// a seed reporting `installs`. The hook passes VERSION/GLOBAL_BIN_DIR through
+// the environment; `marker` is baked in absolute because the hook passes no
+// such variable.
+//
+// `$` and `{` are never adjacent in a source string here: the lexer reads
+// `${` as the start of a `${ expr }` interpolation, so a literal shell
+// `${VAR:-default}` parses as an interpolation of `VAR:-default`. That
+// survives `sfn check` and dies at lowering with a bewildering E1002
+// ("refusing to fabricate a default `double`") — the #1389 shape, where a
+// green check is not a build guarantee. `_env_default` splits the pair.
+fn _env_default(name: string, fallback: string) -> string {
+    return "$" + "{" + name + ":-" + fallback + "}";
+}
+
+fn _write_installer(project: string, marker: string, installs: string, ok: boolean) -> void ![io] {
+    let mut body: string = "#!/usr/bin/env bash\nset -eu\n";
+    body = body + "printf '%s\\n' \"";
+    body = body + _env_default("SAILFIN_BOOTSTRAP_SEED_STORE", "0");
+    body = body + "\" > \"" + marker + "\"\n";
+    if ok {
+        // Mirrors install.sh's own branch: the flat store only when the seam
+        // is set, otherwise the host-triple layout the native bootstrap
+        // cannot see.
+        body = body + "stub() { printf '#!/usr/bin/env bash\\nif [ \"$1\" = \"version\" ]; then echo \"sfn ";
+        body = body + installs;
+        body = body + "\"; exit 0; fi\\nexit 0\\n' > \"$1\"; chmod +x \"$1\"; }\n";
+        body = body + "mkdir -p \"$GLOBAL_BIN_DIR\"\nstub \"$GLOBAL_BIN_DIR/sfn\"\n";
+        body = body + "if [ \"";
+        body = body + _env_default("SAILFIN_BOOTSTRAP_SEED_STORE", "0");
+        body = body + "\" = \"1\" ]; then\n";
+        body = body + "  target=\"$INSTALL_BASE/$VERSION\"\nelse\n";
+        body = body + "  target=\"$INSTALL_BASE/host-triple/$VERSION\"\nfi\n";
+        body = body + "mkdir -p \"$target\"\nstub \"$target/sailfin\"\n";
+    } else {
+        body = body + "echo 'stub installer refusing to install' >&2\nexit 1\n";
+    }
+    fs.writeFile(project + "/install.sh", body);
+    _chmod_x(project + "/install.sh");
+}
+
+fn _install_base() -> string { return "build/toolchains/seed/versions"; }
+fn _bin_dir() -> string { return "build/toolchains/seed/bin"; }
+fn _seed_bin_dir(project: string) -> string { return project + "/" + _bin_dir(); }
+// The flat path `sfn dev bootstrap build` spawns — NOT the bin_dir alias.
+fn _flat_store_bin(project: string) -> string {
+    return project + "/" + _install_base() + "/" + _pin() + "/sailfin";
+}
+
+fn _run_hook(project: string, probe_only: boolean) -> int ![io] {
+    return process.run_capture(["bash", _hook()], _hook_env(project, probe_only));
+}
+
+test "session-start seed: a failing native fetch falls back to the installer" ![io] {
+    let project = _project_root("t1");
+    let marker = project + "/installer-ran";
+    _write_manifest(project);
+    _write_path_guard(project);
+    fs.createDirectory(project + "/build/bin", true);
+    // The SFN-1118 shape: a stale seed that answers `version` (so it qualifies
+    // as a driver) but dies on real work.
+    _write_sfn(project + "/build/bin/sfn", "0.0.1", "134");
+    _write_installer(project, marker, _pin(), true);
+
+    let exit = _run_hook(project, true);
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    assert contains(out, "falling back to ./install.sh");
+    assert contains(out, "installed seed " + _pin());
+    // The fallback must actually have run, not merely been announced.
+    assert fs.exists(marker);
+    // SAILFIN_BOOTSTRAP_SEED_STORE=1 is what makes install.sh write the flat
+    // layout. Without it the bin_dir alias still resolves and the version
+    // probe still reports the pin, so the hook would announce success over a
+    // store `sfn dev bootstrap build` considers empty. Assert the seam and
+    // the artifact, not just the announcement.
+    assert contains(fs.readFile(marker), "1");
+    assert fs.exists(_flat_store_bin(project));
+    assert exit == 0;
+}
+
+test "session-start seed: a store left off the pin is reinstalled and both versions named" ![io] {
+    let project = _project_root("t2");
+    let marker = project + "/installer-ran";
+    _write_manifest(project);
+    _write_path_guard(project);
+    fs.createDirectory(_seed_bin_dir(project), true);
+    // The silent-success shape: the fetch reports 0 but leaves the store on the
+    // wrong version, which the old success line could not distinguish from a
+    // correct install because it echoed the pin rather than reading the store.
+    _write_sfn(_seed_bin_dir(project) + "/sfn", "0.0.1", "0");
+    _write_installer(project, marker, _pin(), true);
+
+    let exit = _run_hook(project, true);
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    assert contains(out, "seed is 0.0.1");
+    assert contains(out, "pins " + _pin());
+    assert fs.exists(marker);
+    assert contains(fs.readFile(marker), "1");
+    assert fs.exists(_flat_store_bin(project));
+    assert exit == 0;
+}
+
+test "session-start seed: a store already on the pin does not reinstall" ![io] {
+    let project = _project_root("t3");
+    let marker = project + "/installer-ran";
+    _write_manifest(project);
+    _write_path_guard(project);
+    fs.createDirectory(_seed_bin_dir(project), true);
+    _write_sfn(_seed_bin_dir(project) + "/sfn", _pin(), "0");
+    // A healthy store holds the flat artifact too — the alias alone is not a
+    // populated store, and asserting only on the version would let a
+    // half-installed store read as healthy.
+    fs.createDirectory(project + "/" + _install_base() + "/" + _pin(), true);
+    _write_sfn(_flat_store_bin(project), _pin(), "0");
+    _write_installer(project, marker, _pin(), true);
+
+    let exit = _run_hook(project, true);
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    assert contains(out, "seed " + _pin() + " matches the pin");
+    // The reconcile is a no-op on a healthy store: re-downloading a seed the
+    // store already holds would cost every session a needless install.
+    assert ! fs.exists(marker);
+    assert exit == 0;
+}
+
+test "session-start seed: a failed install reports the gap instead of claiming the pin" ![io] {
+    let project = _project_root("t4");
+    let marker = project + "/installer-ran";
+    _write_manifest(project);
+    _write_path_guard(project);
+    fs.createDirectory(project + "/build/bin", true);
+    _write_sfn(project + "/build/bin/sfn", "0.0.1", "134");
+    _write_installer(project, marker, _pin(), false);
+
+    let exit = _run_hook(project, true);
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    assert contains(out, "install FAILED");
+    assert contains(out, "pin is " + _pin());
+    // The probe's verdict is the store-matches-pin question, so an unresolved
+    // shortfall must not read as success.
+    assert exit != 0;
+}
+
+test "session-start seed: session start stays non-fatal when the seed cannot be fixed" ![io] {
+    let project = _project_root("t5");
+    let marker = project + "/installer-ran";
+    _write_manifest(project);
+    _write_path_guard(project);
+    fs.createDirectory(project + "/build/bin", true);
+    _write_sfn(project + "/build/bin/sfn", "0.0.1", "134");
+    _write_installer(project, marker, _pin(), false);
+    // Pre-stage the mcp-server artifact so the snapshot skips its npm build:
+    // this case is about the hook's exit status, not about node tooling.
+    fs.createDirectory(project + "/tools/mcp-server/dist", true);
+    fs.writeFile(project + "/tools/mcp-server/dist/index.js", "");
+
+    // No probe seam: the whole hook runs, including the environment snapshot.
+    let exit = _run_hook(project, false);
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    // Never fatal: the snapshot must still reach the model even when the
+    // toolchain could not be repaired.
+    assert exit == 0;
+    assert contains(out, "## Sailfin session bootstrap");
+    assert contains(out, "install FAILED");
+}
+
+test "session-start seed: an absent bootstrap.toml reports the missing pin instead of dying" ![io] {
+    let project = _project_root("t6");
+    // No bootstrap.toml at all. `awk` exits 2 on a file it cannot open, and
+    // under `set -e` that status propagated out of the `SEED_VERSION="$(...)"`
+    // assignment and killed the hook before it printed a single line — so the
+    // `-z "$SEED_VERSION"` guard written for exactly this case never ran.
+    fs.createDirectory(project + "/tools/mcp-server/dist", true);
+    fs.writeFile(project + "/tools/mcp-server/dist/index.js", "");
+
+    // No probe seam: the point is that the whole hook survives and still
+    // delivers its snapshot.
+    let exit = _run_hook(project, false);
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert contains(out, "## Sailfin session bootstrap");
+    assert contains(out, "no [seed].version");
+}
+
+test "session-start seed: a matching alias over an unpopulated store still reinstalls" ![io] {
+    let project = _project_root("t7");
+    let marker = project + "/installer-ran";
+    _write_manifest(project);
+    _write_path_guard(project);
+    fs.createDirectory(_seed_bin_dir(project), true);
+    // The alias reports the pin, but `$INSTALL_BASE/$VERSION/sailfin` — the
+    // artifact `sfn dev bootstrap build` actually spawns — is absent. This is
+    // what install.sh leaves behind without SAILFIN_BOOTSTRAP_SEED_STORE=1:
+    // the version probe is satisfied while the native bootstrap sees an empty
+    // store. Version agreement alone must not read as healthy.
+    _write_sfn(_seed_bin_dir(project) + "/sfn", _pin(), "0");
+    _write_installer(project, marker, _pin(), true);
+
+    let exit = _run_hook(project, true);
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    assert contains(out, "is not populated");
+    assert fs.exists(marker);
+    assert fs.exists(_flat_store_bin(project));
+    assert exit == 0;
+}
