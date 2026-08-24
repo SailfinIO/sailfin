@@ -37,13 +37,13 @@ graduates-to:
 
 Sailfin's developer tooling ships as **subcommands of one `sfn` binary**, and the
 durable interface each one exposes is not its terminal rendering but a
-**versioned, locked, machine-readable output envelope**. Five such envelopes exist
+**versioned, locked, machine-readable output envelope**. Six such envelopes exist
 today — `sailfin-check/1`, `sailfin.bench/v1`, `sailfin-symbols/1`,
-`sailfin-make/1`, and `sfn build --json`'s `BuildReport` — each guarded by a
-schema-lock test that fails CI when its field set drifts. Four of the five also
-have a schema document under `docs/reference/`; `BuildReport` does not, which is
-the one live violation of the contract [§3.3](#33-the-host-question-answered-by-a-fourth-option)
-states.
+`sailfin-run/2`, `sailfin-selfhost/1`, and `sfn build --json`'s `BuildReport` —
+each guarded by a schema-lock test that fails CI when its field set drifts.
+Four of the six also have a schema document under `docs/reference/`;
+`BuildReport` and `sailfin-selfhost/1` do not, which is the live violation of
+the contract [§3.3](#33-the-host-question-answered-by-a-fourth-option) states.
 
 This SFEP owns two things and cedes the rest. It owns (a) the **inventory** — what
 the toolchain surface is, what contract each command exposes, and what is
@@ -232,7 +232,7 @@ which is the drift mechanism this boundary exists to stop.
 | `sfn fmt` — token-stream formatter, rules, `--check`/`--write` | SFEP-0007 (`Implemented`) |
 | The `Diag`/`Span` type, severity model, fix-it structure, migration | SFEP-0061 (`Accepted`) |
 | `sfn bench` — command design, budget flags, both modes | SFEP-0006 Stage C5; `sfn/bench` capsule per `docs/status.md:786` |
-| Agent-legible build/test output, failure taxonomy, `build/agent-report.json` | SFEP-0014 (`Accepted`) |
+| Agent-legible build/test output, failure taxonomy, the `sailfin-run/2` verdict envelope, `build/agent-report.<target>.json` | SFEP-0014 (`Accepted`) |
 | Compiler decomposition into role-oriented capsules; the analyzer boundary | SFEP-0020 (`Accepted`) |
 | CLI structure, `Command` tree, subcommand modularization | SFEP-0027 (supersedes SFEP-0009) |
 | Test/hook syntax and the `sfn/test` capsule contract | SFEP-0010 |
@@ -736,7 +736,7 @@ documented.
 > `compiler/tests/e2e/*.sh` paths that no longer exist — 10 under `docs/`, 19 across
 > `runtime/**.sfn` and `compiler/src/**.sfn`, and 44 in `compiler/tests/` itself.
 > This rewrite corrects the three in the consumer-facing schema references
-> (`docs/reference/check-json-schema.md`, `docs/reference/make-result-schema.md`),
+> (`docs/reference/check-json-schema.md`, `docs/reference/run-result-schema.md`),
 > because a schema doc that misdirects a reader about what locks the contract is
 > the most damaging instance. The remaining ~70 are a standalone mechanical sweep:
 > they touch compiler and runtime source, so they carry the self-host gate for zero
@@ -791,7 +791,7 @@ are absent. Absence is not a behaviour to pin.
 - `docs/reference/check-json-schema.md` — `sailfin-check/1`
 - `docs/reference/bench-json-schema.md` — `sailfin.bench/v1`
 - `docs/reference/symbols-json-schema.md` — `sailfin-symbols/1`
-- `docs/reference/make-result-schema.md` — `make` agent-result envelope
+- `docs/reference/run-result-schema.md` — `sailfin-run/2` agent verdict envelope
 
 **Source of truth for what ships**
 

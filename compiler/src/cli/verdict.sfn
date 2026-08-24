@@ -1,0 +1,164 @@
+// compiler/src/cli/verdict.sfn
+//
+// The `sailfin-run/2` agent verdict envelope: the single producer of the
+// `===SAILFIN-RESULT===` trailer and of the field core it shares with
+// `build/agent-report.<target>.json` (SFEP-0014 §3.6, SFN-726).
+//
+// Why this is its own module. The envelope has two renderings — a framed
+// trailer on stdout and a durable report file — and before SFN-726 each
+// hardcoded its own `schema_version` literal. Two independent literals for
+// one wire contract is how a rename drifts: a consumer that hard-fails on
+// an unknown version (SFEP-0003 §3.3 point 4) then sees one generation on
+// stdout and another on disk. `verdict_fields` renders the shared core
+// once so a caller composing a longer document appends to it rather than
+// restating it, and `VERDICT_SCHEMA` is the only occurrence of the version
+// string under `compiler/src`.
+//
+// Sited in `cli/` rather than at `compiler/src/` top level because the
+// target is derived from argv and the trailer is emitted at command exit;
+// no pipeline pass calls it. (`ice.sfn` sits at top level precisely
+// because passes deep in the pipeline do call it.)
+//
+// Hand-rolled JSON, like every other emitter under `compiler/src`
+// (`diagnostics_json.sfn`, `build_report.sfn`, `bench_json.sfn`): the
+// compiler cannot import its own stdlib capsules without a build cycle.
+// The sole copy of the `sailfin-run/2` schema literal.
+//
+// The number stays monotonic across the rename from the `make`-hosted
+// generation that preceded it, so a consumer that has seen the old
+// envelope cannot mistake this one for an earlier generation
+// (SFEP-0014 §3.6).
+let VERDICT_SCHEMA: string = "sailfin-run/2";
+
+// One verdict. Every field but `host`, `target` and `status` is nullable,
+// using "" as the null sentinel because Sailfin has no option type in this
+// dialect.
+//
+// `host` names the invocation that produced the verdict (`sfn dev verify`).
+// It is what lets a consumer tell its own verdict from one a child emitted
+// into the same stream: read the last sentinel whose `host` matches the
+// invocation you started, and treat any other host as belonging to a child.
+struct Verdict {
+    host: string;
+    target: string;
+    status: string;
+    failure: string;
+    phase: string;
+    first_error: string;
+    report: string;
+}
+
+fn _verdict_json_escape(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn verdict_json_quote(s: string) -> string {
+    return "\"" + _verdict_json_escape(s) + "\"";
+}
+
+// A string field that renders as JSON `null` when empty.
+fn verdict_json_or_null(s: string) -> string {
+    if s.length == 0 { return "null"; }
+    return verdict_json_quote(s);
+}
+
+// The shared field core, rendered WITHOUT enclosing braces so a caller can
+// append its own fields. `_dv_write_report` does exactly that, adding
+// `complete`, `in_flight` and `phases[]` after this core; the trailer emits
+// the core alone. Field order follows SFEP-0014 §3.6, `host` second.
+fn verdict_fields(v: Verdict) -> string {
+    return "\"schema_version\":" + verdict_json_quote(VERDICT_SCHEMA)
+        + ",\"host\":"
+        + verdict_json_quote(v.host)
+        + ",\"target\":"
+        + verdict_json_quote(v.target)
+        + ",\"status\":"
+        + verdict_json_quote(v.status)
+        + ",\"failure\":"
+        + verdict_json_or_null(v.failure)
+        + ",\"phase\":"
+        + verdict_json_or_null(v.phase)
+        + ",\"first_error\":"
+        + verdict_json_or_null(v.first_error)
+        + ",\"report\":"
+        + verdict_json_or_null(v.report);
+}
+
+fn verdict_json(v: Verdict) -> string {
+    return "{" + verdict_fields(v) + "}";
+}
+
+// The framed trailer.
+//
+// Deliberately additive rather than `--json`-exclusive (SFEP-0014 §3.9):
+// it is a framed trailer, not the primary output document, and its whole
+// value is surviving a truncated tail — which requires it to be present in
+// human mode too, the mode an agent actually gets when a phase fails
+// noisily. Consumers read the LAST occurrence of the sentinel.
+fn verdict_emit(v: Verdict) -> void ![io] {
+    print("===SAILFIN-RESULT===");
+    print(verdict_json(v));
+    print("===END-SAILFIN-RESULT===");
+}
+
+// -------------------------------------------------------------------
+// Classification (SFEP-0014 §3.7)
+// -------------------------------------------------------------------
+//
+// Every class is read off the child's exit status. The two exit codes
+// worth stating explicitly:
+//
+//   124 — a deadline the caller owns. `_dv_run_bounded` remaps its own
+//         SIGKILL (137) to 124 before returning, exactly as
+//         `test/pool.sfn::_reap_test_child` does, so a timeout is never
+//         reported as an OOM.
+//   137 — therefore a SIGKILL the caller did NOT send: the 8 GiB
+//         `RLIMIT_AS` self-cap (or the host OOM killer). Classified `oom`.
+//
+// 134 (SIGABRT) is deliberately absent from the crash set: a clean
+// `assert` also aborts 134, so it stays a `test-failure`.
+//
+// `kind` is the phase's own nature ("build" or "test"), which is
+// structural — the caller dispatched the child — rather than inferred from
+// a target name or grepped out of a log.
+fn verdict_classify(rc: int, kind: string) -> string {
+    if rc == 0 { return ""; }
+    if rc == 2 { return "setup-error"; }
+    if rc == 124 { return "timeout"; }
+    if rc == 137 { return "oom"; }
+    if rc == 139 { return "crash"; }
+    if rc == 135 { return "crash"; }
+    if rc == 136 { return "crash"; }
+    if rc == 132 { return "crash"; }
+    // A spawn that never produced a process: `run_capture` reports -1,
+    // the handle API reports a 0 handle which `_dv_run_bounded` maps to
+    // 127. Neither is the tool disagreeing with you; both mean it never
+    // ran.
+    if rc < 0 { return "setup-error"; }
+    if rc == 127 { return "setup-error"; }
+    if strings_equal(kind, "test") { return "test-failure"; }
+    return "compile-error";
+}
+
+export {
+    VERDICT_SCHEMA,
+    Verdict,
+    verdict_classify,
+    verdict_emit,
+    verdict_fields,
+    verdict_json,
+    verdict_json_or_null,
+    verdict_json_quote
+};

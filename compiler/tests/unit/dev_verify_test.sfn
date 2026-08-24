@@ -13,66 +13,70 @@
 import { expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import {
-    _dv_classify,
     _dv_env_without,
-    _dv_json_or_null,
     _dv_last_line_containing,
     _dv_scrape_scalar,
     _dv_test_argv
 } from "../../src/cli/commands/dev_verify";
+import {
+    Verdict,
+    verdict_classify,
+    verdict_json,
+    verdict_json_or_null
+} from "../../src/cli/verdict";
 import { load_workspace_inventory } from "../../src/workspace_inventory";
 
 // --------------------------------------------------------------
-// _dv_classify — producer-emitted failure taxonomy
+// verdict_classify — producer-emitted failure taxonomy
 // --------------------------------------------------------------
 test "dev verify: a clean exit classifies as no failure" {
-    expect_eq_str(_dv_classify(0, "build"), "");
-    expect_eq_str(_dv_classify(0, "test"), "");
+    assert expect_eq_str(verdict_classify(0, "build"), "").ok;
+    assert expect_eq_str(verdict_classify(0, "test"), "").ok;
 }
 
 test "dev verify: exit 2 is a setup error in every phase kind" {
     // SFEP-0003 §3.3 point 6: `2` means the tool never ran.
-    expect_eq_str(_dv_classify(2, "build"), "setup-error");
-    expect_eq_str(_dv_classify(2, "test"), "setup-error");
+    assert expect_eq_str(verdict_classify(2, "build"), "setup-error").ok;
+    assert expect_eq_str(verdict_classify(2, "test"), "setup-error").ok;
 }
 
 test "dev verify: a supervisor deadline classifies as timeout, not oom" {
     // `_dv_run_bounded` remaps its own SIGKILL (137) to 124 before this
     // ever sees it, so 124 is unambiguously OUR deadline.
-    expect_eq_str(_dv_classify(124, "build"), "timeout");
-    expect_eq_str(_dv_classify(124, "test"), "timeout");
+    assert expect_eq_str(verdict_classify(124, "build"), "timeout").ok;
+    assert expect_eq_str(verdict_classify(124, "test"), "timeout").ok;
 }
 
 test "dev verify: an unsolicited SIGKILL classifies as oom" {
     // 137 that reaches the classifier was not sent by this supervisor —
     // it is the 8 GiB RLIMIT_AS self-cap or the host OOM killer.
-    expect_eq_str(_dv_classify(137, "build"), "oom");
-    expect_eq_str(_dv_classify(137, "test"), "oom");
+    assert expect_eq_str(verdict_classify(137, "build"), "oom").ok;
+    assert expect_eq_str(verdict_classify(137, "test"), "oom").ok;
 }
 
 test "dev verify: fatal signals classify as crash" {
-    expect_eq_str(_dv_classify(139, "test"), "crash");
-    expect_eq_str(_dv_classify(135, "test"), "crash");
-    expect_eq_str(_dv_classify(136, "test"), "crash");
-    expect_eq_str(_dv_classify(132, "test"), "crash");
+    assert expect_eq_str(verdict_classify(139, "test"), "crash").ok;
+    assert expect_eq_str(verdict_classify(135, "test"), "crash").ok;
+    assert expect_eq_str(verdict_classify(136, "test"), "crash").ok;
+    assert expect_eq_str(verdict_classify(132, "test"), "crash").ok;
 }
 
 test "dev verify: SIGABRT is a test failure, never a crash" {
     // A clean `assert` aborts 134. Classifying it as a crash would send an
     // agent chasing a fault that does not exist.
-    expect_eq_str(_dv_classify(134, "test"), "test-failure");
+    assert expect_eq_str(verdict_classify(134, "test"), "test-failure").ok;
 }
 
 test "dev verify: a plain non-zero exit splits by phase kind" {
-    expect_eq_str(_dv_classify(1, "build"), "compile-error");
-    expect_eq_str(_dv_classify(1, "test"), "test-failure");
+    assert expect_eq_str(verdict_classify(1, "build"), "compile-error").ok;
+    assert expect_eq_str(verdict_classify(1, "test"), "test-failure").ok;
 }
 
 test "dev verify: a failed spawn is a setup error, not a phase failure" {
     // `run_capture` reports -1 and the handle path reports 127 when no
     // process was ever created. Neither is the tool disagreeing with you.
-    expect_eq_str(_dv_classify(0 - 1, "build"), "setup-error");
-    expect_eq_str(_dv_classify(127, "test"), "setup-error");
+    assert expect_eq_str(verdict_classify(0 - 1, "build"), "setup-error").ok;
+    assert expect_eq_str(verdict_classify(127, "test"), "setup-error").ok;
 }
 
 // --------------------------------------------------------------
@@ -95,41 +99,41 @@ fn _selfhost_envelope_fixture(failed: string, checked: string, fp: string) -> st
 
 test "dev verify: scrapes a quoted string scalar" {
     let env = _selfhost_envelope_fixture("\"stage3\"", "false", "false");
-    expect_eq_str(_dv_scrape_scalar(env, "failed_phase"), "stage3");
-    expect_eq_str(_dv_scrape_scalar(env, "command"), "selfhost");
-    expect_eq_str(_dv_scrape_scalar(env, "schema_version"), "sailfin-selfhost/1");
+    assert expect_eq_str(_dv_scrape_scalar(env, "failed_phase"), "stage3").ok;
+    assert expect_eq_str(_dv_scrape_scalar(env, "command"), "selfhost").ok;
+    assert expect_eq_str(_dv_scrape_scalar(env, "schema_version"), "sailfin-selfhost/1").ok;
 }
 
 test "dev verify: scrapes bare literals without consuming the separator" {
     let env = _selfhost_envelope_fixture("null", "true", "false");
-    expect_eq_str(_dv_scrape_scalar(env, "failed_phase"), "null");
-    expect_eq_str(_dv_scrape_scalar(env, "fixed_point_checked"), "true");
-    expect_eq_str(_dv_scrape_scalar(env, "fixed_point"), "false");
-    expect_eq_str(_dv_scrape_scalar(env, "binary_match"), "true");
-    expect_eq_str(_dv_scrape_scalar(env, "exit_code"), "0");
+    assert expect_eq_str(_dv_scrape_scalar(env, "failed_phase"), "null").ok;
+    assert expect_eq_str(_dv_scrape_scalar(env, "fixed_point_checked"), "true").ok;
+    assert expect_eq_str(_dv_scrape_scalar(env, "fixed_point"), "false").ok;
+    assert expect_eq_str(_dv_scrape_scalar(env, "binary_match"), "true").ok;
+    assert expect_eq_str(_dv_scrape_scalar(env, "exit_code"), "0").ok;
 }
 
 test "dev verify: an absent key scrapes as empty, not as false" {
     // The distinction is load-bearing: `fixed_point` absent means the run
     // never reached the diff, which must NOT read as a mismatch.
     let env = _selfhost_envelope_fixture("\"stage2\"", "false", "false");
-    expect_eq_str(_dv_scrape_scalar(env, "no_such_key"), "");
-    expect_eq_str(_dv_scrape_scalar("", "fixed_point"), "");
+    assert expect_eq_str(_dv_scrape_scalar(env, "no_such_key"), "").ok;
+    assert expect_eq_str(_dv_scrape_scalar("", "fixed_point"), "").ok;
 }
 
 test "dev verify: the nondeterminism predicate needs a completed diff" {
     // status:"warn" / failure:"nondeterminism" fires only when the diff
     // RAN and disagreed — `checked && !fixed_point`.
     let mismatch = _selfhost_envelope_fixture("\"fixed-point\"", "true", "false");
-    expect_eq_str(_dv_scrape_scalar(mismatch, "fixed_point_checked"), "true");
-    expect_eq_str(_dv_scrape_scalar(mismatch, "fixed_point"), "false");
+    assert expect_eq_str(_dv_scrape_scalar(mismatch, "fixed_point_checked"), "true").ok;
+    assert expect_eq_str(_dv_scrape_scalar(mismatch, "fixed_point"), "false").ok;
 
     // An early exit (stage2 died) never reached the diff: same
     // `fixed_point:false`, but `checked` is false, so it must classify as
     // the stage failure it is rather than as nondeterminism.
     let early = _selfhost_envelope_fixture("\"stage2\"", "false", "false");
-    expect_eq_str(_dv_scrape_scalar(early, "fixed_point_checked"), "false");
-    expect_eq_str(_dv_scrape_scalar(early, "failed_phase"), "stage2");
+    assert expect_eq_str(_dv_scrape_scalar(early, "fixed_point_checked"), "false").ok;
+    assert expect_eq_str(_dv_scrape_scalar(early, "failed_phase"), "stage2").ok;
 }
 
 // --------------------------------------------------------------
@@ -141,46 +145,46 @@ test "dev verify: picks the last matching line out of noisy output" {
         + "note: retried\n"
         + "{\"schema_version\":\"sailfin-selfhost/1\",\"failed_phase\":\"stage3\"}\n";
     let line = _dv_last_line_containing(text, "\"schema_version\":\"sailfin-selfhost/1\"");
-    expect_eq_str(_dv_scrape_scalar(line, "failed_phase"), "stage3");
+    assert expect_eq_str(_dv_scrape_scalar(line, "failed_phase"), "stage3").ok;
 }
 
 test "dev verify: finds a match on an unterminated final line" {
     let text = "banner\n{\"schema_version\":\"sailfin-selfhost/1\",\"failed_phase\":\"stage2\"}";
     let line = _dv_last_line_containing(text, "sailfin-selfhost/1");
-    expect_eq_str(_dv_scrape_scalar(line, "failed_phase"), "stage2");
+    assert expect_eq_str(_dv_scrape_scalar(line, "failed_phase"), "stage2").ok;
 }
 
 test "dev verify: no match yields empty" {
-    expect_eq_str(_dv_last_line_containing("a\nb\nc\n", "sailfin-selfhost/1"), "");
-    expect_eq_str(_dv_last_line_containing("", "sailfin-selfhost/1"), "");
+    assert expect_eq_str(_dv_last_line_containing("a\nb\nc\n", "sailfin-selfhost/1"), "").ok;
+    assert expect_eq_str(_dv_last_line_containing("", "sailfin-selfhost/1"), "").ok;
 }
 
 // --------------------------------------------------------------
-// _dv_json_or_null — the "" null sentinel
+// verdict_json_or_null — the "" null sentinel
 // --------------------------------------------------------------
 test "dev verify: empty strings render as JSON null" {
-    expect_eq_str(_dv_json_or_null(""), "null");
-    expect_eq_str(_dv_json_or_null("compile"), "\"compile\"");
+    assert expect_eq_str(verdict_json_or_null(""), "null").ok;
+    assert expect_eq_str(verdict_json_or_null("compile"), "\"compile\"").ok;
 }
 
 // --------------------------------------------------------------
 // _dv_env_without — child-env scrubbing
 // --------------------------------------------------------------
 test "dev verify: drops an exact key without touching prefixed siblings" {
-    let src: string[] = ["PATH=/usr/bin", "SAILFIN_INNER=1", "SAILFIN_INNERMOST=keep", "HOME=/root"];
-    expect_eq_str_array(_dv_env_without(src, "SAILFIN_INNER"), ["PATH=/usr/bin", "SAILFIN_INNERMOST=keep", "HOME=/root"]);
+    let src: string[] = ["PATH=/usr/bin", "SAILFIN_TEST_TIMEOUT=1", "SAILFIN_TEST_TIMEOUTX=keep", "HOME=/root"];
+    assert expect_eq_str_array(_dv_env_without(src, "SAILFIN_TEST_TIMEOUT"), ["PATH=/usr/bin", "SAILFIN_TEST_TIMEOUTX=keep", "HOME=/root"]).ok;
 }
 
 test "dev verify: scrubbing an absent key is a no-op" {
     let src: string[] = ["PATH=/usr/bin"];
-    expect_eq_str_array(_dv_env_without(src, "SAILFIN_TEST_TIMEOUT"), ["PATH=/usr/bin"]);
+    assert expect_eq_str_array(_dv_env_without(src, "SAILFIN_TEST_TIMEOUT"), ["PATH=/usr/bin"]).ok;
 }
 
 // --------------------------------------------------------------
 // _dv_test_argv — the cold-backstop invariant
 // --------------------------------------------------------------
 test "dev verify: full-suite phases always run cold" ![io] {
-    // Both full-suite phases exist as COLD backstops (`check-impl`
+    // Both full-suite phases exist as COLD backstops (`make check`
     // hard-codes `TEST_BIN_CACHE_FLAGS=--no-test-cache`), so a warm
     // per-test binary cache would defeat the point of running them.
     let inventory = load_workspace_inventory(".");
@@ -192,7 +196,7 @@ test "dev verify: full-suite phases always run cold" ![io] {
         i += 1;
     }
     expected.push("--no-test-cache");
-    expect_eq_str_array(_dv_test_argv("build/bin/sfn-seedcheck", 0, false), expected);
+    assert expect_eq_str_array(_dv_test_argv("build/bin/sfn-seedcheck", 0, false), expected).ok;
 }
 
 test "dev verify: an explicit --jobs threads into the suite argv" ![io] {
@@ -208,5 +212,42 @@ test "dev verify: an explicit --jobs threads into the suite argv" ![io] {
     expected.push("--jobs");
     expected.push("4");
     expected.push("--json");
-    expect_eq_str_array(_dv_test_argv("build/bin/sfn", 4, true), expected);
+    assert expect_eq_str_array(_dv_test_argv("build/bin/sfn", 4, true), expected).ok;
+}
+
+// --------------------------------------------------------------
+// verdict_json — the wire shape itself
+// --------------------------------------------------------------
+//
+// Field-at-a-time probes are order- and comma-insensitive, so they would
+// pass through a reordering, a doubled separator, or a field dropped
+// between two others. This pins the rendered line verbatim, which is what
+// makes `docs/reference/run-result-schema.md`'s normative field order
+// enforceable rather than advisory. It is also the single assertion that
+// proves the trailer and the report file cannot carry two different
+// schema literals, since both compose from `verdict_fields`.
+test "dev verify: a fully populated verdict renders the documented field order" {
+    let v = Verdict {
+        host: "sfn dev verify",
+        target: "verify",
+        status: "fail",
+        failure: "test-failure",
+        phase: "tests-seedcheck",
+        first_error: "tests-seedcheck",
+        report: "build/agent-report.verify.json"
+    };
+    assert expect_eq_str(verdict_json(v), "{\"schema_version\":\"sailfin-run/2\",\"host\":\"sfn dev verify\",\"target\":\"verify\",\"status\":\"fail\",\"failure\":\"test-failure\",\"phase\":\"tests-seedcheck\",\"first_error\":\"tests-seedcheck\",\"report\":\"build/agent-report.verify.json\"}").ok;
+}
+
+test "dev verify: a clean verdict renders its nullable fields as JSON null" {
+    let v = Verdict {
+        host: "sfn dev verify",
+        target: "verify",
+        status: "pass",
+        failure: "",
+        phase: "",
+        first_error: "",
+        report: "build/agent-report.verify.json"
+    };
+    assert expect_eq_str(verdict_json(v), "{\"schema_version\":\"sailfin-run/2\",\"host\":\"sfn dev verify\",\"target\":\"verify\",\"status\":\"pass\",\"failure\":null,\"phase\":null,\"first_error\":null,\"report\":\"build/agent-report.verify.json\"}").ok;
 }
