@@ -44,6 +44,8 @@ import { contains, split } from "sfn/strings";
 import {
     clean_runner_env,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_abs_path,
     sfn_bin_path,
     tool_present
@@ -73,7 +75,8 @@ fn _child_env() -> string[] ![io] {
 fn _tar_list_verbose(tarball: string) -> string ![io] {
     let exit = process.run_capture(["tar", "-tvzf", tarball], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package-exe-suffix tar-list", exit, out, err);
     if exit != 0 { return ""; }
     return out;
 }
@@ -120,12 +123,10 @@ fn _nonexec_compiler_bin(root: string, src: string) -> string ![io] {
     fs.createDirectory(root + "/cbin", true);
     let bin = root + "/cbin/sfn";
     let cp_exit = process.run_capture(["cp", src, bin], _child_env());
-    let _co = process.capture_take_stdout();
-    let _ce = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix cp", cp_exit);
     if cp_exit != 0 { return ""; }
     let chmod_exit = process.run_capture(["chmod", "644", bin], _child_env());
-    let _mo = process.capture_take_stdout();
-    let _me = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix chmod", chmod_exit);
     if chmod_exit != 0 { return ""; }
     return bin;
 }
@@ -160,8 +161,7 @@ test "sfn package (compiler mode): windows target stages .exe members with exec 
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix compiler-win build", exit);
     assert exit == 0;
 
     let tarball = _find_tarball(dist, "sailfin-native-windows-x86_64-");
@@ -195,8 +195,7 @@ test "sfn package (compiler mode): linux target keeps today's suffixless members
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix compiler-linux build", exit);
     assert exit == 0;
 
     let tarball = _find_tarball(dist, "sailfin-native-linux-x86_64-");
@@ -228,8 +227,7 @@ test "sfn package --installer: windows target stages .exe members with exec bit"
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix installer-win build", exit);
     assert exit == 0;
 
     let tarball = _find_tarball(dist, "installer-windows-x86_64");
@@ -260,8 +258,7 @@ test "sfn package --installer: linux target keeps today's suffixless members" ![
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix installer-linux build", exit);
     assert exit == 0;
 
     let tarball = _find_tarball(dist, "installer-linux-x86_64");

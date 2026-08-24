@@ -27,7 +27,13 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test (`.claude/rules/no-bash-e2e.md`).
 import { contains, ends_with } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    report_child_failure_pending,
+    sfn_bin_path
+} from "sfn/test";
 
 // Recursively collect every leaf path under `dir`, bounding recursion so a
 // pathological or cyclic tree cannot run away. `fs.listDirectory` has no
@@ -102,17 +108,17 @@ fn _build_in_scratch(label: string, src: string, extra_env: string[]) -> _BuildR
     }
     let out_bin = scratch + "/bin/prog";
     let exit = process.run_capture_cwd([sfn_bin_path(), "build", "-o", out_bin, src], runner_env, scratch);
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("runtime-demand-driven-sources build " + label, exit);
     return _BuildRun { exit: exit, scratch: scratch };
 }
 
 fn _run_binary(scratch: string) -> string ![io] {
     let bin = scratch + "/bin/prog";
     let run_env = clean_runner_env(scratch);
-    let _exit = process.run_capture(["" + bin], run_env);
+    let exit = process.run_capture(["" + bin], run_env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("runtime-demand-driven-sources run", exit, out, err);
     return out + err;
 }
 
@@ -267,8 +273,7 @@ test "runtime gates: manifest [capabilities] required opens the gate" ![io] {
     fs.createDirectory(scratch + "/bin", true);
     let runner_env = clean_runner_env(scratch);
     let exit = process.run_capture_cwd([sfn_bin_path(), "build", "-p", proj, "-o", out_bin], runner_env, scratch);
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("runtime-demand-driven-sources build manifest-capabilities", exit);
     assert exit == 0;
 
     let leaves = _collect_leaves(scratch, [], 0);

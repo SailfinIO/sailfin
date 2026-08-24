@@ -13,7 +13,13 @@
 //   2. exec of a nonexistent path: the image is NOT replaced, so
 //      `process.exec` returns and the fixture's fallback path runs.
 import { find } from "sfn/strings";
-import { clean_runner_env, scratch_root, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    report_child_failure,
+    report_child_failure_pending,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
 
 // Child env for the nested `sfn build` and the built binary: derived by
 // subtraction from the real environment rather than a hand-rolled allowlist
@@ -26,8 +32,7 @@ fn _child_env() -> string[] ![io] {
 // exit code. Threads the child env so the nested clang/link finds its tools.
 fn _build_fixture(src: string, binpath: string) -> int ![io] {
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, src], _child_env());
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("process-exec build " + src, exit);
     return exit;
 }
 
@@ -52,6 +57,7 @@ test "process.exec: replaces the image with /bin/echo" ![io] {
     let run_exit = process.run_capture([bin], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("process-exec run echo-ok", run_exit, out, err);
     // Image was replaced by echo: its exit code (0) is observed, its stdout
     // carries the marker, and the fixture's post-exec fallback never ran.
     assert run_exit == 0;

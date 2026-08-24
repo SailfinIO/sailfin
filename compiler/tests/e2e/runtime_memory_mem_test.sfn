@@ -33,6 +33,8 @@ import {
 import {
     clean_runner_env,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     run_external_c_oracle,
     sfn_bin_path
 } from "sfn/test";
@@ -59,8 +61,7 @@ fn _emit_module(tag: string, module_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let outpath = dir + "/" + tag + ".ll";
     let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-mem emit " + tag, exit);
     if exit != 0 { return "EMIT_FAILED"; }
     return fs.readFile(outpath);
 }
@@ -115,14 +116,14 @@ test "runtime/sfn/memory/mem.sfn typechecks cleanly" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "check", "runtime/sfn/memory/mem.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("runtime-memory-mem check", exit, out, err);
     assert exit == 0;
     assert find(out + err, "ok", 0) >= 0;
 }
 
 test "runtime/sfn/memory/mem.sfn is fmt-canonical" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", "runtime/sfn/memory/mem.sfn"], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-mem fmt", exit);
     assert exit == 0;
 }
 
@@ -231,8 +232,7 @@ test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io
     let dir = _scratch_dir();
     let ll = dir + "/mem.ll";
     let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", "runtime/sfn/memory/mem.sfn"], _child_env());
-    let _eo = process.capture_take_stdout();
-    let _ee = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-mem roundtrip emit", emit_exit);
     assert emit_exit == 0;
 
     let harness = dir + "/harness.c";
@@ -247,7 +247,6 @@ test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io
     assert link_exit == 0;
 
     let run_exit = process.run_capture([bin], _child_env());
-    let _ro = process.capture_take_stdout();
-    let _re = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-mem roundtrip run", run_exit);
     assert run_exit == 0;
 }

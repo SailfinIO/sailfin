@@ -23,7 +23,7 @@
 //   5. `off` (and `--skip-toolchain-check`) skips the gate and proceeds.
 //   6. an explicit `<version>` knob forces that version as the target.
 import { contains } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
 
 import { toolchain_current_host } from "../../src/toolchain/host";
 import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
@@ -106,6 +106,7 @@ test "toolchain dispatch: auto re-execs a complete pre-seeded store entry" ![io]
         + store]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch auto run", exit, out, err);
     // The stub echoed its marker and exited 0 — the image was replaced.
     assert contains(out + err, _marker());
     assert exit == 0;
@@ -181,6 +182,7 @@ test "toolchain dispatch: off skips the gate and proceeds" ![io] {
         + store, "SAILFIN_TOOLCHAIN=off"]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch off run", exit, out, err);
     assert contains(out + err, "proceeding");
     assert ! contains(out + err, _marker());
     // The real check ran against a trivially valid source.
@@ -201,6 +203,7 @@ test "toolchain dispatch: an explicit version forces that dispatch target" ![io]
         + store, "SAILFIN_TOOLCHAIN=888.0.0"]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch forced run", exit, out, err);
     assert contains(out + err, forced_marker);
     assert exit == 0;
 }
@@ -219,6 +222,7 @@ test "toolchain dispatch: qualified entry wins over the legacy fallback" ![io] {
         + store]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch qualified-wins run", exit, out, err);
     assert exit == 0;
     assert contains(out + err, qualified_marker);
     assert ! contains(out + err, legacy_marker);
@@ -239,6 +243,7 @@ test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
         + store]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch legacy-fallback run", exit, out, err);
     assert exit == 0;
     assert contains(out + err, legacy_marker);
     assert contains(err, "warning: dispatching unverified legacy toolchain 999.0.0");

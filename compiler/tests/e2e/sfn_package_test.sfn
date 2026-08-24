@@ -24,6 +24,8 @@ import {
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_abs_path,
     sfn_bin_path,
     tool_present
@@ -70,7 +72,8 @@ fn _first_line(text: string) -> string {
 fn _jq(field: string, file: string) -> string ![io] {
     let exit = process.run_capture(["jq", "-r", "." + field, file], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package jq " + field, exit, out, err);
     if exit != 0 { return ""; }
     return _first_line(out);
 }
@@ -79,7 +82,8 @@ fn _jq(field: string, file: string) -> string ![io] {
 fn _tar_list(tarball: string) -> string ![io] {
     let exit = process.run_capture(["tar", "-tzf", tarball], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package tar-list", exit, out, err);
     if exit != 0 { return ""; }
     return out;
 }
@@ -126,7 +130,8 @@ fn _listing_suffix_count(listing: string, suffix: string) -> int {
 fn _sha256_hex(file: string) -> string ![io] {
     let exit = process.run_capture(["sha256sum", file], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package sha256sum", exit, out, err);
     if exit != 0 { return ""; }
     let line = _first_line(out);
     let parts = split(line, " ");
@@ -218,8 +223,7 @@ test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
 
     // Run from repo root (the runner's cwd) so workspace.toml is found.
     let exit = process.run_capture([sfn_bin_path(), "package", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package compiler-mode build", exit);
     assert exit == 0;
 
     // Discover tarball `sailfin-native-*-<version>.tar.gz`.
@@ -306,8 +310,7 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
     let link_exit = process.run_capture(["ln", "-sfn", repo_root
         + "/stdlib/math", widget
         + "/capsules/sfn/math"], _child_env());
-    let _lo = process.capture_take_stdout();
-    let _le = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package widget symlink", link_exit);
     assert link_exit == 0;
     let isolated_home = root + "/home";
     fs.createDirectory(isolated_home, true);
@@ -325,8 +328,7 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
         + "\" && \""
         + sfn_abs
         + "\" build -p ."], _child_env_with_home(isolated_home));
-    let _bo = process.capture_take_stdout();
-    let _be = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package widget build", build_exit);
     assert build_exit == 0;
 
     let userdist = root + "/dist-widget";
@@ -336,8 +338,7 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
         + "\" package -p . --out \""
         + userdist
         + "\""], _child_env_with_home(isolated_home));
-    let _po = process.capture_take_stdout();
-    let _pe = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package widget package", pkg_exit);
     assert pkg_exit == 0;
 
     let tarball = _find_tarball(userdist, "demo-widget-");
@@ -363,7 +364,8 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
 fn _first_line_pwd() -> string ![io] {
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package pwd", exit, out, err);
     if exit != 0 { return "."; }
     return _first_line(out);
 }
@@ -388,8 +390,7 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     assert version.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--out", inst, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package installer build", exit);
     assert exit == 0;
 
     // Tarball `installer-*.tar.gz` (NO version in the stem).
@@ -437,8 +438,7 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     // part of the installed payload.
     let inst_again = root + "/dist-installer-again";
     let repeat = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", _jq("target", manifest), "--out", inst_again, "--compiler-bin", bin], _child_env());
-    let _repeat_out = process.capture_take_stdout();
-    let _repeat_err = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package installer repeat", repeat);
     assert repeat == 0;
     let repeated_tarball = _find_tarball(inst_again, "installer-");
     assert repeated_tarball.length > 0;

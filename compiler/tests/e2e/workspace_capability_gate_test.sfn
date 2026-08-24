@@ -21,6 +21,8 @@ import {
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_abs_path,
     sfn_bin_path,
     with_tmp_dir
@@ -129,8 +131,10 @@ test "capability gate: mode = warn reports drift without failing sfn check" ![io
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, true);
         let rc = process.run_capture([sfn_bin_path(), "check", dir], []);
-        let _out = process.capture_take_stdout();
-        fs.writeFile(err_marker, process.capture_take_stderr());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        report_child_failure("workspace-capability-gate warn check", rc, out, err);
+        fs.writeFile(err_marker, err);
         return rc;
     });
     assert exit == 0;
@@ -150,8 +154,10 @@ test "capabilities audit: mode = warn reports drift and exits zero" ![io] {
         let rc = process.run_capture(["bash", "-c", "cd \"" + dir + "\" && \""
             + sfn_abs
             + "\" capabilities audit"], _child_env());
-        fs.writeFile(out_marker, process.capture_take_stdout());
-        let _e = process.capture_take_stderr();
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        report_child_failure("workspace-capability-gate warn audit", rc, out, err);
+        fs.writeFile(out_marker, out);
         return rc;
     });
     assert exit == 0;
@@ -174,15 +180,16 @@ test "capability gate: no [workspace.capabilities] is a no-op" ![io] {
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws_bare(dir);
         let check_rc = process.run_capture([sfn_bin_path(), "check", dir], []);
-        let _co = process.capture_take_stdout();
-        let _ce = process.capture_take_stderr();
+        report_child_failure_pending("workspace-capability-gate bare check", check_rc);
         fs.writeFile(check_marker, _rc_marker(check_rc));
         let audit_rc = process.run_capture(["bash", "-c", "cd \"" + dir
             + "\" && \""
             + sfn_abs
             + "\" capabilities audit"], _child_env());
-        fs.writeFile(audit_out_marker, process.capture_take_stdout());
-        let _ae = process.capture_take_stderr();
+        let audit_out = process.capture_take_stdout();
+        let audit_err = process.capture_take_stderr();
+        report_child_failure("workspace-capability-gate bare audit", audit_rc, audit_out, audit_err);
+        fs.writeFile(audit_out_marker, audit_out);
         fs.writeFile(audit_code_marker, _rc_marker(audit_rc));
         return 0;
     });
@@ -319,7 +326,8 @@ fn _implicit_override_env() -> string[] ![io] {
     let mut child = clean_runner_env_without("", ["SAILFIN_RUNTIME_ROOT"]);
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("workspace-capability-gate pwd", exit, out, err);
     if exit == 0 {
         child.push("SAILFIN_RUNTIME_ROOT=" + _first_line(out) + "/runtime");
     }
@@ -332,8 +340,7 @@ test "capability gate: explicit implicit-provider override obeys workspace grant
         if compiler.length == 0 { return 97; }
         let entry = _make_implicit_override_ws(root + "/consumer", true, false);
         let exit = process.run_capture([compiler, "run", entry], _implicit_override_env());
-        let _out = process.capture_take_stdout();
-        let _err = process.capture_take_stderr();
+        report_child_failure_pending("workspace-capability-gate override-grant run", exit);
         return exit;
     });
     assert result == 0;

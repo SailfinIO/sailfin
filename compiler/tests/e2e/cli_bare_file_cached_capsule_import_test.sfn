@@ -25,7 +25,13 @@
 // `workspace.toml` ancestor is discoverable and the cache path (not the
 // workspace-implicit path) is the one under test.
 import { find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
+import {
+    default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 // Child environment for the spawned `sfn build`, with `HOME` overridden
 // to the throwaway cache root. Start from the parent snapshot (PATH plus
@@ -91,13 +97,13 @@ fn _build_and_run(out_marker: string) -> int ![io] {
 
         let binpath = dir + "/main";
         let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env_with_home(dir));
-        let _bo = process.capture_take_stdout();
-        let _be = process.capture_take_stderr();
+        report_child_failure_pending("cli-bare-file-cached-capsule-import build", build_exit);
         if build_exit != 0 { return -100; }
 
         let run_exit = process.run_capture([binpath], []);
         let out = process.capture_take_stdout();
-        let _re = process.capture_take_stderr();
+        let err = process.capture_take_stderr();
+        report_child_failure("cli-bare-file-cached-capsule-import run", run_exit, out, err);
         fs.writeFile(out_marker, out);
         return run_exit;
     });

@@ -39,6 +39,8 @@
 import { contains } from "sfn/strings";
 import {
     clean_runner_env_without,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_path,
     skip,
     symbol_reader
@@ -219,7 +221,8 @@ fn _nm_has_defined(obj: string, sym: string) -> boolean ![io] {
     let no_extra: string[] = [];
     let exit = process.run_capture([reader, obj], _child_env_with("", no_extra));
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("runtime-sfn-sources-link-consumer nm " + sym, exit, out, err);
     if exit != 0 { return false; }
     return contains(out, " " + sym) || contains(out, "_" + sym);
 }
@@ -234,8 +237,7 @@ test "runtime sfn-source consumer fires and produces a cached .o/.ll (#308)" ![i
     let no_extra: string[] = [];
     let exit = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-sfn-sources-link-consumer build positive", exit);
     assert exit == 0;
 
     // `_compile_runtime_sfn_sources` materialized the content-keyed
@@ -309,8 +311,7 @@ test "source edit busts the runtime sfn-source object cache (#969)" ![io] {
     let no_extra: string[] = [];
     let exit1 = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
-    let _o1 = process.capture_take_stdout();
-    let _e1 = process.capture_take_stderr();
+    report_child_failure_pending("runtime-sfn-sources-link-consumer build cachebust-1", exit1);
     assert exit1 == 0;
     assert fs.exists(marker_o);
 
@@ -325,8 +326,7 @@ test "source edit busts the runtime sfn-source object cache (#969)" ![io] {
 
     let exit2 = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
-    let _o2 = process.capture_take_stdout();
-    let _e2 = process.capture_take_stderr();
+    report_child_failure_pending("runtime-sfn-sources-link-consumer build cachebust-2", exit2);
     assert exit2 == 0;
 
     // With the old existence-only cache the .o would be stale and this

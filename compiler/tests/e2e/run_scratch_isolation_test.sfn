@@ -13,7 +13,7 @@
 // regression reverts the fix, `<scratch>/run` is never written and the
 // fixed `build/sailfin/run` collision path returns.
 import { find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
 
 // Child env = the full parent environment (PATH/HOME/TMPDIR + macOS
 // toolchain vars the nested clang/linker need), but with
@@ -46,7 +46,8 @@ test "run: executable is routed under SAILFIN_TEST_SCRATCH, not build/sailfin" !
 
     let exit = process.run_capture([sfn_bin_path(), "run", "examples/advanced/lambda-closure.sfn"], _child_env(scratch));
     let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("run-scratch-isolation run", exit, out, err);
 
     // The fixture compiled, linked, and ran correctly...
     assert exit == 0;

@@ -28,6 +28,7 @@ import {
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    report_child_failure,
     sfn_bin_path,
     wait_until,
     with_background
@@ -127,7 +128,8 @@ fn _abs_sfn_bin() -> string ![io] {
     if substring(bin, 0, 1) == "/" { return bin; }
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("publish pwd", exit, out, err);
     // Fail here rather than returning a bogus path: a failed or empty `pwd`
     // would otherwise make the cwd test fail inside the shell, for a reason
     // that has nothing to do with the gate under test.

@@ -38,7 +38,13 @@
 // `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
-import { clean_runner_env_without, scratch_root, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env_without,
+    report_child_failure,
+    report_child_failure_pending,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
 
 import { build_target_triple, target_artifact_tag } from "../../src/build/target";
 
@@ -181,6 +187,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let log = out + err;
+    report_child_failure("runtime-sfn-sources-struct-import build positive", exit, out, err);
 
     // The pre-#1288 lowering fatal must not appear, and the build must
     // exit 0 (the authoritative signal).
@@ -225,8 +232,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     let use_ll = build_dir + "/sailfin/structuse-reemit.ll";
     let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", use_ll, "--import-context", ctx, "llvm", ws
         + "/runtime/sfn/structuse.sfn"], _child_env_with(no_extra));
-    let _eo = process.capture_take_stdout();
-    let _ee = process.capture_take_stderr();
+    report_child_failure_pending("runtime-sfn-sources-struct-import emit reemit", emit_exit);
     assert emit_exit == 0;
     let ir = fs.readFile(use_ll);
     // `call %Pair @pair_new` or `call %Pair* @pair_new` (sret form).
@@ -237,6 +243,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     let run_exit = process.run_capture([bin], _child_env_with(no_extra));
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();
+    report_child_failure("runtime-sfn-sources-struct-import run", run_exit, run_out, run_err);
     assert run_exit == 0;
     assert find(run_out + run_err, "struct-roundtrip-ok", 0) >= 0;
 }

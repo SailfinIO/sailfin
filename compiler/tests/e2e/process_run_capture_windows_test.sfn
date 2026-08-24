@@ -19,7 +19,7 @@
 // unusable from an `![io]` test (#842); assert on captured output with
 // `sfn/strings::find` / `.length` instead.
 import { find } from "sfn/strings";
-import { clean_runner_env, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, report_child_failure, sfn_bin_path } from "sfn/test";
 
 // True when the test runner is a Windows binary (the only platform whose
 // `run_capture` comes from `process_windows.sfn`).
@@ -68,6 +68,7 @@ test "run_capture (windows): captures a child's stdout sentinel + exit code" ![i
         let exit = process.run_capture([sfn_bin_path(), "guillermo"], _child_env());
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
+        report_child_failure("process-run-capture-windows run sentinel", exit, out, err);
         // The mascot greeting is the sentinel; it may land on stdout or
         // stderr. Capture must surface it and the command's 0 exit code.
         assert exit == 0;
@@ -86,7 +87,8 @@ test "run_capture (windows): drains > 64KiB child output without deadlock" ![io]
         fs.writeFile(src, _big_source());
         let exit = process.run_capture([sfn_bin_path(), "emit", "llvm", src], _child_env());
         let out = process.capture_take_stdout();
-        let _err = process.capture_take_stderr();
+        let err = process.capture_take_stderr();
+        report_child_failure("process-run-capture-windows run big-output", exit, out, err);
         if fs.exists(src) { fs.deleteFile(src); }
         // A deadlocked drain would hang (test timeout) or truncate; a
         // successful drain returns the full IR (well over the 64 KiB pipe
