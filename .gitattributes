@@ -94,11 +94,17 @@ install.sh linguist-vendored
 # Group 2 — key and digest material, where a translated byte is not a
 # cosmetic difference but a verification failure. `bootstrap.toml [verify]`
 # runs `signed-sha256sums` over `SHA256SUMS` + `SHA256SUMS.sig`, and the
-# release-signing public keys are read as bytes. An Ed25519 signature is 64
-# raw bytes that may contain 0x0D, so it takes `-text` (no translation in
-# either direction) rather than `eol=lf`; the rest are text formats that
-# simply must stay LF.
-*.sig -text
+# release-signing public keys are read as bytes.
+#
+# Every one of these is a TEXT encoding here, verified rather than assumed:
+# the `.sig` fixtures are 128 hex characters plus a line ending (129 bytes in
+# the index, 130 in a CRLF working tree), not the 64 raw bytes a detached
+# Ed25519 signature is often stored as. So `eol=lf` is both correct and
+# preferable to `-text`: it stops the checkout conversion AND normalizes on
+# the way in, whereas `-text` would let a CRLF `.sig` committed from a
+# Windows host survive into the index. A raw-binary signature added later
+# would need `-text` instead.
+*.sig text eol=lf
 *.pem text eol=lf
 *.hex text eol=lf
 SHA256SUMS text eol=lf
