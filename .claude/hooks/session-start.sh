@@ -44,6 +44,17 @@ SEED_BIN_DIR="$(_manifest store bin_dir)"
 SEED_INSTALL_BASE="${SEED_INSTALL_BASE:-build/toolchains/seed/versions}"
 SEED_BIN_DIR="${SEED_BIN_DIR:-build/toolchains/seed/bin}"
 
+# macOS ships neither `timeout` nor coreutils; Homebrew spells it `gtimeout`
+# (docs/conventions/e2e-tests.md). Resolve once and run unbounded when neither
+# exists — an unbounded probe is far better than treating a missing `timeout`
+# as a failed one, which would report a healthy seed as broken on every macOS
+# session.
+TIMEOUT_BIN="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
+_bounded() {
+  local secs="$1"; shift
+  if [[ -n "$TIMEOUT_BIN" ]]; then "$TIMEOUT_BIN" "$secs" "$@"; else "$@"; fi
+}
+
 # Any `sfn` that can drive the native bootstrap: a self-hosted build first, then
 # the repo-local seed, then whatever is on PATH.
 _any_sfn() {
@@ -53,11 +64,19 @@ _any_sfn() {
     # SFN-1118: a binary that cannot report its own version cannot drive the
     # bootstrap either. Skipping it lets a working candidate further down the
     # list win instead of failing the whole native path on the first one.
-    timeout 30 "$candidate" version >/dev/null 2>&1 || continue
+    _bounded 30 "$candidate" version >/dev/null 2>&1 || continue
     echo "$candidate"
     return 0
   done
-  command -v sfn 2>/dev/null || return 1
+  # The PATH fallback gets the same health probe as the loop above. Without it
+  # the hardening is defeatable: this hook exports build/bin and the seed dir
+  # onto the session PATH, so a candidate just rejected can return here as the
+  # driver under a different spelling.
+  local path_sfn
+  path_sfn="$(command -v sfn 2>/dev/null || true)"
+  [[ -n "$path_sfn" ]] || return 1
+  _bounded 30 "$path_sfn" version >/dev/null 2>&1 || return 1
+  echo "$path_sfn"
 }
 
 # The version the seed store currently reports, or "" when it holds nothing
@@ -66,19 +85,45 @@ _any_sfn() {
 # compiler/capsule.toml, which legitimately differs from the seed pin.
 _seed_store_version() {
   [[ -x "$SEED_BIN_DIR/sfn" ]] || return 1
-  timeout 30 "$SEED_BIN_DIR/sfn" version 2>/dev/null | head -n1 | awk '{print $NF}'
+  # `sfn version` prints exactly `sfn <version>` on one line
+  # (compiler/src/cli/commands/version.sfn). Take field 2 of line 1 rather than
+  # the last field of the first line: `$NF` silently returns garbage if the
+  # line ever gains a suffix, and garbage here reinstalls on every session.
+  _bounded 30 "$SEED_BIN_DIR/sfn" version 2>/dev/null | awk 'NR==1 {print $2}'
 }
 
 # Install the pinned seed with the curlable installer. The only path that does
 # not depend on an existing `sfn` being able to run.
 _install_via_installer() {
   mkdir -p "$SEED_BIN_DIR"
-  REPO="$(_manifest seed repo)" VERSION="$SEED_VERSION" \
+  # SAILFIN_BOOTSTRAP_SEED_STORE=1 is load-bearing, not decoration: without it
+  # install.sh writes `$INSTALL_BASE/<host-triple>/<version>` while
+  # `sfn dev bootstrap build` reads the flat `$INSTALL_BASE/<version>/sailfin`
+  # (compiler/src/cli/commands/dev.sfn `_bootstrap_seed_bin`). The bin_dir
+  # aliases would still resolve, so the version probe below would report the
+  # pin and this hook would print "installed seed X" over a store the native
+  # bootstrap still considers empty — the exact false-green this file exists
+  # to stop. Makefile's install target sets the same flag for the same reason.
+  SAILFIN_BOOTSTRAP_SEED_STORE=1 \
+    REPO="$(_manifest seed repo)" VERSION="$SEED_VERSION" \
     BINARY="$(_manifest seed asset_prefix)" \
     INSTALL_BASE="$SEED_INSTALL_BASE" GLOBAL_BIN_DIR="$SEED_BIN_DIR" \
-    timeout 300 ./install.sh 2>&1
+    _bounded 300 ./install.sh 2>&1
 }
 
+# True when the store holds the artifact `sfn dev bootstrap build` actually
+# spawns. The version probe reads `$SEED_BIN_DIR/sfn`, which is a best-effort
+# alias that can go stale, so a matching version is necessary but not
+# sufficient.
+_seed_store_populated() {
+  [[ -x "$SEED_INSTALL_BASE/$SEED_VERSION/sailfin" ]]
+}
+
+# NOTE ON errexit: both call sites invoke this as `install_seed || ...`, and
+# bash propagates `ignore_return` into a function body invoked in a condition
+# context — so errexit is effectively disabled for everything below. That is
+# what actually delivers the never-fatal contract. Calling this bare re-arms
+# every command in the body at once; don't, without auditing each one.
 install_seed() {
   if [[ "${SAILFIN_SESSION_BOOTSTRAP:-on}" == "off" ]]; then
     echo "- toolchain: install skipped (SAILFIN_SESSION_BOOTSTRAP=off)"
@@ -92,7 +137,7 @@ install_seed() {
   local driver out rc installed
   if driver="$(_any_sfn)"; then
     # Native, idempotent, and a no-op when the store already holds the pin.
-    out=$(timeout 300 "$driver" dev bootstrap fetch 2>&1) && rc=0 || rc=$?
+    out=$(_bounded 300 "$driver" dev bootstrap fetch 2>&1) && rc=0 || rc=$?
     if [[ $rc -ne 0 ]]; then
       echo "- toolchain: \`$driver dev bootstrap fetch\` FAILED (rc=$rc) — falling back to ./install.sh"
       # A driver that dies on a signal can produce no output at all, so only
@@ -111,12 +156,21 @@ install_seed() {
   # made: the old success line echoed $SEED_VERSION straight from
   # bootstrap.toml, so it reported the pin rather than what is on disk.
   installed="$(_seed_store_version || true)"
-  if [[ "$installed" == "$SEED_VERSION" ]]; then
-    echo "- toolchain: seed $installed matches the pin"
+  if [[ "$installed" == "$SEED_VERSION" ]] && _seed_store_populated; then
+    # Carry the fetch's own last line through: it is the only thing that
+    # distinguishes "already present" from "fetched just now", i.e. whether
+    # the store moved under this session.
+    if [[ $rc -eq 0 && -n "$out" ]]; then
+      echo "- toolchain: seed $installed matches the pin — $(echo "$out" | tail -n1)"
+    else
+      echo "- toolchain: seed $installed matches the pin"
+    fi
     return 0
   fi
 
-  if [[ -z "$installed" ]]; then
+  if [[ "$installed" == "$SEED_VERSION" ]]; then
+    echo "- toolchain: seed $installed matches the pin but $SEED_INSTALL_BASE/$SEED_VERSION is not populated — reinstalling"
+  elif [[ -z "$installed" ]]; then
     echo "- toolchain: no runnable seed in $SEED_BIN_DIR — installing pinned $SEED_VERSION"
   else
     echo "- toolchain: seed is $installed but bootstrap.toml pins $SEED_VERSION — reinstalling"
@@ -124,11 +178,15 @@ install_seed() {
 
   if out=$(_install_via_installer); then
     installed="$(_seed_store_version || true)"
-    if [[ "$installed" == "$SEED_VERSION" ]]; then
+    if [[ "$installed" == "$SEED_VERSION" ]] && _seed_store_populated; then
       echo "  installed seed $installed"
       return 0
     fi
-    echo "  install reported success but the seed is ${installed:-not runnable}, not the pinned $SEED_VERSION"
+    if [[ "$installed" == "$SEED_VERSION" ]]; then
+      echo "  install reported success but left no $SEED_INSTALL_BASE/$SEED_VERSION/sailfin for the native bootstrap"
+    else
+      echo "  install reported success but the seed is ${installed:-not runnable}, not the pinned $SEED_VERSION"
+    fi
     return 1
   fi
 
