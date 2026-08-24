@@ -954,19 +954,35 @@ SAILFIN_ALIAS_PATH="${GLOBAL_BIN_DIR}/${SAILFIN_ALIAS_BASENAME}"
 install_global_command "$SAILFIN_ALIAS_PATH"
 
 if [ "$GLOBAL_COPY_FALLBACK" -eq 1 ]; then
-  if [ ! -f "${ROOT_DIR}/workspace.toml" ]; then
-    for legacy_path in runtime capsules workspace.toml; do
-      if [ -e "${GLOBAL_BIN_DIR}/${legacy_path}" ] && [ "$GLOBAL_PAYLOAD_OWNED" -ne 1 ]; then
-        die "Refusing to replace unowned ${GLOBAL_BIN_DIR}/${legacy_path} for legacy installer compatibility."
-      fi
-    done
-    if [ -d "${TARGET_DIR}/runtime" ]; then
-      $MAYBE_SUDO cp -R "${TARGET_DIR}/runtime" "${GLOBAL_BIN_DIR}/runtime"
+  for legacy_path in runtime capsules workspace.toml; do
+    if [ -e "${GLOBAL_BIN_DIR}/${legacy_path}" ] && [ "$GLOBAL_PAYLOAD_OWNED" -ne 1 ]; then
+      die "Refusing to replace unowned ${GLOBAL_BIN_DIR}/${legacy_path} for the adjacent payload mirror."
     fi
+  done
+  # The pointer alone is not sufficient for any compiler published through
+  # 0.10.5. Only the CLI driver reads it; the analyzer's prelude-global loader
+  # re-derives the runtime root from the executable's own directory, which for
+  # a copied (non-symlinked) executable resolves nowhere. It then contributes
+  # no prelude names and every bare prelude call fails E0420 (SFN-1124). The
+  # adjacent runtime/ mirror is what that probe finds, so it is mirrored for
+  # every archive, not only pre-SFN-937 ones.
+  #
+  # This deliberately re-couples a version-shared bin directory to one
+  # version's payload, which SFN-937 set out to undo. Remove this mirror and
+  # restore the legacy-only guard once a release carrying the SFN-1124
+  # compiler fix is the pinned seed, deleting this comment with it (SFN-1125).
+  if [ -d "${TARGET_DIR}/runtime" ]; then
+    $MAYBE_SUDO cp -R "${TARGET_DIR}/runtime" "${GLOBAL_BIN_DIR}/runtime"
+    log "Installed adjacent runtime mirror for copied-executable discovery."
+  fi
+  # capsules/ stays legacy-only: the pointer already anchors dependency
+  # discovery for it, and it is the expensive tree SFN-937 exists to stop
+  # duplicating.
+  if [ ! -f "${ROOT_DIR}/workspace.toml" ]; then
     if [ -d "${TARGET_DIR}/capsules" ]; then
       $MAYBE_SUDO cp -R "${TARGET_DIR}/capsules" "${GLOBAL_BIN_DIR}/capsules"
     fi
-    log "Installed adjacent payload mirror for pre-SFN-937 compiler compatibility."
+    log "Installed adjacent capsule mirror for pre-SFN-937 compiler compatibility."
   fi
   PAYLOAD_POINTER_TEMP="${TMPDIR}/sailfin-install-root"
   printf '%s' "$TARGET_DIR_ABS" > "$PAYLOAD_POINTER_TEMP"
