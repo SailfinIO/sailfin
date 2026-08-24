@@ -28,8 +28,14 @@ inputs:
       (fallback for tags whose pinned release predates ARM assets). Ignored
       unless `target` is linux-arm64. Callers resolve it with
       scripts/select-aarch64-seed-mode.sh.
+
+      No default: an arm64 caller that omits it trips the validator below
+      rather than silently taking the ~30-minute emulated path. The single
+      place the qemu fallback is chosen is the callers' `Select aarch64 seed
+      mode` step, which documents why (SFN-1078,
+      docs/conventions/aarch64-qemu-bootstrap.md).
     required: false
-    default: "qemu"
+    default: ""
   build_jobs:
     description: "Parallel module builds (BUILD_JOBS). Empty = let the Makefile auto-detect via scripts/detect_build_jobs.sh (CPU + RAM heuristic; macOS capped at 2). Set to a specific N to pin (e.g. for a regression bisect)."
     required: false
@@ -366,7 +372,7 @@ runs:
         SAILFIN_NATIVE_CC: ${{ inputs.clang }}
       run: |
         set -euo pipefail
-        make bootstrap-aarch64-linux
+        scripts/bootstrap-aarch64-linux.sh
         rm -rf build/bin build/compiler
         mkdir -p build/bin build/compiler
         install -m 755 build/aarch64-bootstrap/pass-2/sfn build/bin/sfn

@@ -584,10 +584,6 @@ clean-build:
 # Full cleanup for a CI-like fresh start.
 clean-all: clean clean-build
 
-.PHONY: bootstrap-aarch64-linux
-bootstrap-aarch64-linux:
-	@SEED_X86_64="$(SEED_X86_64)" scripts/bootstrap-aarch64-linux.sh
-
 compile:
 	@# SFN-679: a $(NATIVE_BIN) predating `dev bootstrap fingerprint` (the
 	@# native replacement for scripts/compiler_source_fingerprint.sh) falls

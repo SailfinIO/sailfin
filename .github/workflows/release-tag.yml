@@ -325,7 +325,7 @@ jobs:
           clang: ${{ matrix.clang }}
           seed_version: ${{ steps.seed.outputs.seed_version }}
           mode: build-package
-          arm_seed_mode: ${{ steps.arm_seed.outputs.mode || 'qemu' }}
+          arm_seed_mode: ${{ steps.arm_seed.outputs.mode }}
 
       # Smoke-test the built compiler end-to-end (compile + link + run a
       # real program). Together with the two version verifications below
