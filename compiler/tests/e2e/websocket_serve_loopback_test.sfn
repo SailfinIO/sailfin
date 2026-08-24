@@ -59,7 +59,12 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 // The listening port for the loopback server. Fixed and outside the
 // 18790..18797 HTTP/TLS loopback range so shard-local timeout-wrapped
@@ -126,7 +131,7 @@ fn _lb_connect(port: i64) -> i32 ![net] {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -170,17 +175,17 @@ fn _lb_handshake(port: i64) -> string ![net] {
     if fd < 0 { return ""; }
     let req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
     if !_lb_send_all(fd, req as *u8, strlen(req as *u8) as i64) {
-        close(fd);
+        sfn_socket_close(fd);
         return "";
     }
     let cap: i64 = 1024;
     let buf: *u8 = malloc((cap + 4) as usize);
     if buf as i64 == 0 {
-        close(fd);
+        sfn_socket_close(fd);
         return "";
     }
     let n: i64 = _lb_recv_some(fd, buf, cap);
-    close(fd);
+    sfn_socket_close(fd);
     if n <= 0 { return ""; }
     memset(_lb_ptr_off(buf, n), 0, 1 as usize);
     return buf as string;
@@ -567,7 +572,7 @@ test "websocket.serve loopback: handshake + echo + close round-trip" ![io, net] 
     let mut close_opcode: i64 = 0 - 1;
     let _close_payload = _lb_read_frame(fd, & close_opcode);
     assert close_opcode == 8;
-    close(fd);
+    sfn_socket_close(fd);
 
     // Best-effort cleanup of the consumer tree (the timeout reaps the
     // server process).
@@ -656,13 +661,13 @@ test "websocket.serve loopback: two clients served concurrently" ![io, net] {
     let mut close_opcode1: i64 = 0 - 1;
     let _close_payload1 = _lb_read_frame(fd1, & close_opcode1);
     assert close_opcode1 == 8;
-    close(fd1);
+    sfn_socket_close(fd1);
 
     assert _lb_send_masked(fd2, 8, "");
     let mut close_opcode2: i64 = 0 - 1;
     let _close_payload2 = _lb_read_frame(fd2, & close_opcode2);
     assert close_opcode2 == 8;
-    close(fd2);
+    sfn_socket_close(fd2);
 
     // Best-effort cleanup of the consumer tree (the timeout reaps the
     // server process).
@@ -708,19 +713,19 @@ fn _lb_open_ready(port: i64) -> i32 ![net] {
     if fd < 0 { return 0 - 1; }
     let req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
     if !_lb_send_all(fd, req as *u8, strlen(req as *u8) as i64) {
-        close(fd);
+        sfn_socket_close(fd);
         return 0 - 1;
     }
     let cap: i64 = 1024;
     let buf: *u8 = malloc((cap + 4) as usize);
     if buf as i64 == 0 {
-        close(fd);
+        sfn_socket_close(fd);
         return 0 - 1;
     }
     let n: i64 = _lb_recv_some(fd, buf, cap);
     free(buf);
     if n <= 0 {
-        close(fd);
+        sfn_socket_close(fd);
         return 0 - 1;
     }
     return fd;
@@ -761,7 +766,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
     let after = _lb_read_frame(fd1, & op_after);
     assert op_after == 1;
     assert after == "still-here";
-    close(fd1);
+    sfn_socket_close(fd1);
 
     // Case 2: a fragmented message (initial TEXT FIN=0 + continuation FIN=1)
     // is reassembled and echoed back as a single message.
@@ -776,7 +781,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + frag);
     assert op_frag == 1;
     assert frag == "HelloWorld";
-    close(fd2);
+    sfn_socket_close(fd2);
 
     // Case 3: a client CLOSE carrying a 2-byte status code round-trips that
     // code (not a bare empty CLOSE).
@@ -796,7 +801,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + code_close);
     assert op_close == 8;
     assert code_close == 1000;
-    close(fd3);
+    sfn_socket_close(fd3);
 
     // Case 4: an unmasked client frame is a protocol error — refused with a
     // CLOSE carrying code 1002.
@@ -811,7 +816,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + code_1002);
     assert op_1002 == 8;
     assert code_1002 == 1002;
-    close(fd4);
+    sfn_socket_close(fd4);
 
     // Case 5: an over-large single frame (declared length only, no payload)
     // is refused with CLOSE 1009 before any allocation — the DoS floor.
@@ -826,7 +831,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + code_1009a);
     assert op_1009a == 8;
     assert code_1009a == 1009;
-    close(fd5);
+    sfn_socket_close(fd5);
 
     // Case 6: an oversize REASSEMBLY (two in-cap fragments whose sum exceeds
     // the message cap) is refused with CLOSE 1009 — the buffer is bounded,
@@ -849,7 +854,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + code_1009b);
     assert op_1009b == 8;
     assert code_1009b == 1009;
-    close(fd6);
+    sfn_socket_close(fd6);
 
     // Case 7 (RFC 6455 §5.5): a control frame (PING) with a payload > 125
     // bytes is a protocol error — refused with CLOSE 1002, not clamped.
@@ -869,7 +874,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + code_over);
     assert op_over == 8;
     assert code_over == 1002;
-    close(fd7);
+    sfn_socket_close(fd7);
 
     // Case 8 (RFC 6455 §5.5): a fragmented control frame (PING with FIN=0) is
     // a protocol error — control frames MUST NOT be fragmented — refused 1002.
@@ -884,7 +889,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + code_frag_ctl);
     assert op_frag_ctl == 8;
     assert code_frag_ctl == 1002;
-    close(fd8);
+    sfn_socket_close(fd8);
 
     // Case 9 (RFC 6455 §5.2): a reserved opcode (0x3, reserved non-control) is
     // a protocol error — refused 1002, not silently drained.
@@ -899,7 +904,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + code_resv);
     assert op_resv == 8;
     assert code_resv == 1002;
-    close(fd9);
+    sfn_socket_close(fd9);
 
     // Case 10 (RFC 6455 §5.5.1): a CLOSE with a 1-byte body cannot form a
     // 2-byte status code — a malformed close, refused 1002 rather than echoed.
@@ -914,7 +919,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         + code_badclose);
     assert op_badclose == 8;
     assert code_badclose == 1002;
-    close(fd10);
+    sfn_socket_close(fd10);
 
     let _rm = process.run(["rm", "-rf", _app_root3()]);
 }

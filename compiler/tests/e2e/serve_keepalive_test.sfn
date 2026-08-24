@@ -62,7 +62,12 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 // Distinct fixed port from the other server-spawning e2e tests (18790
 // serve_loopback, 18791 serve_reuseaddr, 18793 socket/concurrency) so they do
@@ -112,7 +117,7 @@ fn _kp_connect(port: i64) -> i32 ![net] {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -266,11 +271,11 @@ fn _kp_send_recv_one(port: i64, request: string) -> string ![net] {
     let fd: i32 = _kp_connect(port);
     if fd < 0 { return ""; }
     if !_kp_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
-        close(fd);
+        sfn_socket_close(fd);
         return "";
     }
     let resp = _kp_recv_one(fd);
-    close(fd);
+    sfn_socket_close(fd);
     return resp;
 }
 
@@ -455,7 +460,7 @@ test "serve keep-alive: connection reuse (server loop + native client) (#1711)" 
     assert contains(ka2, "X-Route: b");
     // The second response must NOT leak the first body.
     assert ! contains(ka2, "AAA");
-    close(fd);
+    sfn_socket_close(fd);
 
     // (2) Close regression: a `Connection: close` request gets the close
     // behavior — the response advertises close and the server closes the
@@ -464,7 +469,7 @@ test "serve keep-alive: connection reuse (server loop + native client) (#1711)" 
     assert cfd >= 0;
     assert _kp_send_all(cfd, "GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as *u8) as i64);
     let close_resp = _kp_recv_all(cfd);
-    close(cfd);
+    sfn_socket_close(cfd);
     print.info("[serve-keepalive] close: " + close_resp);
     assert contains(close_resp, "HTTP/1.1 200");
     assert contains(close_resp, "AAA");
@@ -482,7 +487,7 @@ test "serve keep-alive: connection reuse (server loop + native client) (#1711)" 
             let _r1 = _kp_recv_one(sfd);
             let _s2 = _kp_send_all(sfd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
             let _r2 = _kp_recv_one(sfd);
-            close(sfd);
+            sfn_socket_close(sfd);
         }
         storm = storm + 1;
     }

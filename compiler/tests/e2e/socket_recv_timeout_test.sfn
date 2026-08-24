@@ -56,7 +56,12 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
@@ -106,7 +111,7 @@ fn _st_bind_listen(port: i64) -> i32 ![net] {
         _st_set_reuseaddr(fd);
         let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 {
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
         memset(addr, 0, 16 as usize);
@@ -122,10 +127,10 @@ fn _st_bind_listen(port: i64) -> i32 ![net] {
         free(addr);
         if rc == 0 {
             if listen(fd, 16) == 0 { return fd; }
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -160,7 +165,7 @@ fn _st_connect(port: i64) -> i32 ![net] {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -240,7 +245,7 @@ test "socket recv timeout: silent peer times out; normal recv unaffected" ![io, 
     assert n2 < 0;
 
     free(buf);
-    close(cfd);
-    close(sfd);
-    close(lfd);
+    sfn_socket_close(cfd);
+    sfn_socket_close(sfd);
+    sfn_socket_close(lfd);
 }

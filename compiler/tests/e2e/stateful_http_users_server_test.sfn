@@ -33,7 +33,12 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 fn _su_port() -> i64 { return 18882; }
 
@@ -79,7 +84,7 @@ fn _su_connect(port: i64) -> i32 ![net] {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -128,11 +133,11 @@ fn _su_request(port: i64, request: string) -> string ![net] {
     let fd: i32 = _su_connect(port);
     if fd < 0 { return ""; }
     if !_su_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
-        close(fd);
+        sfn_socket_close(fd);
         return "";
     }
     let resp = _su_recv_all(fd);
-    close(fd);
+    sfn_socket_close(fd);
     return resp;
 }
 
