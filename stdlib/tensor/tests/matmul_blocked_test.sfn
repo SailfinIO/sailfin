@@ -1,4 +1,4 @@
-// capsules/sfn/tensor/tests/matmul_blocked_test.sfn
+// stdlib/tensor/tests/matmul_blocked_test.sfn
 //
 // Correctness coverage for the cache-blocked `matmul` (SFN-425, SFEP-0052).
 // The tiled kernel must be numerically identical to the naive triple loop it

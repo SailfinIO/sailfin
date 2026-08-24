@@ -463,7 +463,7 @@ Six canonical effects, locked at 1.0:
   reserving `model` at 1.0 means `sfn/ai` can ship as a library without a
   language change. Post-1.0 capsules expecting the effect won't break.
 - `gpu` is the same forward-compatibility argument for the tensor work in
-  `capsules/sfn/tensor`, `nn`, `losses`. Reserving the keyword means tensor
+  `stdlib/tensor`, `nn`, `losses`. Reserving the keyword means tensor
   ops can opt-in to GPU compilation post-1.0 without language churn.
 
 **Effects we are NOT adding at 1.0** (proposed and rejected):

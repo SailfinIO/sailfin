@@ -1,4 +1,4 @@
-// capsules/sfn/device/tests/device_test.sfn
+// stdlib/device/tests/device_test.sfn
 //
 // Proves the `sfn/device` dispatch primitive is real rather than a bare
 // effect carrier: the CPU reference kernel computes correct products, and
