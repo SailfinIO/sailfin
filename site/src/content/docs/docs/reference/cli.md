@@ -406,6 +406,41 @@ Makefile's `BUILD_ARGS` variable.
 
 ---
 
+### `sfn dev bootstrap install [--from <path>] [--prefix <dir>] [--destdir <dir>]`
+
+Publish an already-built local compiler. With no install-path flags, the
+command preserves the self-host build contract and writes `build/bin/sfn`
+(`build/bin/sfn.exe` on Windows). `--prefix` instead writes the host-named
+executable under `<dir>/bin`; `--destdir` prepends a packaging staging root.
+When `--destdir` is supplied without `--prefix`, the prefix defaults to
+`~/.local`, matching the retired Makefile install default.
+
+```bash
+sfn dev bootstrap install
+sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
+sfn dev bootstrap install --prefix /usr/local --destdir /tmp/sfn-package
+```
+
+`--from` copies the named runnable binary without rebuilding. A direct prefix
+or staged install also copies the compiler's resolved runtime and capsule
+dependency closure beside the executable, including its installed workspace
+manifest, so `build` and `run` work after leaving the checkout. A direct
+prefix install records a SHA-256 ownership sidecar beside the executable. A
+later invocation may replace that entry only while the sidecar still matches;
+an unmarked or externally changed executable is refused because it may be
+owned by a package manager. Remove such an entry explicitly before replacing
+it with a local self-build. DESTDIR installs are staging output and do not
+carry the live-entry ownership sidecar; parent components in the staged prefix
+or DESTDIR are rejected and path aliases are normalized. POSIX staging links
+are rejected; Windows reparse points are physically resolved and must remain
+beneath the resolved staging root. A filesystem root used as DESTDIR retains
+the live-entry guard. Bundle publication is staged on
+the destination filesystem and rolls back to the prior complete bundle if any
+artifact cannot commit. A prefixed or staged install never updates the
+repo-local source-fingerprint record for `build/bin/sfn`.
+
+---
+
 ### `sfn dev clean <build|dist|all>`
 
 Remove the **repo-local** build artifacts of a compiler checkout — the native
@@ -639,7 +674,6 @@ guide, see
 |---|---|
 | `make compile` | Build the native compiler binary from a released seed, using the self-hosting pipeline. Skips rebuild if the binary is up to date. |
 | `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler`. |
-| `make install` | Install the built compiler binary into `$(BINDIR)` (default: `~/.local/bin`). Requires `make compile` to have run first. |
 | `make check` | Compile (if needed), build a `sailfin-seedcheck` binary, verify it can run `hello-world.sfn`, then run the full test suite against it. This is the authoritative CI gate. |
 | `make check-strict` | Same as `make check`, but a seedcheck/fixed-point rebuild mismatch is fatal. |
 | `make check-fast` | Run `sfn check` over `compiler/src/` and `runtime/` without codegen or clang. |
@@ -701,10 +735,6 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `sfn build`/`run`/`check`/`test` | Set to `1` to downgrade a `[toolchain]` pin mismatch from a hard error to a warning for every invocation in the shell/CI job. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | Controls the toolchain-pin mismatch response: `auto` (default) fetches + verifies + re-execs the pinned toolchain; `local` verifies only and errors on mismatch; `<version>` forces that dispatch target; `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN_DISPATCHED` | `sfn build`/`run`/`check`/`test` | Set automatically by `sfn` before re-exec'ing a dispatched toolchain (`=<version>`) as a re-entrancy guard; not intended to be set by hand. |
-| `PREFIX` | Makefile | Installation prefix. Defaults to `$HOME/.local`. The binary is installed to `$(PREFIX)/bin`. |
-| `BINDIR` | Makefile | Installation bin directory. Defaults to `$(PREFIX)/bin`. |
-| `INSTALL_NAME` | Makefile | Installed binary name. Defaults to `sfn`. |
-| `DESTDIR` | Makefile | Staging prefix for packaging-style installs. |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
 | `GITHUB_TOKEN` | installer / `make fetch-seed` | GitHub token used to raise API rate limits and access release assets. |
 | `BUILD_ARGS` | Makefile | Extra arguments passed through to `sfn build -p compiler`, for example `--no-cache --cache-trace`. |
@@ -793,7 +823,7 @@ make test
 
 ```bash
 make compile
-make install
+build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 # compiler is now at ~/.local/bin/sfn
 ```
 

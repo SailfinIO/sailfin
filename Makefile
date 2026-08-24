@@ -216,7 +216,7 @@ help:
 	@echo ""
 	@echo "  make compile        # Build the compiler from a released seed"
 	@echo "  make rebuild        # Force rebuild from seed via 'sfn build -p compiler'"
-	@echo "  make install        # Install the built compiler binary into PREFIX/bin"
+	@echo "  build/bin/sfn dev bootstrap install --prefix <dir> # Install a complete local compiler bundle"
 	@echo "  make check          # Compile (if needed) then run the full test suite"
 	@echo "  make check-strict   # Same as check, but a stage2/stage3 fixed-point mismatch is fatal"
 	@echo "  make check-fast     # Check workspace compiler/runtime maintainer sources"
@@ -237,22 +237,12 @@ help:
 	@echo "  make clean          # Remove packaged artifacts (dist/)"
 	@echo ""
 
-PREFIX ?= $(HOME)/.local
-BINDIR ?= $(PREFIX)/bin
-INSTALL_NAME ?= sfn
-
+# Keep an explicit tombstone so Make's built-in `%: %.sh` rule cannot turn
+# `make install` into an executable copy of install.sh after the legacy
+# binary-only installer was retired by SFN-1075.
 install:
-	@if [ ! -x "$(NATIVE_BIN)" ] && [ ! -f "$(NATIVE_BIN)" ]; then \
-		echo "[install] missing $(NATIVE_BIN); run 'make compile' first"; \
-		exit 1; \
-	fi
-	@mkdir -p "$(DESTDIR)$(BINDIR)"
-ifeq ($(IS_WINDOWS),1)
-	@cp -f "$(NATIVE_BIN)" "$(DESTDIR)$(BINDIR)/$(INSTALL_NAME)$(EXE_EXT)"
-else
-	@install -m 755 "$(NATIVE_BIN)" "$(DESTDIR)$(BINDIR)/$(INSTALL_NAME)"
-endif
-	@echo "[install] installed $(DESTDIR)$(BINDIR)/$(INSTALL_NAME)$(EXE_EXT)"
+	@echo "error: 'make install' is retired; use 'build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix <dir>'" >&2
+	@exit 2
 
 # Issue #848 (epic #840 Phase 1.2): the four suite shell loops
 # collapsed into one `sfn test` invocation that walks every path,

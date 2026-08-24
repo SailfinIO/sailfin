@@ -14,10 +14,16 @@
 // `EEXIST` on an existing path, so without the `fs.deleteFile` that
 // replaced `ln`'s `-f` the second bootstrap would silently keep a stale
 // alias.
-import { _cwd_cmd } from "../../src/build/fs";
+import { _cwd_cmd, _rename_preserving_source_on_failure } from "../../src/build/fs";
 import { built_program_path, native_install_path } from "../../src/build/source_fingerprint";
-import { host_is_windows } from "../../src/build/target";
-import { _bootstrap_alias, _bootstrap_is_absolute } from "../../src/cli/commands/dev";
+import { host_is_windows, target_exe_name } from "../../src/build/target";
+import {
+    _bootstrap_alias,
+    _bootstrap_commit_dev_payload,
+    _bootstrap_install_is_canonical,
+    _bootstrap_is_absolute,
+    _bootstrap_prefixed_install_path
+} from "../../src/cli/commands/dev";
 
 // Same scratch shape as `fs_tree_test.sfn`: the per-invocation test
 // scratch when the pool provides one, else a repo-relative path rather
@@ -44,6 +50,66 @@ test "dev-bootstrap: scoped build artifact installs as sfn" ![io] {
     assert built == "build/capsules/sfn/compiler/bin/compiler" || built == "build/capsules/sfn/compiler/bin/compiler.exe";
     let installed = native_install_path();
     assert installed == "build/bin/sfn" || installed == "build/bin/sfn.exe";
+}
+
+test "dev-bootstrap: prefixed install resolves bin beneath prefix and DESTDIR" {
+    assert _bootstrap_prefixed_install_path("/opt/sailfin", "", "sfn") == "/opt/sailfin/bin/sfn";
+    assert _bootstrap_prefixed_install_path("/usr/local", "/tmp/package-root", "sfn") == "/tmp/package-root/usr/local/bin/sfn";
+    assert _bootstrap_prefixed_install_path("/usr/local/", "/tmp/package-root/", "sfn") == "/tmp/package-root/usr/local/bin/sfn";
+    assert _bootstrap_prefixed_install_path("build", ".", "sfn") == "build/bin/sfn";
+    assert _bootstrap_prefixed_install_path("/usr/local", "/.", "sfn") == "/usr/local/bin/sfn";
+}
+
+test "dev-bootstrap: prefixed install preserves the shared Windows executable suffix rule" {
+    let windows_exe = target_exe_name("sfn", "Windows");
+    assert windows_exe == "sfn.exe";
+    assert _bootstrap_prefixed_install_path("C:/Sailfin", "", windows_exe) == "C:/Sailfin/bin/sfn.exe";
+    assert _bootstrap_prefixed_install_path("C:/Sailfin", "D:/package-root", windows_exe) == "D:/package-root/Sailfin/bin/sfn.exe";
+}
+
+test "dev-bootstrap: explicit install path flags never select canonical publication" {
+    assert _bootstrap_install_is_canonical("", "");
+    assert ! _bootstrap_install_is_canonical("build", "");
+    assert ! _bootstrap_install_is_canonical("build", ".");
+}
+
+test "dev-bootstrap: failed backup move preserves its only source" ![io] {
+    let root = _scratch_dir() + "/preserve-failed-backup";
+    fs.createDirectory(root, true);
+    let src = root + "/only-copy";
+    let blocking_dir = root + "/blocking-dir";
+    fs.writeFile(src, "recovery-copy");
+    fs.createDirectory(blocking_dir, true);
+
+    assert ! _rename_preserving_source_on_failure(src, blocking_dir);
+    assert fs.readFile(src) == "recovery-copy";
+    assert fs.exists(blocking_dir);
+}
+
+test "dev-bootstrap: failed payload publish restores the prior bundle" ![io] {
+    let root = _scratch_dir() + "/restore-failed-publish";
+    let bin_dir = root + "/bin";
+    let out = bin_dir + "/sfn";
+    let staging = bin_dir + "/staging";
+    fs.createDirectory(bin_dir + "/runtime", true);
+    fs.createDirectory(bin_dir + "/capsules", true);
+    fs.writeFile(bin_dir + "/runtime/old", "old-runtime");
+    fs.writeFile(bin_dir + "/capsules/old", "old-capsules");
+    fs.writeFile(bin_dir + "/workspace.toml", "old-workspace");
+    fs.writeFile(out, "old-compiler");
+
+    // Leave `staging/runtime` absent so the first publish rename fails after
+    // every live component has been backed up.
+    fs.createDirectory(staging + "/capsules", true);
+    fs.writeFile(staging + "/capsules/new", "new-capsules");
+    fs.writeFile(staging + "/workspace.toml", "new-workspace");
+    fs.writeFile(staging + "/sfn", "new-compiler");
+
+    assert ! _bootstrap_commit_dev_payload(staging, out, false);
+    assert fs.readFile(bin_dir + "/runtime/old") == "old-runtime";
+    assert fs.readFile(bin_dir + "/capsules/old") == "old-capsules";
+    assert fs.readFile(bin_dir + "/workspace.toml") == "old-workspace";
+    assert fs.readFile(out) == "old-compiler";
 }
 
 test "dev-bootstrap: _bootstrap_alias points an alias at the target" ![io] {

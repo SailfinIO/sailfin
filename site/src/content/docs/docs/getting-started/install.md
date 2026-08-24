@@ -365,11 +365,11 @@ cd sailfin
 # Build the native compiler by self-hosting from the released seed pinned in bootstrap.toml
 make compile
 
-# Install to ~/.local/bin (or set PREFIX to override)
-make install
+# Install the local self-build to ~/.local/bin
+build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 ```
 
-After `make install`, verify with:
+After installing, verify with:
 
 ```bash
 sfn --version
@@ -380,6 +380,14 @@ You can also run the binary directly without installing:
 ```bash
 build/bin/sfn --version
 ```
+
+Use another `--prefix` to choose a different installation root. Packagers can
+add `--destdir <staging-root>`; a `/usr/local` prefix then lands beneath the
+stage as `<staging-root>/usr/local/bin/sfn`. The native install command refuses
+to overwrite an unmarked or externally changed live entry because it may be
+owned by a package manager. It also installs the runtime and compiler capsule
+closure beside the executable so the PATH command works outside the source
+checkout.
 
 > **Note:** `make compile` routes through `<seed> build -p compiler` — the
 > Sailfin-native driver — and requires `bash`, `clang`, LLVM tools, and `jq`.

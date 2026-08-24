@@ -421,7 +421,7 @@ Build commands:
     make compile    -- build compiler from released seed (self-hosting)
     make test       -- run unit + integration + e2e test suites
     make check      -- full validation including seedcheck
-    make install    -- install to ~/.local/bin
+    build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 
 ## Tooling
 

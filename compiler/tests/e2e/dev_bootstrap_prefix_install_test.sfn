@@ -1,0 +1,261 @@
+// compiler/tests/e2e/dev_bootstrap_prefix_install_test.sfn
+//
+// End-to-end coverage for publishing a locally built compiler under an
+// install prefix or packaging DESTDIR through `sfn dev bootstrap install`.
+import { find } from "sfn/strings";
+import {
+    clean_runner_env,
+    clean_runner_env_without,
+    nested_runner_scratch,
+    sfn_bin_abs_path
+} from "sfn/test";
+import { skip } from "sfn/test/skip";
+
+import { host_exe_name, host_is_windows } from "../../src/build/target";
+
+fn _run_install(root: string, extra: string[]) -> int ![io] {
+    let bin = sfn_bin_abs_path();
+    let mut argv = [bin, "dev", "bootstrap", "install", "--from", bin];
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        argv.push(extra[i]);
+        i += 1;
+    }
+    return process.run_capture(argv, clean_runner_env(root));
+}
+
+fn _run_install_with_env(extra: string[], child_env: string[]) -> int ![io] {
+    let bin = sfn_bin_abs_path();
+    let mut argv = [bin, "dev", "bootstrap", "install", "--from", bin];
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        argv.push(extra[i]);
+        i += 1;
+    }
+    return process.run_capture(argv, child_env);
+}
+
+fn _wait_for_path(path: string, deadline_ms: int) -> boolean ![clock, io] {
+    let mut waited: int = 0;
+    loop {
+        if fs.exists(path) { return true; }
+        if waited >= deadline_ms { return false; }
+        sleep(10);
+        waited += 10;
+    }
+}
+
+test "dev-bootstrap install: prefix publishes a runnable host executable" ![io] {
+    let root = nested_runner_scratch("dev_bootstrap_prefix_install");
+    let prefix = root + "/prefix";
+    let rc = _run_install(root, ["--prefix", prefix]);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let installed = host_exe_name(prefix + "/bin/sfn");
+
+    assert rc == 0;
+    assert err.length == 0;
+    assert find(out, installed, 0) >= 0;
+    assert fs.is_executable(installed);
+
+    let version_rc = process.run_capture([installed, "version"], clean_runner_env(root));
+    let version_out = process.capture_take_stdout();
+    let version_err = process.capture_take_stderr();
+    assert version_rc == 0;
+    assert version_err.length == 0;
+    assert find(version_out, "sfn ", 0) >= 0;
+
+    // Run from outside the checkout so no cwd-relative `runtime/` fallback
+    // or source-workspace discovery can hide a missing installed payload.
+    let away = root + "/away";
+    fs.createDirectory(away, true);
+    fs.writeFile(away + "/hello.sfn", "fn main() -> void ![io] {\n    print(\"installed-runtime-ok\");\n}\n");
+    let run_env = clean_runner_env_without(root, ["SAILFIN_RUNTIME_ROOT"]);
+    let run_rc = process.run_capture_cwd([installed, "run", "hello.sfn"], run_env, away);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_rc == 0;
+    assert find(run_out, "installed-runtime-ok", 0) >= 0;
+    assert find(run_err, "runtime bundle/manifest missing", 0) < 0;
+
+    // The matching ownership digest permits a later local self-build to
+    // refresh the same PATH entry without weakening package-manager safety.
+    let reinstall_rc = _run_install(root, ["--prefix", prefix]);
+    let _reinstall_out = process.capture_take_stdout();
+    let reinstall_err = process.capture_take_stderr();
+    assert reinstall_rc == 0;
+    assert reinstall_err.length == 0;
+
+    // A package-manager or other external writer changing the executable
+    // invalidates the digest sidecar and must close the replacement gate.
+    fs.writeFile(installed, "externally-replaced-entry");
+    fs.set_perms(installed, 493);
+    let changed_rc = _run_install(root, ["--prefix", prefix]);
+    let _changed_out = process.capture_take_stdout();
+    let changed_err = process.capture_take_stderr();
+    assert changed_rc != 0;
+    assert find(changed_err, "may be owned by a package manager", 0) >= 0;
+    assert fs.readFile(installed) == "externally-replaced-entry";
+}
+
+test "dev-bootstrap install: DESTDIR stages the requested prefix" ![io] {
+    let root = nested_runner_scratch("dev_bootstrap_destdir_install");
+    let destdir = root + "/package-root";
+    let rc = _run_install(root, ["--prefix", "/usr/local", "--destdir", destdir]);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let installed = host_exe_name(destdir + "/usr/local/bin/sfn");
+
+    assert rc == 0;
+    assert err.length == 0;
+    assert fs.is_executable(installed);
+    assert fs.exists(destdir + "/usr/local/bin/runtime/capsule.toml");
+}
+
+test "dev-bootstrap install: untracked live entry is not overwritten" ![io] {
+    let root = nested_runner_scratch("dev_bootstrap_owned_entry");
+    let prefix = root + "/managed-prefix";
+    fs.createDirectory(prefix + "/bin", true);
+    let installed = host_exe_name(prefix + "/bin/sfn");
+    fs.writeFile(installed, "package-manager-owned-entry");
+    fs.set_perms(installed, 493);
+
+    let rc = _run_install(root, ["--prefix", prefix]);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert rc != 0;
+    assert find(err, "may be owned by a package manager", 0) >= 0;
+    assert fs.readFile(installed) == "package-manager-owned-entry";
+}
+
+test "dev-bootstrap install: dangling live entry is not overwritten" ![io] {
+    if host_is_windows() {
+        skip("native Windows cannot create the POSIX dangling-symlink fixture; fs.exists uses no-follow GetFileAttributesA there");
+    }
+    let root = nested_runner_scratch("dev_bootstrap_dangling_owned_entry");
+    let prefix = root + "/managed-prefix";
+    fs.createDirectory(prefix + "/bin", true);
+    let installed = prefix + "/bin/sfn";
+    assert fs.symlink("missing-package-entry", installed);
+    assert ! fs.exists(installed);
+    assert fs.read_link(installed) == "missing-package-entry";
+
+    let rc = _run_install(root, ["--prefix", prefix]);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert rc != 0;
+    assert find(err, "may be owned by a package manager", 0) >= 0;
+    assert fs.read_link(installed) == "missing-package-entry";
+    assert ! fs.exists(installed + ".sfn-dev-install.sha256");
+}
+
+test "dev-bootstrap install: live ownership is rechecked after staging" ![clock, io] {
+    let root = nested_runner_scratch("dev_bootstrap_owned_entry_race");
+    let prefix = root + "/prefix";
+    let first_rc = _run_install(root, ["--prefix", prefix]);
+    let _first_out = process.capture_take_stdout();
+    let first_err = process.capture_take_stderr();
+    assert first_rc == 0;
+    assert first_err.length == 0;
+
+    let bin = sfn_bin_abs_path();
+    let installed = host_exe_name(prefix + "/bin/sfn");
+    let lock_path = installed + ".sfn-dev-install.lock";
+    let child_env = clean_runner_env(root + "/reinstall");
+    let handle = process.spawn_with_env([bin, "dev", "bootstrap", "install", "--from", bin, "--prefix", prefix], child_env);
+    assert handle != 0;
+    assert _wait_for_path(lock_path, 30000);
+
+    fs.writeFile(installed, "package-manager-raced-entry");
+    fs.set_perms(installed, 493);
+    let _out = process.handle_read_stdout(handle);
+    let err = process.handle_read_stderr(handle);
+    let exit = process.handle_wait(handle);
+
+    assert exit != 0;
+    assert find(err, "changed while", 0) >= 0;
+    assert fs.readFile(installed) == "package-manager-raced-entry";
+    assert ! fs.exists(lock_path);
+}
+
+test "dev-bootstrap install: DESTDIR cannot escape or disguise a live prefix" ![io] {
+    let root = nested_runner_scratch("dev_bootstrap_destdir_escape");
+    let escaped_prefix = root + "/escaped-prefix";
+    let traversal_rc = _run_install(root, ["--prefix", "../escaped-prefix", "--destdir", root
+        + "/stage"]);
+    let _traversal_out = process.capture_take_stdout();
+    let traversal_err = process.capture_take_stderr();
+    assert traversal_rc != 0;
+    assert find(traversal_err, "escapes DESTDIR", 0) >= 0;
+    assert ! fs.exists(escaped_prefix + "/bin/sfn");
+
+    let destdir_parent_rc = _run_install(root, ["--prefix", "/usr/local", "--destdir", root
+        + "/stage/.."]);
+    let _destdir_parent_out = process.capture_take_stdout();
+    let destdir_parent_err = process.capture_take_stderr();
+    assert destdir_parent_rc != 0;
+    assert find(destdir_parent_err, "DESTDIR contains a parent path component", 0) >= 0;
+
+    let live_prefix = root + "/live-prefix";
+    fs.createDirectory(live_prefix + "/bin", true);
+    let live_entry = host_exe_name(live_prefix + "/bin/sfn");
+    fs.writeFile(live_entry, "managed-live-entry");
+    fs.set_perms(live_entry, 493);
+    let live_rc = _run_install(root, ["--prefix", live_prefix, "--destdir", "/"]);
+    let _live_out = process.capture_take_stdout();
+    let live_err = process.capture_take_stderr();
+    assert live_rc != 0;
+    assert find(live_err, "may be owned by a package manager", 0) >= 0;
+    assert fs.readFile(live_entry) == "managed-live-entry";
+
+    let live_alias_rc = _run_install(root, ["--prefix", live_prefix, "--destdir", "/."]);
+    let _live_alias_out = process.capture_take_stdout();
+    let live_alias_err = process.capture_take_stderr();
+    assert live_alias_rc != 0;
+    assert find(live_alias_err, "may be owned by a package manager", 0) >= 0;
+    assert fs.readFile(live_entry) == "managed-live-entry";
+
+    let mut home_env = clean_runner_env_without(root, ["HOME"]);
+    home_env.push("HOME=../escaped-home");
+    let home_rc = _run_install_with_env(["--destdir", root + "/home-stage"], home_env);
+    let _home_out = process.capture_take_stdout();
+    let home_err = process.capture_take_stderr();
+    assert home_rc != 0;
+    assert find(home_err, "escapes DESTDIR", 0) >= 0;
+    assert ! fs.exists(root + "/escaped-home/.local/bin/sfn");
+}
+
+test "dev-bootstrap install: DESTDIR symlinks cannot redirect publication" ![io] {
+    if host_is_windows() {
+        skip("native Windows does not provide the POSIX symlink fixture used by this containment test");
+    }
+    let root = nested_runner_scratch("dev_bootstrap_destdir_symlink");
+    let live_prefix = root + "/symlink-target";
+    fs.createDirectory(live_prefix + "/bin", true);
+    let live_entry = host_exe_name(live_prefix + "/bin/sfn");
+    fs.writeFile(live_entry, "symlink-redirected-entry");
+    fs.set_perms(live_entry, 493);
+
+    let linked_destdir = root + "/linked-stage";
+    assert fs.symlink("/", linked_destdir);
+    let linked_rc = _run_install(root, ["--prefix", live_prefix, "--destdir", linked_destdir]);
+    let _linked_out = process.capture_take_stdout();
+    let linked_err = process.capture_take_stderr();
+    assert linked_rc != 0;
+    assert find(linked_err, "DESTDIR must not be a symbolic link", 0) >= 0;
+    assert fs.readFile(live_entry) == "symlink-redirected-entry";
+
+    let staged = root + "/stage";
+    fs.createDirectory(staged + "/usr", true);
+    assert fs.symlink(live_prefix, staged + "/usr/local");
+    let child_rc = _run_install(root, ["--prefix", "/usr/local", "--destdir", staged]);
+    let _child_out = process.capture_take_stdout();
+    let child_err = process.capture_take_stderr();
+    assert child_rc != 0;
+    assert find(child_err, "contains a symbolic link", 0) >= 0;
+    assert fs.readFile(live_entry) == "symlink-redirected-entry";
+}

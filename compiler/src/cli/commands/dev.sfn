@@ -15,7 +15,7 @@
 //   sfn dev bootstrap fingerprint [root] print the compiler source
 //                                        fingerprint
 //   sfn dev bootstrap install [--from]   publish an already-built compiler as
-//                                        build/bin/sfn
+//                                        build/bin/sfn or under a prefix
 //
 // The steady-state contributor path is still `sfn build -p compiler`, which
 // enters bootstrap mode via `bootstrap_gate_or_dispatch` (exported here and
@@ -49,12 +49,19 @@ import {
     rewrite_seed_version
 } from "../../bootstrap_manifest";
 import {
+    CREATE_EXCLUSIVE_CREATED,
+    CREATE_EXCLUSIVE_MODE_FILE,
     _atomic_rename_into_place,
     _copy_file,
+    _create_exclusive_cmd,
     _cwd_cmd,
+    _mktemp_sibling_cmd,
+    _rename_preserving_source_on_failure,
+    _sha256_of_file,
     _toml_trim_cmd
 } from "../../build/fs";
-import { ensure_dir_p } from "../../build/fs_tree";
+import { ensure_dir_p, remove_tree } from "../../build/fs_tree";
+import { _dirname, _path_basename, _path_join } from "../../build/paths";
 import {
     built_program_path,
     compute_source_fingerprint,
@@ -68,8 +75,12 @@ import {
     write_fingerprint
 } from "../../build/source_fingerprint";
 import { build_target_triple, host_exe_name, host_target_triple } from "../../build/target";
+import { stage_installer_workspace_assets } from "../../installer_staging";
+import { _source_identity_normalize_path } from "../../module_paths";
 import {
     is_absolute_path,
+    is_path_separator,
+    path_root_prefix_len,
     starts_with,
     strings_equal,
     substring
@@ -83,6 +94,11 @@ import { inventory_command_def, inventory_run } from "./dev_inventory";
 import { shard_command_def, shard_run } from "./dev_shard";
 import { verify_command_def, verify_run } from "./dev_verify";
 import { toolchain_install_to_base } from "./toolchain";
+
+// Resolve DESTDIR against the physical filesystem without adding a new
+// builtin that the pinned seed cannot compile. The Windows runtime supplies
+// the same sibling implementation used by build/fs.sfn::_cwd_cmd.
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 
 // Where a bootstrap-triggered fetch stages its download: the per-invocation
 // test scratch first (so parallel `sfn test --jobs N` children never collide),
@@ -115,6 +131,338 @@ fn _bootstrap_abspath(path: string) -> string ![io] {
     // to returning `path` untouched exactly as the `pwd` shellout did.
     if cwd.length == 0 || strings_equal(cwd, ".") { return path; }
     return cwd + "/" + path;
+}
+
+// Strip the host root before placing an install prefix beneath DESTDIR.
+// `/usr/local` becomes `<destdir>/usr/local`; `C:/Sailfin` becomes
+// `<destdir>/Sailfin`. The shared root parser keeps drive and UNC handling
+// aligned with the rest of the compiler instead of producing an invalid
+// embedded `C:` path on Windows.
+fn _bootstrap_unroot_prefix(prefix: string) -> string {
+    let root_len = path_root_prefix_len(prefix);
+    if root_len <= 0 { return prefix; }
+    return substring(prefix, root_len, prefix.length);
+}
+
+fn _bootstrap_has_parent_segment(path: string) -> boolean {
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i > path.length { break; }
+        let at_end = i == path.length;
+        if at_end || is_path_separator(substring(path, i, i + 1)) {
+            if substring(path, start, i) == ".." { return true; }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// True when DESTDIR names the filesystem root itself. That spelling is not a
+// staging sandbox: `/` + `/usr/local` is the live `/usr/local`, so it must
+// retain the same package-manager ownership guard as a direct prefix install.
+fn _bootstrap_destdir_is_live_root(destdir: string) -> boolean {
+    if destdir.length == 0 { return false; }
+    let root_len = path_root_prefix_len(destdir);
+    if root_len <= 0 { return false; }
+    let mut i: int = root_len;
+    loop {
+        if i >= destdir.length { break; }
+        if !is_path_separator(substring(destdir, i, i + 1)) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _bootstrap_realpath(path: string) -> string ![io] {
+    let resolved: *u8 = realpath(path as *u8, null);
+    if resolved as i64 == 0 { return ""; }
+    return _source_identity_normalize_path(resolved as string);
+}
+
+fn _bootstrap_path_contains(root: string, path: string) -> boolean {
+    if strings_equal(root, path) { return true; }
+    if root.length == 0 || path.length <= root.length { return false; }
+    if !starts_with(path, root) { return false; }
+    return is_path_separator(substring(path, root.length, root.length + 1));
+}
+
+// Prepare only the portion beneath DESTDIR, rejecting symlink components
+// before directory creation. This makes the staging root a containment
+// boundary instead of letting an existing `<destdir>/usr` link redirect a
+// package publish into the live filesystem. Returns 1 for a live filesystem
+// root, 0 for a contained staging root, and -1 on validation failure.
+fn _bootstrap_prepare_destdir(destdir: string, bin_dir: string) -> int ![io] {
+    if !ensure_dir_p(destdir) {
+        print.err("error: could not create DESTDIR " + destdir);
+        return -1;
+    }
+    if fs.read_link(destdir).length > 0 {
+        print.err("error: DESTDIR must not be a symbolic link: " + destdir);
+        return -1;
+    }
+
+    let resolved_root = _bootstrap_realpath(destdir);
+    if resolved_root.length == 0 {
+        print.err("error: could not resolve DESTDIR " + destdir);
+        return -1;
+    }
+    if _bootstrap_destdir_is_live_root(resolved_root) { return 1; }
+
+    let lexical_root = _source_identity_normalize_path(_bootstrap_abspath(destdir));
+    let lexical_bin = _source_identity_normalize_path(_bootstrap_abspath(bin_dir));
+    if !_bootstrap_path_contains(lexical_root, lexical_bin) {
+        print.err("error: resolved install prefix escapes DESTDIR: " + bin_dir);
+        return -1;
+    }
+
+    let mut cursor = lexical_root;
+    let mut start: int = lexical_root.length;
+    if start < lexical_bin.length && is_path_separator(substring(lexical_bin, start, start
+        + 1)) { start += 1; }
+    let mut i: int = start;
+    loop {
+        if i > lexical_bin.length { break; }
+        let at_end = i == lexical_bin.length;
+        if at_end || is_path_separator(substring(lexical_bin, i, i + 1)) {
+            if i > start {
+                cursor = _path_join(cursor, substring(lexical_bin, start, i));
+                if fs.read_link(cursor).length > 0 {
+                    print.err("error: install path beneath DESTDIR contains a symbolic link: "
+                        + cursor);
+                    return -1;
+                }
+                if !fs.exists(cursor) && !fs.createDirectory(cursor, false) {
+                    print.err("error: could not create staged install directory "
+                        + cursor);
+                    return -1;
+                }
+                let resolved_cursor = _bootstrap_realpath(cursor);
+                if resolved_cursor.length == 0 || !_bootstrap_path_contains(resolved_root, resolved_cursor) {
+                    print.err("error: resolved install path escapes DESTDIR: "
+                        + cursor);
+                    return -1;
+                }
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    return 0;
+}
+
+// Resolve a prefixed install from an already host-conditioned executable
+// name. Keeping the name as an input makes the Windows `.exe` branch
+// regression-testable without duplicating its rule here; production passes
+// `host_exe_name("sfn")`.
+fn _bootstrap_prefixed_install_path(prefix: string, destdir: string, exe_name: string) -> string {
+    let mut install_prefix = prefix;
+    if destdir.length > 0 {
+        install_prefix = _path_join(destdir, _bootstrap_unroot_prefix(prefix));
+    }
+    return _source_identity_normalize_path(_path_join(_path_join(install_prefix, "bin"), exe_name));
+}
+
+// Resolve the destination for `dev bootstrap install`. No flags preserve the
+// canonical repo-local publish path. DESTDIR without an explicit prefix uses
+// `~/.local`, matching the Makefile compatibility target it replaces.
+fn _dev_bootstrap_install_prefix(prefix: string, destdir: string) -> string ![io] {
+    if prefix.length == 0 && destdir.length == 0 { return ""; }
+    let mut install_prefix = prefix;
+    if install_prefix.length == 0 {
+        let home = env.home();
+        if home.length == 0 { return ""; }
+        install_prefix = _path_join(home, ".local");
+    }
+    return install_prefix;
+}
+
+fn _dev_bootstrap_install_path(prefix: string, destdir: string) -> string ![io] {
+    if prefix.length == 0 && destdir.length == 0 {
+        return native_install_path();
+    }
+    let install_prefix = _dev_bootstrap_install_prefix(prefix, destdir);
+    if install_prefix.length == 0 { return ""; }
+    return _bootstrap_prefixed_install_path(install_prefix, destdir, host_exe_name("sfn"));
+}
+
+// Canonical publication is selected by CLI mode, not by path coincidence.
+// Explicit path flags may normalize to `build/bin/sfn`, but they still request
+// prefixed/staged bundle semantics and must not touch the repo fingerprint.
+fn _bootstrap_install_is_canonical(prefix: string, destdir: string) -> boolean {
+    return prefix.length == 0 && destdir.length == 0;
+}
+
+fn _bootstrap_dev_owner_marker_path(out: string) -> string {
+    return out + ".sfn-dev-install.sha256";
+}
+
+// `fs.exists` follows POSIX symlinks, so it reports a dangling entry as
+// absent. `fs.read_link` observes that link node without following it. On
+// Windows the read-link primitive is unavailable, but `fs.exists` lowers to
+// GetFileAttributesA, whose link behavior reports attributes for the link
+// itself. Keep the combination centralized so ownership, backup, and rollback
+// cannot disagree about whether a filesystem entry occupies a live path.
+fn _bootstrap_path_entry_exists(path: string) -> boolean ![io] {
+    if fs.exists(path) { return true; }
+    return fs.read_link(path).length > 0;
+}
+
+// A live prefixed install may replace only a binary that this command wrote
+// and that has not changed since. Package managers do not carry the sidecar,
+// and a later package-manager replacement leaves a digest mismatch, so both
+// cases fail closed instead of losing the PATH entry behind the user's back
+// (SFN-1075; SFEP-0073 §3.5).
+fn _bootstrap_dev_owns_install(out: string) -> boolean ![io] {
+    if !_bootstrap_path_entry_exists(out) {
+        let bin_dir = _dirname(out);
+        return !_bootstrap_path_entry_exists(bin_dir + "/runtime") && !_bootstrap_path_entry_exists(bin_dir
+            + "/capsules")
+            && !_bootstrap_path_entry_exists(bin_dir
+            + "/workspace.toml")
+            && !_bootstrap_path_entry_exists(_bootstrap_dev_owner_marker_path(out));
+    }
+    let marker = _bootstrap_dev_owner_marker_path(out);
+    if !_bootstrap_path_entry_exists(marker) { return false; }
+    let expected = _toml_trim_cmd(fs.readFile(marker));
+    if expected.length == 0 { return false; }
+    let actual = _sha256_of_file(out);
+    return actual.length > 0 && strings_equal(actual, expected);
+}
+
+// Stage the compiler's resolved runtime/dependency closure before touching an
+// install prefix. A compiler executable is not a complete local toolchain on
+// its own: through 0.10.5 both driver and analyzer discovery require the
+// adjacent runtime mirror (SFN-1124).
+fn _bootstrap_stage_dev_payload(src: string, out: string, record_owner: boolean) -> string ![io] {
+    let bin_dir = _dirname(out);
+    if !ensure_dir_p(bin_dir) { return ""; }
+    let staging = fs.mkdtemp(bin_dir + "/.sfn-dev-install-payload-");
+    if staging.length == 0 { return ""; }
+    let result = stage_installer_workspace_assets(".", staging);
+    if !result.ok {
+        remove_tree(staging);
+        return "";
+    }
+    let staged_bin = staging + "/" + _path_basename(out);
+    if !install_built_compiler(src, staged_bin) {
+        remove_tree(staging);
+        return "";
+    }
+    if record_owner {
+        let digest = _sha256_of_file(staged_bin);
+        if digest.length == 0 {
+            remove_tree(staging);
+            return "";
+        }
+        let staged_marker = staging + "/" + _path_basename(_bootstrap_dev_owner_marker_path(out));
+        fs.writeFile(staged_marker, digest + "\n");
+        if !strings_equal(_toml_trim_cmd(fs.readFile(staged_marker)), digest) {
+            remove_tree(staging);
+            return "";
+        }
+    }
+    return staging;
+}
+
+struct BootstrapInstallBackup {
+    ok: boolean;
+    existed: boolean;
+    path: string;
+}
+
+fn _bootstrap_backup_install_path(live: string) -> BootstrapInstallBackup ![io] {
+    if !_bootstrap_path_entry_exists(live) {
+        return BootstrapInstallBackup { ok: true, existed: false, path: "" };
+    }
+    let backup = _mktemp_sibling_cmd(live);
+    if backup.length == 0 {
+        return BootstrapInstallBackup { ok: false, existed: true, path: "" };
+    }
+    fs.deleteFile(backup);
+    if !_rename_preserving_source_on_failure(live, backup) {
+        return BootstrapInstallBackup { ok: false, existed: true, path: "" };
+    }
+    return BootstrapInstallBackup { ok: true, existed: true, path: backup };
+}
+
+fn _bootstrap_restore_install_paths(live_paths: string[], backups: BootstrapInstallBackup[]) -> boolean ![io] {
+    let mut restored: boolean = true;
+    let mut i: int = backups.length - 1;
+    loop {
+        if i < 0 { break; }
+        if _bootstrap_path_entry_exists(live_paths[i]) && !remove_tree(live_paths[i]) {
+            restored = false;
+        }
+        if backups[i].existed && backups[i].path.length > 0 {
+            if !_rename_preserving_source_on_failure(backups[i].path, live_paths[i]) {
+                restored = false;
+            }
+        }
+        i -= 1;
+    }
+    return restored;
+}
+
+// Commit a complete same-filesystem bundle. Every source is staged before a
+// live path moves; any failed backup or publish restores the prior bundle.
+// The caller holds the per-entry install lock, so two writers cannot
+// interleave their backup sets.
+fn _bootstrap_commit_dev_payload(staging: string, out: string, record_owner: boolean) -> boolean ![io] {
+    let bin_dir = _dirname(out);
+    let marker = _bootstrap_dev_owner_marker_path(out);
+    let live_paths = [bin_dir + "/runtime", bin_dir + "/capsules", bin_dir
+        + "/workspace.toml", out, marker];
+    let mut staged_paths = [staging + "/runtime", staging + "/capsules", staging
+        + "/workspace.toml", staging
+        + "/"
+        + _path_basename(out), ""];
+    if record_owner {
+        staged_paths[4] = staging + "/" + _path_basename(marker);
+    }
+
+    let mut backups: BootstrapInstallBackup[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= live_paths.length { break; }
+        let backup = _bootstrap_backup_install_path(live_paths[i]);
+        if !backup.ok {
+            let restored = _bootstrap_restore_install_paths(live_paths, backups);
+            if !restored {
+                print.err("error: failed to restore the prior local compiler bundle");
+            }
+            return false;
+        }
+        backups.push(backup);
+        i += 1;
+    }
+
+    i = 0;
+    loop {
+        if i >= live_paths.length { break; }
+        if staged_paths[i].length > 0 {
+            if !_atomic_rename_into_place(staged_paths[i], live_paths[i]) {
+                let restored = _bootstrap_restore_install_paths(live_paths, backups);
+                if !restored {
+                    print.err("error: failed to restore the prior local compiler bundle");
+                }
+                return false;
+            }
+        }
+        i += 1;
+    }
+
+    i = 0;
+    loop {
+        if i >= backups.length { break; }
+        if backups[i].existed && backups[i].path.length > 0 {
+            remove_tree(backups[i].path);
+        }
+        i += 1;
+    }
+    remove_tree(staging);
+    return true;
 }
 
 // A seed store entry is ready to build/dispatch from when its `sailfin`
@@ -560,7 +908,8 @@ fn _looks_like_digest(s: string) -> boolean {
 
 // install: publish an already-built compiler binary (from `from_path`, or
 // `build/capsules/sfn/compiler/bin/compiler` by default) as the canonical
-// `build/bin/sfn`.
+// `build/bin/sfn`, or as `<destdir><prefix>/bin/sfn` when a packaging path
+// is requested.
 // The post-build publish half of `_dev_bootstrap_build`, invoked by the
 // Makefile from the freshly built binary. Applies the same
 // pending-fingerprint race guard: if the sources changed since the build
@@ -571,12 +920,103 @@ fn _looks_like_digest(s: string) -> boolean {
 // to have taken one from, and a binary predating SFN-679 cannot produce one.
 // Both degrade to "install, but do not record a freshness claim nobody
 // checked" rather than failing the completed build outright (SFN-679).
-fn _dev_bootstrap_install(from_path: string) -> int ![io] {
+fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) -> int ![io] {
     let mut src = from_path;
     if src.length == 0 { src = built_program_path(); }
     if !fs.exists(src) {
         print.err("error: no built compiler at " + src);
         return 1;
+    }
+
+    let effective_prefix = _dev_bootstrap_install_prefix(prefix, destdir);
+    let out = _dev_bootstrap_install_path(prefix, destdir);
+    if out.length == 0 {
+        print.err("error: could not determine the default install prefix because the home directory is unset");
+        return 1;
+    }
+
+    if destdir.length > 0 {
+        if _bootstrap_has_parent_segment(destdir) {
+            print.err("error: DESTDIR contains a parent path component: "
+                + destdir);
+            return 1;
+        }
+        if _bootstrap_has_parent_segment(effective_prefix) {
+            print.err("error: install prefix contains a parent path component and escapes DESTDIR: "
+                + effective_prefix);
+            return 1;
+        }
+    }
+
+    let canonical = _bootstrap_install_is_canonical(prefix, destdir);
+    let mut live_prefixed = !canonical && destdir.length == 0;
+    if !canonical && destdir.length > 0 {
+        let destdir_kind = _bootstrap_prepare_destdir(destdir, _dirname(out));
+        if destdir_kind < 0 { return 1; }
+        live_prefixed = destdir_kind == 1;
+    }
+    if live_prefixed && !_bootstrap_dev_owns_install(out) {
+        print.err("error: refusing to overwrite the existing entry executable at "
+            + out);
+        print.err("  it is not an unchanged sfn dev install and may be owned by a package manager");
+        print.err("  remove it explicitly before publishing a local self-build to this prefix");
+        return 1;
+    }
+
+    // A prefixed publish does not make `build/bin/sfn` fresh. Keep the
+    // canonical fingerprint transaction below isolated so installing onto
+    // PATH cannot make a stale repo-local compiler pass the next build gate.
+    if !canonical {
+        let smoke_rc = process.run([src, "version"]);
+        if smoke_rc != 0 {
+            print.err("error: the compiler at " + src
+                + " failed its smoke check (exit "
+                + int_to_string(smoke_rc)
+                + "); "
+                + out
+                + " was left unchanged");
+            return 1;
+        }
+        let lock_path = out + ".sfn-dev-install.lock";
+        if !ensure_dir_p(_dirname(out)) {
+            print.err("error: could not create the local compiler install directory "
+                + _dirname(out));
+            return 1;
+        }
+        let lock_claim = _create_exclusive_cmd(lock_path, CREATE_EXCLUSIVE_MODE_FILE);
+        if lock_claim != CREATE_EXCLUSIVE_CREATED {
+            print.err("error: another local compiler install owns " + lock_path);
+            return 1;
+        }
+        let payload_staging = _bootstrap_stage_dev_payload(src, out, live_prefixed);
+        if payload_staging.length == 0 {
+            fs.deleteFile(lock_path);
+            print.err("error: could not stage the local compiler runtime payload");
+            return 1;
+        }
+        // Staging copies the full runtime closure and can take long enough
+        // for an external writer to replace the entry after the initial
+        // ownership check. Revalidate while holding the dev-writer lock at
+        // the commit boundary so that replacement is preserved, not buried.
+        if live_prefixed && !_bootstrap_dev_owns_install(out) {
+            remove_tree(payload_staging);
+            fs.deleteFile(lock_path);
+            print.err("error: refusing to overwrite the existing entry executable at "
+                + out);
+            print.err("  it changed while the local compiler bundle was being staged and may be owned by a package manager");
+            print.err("  remove it explicitly before publishing a local self-build to this prefix");
+            return 1;
+        }
+        if !_bootstrap_commit_dev_payload(payload_staging, out, live_prefixed) {
+            remove_tree(payload_staging);
+            fs.deleteFile(lock_path);
+            print.err("error: could not commit the local compiler bundle at "
+                + out);
+            return 1;
+        }
+        fs.deleteFile(lock_path);
+        print("sfn dev bootstrap: installed " + out);
+        return 0;
     }
 
     let cur = compute_workspace_source_fingerprint(".");
@@ -608,8 +1048,6 @@ fn _dev_bootstrap_install(from_path: string) -> int ![io] {
         print.err("error: compiler sources changed during the build; refusing to publish a stale binary");
         return 1;
     }
-
-    let out = native_install_path();
 
     // Smoke-verify the candidate BEFORE it replaces anything (SFN-679), so a
     // build that produced an unrunnable binary leaves the previously
@@ -728,7 +1166,10 @@ fn command_def() -> Command {
     bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
     bootstrap = with_subcommand(bootstrap, with_arg(command("pin", "Update the pinned seed version"), arg("version", "Seed version to pin (e.g. 0.8.0-alpha.4)")));
     bootstrap = with_subcommand(bootstrap, with_arg(command("fingerprint", "Print the compiler source fingerprint"), arg_variadic("root", "Source roots to hash (default: workspace maintainer + explicit inputs)")));
-    bootstrap = with_subcommand(bootstrap, with_flag(command("install", "Publish an already-built compiler as build/bin/sfn"), flag_value("from", "Path to the built compiler binary (default: build/capsules/sfn/compiler/bin/compiler)")));
+    let mut install = with_flag(command("install", "Publish an already-built compiler locally or under an install prefix"), flag_value("from", "Path to the built compiler binary (default: build/capsules/sfn/compiler/bin/compiler)"));
+    install = with_flag(install, flag_value("prefix", "Install under <dir>/bin instead of build/bin"));
+    install = with_flag(install, flag_value("destdir", "Prepend a packaging staging root to the install prefix"));
+    bootstrap = with_subcommand(bootstrap, install);
     let mut dev: Command = with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
     dev = with_subcommand(dev, shard_command_def());
     dev = with_subcommand(dev, arena_command_def());
@@ -794,7 +1235,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         return _dev_bootstrap_fingerprint(positionals(matches, "root"));
     }
     if strings_equal(sub, "install") {
-        return _dev_bootstrap_install(get(matches, "from"));
+        return _dev_bootstrap_install(get(matches, "from"), get(matches, "prefix"), get(matches, "destdir"));
     }
     print("usage: sfn dev bootstrap <fetch|build|check|pin|fingerprint|install>");
     return 2;
@@ -808,5 +1249,8 @@ export {
     _bootstrap_alias,
     _bootstrap_compiler_build_argv,
     _bootstrap_is_absolute,
+    _bootstrap_install_is_canonical,
+    _bootstrap_commit_dev_payload,
+    _bootstrap_prefixed_install_path,
     _bootstrap_target_is_cross
 };

@@ -287,6 +287,14 @@ fn _atomic_rename_into_place(tmp_path: string, dst_path: string) -> boolean ![io
     return true;
 }
 
+// Move a non-disposable source without deleting it when the platform rename
+// fails. Backup and rollback paths must use this instead of
+// `_atomic_rename_into_place`: that helper owns a temporary source and removes
+// it on failure, while these callers hold the only live/recovery copy.
+fn _rename_preserving_source_on_failure(src_path: string, dst_path: string) -> boolean ![io] {
+    return sfn_rename_replace(src_path as *u8, dst_path as *u8) == 0;
+}
+
 // A null or empty line array publishes a zero-length artifact, matching
 // the pre-SFN-712 LLVM publication contract. `fs.writeLines`
 // returns early on a null handle without touching the file, so the empty
@@ -920,6 +928,7 @@ export {
     _cwd_cmd,
     _set_perms_or_skip,
     _atomic_rename_into_place,
+    _rename_preserving_source_on_failure,
     _publish_lines_atomic,
     _copy_file,
     _copy_file_preserving_mode,
