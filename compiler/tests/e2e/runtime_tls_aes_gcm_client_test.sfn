@@ -57,17 +57,26 @@ import {
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tag_` so these never collide with the external-linkage
 // runtime helpers of the same shape in `http.sfn` (not linked into this
-// test binary, but the prefix keeps that independent of link order). The
-// libc socket externs carry no effect annotation, so the effect checker
-// infers no `net` requirement for these direct callers — the same
-// rationale as the sibling TLS e2e tests.
+// test binary, but the prefix keeps that independent of link order).
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_tag_connect` and every caller up to
+// `_await_listening`/all three tests declare `![net]` transitively
+// (SFN-927 is the undefined-symbol failure mode otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -83,7 +92,7 @@ fn _tag_ptr_off(p: *u8, off: i64) -> *u8 {
 // sin_len at 0 + u8 sin_family at 1), first success wins — the inlined
 // `http.sfn::_connect_tcp` idiom. Used only to detect that `s_server` is
 // accepting before the fixture runs.
-fn _tag_connect(port: i64) -> i32 {
+fn _tag_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -100,7 +109,7 @@ fn _tag_connect(port: i64) -> i32 {
         memset(_tag_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         memset(_tag_ptr_off(addr, 4), 127, 1 as usize);
         memset(_tag_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -196,7 +205,7 @@ fn _server_argv(dir: string, port_str: string, ciphersuite: string) -> string[] 
 // elapses), napping in-process via `wait_until` rather than shelling
 // `sleep` per tick. ~30s budget, matching the previous 60-attempts x 0.5s
 // shape.
-fn _await_listening(port: i64) -> boolean ![clock, io] {
+fn _await_listening(port: i64) -> boolean ![clock, io, net] {
     return wait_until(fn () -> boolean {
         let fd: i32 = _tag_connect(port);
         if fd >= 0 {
@@ -289,7 +298,7 @@ fn _skip_ready() -> boolean ![io] {
     return true;
 }
 
-test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clock, io] {
+test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
@@ -337,7 +346,7 @@ test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clo
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (control)" ![clock, io] {
+test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (control)" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
@@ -377,7 +386,7 @@ test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only server" ![clock, io] {
+test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only server" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;

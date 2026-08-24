@@ -42,7 +42,19 @@ extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 extern fn strlen(s: *u8) -> usize;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_kp_connect` and every caller up to
+// `_kp_send_recv_one`/`_await_ready`/the test declare `![net]`
+// transitively (SFN-927 is the undefined-symbol failure mode otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -70,16 +82,12 @@ fn _timeout_cmd() -> string ![io] {
 }
 
 // ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──
-// Effect note: the libc socket externs carry no effect annotation, so the
-// effect checker infers no `net` requirement for these direct callers — they
-// (and the `_kp_*` request helpers) are left un-annotated, matching
-// `serve_loopback_test.sfn`. The test bodies keep `![io]` for `process.*`.
 fn _kp_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
     return addr as *u8;
 }
 
-fn _kp_connect(port: i64) -> i32 {
+fn _kp_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -96,7 +104,7 @@ fn _kp_connect(port: i64) -> i32 {
         memset(_kp_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         memset(_kp_ptr_off(addr, 4), 127, 1 as usize);
         memset(_kp_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -254,7 +262,7 @@ fn _kp_recv_all(fd: i32) -> string {
 
 // `_kp_send_recv_one(port, request)` — open a fresh connection, send
 // `request`, read ONE framed response, close. For the readiness probe.
-fn _kp_send_recv_one(port: i64, request: string) -> string {
+fn _kp_send_recv_one(port: i64, request: string) -> string ![net] {
     let fd: i32 = _kp_connect(port);
     if fd < 0 { return ""; }
     if !_kp_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
@@ -385,7 +393,7 @@ fn _spawn_server(bin: string) -> i64 ![io] {
 
 // Poll `GET /probe` until the prebuilt server answers. `Connection: close`
 // here so the probe read completes via the framed read either way.
-fn _await_ready(port: i64) -> string ![io] {
+fn _await_ready(port: i64) -> string ![io, net] {
     let probe = "GET /probe HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
     let mut attempt: i64 = 0;
     loop {
@@ -400,7 +408,7 @@ fn _await_ready(port: i64) -> string ![io] {
     return "";
 }
 
-test "serve keep-alive: connection reuse (server loop + native client) (#1711)" ![io] {
+test "serve keep-alive: connection reuse (server loop + native client) (#1711)" ![io, net] {
     // Teardown of the blocking server relies on a wall-clock timeout (no
     // process-kill primitive; `serve()` never returns). Skip cleanly when
     // neither timeout nor gtimeout is present rather than orphan the fixed

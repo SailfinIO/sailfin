@@ -52,18 +52,26 @@ import {
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tll_` so these never collide with the external-linkage
 // runtime helpers of the same shape in `http.sfn` (not linked into this
-// test binary, but the prefix keeps that independent of link order). The
-// libc socket externs carry no effect annotation, so the effect checker
-// infers no `net` requirement for these direct callers — they are left
-// un-annotated (the same rationale as `serve_loopback_test.sfn`), while
-// the test body keeps `![io]` for its `process.*` / `fs.*` calls.
+// test binary, but the prefix keeps that independent of link order).
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_tll_connect` and every caller up to
+// `_await_listening`/both tests declare `![net]` transitively (SFN-927 is
+// the undefined-symbol failure mode otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -79,7 +87,7 @@ fn _tll_ptr_off(p: *u8, off: i64) -> *u8 {
 // sin_len at 0 + u8 sin_family at 1), first success wins — the inlined
 // `http.sfn::_connect_tcp` idiom. Used only to detect that the server is
 // accepting before the client fixture runs.
-fn _tll_connect(port: i64) -> i32 {
+fn _tll_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -96,7 +104,7 @@ fn _tll_connect(port: i64) -> i32 {
         memset(_tll_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         memset(_tll_ptr_off(addr, 4), 127, 1 as usize);
         memset(_tll_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -324,7 +332,7 @@ fn _spawn_server(tcmd: string, bin: string) -> i64 ![io] {
 // Poll a raw TCP connect until the prebuilt server is accepting (startup is
 // just the binary launching + bind + ctx build, ~1s). ~30s budget (60 ×
 // ~0.5s) under the 60s server timeout.
-fn _await_listening(port: i64) -> boolean ![io] {
+fn _await_listening(port: i64) -> boolean ![io, net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 60 { break; }
@@ -382,7 +390,7 @@ fn _client_body_retry(client_bin: string, run_env: string[], out_path: string) -
     return "";
 }
 
-test "tls loopback: native serve ↔ native https client round-trips + verify-failure" ![io] {
+test "tls loopback: native serve ↔ native https client round-trips + verify-failure" ![io, net] {
     // `openssl` generates the self-signed cert; skip cleanly without it (the
     // plain suite still covers the plaintext paths + `make compile` the TLS
     // surface). Mirrors the tool-absent SKIP precedent.
@@ -451,7 +459,7 @@ test "tls loopback: native serve ↔ native https client round-trips + verify-fa
     let _rm = process.run(["rm", "-rf", dir]);
 }
 
-test "tls loopback: plaintext serve still round-trips (regression guard)" ![io] {
+test "tls loopback: plaintext serve still round-trips (regression guard)" ![io, net] {
     // Plaintext needs no `openssl` (no cert), only a timeout to reap the
     // blocking server.
     let tcmd = _timeout_cmd();

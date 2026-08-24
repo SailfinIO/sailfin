@@ -38,7 +38,20 @@ extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
 extern fn strlen(s: *u8) -> usize;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_lb_connect` and every caller up to
+// `_lb_handshake`/`_lb_open_ready`/`_await_ready`/the three tests declare
+// `![net]` transitively (SFN-927 is the undefined-symbol failure mode
+// otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -87,7 +100,7 @@ fn _lb_byte_at(base: *u8, off: i64) -> i64 {
 // Connect a stream socket to `127.0.0.1:port`. Tries both `sockaddr_in`
 // byte layouts (Linux u16 sin_family at 0; macOS/BSD u8 sin_len at 0 +
 // u8 sin_family at 1), first success wins. Returns the connected fd or -1.
-fn _lb_connect(port: i64) -> i32 {
+fn _lb_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -105,7 +118,7 @@ fn _lb_connect(port: i64) -> i32 {
         // sin_addr = 127.0.0.1
         memset(_lb_ptr_off(addr, 4), 127, 1 as usize);
         memset(_lb_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -152,7 +165,7 @@ fn _lb_recv_exact(fd: i32, buf: *u8, n: i64) -> bool {
 // Send the fixed RFC 6455 handshake request (the well-known test key from
 // the spec's own example, so the expected accept value is a fixed
 // constant) and return the raw response bytes (or "" on failure).
-fn _lb_handshake(port: i64) -> string {
+fn _lb_handshake(port: i64) -> string ![net] {
     let fd: i32 = _lb_connect(port);
     if fd < 0 { return ""; }
     let req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
@@ -485,7 +498,7 @@ fn _spawn_server_pooled(bin: string) -> i64 ![io] {
 
 // Poll the handshake until the prebuilt server answers with a `101`.
 // ~45s budget (90 attempts x ~0.5s) stays under the 60s server timeout.
-fn _await_ready(port: i64) -> string ![io] {
+fn _await_ready(port: i64) -> string ![io, net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 90 { break; }
@@ -499,7 +512,7 @@ fn _await_ready(port: i64) -> string ![io] {
     return "";
 }
 
-test "websocket.serve loopback: handshake + echo + close round-trip" ![io] {
+test "websocket.serve loopback: handshake + echo + close round-trip" ![io, net] {
     // Teardown of the blocking server relies on a wall-clock timeout (no
     // process-kill primitive; `websocket.serve` never returns). Without
     // `timeout`/`gtimeout`, spawning the server would orphan the fixed port
@@ -561,7 +574,7 @@ test "websocket.serve loopback: handshake + echo + close round-trip" ![io] {
     let _rm = process.run(["rm", "-rf", _app_root()]);
 }
 
-test "websocket.serve loopback: two clients served concurrently" ![io] {
+test "websocket.serve loopback: two clients served concurrently" ![io, net] {
     // Same rationale as the test above: without a reaper, a spawned server
     // would orphan the fixed port and poison subsequent runs.
     if _timeout_cmd().length == 0 {
@@ -690,7 +703,7 @@ fn _write_server3(port_str: string) -> string ![io] {
 // Open a fresh connection and complete the RFC 6455 handshake, returning the
 // upgraded fd (or -1). Effect-free (only the plain socket/libc externs), the
 // same shape as `_lb_connect`.
-fn _lb_open_ready(port: i64) -> i32 {
+fn _lb_open_ready(port: i64) -> i32 ![net] {
     let fd: i32 = _lb_connect(port);
     if fd < 0 { return 0 - 1; }
     let req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
@@ -713,7 +726,7 @@ fn _lb_open_ready(port: i64) -> i32 {
     return fd;
 }
 
-test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol errors" ![io] {
+test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol errors" ![io, net] {
     // Same teardown constraint as the tests above: without a reaper the
     // spawned server would orphan the fixed port and poison later runs.
     if _timeout_cmd().length == 0 {

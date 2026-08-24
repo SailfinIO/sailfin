@@ -13,7 +13,19 @@ extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 extern fn strlen(s: *u8) -> usize;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_su_connect` and every caller up to
+// `_su_request`/the test declare `![net]` transitively (SFN-927 is the
+// undefined-symbol failure mode otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -42,7 +54,7 @@ fn _su_ptr_off(p: *u8, off: i64) -> *u8 {
     return addr as *u8;
 }
 
-fn _su_connect(port: i64) -> i32 {
+fn _su_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -59,7 +71,7 @@ fn _su_connect(port: i64) -> i32 {
         memset(_su_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         memset(_su_ptr_off(addr, 4), 127, 1 as usize);
         memset(_su_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -112,7 +124,7 @@ fn _su_recv_all(fd: i32) -> string {
     return buf as string;
 }
 
-fn _su_request(port: i64, request: string) -> string {
+fn _su_request(port: i64, request: string) -> string ![net] {
     let fd: i32 = _su_connect(port);
     if fd < 0 { return ""; }
     if !_su_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
@@ -144,7 +156,7 @@ fn _spawn_server(bin: string) -> i64 ![io] {
     return process.spawn_with_env(argv, _child_env());
 }
 
-fn _await_ready(port: i64) -> string ![io] {
+fn _await_ready(port: i64) -> string ![io, net] {
     let request = "GET /users HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
     let mut attempt: i64 = 0;
     loop {
@@ -159,7 +171,7 @@ fn _await_ready(port: i64) -> string ![io] {
     return "";
 }
 
-test "stateful users server: POST persists across GET requests (SFN-33)" ![io] {
+test "stateful users server: POST persists across GET requests (SFN-33)" ![io, net] {
     if _timeout_cmd().length == 0 {
         print.info("[stateful-users] SKIP: no timeout/gtimeout to reap the blocking server");
         return;
