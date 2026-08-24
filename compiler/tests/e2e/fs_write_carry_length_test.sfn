@@ -25,6 +25,7 @@ import {
     c_math_link_flags,
     clean_runner_env,
     default_scratch_dir,
+    host_is_windows,
     run_external_c_oracle,
     sfn_bin_path
 } from "sfn/test";
@@ -93,7 +94,30 @@ fn _has_define_named(ir: string, sym: string) -> boolean {
 // APIs (`GetFileAttributesA`, `FindFirstFileA`, `FindNextFileA`, `FindClose`)
 // that have no Linux provider. `main` never calls these; they exist only to
 // satisfy the linker, mirroring `string_cstr_boundary_test.sfn`'s stub set.
-fn _harness_c() -> string {
+// `win32_provided` is true on a host whose own libraries define the Win32
+// shims below. They exist ONLY to give the linker a definition on a host
+// that has none; where `kernel32.lib` supplies the real ones, defining
+// them here is a `lld-link: error: duplicate symbol: FindClose` (SFN-1114).
+// The stubs are unreachable either way — `main` never calls them — so
+// omitting them costs the test nothing and lets the real implementations
+// resolve.
+fn _harness_c(win32_provided: boolean) -> string {
+    let mut win32_shims = "int GetFileAttributesA(const char* p){(void)p;return -1;}\n"
+        + "void* FindFirstFileA(const char* p,void* d){(void)p;(void)d;return 0;}\n"
+        + "int FindNextFileA(void* h,void* d){(void)h;(void)d;return 0;}\n"
+        + "int FindClose(void* h){(void)h;return 1;}\n";
+    // The mirror-image gap. `sfn emit` on a single module does NOT apply the
+    // target conditioning that swaps `mkdtemp.sfn` for `mkdtemp_windows.sfn`
+    // in a real build, so the emitted `filesystem.ll` reaches for POSIX
+    // `mkdtemp` even here. Only this one is stubbed, because only this one
+    // fails to resolve: the UCRT supplies `access`/`chmod`/`rmdir`/`unlink`/
+    // `stat` under `oldnames.lib`, and stubbing those would recreate the
+    // duplicate-symbol error in the other direction (SFN-1114).
+    let mut posix_shims = "";
+    if win32_provided {
+        win32_shims = "";
+        posix_shims = "char* mkdtemp(char* t){(void)t;return 0;}\n";
+    }
     return "#include <stdio.h>\n" + "#include <string.h>\n"
         + "#include <stdlib.h>\n"
         + "extern void  sfn_fs_write_file_lv(const char*,const char*,long long);\n"
@@ -103,10 +127,8 @@ fn _harness_c() -> string {
         + "void* sailfin_runtime_append_string_v2(void* a,void* t){(void)a;(void)t;return 0;}\n"
         + "char* sfn_str_from_codepoint(long long cp){(void)cp;return 0;}\n"
         + "int _sfn_fs_access_exec_mode(void){return 1;}\n"
-        + "int GetFileAttributesA(const char* p){(void)p;return -1;}\n"
-        + "void* FindFirstFileA(const char* p,void* d){(void)p;(void)d;return 0;}\n"
-        + "int FindNextFileA(void* h,void* d){(void)h;(void)d;return 0;}\n"
-        + "int FindClose(void* h){(void)h;return 1;}\n"
+        + win32_shims
+        + posix_shims
         + "void  sailfin_runtime_mark_persistent(void* p){(void)p;}\n"
         + "void  sfn_type_register(void* d){(void)d;}\n"
         + "void* sfn_alloc_struct(long n){return malloc((size_t)n);}\n"
@@ -159,7 +181,7 @@ test "sfn_fs_write_file_lv / sfn_fs_append_file_lv carry the caller's byte lengt
     let dir = _scratch_dir();
     let ll = _emit_filesystem_ll();
     let harness = dir + "/carry_length_harness.c";
-    fs.writeFile(harness, _harness_c());
+    fs.writeFile(harness, _harness_c(host_is_windows()));
     let bin = dir + "/carry_length_harness";
     // The shared optional-oracle boundary skips only when no configured host
     // compiler can run. A compile/link failure after resolution remains a
