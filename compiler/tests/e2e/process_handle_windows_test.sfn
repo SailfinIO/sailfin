@@ -185,18 +185,37 @@ test "process handle (windows): several children run concurrently before any wai
 }
 
 // A Sailfin source whose emitted LLVM IR is comfortably larger than the
-// 64 KiB pipe buffer: a ~256 KiB string literal the emitter materialises as
-// a global constant. Mirrors the `run_capture` Windows test's fixture.
+// 64 KiB pipe buffer, built from REPEATED STATEMENTS rather than one giant
+// string literal.
+//
+// The literal form demanded far more memory than the host allows.
+// Front-end peak memory is quadratic in SOURCE size — measured, `emit llvm`
+// peaks near `2 * source_bytes^2` — so the previous ~256 KiB fixture asked
+// for roughly 128 GiB against the 8 GiB cap every `sfn` self-applies
+// (`runtime/sfn/platform/rlimit_windows.sfn`). The child hit the cap, the
+// arena's page allocation failed, and `sfn_arena_global`
+// (`runtime/sfn/memory/arena.sfn`) called `abort()` before the child wrote
+// a single byte.
+//
+// That aborts with `0xC0000409` (`STATUS_STACK_BUFFER_OVERRUN`, what
+// `__fastfail` raises), surfacing as exit `-1073740791` — which reads like
+// an access violation (`0xC0000005` / `-1073741819`) but is not one. The
+// leg was therefore measuring the memory budget, never the drain, and no
+// host could have passed it.
+//
+// 1024 statements: ~15 KiB of source -> ~94 KiB of IR at ~865 MiB peak,
+// so the drain still clears 64 KiB with margin and the memory demand keeps
+// an order of magnitude of headroom (SFN-1115).
 fn _big_source() -> string {
-    let mut a = "AAAAAAAAAAAAAAAA";
+    let mut unit = "    t = t + 1;\n";
     let mut i = 0;
     loop {
-        if i >= 14 { break; }
-        a = a + a;
+        if i >= 10 { break; }
+        unit = unit + unit;
         i = i + 1;
     }
-    return "fn payload() -> int {\n    let s = \"" + a
-        + "\";\n    return s.length;\n}\n";
+    return "fn payload() -> int {\n    let mut t = 0;\n" + unit
+        + "    return t;\n}\n";
 }
 
 // ── Acceptance: > 64 KiB on one pipe does not wedge the other ─────────
