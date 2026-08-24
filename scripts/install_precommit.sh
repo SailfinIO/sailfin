@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # install_precommit.sh — opt-in pre-commit hook for Sailfin contributors.
 #
-# Installs a Git pre-commit hook that runs `make check-fast` (a
-# workspace-derived maintainer-source `sfn check` invocation, ~2 min) so contributors
+# Installs a Git pre-commit hook that runs `sfn check` over the
+# workspace-derived maintainer-source inventory (~2 min) so contributors
 # catch parser, typecheck, and effect-system breakage before pushing.
 #
 # This is opt-in by design — it adds ~2 min to every commit, which is a
@@ -87,8 +87,9 @@ cat > "$HOOK_PATH" <<'HOOK'
 #!/usr/bin/env bash
 # sailfin-precommit-v1
 #
-# Runs `make check-fast` to surface parser/typecheck/effect breakage
-# before committing. Skip with `git commit --no-verify` or
+# Runs `sfn check` over the maintainer-source inventory to surface
+# parser/typecheck/effect breakage before committing. Skip with
+# `git commit --no-verify` or
 # `SAILFIN_SKIP_PRECOMMIT=1 git commit ...`.
 set -euo pipefail
 
@@ -98,7 +99,7 @@ if [ "${SAILFIN_SKIP_PRECOMMIT:-0}" = "1" ]; then
 fi
 
 # Resolve the same maintainer-source and explicit-input inventory as
-# `make check-fast`. If inventory loading itself fails (for example a staged
+# the check below. If inventory loading itself fails (for example a staged
 # manifest deletion), run the gate so the failure is visible instead of
 # silently treating the change as unrelated.
 repo_root=$(git rev-parse --show-toplevel)
@@ -134,15 +135,40 @@ else
     if [ -z "$relevant" ]; then exit 0; fi
 fi
 
-# Defer binary detection to `make check-fast` itself — it knows the
-# correct $(NATIVE_BIN) for the platform (including .exe on Windows)
-# and emits a clear "missing; run make compile" message when absent.
-# That way the hook stays platform-agnostic and doesn't drift from the
-# Makefile if NATIVE_BIN is overridden or EXE_EXT changes.
-echo "[pre-commit] running 'make check-fast' (set SAILFIN_SKIP_PRECOMMIT=1 to skip)"
-if ! make check-fast; then
+# Resolve the compiler directly rather than shelling out to `make
+# check-fast`. That target's whole body is an `sfn check` over the
+# workspace maintainer inventory, which this hook already enumerates
+# above, so the make round-trip bought nothing but a dependency.
+#
+# It also cost correctness on Windows: `$(MAKE)` there expands to
+# `C:/Program Files (x86)/GnuWin32/bin/make`, and the recipe line reached
+# the shell with those parentheses unquoted, so `make check-fast` died at
+# parse time. The hook failed before it could report anything about the
+# diff, and no commit could be made from a native Windows checkout.
+#
+# The binary probe is spelled out here because the Makefile used to own
+# it via $(NATIVE_BIN)/$(EXE_EXT). Bash on Windows resolves an `-x` test
+# on the extensionless path, but a bare `-f` fallback does not, so try
+# both spellings.
+SFN_BIN=build/bin/sfn
+if [ ! -x "$SFN_BIN" ] && [ ! -f "$SFN_BIN" ]; then
+    SFN_BIN=build/bin/sfn.exe
+fi
+if [ ! -x "$SFN_BIN" ] && [ ! -f "$SFN_BIN" ]; then
+    echo "[pre-commit] missing build/bin/sfn; run: sfn dev bootstrap build"
+    exit 1
+fi
+
+echo "[pre-commit] running sfn check on workspace maintainer sources (set SAILFIN_SKIP_PRECOMMIT=1 to skip)"
+check_roots=()
+while IFS= read -r path; do check_roots+=("$path"); done < <("$SFN_BIN" dev inventory maintainer-sources)
+if [ "${#check_roots[@]}" -eq 0 ]; then
+    echo "[pre-commit] empty workspace maintainer inventory" >&2
+    exit 2
+fi
+if ! "$SFN_BIN" check "${check_roots[@]}"; then
     echo ""
-    echo "[pre-commit] check-fast failed. Fix the diagnostics above, or"
+    echo "[pre-commit] check failed. Fix the diagnostics above, or"
     echo "[pre-commit] bypass with: git commit --no-verify"
     exit 1
 fi
@@ -150,6 +176,6 @@ HOOK
 chmod +x "$HOOK_PATH"
 
 echo "[install-precommit] installed $HOOK_PATH"
-echo "[install-precommit] runs 'make check-fast' on commits touching workspace maintainer inputs"
+echo "[install-precommit] runs 'sfn check' on commits touching workspace maintainer inputs"
 echo "[install-precommit] skip with: SAILFIN_SKIP_PRECOMMIT=1 git commit ...   (or --no-verify)"
 echo "[install-precommit] uninstall with: bash scripts/install_precommit.sh --remove"
