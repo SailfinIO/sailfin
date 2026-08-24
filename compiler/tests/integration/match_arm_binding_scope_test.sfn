@@ -22,10 +22,12 @@
 // test never flakes.
 import { sfn_bin_path } from "sfn/test";
 
-extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
-
+// SFN-1129: read PATH directly rather than capturing it through a
+// shell. A shell capture returns the unexpanded literal `$PATH` on a
+// native Windows host — five characters, so the emptiness guard below
+// cannot tell that it failed, and the child is handed `PATH=$PATH`.
 fn _host_path() -> string ![io] {
-    let p = sailfin_runtime_shell_capture("printf '%s' \"$PATH\"");
+    let p = env.get("PATH");
     if p.length == 0 { return "/usr/local/bin:/usr/bin:/bin"; }
     return p;
 }
