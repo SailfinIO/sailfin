@@ -29,6 +29,8 @@
 // dir. Hand the child the parent's real PATH, captured via `system()`
 // (which inherits the real env). Effect knobs (`SAILFIN_EFFECT_*`)
 // stay unset, so the child still exercises shipped defaults.
+import { sfn_bin_path } from "sfn/test";
+
 extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _host_path() -> string ![io] {
@@ -52,7 +54,7 @@ fn _retry_fixture() -> string ![io] {
 // the child exit code. Streams are drained so a later capture can't
 // hand back this run's buffers.
 fn _emit_with_faults(src: string, out: string, attempts: string, validate: boolean, faults: string) -> i64 ![io] {
-    let mut argv: string[] = ["build/bin/sfn", "emit"];
+    let mut argv: string[] = [sfn_bin_path(), "emit"];
     if validate { argv.push("--validate"); } else {
         argv.push("--no-validate");
     }

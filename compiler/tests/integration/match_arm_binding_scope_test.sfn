@@ -20,6 +20,8 @@
 // nonzero on any host with `llvm-as` on PATH; where it is absent the cascade
 // skips validation and the fixture (valid IR) still emits cleanly, so the
 // test never flakes.
+import { sfn_bin_path } from "sfn/test";
+
 extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _host_path() -> string ![io] {
@@ -55,7 +57,7 @@ fn _match_fixture() -> string ![io] {
 // PATH so the `--validate` cascade's `llvm-as` lookup resolves (an empty env
 // array is the empty environment, not "inherit").
 fn _emit_validate(src: string, out: string) -> i64 ![io] {
-    let rc = process.run_capture(["build/bin/sfn", "emit", "--validate", "-o", out, "llvm", src], ["PATH="
+    let rc = process.run_capture([sfn_bin_path(), "emit", "--validate", "-o", out, "llvm", src], ["PATH="
         + _host_path()]);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
