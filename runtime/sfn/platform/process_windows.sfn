@@ -977,6 +977,29 @@ fn sfn_process_run_capture_cwd(argv: string[], env_flat: string[], cwd: *u8) -> 
     return _pw_run_capture_impl(argv, env_flat, cwd);
 }
 
+// `process.run_capture_rlimit_as` — the Windows leg, which runs the child
+// UNCAPPED and ignores `as_bytes` (SFN-1114).
+//
+// The cap it names is `RLIMIT_AS`, a POSIX address-space rlimit with no Win32
+// equivalent: a Job Object's `ProcessMemoryLimit` is a different quantity
+// enforced at a different layer, so pretending to honour `as_bytes` here would
+// report a cap this leg does not apply. Running uncapped is the contract the
+// POSIX side already documents for a non-Linux host
+// (`runtime/sfn/process.sfn:1130-1136`) — Darwin ignores `RLIMIT_AS` too, so
+// this is the same no-op that leg already takes, not a new divergence.
+//
+// It exists at all because the symbol must RESOLVE. The runtime helper
+// registry emits `sfn_process_run_capture_rlimit_as` unconditionally
+// (`codegen-llvm/src/runtime_helpers/registry_process.sfn:95`), and this
+// module wholly replaces `process.sfn` on a Windows target, so its absence
+// was a link failure — `lld-link: undefined symbol` — not a graceful
+// degradation. A caller that needs the cap enforced must gate on the host,
+// exactly as it must on macOS.
+fn sfn_process_run_capture_rlimit_as(argv: string[], env_flat: string[], as_bytes: i64) -> i64 ![io] {
+    let _ignored_cap: i64 = as_bytes;
+    return _pw_run_capture_impl(argv, env_flat, 0 as *u8);
+}
+
 // Hand off the captured stream stashed by the preceding `run_capture`,
 // clearing the global so a second take yields empty. A fresh empty string
 // is returned when no capture is pending (mirrors `process.sfn`).

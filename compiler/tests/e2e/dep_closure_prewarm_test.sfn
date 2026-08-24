@@ -18,7 +18,7 @@
 // See `.claude/rules/no-bash-e2e.md` for the `*_test.sfn` e2e pattern
 // this follows (mirrors `guillermo_test.sfn` / `sailfin_main_entry_test.sfn`).
 import { split } from "sfn/strings";
-import { sfn_bin_path, with_tmp_dir } from "sfn/test";
+import { clean_runner_env_without, sfn_bin_path, with_tmp_dir } from "sfn/test";
 
 // Two compiler unit tests that each pull in a large dep closure and
 // resolve under the same group (both plain files under
@@ -34,27 +34,17 @@ fn _fixture_a() -> string { return "compiler/tests/unit/atomic_fence_test.sfn"; 
 
 fn _fixture_b() -> string { return "compiler/tests/unit/check_tool_test.sfn"; }
 
-// Child environment for the spawned `sfn test` run. Built explicitly
-// (not from `process.environ()`) per `.claude/rules/no-bash-e2e.md`: the
-// nested run spawns its own children that compile+link via clang, so
-// PATH/HOME/TMPDIR must be threaded through — but inheriting the outer
-// environment wholesale would (a) leak the outer runner's managed
-// `SAILFIN_TEST_*` keys into the nested run and (b) risk a pre-existing
-// `SAILFIN_BUILD_CACHE_DIR` shadowing our fresh cold cache via a
-// duplicate env key, making the regression vacuously pass. An empty env
-// array is the EMPTY environment (never "inherit"), so thread each key.
-// (SFN-401)
+// Child environment for the spawned `sfn test` run, derived by subtraction
+// via `clean_runner_env_without` (SFN-1114): the base env drops the pool's
+// managed `SAILFIN_TEST_*` keys, and `SAILFIN_BUILD_CACHE_DIR` /
+// `SAILFIN_EMIT_LEDGER` are named in the strip list too, since a
+// pre-existing outer value for either would otherwise shadow the fresh
+// cold-cache push below via a duplicate env key (first-match `getenv`),
+// making the regression vacuously pass.
 fn _child_env(cache_dir: string, ledger: string, scratch_dir: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let mut e = clean_runner_env_without(scratch_dir, ["SAILFIN_BUILD_CACHE_DIR", "SAILFIN_EMIT_LEDGER"]);
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
     e.push("SAILFIN_EMIT_LEDGER=" + ledger);
-    e.push("SAILFIN_TEST_SCRATCH=" + scratch_dir);
     return e;
 }
 

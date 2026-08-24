@@ -21,6 +21,7 @@
 // `run_external_c_oracle(args)` is the normal boundary for invocation.
 import { trim } from "sfn/strings";
 
+import { host_is_windows } from "./fixtures";
 import { skip } from "./skip";
 
 // ExternalCOracle describes the resolved optional compiler and its child environment.
@@ -69,12 +70,58 @@ fn _capture_first_line(argv: string[], child_env: string[]) -> string ![io] {
     return out;
 }
 
-fn _is_oracle_available(compiler: string, child_env: string[]) -> boolean ![io] {
+// Can the oracle actually COMPILE, as opposed to merely launch (SFN-1114)?
+//
+// `--version` alone was the whole probe, and it answers a weaker question than
+// the callers ask. The gap was observed on a native Windows host: clang 22 ran
+// fine and reported `Target: x86_64-pc-windows-msvc`, then failed on a bare
+// `#include <stdlib.h>`, because a Windows SDK 10.0.26100 `ucrt/stdlib.h`
+// declared an anonymous `_LDOUBLE` struct that clang rejected. Nothing in the
+// toolchain was missing and nothing Sailfin does is wrong; the two vendored
+// halves of a host C toolchain can simply disagree. Sailfin's own build never
+// notices, because it uses clang as an assembler and linker over emitted IR
+// and includes no libc headers at all.
+//
+// State it as an instance, not a standing property of that clang or that SDK:
+// the same host later compiled the probe cleanly with an unchanged clang
+// version, so the disagreement is a moving target between vendored halves
+// rather than a fixed pairing anyone can pin. That is the argument FOR probing
+// capability instead of hardcoding a known-bad version.
+//
+// So the probe compiles a translation unit that includes the two headers every
+// harness here uses. `-fsyntax-only` keeps it to a parse — no object, no link,
+// no temp binary to clean up beyond the source. A host that fails this cannot
+// serve as an oracle, and the honest outcome is the documented voluntary skip
+// rather than a link error attributed to the test under measurement.
+//
+// Deliberately conservative: a healthy host compiles this trivially, so this
+// cannot start silently skipping a real regression on Linux or macOS CI. If it
+// ever does skip there, the toolchain is broken and that is worth knowing.
+fn _oracle_can_compile(compiler: string, child_env: string[]) -> boolean ![io] {
+    let dir = fs.mkdtemp("sfn-c-oracle-probe-");
+    if dir.length == 0 { return false; }
+    let probe = dir + "/probe.c";
+    fs.writeFile(probe, "#include <stdlib.h>\n#include <stdio.h>\nint main(void) { return 0; }\n");
+    let exit = process.run_capture([compiler, "-fsyntax-only", probe], child_env);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if fs.exists(probe) { fs.deleteFile(probe); }
+    return exit == 0;
+}
+
+// Does the resolved compiler exist and start? The weaker of the two halves of
+// availability; `_oracle_can_compile` above is the other.
+fn _launches(compiler: string, child_env: string[]) -> boolean ![io] {
     if compiler.length == 0 { return false; }
     let exit = process.run_capture([compiler, "--version"], child_env);
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     return exit == 0;
+}
+
+fn _is_oracle_available(compiler: string, child_env: string[]) -> boolean ![io] {
+    if !_launches(compiler, child_env) { return false; }
+    return _oracle_can_compile(compiler, child_env);
 }
 
 // external_c_oracle resolves the optional external C test oracle and its
@@ -100,11 +147,23 @@ fn external_c_oracle() -> ExternalCOracle ![io] {
 
     if !_is_oracle_available(compiler, child_env) {
         let mut reason = "optional external C test oracle is unavailable";
+        // Which of the two failures happened, so the skip line is actionable.
+        // "not found on PATH" for a compiler that launched fine and simply
+        // cannot parse its own libc headers sends the reader looking for a
+        // missing install that is not missing (SFN-1114).
+        let launches = _launches(compiler, child_env);
         if configured.length > 0 {
             reason = reason + ": SAILFIN_TEST_C_COMPILER=" + configured;
-        } else if darwin {
+        } else if darwin && !launches {
             reason = reason + ": Apple clang was not resolved by /usr/bin/xcrun";
-        } else { reason = reason + ": clang was not found on PATH"; }
+        } else if !launches {
+            reason = reason + ": clang was not found on PATH";
+        }
+        if launches {
+            reason = reason + ": `" + compiler
+                + "` runs but cannot compile a translation unit including <stdlib.h>/<stdio.h>"
+                + " — the host C toolchain and its SDK headers disagree";
+        }
         return ExternalCOracle {
             available: false,
             compiler: compiler,
@@ -128,6 +187,32 @@ fn require_external_c_oracle() -> ExternalCOracle ![io] {
     let oracle = external_c_oracle();
     if !oracle.available { skip(oracle.unavailable_reason); }
     return oracle;
+}
+
+// The link flags this host needs to reach libm from a C oracle harness, to be
+// spliced into an oracle argv instead of a hard-coded `-lm` (SFN-1114).
+//
+// `-lm` is a POSIX spelling with no MSVC counterpart: the Microsoft CRT has no
+// separate math library, so `libm.a`'s contents live in the same `libcmt.lib`
+// the linker already pulls in and `lld-link` fails with
+// `could not open 'm.lib': no such file or directory`. The right flag on that
+// host is therefore no flag at all, which is why this returns an ARRAY — an
+// empty one is the answer, and a function returning a single string could not
+// express it without a sentinel every caller would have to strip.
+//
+// Keyed on the HOST, not on the build target. The harness is compiled by the
+// host C compiler to run on this machine, so a cross-build's `--target` is not
+// what decides which CRT it links against.
+//
+// The host probe lives in `./fixtures.sfn` so the capsule carries exactly one
+// copy of the rule; see `host_is_windows` there for why it mirrors
+// `build_host_os` rather than importing it.
+fn c_math_link_flags() -> string[] ![io] {
+    if host_is_windows() {
+        let none: string[] = [];
+        return none;
+    }
+    return ["-lm"];
 }
 
 // run_external_c_oracle runs the optional oracle with `args` appended after

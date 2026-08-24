@@ -23,8 +23,15 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` are `![pure]` and cannot be
 // called from an `![io]` test; assert on captured output with
 // `sfn/strings::contains`.
+import { Env, env_from_current, run_bounded } from "sfn/os";
 import { contains } from "sfn/strings";
-import { first_present_tool, sfn_bin_path, tool_present } from "sfn/test";
+import {
+    Background,
+    sfn_bin_path,
+    tool_present,
+    wait_until,
+    with_background
+} from "sfn/test";
 
 // Full parent environment for the build + client subprocesses. The build
 // LINKS a binary (clang + ld), needing the toolchain
@@ -33,16 +40,13 @@ import { first_present_tool, sfn_bin_path, tool_present } from "sfn/test";
 // the nested build cache per-invocation under the parallel pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
+// The same environment in `sfn/os`'s typed form, for `with_background` and
+// `run_bounded`.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
+
 // Fixed loopback port for this test (sole TLS-serve e2e in the pool, so no
 // `--jobs N` collision); high + uncommon to dodge local services.
 fn _tls_port_str() -> string { return "18893"; }
-
-// Resolve a wall-clock timeout command (mirrors the plaintext loopback
-// test). Empty => none found; the caller then skips (the blocking server
-// would otherwise orphan the fixed port).
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
-}
 
 fn _has_openssl() -> boolean ![io] { return tool_present("openssl"); }
 
@@ -121,63 +125,40 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
     return bin;
 }
 
-// Spawn the prebuilt blocking server wrapped in a wall-clock timeout so it
-// self-reaps (no process-kill primitive; `serve()` never returns). Guarded
-// on `tcmd` being present by the caller.
-fn _spawn_server(tcmd: string, bin: string) -> i64 ![io] {
-    let mut argv: string[] = [];
-    argv.push(tcmd);
-    argv.push("60");
-    argv.push(bin);
-    return process.spawn_with_env(argv, _child_env());
-}
-
 // Drive the live server once over TLS: `printf <request> | openssl s_client`
 // completes a handshake and sends the request; the server's `Connection:
-// close` makes s_client exit after the response. Wrapped in `timeout` so a
-// stuck handshake cannot hang the pool. Returns the captured response text.
-fn _tls_get(tcmd: string) -> string ![io] {
-    let cmd = "printf 'GET / HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n' | "
-        + tcmd
-        + " 6 openssl s_client -connect 127.0.0.1:"
+// close` makes s_client exit after the response. Bounded by `run_bounded`
+// (6s) so a stuck handshake cannot hang the pool — the previous embedded
+// `timeout 6` argv vehicle required the external binary for a purpose
+// unrelated to reaping the background server; `run_bounded` owns the
+// deadline itself (`sfn/test`'s `process_control.sfn` header). Returns the
+// captured response text.
+fn _tls_get() -> string ![clock, io] {
+    let cmd = "printf 'GET / HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n' | openssl s_client -connect 127.0.0.1:"
         + _tls_port_str()
         + " -quiet 2>/dev/null";
     // `sh -c` (not `bash -c`): the command is POSIX-shell compatible (printf
     // + pipe + redirect) and `sh` is more universally present. This is a
     // genuine pipeline, not a PATH lookup — the tool probes above no longer
     // spawn a shell at all (SFN-840); retiring this one needs SFN-885.
-    let exit = process.run_capture(["sh", "-c", cmd], _child_env());
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return out; }
-    return out;
+    let outcome = run_bounded(["sh", "-c", cmd], _child_env_typed(), "", 6000);
+    return outcome.stdout;
 }
 
 // Poll the TLS endpoint until the prebuilt server answers (startup is just
-// the binary launching + bind + ctx build, ~1s). ~45s budget (90 × ~0.5s)
-// under the 60s server timeout.
-fn _await_ready(tcmd: string) -> string ![io] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 90 { break; }
-        let resp = _tls_get(tcmd);
-        if contains(resp, "TLS-TYPED-OK-9f3a") { return resp; }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return "";
+// the binary launching + bind + ctx build, ~1s). 45s wall-clock budget.
+// Captures nothing — reaches the fixed port through `_tls_get` itself
+// (SFN-843).
+fn _await_ready() -> string ![clock, io] {
+    let ready = wait_until(fn () -> boolean {
+        let resp = _tls_get();
+        return contains(resp, "TLS-TYPED-OK-9f3a");
+    }, 45000, 500);
+    if !ready { return ""; }
+    return _tls_get();
 }
 
-test "serve TLS loopback: handshake + request→response cycle over TLS" ![io] {
-    // Teardown of the blocking server relies on a wall-clock timeout; skip
-    // cleanly without one rather than orphan the fixed port. CI (Linux +
-    // coreutils) always has `timeout`. Mirrors the sanitizer/loopback skip
-    // precedent.
-    let tcmd = _timeout_cmd();
-    if tcmd.length == 0 {
-        print.info("[serve-tls] SKIP: no timeout/gtimeout to reap the blocking server");
-        return;
-    }
+test "serve TLS loopback: handshake + request→response cycle over TLS" ![clock, io] {
     // `openssl` generates the cert AND drives the TLS handshake; skip if
     // absent (the plain suite still covers the plaintext serve paths).
     if !_has_openssl() {
@@ -191,24 +172,38 @@ test "serve TLS loopback: handshake + request→response cycle over TLS" ![io] {
     assert _gen_cert(cert, key);
 
     let main_path = _write_server(dir, cert, key);
-    let server_bin = _build_bin(main_path, dir + "/tlssrv-bin");
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let server_bin: string = _build_bin(main_path, dir + "/tlssrv-bin");
     assert server_bin.length > 0;
-    let _handle = _spawn_server(tcmd, server_bin);
 
-    // Handshake + full request→response cycle over TLS (acceptance #1).
-    let resp = _await_ready(tcmd);
-    print.info("[serve-tls] response: " + resp);
-    assert resp.length > 0;
-    assert contains(resp, "HTTP/1.1 201");
-    assert contains(resp, "X-TLS-Typed: yes");
-    assert contains(resp, "TLS-TYPED-OK-9f3a");
+    // `with_background` owns the blocking server's lifetime: it is killed
+    // and reaped on scope exit, including when an assertion below throws —
+    // replacing the previous `timeout <secs>` argv vehicle, which was the
+    // ONLY teardown mechanism and forced a SKIP on any host without
+    // coreutils.
+    let _served = with_background([server_bin], _child_env_typed(), "", "serve-tls-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
 
-    // A second TLS request round-trips too (a fresh handshake per
-    // connection; the server ctx is reused read-only across pool workers).
-    let resp2 = _tls_get(tcmd);
-    print.info("[serve-tls] response2: " + resp2);
-    assert contains(resp2, "TLS-TYPED-OK-9f3a");
+        // Handshake + full request→response cycle over TLS (acceptance #1).
+        let resp = _await_ready();
+        print.info("[serve-tls] response: " + resp);
+        assert resp.length > 0;
+        assert contains(resp, "HTTP/1.1 201");
+        assert contains(resp, "X-TLS-Typed: yes");
+        assert contains(resp, "TLS-TYPED-OK-9f3a");
 
-    // Best-effort cleanup (the timeout reaps the server process).
+        // A second TLS request round-trips too (a fresh handshake per
+        // connection; the server ctx is reused read-only across pool
+        // workers).
+        let resp2 = _tls_get();
+        print.info("[serve-tls] response2: " + resp2);
+        assert contains(resp2, "TLS-TYPED-OK-9f3a");
+        return 0;
+    });
+
+    // Best-effort cleanup. The server itself was already killed and reaped
+    // by `with_background` on scope exit.
     let _rm = process.run(["rm", "-rf", dir]);
 }

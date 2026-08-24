@@ -7,23 +7,33 @@
 //
 // Native (no-bash) per `.claude/rules/no-bash-e2e.md`. This is a
 // build-and-run test, so per that rule's "Build-and-run tests must
-// isolate the build" section, `_child_env` threads PATH (required — the
-// nested build runs clang + its linker), HOME, TMPDIR, and
-// SAILFIN_TEST_SCRATCH so the nested `sfn build` does not collide with
-// sibling builds under the parallel `sfn test` pool.
-import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
+// isolate the build" section the nested `sfn build` needs an isolated
+// SAILFIN_TEST_SCRATCH so it does not collide with sibling builds under the
+// parallel `sfn test` pool.
+//
+// `_child_env` derives that from `clean_runner_env` rather than assembling a
+// key list by hand (SFN-1114). The hand-rolled version threaded exactly PATH,
+// HOME, TMPDIR, and SAILFIN_TEST_SCRATCH — an allowlist that reads as
+// sufficient on POSIX and is not on Windows, where a native child needs both
+// the variables Win32 itself resolves DLLs and the OS identity through
+// (SystemRoot, windir) and the ones clang's MSVC toolchain auto-detection
+// walks to find the CRT (ProgramFiles, LOCALAPPDATA, USERPROFILE). Measured:
+// with the hand-rolled env this file failed 9/9 on a native Windows host —
+// first on `duplicate symbol: __sfn_type_desc.*` (the child, seeing no
+// SystemRoot, resolved the host as Linux and emitted non-comdat descriptors
+// COFF cannot fold), then, once SFN-1114 fixed the host probe, on
+// `lld-link: could not open 'libcmt.lib'`. Subtracting from the real
+// environment cannot acquire that failure mode; building one up key by key
+// invites it on every platform the author did not have in front of them.
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // A fresh marker-file path under the runner's scratch dir (or `/tmp`),

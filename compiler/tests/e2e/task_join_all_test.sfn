@@ -11,23 +11,12 @@
 // scratch dir and driven through `sfn build` / `sfn check` subprocesses; the
 // `![io]` tests assert on captured stdout+stderr with `sfn/strings::find`.
 import { find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
-// `process.run_capture`'s empty array is the *empty* environment; thread the
-// variables a nested `sfn build` (clang + linker via PATH) needs, and route
-// its build cache under SAILFIN_TEST_SCRATCH so a parallel run does not
-// collide on the fixed build/sailfin (#1333).
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _scratch_dir() -> string ![io] {

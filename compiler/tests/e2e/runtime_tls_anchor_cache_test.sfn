@@ -34,16 +34,19 @@
 //      symptom of the SFN-816 erasure here is "trust-store" silently
 //      becoming "cert-verify" on the second connection, not "none".
 //
-// Skips cleanly (`assert true`) when `openssl` or a wall-clock `timeout` is
-// unavailable, matching `runtime_tls_verify_failure_test.sfn`.
+// Skips cleanly (`assert true`) when `openssl` is unavailable, matching
+// `runtime_tls_verify_failure_test.sfn`.
+import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
+    Background,
     clean_runner_env,
     default_scratch_dir,
-    first_present_tool,
     nested_runner_scratch,
     sfn_bin_path,
-    tool_present
+    tool_present,
+    wait_until,
+    with_background
 } from "sfn/test";
 
 // ── file-local raw loopback readiness probe (cloned from
@@ -56,18 +59,35 @@ extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_tac_connect` and every caller up to
+// `_await_listening`/both tests declare `![net]` transitively (SFN-927 is
+// the undefined-symbol failure mode otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 fn _tac_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
     return addr as *u8;
 }
 
-fn _tac_connect(port: i64) -> i32 {
+fn _tac_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -84,7 +104,7 @@ fn _tac_connect(port: i64) -> i32 {
         memset(_tac_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         memset(_tac_ptr_off(addr, 4), 127, 1 as usize);
         memset(_tac_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -92,7 +112,7 @@ fn _tac_connect(port: i64) -> i32 {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -104,6 +124,11 @@ fn _tac_connect(port: i64) -> i32 {
 fn _child_env() -> string[] ![io] {
     return clean_runner_env(nested_runner_scratch("tls-anchor-cache"));
 }
+
+// The env for `with_background`'s server spawn — plain `Env` (SFN-401's
+// clean/nested-scratch isolation is for a NESTED `sfn build`/`test`/`run`
+// subprocess, which `openssl s_server` is not).
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // `_child_env()` with any inherited `SAILFIN_TLS_CAFILE` stripped, so the
 // caller can push its own without a duplicate entry shadowing it (a
@@ -127,10 +152,6 @@ fn _trusted_env(cert_path: string) -> string[] ![io] {
     return e;
 }
 
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
-}
-
 fn _scratch_root() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length == 0 { dir = default_scratch_dir(); }
@@ -148,10 +169,11 @@ fn _gen_cert(dir: string, san_host: string) -> boolean ![io] {
     return exit == 0;
 }
 
-fn _spawn_server(cert_dir: string, port_str: string, tcmd: string) -> i64 ![io] {
+// The `openssl s_server -www` argv, for `with_background` to spawn
+// directly — no external `timeout` wrapper needed, since `with_background`
+// owns the child's lifetime itself.
+fn _server_argv(cert_dir: string, port_str: string) -> string[] {
     let mut argv: string[] = [];
-    argv.push(tcmd);
-    argv.push("60");
     argv.push("openssl");
     argv.push("s_server");
     argv.push("-accept");
@@ -162,22 +184,22 @@ fn _spawn_server(cert_dir: string, port_str: string, tcmd: string) -> i64 ![io] 
     argv.push(cert_dir + "/key.pem");
     argv.push("-www");
     argv.push("-quiet");
-    return process.spawn_with_env(argv, _child_env());
+    return argv;
 }
 
-fn _await_listening(port: i64) -> boolean ![io] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 60 { break; }
+// Poll a raw TCP connect until `s_server` is accepting. 30s wall-clock
+// budget. `port` is a typed parameter (not an untyped call-initialized
+// `let`), so capturing it in the probe closure below is unaffected by
+// SFN-843.
+fn _await_listening(port: i64) -> boolean ![clock, io, net] {
+    return wait_until(fn () -> boolean {
         let fd: i32 = _tac_connect(port);
         if fd >= 0 {
-            close(fd);
+            sfn_socket_close(fd);
             return true;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return false;
+        return false;
+    }, 30000, 500);
 }
 
 // Client fixture for property 1: connects to `port_a` then `port_b` then
@@ -297,19 +319,14 @@ fn _skip_ready() -> boolean ![io] {
         print.info("[tls-anchor-cache] SKIP: openssl CLI not available");
         return false;
     }
-    if _timeout_cmd().length == 0 {
-        print.info("[tls-anchor-cache] SKIP: no timeout/gtimeout to reap the blocking s_server");
-        return false;
-    }
     return true;
 }
 
-test "runtime tls: anchor cache survives an intervening verify failure in-process" ![io] {
+test "runtime tls: anchor cache survives an intervening verify failure in-process" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
     let port_a: i64 = 18910;
     let port_a_str = "18910";
     let port_b: i64 = 18911;
@@ -327,36 +344,50 @@ test "runtime tls: anchor cache survives an intervening verify failure in-proces
     assert _gen_cert(dir_b, "localhost");
 
     let main_path = _write_three_conn_client(dir, port_a_str, port_b_str);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    // SFN-843: typed explicitly — both `with_background` bodies below
+    // capture it, and an untyped call-initialized `let` mistypes the
+    // capture's env slot as `i8*`.
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    let _ha = _spawn_server(dir_a, port_a_str, tcmd);
-    let _hb = _spawn_server(dir_b, port_b_str, tcmd);
-    assert _await_listening(port_a);
-    assert _await_listening(port_b);
+    // This property needs BOTH servers up at once (the client connects to
+    // A, then B, then A again in one process), so the two `with_background`
+    // fixtures nest: each independently owns its child's kill+reap on scope
+    // exit, including when an assertion in the inner body throws.
+    let _served_a = with_background(_server_argv(dir_a, port_a_str), _child_env_typed(), "", "tls-anchor-cache-server-a", fn (server_a: Background) -> int {
+        assert server_a.handle.handle_id != 0;
+        let _served_b = with_background(_server_argv(dir_b, port_b_str), _child_env_typed(), "", "tls-anchor-cache-server-b", fn (server_b: Background) -> int {
+            assert server_b.handle.handle_id != 0;
+            assert _await_listening(port_a);
+            assert _await_listening(port_b);
 
-    // CAFILE trusts ONLY A's cert; B's cert is a different self-signed
-    // chain and stays untrusted for the whole process.
-    let out = _run_stdout(client_bin, dir, _trusted_env(dir_a + "/cert.pem"));
+            // CAFILE trusts ONLY A's cert; B's cert is a different
+            // self-signed chain and stays untrusted for the whole process.
+            let out = _run_stdout(client_bin, dir, _trusted_env(dir_a
+                + "/cert.pem"));
 
-    assert contains(out, "c1:ok=true");
-    assert contains(out, "c2:ok=false");
-    // `ok=false` alone cannot distinguish "the cache did not short-circuit
-    // verification" from "something unrelated went wrong" — pin the reason
-    // too, mirroring `runtime_tls_verify_failure_test.sfn`'s own guard
-    // (its line 442) against exactly that ambiguity.
-    assert contains(out, "c2:err=cert-verify");
-    assert contains(out, "c3:ok=true");
+            assert contains(out, "c1:ok=true");
+            assert contains(out, "c2:ok=false");
+            // `ok=false` alone cannot distinguish "the cache did not
+            // short-circuit verification" from "something unrelated went
+            // wrong" — pin the reason too, mirroring
+            // `runtime_tls_verify_failure_test.sfn`'s own guard against
+            // exactly that ambiguity.
+            assert contains(out, "c2:err=cert-verify");
+            assert contains(out, "c3:ok=true");
+            return 0;
+        });
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: a trust-store load failure is never cached (SFN-816 stays fixed)" ![io] {
+test "runtime tls: a trust-store load failure is never cached (SFN-816 stays fixed)" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
     let port_a: i64 = 18912;
     let port_a_str = "18912";
 
@@ -365,27 +396,32 @@ test "runtime tls: a trust-store load failure is never cached (SFN-816 stays fix
     assert _gen_cert(dir, "localhost");
 
     let main_path = _write_two_conn_client(dir, port_a_str);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    // SFN-843: typed explicitly — the `with_background` body below
+    // captures it.
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    let _handle = _spawn_server(dir, port_a_str, tcmd);
-    assert _await_listening(port_a);
+    // `with_background` owns `s_server`'s lifetime; see the sibling test
+    // above for why this replaced the `timeout <secs>` vehicle. Its own
+    // server, port 18912, distinct from the property-1 test's 18910/18911.
+    let _served = with_background(_server_argv(dir, port_a_str), _child_env_typed(), "", "tls-anchor-cache-negcache-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port_a);
 
-    // `SAILFIN_TLS_CAFILE` names a path that never resolves, for both
-    // connections in this one process — a cached negative result would let
-    // the second connection skip `_tls_fail`, so `x509_verify_chain` would
-    // report `no-anchor` against the wrongly-cached empty set and
-    // `_tls_fail_if_unset` (`tls.sfn:1395`) would write `cert-verify`
-    // instead of `trust-store`. Its own server, port 18912, distinct from
-    // the property-1 test's 18910/18911: `_spawn_server` wraps `s_server`
-    // in a bare `timeout` with no kill, so a shared port would silently let
-    // this test's `_await_listening` succeed against the OTHER test's
-    // still-running server instead of its own.
-    let out = _run_stdout(client_bin, dir, _trusted_env(dir
-        + "/does-not-exist.pem"));
+        // `SAILFIN_TLS_CAFILE` names a path that never resolves, for both
+        // connections in this one process — a cached negative result would
+        // let the second connection skip `_tls_fail`, so
+        // `x509_verify_chain` would report `no-anchor` against the
+        // wrongly-cached empty set and `_tls_fail_if_unset`
+        // (`tls.sfn:1395`) would write `cert-verify` instead of
+        // `trust-store`.
+        let out = _run_stdout(client_bin, dir, _trusted_env(dir
+            + "/does-not-exist.pem"));
 
-    assert contains(out, "n1:err=trust-store");
-    assert contains(out, "n2:err=trust-store");
+        assert contains(out, "n1:err=trust-store");
+        assert contains(out, "n2:err=trust-store");
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }

@@ -1,3 +1,7 @@
+// SFN-1114: the hook now invokes `sfn check` directly instead of shelling
+// out to `make check-fast`, so the stub compiler below -- not a stub
+// Makefile -- is what records that the gate ran.
+//
 // SFN-935: staged deletions of explicit repository inputs must still trigger
 // the opt-in fast-check hook even though the deleted path is absent from the
 // live workspace inventory emitted by the compiler.
@@ -31,8 +35,8 @@ fn _deletion_triggers(label: string, deleted_path: string) -> void ![io] {
     fs.writeFile(scratch + "/build/bin/sfn", "#!/usr/bin/env sh\n"
         + "if [ \"$3\" = \"maintainer-sources\" ]; then echo compiler/src; exit 0; fi\n"
         + "if [ \"$3\" = \"explicit-inputs\" ]; then echo workspace.toml; exit 0; fi\n"
+        + "if [ \"$1\" = \"check\" ]; then printf ran > hook-ran; exit 0; fi\n"
         + "exit 1\n");
-    fs.writeFile(scratch + "/Makefile", "check-fast:\n\t@printf ran > hook-ran\n");
     process.run(["chmod", "+x", scratch + "/build/bin/sfn"]);
 
     let child_env = clean_runner_env(scratch + "/test-scratch");
@@ -50,10 +54,10 @@ fn _deletion_triggers(label: string, deleted_path: string) -> void ![io] {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "precommit inventory: staged bootstrap deletion triggers check-fast" ![io] {
+test "precommit inventory: staged bootstrap deletion triggers the check" ![io] {
     _deletion_triggers("bootstrap", "bootstrap.toml");
 }
 
-test "precommit inventory: staged runtime IR deletion triggers check-fast" ![io] {
+test "precommit inventory: staged runtime IR deletion triggers the check" ![io] {
     _deletion_triggers("runtime-ir", "runtime/ir/stub.ll");
 }

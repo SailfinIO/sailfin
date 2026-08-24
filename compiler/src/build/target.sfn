@@ -38,7 +38,7 @@ import { active_build_target } from "./target_state";
 // `SAILFIN_TARGET_OS`, so every Windows-host leg is unit-testable on a
 // Linux runner). Otherwise the non-shelling probe of the SFN-49 de-shell:
 // a `/proc/self/status` probe for Linux, a `/System/Library/CoreServices`
-// probe for Darwin, then the `SystemRoot` env var for Windows, defaulting
+// probe for Darwin, then `_windows_host_evidence()` for Windows, defaulting
 // to Linux. No `uname`/`sh` subprocess — native Windows has neither.
 //
 // This is the one host resolver in the compiler. The LLVM provider-context
@@ -56,8 +56,42 @@ fn build_host_os() -> string ![io] {
     if host_override.length > 0 { return host_override; }
     if fs.exists("/proc/self/status") { return "Linux"; }
     if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
-    if _get_env_cmd("SystemRoot").length > 0 { return "Windows"; }
+    if _windows_host_evidence() { return "Windows"; }
     return "Linux";
+}
+
+// Positive evidence that this process is running on Windows, layered so that
+// no single missing input can erase it (SFN-1114).
+//
+// Windows used to be detected by `SystemRoot` alone, while Linux and Darwin
+// each got a filesystem probe. That asymmetry was the defect: an environment
+// variable is strippable and a mount point is not, so any child spawned with
+// a curated envp — which `process.run_capture` forces, since it takes the
+// child environment explicitly and an empty array means empty, never
+// "inherit" — answered "Linux" ON WINDOWS, and every target-keyed decision
+// followed it there. Measured blast radius: type descriptors emitted
+// `linkonce_odr` with no comdat group, which COFF cannot fold, so the link
+// died on duplicate `__sfn_type_desc.*`; the Windows runtime module swap
+// stayed off; and the runtime-object cache key recorded
+// `x86_64-unknown-linux-gnu` on a Windows host.
+//
+// The env rungs come first because each is a `getenv` away and covers every
+// ordinary invocation. `NUL` is the backstop and the only rung no environment
+// can remove: a reserved DOS device name resolves from ANY directory on
+// Windows, so it needs neither a drive letter nor a variable. Its POSIX
+// false-positive would require a file literally named `NUL` in the cwd of a
+// host that already failed BOTH probes above, so the rung is unreachable on a
+// stock Linux or macOS host.
+//
+// `getenv` is case-insensitive on Windows, so these canonical spellings match
+// a shell that exports them uppercased (Git Bash exports `SYSTEMROOT`); the
+// names are spelled canonically for the reader, not for the lookup.
+fn _windows_host_evidence() -> boolean ![io] {
+    if _get_env_cmd("SystemRoot").length > 0 { return true; }
+    if _get_env_cmd("windir").length > 0 { return true; }
+    if _get_env_cmd("ComSpec").length > 0 { return true; }
+    if _get_env_cmd("SystemDrive").length > 0 { return true; }
+    return fs.exists("NUL");
 }
 
 // True when the compile is running on a Windows host. Gates the

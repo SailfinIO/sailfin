@@ -32,22 +32,34 @@
 //
 // Skips cleanly (`assert true`, the tool-absent SKIP precedent, mirroring
 // `runtime_tls_https_client_test.sfn`) when `openssl` is missing (no TLS
-// peer) or no `timeout`/`gtimeout` is available to backstop a wedged
-// client run. Within the guard, every crypto assertion below is
-// unconditional — a failed handshake on the AES-GCM or ChaCha20 leg FAILS
-// the test, it is never downgraded to a skip or a pass
-// (http_redirect_download_test.sfn's silent-empty-probe class of bug is
-// exactly what this file must not join).
+// peer). Within the guard, every crypto assertion below is unconditional —
+// a failed handshake on the AES-GCM or ChaCha20 leg FAILS the test, it is
+// never downgraded to a skip or a pass (http_redirect_download_test.sfn's
+// silent-empty-probe class of bug is exactly what this file must not
+// join).
+//
+// Each client attempt runs under `os::run_bounded` (30s) rather than an
+// argv-prepended `timeout <secs>` — the same class of bug this file's
+// server-side `with_background` migration (SFN-852) already fixed:
+// `first_present_tool(["timeout", "gtimeout"])` cannot tell GNU coreutils
+// `timeout` from `C:\Windows\System32\timeout.exe` (a pause utility, not a
+// deadline wrapper), so `[tcmd, "30", client_bin]` silently failed to even
+// start the client on Windows. `run_bounded` owns the deadline itself
+// (`sfn/test`'s `process_control.sfn` header).
 //
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
-import { Env, env_from_current } from "sfn/os";
+import {
+    Env,
+    env_from_current,
+    env_set,
+    run_bounded
+} from "sfn/os";
 import { contains } from "sfn/strings";
 import {
     Background,
     default_scratch_dir,
-    first_present_tool,
     sfn_bin_path,
     tool_present,
     wait_until,
@@ -57,21 +69,35 @@ import {
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tag_` so these never collide with the external-linkage
 // runtime helpers of the same shape in `http.sfn` (not linked into this
-// test binary, but the prefix keeps that independent of link order). The
-// libc socket externs carry no effect annotation, so the effect checker
-// infers no `net` requirement for these direct callers — the same
-// rationale as the sibling TLS e2e tests.
+// test binary, but the prefix keeps that independent of link order).
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_tag_connect` and every caller up to
+// `_await_listening`/all three tests declare `![net]` transitively
+// (SFN-927 is the undefined-symbol failure mode otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 fn _tag_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
@@ -83,7 +109,7 @@ fn _tag_ptr_off(p: *u8, off: i64) -> *u8 {
 // sin_len at 0 + u8 sin_family at 1), first success wins — the inlined
 // `http.sfn::_connect_tcp` idiom. Used only to detect that `s_server` is
 // accepting before the fixture runs.
-fn _tag_connect(port: i64) -> i32 {
+fn _tag_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -100,7 +126,7 @@ fn _tag_connect(port: i64) -> i32 {
         memset(_tag_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         memset(_tag_ptr_off(addr, 4), 127, 1 as usize);
         memset(_tag_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -108,7 +134,7 @@ fn _tag_connect(port: i64) -> i32 {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -128,18 +154,10 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // The client run-env plus `SAILFIN_TLS_CAFILE` pointed at the generated
-// self-signed cert so the client trusts it (verify stays on).
-fn _client_env(cert_path: string) -> string[] ![io] {
-    let mut e = process.environ();
-    e.push("SAILFIN_TLS_CAFILE=" + cert_path);
-    return e;
-}
-
-// Resolve a wall-clock timeout command; used as a backstop wrapper around
-// each client attempt (`_client_body`), not the server — the server's
-// lifetime is owned by `with_background` (SFN-852). Empty if none found.
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
+// self-signed cert so the client trusts it (verify stays on), typed for
+// `run_bounded`.
+fn _client_env_typed(cert_path: string) -> Env ![io] {
+    return env_set(_child_env_typed(), "SAILFIN_TLS_CAFILE", cert_path);
 }
 
 fn _scratch_dir() -> string ![io] {
@@ -196,11 +214,11 @@ fn _server_argv(dir: string, port_str: string, ciphersuite: string) -> string[] 
 // elapses), napping in-process via `wait_until` rather than shelling
 // `sleep` per tick. ~30s budget, matching the previous 60-attempts x 0.5s
 // shape.
-fn _await_listening(port: i64) -> boolean ![clock, io] {
+fn _await_listening(port: i64) -> boolean ![clock, io, net] {
     return wait_until(fn () -> boolean {
         let fd: i32 = _tag_connect(port);
         if fd >= 0 {
-            close(fd);
+            sfn_socket_close(fd);
             return true;
         }
         return false;
@@ -246,16 +264,15 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
 // Run the client once and return the downloaded body (or "" if
 // `http.download` wrote nothing — connect failure, handshake failure, or
 // verify failure). Removes any stale output first so the result reflects
-// THIS run only. Wrapped in `tcmd` as a wall-clock backstop: the client's
-// own socket read/write deadlines (`_http_io_timeout_secs`, 10s) already
-// turn a stalled peer into a clean `null` return, but the extra `timeout`
-// wrapper keeps a genuinely wedged client from hanging the test runner.
-fn _client_body(tcmd: string, client_bin: string, run_env: string[], out_path: string) -> string ![io] {
+// THIS run only. Bounded by `run_bounded` (30s) as a wall-clock backstop:
+// the client's own socket read/write deadlines (`_http_io_timeout_secs`,
+// 10s) already turn a stalled peer into a clean `null` return, but the
+// extra deadline keeps a genuinely wedged client from hanging the test
+// runner.
+fn _client_body(client_bin: string, run_env: Env, out_path: string) -> string ![clock, io] {
     let _rm = process.run(["rm", "-f", out_path]);
-    let cexit = process.run_capture([tcmd, "30", client_bin], run_env);
-    let _co = process.capture_take_stdout();
-    let _ce = process.capture_take_stderr();
-    if cexit != 0 { return ""; }
+    let outcome = run_bounded([client_bin], run_env, "", 30000);
+    if outcome.exit != 0 { return ""; }
     if !fs.exists(out_path) { return ""; }
     return fs.readFile(out_path);
 }
@@ -264,10 +281,19 @@ fn _client_body(tcmd: string, client_bin: string, run_env: string[], out_path: s
 // only for the positive round-trip legs. Naps in-process via `wait_until` rather than
 // shelling `sleep` per tick; ~10s budget, matching the previous
 // 20-attempts x 0.5s shape.
-fn _client_body_retry(tcmd: string, client_bin: string, run_env: string[], out_path: string) -> string ![clock, io] {
+fn _client_body_retry(client_bin: string, run_env: Env, out_path: string) -> string ![clock, io] {
+    // The closure below must capture an annotated local, never `run_env`
+    // directly. Capturing a by-value struct PARAMETER emits invalid IR: the
+    // parameter arrives as `%Env*`, the capture-env field is the `%Env`
+    // aggregate, and nothing bridges them — clang rejects it with
+    // "'%run_env' defined with type 'ptr' but expected '%Env'". An annotated
+    // local allocas the aggregate and the capture site loads through it, so
+    // both halves agree (SFN-1126). Delete this local and capture `run_env`
+    // directly once that lands.
+    let captured_env: Env = run_env;
     let mut last_body: string = "";
     let _ready = wait_until(fn () -> boolean {
-        let body: string = _client_body(tcmd, client_bin, run_env, out_path);
+        let body: string = _client_body(client_bin, captured_env, out_path);
         if body.length > 0 {
             last_body = body;
             return true;
@@ -282,19 +308,14 @@ fn _skip_ready() -> boolean ![io] {
         print.info("[tls-aes-gcm] SKIP: openssl CLI not available");
         return false;
     }
-    if _timeout_cmd().length == 0 {
-        print.info("[tls-aes-gcm] SKIP: no timeout/gtimeout to backstop the client run");
-        return false;
-    }
     return true;
 }
 
-test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clock, io] {
+test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd: string = _timeout_cmd();
     // Distinct from every other e2e's fixed loopback port so the pool's
     // `--jobs N` does not collide.
     let port: i64 = 18898;
@@ -310,7 +331,7 @@ test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clo
     assert client_bin.length > 0;
 
     let argv = _server_argv(dir, port_str, "TLS_AES_128_GCM_SHA256");
-    let run_env: string[] = _client_env(dir + "/cert.pem");
+    let run_env: Env = _client_env_typed(dir + "/cert.pem");
 
     // `with_background` owns the server's lifetime: it is killed and
     // reaped when this scope exits, including on a thrown assertion below,
@@ -327,7 +348,7 @@ test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clo
         // `encode_client_hello` offers it, so a server that speaks ONLY
         // this suite must still complete the handshake and round-trip the
         // body.
-        let body = _client_body_retry(tcmd, client_bin, run_env, out_path);
+        let body = _client_body_retry(client_bin, run_env, out_path);
         print.info("[tls-aes-gcm] AES-128-GCM round-trip body received");
         assert body.length > 0;
         assert contains(body, "Ciphers");
@@ -337,12 +358,11 @@ test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clo
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (control)" ![clock, io] {
+test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (control)" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd: string = _timeout_cmd();
     let port: i64 = 18899;
     let port_str: string = "18899";
 
@@ -356,7 +376,7 @@ test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (
     assert client_bin.length > 0;
 
     let argv = _server_argv(dir, port_str, "TLS_CHACHA20_POLY1305_SHA256");
-    let run_env: string[] = _client_env(dir + "/cert.pem");
+    let run_env: Env = _client_env_typed(dir + "/cert.pem");
 
     // `with_background` owns the server's lifetime; see the AES-128-GCM
     // leg above for the full rationale (SFN-852).
@@ -367,7 +387,7 @@ test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (
         // Control leg: proves the AES-128-GCM leg above discriminates by
         // cipher suite rather than passing for an unrelated reason (e.g.
         // the server ignoring `-ciphersuites` entirely).
-        let body = _client_body_retry(tcmd, client_bin, run_env, out_path);
+        let body = _client_body_retry(client_bin, run_env, out_path);
         print.info("[tls-aes-gcm] ChaCha20-Poly1305 round-trip body received");
         assert body.length > 0;
         assert contains(body, "Ciphers");
@@ -377,12 +397,11 @@ test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only server" ![clock, io] {
+test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only server" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd: string = _timeout_cmd();
     let port: i64 = 18900;
     let port_str: string = "18900";
 
@@ -396,7 +415,7 @@ test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only serve
     assert client_bin.length > 0;
 
     let argv = _server_argv(dir, port_str, "TLS_AES_256_GCM_SHA384");
-    let run_env: string[] = _client_env(dir + "/cert.pem");
+    let run_env: Env = _client_env_typed(dir + "/cert.pem");
 
     // `with_background` owns the server's lifetime; see the AES-128-GCM
     // leg above for the full rationale (SFN-852).
@@ -404,7 +423,7 @@ test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only serve
         assert server.handle.handle_id != 0;
         assert _await_listening(port);
 
-        let body = _client_body_retry(tcmd, client_bin, run_env, out_path);
+        let body = _client_body_retry(client_bin, run_env, out_path);
         print.info("[tls-aes-gcm] AES-256-GCM/SHA-384 round-trip body received");
         assert body.length > 0;
         assert contains(body, "Ciphers");

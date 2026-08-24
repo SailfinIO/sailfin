@@ -1,17 +1,12 @@
 // SFN-930: direct emit must resolve the same manifest-owned identity as build
 // and relative traversal, without a `--module-name` override.
 import { contains, trim_right } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { clean_runner_env, sfn_bin_path } from "sfn/test";
 
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut out: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { out.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { out.push("HOME=" + home); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { out.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return out;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _cwd() -> string ![io] {

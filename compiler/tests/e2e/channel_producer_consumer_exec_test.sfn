@@ -37,23 +37,23 @@
 // interpolation) so the host compiler does not interpolate the fixture
 // before it is written.
 import { contains } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // Empty `run_capture` env is the EMPTY environment, not "inherit"; a nested
 // `sailfin run` spawns clang + linker (needs PATH) and routes its
 // program.ll build-cache under SAILFIN_TEST_SCRATCH so the parallel pool
 // does not collide on the fixed build/sailfin (#1333).
+//
+// `SAILFIN_THREADS` is stripped because this file's whole point is the DEFAULT
+// scheduler pool (see the header note): it guards the runtime's two-worker
+// floor, which only holds while nothing overrides the worker count. The former
+// hand-rolled env guaranteed that structurally by forwarding four named keys
+// and nothing else; deriving by subtraction does not, and `SAILFIN_THREADS` is
+// neither pool-managed nor a caller-override key, so it would ride through
+// (SFN-1114). Nothing sets it today — this closes a guarantee that had quietly
+// become conditional on ambient state, not an observed failure.
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_THREADS"]);
 }
 
 fn _scratch_dir() -> string ![io] {

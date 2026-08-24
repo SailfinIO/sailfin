@@ -32,14 +32,17 @@
 // pattern. The client fixture is compiled via a nested `sfn build`, isolated
 // with `clean_runner_env(nested_runner_scratch(...))` (SFN-401) so the pool's
 // per-file scratch/orchestration keys never leak into the nested build.
+import { Env, env_from_current } from "sfn/os";
 import { int_to_string } from "sfn/strings";
 import {
+    Background,
     clean_runner_env,
     default_scratch_dir,
-    first_present_tool,
     nested_runner_scratch,
     sfn_bin_path,
-    tool_present
+    tool_present,
+    wait_until,
+    with_background
 } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
@@ -52,11 +55,28 @@ extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_tcb_connect` and every caller up to
+// `_await_listening`/the test declare `![net]` transitively (SFN-927 is
+// the undefined-symbol failure mode otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 fn _tcb_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
@@ -68,7 +88,7 @@ fn _tcb_ptr_off(p: *u8, off: i64) -> *u8 {
 // sin_len at 0 + u8 sin_family at 1), first success wins — the inlined
 // `http.sfn::_connect_tcp` idiom. Used only to detect that `s_server` is
 // accepting before the fixture runs.
-fn _tcb_connect(port: i64) -> i32 {
+fn _tcb_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -85,7 +105,7 @@ fn _tcb_connect(port: i64) -> i32 {
         memset(_tcb_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         memset(_tcb_ptr_off(addr, 4), 127, 1 as usize);
         memset(_tcb_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -93,17 +113,16 @@ fn _tcb_connect(port: i64) -> i32 {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
 }
 
-// Resolve a wall-clock timeout command to reap the blocking `s_server`;
-// empty if none found.
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
-}
+// The env for `with_background`'s server spawn — plain `Env` (SFN-401's
+// clean/nested-scratch isolation in `build_env` below is for the NESTED
+// `sfn build`, which `openssl s_server` is not).
+fn _server_env_typed() -> Env ![io] { return env_from_current(); }
 
 fn _scratch_root() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -170,13 +189,11 @@ fn _write_bundle(dir: string, filler_count: int, env_vars: string[]) -> string !
     return path;
 }
 
-// Spawn `openssl s_server -www` in the background, wrapped in a wall-clock
-// timeout so it self-reaps (there is no process-kill primitive; s_server
-// blocks forever).
-fn _spawn_server(dir: string, port_str: string, tcmd: string, env_vars: string[]) -> i64 ![io] {
+// The `openssl s_server -www` argv, for `with_background` to spawn
+// directly — no external `timeout` wrapper needed, since `with_background`
+// owns the child's lifetime itself.
+fn _server_argv(dir: string, port_str: string) -> string[] {
     let mut argv: string[] = [];
-    argv.push(tcmd);
-    argv.push("60");
     argv.push("openssl");
     argv.push("s_server");
     argv.push("-accept");
@@ -187,25 +204,22 @@ fn _spawn_server(dir: string, port_str: string, tcmd: string, env_vars: string[]
     argv.push(dir + "/key.pem");
     argv.push("-www");
     argv.push("-quiet");
-    return process.spawn_with_env(argv, env_vars);
+    return argv;
 }
 
-// Poll a raw TCP connect until `s_server` is accepting (or the budget
-// elapses). ~30s budget (60 attempts x ~0.5s) stays under the 60s server
-// timeout.
-fn _await_listening(port: i64) -> boolean ![io] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 60 { break; }
+// Poll a raw TCP connect until `s_server` is accepting. 30s wall-clock
+// budget. `port` is a typed parameter (not an untyped call-initialized
+// `let`), so capturing it in the probe closure below is unaffected by
+// SFN-843.
+fn _await_listening(port: i64) -> boolean ![clock, io, net] {
+    return wait_until(fn () -> boolean {
         let fd: i32 = _tcb_connect(port);
         if fd >= 0 {
-            close(fd);
+            sfn_socket_close(fd);
             return true;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt += 1;
-    }
-    return false;
+        return false;
+    }, 30000, 500);
 }
 
 // Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
@@ -280,34 +294,32 @@ fn _skip_ready() -> boolean ![io] {
         print.info("[tls-ca-bundle-size] SKIP: openssl CLI not available");
         return false;
     }
-    if _timeout_cmd().length == 0 {
-        print.info("[tls-ca-bundle-size] SKIP: no timeout/gtimeout to reap the blocking s_server");
-        return false;
-    }
     return true;
 }
 
-test "runtime tls: a CAFILE bundle over the old 16-block chain cap still verifies (SFN-807)" ![io] {
+test "runtime tls: a CAFILE bundle over the old 16-block chain cap still verifies (SFN-807)" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
     // 18900 is taken by `runtime_tls_aes_gcm_client_test.sfn`; 18902 is the
-    // next free fixed port among this repo's TLS e2es. The spawned
-    // `s_server` holds it for ~55s after `timeout 60` starts it, past this
-    // test's own runtime, so a same-host rerun inside that window binds
-    // nothing new and would otherwise handshake against the PRIOR run's
-    // server. That peer presents this CN under a different key, so
-    // `_find_issuer` matches on subject and `_verify_link` then fails the
-    // signature — a deterministic `bad-signature` that has nothing to do
-    // with the anchors under test. That is SFN-851's root cause; the
-    // pre-flight probe below refuses to run rather than reporting it.
+    // next free fixed port among this repo's TLS e2es. `with_background`
+    // kills and reaps `s_server` on scope exit (including a thrown
+    // assertion), but the pre-flight probe below stays as defense-in-depth
+    // against a listener left by anything external to this test (e.g. a
+    // manually run debug session) — a foreign peer on this CN under a
+    // different key would make `_find_issuer` match on subject and
+    // `_verify_link` then fail the signature, a deterministic
+    // `bad-signature` that has nothing to do with the anchors under test
+    // (SFN-851's root cause).
     let port: i64 = 18902;
     let port_str = "18902";
 
     let scratch = nested_runner_scratch("tls-ca-bundle-size");
-    let build_env = clean_runner_env(scratch);
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let build_env: string[] = clean_runner_env(scratch);
     // Per-invocation, so a rerun can never inherit the previous run's
     // cert.pem/key.pem and silently verify against the wrong key.
     let dir = scratch + "/sfn-tls-ca-bundle-size";
@@ -319,41 +331,50 @@ test "runtime tls: a CAFILE bundle over the old 16-block chain cap still verifie
     // 16-block chain default (the SFN-807 shape), modest enough to stay
     // well inside the post-fix cost budget (~94 ms / ~23 MB for a real
     // bundle; this hermetic one is smaller still).
-    let bundle = _write_bundle(dir, 19, build_env);
+    // SFN-843: typed explicitly — see `build_env` above.
+    let bundle: string = _write_bundle(dir, 19, build_env);
 
     let out_path = dir + "/body.out";
     let main_path = _write_client(dir, port_str, out_path);
-    let client_bin = _build_bin(main_path, dir + "/client-bin", build_env);
+    // SFN-843: typed explicitly — see `build_env` above.
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin", build_env);
     assert client_bin.length > 0;
 
     // A listener already on this port is a prior run's server, not ours:
-    // this run's `s_server` cannot bind, `_spawn_server` does not check that,
-    // and `_await_listening` would succeed against the foreign peer. Skip
-    // rather than report its `bad-signature` as this test's verdict
-    // (SFN-851).
+    // this run's `s_server` cannot bind, and `_await_listening` would
+    // succeed against the foreign peer. Skip rather than report its
+    // `bad-signature` as this test's verdict (SFN-851).
     let stale: i32 = _tcb_connect(port);
     if stale >= 0 {
-        close(stale);
+        sfn_socket_close(stale);
         print.info("[tls-ca-bundle-size] SKIP: port 18902 still held by a prior run's s_server");
         assert true;
         return;
     }
 
-    let _handle = _spawn_server(dir, port_str, tcmd, build_env);
-    assert _await_listening(port);
+    // `with_background` owns `s_server`'s lifetime: it is killed and reaped
+    // on scope exit, including when an assertion below throws — replacing
+    // the previous `timeout <secs>` argv vehicle, which was the ONLY
+    // teardown mechanism and forced a SKIP on any host without coreutils.
+    let _served = with_background(_server_argv(dir, port_str), _server_env_typed(), "", "tls-ca-bundle-size-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port);
 
-    // The acceptance shape: SUCCESS against a bundle over the old cap. Pre-
-    // SFN-807, `trust_store_from_pem` inherited `pem.sfn`'s 16-block chain
-    // default, so this 20-block bundle fail-closed to zero anchors and every
-    // handshake below would have been rejected for `no-anchor` — the same
-    // failure signal as an actually-untrusted peer, which is exactly why the
-    // bug went undetected. Post-fix, `trust_store.sfn` applies its own
-    // 512-block cap and this succeeds.
-    let mut run_env = build_env;
-    run_env.push("SAILFIN_TLS_CAFILE=" + bundle);
-    let ok = _client_downloads_retry(client_bin, run_env, out_path);
-    print.info("[tls-ca-bundle-size] round-trip against a 20-block CAFILE bundle");
-    assert ok;
+        // The acceptance shape: SUCCESS against a bundle over the old cap.
+        // Pre-SFN-807, `trust_store_from_pem` inherited `pem.sfn`'s
+        // 16-block chain default, so this 20-block bundle fail-closed to
+        // zero anchors and every handshake below would have been rejected
+        // for `no-anchor` — the same failure signal as an actually-
+        // untrusted peer, which is exactly why the bug went undetected.
+        // Post-fix, `trust_store.sfn` applies its own 512-block cap and
+        // this succeeds.
+        let mut run_env = build_env;
+        run_env.push("SAILFIN_TLS_CAFILE=" + bundle);
+        let ok = _client_downloads_retry(client_bin, run_env, out_path);
+        print.info("[tls-ca-bundle-size] round-trip against a 20-block CAFILE bundle");
+        assert ok;
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }

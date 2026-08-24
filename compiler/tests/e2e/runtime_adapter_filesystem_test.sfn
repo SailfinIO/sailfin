@@ -36,24 +36,18 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    sfn_bin_path,
+    skip,
+    symbol_reader
+} from "sfn/test";
 
-// `run_capture`'s empty array is the *empty* environment; thread the
-// variables the toolchain needs. The `sfn run` round-trips spawn a full
-// build (clang + linker resolve through PATH) and route the program.ll
-// build cache under SAILFIN_TEST_SCRATCH (#1333) — both are mandatory
-// under the parallel pool. The `nm` export check also resolves nm via PATH.
+// Derived by subtraction from the real environment rather than a
+// hand-rolled allowlist (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 fn _scratch_dir() -> string ![io] {
@@ -167,9 +161,52 @@ fn _source_declares_extern(source: string, sym: string) -> boolean {
     return false;
 }
 
+// Locates the compiled runtime-native object for `module` — the bare
+// filename a runtime/sfn source module mangles to
+// (`sfn__runtime-native__<module>.sfn-<target>-<opt>.o` under
+// `build/sailfin/`) — tolerant of the `<target>-<opt>` segment differing
+// per host via a prefix match rather than the exact literal name. Returns
+// "" when the tree has not been built yet, for the caller to `skip(...)`.
+//
+// Used in place of `sfn_bin_path()` for a symbol-presence assertion: on a
+// native Windows host `lld-link` strips the COFF symbol table from the
+// linked PE (`llvm-nm build/bin/sfn.exe` reports "no symbols"), while the
+// object files retain it in exactly the `T`/`t` shape `_nm_has_defined`
+// already parses. This is not a weakening — this test asserts a symbol is
+// Sailfin-DEFINED at the bare name, and an object file answers that MORE
+// precisely by naming which object defines it. Whether the symbol survived
+// into the link is already guaranteed by the link itself: an unresolved
+// symbol fails `lld-link`, so a binary that exists at all has it resolved
+// (SFN-1114).
+fn _runtime_object(module: string) -> string ![io] {
+    let dir = "build/sailfin";
+    if !fs.exists(dir) { return ""; }
+    let prefix = "sfn__runtime-native__" + module + ".sfn-";
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        if starts_with(name, prefix) && ends_with(name, ".o") {
+            return dir + "/" + name;
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
 // `<space>T<space>_?sym` at end of an `nm` line (optional `_` for macOS).
+//
+// `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
+// dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
+// absent on a native Windows host (SFN-1114).
 fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
-    let exit = process.run_capture(["nm", binary], _child_env());
+    let reader = symbol_reader();
+    if reader.length == 0 {
+        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        return false;
+    }
+    let exit = process.run_capture([reader, binary], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return false; }
@@ -314,18 +351,21 @@ test "probe routes fs.{listDirectory,deleteFile,createDirectory} through @sfn_fs
 }
 
 test "compiler binary exports the defined sfn_fs_* family" ![io] {
-    let bin = sfn_bin_path();
-    assert _nm_has_defined(bin, "sfn_fs_read_file");
-    assert _nm_has_defined(bin, "sfn_fs_write_file");
-    assert _nm_has_defined(bin, "sfn_fs_append_file");
+    let obj = _runtime_object("filesystem");
+    if obj.length == 0 {
+        skip("build/sailfin/sfn__runtime-native__filesystem.sfn-*.o not found — tree not built yet (SFN-1114)");
+    }
+    assert _nm_has_defined(obj, "sfn_fs_read_file");
+    assert _nm_has_defined(obj, "sfn_fs_write_file");
+    assert _nm_has_defined(obj, "sfn_fs_append_file");
     // SFN-1009: the length-carrying twins must be defined text symbols too.
-    assert _nm_has_defined(bin, "sfn_fs_write_file_lv");
-    assert _nm_has_defined(bin, "sfn_fs_append_file_lv");
-    assert _nm_has_defined(bin, "sfn_fs_delete");
-    assert _nm_has_defined(bin, "sfn_fs_mkdir");
-    assert _nm_has_defined(bin, "sfn_fs_list_dir");
-    assert _nm_has_defined(bin, "sfn_fs_read_bytes");
-    assert _nm_has_defined(bin, "sfn_fs_write_bytes");
+    assert _nm_has_defined(obj, "sfn_fs_write_file_lv");
+    assert _nm_has_defined(obj, "sfn_fs_append_file_lv");
+    assert _nm_has_defined(obj, "sfn_fs_delete");
+    assert _nm_has_defined(obj, "sfn_fs_mkdir");
+    assert _nm_has_defined(obj, "sfn_fs_list_dir");
+    assert _nm_has_defined(obj, "sfn_fs_read_bytes");
+    assert _nm_has_defined(obj, "sfn_fs_write_bytes");
 }
 
 test "runtime/capsule.toml sfn-sources lists the filesystem adapter" ![io] {

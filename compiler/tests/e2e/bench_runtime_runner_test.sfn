@@ -8,6 +8,7 @@
 // SAILFIN_TEST_SCRATCH (build-cache isolation under the parallel pool).
 import { find } from "sfn/strings";
 import {
+    clean_runner_env,
     default_scratch_dir,
     nested_runner_scratch,
     report_child_failure,
@@ -15,16 +16,7 @@ import {
 } from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // The bundled workloads exist under benchmarks/runtime in a normal checkout;

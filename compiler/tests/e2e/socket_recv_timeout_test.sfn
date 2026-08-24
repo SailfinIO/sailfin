@@ -21,19 +21,28 @@
 // coverage that the shipped `http.sfn` / `serve.sfn` paths still compile and
 // round-trip lives in `serve_loopback_test.sfn`.
 //
-// Effect note: the libc socket externs carry no effect annotation, so the
-// effect checker infers no `net` requirement for direct callers — the raw
-// helpers are left un-annotated (matching `serve_loopback_test.sfn`), while
-// the test block keeps `![io]` for `print.*`. This compiles under the
-// COMPILER capsule surface (`compiler/capsule.toml` → `["io", "clock"]`,
-// no `net`).
+// Effect note: `sfn_socket_open` lives in `socket_ops.sfn`, which is
+// `net`-gated (`runtime/capsule.toml` `[sfn-source-gates]`) — a binary
+// referencing it without declaring `![net]` fails to link
+// (`ld.lld: undefined symbol: sfn_socket_open`, SFN-927). So
+// `_st_bind_listen`, `_st_connect`, and the test itself declare `![net]`
+// (the compiler capsule's surface already includes `net`,
+// `compiler/capsule.toml` → `required = ["clock", "io", "net"]`).
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution.
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn bind(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -47,7 +56,12 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
@@ -88,16 +102,16 @@ fn _st_set_reuseaddr(fd: i32) -> void {
 // `sockaddr_in` byte layouts (Linux u16 sin_family at 0; macOS/BSD u8
 // sin_len at 0 + u8 sin_family at 1), first success wins. Mirrors
 // `serve.sfn::_serve_bind_listen`. Returns the listening fd or -1.
-fn _st_bind_listen(port: i64) -> i32 {
+fn _st_bind_listen(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 { return 0 - 1; }
         _st_set_reuseaddr(fd);
         let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 {
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
         memset(addr, 0, 16 as usize);
@@ -113,10 +127,10 @@ fn _st_bind_listen(port: i64) -> i32 {
         free(addr);
         if rc == 0 {
             if listen(fd, 16) == 0 { return fd; }
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -125,7 +139,7 @@ fn _st_bind_listen(port: i64) -> i32 {
 // Connect a stream socket to `127.0.0.1:port`. Dual sockaddr layout, first
 // success wins. Mirrors `http.sfn::_connect_tcp` / the loopback test's
 // `_lb_connect`. Returns the connected fd or -1.
-fn _st_connect(port: i64) -> i32 {
+fn _st_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -143,7 +157,7 @@ fn _st_connect(port: i64) -> i32 {
         // sin_addr = 127.0.0.1
         memset(_st_ptr_off(addr, 4), 127, 1 as usize);
         memset(_st_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -151,7 +165,7 @@ fn _st_connect(port: i64) -> i32 {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -195,7 +209,7 @@ fn _st_send_all(fd: i32, buf: *u8, total: i64) -> bool {
     return true;
 }
 
-test "socket recv timeout: silent peer times out; normal recv unaffected" ![io] {
+test "socket recv timeout: silent peer times out; normal recv unaffected" ![io, net] {
     let port = _st_port();
     let lfd = _st_bind_listen(port);
     assert lfd >= 0;
@@ -231,7 +245,7 @@ test "socket recv timeout: silent peer times out; normal recv unaffected" ![io] 
     assert n2 < 0;
 
     free(buf);
-    close(cfd);
-    close(sfd);
-    close(lfd);
+    sfn_socket_close(cfd);
+    sfn_socket_close(sfd);
+    sfn_socket_close(lfd);
 }

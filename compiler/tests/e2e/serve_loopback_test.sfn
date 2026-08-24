@@ -62,7 +62,15 @@ extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 extern fn strlen(s: *u8) -> usize;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution.
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -70,7 +78,12 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 // `shutdown(fd, SHUT_WR=1)` — half-close the write side so the server's
 // recv sees EOF (a truncated request, #1709) while the read side stays
@@ -108,14 +121,13 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──
-// Effect note: `http.sfn`'s socket helpers are `![net]`, but they live in
-// the `sfn/http` capsule whose surface includes `net`. The libc socket
-// externs used here carry no effect annotation, so the effect checker
-// infers no `net` requirement for these direct callers — hence they (and
-// `_lb_request`) are left un-annotated, while `_await_ready`/the test keep
-// `![clock, io]` for their `process.*`/`fs.*` calls plus the wall-clock
-// readiness budget. (Tightening the effect system to tag raw socket
-// externs is a separate, out-of-scope concern.)
+// Effect note: `sfn_socket_open` lives in `socket_ops.sfn`, which is
+// `net`-gated (`runtime/capsule.toml` `[sfn-source-gates]`) — a binary
+// referencing it without declaring `![net]` fails to link
+// (`ld.lld: undefined symbol: sfn_socket_open`, SFN-927). So `_lb_connect`
+// and every caller up to `_lb_request`/`_lb_fire_and_close`/
+// `_lb_request_halfclose`/`_await_ready`/the test itself declare `![net]`
+// transitively.
 fn _lb_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
     return addr as *u8;
@@ -126,7 +138,7 @@ fn _lb_ptr_off(p: *u8, off: i64) -> *u8 {
 // u8 sin_family at 1), first success wins — the wrong-layout attempt
 // fails fast (EAFNOSUPPORT) without connecting. Returns the connected fd
 // or -1. Identical rationale to `http.sfn::_connect_tcp`.
-fn _lb_connect(port: i64) -> i32 {
+fn _lb_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -144,7 +156,7 @@ fn _lb_connect(port: i64) -> i32 {
         // sin_addr = 127.0.0.1
         memset(_lb_ptr_off(addr, 4), 127, 1 as usize);
         memset(_lb_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -152,7 +164,7 @@ fn _lb_connect(port: i64) -> i32 {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -204,15 +216,15 @@ fn _lb_recv_all(fd: i32) -> string {
 
 // Open a fresh connection, send `request` verbatim, drain the response,
 // and close. Returns "" on a connect/send failure (server not up yet).
-fn _lb_request(port: i64, request: string) -> string {
+fn _lb_request(port: i64, request: string) -> string ![net] {
     let fd: i32 = _lb_connect(port);
     if fd < 0 { return ""; }
     if !_lb_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
-        close(fd);
+        sfn_socket_close(fd);
         return "";
     }
     let resp = _lb_recv_all(fd);
-    close(fd);
+    sfn_socket_close(fd);
     return resp;
 }
 
@@ -226,12 +238,12 @@ fn _lb_request(port: i64, request: string) -> string {
 // terminator). Both take the worker's free-and-500 early-return path
 // rather than a 10s recv-timeout wait. Returns true if the connection
 // was established.
-fn _lb_fire_and_close(port: i64, request: string) -> bool {
+fn _lb_fire_and_close(port: i64, request: string) -> bool ![net] {
     let fd: i32 = _lb_connect(port);
     if fd < 0 { return false; }
     let n: i64 = strlen(request as *u8) as i64;
     if n > 0 { let _ = _lb_send_all(fd, request as *u8, n); }
-    close(fd);
+    sfn_socket_close(fd);
     return true;
 }
 
@@ -241,18 +253,18 @@ fn _lb_fire_and_close(port: i64, request: string) -> bool {
 // `_lb_fire_and_close`, this keeps the read side open to OBSERVE the
 // server's response (a 500 for the truncated request, #1709). Returns the
 // response text, or "" on a connect/send failure.
-fn _lb_request_halfclose(port: i64, request: string) -> string {
+fn _lb_request_halfclose(port: i64, request: string) -> string ![net] {
     let fd: i32 = _lb_connect(port);
     if fd < 0 { return ""; }
     if !_lb_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
-        close(fd);
+        sfn_socket_close(fd);
         return "";
     }
     // SHUT_WR = 1: signal EOF to the server's recv while keeping the read
     // side open to drain its 500 response.
     shutdown(fd, 1);
     let resp = _lb_recv_all(fd);
-    close(fd);
+    sfn_socket_close(fd);
     return resp;
 }
 
@@ -404,7 +416,7 @@ fn _probe_req() -> string {
 // env slot as `i8*`, failing to lower while still passing `sfn check`.
 // Calling a helper is not a capture, so this shape is unaffected. Take
 // `port` as a parameter again once SFN-843 lands.
-fn _await_ready() -> string ![clock, io] {
+fn _await_ready() -> string ![clock, io, net] {
     let ready = wait_until(fn () -> boolean {
         let resp = _lb_request(_lb_port(), _probe_req());
         if resp.length == 0 { return false; }
@@ -414,7 +426,7 @@ fn _await_ready() -> string ![clock, io] {
     return _lb_request(_lb_port(), _probe_req());
 }
 
-test "serve loopback: macOS request delivery + framed behavioral round-trips" ![clock, io] {
+test "serve loopback: macOS request delivery + framed behavioral round-trips" ![clock, io, net] {
     let main_path = _write_server(_lb_port_str());
 
     // Compile once (synchronously), then run the prebuilt server.

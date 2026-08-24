@@ -15,6 +15,73 @@ extern fn _read(fd: i32, buf: *u8, count: i32) -> i32;
 
 extern fn _write(fd: i32, buf: *u8, count: i32) -> i32;
 
+// `_setmode` switches an already-open fd between the UCRT's text and
+// binary translation modes. Declared here rather than in a shared
+// platform module because it has no POSIX counterpart to be a sibling
+// of: on POSIX there is no translation layer to turn off.
+extern fn _setmode(fd: i32, mode: i32) -> i32;
+
+// `_O_BINARY` from the UCRT's <fcntl.h>. Spelled as the literal rather
+// than `1 << 15` deliberately — see the armed-flag comment below.
+let SFN_O_BINARY: i32 = 32768;
+
+// Has stdout/stderr been switched out of the UCRT's text mode yet?
+//
+// SFN-1114. The UCRT opens the three inherited stdio fds in TEXT mode,
+// which rewrites every `\n` this module writes into `\r\n` on the way
+// out. That is a silent violation of the numerics/reproducibility
+// contract in the top-level design framework: the same Sailfin program
+// emitted `hello\n` on Linux and `hello\r\n` on Windows, so its output
+// was not byte-identical across targets and could not be compared,
+// hashed, or attested against a Linux-produced reference. Measured on a
+// native Windows host, `sfn --version` wrote `sfn 0.10.4\r\n`.
+//
+// The blast radius was mostly invisible because nothing on Windows
+// *reads* the translated bytes back except the test suite, which does:
+// every e2e test that captures a child's stdout and compares it against
+// a `\n`-joined expected string failed on the line endings alone, with
+// the compared text looking correct in any terminal. That accounted for
+// the bulk of the native-Windows e2e failures.
+//
+// STDIN IS DELIBERATELY NOT TOUCHED. Switching fd 0 to binary would
+// also stop the CRT collapsing an incoming `\r\n` to `\n` and stop it
+// honouring a lone Ctrl-Z as EOF, which is a real behaviour change for
+// anything reading interactive or piped text input. Nothing in the
+// contract above requires it — the identity claim is about what a
+// program WRITES — so the narrower fix is the correct one. Revisit only
+// with a concrete reader that needs untranslated input.
+//
+// Armed lazily from `sfn_fd_write` rather than at startup because a
+// runtime module has no startup hook of its own: the generated `@main`
+// wrapper calls straight into the user's `main`, and adding an emission
+// there would be a codegen change that could not take effect until the
+// compiler had self-hosted through it twice. Arming on first write costs
+// one already-hot compare per write and is correct from the first build.
+//
+// Two threads racing here both call `_setmode` with the same arguments
+// against a CRT that locks its own fd table; the duplicate call is
+// idempotent, so the race is benign and no lock is warranted.
+//
+// The initializer is a plain literal `0`, not a computed expression:
+// SFN-1005 silently drops ANY computed module-global initializer in a
+// non-entry runtime module (`2 + 3` reads 0, `1 > 0` reads false), which
+// would leave this reading its zero default forever. That happens to be
+// the safe direction here, but the spelling is load-bearing for the same
+// reason it is at `exclusive_create.sfn:101` — do not respell it until
+// SFN-1005 lands.
+let mut _fd_io_stdio_binary_armed: i32 = 0;
+
+fn _ensure_binary_stdio() {
+    if _fd_io_stdio_binary_armed != 0 { return; }
+    _fd_io_stdio_binary_armed = 1;
+    // Return value ignored on purpose: `-1` means the fd was closed or
+    // was never a character/pipe device, and neither is this module's
+    // business to report — the write that follows carries the real
+    // error.
+    let _out = _setmode(1, SFN_O_BINARY);
+    let _err = _setmode(2, SFN_O_BINARY);
+}
+
 // Sign-extend the UCRT's 32-bit result to i64 so the `if n <= 0` /
 // `if n < 0` guards throughout `io.sfn`/`assert.sfn` see the true
 // negative-error signal instead of a truncated positive count
@@ -25,6 +92,7 @@ fn sfn_fd_read(fd: i32, buf: *u8, count: usize) -> i64 {
 }
 
 fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64 {
+    _ensure_binary_stdio();
     let n: i32 = _write(fd, buf, count as i32);
     return n as i64;
 }

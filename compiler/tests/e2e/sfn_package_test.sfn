@@ -21,6 +21,8 @@
 // stdout / parsed `jq` output with `sfn/strings` predicates instead. (#842.)
 import { contains, find, split } from "sfn/strings";
 import {
+    clean_runner_env,
+    clean_runner_env_without,
     default_scratch_dir,
     sfn_bin_abs_path,
     sfn_bin_path,
@@ -43,27 +45,16 @@ fn _test_root(tag: string) -> string ![io] {
     return root;
 }
 
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
+// HOME is named in the strip list so the outer process's own HOME cannot
+// shadow the caller's override (`env.get` resolves the first match).
 fn _child_env_with_home(home: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["HOME"]);
     e.push("HOME=" + home);
     return e;
 }

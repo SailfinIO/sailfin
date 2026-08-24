@@ -26,6 +26,7 @@
 // `![io]` test (#842).
 import { contains } from "sfn/strings";
 import {
+    clean_runner_env,
     report_child_failure,
     scratch_root,
     sfn_bin_path,
@@ -34,20 +35,10 @@ import {
 
 import { build_target_os, target_exe_name } from "../../src/build/target";
 
-// The self-host build spawns nested clang + linker, so the child needs
-// PATH (+ HOME, TMPDIR). SAILFIN_TEST_SCRATCH routes the program.ll
-// build-cache per invocation so the parallel pool does not collide.
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Host-OS probe (via `uname -s`). Byte-identity is a Linux ELF guarantee;

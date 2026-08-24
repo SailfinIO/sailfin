@@ -44,25 +44,21 @@
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
 import { find } from "sfn/strings";
 import {
+    clean_runner_env_without,
     default_scratch_dir,
     report_child_failure,
     sfn_bin_abs_path,
     sfn_bin_path
 } from "sfn/test";
 
-// Build env for sfn run: PATH (clang/linker), HOME, TMPDIR,
-// and per-test SAILFIN_TEST_SCRATCH + SAILFIN_BUILD_CACHE_DIR.
-// Using per-test scratch ensures the runtime .o cache is also cold on
-// the first run (the bash original used a fresh mktemp scratch each time).
+// Build env for sfn run: derived by subtraction from the real environment
+// rather than a hand-rolled allowlist (SFN-1114), with per-test
+// SAILFIN_TEST_SCRATCH + SAILFIN_BUILD_CACHE_DIR forced. SAILFIN_BUILD_CACHE_DIR
+// is named to `clean_runner_env_without` so an inherited entry cannot shadow
+// this push. Using per-test scratch ensures the runtime .o cache is also cold
+// on the first run (the bash original used a fresh mktemp scratch each time).
 fn _make_env(test_scratch: string, cache_dir: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    e.push("SAILFIN_TEST_SCRATCH=" + test_scratch);
+    let mut e = clean_runner_env_without(test_scratch, ["SAILFIN_BUILD_CACHE_DIR"]);
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
     return e;
 }

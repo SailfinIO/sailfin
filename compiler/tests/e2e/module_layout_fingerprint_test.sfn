@@ -15,7 +15,7 @@
 // job) and the restore prefix (the same action, plus the warmer job) must
 // never drift apart, or PR CI is stranded on a permanently cold cache.
 import { contains } from "sfn/strings";
-import { sfn_bin_abs_path } from "sfn/test";
+import { clean_runner_env, sfn_bin_abs_path } from "sfn/test";
 
 fn _repo_root() -> string ![io] {
     let mut repo = env.get("SAILFIN_REPO_ROOT");
@@ -25,13 +25,10 @@ fn _repo_root() -> string ![io] {
 }
 
 // `run_capture`'s env is empty, not inherited — the script needs
-// `sha256sum`/`shasum`, `find`, and `sort` on `PATH`.
-fn _script_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    return e;
-}
+// `sha256sum`/`shasum`, `find`, and `sort` on `PATH`. Derived by
+// subtraction via `clean_runner_env` (SFN-1114); no nested scratch is
+// threaded through this helper.
+fn _script_env() -> string[] ![io] { return clean_runner_env(""); }
 
 fn _fingerprint(root: string) -> string ![io] {
     let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";

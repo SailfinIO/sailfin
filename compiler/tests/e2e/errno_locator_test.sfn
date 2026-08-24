@@ -21,9 +21,10 @@
 // test sets `SAILFIN_TARGET_OS` to the *opposite* of the real host, proving
 // the override wins over the host probe (the cross-compile path, #890). An
 // unset-override test additionally pins that the bare `_host_os()` probe
-// selects a POSIX leg — never mingw's `@_errno` — on a POSIX CI host, guarding
-// the SFN-49 de-shell against a host mis-detection regression. For each path it
-// pins:
+// selects the leg matching the REAL host, guarding the SFN-49 de-shell against
+// a host mis-detection regression — it is the one case here whose expected
+// value is not forced, so it branches on `host_is_windows()` (SFN-1114) rather
+// than assuming POSIX. For each path it pins:
 //
 //   1. typecheck       — `sfn check <fixture>` exits 0.
 //   2. locator call    — emitted IR contains `call i32* @<sym>()`.
@@ -38,7 +39,7 @@
 // cannot be called from an `![io]` test like this. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
 import { contains, split } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, host_is_windows, sfn_bin_path } from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -188,18 +189,33 @@ test "errno-locator: SAILFIN_TARGET_OS=Darwin overrides uname=Linux (@__error)" 
     assert ! contains(ir, "@__errno_location(");
 }
 
-test "errno-locator: unset SAILFIN_TARGET_OS selects a POSIX leg on a POSIX host, never @_errno" ![io] {
+test "errno-locator: unset SAILFIN_TARGET_OS selects the leg matching the real host" ![io] {
     // Guards the SFN-49 de-shell: with no override, `errno_locator_symbol()`
-    // consults the bare `_host_os()` probe. On the Linux/macOS CI runner it must
-    // resolve to a POSIX leg (`@__errno_location` or `@__error`) and never
-    // mis-detect the host as native Windows (`@_errno`) — the regression the
-    // fs/env marker probe replaces the `uname -s` shellout to avoid.
+    // consults the bare `_host_os()` probe, so this is the ONE case in this
+    // file whose expected value is not forced — it is whatever the host
+    // actually is. Every other case pins its leg with `SAILFIN_TARGET_OS` and
+    // asserts identically everywhere.
+    //
+    // This previously asserted a POSIX leg unconditionally, and passed on a
+    // native Windows host for the wrong reason: `build_host_os()` had
+    // `SystemRoot` as its only Windows evidence, and `_emit` hands the child a
+    // curated env that does not carry it, so the probe answered "Linux" ON
+    // WINDOWS and the emitter duly baked `@__errno_location`. Fixing the probe
+    // (SFN-1114) made this the first thing to fail — correctly. A test that
+    // asserts the host is POSIX cannot tell a working probe from a broken one
+    // on the only platform where the distinction is load-bearing.
     let src = _fixture_path();
     let ir = _emit(src, _base_env(), "hostprobe");
     fs.deleteFile(src);
     assert ir.length > 0;
-    assert ! contains(ir, "@_errno(");
-    assert contains(ir, "@__errno_location(") || contains(ir, "@__error(");
+    if host_is_windows() {
+        assert contains(ir, "@_errno(");
+        assert ! contains(ir, "@__errno_location(");
+        assert ! contains(ir, "@__error(");
+    } else {
+        assert ! contains(ir, "@_errno(");
+        assert contains(ir, "@__errno_location(") || contains(ir, "@__error(");
+    }
 }
 
 test "errno-locator: SAILFIN_HOST_OS alone steers the emitted leg (@__error)" ![io] {

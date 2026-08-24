@@ -208,6 +208,28 @@ fn nested_runner_scratch(label: string) -> string ![io] {
     return fs.mkdtemp("sfn-nested-runner-");
 }
 
+// True when the test process is running on a Windows host (SFN-1114).
+//
+// For a test whose EXPECTED VALUE differs by host — the errno accessor the
+// emitter picks, the link flags a C harness needs — as opposed to one that
+// merely needs a platform-shaped input, which belongs in a `SAILFIN_TARGET_OS`
+// override instead. Reach for the override first: a forced target asserts the
+// same thing on every runner, while this predicate makes an assertion that
+// only one platform ever evaluates.
+//
+// Mirrors `build_host_os`'s Windows rungs rather than importing them: a capsule
+// cannot import compiler-internal modules, so this is a deliberate paired copy,
+// the same arrangement `_pool_managed_keys` documents above. `NUL` backstops
+// the environment variable for the reason SFN-1114 exists — a child spawned
+// with a curated envp need not carry `SystemRoot`, and test helpers run inside
+// exactly such children. Deliberately has no POSIX-vs-Darwin split: no caller
+// has needed one, and a three-way answer invites a two-way `if` that silently
+// files Darwin under Linux.
+fn host_is_windows() -> boolean ![io] {
+    if env.get("SystemRoot").length > 0 { return true; }
+    return fs.exists("NUL");
+}
+
 // Build a clean top-level child environment for spawning a nested `sfn test`
 // (or `sfn build` / `sfn run`) subprocess. Returns `process.environ()` with
 // every pool-managed key (see `_pool_managed_keys`) and every caller-override
@@ -234,13 +256,34 @@ fn nested_runner_scratch(label: string) -> string ![io] {
 // Use with the raw `process.run_capture(argv, env)` builtin the e2e tests
 // call.
 fn clean_runner_env(nested_scratch: string) -> string[] ![io] {
+    let none: string[] = [];
+    return clean_runner_env_without(nested_scratch, none);
+}
+
+// `clean_runner_env` plus a caller-supplied strip list, for a test that pushes
+// its own value for a key the outer environment may also carry (SFN-1114).
+//
+// This exists because of the first-match rule `clean_runner_env` documents
+// above: `env.get` resolves through libc `getenv`, which returns the FIRST
+// matching entry, so an inherited `KEY=old` earlier in the array silently
+// defeats a caller's later `KEY=new` push. `_caller_override_keys` hard-codes
+// the two keys SFN-925 found this way; every other seam a test invents — a
+// probe-only toggle, a fixture registry URL, a forced HOME — has the same
+// exposure and no fixed list can anticipate it. Naming the keys at the push
+// site keeps the strip and the push in one place, where they cannot drift.
+//
+// Pass the bare key names, no `=`. A key absent from the environment costs a
+// scan and nothing else, so over-listing is safe and under-listing is the
+// failure — when in doubt, name every key the helper goes on to push.
+fn clean_runner_env_without(nested_scratch: string, also_strip: string[]) -> string[] ![io] {
     let all = process.environ();
     let mut out: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= all.length { break; }
-        if !_is_pool_managed(all[i]) && !_is_caller_override(all[i]) {
-            out.push(all[i]);
+        let entry = all[i];
+        if !_is_pool_managed(entry) && !_is_caller_override(entry) && !_matches_any_key(entry, also_strip) {
+            out.push(entry);
         }
         i += 1;
     }

@@ -42,24 +42,12 @@
 // NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
 // an `![io]` test; assertions use plain `assert` per
 // `.claude/rules/no-bash-e2e.md`. Shape follows `runtime_identity_stamp_test.sfn`.
-// `run_capture`'s empty-array env is the FULL empty environment, not
-// "inherit", so a nested build cannot reach clang or its linker without an
-// explicit PATH. SAILFIN_TEST_SCRATCH is pinned per call so a concurrent pool
-// peer cannot overwrite this build's `program.ll` (see
-// `.claude/rules/no-bash-e2e.md`).
-// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak.
-import { sfn_bin_path } from "sfn/test";
+// env-safe (SFN-1114): derived by subtraction from the real environment
+// rather than a hand-rolled allowlist.
+import { clean_runner_env, clean_runner_env_without, sfn_bin_path } from "sfn/test";
 
 fn _child_env(scratch: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    e.push("SAILFIN_TEST_SCRATCH=" + scratch);
-    return e;
+    return clean_runner_env(scratch);
 }
 
 fn _contains_text(haystack: string, needle: string) -> boolean {
@@ -131,7 +119,9 @@ fn _build_against_runtime(scratch: string, runtime_copy: string) -> int ![io] {
     let prog = scratch + "/prog.sfn";
     fs.writeFile(prog, "fn main() -> int { return 0; }\n");
 
-    let mut build_env = _child_env(scratch);
+    // SAILFIN_RUNTIME_ROOT is named explicitly so an inherited entry cannot
+    // shadow this push (SFN-1114).
+    let mut build_env = clean_runner_env_without(scratch, ["SAILFIN_RUNTIME_ROOT"]);
     build_env.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy);
     let out_bin = scratch + "/prog-out";
     let build_exit = process.run_capture([sfn_bin_path(), "build", prog, "-o", out_bin], build_env);

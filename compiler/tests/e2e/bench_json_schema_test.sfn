@@ -7,19 +7,15 @@
 // bench requires `make compile` to have produced it), matching
 // bench_compiler_test.sfn.
 import { find } from "sfn/strings";
-import { nested_runner_scratch, report_child_failure, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 test "bench json: --compiler emits sailfin.bench/v1 envelope" ![io] {

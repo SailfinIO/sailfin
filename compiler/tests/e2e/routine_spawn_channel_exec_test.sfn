@@ -24,24 +24,12 @@
 // `number_to_string`, NOT `{{ }}` interpolation, so the host compiler does not
 // interpolate the fixture before it is written.
 import { contains } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
-// `process.run_capture`'s empty array is the *empty* environment, not
-// "inherit". `sfn run` spawns a nested clang + linker, so the child needs
-// PATH (else the linker is not found). SAILFIN_TEST_SCRATCH routes the
-// program.ll build-cache per invocation so the parallel pool does not collide
-// on the fixed build/sailfin (#1333).
+// Derived by subtraction from the real environment rather than a
+// hand-rolled allowlist (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // A unique per-invocation scratch root so fixture source paths never collide

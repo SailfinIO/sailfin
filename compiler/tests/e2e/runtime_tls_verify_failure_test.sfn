@@ -25,38 +25,55 @@
 // after a confirmed-up server is proof the TLS verify rejected the peer.
 //
 // Skips cleanly (`assert true`, the tool-absent SKIP precedent) when
-// `openssl` is missing (no TLS peer / cert gen) or no `timeout`/`gtimeout`
-// is available to reap the blocking `s_server`. CI runners (Linux +
-// coreutils + libssl) have both.
+// `openssl` is missing (no TLS peer / cert gen). CI runners (Linux +
+// coreutils + libssl) have it.
 //
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured state with
 // direct comparisons instead.
+import { Env, env_from_current } from "sfn/os";
 import { contains, find } from "sfn/strings";
 import {
+    Background,
     default_scratch_dir,
-    first_present_tool,
     sfn_bin_path,
-    tool_present
+    tool_present,
+    wait_until,
+    with_background
 } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tvf_` so these never collide with the external-linkage
 // runtime helpers of the same shape in `http.sfn` (not linked into this
-// test binary, but the prefix keeps that independent of link order). The
-// libc socket externs carry no effect annotation, so the effect checker
-// infers no `net` requirement for these direct callers.
+// test binary, but the prefix keeps that independent of link order).
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
 
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// `sfn_socket_open`, not the raw libc `socket` — on Windows every raw
+// `socket()` call fails until `WSAStartup` runs in the process (SFN-1114):
+// a probe of `socket(2, 1, 0)` here returns fd=-1 with
+// `WSAGetLastError()` = 10093 (WSANOTINITIALISED). `sfn_socket_open`
+// (`runtime/sfn/platform/socket_ops_windows.sfn`) is the runtime's socket
+// creator and carries the `WSAStartup` call; its POSIX sibling
+// (`socket_ops.sfn`) is a direct pass-through, so this is the correct
+// symbol on every target, not a Windows-only substitution. Effect note:
+// `socket_ops.sfn` is `net`-gated (`runtime/capsule.toml`
+// `[sfn-source-gates]`), so `_tvf_connect` and every caller up to
+// `_await_listening`/all four tests declare `![net]` transitively
+// (SFN-927 is the undefined-symbol failure mode otherwise).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn close(fd: i32) -> i32;
+// `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
+// Winsock SOCKET is not an error return but a process-killing
+// `__fastfail(0xC0000409)` (`socket_ops_windows.sfn:11-12`). The runtime
+// helper routes to `closesocket` there and to `close` on POSIX
+// (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 fn _tvf_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
@@ -68,7 +85,7 @@ fn _tvf_ptr_off(p: *u8, off: i64) -> *u8 {
 // sin_len at 0 + u8 sin_family at 1), first success wins — the inlined
 // `http.sfn::_connect_tcp` idiom. Used only to detect that `s_server` is
 // accepting before the fixture runs.
-fn _tvf_connect(port: i64) -> i32 {
+fn _tvf_connect(port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
@@ -85,7 +102,7 @@ fn _tvf_connect(port: i64) -> i32 {
         memset(_tvf_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         memset(_tvf_ptr_off(addr, 4), 127, 1 as usize);
         memset(_tvf_ptr_off(addr, 7), 1, 1 as usize);
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 {
             free(addr);
             return 0 - 1;
@@ -93,7 +110,7 @@ fn _tvf_connect(port: i64) -> i32 {
         let rc: i32 = connect(fd, addr, 16);
         free(addr);
         if rc == 0 { return fd; }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -104,6 +121,9 @@ fn _tvf_connect(port: i64) -> i32 {
 // the nested build links a binary (clang + ld), and
 // SAILFIN_TEST_SCRATCH keeps the build cache per-invocation under the pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// The same environment in `sfn/os`'s typed form, for `with_background`.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // Parent environment with any inherited `SAILFIN_TLS_CAFILE` entry
 // stripped. A child's `getenv` resolves the FIRST matching entry, so a
@@ -137,12 +157,6 @@ fn _trusted_env(cert_path: string) -> string[] ![io] {
     return e;
 }
 
-// Resolve a wall-clock timeout command to reap the blocking `s_server`;
-// empty if none found.
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
-}
-
 fn _scratch_root() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length == 0 { dir = default_scratch_dir(); }
@@ -167,14 +181,11 @@ fn _gen_cert(dir: string, san_host: string) -> boolean ![io] {
     return exit == 0;
 }
 
-// Spawn `openssl s_server -www` in the background, wrapped in a wall-clock
-// timeout so it self-reaps (there is no process-kill primitive; s_server
-// blocks forever). Returns the spawn handle (unused — the timeout owns the
-// lifetime).
-fn _spawn_server(dir: string, port_str: string, tcmd: string) -> i64 ![io] {
+// The `openssl s_server -www` argv, for `with_background` to spawn
+// directly — no external `timeout` wrapper needed, since `with_background`
+// owns the child's lifetime itself.
+fn _server_argv(dir: string, port_str: string) -> string[] {
     let mut argv: string[] = [];
-    argv.push(tcmd);
-    argv.push("60");
     argv.push("openssl");
     argv.push("s_server");
     argv.push("-accept");
@@ -185,25 +196,22 @@ fn _spawn_server(dir: string, port_str: string, tcmd: string) -> i64 ![io] {
     argv.push(dir + "/key.pem");
     argv.push("-www");
     argv.push("-quiet");
-    return process.spawn_with_env(argv, _child_env());
+    return argv;
 }
 
-// Poll a raw TCP connect until `s_server` is accepting (or the budget
-// elapses). ~30s budget (60 attempts x ~0.5s) stays under the 60s server
-// timeout. Returns true once the port accepts a connection.
-fn _await_listening(port: i64) -> boolean ![io] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 60 { break; }
+// Poll a raw TCP connect until `s_server` is accepting. 30s wall-clock
+// budget. `port` is a typed parameter (not an untyped call-initialized
+// `let`), so capturing it in the probe closure below is unaffected by
+// SFN-843.
+fn _await_listening(port: i64) -> boolean ![clock, io, net] {
+    return wait_until(fn () -> boolean {
         let fd: i32 = _tvf_connect(port);
         if fd >= 0 {
-            close(fd);
+            sfn_socket_close(fd);
             return true;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return false;
+        return false;
+    }, 30000, 500);
 }
 
 // Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
@@ -327,19 +335,14 @@ fn _skip_ready() -> boolean ![io] {
         print.info("[tls-verify] SKIP: openssl CLI not available");
         return false;
     }
-    if _timeout_cmd().length == 0 {
-        print.info("[tls-verify] SKIP: no timeout/gtimeout to reap the blocking s_server");
-        return false;
-    }
     return true;
 }
 
-test "runtime tls: an untrusted server cert is rejected (verify enforced)" ![io] {
+test "runtime tls: an untrusted server cert is rejected (verify enforced)" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
     let port: i64 = 18796;
     let port_str = "18796";
 
@@ -351,43 +354,53 @@ test "runtime tls: an untrusted server cert is rejected (verify enforced)" ![io]
 
     let out_path = dir + "/body.out";
     let main_path = _write_client(dir, port_str, out_path);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    let _handle = _spawn_server(dir, port_str, tcmd);
-    assert _await_listening(port);
+    // `with_background` owns `s_server`'s lifetime: it is killed and reaped
+    // on scope exit, including when an assertion below throws — replacing
+    // the previous `timeout <secs>` argv vehicle, which was the ONLY
+    // teardown mechanism and forced a SKIP on any host without coreutils.
+    let _served = with_background(_server_argv(dir, port_str), _child_env_typed(), "", "tls-verify-untrusted-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port);
 
-    // NEGATIVE: no CAFILE -> the self-signed cert is not trust-anchored ->
-    // chain verification fails -> no body is written. A single attempt is
-    // conclusive (trust cannot appear on retry).
-    //
-    // This must fail because the cert has no anchor, not because the trust
-    // store failed to load anything at all — SFN-807 showed those are not
-    // the same failure. A bundle-loading bug fail-closed to zero anchors for
-    // a full release cycle while this exact assertion kept passing, because
-    // "no anchors" and "no matching anchor" produce the identical no-body
-    // signal. `runtime_tls_ca_bundle_realistic_size_test.sfn` (SFN-813)
-    // covers the loader itself so a regression there cannot hide behind this
-    // leg again.
-    let untrusted_ok = _client_downloads(client_bin, _untrusted_env(), out_path);
-    assert untrusted_ok == false;
+        // NEGATIVE: no CAFILE -> the self-signed cert is not trust-anchored
+        // -> chain verification fails -> no body is written. A single
+        // attempt is conclusive (trust cannot appear on retry).
+        //
+        // This must fail because the cert has no anchor, not because the
+        // trust store failed to load anything at all — SFN-807 showed those
+        // are not the same failure. A bundle-loading bug fail-closed to
+        // zero anchors for a full release cycle while this exact assertion
+        // kept passing, because "no anchors" and "no matching anchor"
+        // produce the identical no-body signal.
+        // `runtime_tls_ca_bundle_realistic_size_test.sfn` (SFN-813) covers
+        // the loader itself so a regression there cannot hide behind this
+        // leg again.
+        let untrusted_ok = _client_downloads(client_bin, _untrusted_env(), out_path);
+        assert untrusted_ok == false;
 
-    // POSITIVE control: same cert, same host, now trusted via CAFILE ->
-    // the round-trip succeeds. Proves the negative above was TRUST, not an
-    // unrelated failure (server-down, build break, wrong port).
-    let trusted_ok = _client_downloads_retry(client_bin, _trusted_env(dir
-        + "/cert.pem"), out_path);
-    assert trusted_ok;
+        // POSITIVE control: same cert, same host, now trusted via CAFILE ->
+        // the round-trip succeeds. Proves the negative above was TRUST, not
+        // an unrelated failure (server-down, build break, wrong port).
+        let trusted_ok = _client_downloads_retry(client_bin, _trusted_env(dir
+            + "/cert.pem"), out_path);
+        assert trusted_ok;
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: a hostname/SAN mismatch is rejected (RFC-6125 enforced)" ![io] {
+test "runtime tls: a hostname/SAN mismatch is rejected (RFC-6125 enforced)" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
     let port: i64 = 18797;
     let port_str = "18797";
 
@@ -400,32 +413,37 @@ test "runtime tls: a hostname/SAN mismatch is rejected (RFC-6125 enforced)" ![io
 
     let out_path = dir + "/body.out";
     let main_path = _write_client(dir, port_str, out_path);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    // SFN-843: typed explicitly — see the untrusted-cert test above.
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    let _handle = _spawn_server(dir, port_str, tcmd);
-    assert _await_listening(port);
+    // `with_background` owns `s_server`'s lifetime; see the untrusted-cert
+    // test above for why this replaced the `timeout <secs>` vehicle.
+    let _served = with_background(_server_argv(dir, port_str), _child_env_typed(), "", "tls-verify-hostmismatch-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port);
 
-    // Trust the cert via CAFILE so chain verification PASSES; the only
-    // remaining gate is the hostname check (SSL_set1_host = "localhost" vs
-    // SAN example.com). A wrong-host cert must be rejected -> no body.
-    // This test has no positive control of its own; the sibling
-    // "untrusted server cert is rejected" test above establishes that the
-    // CAFILE-anchoring + build + server machinery yields a body on a
-    // SAN-matching cert, so a rejection here is attributable to the host
-    // check, not to broken trust plumbing.
-    let ok = _client_downloads(client_bin, _trusted_env(dir + "/cert.pem"), out_path);
-    assert ok == false;
+        // Trust the cert via CAFILE so chain verification PASSES; the only
+        // remaining gate is the hostname check (SSL_set1_host = "localhost"
+        // vs SAN example.com). A wrong-host cert must be rejected -> no
+        // body. This test has no positive control of its own; the sibling
+        // "untrusted server cert is rejected" test above establishes that
+        // the CAFILE-anchoring + build + server machinery yields a body on
+        // a SAN-matching cert, so a rejection here is attributable to the
+        // host check, not to broken trust plumbing.
+        let ok = _client_downloads(client_bin, _trusted_env(dir + "/cert.pem"), out_path);
+        assert ok == false;
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: an untrusted peer reports cert-verify, not silence" ![io, net] {
+test "runtime tls: an untrusted peer reports cert-verify, not silence" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
     let port: i64 = 18798;
     let port_str = "18798";
 
@@ -433,33 +451,38 @@ test "runtime tls: an untrusted peer reports cert-verify, not silence" ![io, net
     fs.createDirectory(dir, true);
     assert _gen_cert(dir, "localhost");
 
-    let _handle = _spawn_server(dir, port_str, tcmd);
-    assert _await_listening(port);
+    // `with_background` owns `s_server`'s lifetime; see the untrusted-cert
+    // test above for why this replaced the `timeout <secs>` vehicle.
+    let _served = with_background(_server_argv(dir, port_str), _child_env_typed(), "", "tls-reason-certverify-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port);
 
-    // SFN-822: this scenario needs no custom environment (no CAFILE is
-    // configured for this process, so the self-signed peer is untrusted by
-    // default), so `tls.last_error()` is read directly here — no fixture
-    // build, no subprocess, no trace. This is the SFN-807 regression
-    // guard: an unrelated failure must not report the same reason.
-    let out_path = dir + "/body.out";
-    // Stale-output guard: `dir` is a fixed (not `mkdtemp`) path reused
-    // across runs, and `fs.createDirectory(dir, true)` above does not
-    // clear an existing directory, so a body left by a crashed prior run
-    // would otherwise poison the "no body written" check below.
-    if fs.exists(out_path) { let _ = fs.deleteFile(out_path); }
-    let _d = http.download("https://localhost:" + port_str + "/", out_path);
-    assert ! fs.exists(out_path) || fs.readFile(out_path).length == 0;
-    assert tls.last_error() == "cert-verify";
+        // SFN-822: this scenario needs no custom environment (no CAFILE is
+        // configured for this process, so the self-signed peer is untrusted
+        // by default), so `tls.last_error()` is read directly here — no
+        // fixture build, no subprocess, no trace. This is the SFN-807
+        // regression guard: an unrelated failure must not report the same
+        // reason.
+        let out_path = dir + "/body.out";
+        // Stale-output guard: `dir` is a fixed (not `mkdtemp`) path reused
+        // across runs, and `fs.createDirectory(dir, true)` above does not
+        // clear an existing directory, so a body left by a crashed prior
+        // run would otherwise poison the "no body written" check below.
+        if fs.exists(out_path) { let _ = fs.deleteFile(out_path); }
+        let _d = http.download("https://localhost:" + port_str + "/", out_path);
+        assert ! fs.exists(out_path) || fs.readFile(out_path).length == 0;
+        assert tls.last_error() == "cert-verify";
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: an unreadable trust store reports trust-store, not cert-verify" ![io] {
+test "runtime tls: an unreadable trust store reports trust-store, not cert-verify" ![clock, io, net] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
     let port: i64 = 18799;
     let port_str = "18799";
 
@@ -469,74 +492,81 @@ test "runtime tls: an unreadable trust store reports trust-store, not cert-verif
 
     let out_path = dir + "/body.out";
     let main_path = _write_client(dir, port_str, out_path);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    // SFN-843: typed explicitly — see the untrusted-cert test above.
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    let _handle = _spawn_server(dir, port_str, tcmd);
-    assert _await_listening(port);
+    // `with_background` owns `s_server`'s lifetime; see the untrusted-cert
+    // test above for why this replaced the `timeout <secs>` vehicle. The
+    // rest of this test's body follows below, inside the fixture.
+    let _served = with_background(_server_argv(dir, port_str), _child_env_typed(), "", "tls-reason-truststore-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port);
 
-    // This scenario needs `SAILFIN_TLS_CAFILE` pointed at a path that
-    // cannot resolve, which is unavoidably env-based (`trust_store_load`
-    // reads it via `getenv`, and `http.download` has no CAfile parameter
-    // to inject one directly). SFN-822 considered and explicitly declined
-    // an `env.set` primitive as its option 3 — "cheapest, and the worst of
-    // the three: it makes a process-global mutation the diagnostic API" —
-    // so there is no way to give THIS process a different CAFILE than the
-    // one it started with. The subprocess below is the residual cost of
-    // that decision, not an unconverted leftover: it exists solely to give
-    // the client a different environment, and the fixture reports the
-    // reason via `tls.last_error()` (SFN-822) on its own stdout rather than
-    // the retired opt-in stderr trace. Removal condition: an
-    // `env.set` primitive landing would let this test set CAFILE for its
-    // own process and drop the subprocess, mirroring the sibling test
-    // above (cite SFN-822 in that change).
-    //
-    // `trust_store_load` fails, so `_tls_anchors` records `trust_store`;
-    // `x509_verify_chain` then reports `no-anchor` for the empty anchor
-    // set. The `no-anchor` verdict code is trace-only rendering detail with
-    // no equivalent through `tls.last_error()`, so it is asserted against
-    // the trace below (SFN-850) rather than the reason slot.
-    //
-    // The reason assertion is the regression guard for the defect the
-    // SFN-816 review caught: the verify seam used to OVERWRITE the
-    // trust-store reason with `cert-verify`, erasing the distinction and
-    // reporting a trust-store outage as a bad certificate. `sfn_tls_last_error`
-    // reading `cert-verify` here would already fail this check, so the
-    // single equality below is sufficient — there is exactly one
-    // `tls-reason:<name>` line, so a second assertion negating a
-    // different name is implied by the first and pins nothing (asserting
-    // it anyway was this review's own error, corrected here).
-    let out = _client_stdout(client_bin, _trusted_env(dir
-        + "/does-not-exist.pem"), out_path);
+        // This scenario needs `SAILFIN_TLS_CAFILE` pointed at a path that
+        // cannot resolve, which is unavoidably env-based (`trust_store_load`
+        // reads it via `getenv`, and `http.download` has no CAfile parameter
+        // to inject one directly). SFN-822 considered and explicitly declined
+        // an `env.set` primitive as its option 3 — "cheapest, and the worst of
+        // the three: it makes a process-global mutation the diagnostic API" —
+        // so there is no way to give THIS process a different CAFILE than the
+        // one it started with. The subprocess below is the residual cost of
+        // that decision, not an unconverted leftover: it exists solely to give
+        // the client a different environment, and the fixture reports the
+        // reason via `tls.last_error()` (SFN-822) on its own stdout rather than
+        // the retired opt-in stderr trace. Removal condition: an
+        // `env.set` primitive landing would let this test set CAFILE for its
+        // own process and drop the subprocess, mirroring the sibling test
+        // above (cite SFN-822 in that change).
+        //
+        // `trust_store_load` fails, so `_tls_anchors` records `trust_store`;
+        // `x509_verify_chain` then reports `no-anchor` for the empty anchor
+        // set. The `no-anchor` verdict code is trace-only rendering detail with
+        // no equivalent through `tls.last_error()`, so it is asserted against
+        // the trace below (SFN-850) rather than the reason slot.
+        //
+        // The reason assertion is the regression guard for the defect the
+        // SFN-816 review caught: the verify seam used to OVERWRITE the
+        // trust-store reason with `cert-verify`, erasing the distinction and
+        // reporting a trust-store outage as a bad certificate. `sfn_tls_last_error`
+        // reading `cert-verify` here would already fail this check, so the
+        // single equality below is sufficient — there is exactly one
+        // `tls-reason:<name>` line, so a second assertion negating a
+        // different name is implied by the first and pins nothing (asserting
+        // it anyway was this review's own error, corrected here).
+        let out = _client_stdout(client_bin, _trusted_env(dir
+            + "/does-not-exist.pem"), out_path);
 
-    assert contains(out, "tls-reason:trust-store");
+        assert contains(out, "tls-reason:trust-store");
 
-    // What that single reason-slot check cannot express: that `cert-verify`
-    // was recorded-and-demoted rather than never seen at all. Only the
-    // trace carries that (`_tls_fail_if_unset`'s "(also)" prefix), so this
-    // one assertion stays trace-based rather than reason-based — the
-    // acceptance bar this file holds to is "no trace-based *reason*
-    // lookup", not "no trace coverage at all".
-    let mut traced_env = _trusted_env(dir + "/does-not-exist.pem");
-    traced_env.push("SAILFIN_TRACE_TLS=1");
-    let traced_err = _client_stderr(client_bin, traced_env, out_path);
-    assert contains(traced_err, "(also) cert-verify");
-    assert find(traced_err, "trust-store", 0) < find(traced_err, "(also) cert-verify", 0);
+        // What that single reason-slot check cannot express: that `cert-verify`
+        // was recorded-and-demoted rather than never seen at all. Only the
+        // trace carries that (`_tls_fail_if_unset`'s "(also)" prefix), so this
+        // one assertion stays trace-based rather than reason-based — the
+        // acceptance bar this file holds to is "no trace-based *reason*
+        // lookup", not "no trace coverage at all".
+        let mut traced_env = _trusted_env(dir + "/does-not-exist.pem");
+        traced_env.push("SAILFIN_TRACE_TLS=1");
+        let traced_err = _client_stderr(client_bin, traced_env, out_path);
+        assert contains(traced_err, "(also) cert-verify");
+        assert find(traced_err, "trust-store", 0) < find(traced_err, "(also) cert-verify", 0);
 
-    // The verdict code travels in the demoted line's detail, which renders as
-    // `<reason>: <code>: <message>`. Asserting the code together with the
-    // reason that precedes it pins its position in the render, so dropping or
-    // renaming it fails here rather than passing on a bare substring match.
-    assert contains(traced_err, "(also) cert-verify: no-anchor");
+        // The verdict code travels in the demoted line's detail, which renders as
+        // `<reason>: <code>: <message>`. Asserting the code together with the
+        // reason that precedes it pins its position in the render, so dropping or
+        // renaming it fails here rather than passing on a bare substring match.
+        assert contains(traced_err, "(also) cert-verify: no-anchor");
 
-    // The trace must stay off by default — it goes to stderr on a security
-    // path and discloses the CA-bundle path, so a default-on trace would be
-    // an unasked-for disclosure. Checked on this test's own (un-traced)
-    // scenario since the sibling "untrusted peer" test above no longer
-    // spawns a subprocess to check it against.
-    let quiet = _client_stderr(client_bin, _trusted_env(dir
-        + "/does-not-exist.pem"), out_path);
-    assert ! contains(quiet, "[tls] ");
+        // The trace must stay off by default — it goes to stderr on a security
+        // path and discloses the CA-bundle path, so a default-on trace would be
+        // an unasked-for disclosure. Checked on this test's own (un-traced)
+        // scenario since the sibling "untrusted peer" test above no longer
+        // spawns a subprocess to check it against.
+        let quiet = _client_stderr(client_bin, _trusted_env(dir
+            + "/does-not-exist.pem"), out_path);
+        assert ! contains(quiet, "[tls] ");
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }

@@ -13,7 +13,7 @@
 // the mtime-on-hit test drives a real `sfn build` twice because the
 // touch only fires on a genuine cache hit.
 import { find } from "sfn/strings";
-import { scratch_root, sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, scratch_root, sfn_bin_path } from "sfn/test";
 
 struct Run {
     exit: int,
@@ -30,14 +30,12 @@ fn _cache_base(tag: string) -> string ![io] {
     return base;
 }
 
-// Run `sfn cache <args...>` with the scratch cache root (+ PATH/HOME)
-// threaded to the child, returning the exit code and combined output.
+// Run `sfn cache <args...>` with the scratch cache root threaded to the
+// child, derived by subtraction from the real environment (SFN-1114),
+// returning the exit code and combined output.
 fn _run_cache(cache_base: string, args: string[]) -> Run ![io] {
-    let mut e: string[] = ["SAILFIN_BUILD_CACHE_DIR=" + cache_base];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
+    let mut e = clean_runner_env_without("", ["SAILFIN_BUILD_CACHE_DIR"]);
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_base);
     let mut argv: string[] = [sfn_bin_path(), "cache"];
     let mut i = 0;
     loop {
@@ -69,23 +67,17 @@ fn _seed_big_entry(cache_base: string, prefix: string, key: string) ![io] {
     process.run(["bash", "-c", "head -c 200000 /dev/zero > '" + dir + "/mod.o'"]);
 }
 
-// Build `src` to `out` with the scratch cache root and the full child
-// env a nested compile needs (PATH for clang/linker, HOME/TMPDIR).
-// `work` is a *distinct* per-build scratch dir threaded as
+// Build `src` to `out` with the scratch cache root and the full child env
+// a nested compile needs, derived by subtraction from the real environment
+// (SFN-1114). `work` is a *distinct* per-build scratch dir threaded as
 // SAILFIN_TEST_SCRATCH: it isolates the driver's non-content-addressed
 // build scratch per invocation, and — critically for the mtime-on-hit
 // test — forces a warm build to restore module artifacts from the
 // content-addressed cache (rather than reusing already-staged `.ll`s in
 // a shared work-dir), which is the path that refreshes entry mtime.
 fn _build(cache_base: string, work: string, src: string, out: string) -> Run ![io] {
-    let mut e: string[] = ["SAILFIN_BUILD_CACHE_DIR=" + cache_base];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    e.push("SAILFIN_TEST_SCRATCH=" + work);
+    let mut e = clean_runner_env_without(work, ["SAILFIN_BUILD_CACHE_DIR"]);
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_base);
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", out, src], e);
     let so = process.capture_take_stdout();
     let se = process.capture_take_stderr();

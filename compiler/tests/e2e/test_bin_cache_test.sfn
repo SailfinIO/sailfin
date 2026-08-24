@@ -40,23 +40,14 @@
 // cache contract. The four legs below fully cover the hit/miss/store/bust
 // behavior.
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, sfn_bin_path } from "sfn/test";
 
-// Child env for the nested `sfn test`: PATH (clang/linker for any lower),
-// HOME, TMPDIR, the inherited SAILFIN_TEST_SCRATCH, plus the dedicated
-// per-invocation shared cache root. The runtime root is resolved relative
-// to the runner's cwd (repo root), so no --runtime-root is threaded.
-// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak (isolation is via the fresh per-invocation SAILFIN_BUILD_CACHE_DIR).
+// Derived by subtraction, not assembled key by key (SFN-1114). The runtime
+// root is resolved relative to the runner's cwd (repo root), so no
+// --runtime-root is threaded. SAILFIN_BUILD_CACHE_DIR is named in the strip
+// list so an inherited outer value cannot shadow the per-invocation push.
 fn _suite_env(cache_dir: string) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_BUILD_CACHE_DIR"]);
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
     return e;
 }

@@ -37,30 +37,25 @@
 // predicates — the `sfn/test` `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test (#842).
 import { contains } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env_without,
+    sfn_bin_path,
+    skip,
+    symbol_reader
+} from "sfn/test";
 
 import { build_target_triple, target_artifact_tag } from "../../src/build/target";
 
-// The build spawns a nested clang + linker, so the child needs PATH (an
-// empty `run_capture` env is the *empty* environment, not "inherit").
-// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
-// under the parallel pool. Each test threads its OWN dedicated
-// SAILFIN_BUILD_CACHE_DIR (`cache_dir`) so the shared content-addressed
-// runtime-object cache is genuinely cold per test: a warm shared cache
-// would serve the marker `.o` from a prior run and SKIP re-emitting its
-// staged `.ll`, breaking the positive test's `.ll`-exists assertion (the
-// bash original got a fresh `mktemp` workspace each run). `extra` appends
-// per-test env (the disable gate).
+// Derived by subtraction (SFN-1114), not assembled key by key. Each test
+// threads its OWN dedicated SAILFIN_BUILD_CACHE_DIR (`cache_dir`) so the
+// shared content-addressed runtime-object cache is genuinely cold per test: a
+// warm shared cache would serve the marker `.o` from a prior run and SKIP
+// re-emitting its staged `.ll`, breaking the positive test's `.ll`-exists
+// assertion. `extra` appends per-test env (the disable gate). Both pushed
+// keys are named in the strip list so an inherited outer value cannot shadow
+// them (`env.get` resolves the first match).
 fn _child_env_with(cache_dir: string, extra: string[]) -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_BUILD_CACHE_DIR", "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES"]);
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
     let mut i = 0;
     loop {
@@ -211,9 +206,18 @@ fn _clock_ll(build_dir: string) -> string ![io] {
 
 // nm <binary> | grep ' [Tt] _?sym' — true if `sym` is a defined text
 // symbol (optional `_` prefix for macOS Mach-O).
+//
+// `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
+// dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
+// absent on a native Windows host (SFN-1114).
 fn _nm_has_defined(obj: string, sym: string) -> boolean ![io] {
+    let reader = symbol_reader();
+    if reader.length == 0 {
+        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        return false;
+    }
     let no_extra: string[] = [];
-    let exit = process.run_capture(["nm", obj], _child_env_with("", no_extra));
+    let exit = process.run_capture([reader, obj], _child_env_with("", no_extra));
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return false; }

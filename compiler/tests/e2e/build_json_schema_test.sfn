@@ -23,7 +23,7 @@
 // substring checks against the emitted JSON, which is what the schema
 // lock cares about.
 import { contains, find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 // The build spawns a nested clang + linker, so the child needs PATH.
 //
@@ -33,14 +33,8 @@ import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 // per-test-fresh for the cold/warm distinction: a shared scratch keeps
 // the runtime objects warm, so a "cold" build would report 24 hits.
 fn _child_env(cache_dir: string, scratch: string) -> string[] ![io] {
-    let mut e: string[] = ["SAILFIN_BUILD_CACHE_DIR=" + cache_dir, "SAILFIN_TEST_SCRATCH="
-        + scratch];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let mut e = clean_runner_env_without(scratch, ["SAILFIN_BUILD_CACHE_DIR"]);
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
     return e;
 }
 

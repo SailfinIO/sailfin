@@ -20,7 +20,7 @@
 // `.claude/rules/no-bash-e2e.md`, so the wall-clock timing leg is
 // OMITTED. Instead we assert the post-#693 retry-loop shape survives in
 // the emitted `sfn_sleep` body: a `nanosleep` declare/call, the
-// errno-read after a non-zero return (`@__errno_location()`, which the
+// errno-read after a non-zero return (whichever host accessor the
 // errno-locator trampoline lowers to), and the EINTR re-check against
 // `@global.EINTR` — the structural fingerprint a regression that
 // reverts to a single, errno-unaware `nanosleep` call would erase.
@@ -137,11 +137,20 @@ test "sleep emit: EINTR-resume loop reads errno after a non-zero return (#693)" 
     assert ir != "EMIT_FAILED";
     // The bounded retry loop re-checks errno on a non-zero nanosleep
     // return and resumes only on EINTR. The errno-location locator
-    // trampoline (#887) lowers to the host libc errno accessor —
-    // @__errno_location() on Linux/glibc, @__error() on Darwin/macOS — so
-    // accept either; a single, errno-unaware nanosleep body would never
-    // read errno at all.
-    assert _calls(ir, "__errno_location") || _calls(ir, "__error");
+    // trampoline (#887) lowers to the host libc errno accessor, and WHICH
+    // accessor is a property of the host, not of this loop: @__errno_location
+    // on Linux/glibc, @__error on Darwin/macOS, @_errno on Windows. The
+    // assertion is "errno is read at all" — a single, errno-unaware nanosleep
+    // body would name none of the three.
+    //
+    // The Windows arm is not decoration. This listed only the two POSIX
+    // accessors and passed on a native Windows host for the wrong reason:
+    // `build_host_os()` had `SystemRoot` as its only Windows evidence, and the
+    // emit child's curated env does not carry it, so the probe answered "Linux"
+    // ON WINDOWS. Fixing that (SFN-1114) turned this red, correctly — the
+    // emitter had started naming the right accessor and the test did not know
+    // it existed.
+    assert _calls(ir, "__errno_location") || _calls(ir, "__error") || _calls(ir, "_errno");
     // The re-check compares the read errno against the EINTR sentinel.
     assert contains(ir, "@global.EINTR");
 }

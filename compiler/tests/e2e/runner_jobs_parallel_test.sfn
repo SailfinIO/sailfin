@@ -20,26 +20,15 @@
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
 import { contains, find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
-// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak (the outer SAILFIN_TEST_SCRATCH is threaded through deliberately).
+// env-safe (SFN-1114): derived by subtraction from the real environment
+// (the outer SAILFIN_TEST_SCRATCH is threaded through deliberately). No
+// override pushes needed — SAILFIN_BUILD_CACHE_DIR/SAILFIN_NO_CACHE were only
+// ever forwarded at their inherited value, which clean_runner_env already
+// passes through.
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    let build_cache = env.get("SAILFIN_BUILD_CACHE_DIR");
-    if build_cache.length > 0 {
-        e.push("SAILFIN_BUILD_CACHE_DIR=" + build_cache);
-    }
-    let no_cache = env.get("SAILFIN_NO_CACHE");
-    if no_cache.length > 0 { e.push("SAILFIN_NO_CACHE=" + no_cache); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Create a scratch directory with four passing test files (6 tests total).

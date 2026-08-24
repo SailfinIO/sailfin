@@ -13,24 +13,13 @@
 //   2. exec of a nonexistent path: the image is NOT replaced, so
 //      `process.exec` returns and the fixture's fallback path runs.
 import { find } from "sfn/strings";
-import { scratch_root, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, scratch_root, sfn_bin_path } from "sfn/test";
 
-// Child env for the nested `sfn build`: `run_capture`'s empty env is the
-// EMPTY environment (not "inherit"), so a build-spawning test must thread
-// PATH (the nested build runs clang + its linker), HOME, TMPDIR, and
-// SAILFIN_TEST_SCRATCH (per-invocation build-cache isolation under the
-// parallel pool). Per `.claude/rules/no-bash-e2e.md`.
+// Child env for the nested `sfn build` and the built binary: derived by
+// subtraction from the real environment rather than a hand-rolled allowlist
+// (SFN-1114).
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Build `src` to `binpath` with the compiler-under-test; returns the build

@@ -39,24 +39,16 @@
 // they cannot be called from an `![io]` test. Assert on the captured
 // stderr with `sfn/strings` predicates instead. (#842.)
 import { contains } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, default_scratch_dir, sfn_bin_path } from "sfn/test";
 
-// `run_capture`'s empty array is the *empty* environment; thread the
-// variables the toolchain needs. PATH is kept so a bare `SAILFIN_BIN`
-// name still resolves (the default `build/bin/sfn` is cwd-relative and
-// needs none). Per-case SAILFIN_* trace/limit vars are appended by the
-// caller.
+// Base env derived by subtraction via `clean_runner_env_without` (SFN-1114).
+// SAILFIN_MEM_LIMIT / SAILFIN_TRACE_MEM_LIMIT are named in the strip list
+// because every caller of `_child_env` appends its own value for both
+// (`_run_direct` / `_run_under_cap` below) — an outer value for either
+// would otherwise shadow that push via a duplicate env key (first-match
+// `getenv`), asserting on the wrong trace token.
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_MEM_LIMIT", "SAILFIN_TRACE_MEM_LIMIT"]);
 }
 
 fn _scratch_dir() -> string ![io] {
