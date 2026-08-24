@@ -137,8 +137,14 @@ jobs:
                 source=true
                 reason="workspace member or manifest input changed: $path"
               fi
+              # `.claude/hooks/*` is here because the session-start hook owns
+              # seed installation and has e2e coverage under compiler/tests
+              # (SFN-1118). Without it a hook-only edit scoped CI to nothing,
+              # so the test written to guard that file never ran against a
+              # change to it. Scoped to `hooks` deliberately: agent and skill
+              # prompts elsewhere under `.claude/` do not warrant the matrix.
               case "$path" in
-                compiler/tests/*|scripts/*|Makefile|.github/release-signing/toolchain-index-state.json|.github/workflows/ci.yml|.github/workflows/release-tag.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
+                compiler/tests/*|scripts/*|Makefile|.claude/hooks/*|.github/release-signing/toolchain-index-state.json|.github/workflows/ci.yml|.github/workflows/release-tag.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
                   source=true
                   reason="compiler/runtime/build-system path changed: $path"
                   ;;
