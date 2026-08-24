@@ -61,7 +61,8 @@ import {
     host_is_windows,
     nested_runner_scratch,
     sfn_bin_path,
-    skip
+    skip,
+    symbol_reader
 } from "sfn/test";
 
 // In-tree fixture root (CWD-relative = repo root).
@@ -216,7 +217,12 @@ fn _symbol_defined(syms: string, mangled: string) -> boolean {
 // dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
 // absent on a native Windows host (SFN-1114).
 fn _dump_symbols(binary: string, child_env: string[]) -> string ![io] {
-    let exit = process.run_capture(["llvm-nm", binary], child_env);
+    let reader = symbol_reader();
+    if reader.length == 0 {
+        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        return "";
+    }
+    let exit = process.run_capture([reader, binary], child_env);
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }

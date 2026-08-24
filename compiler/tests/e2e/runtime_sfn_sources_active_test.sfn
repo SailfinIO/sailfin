@@ -26,7 +26,7 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { clean_runner_env, skip } from "sfn/test";
+import { clean_runner_env, skip, symbol_reader } from "sfn/test";
 
 // The child env is derived by subtraction from the real environment, not
 // assembled key by key (SFN-1114).
@@ -78,7 +78,12 @@ fn _runtime_object(module: string) -> string ![io] {
 // dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
 // absent on a native Windows host (SFN-1114).
 fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
-    let exit = process.run_capture(["llvm-nm", binary], _child_env());
+    let reader = symbol_reader();
+    if reader.length == 0 {
+        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        return false;
+    }
+    let exit = process.run_capture([reader, binary], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return false; }
@@ -100,7 +105,12 @@ fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
 // matches at least one symbol in the compiler binary (substring, any kind).
 // `llvm-nm` rather than `nm` (SFN-1114) — see `_nm_has_defined` above.
 fn _nm_references(binary: string, sym: string) -> boolean ![io] {
-    let exit = process.run_capture(["llvm-nm", binary], _child_env());
+    let reader = symbol_reader();
+    if reader.length == 0 {
+        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        return false;
+    }
+    let exit = process.run_capture([reader, binary], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return false; }

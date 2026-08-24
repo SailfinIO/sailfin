@@ -37,7 +37,12 @@
 // predicates — the `sfn/test` `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test (#842).
 import { contains } from "sfn/strings";
-import { clean_runner_env_without, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env_without,
+    sfn_bin_path,
+    skip,
+    symbol_reader
+} from "sfn/test";
 
 import { build_target_triple, target_artifact_tag } from "../../src/build/target";
 
@@ -206,8 +211,13 @@ fn _clock_ll(build_dir: string) -> string ![io] {
 // dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
 // absent on a native Windows host (SFN-1114).
 fn _nm_has_defined(obj: string, sym: string) -> boolean ![io] {
+    let reader = symbol_reader();
+    if reader.length == 0 {
+        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        return false;
+    }
     let no_extra: string[] = [];
-    let exit = process.run_capture(["llvm-nm", obj], _child_env_with("", no_extra));
+    let exit = process.run_capture([reader, obj], _child_env_with("", no_extra));
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return false; }

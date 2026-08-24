@@ -20,7 +20,12 @@ import {
     find,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path, skip } from "sfn/test";
+import {
+    default_scratch_dir,
+    sfn_bin_path,
+    skip,
+    symbol_reader
+} from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -189,10 +194,11 @@ test "compiler binary exports sfn_str_concat and sfn_str_append as text symbols"
     if obj.length == 0 {
         skip("build/sailfin/sfn__runtime-native__string.sfn-*.o not found — tree not built yet (SFN-1114)");
     }
-    // `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
-    // dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
-    // absent on a native Windows host (SFN-1114).
-    let exit = process.run_capture(["llvm-nm", obj], _env());
+    let reader = symbol_reader();
+    if reader.length == 0 {
+        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) -- cannot assert symbol presence (SFN-1114)");
+    }
+    let exit = process.run_capture([reader, obj], _env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;

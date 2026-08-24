@@ -99,3 +99,18 @@ fn first_present_tool(candidates: string[]) -> string ![io] {
     }
     return "";
 }
+
+// The host's symbol reader, probed rather than hardcoded (SFN-1114).
+//
+// Neither name is portable. `nm` is absent on a native Windows host, and
+// `llvm-nm` is absent on Ubuntu, whose `llvm-18` package ships only
+// versioned names (`llvm-nm-18`) -- the same packaging constraint
+// `.github/workflows/ci.yml` records for `lld`. Preference order puts the
+// LLVM reader first because it reads ELF, Mach-O and COFF uniformly, then
+// falls back to binutils `nm`, then to the Ubuntu versioned name.
+//
+// Returns "" when none resolve; callers `skip(...)` on that rather than
+// failing, matching every other `tool_probe` consumer.
+fn symbol_reader() -> string ![io] {
+    return first_present_tool(["llvm-nm", "nm", "llvm-nm-18"]);
+}

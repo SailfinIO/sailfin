@@ -456,7 +456,10 @@ export { report_child_failure } from "./child_diag";
 // handle. The probe deliberately uses the runtime builtin, whose documented
 // spawn-failure codes are what make it a faithful `command -v`. See
 // `tool_probe.sfn`.
-export { first_present_tool, tool_present } from "./tool_probe";
+//
+// `symbol_reader()` is the `first_present_tool` instantiation for the host's
+// symbol reader (`llvm-nm` / `nm` / `llvm-nm-18`, SFN-1114).
+export { first_present_tool, symbol_reader, tool_present } from "./tool_probe";
 
 // ---------------------------------------------------------------------------
 // Optional external C test oracle (SFN-1107)
