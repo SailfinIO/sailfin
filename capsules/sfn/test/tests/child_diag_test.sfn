@@ -1,4 +1,5 @@
-// Tests for `report_child_failure` (SFN-87 / #1726).
+// Tests for `report_child_failure` / `report_child_failure_pending`
+// (SFN-87 / #1726, clipping + drain form: SFN-1115).
 //
 // `report_child_failure(tag, exit, out, err)` prints a failed child's
 // captured output to stderr and is a no-op on `exit == 0`. It has no
@@ -7,9 +8,9 @@
 // and inspecting the child's captured stderr — the same subprocess
 // pattern `compile_assert_test.sfn` uses to exercise `![io]` helpers that
 // only print.
-import { find } from "sfn/strings";
+import { find, repeat, replace } from "sfn/strings";
 
-import { report_child_failure, sfn_bin_path } from "../src/mod";
+import { report_child_failure, report_child_failure_pending, sfn_bin_path } from "../src/mod";
 
 // Falls back to the test runner's own default scratch root
 // (`_test_scratch_root` in `cli/commands/test/cache_scratch.sfn`) rather
@@ -33,12 +34,24 @@ struct ProbeResult {
     err: string
 }
 
-// Run `body` as a standalone program's `main`, importing `report_child_failure`
-// from the capsule under test, and return its exit code and captured streams.
+// Escapes `text` for embedding inside a double-quoted string literal in
+// generated fixture source. Load-bearing on a native Windows host: `sfn_bin_path()`
+// returns a `\`-separated absolute path, and splicing it into a fixture's source
+// unescaped drops every backslash at parse time — a self-inflicted version of the
+// SFN-1128 defect this capsule's `-1` hint (SFN-1115 §5.1b) exists to name.
+fn _sfn_escape(text: string) -> string {
+    let backslash_escaped = replace(text, "\\", "\\\\");
+    return replace(backslash_escaped, "\"", "\\\"");
+}
+
+// Run `body` as a standalone program's `main`, importing both helpers under
+// test plus `repeat` (for the clipping fixture's oversized stream), and
+// return its exit code and captured streams. Unused imports are not
+// diagnosed, so a probe body that needs only one of these is unaffected.
 fn _run_probe(tag: string, body: string) -> ProbeResult ![io] {
     let dir = _scratch_dir();
     let src = dir + "/sfn-child-diag-" + tag + ".sfn";
-    let source = "import { report_child_failure } from \"sfn/test\";\n\nfn main() ![io] {\n"
+    let source = "import { report_child_failure, report_child_failure_pending } from \"sfn/test\";\nimport { repeat } from \"sfn/strings\";\n\nfn main() ![io] {\n"
         + body
         + "\n}\n";
     fs.writeFile(src, source);
@@ -77,4 +90,80 @@ test "report_child_failure: non-zero exit surfaces tag and both streams" ![io] {
     assert find(result.err, "probe-tag", 0) >= 0;
     assert find(result.err, "child-stdout-marker", 0) >= 0;
     assert find(result.err, "child-stderr-marker", 0) >= 0;
+}
+
+// The default budget is 8192 bytes/stream, so a >8 KiB stdout with distinct
+// head/mid/tail markers proves both ends survive clipping while the middle
+// (well outside either half) is elided — pinning `_clip_stream`'s "keep
+// head AND tail" shape (SFN-1115 §5.1a), not just "keep the first N bytes".
+test "report_child_failure: clips an oversized stream and states the elision" ![io] {
+    let body = "let big = \"HEAD-MARKER\" + repeat(\"X\", 9000) + \"MID-MARKER-AT-CENTER\" + repeat(\"Y\", 9000) + \"TAIL-MARKER\";\n"
+        + "report_child_failure(\"clip-probe\", 7, big, \"\");";
+    let result = _run_probe("clip", body);
+    if result.exit != 0 {
+        report_child_failure("child-diag clip probe", result.exit, result.out, result.err);
+    }
+    assert result.exit == 0;
+    assert find(result.err, "HEAD-MARKER", 0) >= 0;
+    assert find(result.err, "TAIL-MARKER", 0) >= 0;
+    assert find(result.err, "bytes elided", 0) >= 0;
+    assert find(result.err, "MID-MARKER-AT-CENTER", 0) < 0;
+}
+
+// `_run_capture_impl` / `_pw_run_capture_impl` return exit == -1, with both
+// streams empty, for a spawn/reap failure — the child never ran. Without the
+// SFN-1115 §5.1b hint, that diagnostic teaches the reader nothing (SFN-1128
+// took manual probing to find). Assert the hint appears for -1 and does not
+// leak onto an ordinary non-zero exit.
+test "report_child_failure: exit -1 names spawn failure, not child failure" ![io] {
+    let spawn_result = _run_probe("negone", "report_child_failure(\"negone-probe\", -1, \"\", \"\");");
+    if spawn_result.exit != 0 {
+        report_child_failure("child-diag negone probe", spawn_result.exit, spawn_result.out, spawn_result.err);
+    }
+    assert spawn_result.exit == 0;
+    assert find(spawn_result.err, "could not spawn or reap the child", 0) >= 0;
+
+    let ordinary_result = _run_probe("ordinary-fail", "report_child_failure(\"ordinary-probe\", 7, \"\", \"\");");
+    if ordinary_result.exit != 0 {
+        report_child_failure("child-diag ordinary-fail probe", ordinary_result.exit, ordinary_result.out, ordinary_result.err);
+    }
+    assert ordinary_result.exit == 0;
+    assert find(ordinary_result.err, "could not spawn or reap the child", 0) < 0;
+}
+
+// Pins behavioural equivalence with the two `let _o = process.capture_take_stdout();
+// let _e = process.capture_take_stderr();` lines `report_child_failure_pending`
+// replaces (SFN-1115 §5.1c): it must drain both streams even when the exit it is
+// told about is 0, so a caller after it never observes stale captured output.
+test "report_child_failure_pending: drains both streams on success" ![io] {
+    let body = "let exit = process.run_capture([\"" + _sfn_escape(sfn_bin_path())
+        + "\", \"--version\"], process.environ());\n"
+        + "report_child_failure_pending(\"drain-probe\", exit);\n"
+        + "let remaining_out = process.capture_take_stdout();\n"
+        + "let remaining_err = process.capture_take_stderr();\n"
+        + "assert exit == 0;\n"
+        + "assert remaining_out.length == 0;\n"
+        + "assert remaining_err.length == 0;";
+    let result = _run_probe("drain", body);
+    if result.exit != 0 {
+        report_child_failure("child-diag drain probe", result.exit, result.out, result.err);
+    }
+    assert result.exit == 0;
+}
+
+// A non-zero exit from the wrapped child must still surface both streams
+// through the draining form, exactly as it does through the borrowing form.
+test "report_child_failure_pending: surfaces both streams on a non-zero exit" ![io] {
+    let body = "let exit = process.run_capture([\"" + _sfn_escape(sfn_bin_path())
+        + "\", \"not-a-real-command\"], process.environ());\n"
+        + "report_child_failure_pending(\"pending-nonzero-probe\", exit);\n"
+        + "assert exit != 0;";
+    let result = _run_probe("pending-nonzero", body);
+    if result.exit != 0 {
+        report_child_failure("child-diag pending-nonzero probe", result.exit, result.out, result.err);
+    }
+    assert result.exit == 0;
+    assert find(result.err, "pending-nonzero-probe", 0) >= 0;
+    assert find(result.err, "stdout:", 0) >= 0;
+    assert find(result.err, "stderr:", 0) >= 0;
 }
