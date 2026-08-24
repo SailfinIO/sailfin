@@ -166,6 +166,18 @@ fn _run_emit(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         print("file not found: " + path);
         return 1;
     }
+    // Same input-path fail-open the build driver carries (SFN-1115), but with
+    // a worse failure mode: `fs.exists` is true for a directory and
+    // `fs.readFile` on one returns an empty string, and because `emit` has no
+    // link stage to trip over the missing `main`, a directory argument
+    // WROTE AN EMPTY `.ll` AND EXITED 0. A silent success hands a consuming
+    // script a bogus artifact with nothing to notice; refusing is the only
+    // answer that cannot be mistaken for a real emit.
+    if fs.is_directory(path) {
+        print("not a source file: " + path + " is a directory");
+        print("note: pass a `.sfn` file");
+        return 1;
+    }
     // #1370: a user-facing `emit llvm` (no `--module-name` /
     // `--import-context`, i.e. NOT a build-internal worker emit) stages the
     // consumer capsule's dependencies into the import-context tree first,

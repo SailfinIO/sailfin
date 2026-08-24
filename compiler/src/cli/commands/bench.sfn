@@ -114,6 +114,20 @@ fn _bench_child_env() -> string[] ![io] {
     if home.length > 0 { e.push("HOME=" + home); }
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    // Carried for the reason `bench_consumer.sfn::_bc_child_env` documents in
+    // full: without `ProgramData` a curated child env gives clang no MSVC
+    // toolchain on Windows. Inert for this helper's own callers, whose emit
+    // children pass `--no-validate` (`build/emit_child_argv.sfn`) and so
+    // never invoke clang.
+    //
+    // It is not inert for the file: `_bench_rt_one` runs a full linking
+    // `sfn build`, and that works today only because its caller hands it
+    // `process.environ()` rather than this curated array. Tightening that
+    // call site to `_bench_child_env()` on hygiene grounds is exactly the
+    // plausible future edit that would reintroduce the failure, and this
+    // push is what makes that edit safe (SFN-1115).
+    let program_data = env.get("ProgramData");
+    if program_data.length > 0 { e.push("ProgramData=" + program_data); }
     return e;
 }
 
