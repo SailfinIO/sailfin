@@ -24,12 +24,18 @@
 //      lives in `serve_request_leak_test.sfn`).
 //
 // Mirrors `serve_loopback_test.sfn` for the spawn/reap/readiness machinery
-// (blocking `serve()` wrapped in `timeout` so it self-reaps; raw libc socket
+// (blocking `serve()` scoped under `with_background`; raw libc socket
 // client inlined with a `_kp_` prefix). Matchers note (#842): `sfn/test`'s
 // `expect_*` are `![pure]` and cannot be called from an `![io]` test; assert
 // on captured text with `sfn/strings`.
+import { Env, env_from_current } from "sfn/os";
 import { contains, find } from "sfn/strings";
-import { first_present_tool, sfn_bin_path } from "sfn/test";
+import {
+    Background,
+    sfn_bin_path,
+    wait_until,
+    with_background
+} from "sfn/test";
 
 // ── libc memory + socket surface (test-local raw client) ──
 extern fn malloc(size: usize) -> *u8;
@@ -58,9 +64,15 @@ extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+// `sfn_socket_send`/`sfn_socket_recv`, not the raw libc `send`/`recv` — on
+// Windows `recv`/`send` return a 32-bit `int`, so an `-> i64` extern (needed
+// to match the buffer-length parameter) sign-extends a `-1` failure return
+// into `4294967295`, silently defeating every `if n < 0` guard (SFN-927).
+// The runtime helpers carry an identical Sailfin signature on both
+// platforms and do the width conversion internally.
+extern fn sfn_socket_send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+extern fn sfn_socket_recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 // `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
 // Winsock SOCKET is not an error return but a process-killing
@@ -82,9 +94,8 @@ fn _kp_port_str() -> string { return "18792"; }
 // `serve_loopback_test.sfn::_child_env`.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
-}
+// The same environment in `sfn/os`'s typed form, for `with_background`.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──
 fn _kp_ptr_off(p: *u8, off: i64) -> *u8 {
@@ -127,7 +138,7 @@ fn _kp_send_all(fd: i32, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
-        let n: i64 = send(fd, _kp_ptr_off(buf, sent), total - sent, 0);
+        let n: i64 = sfn_socket_send(fd, _kp_ptr_off(buf, sent), total - sent, 0);
         if n <= 0 { return false; }
         sent = sent + n;
     }
@@ -190,7 +201,7 @@ fn _kp_recv_one(fd: i32) -> string {
             buf = nb;
             capacity = new_cap;
         }
-        let n: i64 = recv(fd, _kp_ptr_off(buf, len), 4096, 0);
+        let n: i64 = sfn_socket_recv(fd, _kp_ptr_off(buf, len), 4096, 0);
         if n < 0 {
             free(buf);
             return "";
@@ -241,7 +252,7 @@ fn _kp_recv_all(fd: i32) -> string {
             buf = nb;
             capacity = new_cap;
         }
-        let n: i64 = recv(fd, _kp_ptr_off(buf, len), 4096, 0);
+        let n: i64 = sfn_socket_recv(fd, _kp_ptr_off(buf, len), 4096, 0);
         if n < 0 {
             free(buf);
             return "";
@@ -385,138 +396,134 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
     return bin;
 }
 
-fn _spawn_server(bin: string) -> i64 ![io] {
-    let tcmd = _timeout_cmd();
-    let mut argv: string[] = [];
-    if tcmd.length > 0 {
-        argv.push(tcmd);
-        argv.push("60");
-    }
-    argv.push(bin);
-    return process.spawn_with_env(argv, _child_env());
-}
-
 // Poll `GET /probe` until the prebuilt server answers. `Connection: close`
-// here so the probe read completes via the framed read either way.
-fn _await_ready(port: i64) -> string ![io, net] {
+// here so the probe read completes via the framed read either way. 45s
+// wall-clock budget. `port` is a typed parameter (not an untyped call-
+// initialized `let`), so capturing it in the probe closure below is
+// unaffected by SFN-843.
+fn _await_ready(port: i64) -> string ![clock, io, net] {
     let probe = "GET /probe HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 90 { break; }
+    let mut last_resp: string = "";
+    let _ready = wait_until(fn () -> boolean {
         let resp = _kp_send_recv_one(port, probe);
-        if resp.length > 0 {
-            if contains(resp, "READY") { return resp; }
+        if resp.length > 0 && contains(resp, "READY") {
+            last_resp = resp;
+            return true;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return "";
+        return false;
+    }, 45000, 500);
+    return last_resp;
 }
 
-test "serve keep-alive: connection reuse (server loop + native client) (#1711)" ![io, net] {
-    // Teardown of the blocking server relies on a wall-clock timeout (no
-    // process-kill primitive; `serve()` never returns). Skip cleanly when
-    // neither timeout nor gtimeout is present rather than orphan the fixed
-    // port. CI runners (Linux + coreutils) always have `timeout`.
-    if _timeout_cmd().length == 0 {
-        print.info("[serve-keepalive] SKIP: no timeout/gtimeout to reap the blocking server");
-        return;
-    }
-
-    let port = _kp_port();
+test "serve keep-alive: connection reuse (server loop + native client) (#1711)" ![clock, io, net] {
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let port: i64 = _kp_port();
     let main_path = _write_server(_kp_port_str());
 
-    let server_bin = _build_bin(main_path, _app_root() + "/server-bin");
+    let server_bin: string = _build_bin(main_path, _app_root() + "/server-bin");
     assert server_bin.length > 0;
-    let _handle = _spawn_server(server_bin);
 
-    let probe_resp = _await_ready(port);
-    print.info("[serve-keepalive] probe: " + probe_resp);
-    assert probe_resp.length > 0;
-    assert contains(probe_resp, "HTTP/1.1 200");
-    assert contains(probe_resp, "READY");
+    // `with_background` owns the blocking server's lifetime: it is killed
+    // and reaped on scope exit, including when an assertion below throws —
+    // replacing the previous `timeout <secs>` argv vehicle, which was the
+    // ONLY teardown mechanism and forced a SKIP on any host without
+    // coreutils.
+    let _served = with_background([server_bin], _child_env_typed(), "", "serve-keepalive-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
 
-    // (1) Server keep-alive loop: TWO requests on ONE connection, no
-    // `Connection: close` (HTTP/1.1 default keep-alive). Each response is read
-    // Content-Length-framed (NOT to EOF) so the second request is sent on the
-    // still-open connection. Distinct bodies prove no cross-contamination.
-    let fd = _kp_connect(port);
-    assert fd >= 0;
-    assert _kp_send_all(fd, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
-    let ka1 = _kp_recv_one(fd);
-    print.info("[serve-keepalive] reuse-1: " + ka1);
-    assert contains(ka1, "HTTP/1.1 200");
-    assert contains(ka1, "AAA");
-    assert contains(ka1, "X-Route: a");
-    // The kept-alive response advertises keep-alive (criterion 4: the wire
-    // serializer no longer hard-codes `Connection: close`).
-    assert contains(ka1, "Connection: keep-alive");
+        let probe_resp = _await_ready(port);
+        print.info("[serve-keepalive] probe: " + probe_resp);
+        assert probe_resp.length > 0;
+        assert contains(probe_resp, "HTTP/1.1 200");
+        assert contains(probe_resp, "READY");
 
-    assert _kp_send_all(fd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
-    let ka2 = _kp_recv_one(fd);
-    print.info("[serve-keepalive] reuse-2: " + ka2);
-    assert contains(ka2, "HTTP/1.1 200");
-    assert contains(ka2, "BBB");
-    assert contains(ka2, "X-Route: b");
-    // The second response must NOT leak the first body.
-    assert ! contains(ka2, "AAA");
-    sfn_socket_close(fd);
+        // (1) Server keep-alive loop: TWO requests on ONE connection, no
+        // `Connection: close` (HTTP/1.1 default keep-alive). Each response
+        // is read Content-Length-framed (NOT to EOF) so the second request
+        // is sent on the still-open connection. Distinct bodies prove no
+        // cross-contamination.
+        let fd = _kp_connect(port);
+        assert fd >= 0;
+        assert _kp_send_all(fd, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
+        let ka1 = _kp_recv_one(fd);
+        print.info("[serve-keepalive] reuse-1: " + ka1);
+        assert contains(ka1, "HTTP/1.1 200");
+        assert contains(ka1, "AAA");
+        assert contains(ka1, "X-Route: a");
+        // The kept-alive response advertises keep-alive (criterion 4: the
+        // wire serializer no longer hard-codes `Connection: close`).
+        assert contains(ka1, "Connection: keep-alive");
 
-    // (2) Close regression: a `Connection: close` request gets the close
-    // behavior — the response advertises close and the server closes the
-    // connection (the drain-to-EOF read completes).
-    let cfd = _kp_connect(port);
-    assert cfd >= 0;
-    assert _kp_send_all(cfd, "GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as *u8) as i64);
-    let close_resp = _kp_recv_all(cfd);
-    sfn_socket_close(cfd);
-    print.info("[serve-keepalive] close: " + close_resp);
-    assert contains(close_resp, "HTTP/1.1 200");
-    assert contains(close_resp, "AAA");
-    assert contains(close_resp, "Connection: close");
+        assert _kp_send_all(fd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
+        let ka2 = _kp_recv_one(fd);
+        print.info("[serve-keepalive] reuse-2: " + ka2);
+        assert contains(ka2, "HTTP/1.1 200");
+        assert contains(ka2, "BBB");
+        assert contains(ka2, "X-Route: b");
+        // The second response must NOT leak the first body.
+        assert ! contains(ka2, "AAA");
+        sfn_socket_close(fd);
 
-    // (4) Memory stability proxy: many keep-alive cycles across reused
-    // connections, then a post-storm round-trip proving the long-lived server
-    // survived. Each connection serves two cycles then closes.
-    let mut storm: i64 = 0;
-    loop {
-        if storm >= 40 { break; }
-        let sfd = _kp_connect(port);
-        if sfd >= 0 {
-            let _s1 = _kp_send_all(sfd, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
-            let _r1 = _kp_recv_one(sfd);
-            let _s2 = _kp_send_all(sfd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
-            let _r2 = _kp_recv_one(sfd);
-            sfn_socket_close(sfd);
+        // (2) Close regression: a `Connection: close` request gets the
+        // close behavior — the response advertises close and the server
+        // closes the connection (the drain-to-EOF read completes).
+        let cfd = _kp_connect(port);
+        assert cfd >= 0;
+        assert _kp_send_all(cfd, "GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as *u8) as i64);
+        let close_resp = _kp_recv_all(cfd);
+        sfn_socket_close(cfd);
+        print.info("[serve-keepalive] close: " + close_resp);
+        assert contains(close_resp, "HTTP/1.1 200");
+        assert contains(close_resp, "AAA");
+        assert contains(close_resp, "Connection: close");
+
+        // (4) Memory stability proxy: many keep-alive cycles across reused
+        // connections, then a post-storm round-trip proving the long-lived
+        // server survived. Each connection serves two cycles then closes.
+        let mut storm: i64 = 0;
+        loop {
+            if storm >= 40 { break; }
+            let sfd = _kp_connect(port);
+            if sfd >= 0 {
+                let _s1 = _kp_send_all(sfd, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
+                let _r1 = _kp_recv_one(sfd);
+                let _s2 = _kp_send_all(sfd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
+                let _r2 = _kp_recv_one(sfd);
+                sfn_socket_close(sfd);
+            }
+            storm = storm + 1;
         }
-        storm = storm + 1;
-    }
-    let post_storm = _kp_send_recv_one(port, "GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-    print.info("[serve-keepalive] post-storm: " + post_storm);
-    assert contains(post_storm, "HTTP/1.1 200");
-    assert contains(post_storm, "AAA");
+        let post_storm = _kp_send_recv_one(port, "GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        print.info("[serve-keepalive] post-storm: " + post_storm);
+        assert contains(post_storm, "HTTP/1.1 200");
+        assert contains(post_storm, "AAA");
 
-    // (3) Native client reuse: the `sfn_http_conn_*` primitives issue two
-    // requests on one kept-alive connection and parse two distinct bodies.
-    let client_main = _write_reuse_client(_kp_port_str());
-    let client_bin = _build_bin(client_main, _client_root() + "/client-bin");
-    assert client_bin.length > 0;
-    let cexit = process.run_capture([client_bin], _child_env());
-    let cout = process.capture_take_stdout();
-    let _cerr = process.capture_take_stderr();
-    print.info("[serve-keepalive] reuse-client: " + cout);
-    assert cexit == 0;
-    // R1 carries /a's body, R2 carries /b's — two correct responses on one
-    // reused connection.
-    let r1_at = find(cout, "R1=", 0);
-    let r2_at = find(cout, "R2=", 0);
-    assert r1_at >= 0;
-    assert r2_at >= 0;
-    assert contains(cout, "AAA");
-    assert contains(cout, "BBB");
+        // (3) Native client reuse: the `sfn_http_conn_*` primitives issue
+        // two requests on one kept-alive connection and parse two distinct
+        // bodies.
+        let client_main = _write_reuse_client(_kp_port_str());
+        let client_bin = _build_bin(client_main, _client_root() + "/client-bin");
+        assert client_bin.length > 0;
+        let cexit = process.run_capture([client_bin], _child_env());
+        let cout = process.capture_take_stdout();
+        let _cerr = process.capture_take_stderr();
+        print.info("[serve-keepalive] reuse-client: " + cout);
+        assert cexit == 0;
+        // R1 carries /a's body, R2 carries /b's — two correct responses on
+        // one reused connection.
+        let r1_at = find(cout, "R1=", 0);
+        let r2_at = find(cout, "R2=", 0);
+        assert r1_at >= 0;
+        assert r2_at >= 0;
+        assert contains(cout, "AAA");
+        assert contains(cout, "BBB");
+        return 0;
+    });
 
-    // Best-effort cleanup of the consumer trees (the timeout reaps the
-    // server process).
+    // Best-effort cleanup of the consumer trees. The server itself was
+    // already killed and reaped by `with_background` on scope exit.
     let _rm = process.run(["rm", "-rf", _app_root()]);
     let _rmc = process.run(["rm", "-rf", _client_root()]);
 }

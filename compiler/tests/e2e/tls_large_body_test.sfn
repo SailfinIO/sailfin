@@ -53,12 +53,15 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
+import { Env, env_from_current } from "sfn/os";
 import { contains, find } from "sfn/strings";
 import {
+    Background,
     default_scratch_dir,
-    first_present_tool,
     sfn_bin_path,
-    tool_present
+    tool_present,
+    wait_until,
+    with_background
 } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
@@ -188,6 +191,9 @@ fn _big_helper() -> string {
 // (already present) keeps the build cache per-invocation under the pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
+// The same environment in `sfn/os`'s typed form, for `with_background`.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
+
 // Parent environment with any inherited `SAILFIN_TLS_CAFILE` stripped. A
 // child's `getenv` resolves the FIRST matching entry, so a CAFILE set in the
 // parent shell would otherwise shadow this test's intended cert.
@@ -212,13 +218,6 @@ fn _trusted_env(cert_path: string) -> string[] ![io] {
     let mut e = _env_no_cafile();
     e.push("SAILFIN_TLS_CAFILE=" + cert_path);
     return e;
-}
-
-// Resolve a wall-clock timeout command to reap the blocking server; empty if
-// none found (the caller then skips — a never-returning server would orphan
-// the fixed port).
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 // A per-test scratch dir (under the runner's per-file scratch when present,
@@ -377,31 +376,19 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
     return bin;
 }
 
-// Spawn the prebuilt blocking server wrapped in a wall-clock timeout so it
-// self-reaps (no process-kill primitive; `serve()` never returns).
-fn _spawn_server(tcmd: string, bin: string) -> i64 ![io] {
-    let mut argv: string[] = [];
-    argv.push(tcmd);
-    argv.push("90");
-    argv.push(bin);
-    return process.spawn_with_env(argv, _child_env());
-}
-
-// Poll a raw TCP connect until the prebuilt server is accepting. ~30s budget
-// (60 x ~0.5s) under the 90s server timeout.
-fn _await_listening(port: i64) -> boolean ![io, net] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 60 { break; }
+// Poll a raw TCP connect until the prebuilt server is accepting. 30s
+// wall-clock budget. `port` is a typed parameter (not an untyped call-
+// initialized `let`), so capturing it in the probe closure below is
+// unaffected by SFN-843.
+fn _await_listening(port: i64) -> boolean ![clock, io, net] {
+    return wait_until(fn () -> boolean {
         let fd: i32 = _tlb_connect(port);
         if fd >= 0 {
             sfn_socket_close(fd);
             return true;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return false;
+        return false;
+    }, 30000, 500);
 }
 
 // Run the client once and return the response body it wrote (or "" if it
@@ -431,19 +418,10 @@ fn _client_body_retry(client_bin: string, run_env: string[], out_path: string) -
     return "";
 }
 
-test "tls: a payload larger than one TLS record round-trips in both directions" ![io, net] {
+test "tls: a payload larger than one TLS record round-trips in both directions" ![clock, io, net] {
     // `openssl` generates the self-signed cert; skip cleanly without it.
     if !tool_present("openssl") {
         print.info("[tls-large-body] SKIP: openssl CLI not available");
-        assert true;
-        return;
-    }
-    // Teardown of the blocking server relies on a wall-clock timeout; skip
-    // rather than orphan the fixed port. CI (Linux + coreutils) always has
-    // `timeout`.
-    let tcmd = _timeout_cmd();
-    if tcmd.length == 0 {
-        print.info("[tls-large-body] SKIP: no timeout/gtimeout to reap the blocking server");
         assert true;
         return;
     }
@@ -455,70 +433,84 @@ test "tls: a payload larger than one TLS record round-trips in both directions" 
     // that could reject the peer — and the trusted env supplies it.
     assert _gen_cert(dir, "localhost");
 
-    // Build + spawn the native TLS server, then wait for it to accept.
+    // Build the native TLS server binary up front (synchronous), so the cold
+    // compile is not inside the readiness poll window.
     let srv_main = _write_tls_server(dir, cert, key);
-    let srv_bin = _build_bin(srv_main, dir + "/tlssrv-bin");
+    let srv_bin: string = _build_bin(srv_main, dir + "/tlssrv-bin");
     assert srv_bin.length > 0;
-    let _handle = _spawn_server(tcmd, srv_bin);
-    assert _await_listening(_tls_port());
 
     // Build the native https client fixture.
     let out_path = dir + "/body.out";
     let cli_main = _write_client(dir, "https://localhost:" + _tls_port_str()
         + "/", out_path);
-    let cli_bin = _build_bin(cli_main, dir + "/client-bin");
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let cli_bin: string = _build_bin(cli_main, dir + "/client-bin");
     assert cli_bin.length > 0;
 
-    let body = _client_body_retry(cli_bin, _trusted_env(cert), out_path);
+    // `with_background` owns the blocking server's lifetime: it is killed
+    // and reaped on scope exit, including when an assertion below throws —
+    // replacing the previous `timeout <secs>` argv vehicle, which was the
+    // ONLY teardown mechanism and forced a SKIP on any host without
+    // coreutils.
+    let _served = with_background([srv_bin], _child_env_typed(), "", "tls-large-body-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(_tls_port());
 
-    // A body at all means the oversize request was sent, framed, and
-    // answered — the pre-SFN-984 client failed `_send_all` here and wrote
-    // nothing, surfacing as "could not reach registry".
-    assert body.length > 0;
+        let body = _client_body_retry(cli_bin, _trusted_env(cert), out_path);
 
-    // client → server: the handler emits its marker ONLY when the request it
-    // received cleared `_big_min()`, so this is the proof that every byte of
-    // the oversize POST body arrived rather than being truncated.
-    assert contains(body, _ok_marker());
+        // A body at all means the oversize request was sent, framed, and
+        // answered — the pre-SFN-984 client failed `_send_all` here and
+        // wrote nothing, surfacing as "could not reach registry".
+        assert body.length > 0;
 
-    // server → client: the response itself is oversize, so a full-length body
-    // proves the server fragmented its reply too.
-    assert body.length >= _big_min();
+        // client → server: the handler emits its marker ONLY when the
+        // request it received cleared `_big_min()`, so this is the proof
+        // that every byte of the oversize POST body arrived rather than
+        // being truncated.
+        assert contains(body, _ok_marker());
 
-    // Best-effort cleanup (the timeout reaps the server process).
+        // server → client: the response itself is oversize, so a
+        // full-length body proves the server fragmented its reply too.
+        assert body.length >= _big_min();
+        return 0;
+    });
+
+    // Best-effort cleanup. The server itself was already killed and reaped
+    // by `with_background` on scope exit.
     let _rm = process.run(["rm", "-rf", dir]);
 }
 
-test "tls: the same oversize payload round-trips over plaintext (control)" ![io, net] {
-    // Plaintext needs no `openssl` (no cert), only a timeout to reap the
-    // blocking server. This leg never touched the record layer and passed
-    // before SFN-984, so it keeps a future failure attributable to TLS
-    // rather than to the oversize body itself.
-    let tcmd = _timeout_cmd();
-    if tcmd.length == 0 {
-        print.info("[tls-large-body] SKIP: no timeout/gtimeout to reap the blocking server");
-        assert true;
-        return;
-    }
-
+test "tls: the same oversize payload round-trips over plaintext (control)" ![clock, io, net] {
+    // This leg never touched the record layer and passed before SFN-984, so
+    // it keeps a future failure attributable to TLS rather than to the
+    // oversize body itself.
     let dir = _scratch_dir("sfn-tls-large-body-plain");
 
     let srv_main = _write_plain_server(dir);
-    let srv_bin = _build_bin(srv_main, dir + "/plainsrv-bin");
+    let srv_bin: string = _build_bin(srv_main, dir + "/plainsrv-bin");
     assert srv_bin.length > 0;
-    let _handle = _spawn_server(tcmd, srv_bin);
-    assert _await_listening(_plain_port());
 
     let out_path = dir + "/body.out";
     let cli_main = _write_client(dir, "http://localhost:" + _plain_port_str()
         + "/", out_path);
-    let cli_bin = _build_bin(cli_main, dir + "/client-bin");
+    // SFN-843: typed explicitly — see the TLS test above.
+    let cli_bin: string = _build_bin(cli_main, dir + "/client-bin");
     assert cli_bin.length > 0;
 
-    let body = _client_body_retry(cli_bin, _child_env(), out_path);
-    assert body.length > 0;
-    assert contains(body, _ok_marker());
-    assert body.length >= _big_min();
+    // `with_background` owns the blocking server's lifetime; see the TLS
+    // test above for why this replaced the `timeout <secs>` vehicle.
+    let _served = with_background([srv_bin], _child_env_typed(), "", "tls-large-body-plain-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(_plain_port());
+
+        let body = _client_body_retry(cli_bin, _child_env(), out_path);
+        assert body.length > 0;
+        assert contains(body, _ok_marker());
+        assert body.length >= _big_min();
+        return 0;
+    });
 
     let _rm = process.run(["rm", "-rf", dir]);
 }

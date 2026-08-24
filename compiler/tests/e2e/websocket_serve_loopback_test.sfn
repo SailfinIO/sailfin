@@ -20,8 +20,14 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured bytes with
 // `sfn/strings::contains`/`find` instead.
+import { Env, env_from_current, env_set } from "sfn/os";
 import { contains, find } from "sfn/strings";
-import { first_present_tool, sfn_bin_path } from "sfn/test";
+import {
+    Background,
+    sfn_bin_path,
+    wait_until,
+    with_background
+} from "sfn/test";
 
 // ── libc memory + string + socket surface (test-local raw client) ──
 // Prefixed `_lb_` so the file-local helpers never collide with the
@@ -55,9 +61,15 @@ extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+// `sfn_socket_send`/`sfn_socket_recv`, not the raw libc `send`/`recv` — on
+// Windows `recv`/`send` return a 32-bit `int`, so an `-> i64` extern (needed
+// to match the buffer-length parameter) sign-extends a `-1` failure return
+// into `4294967295`, silently defeating every `if n < 0`/`if n <= 0` guard
+// (SFN-927). The runtime helpers carry an identical Sailfin signature on
+// both platforms and do the width conversion internally.
+extern fn sfn_socket_send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+extern fn sfn_socket_recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 // `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
 // Winsock SOCKET is not an error return but a process-killing
@@ -86,11 +98,8 @@ fn _lb_port2_str() -> string { return "18885"; }
 // pool, `.claude/rules/no-bash-e2e.md`).
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
-// Resolve a wall-clock timeout command, mirroring
-// `serve_loopback_test.sfn::_timeout_cmd`. Empty string => none found.
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
-}
+// The same environment in `sfn/os`'s typed form, for `with_background`.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // ── raw loopback websocket client (test-local, not the #1876 adapter) ──
 fn _lb_ptr_off(p: *u8, off: i64) -> *u8 {
@@ -141,7 +150,7 @@ fn _lb_send_all(fd: i32, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
-        let n: i64 = send(fd, _lb_ptr_off(buf, sent), total - sent, 0);
+        let n: i64 = sfn_socket_send(fd, _lb_ptr_off(buf, sent), total - sent, 0);
         if n <= 0 { return false; }
         sent = sent + n;
     }
@@ -152,7 +161,7 @@ fn _lb_send_all(fd: i32, buf: *u8, total: i64) -> bool {
 // loopback — the same v0 single-recv scope `websocket.sfn::_ws_recv_some`
 // documents). Returns the byte count, or -1 on error.
 fn _lb_recv_some(fd: i32, buf: *u8, cap: i64) -> i64 {
-    return recv(fd, buf, cap, 0);
+    return sfn_socket_recv(fd, buf, cap, 0);
 }
 
 // `_lb_recv_exact(fd, buf, n)` — loop `recv` until exactly `n` bytes land.
@@ -160,7 +169,7 @@ fn _lb_recv_exact(fd: i32, buf: *u8, n: i64) -> bool {
     let mut got: i64 = 0;
     loop {
         if got >= n { break; }
-        let r: i64 = recv(fd, _lb_ptr_off(buf, got), n - got, 0);
+        let r: i64 = sfn_socket_recv(fd, _lb_ptr_off(buf, got), n - got, 0);
         if r <= 0 { return false; }
         got = got + r;
     }
@@ -452,225 +461,196 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
     return bin;
 }
 
-// Spawn the prebuilt blocking server, wrapped in a wall-clock timeout so it
-// self-reaps — there is no process-kill primitive and `websocket.serve`
-// never returns. The test guards on a timeout command being present before
-// calling this, so `tcmd` is always non-empty here.
-fn _spawn_server(bin: string) -> i64 ![io] {
-    let tcmd = _timeout_cmd();
-    let mut argv: string[] = [];
-    if tcmd.length > 0 {
-        argv.push(tcmd);
-        argv.push("60");
-    }
-    argv.push(bin);
-    return process.spawn_with_env(argv, _child_env());
+// Child env with the scheduler pool pinned to two workers, typed for
+// `with_background`. The concurrency test is the first test whose PASS
+// depends on the server's pool being >= 2 threads; the runtime auto-floors
+// auto-detection at two (`scheduler.sfn::sfn_scheduler_resolve_thread_count`),
+// but an inherited `SAILFIN_THREADS=1` bypasses that floor. `env_set`
+// replaces an existing entry by name (last write wins) rather than
+// appending a duplicate `getenv` would resolve to the first, stale one.
+fn _pool_env_typed() -> Env ![io] {
+    return env_set(_child_env_typed(), "SAILFIN_THREADS", "2");
 }
 
-// Child env with the scheduler pool pinned to two workers. The
-// concurrency test is the first test whose PASS depends on the server's
-// pool being >= 2 threads; the runtime auto-floors auto-detection at two
-// (`scheduler.sfn::sfn_scheduler_resolve_thread_count`), but an inherited
-// `SAILFIN_THREADS=1` bypasses that floor. `getenv` returns the first
-// match, so we must DROP any inherited `SAILFIN_THREADS=` before appending
-// our pin rather than just append a second entry.
-fn _pool_env() -> string[] ![io] {
-    let base = process.environ();
-    let mut e: string[] = [];
-    let mut i = 0;
-    loop {
-        if i >= base.length { break; }
-        let entry = base[i];
-        if find(entry, "SAILFIN_THREADS=", 0) != 0 { e.push(entry); }
-        i = i + 1;
-    }
-    e.push("SAILFIN_THREADS=2");
-    return e;
-}
-
-// Spawn the concurrent-test server with the pool pinned (`_pool_env`) so
-// the two-client guarantee never hinges on an inherited thread count.
-fn _spawn_server_pooled(bin: string) -> i64 ![io] {
-    let tcmd = _timeout_cmd();
-    let mut argv: string[] = [];
-    if tcmd.length > 0 {
-        argv.push(tcmd);
-        argv.push("60");
-    }
-    argv.push(bin);
-    return process.spawn_with_env(argv, _pool_env());
-}
-
-// Poll the handshake until the prebuilt server answers with a `101`.
-// ~45s budget (90 attempts x ~0.5s) stays under the 60s server timeout.
-fn _await_ready(port: i64) -> string ![io, net] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 90 { break; }
+// Poll the handshake until the prebuilt server answers with a `101`. 45s
+// wall-clock budget. `port` is a typed parameter (not an untyped call-
+// initialized `let`), so capturing it in the probe closure below is
+// unaffected by SFN-843.
+fn _await_ready(port: i64) -> string ![clock, io, net] {
+    let mut last_resp: string = "";
+    let _ready = wait_until(fn () -> boolean {
         let resp = _lb_handshake(port);
-        if resp.length > 0 {
-            if contains(resp, "101") { return resp; }
+        if resp.length > 0 && contains(resp, "101") {
+            last_resp = resp;
+            return true;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return "";
+        return false;
+    }, 45000, 500);
+    return last_resp;
 }
 
-test "websocket.serve loopback: handshake + echo + close round-trip" ![io, net] {
-    // Teardown of the blocking server relies on a wall-clock timeout (no
-    // process-kill primitive; `websocket.serve` never returns). Without
-    // `timeout`/`gtimeout`, spawning the server would orphan the fixed port
-    // and poison subsequent runs — skip cleanly instead.
-    if _timeout_cmd().length == 0 {
-        print.info("[websocket-serve-loopback] SKIP: no timeout/gtimeout to reap the blocking server");
-        return;
-    }
-
-    let port = _lb_port();
+test "websocket.serve loopback: handshake + echo + close round-trip" ![clock, io, net] {
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let port: i64 = _lb_port();
     let main_path = _write_server(_lb_port_str());
 
-    let server_bin = _build_bin(main_path, _app_root() + "/server-bin");
+    let server_bin: string = _build_bin(main_path, _app_root() + "/server-bin");
     assert server_bin.length > 0;
-    let _handle = _spawn_server(server_bin);
 
-    // Readiness + handshake correctness: the fixed RFC 6455 example key
-    // `dGhlIHNhbXBsZSBub25jZQ==` must produce the canonical accept value
-    // `s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`, isolating handshake bugs (`_ws_sec_accept`)
-    // from framing bugs below.
-    let handshake_resp = _await_ready(port);
-    print.info("[websocket-serve-loopback] handshake: " + handshake_resp);
-    assert handshake_resp.length > 0;
-    assert contains(handshake_resp, "101");
-    assert contains(handshake_resp, "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+    // `with_background` owns the blocking server's lifetime: it is killed
+    // and reaped on scope exit, including when an assertion below throws —
+    // replacing the previous `timeout <secs>` argv vehicle, which was the
+    // ONLY teardown mechanism and forced a SKIP on any host without
+    // coreutils.
+    let _served = with_background([server_bin], _child_env_typed(), "", "websocket-serve-loopback-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
 
-    // A fresh connection for the framed round-trip (the handshake connection
-    // above was used only to prove the accept value and is left to the
-    // server's own per-connection teardown).
-    let fd: i32 = _lb_connect(port);
-    assert fd >= 0;
-    let handshake_req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
-    assert _lb_send_all(fd, handshake_req as *u8, strlen(handshake_req as *u8) as i64);
-    let cap: i64 = 1024;
-    let hbuf: *u8 = malloc((cap + 4) as usize);
-    assert hbuf as i64 != 0;
-    let hn: i64 = _lb_recv_some(fd, hbuf, cap);
-    assert hn > 0;
+        // Readiness + handshake correctness: the fixed RFC 6455 example key
+        // `dGhlIHNhbXBsZSBub25jZQ==` must produce the canonical accept
+        // value `s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`, isolating handshake bugs
+        // (`_ws_sec_accept`) from framing bugs below.
+        let handshake_resp = _await_ready(port);
+        print.info("[websocket-serve-loopback] handshake: " + handshake_resp);
+        assert handshake_resp.length > 0;
+        assert contains(handshake_resp, "101");
+        assert contains(handshake_resp, "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
 
-    // Masked TEXT frame "hi" round-trips as an unmasked echo.
-    assert _lb_send_masked(fd, 1, "hi");
-    let mut opcode: i64 = 0 - 1;
-    let echoed = _lb_read_frame(fd, & opcode);
-    print.info("[websocket-serve-loopback] echo opcode=" + opcode + " payload="
-        + echoed);
-    assert opcode == 1;
-    assert echoed == "hi";
+        // A fresh connection for the framed round-trip (the handshake
+        // connection above was used only to prove the accept value and is
+        // left to the server's own per-connection teardown).
+        let fd: i32 = _lb_connect(port);
+        assert fd >= 0;
+        let handshake_req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+        assert _lb_send_all(fd, handshake_req as *u8, strlen(handshake_req as *u8) as i64);
+        let cap: i64 = 1024;
+        let hbuf: *u8 = malloc((cap + 4) as usize);
+        assert hbuf as i64 != 0;
+        let hn: i64 = _lb_recv_some(fd, hbuf, cap);
+        assert hn > 0;
 
-    // Masked CLOSE frame -> the server replies with an unmasked CLOSE
-    // (opcode 8, empty payload) before it tears the connection down.
-    assert _lb_send_masked(fd, 8, "");
-    let mut close_opcode: i64 = 0 - 1;
-    let _close_payload = _lb_read_frame(fd, & close_opcode);
-    assert close_opcode == 8;
-    sfn_socket_close(fd);
+        // Masked TEXT frame "hi" round-trips as an unmasked echo.
+        assert _lb_send_masked(fd, 1, "hi");
+        let mut opcode: i64 = 0 - 1;
+        let echoed = _lb_read_frame(fd, & opcode);
+        print.info("[websocket-serve-loopback] echo opcode=" + opcode
+            + " payload="
+            + echoed);
+        assert opcode == 1;
+        assert echoed == "hi";
 
-    // Best-effort cleanup of the consumer tree (the timeout reaps the
-    // server process).
+        // Masked CLOSE frame -> the server replies with an unmasked CLOSE
+        // (opcode 8, empty payload) before it tears the connection down.
+        assert _lb_send_masked(fd, 8, "");
+        let mut close_opcode: i64 = 0 - 1;
+        let _close_payload = _lb_read_frame(fd, & close_opcode);
+        assert close_opcode == 8;
+        sfn_socket_close(fd);
+        return 0;
+    });
+
+    // Best-effort cleanup of the consumer tree. The server itself was
+    // already killed and reaped by `with_background` on scope exit.
     let _rm = process.run(["rm", "-rf", _app_root()]);
 }
 
-test "websocket.serve loopback: two clients served concurrently" ![io, net] {
-    // Same rationale as the test above: without a reaper, a spawned server
-    // would orphan the fixed port and poison subsequent runs.
-    if _timeout_cmd().length == 0 {
-        print.info("[websocket-serve-concurrent] SKIP: no timeout/gtimeout to reap the blocking server");
-        return;
-    }
-
-    let port2 = _lb_port2();
+test "websocket.serve loopback: two clients served concurrently" ![clock, io, net] {
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it.
+    let port2: i64 = _lb_port2();
     let main_path = _write_server2(_lb_port2_str());
 
-    let server_bin = _build_bin(main_path, _app_root2() + "/server-bin");
+    let server_bin: string = _build_bin(main_path, _app_root2() + "/server-bin");
     assert server_bin.length > 0;
-    let _handle = _spawn_server_pooled(server_bin);
 
-    let ready_resp = _await_ready(port2);
-    print.info("[websocket-serve-concurrent] ready: " + ready_resp);
-    assert ready_resp.length > 0;
-    assert contains(ready_resp, "101");
+    // `with_background` owns the blocking server's lifetime; see the
+    // handshake+echo test above for why this replaced the `timeout <secs>`
+    // vehicle. `_pool_env_typed` pins the scheduler pool to two workers so
+    // the two-client guarantee never hinges on an inherited thread count.
+    let _served = with_background([server_bin], _pool_env_typed(), "", "websocket-serve-concurrent-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
 
-    let handshake_req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
-    let cap: i64 = 1024;
+        let ready_resp = _await_ready(port2);
+        print.info("[websocket-serve-concurrent] ready: " + ready_resp);
+        assert ready_resp.length > 0;
+        assert contains(ready_resp, "101");
 
-    // Open the first connection and complete its handshake, but do NOT
-    // close it or drive it further yet — a single-threaded accept loop
-    // would now be blocked in this connection's per-client frame loop.
-    let fd1: i32 = _lb_connect(port2);
-    assert fd1 >= 0;
-    assert _lb_send_all(fd1, handshake_req as *u8, strlen(handshake_req as *u8) as i64);
-    let hbuf1: *u8 = malloc((cap + 4) as usize);
-    assert hbuf1 as i64 != 0;
-    let hn1: i64 = _lb_recv_some(fd1, hbuf1, cap);
-    assert hn1 > 0;
-    memset(_lb_ptr_off(hbuf1, hn1), 0, 1 as usize);
-    let resp1: string = hbuf1 as string;
-    print.info("[websocket-serve-concurrent] fd1 handshake: " + resp1);
-    assert contains(resp1, "101");
+        let handshake_req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+        let cap: i64 = 1024;
 
-    // Load-bearing assertion: open and handshake a SECOND connection while
-    // the first is still open and mid-session. A single-threaded accept
-    // loop could not reach `accept()` again here, so a successful 101 on
-    // fd2 proves connections are dispatched to a shared thread pool (#1923),
-    // not served one at a time.
-    let fd2: i32 = _lb_connect(port2);
-    assert fd2 >= 0;
-    assert _lb_send_all(fd2, handshake_req as *u8, strlen(handshake_req as *u8) as i64);
-    let hbuf2: *u8 = malloc((cap + 4) as usize);
-    assert hbuf2 as i64 != 0;
-    let hn2: i64 = _lb_recv_some(fd2, hbuf2, cap);
-    assert hn2 > 0;
-    memset(_lb_ptr_off(hbuf2, hn2), 0, 1 as usize);
-    let resp2: string = hbuf2 as string;
-    print.info("[websocket-serve-concurrent] fd2 handshake: " + resp2);
-    assert contains(resp2, "101");
+        // Open the first connection and complete its handshake, but do NOT
+        // close it or drive it further yet — a single-threaded accept loop
+        // would now be blocked in this connection's per-client frame loop.
+        let fd1: i32 = _lb_connect(port2);
+        assert fd1 >= 0;
+        assert _lb_send_all(fd1, handshake_req as *u8, strlen(handshake_req as *u8) as i64);
+        let hbuf1: *u8 = malloc((cap + 4) as usize);
+        assert hbuf1 as i64 != 0;
+        let hn1: i64 = _lb_recv_some(fd1, hbuf1, cap);
+        assert hn1 > 0;
+        memset(_lb_ptr_off(hbuf1, hn1), 0, 1 as usize);
+        let resp1: string = hbuf1 as string;
+        print.info("[websocket-serve-concurrent] fd1 handshake: " + resp1);
+        assert contains(resp1, "101");
 
-    // Interleaved echo: prove both connections are independently live by
-    // sending on both, then reading fd2's echo BEFORE fd1's. Servicing fd2
-    // without waiting on fd1 shows fd1 is not holding the server hostage.
-    assert _lb_send_masked(fd1, 1, "one");
-    assert _lb_send_masked(fd2, 1, "two");
+        // Load-bearing assertion: open and handshake a SECOND connection
+        // while the first is still open and mid-session. A single-threaded
+        // accept loop could not reach `accept()` again here, so a
+        // successful 101 on fd2 proves connections are dispatched to a
+        // shared thread pool (#1923), not served one at a time.
+        let fd2: i32 = _lb_connect(port2);
+        assert fd2 >= 0;
+        assert _lb_send_all(fd2, handshake_req as *u8, strlen(handshake_req as *u8) as i64);
+        let hbuf2: *u8 = malloc((cap + 4) as usize);
+        assert hbuf2 as i64 != 0;
+        let hn2: i64 = _lb_recv_some(fd2, hbuf2, cap);
+        assert hn2 > 0;
+        memset(_lb_ptr_off(hbuf2, hn2), 0, 1 as usize);
+        let resp2: string = hbuf2 as string;
+        print.info("[websocket-serve-concurrent] fd2 handshake: " + resp2);
+        assert contains(resp2, "101");
 
-    let mut op2: i64 = 0 - 1;
-    let echoed2 = _lb_read_frame(fd2, & op2);
-    print.info("[websocket-serve-concurrent] fd2 echo opcode=" + op2
-        + " payload="
-        + echoed2);
-    assert op2 == 1;
-    assert echoed2 == "two";
+        // Interleaved echo: prove both connections are independently live
+        // by sending on both, then reading fd2's echo BEFORE fd1's.
+        // Servicing fd2 without waiting on fd1 shows fd1 is not holding
+        // the server hostage.
+        assert _lb_send_masked(fd1, 1, "one");
+        assert _lb_send_masked(fd2, 1, "two");
 
-    let mut op1: i64 = 0 - 1;
-    let echoed1 = _lb_read_frame(fd1, & op1);
-    print.info("[websocket-serve-concurrent] fd1 echo opcode=" + op1
-        + " payload="
-        + echoed1);
-    assert op1 == 1;
-    assert echoed1 == "one";
+        let mut op2: i64 = 0 - 1;
+        let echoed2 = _lb_read_frame(fd2, & op2);
+        print.info("[websocket-serve-concurrent] fd2 echo opcode=" + op2
+            + " payload="
+            + echoed2);
+        assert op2 == 1;
+        assert echoed2 == "two";
 
-    // Tear both connections down with a masked CLOSE + reply.
-    assert _lb_send_masked(fd1, 8, "");
-    let mut close_opcode1: i64 = 0 - 1;
-    let _close_payload1 = _lb_read_frame(fd1, & close_opcode1);
-    assert close_opcode1 == 8;
-    sfn_socket_close(fd1);
+        let mut op1: i64 = 0 - 1;
+        let echoed1 = _lb_read_frame(fd1, & op1);
+        print.info("[websocket-serve-concurrent] fd1 echo opcode=" + op1
+            + " payload="
+            + echoed1);
+        assert op1 == 1;
+        assert echoed1 == "one";
 
-    assert _lb_send_masked(fd2, 8, "");
-    let mut close_opcode2: i64 = 0 - 1;
-    let _close_payload2 = _lb_read_frame(fd2, & close_opcode2);
-    assert close_opcode2 == 8;
-    sfn_socket_close(fd2);
+        // Tear both connections down with a masked CLOSE + reply.
+        assert _lb_send_masked(fd1, 8, "");
+        let mut close_opcode1: i64 = 0 - 1;
+        let _close_payload1 = _lb_read_frame(fd1, & close_opcode1);
+        assert close_opcode1 == 8;
+        sfn_socket_close(fd1);
 
-    // Best-effort cleanup of the consumer tree (the timeout reaps the
-    // server process).
+        assert _lb_send_masked(fd2, 8, "");
+        let mut close_opcode2: i64 = 0 - 1;
+        let _close_payload2 = _lb_read_frame(fd2, & close_opcode2);
+        assert close_opcode2 == 8;
+        sfn_socket_close(fd2);
+        return 0;
+    });
+
+    // Best-effort cleanup of the consumer tree. The server itself was
+    // already killed and reaped by `with_background` on scope exit.
     let _rm = process.run(["rm", "-rf", _app_root2()]);
 }
 
@@ -731,195 +711,207 @@ fn _lb_open_ready(port: i64) -> i32 ![net] {
     return fd;
 }
 
-test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol errors" ![io, net] {
-    // Same teardown constraint as the tests above: without a reaper the
-    // spawned server would orphan the fixed port and poison later runs.
-    if _timeout_cmd().length == 0 {
-        print.info("[websocket-serve-protocol] SKIP: no timeout/gtimeout to reap the blocking server");
-        return;
-    }
-
-    let port = _lb_port3();
+test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol errors" ![clock, io, net] {
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let port: i64 = _lb_port3();
     let main_path = _write_server3(_lb_port3_str());
-    let server_bin = _build_bin(main_path, _app_root3() + "/server-bin");
+    let server_bin: string = _build_bin(main_path, _app_root3() + "/server-bin");
     assert server_bin.length > 0;
-    let _handle = _spawn_server(server_bin);
 
-    let ready = _await_ready(port);
-    print.info("[websocket-serve-protocol] ready: " + ready);
-    assert ready.length > 0;
-    assert contains(ready, "101");
+    // `with_background` owns the blocking server's lifetime; see the
+    // handshake+echo test above for why this replaced the `timeout <secs>`
+    // vehicle.
+    let _served = with_background([server_bin], _child_env_typed(), "", "websocket-serve-protocol-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
 
-    // Case 1: a PING is answered with a PONG carrying the same payload, and
-    // the connection stays open for subsequent data frames.
-    let fd1: i32 = _lb_open_ready(port);
-    assert fd1 >= 0;
-    assert _lb_send_frame_raw(fd1, 1, 9, true, "pingdata" as *u8, 8);
-    let mut op_pong: i64 = 0 - 1;
-    let pong = _lb_read_frame(fd1, & op_pong);
-    print.info("[websocket-serve-protocol] pong opcode=" + op_pong + " payload="
-        + pong);
-    assert op_pong == 10;
-    assert pong == "pingdata";
-    assert _lb_send_frame_raw(fd1, 1, 1, true, "still-here" as *u8, 10);
-    let mut op_after: i64 = 0 - 1;
-    let after = _lb_read_frame(fd1, & op_after);
-    assert op_after == 1;
-    assert after == "still-here";
-    sfn_socket_close(fd1);
+        let ready = _await_ready(port);
+        print.info("[websocket-serve-protocol] ready: " + ready);
+        assert ready.length > 0;
+        assert contains(ready, "101");
 
-    // Case 2: a fragmented message (initial TEXT FIN=0 + continuation FIN=1)
-    // is reassembled and echoed back as a single message.
-    let fd2: i32 = _lb_open_ready(port);
-    assert fd2 >= 0;
-    assert _lb_send_frame_raw(fd2, 0, 1, true, "Hello" as *u8, 5);
-    assert _lb_send_frame_raw(fd2, 1, 0, true, "World" as *u8, 5);
-    let mut op_frag: i64 = 0 - 1;
-    let frag = _lb_read_frame(fd2, & op_frag);
-    print.info("[websocket-serve-protocol] reassembled opcode=" + op_frag
-        + " payload="
-        + frag);
-    assert op_frag == 1;
-    assert frag == "HelloWorld";
-    sfn_socket_close(fd2);
+        // Case 1: a PING is answered with a PONG carrying the same payload, and
+        // the connection stays open for subsequent data frames.
+        let fd1: i32 = _lb_open_ready(port);
+        assert fd1 >= 0;
+        assert _lb_send_frame_raw(fd1, 1, 9, true, "pingdata" as *u8, 8);
+        let mut op_pong: i64 = 0 - 1;
+        let pong = _lb_read_frame(fd1, & op_pong);
+        print.info("[websocket-serve-protocol] pong opcode=" + op_pong
+            + " payload="
+            + pong);
+        assert op_pong == 10;
+        assert pong == "pingdata";
+        assert _lb_send_frame_raw(fd1, 1, 1, true, "still-here" as *u8, 10);
+        let mut op_after: i64 = 0 - 1;
+        let after = _lb_read_frame(fd1, & op_after);
+        assert op_after == 1;
+        assert after == "still-here";
+        sfn_socket_close(fd1);
 
-    // Case 3: a client CLOSE carrying a 2-byte status code round-trips that
-    // code (not a bare empty CLOSE).
-    let fd3: i32 = _lb_open_ready(port);
-    assert fd3 >= 0;
-    let code_buf: *u8 = malloc(8 as usize);
-    assert code_buf as i64 != 0;
-    memset(_lb_ptr_off(code_buf, 0), 3, 1 as usize);
-    memset(_lb_ptr_off(code_buf, 1), 232, 1 as usize);
-    assert _lb_send_frame_raw(fd3, 1, 8, true, code_buf, 2);
-    free(code_buf);
-    let mut op_close: i64 = 0 - 1;
-    let mut code_close: i64 = 0 - 1;
-    assert _lb_read_close(fd3, & op_close, & code_close);
-    print.info("[websocket-serve-protocol] close-echo opcode=" + op_close
-        + " code="
-        + code_close);
-    assert op_close == 8;
-    assert code_close == 1000;
-    sfn_socket_close(fd3);
+        // Case 2: a fragmented message (initial TEXT FIN=0 + continuation FIN=1)
+        // is reassembled and echoed back as a single message.
+        let fd2: i32 = _lb_open_ready(port);
+        assert fd2 >= 0;
+        assert _lb_send_frame_raw(fd2, 0, 1, true, "Hello" as *u8, 5);
+        assert _lb_send_frame_raw(fd2, 1, 0, true, "World" as *u8, 5);
+        let mut op_frag: i64 = 0 - 1;
+        let frag = _lb_read_frame(fd2, & op_frag);
+        print.info("[websocket-serve-protocol] reassembled opcode=" + op_frag
+            + " payload="
+            + frag);
+        assert op_frag == 1;
+        assert frag == "HelloWorld";
+        sfn_socket_close(fd2);
 
-    // Case 4: an unmasked client frame is a protocol error — refused with a
-    // CLOSE carrying code 1002.
-    let fd4: i32 = _lb_open_ready(port);
-    assert fd4 >= 0;
-    assert _lb_send_frame_raw(fd4, 1, 1, false, "nomask" as *u8, 6);
-    let mut op_1002: i64 = 0 - 1;
-    let mut code_1002: i64 = 0 - 1;
-    assert _lb_read_close(fd4, & op_1002, & code_1002);
-    print.info("[websocket-serve-protocol] unmasked-reject opcode=" + op_1002
-        + " code="
-        + code_1002);
-    assert op_1002 == 8;
-    assert code_1002 == 1002;
-    sfn_socket_close(fd4);
+        // Case 3: a client CLOSE carrying a 2-byte status code round-trips that
+        // code (not a bare empty CLOSE).
+        let fd3: i32 = _lb_open_ready(port);
+        assert fd3 >= 0;
+        let code_buf: *u8 = malloc(8 as usize);
+        assert code_buf as i64 != 0;
+        memset(_lb_ptr_off(code_buf, 0), 3, 1 as usize);
+        memset(_lb_ptr_off(code_buf, 1), 232, 1 as usize);
+        assert _lb_send_frame_raw(fd3, 1, 8, true, code_buf, 2);
+        free(code_buf);
+        let mut op_close: i64 = 0 - 1;
+        let mut code_close: i64 = 0 - 1;
+        assert _lb_read_close(fd3, & op_close, & code_close);
+        print.info("[websocket-serve-protocol] close-echo opcode=" + op_close
+            + " code="
+            + code_close);
+        assert op_close == 8;
+        assert code_close == 1000;
+        sfn_socket_close(fd3);
 
-    // Case 5: an over-large single frame (declared length only, no payload)
-    // is refused with CLOSE 1009 before any allocation — the DoS floor.
-    let fd5: i32 = _lb_open_ready(port);
-    assert fd5 >= 0;
-    assert _lb_send_oversize_header(fd5);
-    let mut op_1009a: i64 = 0 - 1;
-    let mut code_1009a: i64 = 0 - 1;
-    assert _lb_read_close(fd5, & op_1009a, & code_1009a);
-    print.info("[websocket-serve-protocol] oversize-frame opcode=" + op_1009a
-        + " code="
-        + code_1009a);
-    assert op_1009a == 8;
-    assert code_1009a == 1009;
-    sfn_socket_close(fd5);
+        // Case 4: an unmasked client frame is a protocol error — refused with a
+        // CLOSE carrying code 1002.
+        let fd4: i32 = _lb_open_ready(port);
+        assert fd4 >= 0;
+        assert _lb_send_frame_raw(fd4, 1, 1, false, "nomask" as *u8, 6);
+        let mut op_1002: i64 = 0 - 1;
+        let mut code_1002: i64 = 0 - 1;
+        assert _lb_read_close(fd4, & op_1002, & code_1002);
+        print.info("[websocket-serve-protocol] unmasked-reject opcode="
+            + op_1002
+            + " code="
+            + code_1002);
+        assert op_1002 == 8;
+        assert code_1002 == 1002;
+        sfn_socket_close(fd4);
 
-    // Case 6: an oversize REASSEMBLY (two in-cap fragments whose sum exceeds
-    // the message cap) is refused with CLOSE 1009 — the buffer is bounded,
-    // not grown without limit.
-    let fd6: i32 = _lb_open_ready(port);
-    assert fd6 >= 0;
-    let frag_len: i64 = 525000;
-    let big: *u8 = malloc((frag_len + 4) as usize);
-    assert big as i64 != 0;
-    memset(big, 65, frag_len as usize);
-    assert _lb_send_frame_raw(fd6, 0, 1, true, big, frag_len);
-    assert _lb_send_frame_raw(fd6, 1, 0, true, big, frag_len);
-    free(big);
-    let mut op_1009b: i64 = 0 - 1;
-    let mut code_1009b: i64 = 0 - 1;
-    assert _lb_read_close(fd6, & op_1009b, & code_1009b);
-    print.info("[websocket-serve-protocol] oversize-reassembly opcode="
-        + op_1009b
-        + " code="
-        + code_1009b);
-    assert op_1009b == 8;
-    assert code_1009b == 1009;
-    sfn_socket_close(fd6);
+        // Case 5: an over-large single frame (declared length only, no payload)
+        // is refused with CLOSE 1009 before any allocation — the DoS floor.
+        let fd5: i32 = _lb_open_ready(port);
+        assert fd5 >= 0;
+        assert _lb_send_oversize_header(fd5);
+        let mut op_1009a: i64 = 0 - 1;
+        let mut code_1009a: i64 = 0 - 1;
+        assert _lb_read_close(fd5, & op_1009a, & code_1009a);
+        print.info("[websocket-serve-protocol] oversize-frame opcode="
+            + op_1009a
+            + " code="
+            + code_1009a);
+        assert op_1009a == 8;
+        assert code_1009a == 1009;
+        sfn_socket_close(fd5);
 
-    // Case 7 (RFC 6455 §5.5): a control frame (PING) with a payload > 125
-    // bytes is a protocol error — refused with CLOSE 1002, not clamped.
-    let fd7: i32 = _lb_open_ready(port);
-    assert fd7 >= 0;
-    let ctl_len: i64 = 126;
-    let ctl_buf: *u8 = malloc((ctl_len + 4) as usize);
-    assert ctl_buf as i64 != 0;
-    memset(ctl_buf, 65, ctl_len as usize);
-    assert _lb_send_frame_raw(fd7, 1, 9, true, ctl_buf, ctl_len);
-    free(ctl_buf);
-    let mut op_over: i64 = 0 - 1;
-    let mut code_over: i64 = 0 - 1;
-    assert _lb_read_close(fd7, & op_over, & code_over);
-    print.info("[websocket-serve-protocol] control-over125 opcode=" + op_over
-        + " code="
-        + code_over);
-    assert op_over == 8;
-    assert code_over == 1002;
-    sfn_socket_close(fd7);
+        // Case 6: an oversize REASSEMBLY (two in-cap fragments whose sum exceeds
+        // the message cap) is refused with CLOSE 1009 — the buffer is bounded,
+        // not grown without limit.
+        let fd6: i32 = _lb_open_ready(port);
+        assert fd6 >= 0;
+        let frag_len: i64 = 525000;
+        let big: *u8 = malloc((frag_len + 4) as usize);
+        assert big as i64 != 0;
+        memset(big, 65, frag_len as usize);
+        assert _lb_send_frame_raw(fd6, 0, 1, true, big, frag_len);
+        assert _lb_send_frame_raw(fd6, 1, 0, true, big, frag_len);
+        free(big);
+        let mut op_1009b: i64 = 0 - 1;
+        let mut code_1009b: i64 = 0 - 1;
+        assert _lb_read_close(fd6, & op_1009b, & code_1009b);
+        print.info("[websocket-serve-protocol] oversize-reassembly opcode="
+            + op_1009b
+            + " code="
+            + code_1009b);
+        assert op_1009b == 8;
+        assert code_1009b == 1009;
+        sfn_socket_close(fd6);
 
-    // Case 8 (RFC 6455 §5.5): a fragmented control frame (PING with FIN=0) is
-    // a protocol error — control frames MUST NOT be fragmented — refused 1002.
-    let fd8: i32 = _lb_open_ready(port);
-    assert fd8 >= 0;
-    assert _lb_send_frame_raw(fd8, 0, 9, true, "pingdata" as *u8, 8);
-    let mut op_frag_ctl: i64 = 0 - 1;
-    let mut code_frag_ctl: i64 = 0 - 1;
-    assert _lb_read_close(fd8, & op_frag_ctl, & code_frag_ctl);
-    print.info("[websocket-serve-protocol] control-fin0 opcode=" + op_frag_ctl
-        + " code="
-        + code_frag_ctl);
-    assert op_frag_ctl == 8;
-    assert code_frag_ctl == 1002;
-    sfn_socket_close(fd8);
+        // Case 7 (RFC 6455 §5.5): a control frame (PING) with a payload > 125
+        // bytes is a protocol error — refused with CLOSE 1002, not clamped.
+        let fd7: i32 = _lb_open_ready(port);
+        assert fd7 >= 0;
+        let ctl_len: i64 = 126;
+        let ctl_buf: *u8 = malloc((ctl_len + 4) as usize);
+        assert ctl_buf as i64 != 0;
+        memset(ctl_buf, 65, ctl_len as usize);
+        assert _lb_send_frame_raw(fd7, 1, 9, true, ctl_buf, ctl_len);
+        free(ctl_buf);
+        let mut op_over: i64 = 0 - 1;
+        let mut code_over: i64 = 0 - 1;
+        assert _lb_read_close(fd7, & op_over, & code_over);
+        print.info("[websocket-serve-protocol] control-over125 opcode="
+            + op_over
+            + " code="
+            + code_over);
+        assert op_over == 8;
+        assert code_over == 1002;
+        sfn_socket_close(fd7);
 
-    // Case 9 (RFC 6455 §5.2): a reserved opcode (0x3, reserved non-control) is
-    // a protocol error — refused 1002, not silently drained.
-    let fd9: i32 = _lb_open_ready(port);
-    assert fd9 >= 0;
-    assert _lb_send_frame_raw(fd9, 1, 3, true, "x" as *u8, 1);
-    let mut op_resv: i64 = 0 - 1;
-    let mut code_resv: i64 = 0 - 1;
-    assert _lb_read_close(fd9, & op_resv, & code_resv);
-    print.info("[websocket-serve-protocol] reserved-opcode opcode=" + op_resv
-        + " code="
-        + code_resv);
-    assert op_resv == 8;
-    assert code_resv == 1002;
-    sfn_socket_close(fd9);
+        // Case 8 (RFC 6455 §5.5): a fragmented control frame (PING with FIN=0) is
+        // a protocol error — control frames MUST NOT be fragmented — refused 1002.
+        let fd8: i32 = _lb_open_ready(port);
+        assert fd8 >= 0;
+        assert _lb_send_frame_raw(fd8, 0, 9, true, "pingdata" as *u8, 8);
+        let mut op_frag_ctl: i64 = 0 - 1;
+        let mut code_frag_ctl: i64 = 0 - 1;
+        assert _lb_read_close(fd8, & op_frag_ctl, & code_frag_ctl);
+        print.info("[websocket-serve-protocol] control-fin0 opcode="
+            + op_frag_ctl
+            + " code="
+            + code_frag_ctl);
+        assert op_frag_ctl == 8;
+        assert code_frag_ctl == 1002;
+        sfn_socket_close(fd8);
 
-    // Case 10 (RFC 6455 §5.5.1): a CLOSE with a 1-byte body cannot form a
-    // 2-byte status code — a malformed close, refused 1002 rather than echoed.
-    let fd10: i32 = _lb_open_ready(port);
-    assert fd10 >= 0;
-    assert _lb_send_frame_raw(fd10, 1, 8, true, "x" as *u8, 1);
-    let mut op_badclose: i64 = 0 - 1;
-    let mut code_badclose: i64 = 0 - 1;
-    assert _lb_read_close(fd10, & op_badclose, & code_badclose);
-    print.info("[websocket-serve-protocol] close-1byte opcode=" + op_badclose
-        + " code="
-        + code_badclose);
-    assert op_badclose == 8;
-    assert code_badclose == 1002;
-    sfn_socket_close(fd10);
+        // Case 9 (RFC 6455 §5.2): a reserved opcode (0x3, reserved non-control) is
+        // a protocol error — refused 1002, not silently drained.
+        let fd9: i32 = _lb_open_ready(port);
+        assert fd9 >= 0;
+        assert _lb_send_frame_raw(fd9, 1, 3, true, "x" as *u8, 1);
+        let mut op_resv: i64 = 0 - 1;
+        let mut code_resv: i64 = 0 - 1;
+        assert _lb_read_close(fd9, & op_resv, & code_resv);
+        print.info("[websocket-serve-protocol] reserved-opcode opcode="
+            + op_resv
+            + " code="
+            + code_resv);
+        assert op_resv == 8;
+        assert code_resv == 1002;
+        sfn_socket_close(fd9);
 
+        // Case 10 (RFC 6455 §5.5.1): a CLOSE with a 1-byte body cannot form a
+        // 2-byte status code — a malformed close, refused 1002 rather than echoed.
+        let fd10: i32 = _lb_open_ready(port);
+        assert fd10 >= 0;
+        assert _lb_send_frame_raw(fd10, 1, 8, true, "x" as *u8, 1);
+        let mut op_badclose: i64 = 0 - 1;
+        let mut code_badclose: i64 = 0 - 1;
+        assert _lb_read_close(fd10, & op_badclose, & code_badclose);
+        print.info("[websocket-serve-protocol] close-1byte opcode="
+            + op_badclose
+            + " code="
+            + code_badclose);
+        assert op_badclose == 8;
+        assert code_badclose == 1002;
+        sfn_socket_close(fd10);
+        return 0;
+    });
+
+    // Best-effort cleanup of the consumer tree. The server itself was
+    // already killed and reaped by `with_background` on scope exit.
     let _rm = process.run(["rm", "-rf", _app_root3()]);
 }

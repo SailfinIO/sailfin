@@ -29,12 +29,15 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
+import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
+    Background,
     default_scratch_dir,
-    first_present_tool,
     sfn_bin_path,
-    tool_present
+    tool_present,
+    wait_until,
+    with_background
 } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
@@ -125,18 +128,15 @@ fn _tlp_connect(port: i64) -> i32 ![net] {
 // per-invocation under the parallel pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
+// The same environment in `sfn/os`'s typed form, for `with_background`.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
+
 // The client run-env plus `SAILFIN_TLS_CAFILE` pointed at the generated
 // self-signed cert so the client trusts it (verify stays on).
 fn _client_env(cert_path: string) -> string[] ![io] {
     let mut e = process.environ();
     e.push("SAILFIN_TLS_CAFILE=" + cert_path);
     return e;
-}
-
-// Resolve a wall-clock timeout command to reap the blocking `s_server`;
-// empty if none found.
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 fn _scratch_dir() -> string ![io] {
@@ -163,14 +163,11 @@ fn _gen_cert(dir: string) -> boolean ![io] {
     return exit == 0;
 }
 
-// Spawn `openssl s_server -www` (an HTTP status-page server) in the
-// background, wrapped in a wall-clock timeout so it self-reaps (there is
-// no process-kill primitive; s_server blocks forever). Returns the spawn
-// handle (unused for teardown — the timeout owns the lifetime).
-fn _spawn_server(dir: string, tcmd: string) -> i64 ![io] {
+// The `openssl s_server -www` argv (an HTTP status-page server), for
+// `with_background` to spawn directly — no external `timeout` wrapper
+// needed, since `with_background` owns the child's lifetime itself.
+fn _server_argv(dir: string) -> string[] {
     let mut argv: string[] = [];
-    argv.push(tcmd);
-    argv.push("60");
     argv.push("openssl");
     argv.push("s_server");
     argv.push("-accept");
@@ -181,25 +178,21 @@ fn _spawn_server(dir: string, tcmd: string) -> i64 ![io] {
     argv.push(dir + "/key.pem");
     argv.push("-www");
     argv.push("-quiet");
-    return process.spawn_with_env(argv, _child_env());
+    return argv;
 }
 
-// Poll a raw TCP connect until `s_server` is accepting (or the budget
-// elapses). ~30s budget (60 attempts x ~0.5s) stays under the 60s server
-// timeout. Returns true once the port accepts a connection.
-fn _await_listening(port: i64) -> boolean ![io, net] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 60 { break; }
-        let fd: i32 = _tlp_connect(port);
+// Poll a raw TCP connect until `s_server` is accepting. 30s wall-clock
+// budget. Captures nothing — reaches the port through the file-local
+// `_tls_port()` rather than closing over a parameter (SFN-843).
+fn _await_listening() -> boolean ![clock, io, net] {
+    return wait_until(fn () -> boolean {
+        let fd: i32 = _tlp_connect(_tls_port());
         if fd >= 0 {
             sfn_socket_close(fd);
             return true;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return false;
+        return false;
+    }, 30000, 500);
 }
 
 // Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
@@ -238,18 +231,12 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
     return bin;
 }
 
-test "runtime tls: https GET round-trips against a local openssl s_server" ![io, net] {
-    // Need the openssl CLI (TLS peer + cert gen) and a timeout to reap the
-    // blocking server. Skip cleanly otherwise — the plain suite still
-    // covers the surface via the unit skeleton test + `make compile`.
+test "runtime tls: https GET round-trips against a local openssl s_server" ![clock, io, net] {
+    // Need the openssl CLI (TLS peer + cert gen). Skip cleanly otherwise —
+    // the plain suite still covers the surface via the unit skeleton test +
+    // `make compile`.
     if !tool_present("openssl") {
         print.info("[tls-https] SKIP: openssl CLI not available");
-        assert true;
-        return;
-    }
-    let tcmd = _timeout_cmd();
-    if tcmd.length == 0 {
-        print.info("[tls-https] SKIP: no timeout/gtimeout to reap the blocking s_server");
         assert true;
         return;
     }
@@ -262,46 +249,56 @@ test "runtime tls: https GET round-trips against a local openssl s_server" ![io,
     let out_path = dir + "/body.out";
     let _rm = process.run(["rm", "-f", out_path]);
     let main_path = _write_client(dir, out_path);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    // Start the TLS server and wait for it to accept.
-    let _handle = _spawn_server(dir, tcmd);
-    let up = _await_listening(_tls_port());
-    assert up;
+    // `with_background` owns `s_server`'s lifetime: it is killed and reaped
+    // on scope exit, including when an assertion below throws — replacing
+    // the previous `timeout <secs>` argv vehicle, which was the ONLY
+    // teardown mechanism and forced a SKIP on any host without coreutils.
+    let _served = with_background(_server_argv(dir), _child_env_typed(), "", "tls-https-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        let up = _await_listening();
+        assert up;
 
-    // Run the client (with SAILFIN_TLS_CAFILE trusting the self-signed
-    // cert), retrying briefly to absorb any residual startup latency. A
-    // non-empty output file proves the https round-trip succeeded.
-    let cenv = _client_env(dir + "/cert.pem");
-    let mut body = "";
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 20 { break; }
-        let _rm2 = process.run(["rm", "-f", out_path]);
-        let cexit = process.run_capture([client_bin], cenv);
-        let _co = process.capture_take_stdout();
-        let _ce = process.capture_take_stderr();
-        if cexit == 0 {
-            if fs.exists(out_path) {
-                let content = fs.readFile(out_path);
-                if content.length > 0 {
-                    body = content;
-                    break;
+        // Run the client (with SAILFIN_TLS_CAFILE trusting the self-signed
+        // cert), retrying briefly to absorb any residual startup latency. A
+        // non-empty output file proves the https round-trip succeeded.
+        let cenv = _client_env(dir + "/cert.pem");
+        let mut body = "";
+        let mut attempt: i64 = 0;
+        loop {
+            if attempt >= 20 { break; }
+            let _rm2 = process.run(["rm", "-f", out_path]);
+            let cexit = process.run_capture([client_bin], cenv);
+            let _co = process.capture_take_stdout();
+            let _ce = process.capture_take_stderr();
+            if cexit == 0 {
+                if fs.exists(out_path) {
+                    let content = fs.readFile(out_path);
+                    if content.length > 0 {
+                        body = content;
+                        break;
+                    }
                 }
             }
+            let _ = process.run(["sleep", "0.5"]);
+            attempt = attempt + 1;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
 
-    print.info("[tls-https] body length: received");
-    // Round-trip proof: a non-empty body came back over TLS. `s_server
-    // -www` returns an HTML status page listing the negotiated ciphers.
-    assert body.length > 0;
-    assert contains(body, "Ciphers");
+        print.info("[tls-https] body length: received");
+        // Round-trip proof: a non-empty body came back over TLS. `s_server
+        // -www` returns an HTML status page listing the negotiated ciphers.
+        assert body.length > 0;
+        assert contains(body, "Ciphers");
+        return 0;
+    });
 
-    // Best-effort cleanup (the timeout reaps the server process).
+    // Best-effort cleanup. The server itself was already killed and reaped
+    // by `with_background` on scope exit.
     let _rmd = process.run(["rm", "-rf", dir + "/client"]);
     let _rmo = process.run(["rm", "-f", out_path]);
 }

@@ -1,7 +1,13 @@
 // Native e2e regression for SFN-33: a pure-Sailfin `sfn/http` server keeps
 // module-global state across requests in one process.
+import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
-import { first_present_tool, sfn_bin_path } from "sfn/test";
+import {
+    Background,
+    sfn_bin_path,
+    wait_until,
+    with_background
+} from "sfn/test";
 
 extern fn malloc(size: usize) -> *u8;
 
@@ -29,9 +35,15 @@ extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+// `sfn_socket_send`/`sfn_socket_recv`, not the raw libc `send`/`recv` — on
+// Windows `recv`/`send` return a 32-bit `int`, so an `-> i64` extern (needed
+// to match the buffer-length parameter) sign-extends a `-1` failure return
+// into `4294967295`, silently defeating every `if n < 0` guard (SFN-927).
+// The runtime helpers carry an identical Sailfin signature on both
+// platforms and do the width conversion internally.
+extern fn sfn_socket_send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+extern fn sfn_socket_recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 // `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
 // Winsock SOCKET is not an error return but a process-killing
@@ -44,9 +56,8 @@ fn _su_port() -> i64 { return 18882; }
 
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
-}
+// The same environment in `sfn/os`'s typed form, for `with_background`.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 fn _fixture_root() -> string {
     return "compiler/tests/e2e/fixtures/stateful_http_users_server";
@@ -94,7 +105,7 @@ fn _su_send_all(fd: i32, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
-        let n: i64 = send(fd, _su_ptr_off(buf, sent), total - sent, 0);
+        let n: i64 = sfn_socket_send(fd, _su_ptr_off(buf, sent), total - sent, 0);
         if n <= 0 { return false; }
         sent = sent + n;
     }
@@ -117,7 +128,7 @@ fn _su_recv_all(fd: i32) -> string {
             buf = new_buf;
             capacity = new_cap;
         }
-        let n: i64 = recv(fd, _su_ptr_off(buf, len), 4096, 0);
+        let n: i64 = sfn_socket_recv(fd, _su_ptr_off(buf, len), 4096, 0);
         if n < 0 {
             free(buf);
             return "";
@@ -150,63 +161,58 @@ fn _build_bin(bin: string) -> string ![io] {
     return bin;
 }
 
-fn _spawn_server(bin: string) -> i64 ![io] {
-    let tcmd = _timeout_cmd();
-    let mut argv: string[] = [];
-    if tcmd.length > 0 {
-        argv.push(tcmd);
-        argv.push("60");
-    }
-    argv.push(bin);
-    return process.spawn_with_env(argv, _child_env());
-}
-
-fn _await_ready(port: i64) -> string ![io, net] {
+// Poll `GET /users` until the prebuilt server answers with an empty list
+// (startup is just the binary launching + bind, ~1s). 45s wall-clock budget.
+// Captures nothing — reaches the port through the file-local `_su_port()`
+// rather than closing over a parameter (SFN-843).
+fn _await_ready() -> string ![clock, io, net] {
     let request = "GET /users HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 90 { break; }
-        let resp = _su_request(port, request);
-        if contains(resp, "HTTP/1.1 200") && contains(resp, "[]") {
-            return resp;
-        }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return "";
+    let ready = wait_until(fn () -> boolean {
+        let resp = _su_request(_su_port(), request);
+        return contains(resp, "HTTP/1.1 200") && contains(resp, "[]");
+    }, 45000, 500);
+    if !ready { return ""; }
+    return _su_request(_su_port(), request);
 }
 
-test "stateful users server: POST persists across GET requests (SFN-33)" ![io, net] {
-    if _timeout_cmd().length == 0 {
-        print.info("[stateful-users] SKIP: no timeout/gtimeout to reap the blocking server");
-        return;
-    }
-
-    let server_bin = _build_bin(_work_root() + "/server-bin");
+test "stateful users server: POST persists across GET requests (SFN-33)" ![clock, io, net] {
+    // SFN-843: typed explicitly — the `with_background` body below captures
+    // it, and an untyped call-initialized `let` mistypes the capture's env
+    // slot as `i8*`.
+    let server_bin: string = _build_bin(_work_root() + "/server-bin");
     assert server_bin.length > 0;
-    let _handle = _spawn_server(server_bin);
 
-    let ready = _await_ready(_su_port());
-    print.info("[stateful-users] ready: " + ready);
-    assert ready.length > 0;
-    assert contains(ready, "HTTP/1.1 200");
-    assert contains(ready, "[]");
+    // `with_background` owns the blocking server's lifetime: it is killed
+    // and reaped on scope exit, including when an assertion below throws —
+    // replacing the previous `timeout <secs>` argv vehicle, which the
+    // original `_spawn_server` fell back to running the server unreaped
+    // without, and which forced a SKIP on any host without coreutils.
+    let _served = with_background([server_bin], _child_env_typed(), "", "stateful-users-server", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
 
-    let post = _su_request(_su_port(), "POST /users HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nConnection: close\r\n\r\nAlice");
-    print.info("[stateful-users] post: " + post);
-    assert contains(post, "HTTP/1.1 201");
-    assert contains(post, "Content-Type: application/json");
-    assert contains(post, "{\"id\":\"1\",\"name\":\"Alice\"}");
+        let ready = _await_ready();
+        print.info("[stateful-users] ready: " + ready);
+        assert ready.length > 0;
+        assert contains(ready, "HTTP/1.1 200");
+        assert contains(ready, "[]");
 
-    let list = _su_request(_su_port(), "GET /users HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-    print.info("[stateful-users] list: " + list);
-    assert contains(list, "HTTP/1.1 200");
-    assert contains(list, "[{\"id\":\"1\",\"name\":\"Alice\"}]");
+        let post = _su_request(_su_port(), "POST /users HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nConnection: close\r\n\r\nAlice");
+        print.info("[stateful-users] post: " + post);
+        assert contains(post, "HTTP/1.1 201");
+        assert contains(post, "Content-Type: application/json");
+        assert contains(post, "{\"id\":\"1\",\"name\":\"Alice\"}");
 
-    let by_id = _su_request(_su_port(), "GET /users/1 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-    print.info("[stateful-users] by-id: " + by_id);
-    assert contains(by_id, "HTTP/1.1 200");
-    assert contains(by_id, "{\"id\":\"1\",\"name\":\"Alice\"}");
+        let list = _su_request(_su_port(), "GET /users HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        print.info("[stateful-users] list: " + list);
+        assert contains(list, "HTTP/1.1 200");
+        assert contains(list, "[{\"id\":\"1\",\"name\":\"Alice\"}]");
+
+        let by_id = _su_request(_su_port(), "GET /users/1 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        print.info("[stateful-users] by-id: " + by_id);
+        assert contains(by_id, "HTTP/1.1 200");
+        assert contains(by_id, "{\"id\":\"1\",\"name\":\"Alice\"}");
+        return 0;
+    });
 
     let _rm = process.run(["rm", "-rf", _work_root()]);
 }
