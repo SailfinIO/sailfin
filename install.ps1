@@ -896,23 +896,38 @@ foreach ($Alias in ($Aliases | Select-Object -Unique)) {
     Log "Installed: $LinkPath"
 }
 
-# Published compilers predating SFN-937 cannot read the install-root pointer.
-# Their archives have no workspace.toml, so mirror their runtime dependency
-# payload beside the copied executable. New archives use only the pointer.
+foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
+    $LegacyPath = Join-Path $GlobalBinDir $LegacyName
+    if ((Test-Path $LegacyPath) -and -not $GlobalPayloadOwned) {
+        throw "Refusing to replace unowned $LegacyPath for the adjacent payload mirror."
+    }
+}
+
+# The pointer alone is not sufficient for any compiler published through
+# 0.10.5. Only the CLI driver reads it; the analyzer's prelude-global loader
+# re-derives the runtime root from the executable's own directory, which for a
+# copied (non-symlinked) executable resolves nowhere. It then contributes no
+# prelude names and every bare prelude call fails E0420 -- which is why an
+# installed 0.10.5 cannot compile the standard library (SFN-1124). The adjacent
+# runtime\ mirror is what that probe finds, so it is mirrored for every archive,
+# not only pre-SFN-937 ones.
+#
+# This deliberately re-couples a version-shared bin directory to one version's
+# payload, which SFN-937 set out to undo. Remove this mirror and restore the
+# legacy-only guard once a release carrying the SFN-1124 compiler fix is the
+# pinned seed, deleting this comment with it (SFN-1125).
+if (Test-Path $RuntimeDest) {
+    Copy-Item -Path $RuntimeDest -Destination (Join-Path $GlobalBinDir "runtime") -Recurse
+    Log "Installed adjacent runtime mirror for copied-executable discovery."
+}
+
+# capsules\ stays legacy-only: the pointer already anchors dependency discovery
+# for it, and it is the expensive tree SFN-937 exists to stop duplicating.
 if (-not (Test-Path $WorkspaceSrc)) {
-    foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
-        $LegacyPath = Join-Path $GlobalBinDir $LegacyName
-        if ((Test-Path $LegacyPath) -and -not $GlobalPayloadOwned) {
-            throw "Refusing to replace unowned $LegacyPath for legacy installer compatibility."
-        }
-    }
-    if (Test-Path $RuntimeDest) {
-        Copy-Item -Path $RuntimeDest -Destination (Join-Path $GlobalBinDir "runtime") -Recurse
-    }
     if (Test-Path $CapsulesDest) {
         Copy-Item -Path $CapsulesDest -Destination (Join-Path $GlobalBinDir "capsules") -Recurse
     }
-    Log "Installed adjacent payload mirror for pre-SFN-937 compiler compatibility."
+    Log "Installed adjacent capsule mirror for pre-SFN-937 compiler compatibility."
 }
 
 # Copied executables report GLOBAL_BIN_DIR as their own directory. Publish the

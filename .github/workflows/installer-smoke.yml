@@ -154,6 +154,16 @@ jobs:
           test -x "${GLOBAL_BIN_DIR}/sfn"
           file -L "${GLOBAL_BIN_DIR}/sfn" | grep -E '${{ matrix.file_pattern }}'
           test "$("${GLOBAL_BIN_DIR}/sfn" --version)" = "sfn ${SEED_VERSION}"
+          # Conditional, unlike the Windows twin: a symlinked global command
+          # resolves its runtime root through the link into the version store,
+          # so no mirror is written and none should be asserted. It is only the
+          # copy fallback (a filesystem without symlinks) that needs the
+          # adjacent runtime/ beside it, for the reason in install.sh
+          # (SFN-1124). Guards the mirror against silent removal (SFN-1125).
+          if [ ! -L "${GLOBAL_BIN_DIR}/sfn" ]; then
+            test -d "${GLOBAL_BIN_DIR}/runtime" \
+              || { echo "::error::copied global command has no adjacent runtime mirror"; exit 1; }
+          fi
           empty_dir="${RUNNER_TEMP}/sailfin-empty-cwd"
           mkdir -p "$empty_dir"
           cd "$empty_dir"
@@ -298,6 +308,15 @@ jobs:
           $sailfin = Join-Path $env:GLOBAL_BIN_DIR "sailfin.exe"
           if (-not (Test-Path $sfn) -or -not (Test-Path $sailfin)) {
             throw "Expected sfn.exe and sailfin.exe in $env:GLOBAL_BIN_DIR"
+          }
+          # A copied executable resolves its runtime root from its OWN
+          # directory, so the adjacent runtime\ mirror is load-bearing, not
+          # legacy compatibility. Without it the installed compiler contributes
+          # no prelude globals and cannot compile the standard library
+          # (SFN-1124). Asserted here so a future cleanup of the mirror fails
+          # loudly instead of silently reopening that (SFN-1125).
+          if (-not (Test-Path (Join-Path $env:GLOBAL_BIN_DIR "runtime"))) {
+            throw "Expected adjacent runtime mirror in $env:GLOBAL_BIN_DIR"
           }
           & $sfn --version
           $emptyDir = Join-Path $env:RUNNER_TEMP "sailfin-empty-cwd"
