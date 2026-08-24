@@ -73,14 +73,20 @@ fn _capture_first_line(argv: string[], child_env: string[]) -> string ![io] {
 // Can the oracle actually COMPILE, as opposed to merely launch (SFN-1114)?
 //
 // `--version` alone was the whole probe, and it answers a weaker question than
-// the callers ask. Measured on a native Windows host: clang 22 runs fine and
-// reports `Target: x86_64-pc-windows-msvc`, then fails on a bare
-// `#include <stdlib.h>` — Windows SDK 10.0.26100's `ucrt/stdlib.h` declares an
-// anonymous `_LDOUBLE` struct this clang rejects. Nothing in the toolchain is
-// missing and nothing Sailfin does is wrong; the two vendored halves of the
-// host C toolchain simply do not agree. Sailfin's own build never notices,
-// because it uses clang as an assembler and linker over emitted IR and
-// includes no libc headers at all.
+// the callers ask. The gap was observed on a native Windows host: clang 22 ran
+// fine and reported `Target: x86_64-pc-windows-msvc`, then failed on a bare
+// `#include <stdlib.h>`, because a Windows SDK 10.0.26100 `ucrt/stdlib.h`
+// declared an anonymous `_LDOUBLE` struct that clang rejected. Nothing in the
+// toolchain was missing and nothing Sailfin does is wrong; the two vendored
+// halves of a host C toolchain can simply disagree. Sailfin's own build never
+// notices, because it uses clang as an assembler and linker over emitted IR
+// and includes no libc headers at all.
+//
+// State it as an instance, not a standing property of that clang or that SDK:
+// the same host later compiled the probe cleanly with an unchanged clang
+// version, so the disagreement is a moving target between vendored halves
+// rather than a fixed pairing anyone can pin. That is the argument FOR probing
+// capability instead of hardcoding a known-bad version.
 //
 // So the probe compiles a translation unit that includes the two headers every
 // harness here uses. `-fsyntax-only` keeps it to a parse — no object, no link,
