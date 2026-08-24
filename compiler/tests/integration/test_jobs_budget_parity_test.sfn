@@ -41,7 +41,7 @@
 // the exact-MiB-boundary test further down pins directly — that is the one a
 // new constant can break.
 import { int_to_string, parse_int, trim } from "sfn/strings";
-import { skip, tool_present } from "sfn/test";
+import { host_is_windows, skip, tool_present } from "sfn/test";
 
 import { _resolve_auto_test_jobs, _test_jobs_budget } from "../../src/cli/commands/test/arg_and_jobs";
 
@@ -268,6 +268,26 @@ test "test-jobs budget: the no-argument form agrees with the native host probe (
         Result.Err { error } => { jobs = -1; }
     }
     let native = _resolve_auto_test_jobs();
+    // On a Windows shell the two probes are DESIGNED to disagree, so parity
+    // is not the contract there and asserting it fails for a reason that is
+    // not a defect (SFN-1115). They size different execution mechanisms:
+    // `detect_test_jobs.sh` sizes a pool driven by `xargs -P`, which it
+    // documents as unreliable under MSYS/Cygwin/Git Bash and therefore
+    // forces to 1 (`scripts/detect_test_jobs.sh:165`), while
+    // `_resolve_auto_test_jobs` sizes the native runner's own pool from real
+    // host RAM and correctly returns more. Measured on a native Windows
+    // host: script=1, native=6.
+    //
+    // Asserting the documented relationship rather than skipping keeps this
+    // test live on Windows instead of dormant. The twin's Windows floor
+    // itself stays pinned by the sibling test above, which drives the
+    // injected `MINGW64_NT`/`MSYS_NT`/`CYGWIN_NT` uname values directly.
+    if host_is_windows() {
+        assert jobs == 1;
+        assert native >= 1;
+        assert native <= 16;
+        return;
+    }
     if jobs != native {
         print.info("test-jobs parity: no-arg script=" + int_to_string(jobs)
             + " native probe="
