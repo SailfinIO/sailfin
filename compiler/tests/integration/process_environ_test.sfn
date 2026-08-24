@@ -64,13 +64,27 @@ test "process.environ: includes PATH with the value env.get reports" ![io] {
 
 test "process.environ: snapshot propagates a parent variable to a spawned child" ![io] {
     // End-to-end inheritance shape: a child spawned with the full
-    // environ snapshot sees the parent's PATH — the exact pattern the
-    // post-pin `_pool_env_snapshot` migration (scoped out of #1242)
-    // will rely on.
-    let expected = env.get("PATH");
-    assert expected.length > 0;
-    let snapshot = process.environ();
-    let id = process.spawn_with_env(["printenv", "PATH"], snapshot);
+    // environ snapshot sees a variable the parent placed in it — the
+    // exact pattern the post-pin `_pool_env_snapshot` migration (scoped
+    // out of #1242) will rely on.
+    //
+    // The probe variable is synthetic rather than PATH, and that is
+    // load-bearing rather than incidental (SFN-1115). On a native
+    // Windows host `printenv` is the MSYS2 build, which rewrites
+    // path-shaped variables into POSIX form on the way out: the parent
+    // holds `C:\...\build\bin;C:\...` while the child prints
+    // `/c/.../build/bin:/c/...` — different separators AND different
+    // slashes, so an equality check against `env.get("PATH")` compares
+    // a Windows-form value against a translated one and fails for a
+    // reason that has nothing to do with environment propagation. A
+    // variable MSYS2 does not recognise as a path round-trips
+    // byte-for-byte, so it tests the propagation contract and nothing
+    // else.
+    let probe = "SFN_ENVIRON_PROBE";
+    let expected = "propagated-snapshot-value";
+    let mut snapshot = process.environ();
+    snapshot.push(probe + "=" + expected);
+    let id = process.spawn_with_env(["printenv", probe], snapshot);
     assert id != 0;
     process.handle_close_stdin(id);
     let out = process.handle_read_stdout(id);
