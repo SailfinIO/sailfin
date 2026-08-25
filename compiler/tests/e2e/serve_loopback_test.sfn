@@ -42,6 +42,8 @@ import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
     Background,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_path,
     wait_until,
     with_background
@@ -387,8 +389,7 @@ fn _write_fetch_client(port_str: string) -> string ![io] {
 // "" on a build failure.
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("serve-loopback build", exit);
     if exit != 0 { return ""; }
     return bin;
 }
@@ -536,7 +537,8 @@ test "serve loopback: macOS request delivery + framed behavioral round-trips" ![
         assert client_bin.length > 0;
         let fexit = process.run_capture([client_bin], _child_env());
         let fout = process.capture_take_stdout();
-        let _ferr = process.capture_take_stderr();
+        let ferr = process.capture_take_stderr();
+        report_child_failure("serve-loopback fetch-client run", fexit, fout, ferr);
         print.info("[serve-loopback] fetch-client: " + fout);
         assert fexit == 0;
         assert contains(fout, "FETCH_STATUS=403");

@@ -36,6 +36,8 @@ import {
 import {
     clean_runner_env,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     run_external_c_oracle,
     sfn_bin_path
 } from "sfn/test";
@@ -58,8 +60,7 @@ fn _emit_module(tag: string, module_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let outpath = dir + "/" + tag + ".ll";
     let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-rc emit " + tag, exit);
     if exit != 0 { return "EMIT_FAILED"; }
     return fs.readFile(outpath);
 }
@@ -150,14 +151,14 @@ test "runtime/sfn/memory/rc.sfn typechecks cleanly" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "check", "runtime/sfn/memory/rc.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("runtime-memory-rc check", exit, out, err);
     assert exit == 0;
     assert find(out + err, "ok", 0) >= 0;
 }
 
 test "runtime/sfn/memory/rc.sfn is fmt-canonical" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", "runtime/sfn/memory/rc.sfn"], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-rc fmt", exit);
     assert exit == 0;
 }
 
@@ -241,15 +242,13 @@ test "rc roundtrip: alloc -> retain -> release -> release frees exactly once" ![
     let dir = _scratch_dir();
     let ll = dir + "/rc.ll";
     let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", "runtime/sfn/memory/rc.sfn"], _child_env());
-    let _eo = process.capture_take_stdout();
-    let _ee = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-rc roundtrip emit", emit_exit);
     assert emit_exit == 0;
 
     let tm_ll = dir + "/type_meta.ll";
     let tm_o = dir + "/type_meta.o";
     let tm_emit = process.run_capture([sfn_bin_path(), "emit", "-o", tm_ll, "llvm", "runtime/sfn/type_meta.sfn"], _child_env());
-    let _to = process.capture_take_stdout();
-    let _te = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-rc roundtrip emit-type-meta", tm_emit);
     assert tm_emit == 0;
     let tm_cc = run_external_c_oracle(["-Wno-override-module", "-c", tm_ll, "-o", tm_o]);
     let _co = process.capture_take_stdout();
@@ -266,7 +265,6 @@ test "rc roundtrip: alloc -> retain -> release -> release frees exactly once" ![
     assert link_exit == 0;
 
     let run_exit = process.run_capture([bin], _child_env());
-    let _ro = process.capture_take_stdout();
-    let _re = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-rc roundtrip run", run_exit);
     assert run_exit == 0;
 }

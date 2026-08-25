@@ -38,7 +38,13 @@
 // `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
-import { clean_runner_env_without, scratch_root, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env_without,
+    report_child_failure,
+    report_child_failure_pending,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
 
 import { build_target_triple, target_artifact_tag } from "../../src/build/target";
 
@@ -123,6 +129,38 @@ fn _setup_workspace(ws: string) ![io] {
     _copy("runtime/sfn/platform/fd_io.sfn", ws
         + "/runtime/sfn/platform/fd_io.sfn");
 
+    // SFN-1115: stage the Windows half of the runtime platform set too.
+    // On a native Windows host `target_condition_runtime_sfn_sources`
+    // (`compiler/src/build/target.sfn`) rewrites the `fd_io.sfn` entry to
+    // `fd_io_windows.sfn` AND — because any platform entry anchors its
+    // `platform_dir` — unconditionally appends eight Windows-only modules
+    // that have no POSIX counterpart to swap from. `sfn emit` hard-fails on
+    // a missing source, so a fixture staging only the POSIX half dies with
+    // `file not found` before a single module is compiled.
+    //
+    // Copied unconditionally rather than behind `host_is_windows()`: an
+    // unreferenced extra file costs one copy on POSIX and keeps the staged
+    // tree identical on every host. Keep this list in step with that
+    // function's append block.
+    _copy("runtime/sfn/platform/fd_io_windows.sfn", ws
+        + "/runtime/sfn/platform/fd_io_windows.sfn");
+    _copy("runtime/sfn/platform/realpath_windows.sfn", ws
+        + "/runtime/sfn/platform/realpath_windows.sfn");
+    _copy("runtime/sfn/platform/clock_windows.sfn", ws
+        + "/runtime/sfn/platform/clock_windows.sfn");
+    _copy("runtime/sfn/platform/pthread_windows.sfn", ws
+        + "/runtime/sfn/platform/pthread_windows.sfn");
+    _copy("runtime/sfn/platform/popen_windows.sfn", ws
+        + "/runtime/sfn/platform/popen_windows.sfn");
+    _copy("runtime/sfn/platform/mkstemp_windows.sfn", ws
+        + "/runtime/sfn/platform/mkstemp_windows.sfn");
+    _copy("runtime/sfn/platform/strcasestr_windows.sfn", ws
+        + "/runtime/sfn/platform/strcasestr_windows.sfn");
+    _copy("runtime/sfn/platform/opendir_windows.sfn", ws
+        + "/runtime/sfn/platform/opendir_windows.sfn");
+    _copy("runtime/sfn/platform/mkdtemp_windows.sfn", ws
+        + "/runtime/sfn/platform/mkdtemp_windows.sfn");
+
     // The struct-defining sibling. Returned by value across the module
     // boundary — the case an inline `extern fn` cannot express (E0805).
     fs.writeFile(ws + "/runtime/sfn/structlib.sfn", "struct Pair {\n"
@@ -181,6 +219,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let log = out + err;
+    report_child_failure("runtime-sfn-sources-struct-import build positive", exit, out, err);
 
     // The pre-#1288 lowering fatal must not appear, and the build must
     // exit 0 (the authoritative signal).
@@ -225,8 +264,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     let use_ll = build_dir + "/sailfin/structuse-reemit.ll";
     let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", use_ll, "--import-context", ctx, "llvm", ws
         + "/runtime/sfn/structuse.sfn"], _child_env_with(no_extra));
-    let _eo = process.capture_take_stdout();
-    let _ee = process.capture_take_stderr();
+    report_child_failure_pending("runtime-sfn-sources-struct-import emit reemit", emit_exit);
     assert emit_exit == 0;
     let ir = fs.readFile(use_ll);
     // `call %Pair @pair_new` or `call %Pair* @pair_new` (sret form).
@@ -237,6 +275,7 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     let run_exit = process.run_capture([bin], _child_env_with(no_extra));
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();
+    report_child_failure("runtime-sfn-sources-struct-import run", run_exit, run_out, run_err);
     assert run_exit == 0;
     assert find(run_out + run_err, "struct-roundtrip-ok", 0) >= 0;
 }

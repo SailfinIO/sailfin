@@ -32,6 +32,8 @@ import {
     clean_runner_env,
     default_scratch_dir,
     nested_runner_scratch,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_abs_path
 } from "sfn/test";
 
@@ -185,6 +187,7 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let first_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
     let first_out = process.capture_take_stdout();
     let first_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate build 1", first_exit, first_out, first_err);
     assert first_exit == 0;
     assert fs.exists(repo + "/build/bin/sfn");
     assert fs.is_executable(repo + "/build/bin/sfn");
@@ -197,6 +200,7 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let second_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
     let second_out = process.capture_take_stdout();
     let second_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate build 2", second_exit, second_out, second_err);
     assert second_exit == 0;
     assert find(second_out + second_err, "is up to date", 0) >= 0;
     assert _marker_count(marker) == 1;
@@ -206,6 +210,7 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let third_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
     let third_out = process.capture_take_stdout();
     let third_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate build 3", third_exit, third_out, third_err);
     assert third_exit == 0;
     assert _marker_count(marker) == 2;
     assert find(third_out + third_err, "is up to date", 0) < 0;
@@ -216,14 +221,14 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let capsule_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
     let capsule_out = process.capture_take_stdout();
     let capsule_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate build capsule-edit", capsule_exit, capsule_out, capsule_err);
     assert capsule_exit == 0;
     assert _marker_count(marker) == 3;
     assert find(capsule_out + capsule_err, "is up to date", 0) < 0;
 
     // 5. --force re-invokes the seed even on an unchanged tree.
     let fourth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--force"], child_env, repo);
-    let _fourth_out = process.capture_take_stdout();
-    let _fourth_err = process.capture_take_stderr();
+    report_child_failure_pending("bootstrap-install-gate build force", fourth_exit);
     assert fourth_exit == 0;
     assert _marker_count(marker) == 4;
 
@@ -234,8 +239,7 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     fs.writeFile(fresh, "#!/bin/sh\necho fresh-stub-version\nexit 0\n");
     process.run(["chmod", "+x", fresh]);
     let fifth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install", "--from", fresh], child_env, repo);
-    let _fifth_out = process.capture_take_stdout();
-    let _fifth_err = process.capture_take_stderr();
+    report_child_failure_pending("bootstrap-install-gate install fresh", fifth_exit);
     assert fifth_exit == 0;
     let installed_after_fifth = fs.readFile(repo + "/build/bin/sfn");
     assert installed_after_fifth == fs.readFile(fresh);
@@ -278,8 +282,7 @@ test "bootstrap install gate: a malformed .pending is treated as no snapshot, no
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_malformed_pending"));
 
     let install_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install"], child_env, repo);
-    let _install_out = process.capture_take_stdout();
-    let _install_err = process.capture_take_stderr();
+    report_child_failure_pending("bootstrap-install-gate install malformed-pending", install_exit);
     assert install_exit == 0;
     assert fs.exists(repo + "/build/bin/sfn");
     assert fs.is_executable(repo + "/build/bin/sfn");
@@ -306,14 +309,16 @@ test "bootstrap install gate: a matching raw-v1 pending digest is never promoted
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_raw_v1"));
     let fp_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "fingerprint", "compiler/src", "compiler/capsules", "runtime"], child_env, repo);
     let raw_v1 = process.capture_take_stdout();
-    let _fp_err = process.capture_take_stderr();
+    let fp_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate fingerprint raw-v1", fp_exit, raw_v1, fp_err);
     assert fp_exit == 0;
     assert raw_v1.length == 65;
     fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", raw_v1);
 
     let install_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install"], child_env, repo);
     let install_out = process.capture_take_stdout();
-    let _install_err = process.capture_take_stderr();
+    let install_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate install raw-v1", install_exit, install_out, install_err);
     assert install_exit == 0;
     assert fs.exists(repo + "/build/bin/sfn");
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint");
@@ -339,8 +344,7 @@ test "bootstrap install gate: a failed build leaves the installed binary and fin
     // Establish a real installed binary and recorded fingerprint first, so
     // there is something to check for corruption.
     let setup_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
-    let _setup_out = process.capture_take_stdout();
-    let _setup_err = process.capture_take_stderr();
+    report_child_failure_pending("bootstrap-install-gate build setup-failed-build", setup_exit);
     assert setup_exit == 0;
     let installed_before = fs.readFile(repo + "/build/bin/sfn");
     let fingerprint_before = fs.readFile(repo
@@ -380,8 +384,7 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
     // Establish a real installed binary and recorded fingerprint first, so
     // there is something to check for corruption.
     let setup_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
-    let _setup_out = process.capture_take_stdout();
-    let _setup_err = process.capture_take_stderr();
+    report_child_failure_pending("bootstrap-install-gate build setup-unrunnable", setup_exit);
     assert setup_exit == 0;
     let installed_before = fs.readFile(repo + "/build/bin/sfn");
     let fingerprint_before = fs.readFile(repo

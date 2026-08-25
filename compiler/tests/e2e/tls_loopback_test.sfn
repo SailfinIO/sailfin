@@ -46,6 +46,7 @@ import { contains, find } from "sfn/strings";
 import {
     Background,
     default_scratch_dir,
+    report_child_failure_pending,
     sfn_bin_path,
     tool_present,
     wait_until,
@@ -207,8 +208,7 @@ fn _gen_cert(dir: string, san_host: string) -> boolean ![io] {
         + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN="
         + san_host, "-addext", "subjectAltName=DNS:"
         + san_host], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("tls-loopback cert-gen", exit);
     return exit == 0;
 }
 
@@ -318,8 +318,7 @@ fn _write_client(dir: string, url: string, out_path: string) -> string ![io] {
 // parent environment (the nested build links via clang + ld).
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("tls-loopback build", exit);
     if exit != 0 { return ""; }
     return bin;
 }
@@ -358,8 +357,7 @@ fn _await_plain_listening() -> boolean ![clock, io, net] {
 fn _client_body(client_bin: string, run_env: string[], out_path: string) -> string ![io] {
     let _rm = process.run(["rm", "-f", out_path]);
     let cexit = process.run_capture([client_bin], run_env);
-    let _co = process.capture_take_stdout();
-    let _ce = process.capture_take_stderr();
+    report_child_failure_pending("tls-loopback client body run", cexit);
     if cexit != 0 { return ""; }
     if !fs.exists(out_path) { return ""; }
     return fs.readFile(out_path);
@@ -374,8 +372,7 @@ fn _client_body(client_bin: string, run_env: string[], out_path: string) -> stri
 fn _client_exit(client_bin: string, run_env: string[], out_path: string) -> i64 ![io] {
     let _rm = process.run(["rm", "-f", out_path]);
     let cexit = process.run_capture([client_bin], run_env);
-    let _co = process.capture_take_stdout();
-    let _ce = process.capture_take_stderr();
+    report_child_failure_pending("tls-loopback client exit run", cexit);
     return cexit;
 }
 

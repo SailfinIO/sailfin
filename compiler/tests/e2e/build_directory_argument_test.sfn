@@ -1,0 +1,104 @@
+// compiler/tests/e2e/build_directory_argument_test.sfn
+//
+// Regression for the input-path fail-open in `compiler/src/cli/commands/
+// build.sfn` (SFN-1115). `fs.exists` answers true for a directory and
+// `fs.readFile` on one yields an empty string rather than failing, so a
+// directory argument used to compile an EMPTY module all the way to a link.
+// The link then failed for want of a `main` — on Windows as `lld-link:
+// error: subsystem must be defined` — and the driver reported that as an
+// internal compiler error, complete with the "file a report" URL.
+//
+// That is the precise inversion the ICE banner exists to avoid: a mistyped
+// path is user error, while the ICE path is reserved for backend failures on
+// IR the compiler actually emitted from real source (see
+// `ice_banner_test.sfn`, SFEP-0037 §3.2). The assertion that matters is
+// therefore not merely "exits non-zero" — the buggy build did too — but
+// "exits non-zero WITHOUT claiming a compiler bug".
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`: drives the compiler via
+// `process.run_capture` and asserts on the captured streams.
+import { find } from "sfn/strings";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
+
+// Both streams joined. The user-facing refusal is printed on stdout by the
+// driver's `print`, while the ICE banner it must NOT emit goes to stderr, so
+// a single-stream assertion could pass while the other stream carried the
+// wrong thing.
+fn _both_streams() -> string ![io] {
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + "\n" + err;
+}
+
+test "build: a directory argument is refused as user error, not an ICE" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        // A directory holding a perfectly valid source file: the refusal must
+        // rest on the argument being a directory, not on anything being wrong
+        // with what is inside it.
+        let sub = dir + "/srcdir";
+        fs.createDirectory(sub, true);
+        fs.writeFile(sub + "/a.sfn", "fn main() -> int {\n    return 0;\n}\n");
+
+        let child_env = clean_runner_env(nested_runner_scratch("build-dir-arg"));
+        let exit = process.run_capture([sfn_bin_path(), "build", "--skip-toolchain-check", sub], child_env);
+        let text = _both_streams();
+
+        assert exit != 0;
+        assert find(text, "is a directory", 0) >= 0;
+        // The whole point: no compiler-bug claim, and no invitation to file
+        // one, for what is an ordinary bad argument.
+        assert find(text, "internal compiler error", 0) < 0;
+        assert find(text, "issues/new?template=ice.md", 0) < 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "build: a missing path is still refused as file not found" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let child_env = clean_runner_env(nested_runner_scratch("build-missing-arg"));
+        let exit = process.run_capture([sfn_bin_path(), "build", "--skip-toolchain-check", dir + "/nope.sfn"], child_env);
+        let text = _both_streams();
+
+        // The pre-existing `fs.exists` rung still owns the missing-path case;
+        // the directory guard sits after it and must not have shadowed it.
+        assert exit != 0;
+        assert find(text, "file not found", 0) >= 0;
+        assert find(text, "is a directory", 0) < 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "emit: a directory argument is refused instead of writing an empty module" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let sub = dir + "/srcdir";
+        fs.createDirectory(sub, true);
+        fs.writeFile(sub + "/a.sfn", "fn main() -> int {\n    return 0;\n}\n");
+        let out = dir + "/out.ll";
+
+        // `emit` carries no toolchain gate, so no `--skip-toolchain-check`
+        // here — the flag is registered on `build` alone.
+        let child_env = clean_runner_env(nested_runner_scratch("emit-dir-arg"));
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out, "llvm", sub], child_env);
+        let text = _both_streams();
+
+        // The `emit` variant was strictly worse than the `build` one: with no
+        // link stage to trip over the missing `main`, a directory argument
+        // exited 0 having written a 144-line module containing one `define`
+        // and no user code. Exit status is therefore the load-bearing
+        // assertion — a consuming script had nothing else to notice.
+        assert exit != 0;
+        assert find(text, "is a directory", 0) >= 0;
+        // And no artifact: a refused emit that still left a file behind would
+        // hand the same bogus `.ll` to anything reading the path.
+        assert !fs.exists(out);
+        return 0;
+    });
+    assert code == 0;
+}

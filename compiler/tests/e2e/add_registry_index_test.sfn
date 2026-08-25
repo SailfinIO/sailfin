@@ -27,6 +27,8 @@ import {
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_abs_path,
     sfn_bin_path,
     wait_until,
@@ -37,7 +39,8 @@ import {
 fn _pwd() -> string ![io] {
     let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("add-registry-index pwd", exit, out, err);
     if exit != 0 { return ""; }
     return _first_line(out);
 }
@@ -173,8 +176,7 @@ fn _fixture_build_env() -> string[] ![io] { return process.environ(); }
 
 fn _build_fixture_bin(main_path: string, bin: string) -> string ![io] {
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _fixture_build_env());
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("add-registry-index build", exit);
     if exit != 0 { return ""; }
     return bin;
 }

@@ -24,7 +24,12 @@ import {
     tensor_parameter,
     tensor_reduce_sum
 } from "sfn/ir";
-import { clean_runner_env, snapshot_match_in, with_tmp_dir } from "sfn/test";
+import {
+    clean_runner_env,
+    report_child_failure_pending,
+    snapshot_match_in,
+    with_tmp_dir
+} from "sfn/test";
 
 // The child env is derived by subtraction from the real environment, not
 // assembled key by key (SFN-1114). No nested scratch: this emitter never
@@ -91,8 +96,7 @@ test "stablehlo emit: emitted text round-trips through stablehlo-opt when presen
         let path = dir + "/spike.mlir";
         fs.writeFile(path, text);
         let rc = process.run_capture([tool, path], _child_env());
-        let _o = process.capture_take_stdout();
-        let _e = process.capture_take_stderr();
+        report_child_failure_pending("tensor-ir-stablehlo roundtrip", rc);
         return rc;
     });
     assert exit == 0;

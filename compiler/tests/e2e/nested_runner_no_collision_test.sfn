@@ -22,6 +22,7 @@ import { find } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
+    report_child_failure,
     sfn_bin_path,
     with_tmp_dir
 } from "sfn/test";
@@ -59,7 +60,8 @@ test "nested runner: inner sfn test reports correct counts on its own" ![io] {
         // that it reports its own correct counts.
         let exit = process.run_capture([sfn_bin_path(), "test", inner_path, "--json"], clean_runner_env(nested_runner_scratch("inner-direct")));
         let out = process.capture_take_stdout();
-        let _ = process.capture_take_stderr();
+        let err = process.capture_take_stderr();
+        report_child_failure("nested-runner-no-collision inner-direct run", exit, out, err);
         assert exit == 0;
         assert find(out, "\"passed\":2", 0) >= 0;
         assert find(out, "\"failed\":0", 0) >= 0;
@@ -78,6 +80,7 @@ test "nested runner: outer sfn test whose body spawns a nested sfn test reports 
         let exit = process.run_capture([sfn_bin_path(), "test", outer_path, "--json"], clean_runner_env(nested_runner_scratch("outer-top")));
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
+        report_child_failure("nested-runner-no-collision outer-top run", exit, out, err);
         let combined = out + err;
 
         // The OUTER run's own single test passed — which only happens if

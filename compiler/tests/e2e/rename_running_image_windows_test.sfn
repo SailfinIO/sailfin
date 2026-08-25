@@ -23,7 +23,12 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
 // unusable from an `![io]` test (#842); assert directly on values instead.
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure_pending,
+    sfn_bin_path
+} from "sfn/test";
 
 // Declared directly rather than resolved through the compiler under
 // test: calling the runtime symbol as an extern lets this test prove the
@@ -94,8 +99,7 @@ fn _build_fixture(dir: string, name: string, src_text: string, label: string) ->
     let bin = dir + "/" + name + ".exe";
     fs.writeFile(src, src_text);
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch(label)));
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("rename-running-image build " + name, exit);
     if exit != 0 { return ""; }
     return bin;
 }

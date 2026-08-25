@@ -1,0 +1,248 @@
+// Guard for two idioms that are silently wrong on a native Windows host,
+// both observed as real regressions rather than hypothesized:
+//
+// SFN-1128 — a bare relative literal `"build/bin/sfn"` spelled directly in
+// argv[0] of a spawn call. The Windows binary is `sfn.exe`, so the spawn
+// finds nothing; `run_capture` returns exit code `-1` with both streams
+// empty, and the child never runs. That `-1` is nonzero, so a plain
+// `assert exit_code != 0` passes deceptively before the test dies a line
+// later on an empty stdout/stderr string. This broke 16 integration tests.
+// Fix: spawn through `sfn_bin_path()` / `sfn_bin_abs_path()` (`sfn/test`,
+// `capsules/sfn/test/src/sfn_bin.sfn`), which resolve the `.exe` suffix.
+//
+// SFN-1129 — shelling out to `sh -c`/`bash -c` purely to expand an
+// environment variable via `echo $NAME`. On a native Windows host the shell
+// returns the unexpanded literal `$NAME` — five characters for `$PATH`, so
+// an emptiness guard cannot detect the failure, and whatever consumes the
+// captured value is silently handed a literal `$NAME` string. Fix: read the
+// variable directly with `env.get("NAME")`.
+//
+// Both targets are zero today, with no allowlist — this is a ratchet
+// against the idioms as written, not a proof of absence: a determined
+// author can still evade the argv[0] check with a `["env", "build/bin/sfn",
+// ...]` head or a variable built up piecemeal, and can evade the shell
+// check by naming the shell some other way. Those are worth adding the day
+// one appears; guessing at them now would trade real false-positive risk
+// for hypothetical coverage.
+//
+// Needles are built by runtime concatenation rather than as contiguous
+// literals, so no line of this file is itself a match — that is what lets
+// the guard scan its own source along with every other test.
+import {
+    contains,
+    int_to_string,
+    split,
+    trim
+} from "sfn/strings";
+
+fn _tests_root() -> string { return "compiler/tests"; }
+
+// Recursively collect `.sfn` files under a directory. Mirrors the walk in
+// no_shell_tool_probe_test.sfn: fs.listDirectory is non-recursive, so a path
+// whose listing has entries is treated as a directory and descended into; a
+// zero-entry listing is treated as a file.
+fn _collect_test_files(dir: string, acc: string[]) -> string[] ![io] {
+    let mut out = acc;
+    if !fs.exists(dir) { return out; }
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i = i + 1;
+        if name == "." || name == ".." { continue; }
+        let full = dir + "/" + name;
+        let sub = fs.listDirectory(full);
+        if sub.length > 0 { out = _collect_test_files(full, out); } else if _ends_with_test_sfn(name) {
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+fn _ends_with_test_sfn(name: string) -> boolean {
+    let suffix = "_test.sfn";
+    if name.length < suffix.length { return false; }
+    let start = name.length - suffix.length;
+    return substring(name, start, name.length) == suffix;
+}
+
+// The bare relative compiler-binary literal, spelled via concatenation so
+// this file does not match its own guard.
+fn _bare_compiler_literal() -> string { return "build/bin" + "/sfn"; }
+
+// One of the three spawn-argv0 forms this guard flags: `process.run_capture`,
+// `process.run_capture_cwd`, or `process.run`, each opening its argv with the
+// bare relative literal — with or without whitespace after `(["`. The
+// literal appears legitimately elsewhere in the tree as pure data (helper
+// arguments, struct fields, a non-first `tar` argument); anchoring on the
+// opening `(["` immediately before the literal excludes all of those.
+fn _has_bare_compiler_argv0(line: string) -> boolean {
+    let literal = _bare_compiler_literal();
+    let capture = "run_capture([\"" + literal;
+    let capture_spaced = "run_capture([ \"" + literal;
+    let capture_cwd = "run_capture_cwd([\"" + literal;
+    let capture_cwd_spaced = "run_capture_cwd([ \"" + literal;
+    let run = "process.run([\"" + literal;
+    let run_spaced = "process.run([ \"" + literal;
+    if contains(line, capture) { return true; }
+    if contains(line, capture_spaced) { return true; }
+    if contains(line, capture_cwd) { return true; }
+    if contains(line, capture_cwd_spaced) { return true; }
+    if contains(line, run) { return true; }
+    if contains(line, run_spaced) { return true; }
+    return false;
+}
+
+// A shell argv head that starts a `-c` invocation — a quoted `sh` or `bash`
+// followed by a quoted `-c`, with or without a space after the comma. Reused
+// verbatim from no_shell_tool_probe_test.sfn, spelled via concatenation for
+// the same self-scanning reason.
+fn _has_shell_argv_head(line: string) -> boolean {
+    let needle_sh = "\"sh\"," + " \"-c\"";
+    let needle_sh_tight = "\"sh\"," + "\"-c\"";
+    let needle_bash = "\"bash\"," + " \"-c\"";
+    let needle_bash_tight = "\"bash\"," + "\"-c\"";
+    if contains(line, needle_sh) { return true; }
+    if contains(line, needle_sh_tight) { return true; }
+    if contains(line, needle_bash) { return true; }
+    if contains(line, needle_bash_tight) { return true; }
+    return false;
+}
+
+// A shell-level `$NAME` variable expansion inside an `echo` invocation.
+fn _has_echo_dollar(line: string) -> boolean {
+    let needle = "echo" + " $";
+    return contains(line, needle);
+}
+
+// Collapse every run of whitespace to a single space.
+//
+// `compiler/tests` is deliberately outside the CI `sfn fmt --check` roots
+// (`scripts/module_layout_fingerprint.sh --maintainer-sources` lists only
+// `compiler/src`, the five `compiler/capsules/*/src` trees, and `runtime/`).
+// The formatter collapses a hand-wrapped argv array back onto one line, but
+// nothing runs it over the test tree — so a manually wrapped spawn survives
+// indefinitely, and a per-line scan alone would never see it. Normalizing
+// the whole file and requiring the tokens to stay adjacent closes that
+// without widening the match: adjacency means an unrelated mention
+// elsewhere in the same file cannot combine into a false positive.
+fn _collapse_whitespace(text: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    let mut in_space = false;
+    loop {
+        if i >= text.length { break; }
+        let ch = text[i];
+        i = i + 1;
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            if !in_space { out = out + " "; }
+            in_space = true;
+            continue;
+        }
+        in_space = false;
+        out = out + ch;
+    }
+    return out;
+}
+
+test "windows host: no hardcoded compiler path in a spawn argv" ![io] {
+    let files = _collect_test_files(_tests_root(), []);
+    assert files.length > 0;
+
+    let mut offenders: string[] = [];
+    let mut fi = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        fi = fi + 1;
+
+        let body = fs.readFile(path);
+        let lines = split(body, "\n");
+        let mut li = 0;
+        let mut hit_on_a_line = false;
+        loop {
+            if li >= lines.length { break; }
+            let line = lines[li];
+            let line_no = li + 1;
+            li = li + 1;
+            if !_has_bare_compiler_argv0(line) { continue; }
+            hit_on_a_line = true;
+            offenders.push(path + ":" + int_to_string(line_no) + ": " + trim(line));
+        }
+        // The wrapped form carries no single line to point at, so it is
+        // reported against the file. Only checked when no line already
+        // matched, to avoid reporting the same site twice.
+        if hit_on_a_line { continue; }
+        // Gate the char-by-char rebuild on a cheap raw scan. Wrapping splits
+        // the call head from the literal but never splits the literal
+        // itself, so a file without it raw cannot hold a wrapped spawn.
+        // Without this early-out the rebuild would run over every test file.
+        if !contains(body, _bare_compiler_literal()) { continue; }
+        if _has_bare_compiler_argv0(_collapse_whitespace(body)) {
+            offenders.push(path
+                + ": bare compiler path in a spawn argv, spelled across wrapped lines");
+        }
+    }
+
+    if offenders.length > 0 {
+        let mut oi = 0;
+        loop {
+            if oi >= offenders.length { break; }
+            print.err(offenders[oi]);
+            oi = oi + 1;
+        }
+        print.err("fix: use sfn_bin_path() or sfn_bin_abs_path() from sfn/test — the Windows binary is sfn.exe, and a bare relative literal makes run_capture return -1 (child never spawned)");
+    }
+    assert offenders.length == 0;
+}
+
+test "windows host: no shell capture used to read an environment variable" ![io] {
+    let files = _collect_test_files(_tests_root(), []);
+    assert files.length > 0;
+
+    let mut offenders: string[] = [];
+    let mut fi = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        fi = fi + 1;
+
+        let body = fs.readFile(path);
+        // Same wrapping caveat as the spawn-argv guard above: an argv array
+        // hand-split across lines separates `"sh"` from `"-c"`, and nothing
+        // reformats the test tree. Fall back to the normalized form before
+        // concluding the file spawns no shell, gated on the cheap raw scan
+        // for the flag itself — wrapping never splits that one literal.
+        let mut spawns_shell = _has_shell_argv_head(body);
+        if !spawns_shell {
+            let quoted_dash_c = "\"-c" + "\"";
+            if contains(body, quoted_dash_c) {
+                spawns_shell = _has_shell_argv_head(_collapse_whitespace(body));
+            }
+        }
+        if !spawns_shell { continue; }
+
+        let lines = split(body, "\n");
+        let mut li = 0;
+        loop {
+            if li >= lines.length { break; }
+            let line = lines[li];
+            let line_no = li + 1;
+            li = li + 1;
+            if !_has_echo_dollar(line) { continue; }
+            offenders.push(path + ":" + int_to_string(line_no) + ": " + trim(line));
+        }
+    }
+
+    if offenders.length > 0 {
+        let mut oi = 0;
+        loop {
+            if oi >= offenders.length { break; }
+            print.err(offenders[oi]);
+            oi = oi + 1;
+        }
+        print.err("fix: read the variable directly with env.get(\"NAME\") — a shell capture returns the unexpanded literal $NAME on a native Windows host, which is non-empty and therefore silently passes an emptiness guard");
+    }
+    assert offenders.length == 0;
+}

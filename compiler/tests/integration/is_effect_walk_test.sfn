@@ -12,6 +12,8 @@
 // check` as a subprocess (matching the style of
 // `compiler/tests/integration/undefined_function_check_test.sfn`) so it
 // exercises the full parse → typecheck → effect-check → render pipeline.
+import { sfn_bin_path } from "sfn/test";
+
 fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if needle.length > haystack.length { return false; }
@@ -34,14 +36,14 @@ fn _mint_fixture(name: string, source: string) -> string ![io] {
 }
 
 fn _check_output(path: string) -> string ![io] {
-    let _rc = process.run_capture(["build/bin/sfn", "check", path], []);
+    let _rc = process.run_capture([sfn_bin_path(), "check", path], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return out + err;
 }
 
 fn _check_exit(path: string) -> i64 ![io] {
-    let rc = process.run_capture(["build/bin/sfn", "check", path], []);
+    let rc = process.run_capture([sfn_bin_path(), "check", path], []);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return rc;

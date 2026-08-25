@@ -4,17 +4,48 @@
 // `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
 // for a Windows target — `mkstemp(3)` is a bare libc symbol on POSIX, not
 // a Sailfin-authored module, so — like `realpath_windows.sfn` — there is
-// no POSIX `.sfn` module to swap FROM. `compiler/src/build/fs.sfn:32`
+// no POSIX `.sfn` module to swap FROM. `compiler/src/build/fs.sfn:38`
 // declares `extern fn mkstemp(template: *u8) -> i32;` for the staging
-// path's temp-mint (`_mktemp_from_template_cmd`, `fs.sfn:92-116`); this
+// path's temp-mint (`_mktemp_from_template_cmd`, `fs.sfn:170`); this
 // module satisfies that symbol at the Windows link.
 //
-// MSVC UCRT has no single `mkstemp` call — it composes from two: `_mktemp_s`
-// rewrites the trailing `XXXXXX` of `template` into a unique name in
-// place (mirroring POSIX `mkstemp`'s in-place rewrite contract), then
-// `_open` creates the file `_O_CREAT|_O_EXCL|_O_RDWR` so a racing process
-// cannot win the same name — the same exclusivity guarantee
-// `_mktemp_from_template_cmd` relies on the real `mkstemp` for.
+// NOT `_mktemp_s`, which this used originally. MSVC UCRT has no single
+// `mkstemp` call, and `_mktemp_s` looked like the closest half of one: it
+// rewrites the trailing `XXXXXX` of `template` in place, mirroring POSIX
+// `mkstemp`'s in-place rewrite contract. But its generator is a bare
+// `<letter><pid>` sequence that probes the filesystem and hands back the
+// LOWEST free letter, so once a previously minted temp is removed the very
+// next mint in that directory returns the IDENTICAL path. Measured on a
+// native Windows host, three mints in one process against one directory:
+//
+//   mint A                        -> .sfn_stage.a11204
+//   mint B (A still present)      -> .sfn_stage.b11204
+//   mint C (A and B both removed) -> .sfn_stage.a11204   aliases A
+//
+// glibc draws its six characters from a clock/pid/ASLR mix, so callers
+// across this tree assume two mints never name the same path even after
+// the first is unlinked. `toolchain_commit_staged_entry`
+// (`compiler/src/toolchain/store.sfn:226`) is where that assumption is
+// load-bearing: it mints a `backup_dir` beside a `store_dir` whose staging
+// sibling has already been removed, so under `_mktemp_s` the backup
+// ALIASED the staged directory. The commit then displaced `store_dir` onto
+// the staged path, renamed it straight back, and reported a publish that
+// never happened as SUCCESS — a failed toolchain install returning `true`
+// is the worst shape a mint bug can take.
+//
+// `_mktemp_s` is additionally capped by MSDN at 26 unique names per
+// template per process, one per letter, which a long-running process that
+// mints repeatedly into one directory exhausts outright.
+//
+// The suffix is therefore generated here, identically to the sibling
+// `mkdtemp_windows.sfn` (SFN-993) whose header rejected `_mktemp_s` for
+// the cap alone: a six-character `[A-Za-z0-9]` run seeded from
+// `GetCurrentProcessId()` mixed with `GetTickCount()` and a module-local
+// call counter, retried when the name is already taken. `_open` still
+// creates the file `_O_CREAT|_O_EXCL|_O_RDWR`, so a racing process cannot
+// win the same name — that is the exclusivity guarantee
+// `_mktemp_from_template_cmd` relies on, and a colliding suffix now costs
+// a re-roll rather than a bad mint.
 //
 // Decimal-only constants: hex integer literals silently fold to 0 on the
 // pinned seed (`runtime/sfn/process.sfn:38`), so the UCRT `fcntl.h`/
@@ -23,10 +54,7 @@
 // `_S_IREAD` = 256, `_S_IWRITE` = 128.
 extern fn strlen(s: *u8) -> usize;
 
-// `errno_t _mktemp_s(char *template, size_t sizeInChars)` — `sizeInChars`
-// is the FULL buffer size including the trailing NUL (MSDN), unlike
-// POSIX `mkstemp`'s implicit NUL-terminated-string contract.
-extern fn _mktemp_s(template: *u8, size_in_chars: usize) -> i32;
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
 // `int _open(const char *filename, int oflag, int pmode)` — the UCRT
 // declares `_open` variadic (`pmode` only applies when `_O_CREAT` is
@@ -34,11 +62,55 @@ extern fn _mktemp_s(template: *u8, size_in_chars: usize) -> i32;
 // fixed-arity extern is ABI-compatible.
 extern fn _open(filename: *u8, oflag: i32, pmode: i32) -> i32;
 
+extern fn GetLastError() -> i32;
+
+extern fn GetCurrentProcessId() -> i32;
+
+extern fn GetTickCount() -> i32;
+
+// Module-local counter mixed into the name seed so two calls within the
+// same millisecond of `GetTickCount()` still diverge. This is the term
+// `_mktemp_s` lacked: it makes a mint depend on how many mints this
+// process has already made, not only on what is currently on disk.
+let mut _mkstemp_windows_counter: i64 = 0;
+
+// Render one `[A-Za-z0-9]` character (62-symbol alphabet) from `seed`,
+// folding a negative `seed % 62` back into range.
+fn _mkstemp_windows_char(seed: i64) -> i64 {
+    let alphabet: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let alphabet_ptr: *u8 = alphabet as *u8;
+    let mut idx: i64 = seed % 62;
+    if idx < 0 { idx = idx + 62; }
+    return load_byte((alphabet_ptr as i64) + idx);
+}
+
+// Overwrite the trailing six bytes at `template + suffix_off` with a
+// pseudo-unique `[A-Za-z0-9]` run derived from `seed`, mixing in a
+// distinct multiplier per slot so adjacent slots do not repeat the same
+// character for a slowly-changing seed.
+fn _mkstemp_windows_fill_suffix(template: *u8, suffix_off: i64, seed: i64) {
+    let mut i: i64 = 0;
+    while i < 6 {
+        let slot_seed: i64 = seed + (i * 40503) + ((seed >> (i * 5)) & 4095);
+        let ch: i64 = _mkstemp_windows_char(slot_seed);
+        memset(((template as i64) + suffix_off + i) as *u8, ch as i32, 1 as usize);
+        i = i + 1;
+    }
+}
+
+// `mkstemp(template)` — mutate the trailing six `X` bytes of `template`
+// into a fresh, uncontended name, create it `_O_EXCL`, and return the open
+// descriptor, having rewritten `template` in place per the POSIX contract
+// `_mktemp_from_template_cmd` reads the minted path back out of. Returns
+// -1 on a null template, a template shorter than the six-byte suffix, an
+// `_open` failure that is not a name collision, or an exhausted retry
+// budget.
 fn mkstemp(template: *u8) -> i32 ![io] {
-    if template as i64 == 0 { return 0 - 1; }
-    let len: usize = strlen(template);
-    let size_in_chars: usize = len + (1 as usize);
-    if _mktemp_s(template, size_in_chars) != 0 { return 0 - 1; }
+    if (template as i64) == 0 { return 0 - 1; }
+    let len: i64 = strlen(template) as i64;
+    if len < 6 { return 0 - 1; }
+    let suffix_off: i64 = len - 6;
+
     let o_creat: i32 = 256;
     let o_excl: i32 = 1024;
     let o_rdwr: i32 = 2;
@@ -46,5 +118,39 @@ fn mkstemp(template: *u8) -> i32 ![io] {
     let s_iread: i32 = 256;
     let s_iwrite: i32 = 128;
     let pmode: i32 = s_iread | s_iwrite;
-    return _open(template, oflag, pmode);
+
+    let pid: i64 = GetCurrentProcessId() as i64;
+    let ticks: i64 = GetTickCount() as i64;
+
+    // Guard counter: bounded retry against a name already on disk. 62^6
+    // possible suffixes makes repeated collision within this budget
+    // effectively impossible for a live seed.
+    let max_attempts: i64 = 100;
+    let mut attempt: i64 = 0;
+    while attempt < max_attempts {
+        _mkstemp_windows_counter = _mkstemp_windows_counter + 1;
+        // The `7919` term is what separates this generator's first attempt
+        // from `mkdtemp_windows.sfn`'s for an identical pid, tick and
+        // counter, so the two mints do not walk the same sequence into one
+        // directory. A collision would only cost a re-roll below, but not
+        // colliding is cheaper.
+        let seed: i64 = pid + (ticks * 2654435) + (_mkstemp_windows_counter * 40503)
+            + attempt
+            + 7919;
+        _mkstemp_windows_fill_suffix(template, suffix_off, seed);
+
+        let fd: i32 = _open(template, oflag, pmode);
+        if fd >= 0 { return fd; }
+
+        // `ERROR_FILE_EXISTS`. Measured rather than assumed: `_open` with
+        // `_O_CREAT|_O_EXCL` leaves the Win32 last error from its inner
+        // `CreateFileA` in place, reporting 80 for an occupied name, 3 for
+        // a missing parent directory and 5 for a directory standing on the
+        // path. Only the first is a collision a re-roll can clear; the
+        // others are already the caller's answer, and returning them at
+        // once beats burning the budget on a failure that cannot improve.
+        if GetLastError() != 80 { return 0 - 1; }
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
 }

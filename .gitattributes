@@ -61,3 +61,51 @@ install.sh linguist-vendored
 # `git diff` stays empty afterwards, since the content already matched the index.
 *.sfn text eol=lf
 *.toml text eol=lf
+
+# The same reasoning reaches past source, to two groups the `.sfn`/`.toml`
+# rules above left uncovered (SFN-1115). Measured on a native Windows host,
+# `git ls-files --eol` reported 573 tracked files checked out `w/crlf` with
+# `attr/` empty — nothing governing them.
+#
+# Group 1 — golden artifacts a test compares BYTE-EXACTLY. A CRLF checkout
+# makes the comparison unsatisfiable, and the failure names only a line
+# number, so it reads as a logic bug rather than a checkout artifact.
+# `compiler/tests/unit/lowering_trace_sink_test.sfn:79` asserts captured
+# stderr equals `fixtures/lowering_trace_success.stderr`; the compiler emits
+# LF (the `_setmode` binary-mode fix, SFN-1114) while the fixture arrived
+# CRLF, so it could never match.
+*.stderr text eol=lf
+*.snap text eol=lf
+*.ll text eol=lf
+*.sfn-asm text eol=lf
+# `.sh` and `.yml` join them for the same reason and one more: they are read
+# back as text and pinned by `\n`-joined substrings.
+# `aarch64_binfmt_probe_test.sfn:95` asserts against
+# `scripts/bootstrap-aarch64-linux.sh`, and `:100` asserts a two-line
+# `SAILFIN_BOOTSTRAP=off \\\n            SAILFIN_LINKER=lld` substring against
+# `.github/workflows/ci.yml`. A substring spanning a newline is the shape a
+# CRLF checkout always breaks, and a single-line one is the shape it usually
+# survives — which is why this class shows up as an unreproducible subset of a
+# file's tests rather than the whole file.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Group 2 — key and digest material, where a translated byte is not a
+# cosmetic difference but a verification failure. `bootstrap.toml [verify]`
+# runs `signed-sha256sums` over `SHA256SUMS` + `SHA256SUMS.sig`, and the
+# release-signing public keys are read as bytes.
+#
+# Every one of these is a TEXT encoding here, verified rather than assumed:
+# the `.sig` fixtures are 128 hex characters plus a line ending (129 bytes in
+# the index, 130 in a CRLF working tree), not the 64 raw bytes a detached
+# Ed25519 signature is often stored as. So `eol=lf` is both correct and
+# preferable to `-text`: it stops the checkout conversion AND normalizes on
+# the way in, whereas `-text` would let a CRLF `.sig` committed from a
+# Windows host survive into the index. A raw-binary signature added later
+# would need `-text` instead.
+*.sig text eol=lf
+*.pem text eol=lf
+*.hex text eol=lf
+SHA256SUMS text eol=lf
+*_SHA256SUMS text eol=lf

@@ -1,7 +1,12 @@
 // SFN-930: direct emit must resolve the same manifest-owned identity as build
 // and relative traversal, without a `--module-name` override.
 import { contains, trim_right } from "sfn/strings";
-import { clean_runner_env, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    report_child_failure,
+    report_child_failure_pending,
+    sfn_bin_path
+} from "sfn/test";
 
 // The child env is derived by subtraction from the real environment, not
 // assembled key by key (SFN-1114).
@@ -13,14 +18,14 @@ fn _cwd() -> string ![io] {
     let exit = process.run_capture(["pwd"], []);
     let out = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();
+    report_child_failure("source-identity pwd", exit, out, _stderr);
     if exit != 0 { return ""; }
     return trim_right(out);
 }
 
 fn _emit_native(source: string, output: string) -> string ![io] {
     let exit = process.run_capture([sfn_bin_path(), "emit", "-o", output, "native", source], _child_env());
-    let _stdout = process.capture_take_stdout();
-    let _stderr = process.capture_take_stderr();
+    report_child_failure_pending("source-identity emit " + source, exit);
     if exit != 0 || !fs.exists(output) { return ""; }
     return fs.readFile(output);
 }
@@ -65,8 +70,7 @@ test "absolute standalone entry converges with relative imports" ![io] {
     let main_source = root + "/main.sfn";
     fs.writeFile(main_source, "import { answer } from \"./dep\";\n\nfn main() -> int { return answer() - 42; }\n");
     let exit = process.run_capture([sfn_bin_path(), "run", main_source], _child_env());
-    let _stdout = process.capture_take_stdout();
-    let _stderr = process.capture_take_stderr();
+    report_child_failure_pending("source-identity run", exit);
     assert exit == 0;
 }
 
@@ -102,7 +106,6 @@ test "relative traversal: absolute-path library test converges on provider ident
     let test_source = ws + "/lib/tests/mod_test.sfn";
     fs.writeFile(test_source, "import { answer } from \"../src/mod\";\n\ntest \"provider identity\" { assert answer() == 42; }\n");
     let exit = process.run_capture([sfn_bin_path(), "test", test_source], _child_env());
-    let _stdout = process.capture_take_stdout();
-    let _stderr = process.capture_take_stderr();
+    report_child_failure_pending("source-identity test", exit);
     assert exit == 0;
 }

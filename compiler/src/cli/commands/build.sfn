@@ -441,6 +441,20 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         return 1;
     }
 
+    // `fs.exists` is true for a directory, and `fs.readFile` on one yields an
+    // empty string rather than failing — so without this guard a directory
+    // argument compiles an EMPTY module all the way to a link, which then
+    // fails for want of a `main` and is reported as an internal compiler
+    // error inviting the user to file a compiler bug (SFN-1115). A mistyped
+    // path is user error and has to read as one; the ICE path is reserved for
+    // backend failures on IR the compiler actually emitted from real source.
+    if fs.is_directory(input_path) {
+        print("not a source file: " + input_path + " is a directory");
+        print("note: pass a `.sfn` file, or `-p <capsule>` to build a capsule");
+
+        return 1;
+    }
+
     if work_dir.length == 0 { _ensure_dir("build"); } else {
         _ensure_dir(work_dir);
     }

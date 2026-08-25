@@ -20,6 +20,7 @@ import { contains } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
+    report_child_failure,
     sfn_bin_abs_path,
     with_tmp_dir
 } from "sfn/test";
@@ -48,6 +49,7 @@ test "cross-target emit: --target reaches sfn emit and flips the comdat gate" ![
         let host_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "probe", "-o", host_out, "llvm", "probe.sfn"], host_env, dir);
         let _host_stdout = process.capture_take_stdout();
         let host_stderr = process.capture_take_stderr();
+        report_child_failure("cross-target-emit host emit", host_exit, _host_stdout, host_stderr);
         assert host_exit == 0;
         assert fs.exists(host_out);
         let host_ll = fs.readFile(host_out);
@@ -57,6 +59,7 @@ test "cross-target emit: --target reaches sfn emit and flips the comdat gate" ![
         let win_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "probe", "--target=x86_64-pc-windows-msvc", "-o", win_out, "llvm", "probe.sfn"], win_env, dir);
         let _win_stdout = process.capture_take_stdout();
         let win_stderr = process.capture_take_stderr();
+        report_child_failure("cross-target-emit win emit", win_exit, _win_stdout, win_stderr);
         assert win_exit == 0;
         assert fs.exists(win_out);
         let win_ll = fs.readFile(win_out);
@@ -100,6 +103,7 @@ test "cross-target emit: an unsupported --target triple is rejected with E0614, 
         let win_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "probe", "--target=x86_64-pc-windows-msvc", "-o", win_out, "llvm", "probe.sfn"], win_env, dir);
         let _win_stdout = process.capture_take_stdout();
         let win_stderr = process.capture_take_stderr();
+        report_child_failure("cross-target-emit well-formed win emit", win_exit, _win_stdout, win_stderr);
         assert win_exit == 0;
         assert ! contains(win_stderr, "E0617");
 

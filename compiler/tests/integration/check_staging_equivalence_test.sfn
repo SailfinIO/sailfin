@@ -34,25 +34,172 @@
 // production exactly and avoids dragging the whole driver into the
 // test link — the same rationale as `emit_retry_test.sfn`.
 //
-// Each spawned `check` clears `SAILFIN_TEST_SCRATCH` (`SAILFIN_TEST_SCRATCH=`
-// prefix): the parent test runner sets it per-file, and the compiler now
-// routes the import-context staging under it (#1333). This test asserts on
-// the CWD-relative default (`<cwd>/build/compiler/import-context`), so it
-// must opt out of that redirection to exercise the default path.
-extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
-
-fn _shell_capture(cmd: string) -> string ![io] {
-    return sailfin_runtime_shell_capture(cmd);
-}
+// Each spawned `check` clears `SAILFIN_TEST_SCRATCH` (an explicit
+// `SAILFIN_TEST_SCRATCH=` entry in the child's env array — see
+// `_check_env` below): the parent test runner sets it per-file, and the
+// compiler now routes the import-context staging under it (#1333). This
+// test asserts on the CWD-relative default
+// (`<cwd>/build/compiler/import-context`), so it must opt out of that
+// redirection to exercise the default path.
+//
+// SFN-1115: every path below is threaded as a real argv/cwd element
+// rather than spliced into a `sh -c` string (`.claude/rules/no-bash-e2e.md`)
+// — a native Windows host has no POSIX shell to splice into, and even on
+// POSIX hosts an unquoted path can contain shell metacharacters. The
+// second test's warm-rerun probe used to shell `find -newer` out for an
+// mtime check; `find` itself is unusable there regardless of shelling or
+// quoting — a bare `find` argv0 resolves to `%SystemRoot%\System32\find.exe`
+// (Microsoft's text-search tool, a same-named but unrelated program: its
+// `-type`/`-newer` flags come back rejected as literal search strings,
+// observed live as `File not found - -TYPE` on stderr). Do not reintroduce
+// `find` here. The probe below is a content comparison instead — no
+// external tool, no shell, and a strictly stronger claim than an mtime
+// check ever made (a rewrite that preserves the timestamp would pass
+// `-newer` but not this).
+import { clean_runner_env, sfn_bin_abs_path } from "sfn/test";
 
 // Write a minimal two-module fixture: `main.sfn` relatively imports
 // `./helper`, so the resolver's relative-import walk stages `helper`
 // into the import-context even though no capsule.toml exists
 // (standalone files are valid `sfn check` input).
 fn _write_fixture(src_dir: string) ![io] {
-    process.run(["mkdir", "-p", src_dir]);
+    fs.createDirectory(src_dir, true);
     fs.writeFile(src_dir + "/helper.sfn", "fn helper_add(a: int, b: int) -> int {\n    return a + b;\n}\n\nexport { helper_add };\n");
     fs.writeFile(src_dir + "/main.sfn", "import { helper_add } from \"./helper\";\n\nfn main() ![io] {\n    let total = helper_add(1, 2);\n    print.info(\"total: \" + number_to_string(total));\n}\n");
+}
+
+// `process.run_capture_cwd`'s env array REPLACES the child environment —
+// an empty array is the empty environment, not "inherit". `clean_runner_env`
+// starts from the full parent environment (so PATH survives for the child
+// to find `clang`/`llvm-as`) and strips only the pool-managed/caller-
+// override keys a nested `sfn` invocation must not leak (SFN-1114). The
+// explicit trailing `SAILFIN_TEST_SCRATCH=` entry is the array-form of
+// the header comment above: it opts the spawned `check` out of the
+// per-test-file scratch redirection the parent test runner sets.
+fn _check_env() -> string[] ![io] {
+    let mut env_list = clean_runner_env("");
+    env_list.push("SAILFIN_TEST_SCRATCH=");
+    return env_list;
+}
+
+// Lexicographic byte-wise less-than over character codes, for sorting
+// staged file listings deterministically (mirrors `_sym_string_lt` in
+// `compiler/capsules/analyzer/src/symbols_index.sfn`).
+fn _path_lt(a: string, b: string) -> boolean {
+    let mut i = 0;
+    loop {
+        if i >= a.length || i >= b.length { break; }
+        let ca = char_code(a[i]);
+        let cb = char_code(b[i]);
+        if ca < cb { return true; }
+        if ca > cb { return false; }
+        i += 1;
+    }
+    return a.length < b.length;
+}
+
+fn _sorted(items: string[]) -> string[] {
+    let mut out = items;
+    let mut k = 1;
+    loop {
+        if k >= out.length { break; }
+        let cur = out[k];
+        let mut j = k - 1;
+        loop {
+            if j < 0 { break; }
+            if !_path_lt(cur, out[j]) { break; }
+            out[j + 1] = out[j];
+            j -= 1;
+        }
+        out[j + 1] = cur;
+        k += 1;
+    }
+    return out;
+}
+
+// Recursively collect every file under `dir`, relative to `dir` — the
+// Sailfin-native replacement for `find <dir> -type f` (SFN-1115,
+// `.claude/rules/no-bash-e2e.md`). `fs.listDirectory` is not recursive;
+// import-context never stages an empty directory, so a zero-entry listing
+// unambiguously means a leaf file (same probe as `_collect_files` in
+// `compiler/tests/e2e/work_dir_parity_test.sfn`, which walks this same
+// staging tree).
+fn _collect_files(root: string, rel: string, acc: string[]) -> string[] ![io] {
+    let dir = root + "/" + rel;
+    let entries = fs.listDirectory(dir);
+    let mut out = acc;
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if name == "." || name == ".." { continue; }
+        let child_rel = rel + "/" + name;
+        let child_abs = root + "/" + child_rel;
+        let sub = fs.listDirectory(child_abs);
+        if sub.length > 0 { out = _collect_files(root, child_rel, out); } else {
+            out.push(child_rel);
+        }
+    }
+    return out;
+}
+
+// Sorted `find <dir> -type f | sort` equivalent.
+fn _staged_files(dir: string) -> string[] ![io] {
+    if !fs.exists(dir) { return []; }
+    return _sorted(_collect_files(dir, ".", []));
+}
+
+fn _join_lines(items: string[]) -> string {
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= items.length { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + items[i];
+        i += 1;
+    }
+    return out;
+}
+
+// Concatenate every staged file's relative path and byte content, in
+// `files` order, into one comparable snapshot string. Used in place of an
+// mtime probe (SFN-1115): comparing two snapshots proves the bytes are
+// unchanged, which is what "a warm run rewrites nothing" actually means —
+// stronger than an mtime check, which a same-second or timestamp-
+// preserving rewrite could pass despite changing content. Callers pass a
+// SORTED `files` list (`_staged_files`) so the snapshot is deterministic
+// regardless of directory-listing order.
+fn _staged_snapshot(dir: string, files: string[]) -> string ![io] {
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= files.length { break; }
+        out = out + files[i] + "\n" + fs.readFile(dir + "/" + files[i]) + "\n";
+        i += 1;
+    }
+    return out;
+}
+
+// `string_ends_with` is prelude-internal (not on the cross-capsule mirror
+// list in `compiler/capsules/codegen-llvm/src/prelude_mirror_signatures.sfn`,
+// so lowering can't resolve a call to it from here) — `substring` is
+// mirrored, so build the suffix check on top of that instead, same as
+// `_ends_with_test_sfn` in `compiler/tests/e2e/no_shell_tool_probe_test.sfn`.
+fn _ends_with(name: string, suffix: string) -> boolean {
+    if name.length < suffix.length { return false; }
+    let start = name.length - suffix.length;
+    return substring(name, start, name.length) == suffix;
+}
+
+fn _has_sfn_asm(files: string[]) -> boolean {
+    let mut i = 0;
+    loop {
+        if i >= files.length { break; }
+        if _ends_with(files[i], ".sfn-asm") { return true; }
+        i += 1;
+    }
+    return false;
 }
 
 test "check staging: subprocess path stages byte-identical artifacts to in-process path" ![io] {
@@ -61,22 +208,14 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
     let src_dir = root + "/src";
     _write_fixture(src_dir);
 
-    // `printf '%s'` strips the trailing newline `realpath` emits —
-    // a raw capture would split the `sh -c` scripts below in two
-    // (same pattern as `_host_path` in `emit_retry_test.sfn`).
-    let exe = _shell_capture("printf '%s' \"$(realpath build/bin/sfn)\"");
+    let exe = sfn_bin_abs_path();
     assert exe.length > 0;
 
     // Run A: shipped binary under its real name -> `binary_dir`
     // resolves -> subprocess staging path.
     let work_a = root + "/work_a";
-    process.run(["mkdir", "-p", work_a]);
-    let rc_a = process.run(["sh", "-c", "cd " + work_a
-        + " && SAILFIN_TEST_SCRATCH= "
-        + exe
-        + " check "
-        + src_dir
-        + "/main.sfn >/dev/null 2>&1"]);
+    fs.createDirectory(work_a, true);
+    let rc_a = process.run_capture_cwd([exe, "check", src_dir + "/main.sfn"], _check_env(), work_a);
     assert rc_a == 0;
 
     // Run B: byte-identical copy under a different filename ->
@@ -84,26 +223,20 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
     // legacy in-process staging path.
     let work_b = root + "/work_b";
     let bin_b = root + "/binb";
-    process.run(["mkdir", "-p", work_b]);
-    process.run(["mkdir", "-p", bin_b]);
+    fs.createDirectory(work_b, true);
+    fs.createDirectory(bin_b, true);
     process.run(["cp", exe, bin_b + "/sfn-renamed"]);
-    let rc_b = process.run(["sh", "-c", "cd " + work_b
-        + " && SAILFIN_TEST_SCRATCH= "
-        + bin_b
-        + "/sfn-renamed check "
-        + src_dir
-        + "/main.sfn >/dev/null 2>&1"]);
+    let rc_b = process.run_capture_cwd([bin_b + "/sfn-renamed", "check", src_dir
+        + "/main.sfn"], _check_env(), work_b);
     assert rc_b == 0;
 
     // Guard against a vacuous pass: both runs must actually have
     // staged at least one `.sfn-asm` (the fixture's relative import
     // guarantees a non-empty resolution).
-    let staged_a = process.run(["sh", "-c", "find " + work_a
-        + "/build/compiler/import-context -name '*.sfn-asm' | grep -q ."]);
-    assert staged_a == 0;
-    let staged_b = process.run(["sh", "-c", "find " + work_b
-        + "/build/compiler/import-context -name '*.sfn-asm' | grep -q ."]);
-    assert staged_b == 0;
+    let staged_a = _staged_files(work_a + "/build/compiler/import-context");
+    let staged_b = _staged_files(work_b + "/build/compiler/import-context");
+    assert _has_sfn_asm(staged_a);
+    assert _has_sfn_asm(staged_b);
 
     // The headline equivalence: identical file set, identical bytes
     // (`.sfn-asm`, `.layout-manifest`, and `.srchash` sidecars all
@@ -122,61 +255,50 @@ test "check staging: warm re-run is a cache hit (staged artifacts untouched)" ![
     let src_dir = root + "/src";
     _write_fixture(src_dir);
 
-    // `printf '%s'` strips the trailing newline `realpath` emits —
-    // a raw capture would split the `sh -c` scripts below in two
-    // (same pattern as `_host_path` in `emit_retry_test.sfn`).
-    let exe = _shell_capture("printf '%s' \"$(realpath build/bin/sfn)\"");
+    let exe = sfn_bin_abs_path();
     assert exe.length > 0;
 
     let work = root + "/work";
-    process.run(["mkdir", "-p", work]);
-    let cmd = "cd " + work + " && SAILFIN_TEST_SCRATCH= " + exe + " check "
-        + src_dir
-        + "/main.sfn >/dev/null 2>&1";
+    fs.createDirectory(work, true);
+    let argv = [exe, "check", src_dir + "/main.sfn"];
 
     // Cold run stages the import-context.
-    let rc_cold = process.run(["sh", "-c", cmd]);
+    let rc_cold = process.run_capture_cwd(argv, _check_env(), work);
     assert rc_cold == 0;
 
     // Pin the "warm runs spawn nothing" half of #1246:
-    // `_cr_stage_one`'s cache hit short-circuits before the
-    // subprocess branch, so a warm run must not rewrite anything.
-    // Two POSIX-portable probes (macOS CI runs this suite — no GNU
-    // `stat -c` / `sha256sum` / `xargs -r` here):
-    //   1. the staged file SET is unchanged (`find | sort`), and
-    //   2. no staged file is newer than a marker touched between the
-    //      runs (`find -newer`) — i.e. nothing was rewritten, even
-    //      with identical content.
+    // `_cr_stage_one`'s cache hit short-circuits before the subprocess
+    // branch, so a warm run must not rewrite anything. Two checks:
+    //   1. the staged file SET is unchanged (`_staged_files`, a
+    //      Sailfin-native recursive walk — SFN-1115 retired the
+    //      `find | sort` shellout), and
+    //   2. every staged file's BYTES are unchanged (`_staged_snapshot`).
+    //      This started as an mtime probe (`find -newer` against a
+    //      marker touched between the runs), but `find` itself is
+    //      unusable on a native Windows host — see the header comment
+    //      for the `File not found - -TYPE` evidence — and a content
+    //      comparison proves the stronger claim anyway: an mtime probe
+    //      only shows no timestamp advanced, which a rewrite that
+    //      happens to preserve the timestamp would still pass.
     //
     // Load-bearing fixture assumption: with NO capsule.toml, every
     // source's canonical slug equals its path slug, so
-    // `_cr_write_capsule_slug_aliases` writes no `.slugalias` on
-    // either run. A capsule fixture with a scoped slug would rewrite
-    // the alias each run and flake the `-newer` half of this probe.
+    // `_cr_write_capsule_slug_aliases` writes no `.slugalias` on either
+    // run — a capsule fixture with a scoped slug would rewrite the alias
+    // each run and flake this probe.
     let ctx = work + "/build/compiler/import-context";
-    let set_cmd = "cd " + ctx + " && find . -type f | sort";
-    let set_before = _shell_capture(set_cmd);
-    assert set_before.length > 0;
-
-    // The sleep guards against coarse (1s) mtime granularity on
-    // older filesystems: a same-second rewrite would otherwise tie
-    // with the marker and slip past `-newer`.
-    let marker = root + "/warm-marker";
-    process.run(["touch", marker]);
-    process.run(["sleep", "1"]);
+    let files_before = _staged_files(ctx);
+    assert files_before.length > 0;
+    let set_before = _join_lines(files_before);
+    let snapshot_before = _staged_snapshot(ctx, files_before);
 
     // Warm run: byte-identical source -> content-hash cache hit.
-    let rc_warm = process.run(["sh", "-c", cmd]);
+    let rc_warm = process.run_capture_cwd(argv, _check_env(), work);
     assert rc_warm == 0;
 
-    let set_after = _shell_capture(set_cmd);
-    assert set_before == set_after;
-    // `grep -q .` exits 0 iff `find -newer` emitted anything; a warm
-    // run must leave NOTHING newer than the marker.
-    let rewritten = process.run(["sh", "-c", "find " + ctx + " -type f -newer "
-        + marker
-        + " | grep -q ."]);
-    assert rewritten != 0;
+    let files_after = _staged_files(ctx);
+    assert set_before == _join_lines(files_after);
+    assert snapshot_before == _staged_snapshot(ctx, files_after);
 
     process.run(["rm", "-rf", root]);
 }

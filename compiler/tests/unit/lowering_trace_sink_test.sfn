@@ -7,12 +7,26 @@ import {
     take_lowering_trace_buffer,
     trace_log
 } from "sfn/codegen-llvm/lowering_debug_state";
-import { find } from "sfn/strings";
+import {
+    find,
+    int_to_string,
+    split,
+    trim
+} from "sfn/strings";
 import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 struct TraceRun {
     exit_code: int;
     stderr: string;
+}
+
+// Lines in `text`, counting the way the emitter's own `lines=` tally does: a
+// trailing newline terminates the last line rather than starting an empty one.
+fn _line_count(text: string) -> int {
+    let parts = split(text, "\n");
+    if parts.length == 0 { return 0; }
+    if parts[parts.length - 1].length == 0 { return parts.length - 1; }
+    return parts.length;
 }
 
 fn _trace_source(name: string, source: string) -> string ![io] {
@@ -76,7 +90,28 @@ test "lowering trace stderr exactly matches the pre-buffer stream" ![io] {
     let run = _run_emit_path("compiler/tests/unit/fixtures/lowering_trace_success.sfn", ["-o", output, "--module-name", "trace_fixture", "llvm"], ["SAILFIN_TRACE_LOWERING=1"]);
     assert run.exit_code == 0;
     let expected = fs.readFile("compiler/tests/unit/fixtures/lowering_trace_success.stderr");
-    assert run.stderr == expected;
+
+    // The final trace line carries the emitted module's line count, and that
+    // count is TARGET-dependent: a Windows target emits comdat declarations a
+    // Linux one does not, so this fixture lowers to 181 lines on a native
+    // Windows host against the golden's 179 (SFN-1115). Freezing the number in
+    // the golden makes this test assert which host recorded it rather than the
+    // property it is named for.
+    //
+    // Everything before the count is still compared byte-for-byte, so the
+    // stream's content and ordering — what this test exists to pin — are
+    // unchanged. The count is then checked against the artifact actually
+    // written, which is the stronger claim: it verifies the trace REPORTS the
+    // right number rather than that it matches a constant recorded elsewhere.
+    let marker = "emit-llvm: phase=end lines=";
+    let expected_at = find(expected, marker, 0);
+    let actual_at = find(run.stderr, marker, 0);
+    assert expected_at >= 0;
+    assert actual_at >= 0;
+    assert substring(run.stderr, 0, actual_at) == substring(expected, 0, expected_at);
+
+    let reported = trim(substring(run.stderr, actual_at + marker.length, run.stderr.length));
+    assert reported == int_to_string(_line_count(fs.readFile(output)));
 }
 
 test "lowering trace buffer drains before artifact failure diagnostics" ![io] {
