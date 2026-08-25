@@ -31,6 +31,7 @@ import {
     starts_with
 } from "sfn/strings";
 import {
+    c_math_link_flags,
     clean_runner_env,
     default_scratch_dir,
     host_is_windows,
@@ -248,9 +249,13 @@ test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io
     let harness = dir + "/harness.c";
     fs.writeFile(harness, _mem_harness_c());
     let bin = dir + "/roundtrip";
-    // `-Wno-override-module` for the emitted target-triple mismatch;
-    // `-lm` because the seed lowers integer literals through libm.
-    let link_exit = run_external_c_oracle(["-Wno-override-module", harness, ll, "-o", bin, "-lm"]);
+    // `-Wno-override-module` for the emitted target-triple mismatch.
+    // libm comes from `c_math_link_flags()` rather than a literal `-lm`
+    // (SFN-1114): the helper supplies it on POSIX and correctly supplies
+    // nothing on msvc, where there is no separate math library to link.
+    let mut oracle_argv: string[] = ["-Wno-override-module", harness, ll, "-o", bin];
+    for flag in c_math_link_flags() { oracle_argv.push(flag); }
+    let link_exit = run_external_c_oracle(oracle_argv);
     let _lo = process.capture_take_stdout();
     let lerr = process.capture_take_stderr();
     assert find(lerr, "doesn't exist", 0) < 0;

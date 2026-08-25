@@ -270,10 +270,10 @@ everything the old hold-out scripts did by spawning the tool via
 `process.run_capture`. Established patterns (all in-tree as of the #840
 migration):
 
-- **External tools** (`tar`, `jq`, `sha256sum`, `readlink`, `ln`):
+- **External tools** (`tar`, `jq`, `sha256sum`, `ln`):
   call them as the subprocess argv and parse the captured stdout with
-  `sfn/strings` — e.g. `sfn_package_test.sfn` shells `tar -tzf` / `jq -r`,
-  `llms_txt_sync_test.sfn` shells `readlink -f`. Guard with the shared
+  `sfn/strings` — e.g. `sfn_package_test.sfn` shells `tar -tzf` / `jq -r`.
+  Guard with the shared
   `tool_present(tool)` / `first_present_tool(candidates)` helpers exported
   from `sfn/test` (`capsules/sfn/test/src/tool_probe.sfn`, SFN-840) and call
   `skip("<tool> not on PATH")` when the tool is absent, rather than
