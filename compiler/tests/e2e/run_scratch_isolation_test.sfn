@@ -15,6 +15,19 @@
 import { find } from "sfn/strings";
 import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
 
+// A compiler-derived Windows executable carries `.exe` from birth
+// (`target_exe_name`, `compiler/src/build/target.sfn`; SFN-693), so `run`'s
+// output is found — and cleared — under either spelling. Probing both is an
+// observation; branching on the host would be an assumption.
+fn _run_exe_exists(base: string) -> boolean ![io] {
+    return fs.exists(base) || fs.exists(base + ".exe");
+}
+
+fn _delete_run_exe(base: string) -> void ![io] {
+    if fs.exists(base) { fs.deleteFile(base); }
+    if fs.exists(base + ".exe") { fs.deleteFile(base + ".exe"); }
+}
+
 // Child env = the full parent environment (PATH/HOME/TMPDIR + macOS
 // toolchain vars the nested clang/linker need), but with
 // `SAILFIN_TEST_SCRATCH` forced to `scratch` so the routing target is
@@ -42,7 +55,7 @@ test "run: executable is routed under SAILFIN_TEST_SCRATCH, not build/sailfin" !
     let scratch = base + "/sfn-run-iso-1411";
     fs.createDirectory(scratch, true);
     let exe = scratch + "/run";
-    if fs.exists(exe) { fs.deleteFile(exe); }
+    _delete_run_exe(exe);
 
     let exit = process.run_capture([sfn_bin_path(), "run", "examples/advanced/lambda-closure.sfn"], _child_env(scratch));
     let out = process.capture_take_stdout();
@@ -54,7 +67,7 @@ test "run: executable is routed under SAILFIN_TEST_SCRATCH, not build/sailfin" !
     assert find(out, "7", 0) >= 0;
     // ...and its executable landed under the per-invocation scratch, proving
     // `sfn run` no longer hard-codes `build/sailfin/run` (#1411).
-    assert fs.exists(exe);
+    assert _run_exe_exists(exe);
 
-    if fs.exists(exe) { fs.deleteFile(exe); }
+    _delete_run_exe(exe);
 }

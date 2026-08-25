@@ -15,6 +15,12 @@ extern fn _read(fd: i32, buf: *u8, count: i32) -> i32;
 
 extern fn _write(fd: i32, buf: *u8, count: i32) -> i32;
 
+// `_pipe(fds, size, textmode)` — the UCRT's anonymous pipe. Unlike
+// `_read`/`_write` this is NOT a signature-compatible rename of its POSIX
+// counterpart, which is exactly why `oldnames.lib` does not map `pipe` to
+// it and why `sfn_fd_pipe` below has to exist.
+extern fn _pipe(fds: *i32, size: i32, textmode: i32) -> i32;
+
 // `_setmode` switches an already-open fd between the UCRT's text and
 // binary translation modes. Declared here rather than in a shared
 // platform module because it has no POSIX counterpart to be a sibling
@@ -97,4 +103,20 @@ fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64 {
     return n as i64;
 }
 
-export { sfn_fd_read, sfn_fd_write };
+// `sfn_fd_pipe(fds)` — the Windows half of the pair; see `fd_io.sfn` for
+// why this function exists at all rather than callers using `pipe(2)`.
+//
+// `_pipe` is not a signature-compatible rename of `pipe`: it takes the
+// buffer size and a translation mode as well. `SFN_O_BINARY` is
+// mandatory, not a default — a text-mode pipe would have the UCRT rewrite
+// `\n` to `\r\n` on write and strip `\r` on read, so byte counts on both
+// sides would stop agreeing with what the caller passed, and every
+// framed/length-prefixed protocol over the pipe would mis-frame.
+//
+// 65536 matches the 64 KiB default Win32 gives an anonymous `CreatePipe`
+// buffer (`process_windows.sfn`'s drain loop is written against that
+// size), so a caller that reasons about pipe capacity sees one answer
+// whichever primitive created the pipe.
+fn sfn_fd_pipe(fds: *i32) -> i32 { return _pipe(fds, 65536, SFN_O_BINARY); }
+
+export { sfn_fd_pipe, sfn_fd_read, sfn_fd_write };

@@ -54,6 +54,14 @@ fn _child_env_with_home(home: string) -> string[] ![io] {
     return e;
 }
 
+// `-o` is honoured verbatim, so on Windows the built file may carry a
+// `.exe` suffix the base path did not ask for. Both spellings are probed
+// rather than branching on the host (`process_argv_quoting_test.sfn::_built_path`).
+fn _built_path(base: string) -> string ![io] {
+    if fs.exists(base + ".exe") { return base + ".exe"; }
+    return base;
+}
+
 // A fresh marker-file path under the runner's scratch dir (or `/tmp`),
 // stale value removed, living outside the `with_tmp_dir` tree so it
 // survives teardown.
@@ -100,7 +108,12 @@ fn _build_and_run(out_marker: string) -> int ![io] {
         report_child_failure_pending("cli-bare-file-cached-capsule-import build", build_exit);
         if build_exit != 0 { return -100; }
 
-        let run_exit = process.run_capture([binpath], []);
+        // Resolve the launchable path AFTER the build: an extensionless
+        // path is not merely unfound but unlaunchable on Windows (SFN-693,
+        // `_bootstrap_seed_bin`'s comment, `compiler/src/cli/commands/dev.sfn:145-147`)
+        // — `CreateProcessA` fails `ERROR_FILE_NOT_FOUND` outright rather
+        // than falling back the way a PATH search would.
+        let run_exit = process.run_capture([_built_path(binpath)], []);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         report_child_failure("cli-bare-file-cached-capsule-import run", run_exit, out, err);

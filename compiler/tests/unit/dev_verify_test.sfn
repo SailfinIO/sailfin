@@ -61,6 +61,40 @@ test "dev verify: fatal signals classify as crash" {
     assert expect_eq_str(verdict_classify(132, "test"), "crash").ok;
 }
 
+// Windows raises no signals, so the `128 + signal` codes above never
+// occur there and every crash arrives as a sign-extended NT status.
+// Before these were classified, the `rc < 0` never-ran rule claimed all
+// of them and a crashed child was reported as a broken harness.
+test "dev verify: an NT fault status classifies as crash" {
+    // 0xC0000005 ACCESS_VIOLATION — the Windows counterpart of the 139
+    // (SIGSEGV) case above.
+    assert expect_eq_str(verdict_classify(-1073741819, "test"), "crash").ok;
+    assert expect_eq_str(verdict_classify(-1073741819, "build"), "crash").ok;
+    // 0xC0000409 STACK_BUFFER_OVERRUN — what `__fastfail` raises, and
+    // what an aborting Sailfin runtime actually produces on Windows.
+    assert expect_eq_str(verdict_classify(-1073740791, "test"), "crash").ok;
+    // 0xC00000FD STACK_OVERFLOW.
+    assert expect_eq_str(verdict_classify(-1073741571, "test"), "crash").ok;
+}
+
+// The half that makes the classification mean something: not every
+// negative status is a crash, and the ones that are not must keep
+// answering `setup-error`.
+test "dev verify: a loader NT status is a setup error, not a crash" {
+    // 0xC0000135 STATUS_DLL_NOT_FOUND and 0xC0000139
+    // STATUS_ENTRYPOINT_NOT_FOUND: the image was never entered, which is
+    // the same thing `-1` and `127` mean below.
+    assert expect_eq_str(verdict_classify(-1073741515, "test"), "setup-error").ok;
+    assert expect_eq_str(verdict_classify(-1073741511, "test"), "setup-error").ok;
+}
+
+test "dev verify: a failed spawn is still a setup error" {
+    // `run_capture` reports -1 when no process was produced. The NT
+    // classification above must not have captured it.
+    assert expect_eq_str(verdict_classify(-1, "test"), "setup-error").ok;
+    assert expect_eq_str(verdict_classify(127, "test"), "setup-error").ok;
+}
+
 test "dev verify: SIGABRT is a test failure, never a crash" {
     // A clean `assert` aborts 134. Classifying it as a crash would send an
     // agent chasing a fault that does not exist.

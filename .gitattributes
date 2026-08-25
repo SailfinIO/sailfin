@@ -90,6 +90,15 @@ install.sh linguist-vendored
 *.sh text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+# `.txt` joins them for the same reason: a plain-text fixture read back and
+# split on `\n`. `compiler/tests/e2e/fixtures/runtime_emission_allowlist.txt`
+# is compared line-by-line against a freshly built (LF-only) audit set in
+# `lowering_no_bare_runtime_emissions_test.sfn` — a CRLF checkout leaves a
+# trailing `\r` on every parsed line, which a suffix or equality comparison
+# against an `\n`-split line misses silently (the count still matches, only
+# the per-line comparison fails), the same shape the `.stderr`/`.snap`
+# fixtures above already describe.
+*.txt text eol=lf
 
 # Group 2 — key and digest material, where a translated byte is not a
 # cosmetic difference but a verification failure. `bootstrap.toml [verify]`

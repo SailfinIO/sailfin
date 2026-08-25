@@ -13,8 +13,10 @@
 // understand. This fixture proves all four against the real seed binary
 // pinned by `bootstrap.toml`, so a regression here would block the
 // `publish = false` rollout before it starts.
-import { find, split } from "sfn/strings";
+import { find } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+import { _cwd_cmd } from "../../src/build/fs";
 
 // The pinned seed binary, resolved relative to the repo root this test
 // runner starts from (mirrors the seed-store layout `bootstrap.toml`
@@ -23,20 +25,14 @@ import { clean_runner_env, nested_runner_scratch, report_child_failure } from "s
 fn _seed_bin_relative() -> string { return "build/toolchains/seed/bin/sfn"; }
 
 // Absolutize a repo-relative path against the test runner's own cwd (the
-// repo root) via `pwd`, so it still resolves once the nested seed build
-// runs with the fixture root as its cwd.
+// repo root) via `_cwd_cmd()` (`realpath(".", null)`) rather than a `pwd`
+// shellout — a Git-Bash `pwd` prints the POSIX-mount spelling
+// (`/c/Users/...`) on a native Windows host, a different path style than
+// the Win32-native path the nested seed build needs (SFN-995) — so it
+// still resolves once the nested seed build runs with the fixture root as
+// its cwd.
 fn _abs_repo_path(relative: string) -> string ![io] {
-    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("seed-private-workspace-pwd")));
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return relative; }
-    return _first_line(out) + "/" + relative;
-}
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
+    return _cwd_cmd() + "/" + relative;
 }
 
 fn _write_fixture(root: string) -> void ![io] {

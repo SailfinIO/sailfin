@@ -46,6 +46,35 @@ fn _cr_is_path_sep(ch: string) -> boolean { return ch == "/" || ch == "\\"; }
 //
 // Every other `_cr_dirname` call site was returning `"."` for a backslashed
 // input too, so widening the scan can only make more things resolve.
+// A bare drive specifier (`C:`), which is what the walk above reaches after
+// `_cr_dirname("C:\\repo")`. It has no separator, so without this it falls
+// through to the `"."` no-directory sentinel below.
+//
+// Two characters ending in `:` cannot be anything else in this position: a
+// path component may not contain `:` on Windows, and on POSIX a two-character
+// name ending in `:` is not a root and never terminates a walk either way.
+fn _cr_is_drive_spec(path: string) -> boolean {
+    if path.length != 2 { return false; }
+    return path[1] == ":";
+}
+
+// A drive specifier is its OWN parent — the fixed point `/` provides on POSIX,
+// which every caller's walk-termination check (`strings_equal(parent, dir)`)
+// depends on to stop.
+//
+// SFN-1114 widened the separator SCAN so a backslashed path stops collapsing to
+// `"."` on the first step; it did not give the walk a place to stop. The result
+// was the same defect one level further up: `C:\repo` -> `C:` -> `"."`, and
+// `"."` is not equal to `C:`, so the walk does not terminate — it carries on
+// and probes `./workspace.toml`, turning the anchor `dedupe.sfn` calls
+// "deliberately independent of the CWD" into a probe OF the CWD. Running from
+// anywhere inside this repository then finds the repository's own
+// `workspace.toml` for an entry file in a scratch directory, and a spuriously
+// non-empty workspace root gates off the cache-implicit source leg
+// (`dedupe.sfn:566-593`), so a cached capsule's signatures are never staged and
+// lowering reports the callee as unknown.
+//
+// POSIX is unaffected: `/` already terminates at `last_slash == 0` below.
 fn _cr_dirname(path: string) -> string {
     let mut last_slash: int = -1;
     let mut i: int = 0;
@@ -54,7 +83,10 @@ fn _cr_dirname(path: string) -> string {
         if _cr_is_path_sep(path[i]) { last_slash = i; }
         i += 1;
     }
-    if last_slash < 0 { return "."; }
+    if last_slash < 0 {
+        if _cr_is_drive_spec(path) { return path; }
+        return ".";
+    }
     // Preserve the separator the caller actually used, so a Windows root keeps
     // its `\` spelling rather than being rewritten to `/`.
     if last_slash == 0 { return substring(path, 0, 1); }

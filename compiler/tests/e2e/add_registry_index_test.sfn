@@ -14,20 +14,19 @@
 // `compiler/tests/e2e/serve_loopback_test.sfn`.
 //
 // `sfn add` reads/writes `capsule.toml` in the CWD and has no path arg, so
-// each case runs inside its own temp dir via a `cd <dir> && exec <sfn>`
-// bash vehicle (run_capture cannot chdir) with an ABSOLUTE compiler path.
+// each case runs inside its own temp dir via `run_capture_cwd` with an
+// ABSOLUTE compiler path.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
 // cannot be called from an `![io]` test; assert on captured stdout/stderr
 // with `sfn/strings::contains` instead. (#842.)
 import { Env, env_from_current, env_set } from "sfn/os";
-import { contains, split } from "sfn/strings";
+import { contains } from "sfn/strings";
 import {
     Background,
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
-    report_child_failure,
     report_child_failure_pending,
     sfn_bin_abs_path,
     sfn_bin_path,
@@ -35,28 +34,25 @@ import {
     with_background
 } from "sfn/test";
 
-// Absolute path of the runner's working directory (repo root).
-fn _pwd() -> string ![io] {
-    let exit = process.run_capture(["pwd"], _child_env());
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    report_child_failure("add-registry-index pwd", exit, out, err);
-    if exit != 0 { return ""; }
-    return _first_line(out);
-}
+import { _cwd_cmd } from "../../src/build/fs";
+import { is_absolute_path } from "../../src/string_utils";
 
 fn _child_env() -> string[] ![io] {
     return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
 // Absolute scratch root. `SAILFIN_TEST_SCRATCH` is often the relative
-// `build/sailfin`; the tests `cd` into a temp dir via a bash vehicle, so a
-// relative path would break after the `cd`. Anchor it to the repo root.
+// `build/sailfin`; the tests run the child with its cwd set to a temp dir,
+// so a relative path would break once the child moves. Anchor it to the
+// repo root via `_cwd_cmd()` (`realpath(".", null)`) rather than a `pwd`
+// shellout — a Git-Bash `pwd` prints the POSIX-mount spelling
+// (`/c/Users/...`) on a native Windows host, a different path style than
+// the Win32-native paths every `fs.*` call here deals in (SFN-995).
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length == 0 { dir = default_scratch_dir(); }
-    if dir[0] != "/" {
-        let root = _pwd();
+    if !is_absolute_path(dir) {
+        let root = _cwd_cmd();
         if root.length > 0 { dir = root + "/" + dir; }
     }
     fs.createDirectory(dir, true);
@@ -67,12 +63,6 @@ fn _test_root(tag: string) -> string ![io] {
     let root = _scratch_dir() + "/add-idx-" + tag;
     fs.createDirectory(root, true);
     return root;
-}
-
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
 }
 
 // Minimal consumer capsule so `add` gets past its `capsule.toml` guard.
@@ -90,13 +80,11 @@ fn _env_for(home: string) -> string[] ![io] {
     return e;
 }
 
-// Run `sfn add <capsule>` in `workdir` (cd vehicle) with `home`.
+// Run `sfn add <capsule>` in `workdir` with `home`.
 fn _run_add(workdir: string, home: string, capsule: string) -> string ![io] {
     let sfn_abs = sfn_bin_abs_path();
     let e = _env_for(home);
-    let cmd = "cd \"" + workdir + "\" && exec \"" + sfn_abs + "\" add "
-        + capsule;
-    let _exit = process.run_capture(["bash", "-c", cmd], e);
+    let _exit = process.run_capture_cwd([sfn_abs, "add", capsule], e, workdir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return out + err;

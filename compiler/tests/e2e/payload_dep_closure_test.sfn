@@ -17,7 +17,7 @@ import {
     LinkPolicy,
     targz_create
 } from "sfn/archive";
-import { contains } from "sfn/strings";
+import { contains, int_to_string } from "sfn/strings";
 import { clean_runner_env, default_scratch_dir, with_tmp_dir } from "sfn/test";
 
 // Marker files live under `SAILFIN_TEST_SCRATCH` (or the platform default),
@@ -51,7 +51,17 @@ fn _fixed_opts() -> CreateOptions {
 fn _run_once(marker: string, tarball: string) -> int ![io] {
     let exit = process.run_capture(["bash", "scripts/verify-payload-dep-closure.sh", tarball], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    // Unconditional, not `report_child_failure`-style: callers expect exit
+    // 0 in three of the four tests but nonzero in the fourth, so the
+    // exit==0-is-fine convention would stay silent on exactly the runs
+    // that need to be seen, depending which caller is failing.
+    print.err("[payload-dep-closure] tarball=" + tarball + " child exit="
+        + int_to_string(exit)
+        + " stdout:\n"
+        + out
+        + "\nstderr:\n"
+        + err);
     fs.writeFile(marker, out);
     return exit;
 }
@@ -143,8 +153,9 @@ test "payload closure: a CRLF manifest with a missing dependency fails closed" !
     fs.deleteFile(marker);
     // Under the pre-fix script this wrongly exited 0 (the CRLF section
     // header never matched, so the missing dependency was never checked).
-    // The failure message itself goes to stderr, which `_run_once` does
-    // not capture -- the exit code is the whole assertion here.
+    // The failure message itself goes to stderr, which `_run_once` prints
+    // (diagnostic only) but does not thread into `marker` -- the exit code
+    // is the whole assertion here.
     assert exit != 0;
 }
 

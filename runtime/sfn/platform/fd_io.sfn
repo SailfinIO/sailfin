@@ -57,6 +57,10 @@ extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
+// `pipe(2)` — writes the read fd to `fds[0]` and the write fd to
+// `fds[1]`, returning 0 on success and -1 on failure.
+extern fn pipe(fds: *i32) -> i32;
+
 fn sfn_fd_read(fd: i32, buf: *u8, count: usize) -> i64 {
     return read(fd, buf, count);
 }
@@ -65,4 +69,18 @@ fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64 {
     return write(fd, buf, count);
 }
 
-export { sfn_fd_read, sfn_fd_write };
+// `sfn_fd_pipe(fds)` — an anonymous pipe as a pair of CRT file
+// descriptors, joining `sfn_fd_read`/`sfn_fd_write` as a target-swapped
+// pair. Same out-parameter shape and same 0/-1 result as `pipe(2)`.
+//
+// It exists because `pipe` is one of the POSIX names the UCRT does NOT
+// carry: `read`/`write`/`close` all have `_`-prefixed UCRT twins with
+// identical signatures, so `oldnames.lib` maps them and a bare `extern fn
+// read` links on Windows — but `_pipe` takes THREE parameters
+// (`_pipe(fds, size, textmode)`), so no such mapping exists and a bare
+// `extern fn pipe` fails the Windows link with `undefined symbol: pipe`.
+// Owning the divergence here keeps it in the one module that already owns
+// this fd family, rather than making every caller branch on the host.
+fn sfn_fd_pipe(fds: *i32) -> i32 { return pipe(fds); }
+
+export { sfn_fd_pipe, sfn_fd_read, sfn_fd_write };

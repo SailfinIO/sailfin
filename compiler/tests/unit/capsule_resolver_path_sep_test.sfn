@@ -52,6 +52,29 @@ test "capsule resolver: dirname preserves the caller's root separator" ![pure] {
     assert expect_eq_str(_cr_dirname("/abs"), "/").ok;
 }
 
+// A drive specifier is its own parent. This is the STOP the walk needs, and
+// it is a different claim from the step above it: `_cr_dirname("C:\\repo")`
+// already answered `"C:"` before this, and the walk then fell off the end
+// into `"."` — which does not equal `"C:"`, so `strings_equal(parent, dir)`
+// never fired and the walk kept going into the CWD.
+//
+// Asserted as the PAIR, because the fixed point is only meaningful in
+// sequence: the step must reach `"C:"` and `"C:"` must then stay there.
+test "capsule resolver: a drive specifier is its own parent" ![pure] {
+    assert expect_eq_str(_cr_dirname("C:\\repo"), "C:").ok;
+    assert expect_eq_str(_cr_dirname("C:"), "C:").ok;
+    assert expect_eq_str(_cr_dirname("D:"), "D:").ok;
+}
+
+// The stop must not be so eager that it swallows ordinary names. Only a
+// two-character string ending in `:` is a drive specifier; anything else
+// keeps the `"."` no-directory answer.
+test "capsule resolver: a drive-shaped stop does not capture ordinary names" ![pure] {
+    assert expect_eq_str(_cr_dirname("ab"), ".").ok;
+    assert expect_eq_str(_cr_dirname("abc:"), ".").ok;
+    assert expect_eq_str(_cr_dirname(":"), ".").ok;
+}
+
 // The `"."` default survives, but now only for input that genuinely carries no
 // separator. `_cr_dirname(".") == "."` is what terminates the upward walk, so
 // this pins the loop's stop condition as much as the default itself.

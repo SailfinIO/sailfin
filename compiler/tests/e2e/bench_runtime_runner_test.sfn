@@ -6,7 +6,7 @@
 // .claude/rules/no-bash-e2e.md. Each spawned `sfn bench` builds the workload
 // via a nested `sfn build`, so the child env carries PATH (clang + linker) and
 // SAILFIN_TEST_SCRATCH (build-cache isolation under the parallel pool).
-import { find } from "sfn/strings";
+import { find, int_to_string } from "sfn/strings";
 import {
     clean_runner_env,
     default_scratch_dir,
@@ -78,9 +78,16 @@ test "bench: an unmeetable memory budget exits 2" ![io, clock] {
     let work = nested_runner_scratch("bench-runtime-budget");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([sfn_bin_path(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--budget-mem", "1", "--work-dir", work], _child_env());
+    let budget_kb = "1";
+    let exit = process.run_capture([sfn_bin_path(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--budget-mem", budget_kb, "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    print.err("[bench-runtime-budget] budget-mem=" + budget_kb + " child exit="
+        + int_to_string(exit)
+        + " stdout:\n"
+        + out
+        + "\nstderr:\n"
+        + err);
     assert exit == 2;
     assert find(out, "HIGHMEM", 0) >= 0;
 }

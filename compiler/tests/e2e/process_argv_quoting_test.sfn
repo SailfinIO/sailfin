@@ -1,0 +1,135 @@
+// compiler/tests/e2e/process_argv_quoting_test.sfn
+//
+// The os-capsule contract is that `process.run_capture(argv, env)` delivers
+// `argv` to the child EXACTLY as written. POSIX gets that for free —
+// `posix_spawnp` takes the vector itself — but Win32 has no argument vector:
+// `CreateProcessA` takes one flat `lpCommandLine` string that the child's own
+// startup code re-splits, so the runtime has to ENCODE the vector and the
+// child has to decode it back to the same elements.
+//
+// `_pw_build_cmdline` (`runtime/sfn/platform/process_windows.sfn`) used to
+// wrap every element in a bare quote pair and escape nothing, which is not
+// that encoding. It loses two argument shapes outright:
+//
+//   * a trailing backslash — `C:\dir\` encodes as `"C:\dir\"`, whose final
+//     `\"` the tokenizer reads as an ESCAPED quote, so the argument runs on
+//     and swallows the separator and everything after it;
+//   * an embedded quote — `a"b` encodes as `"a"b"`, which re-splits into
+//     something else entirely, observably eating every backslash in the
+//     Windows paths around it.
+//
+// This test is deliberately NOT Windows-gated. The guarantee is
+// platform-independent, POSIX satisfies it structurally, and running both
+// legs is what makes the Windows encoder's job checkable against a reference
+// rather than against itself.
+//
+// The probe echoes `argv[1..]` back one bracketed element per line, so the
+// assertions read the child's DECODED vector. Asserting on the child's exit
+// code instead would pass against the broken encoder — it spawns fine, it
+// just delivers different arguments.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): the child is a compiled
+// Sailfin probe, spawned through `process.run_capture`. The nested build
+// needs `clang` and its linker, so the environment is
+// `clean_runner_env(nested_runner_scratch(...))` per
+// `docs/conventions/e2e-tests.md` rather than an empty vector.
+import { contains } from "sfn/strings";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_abs_path
+} from "sfn/test";
+
+// Echoes every argument after `argv[0]` on its own line, bracketed so a
+// dropped, merged, or padded element is visible rather than absorbed into
+// neighbouring whitespace.
+let PROBE_SRC: string = "fn main(argv: string[]) -> int ![io] {\n"
+    + "    let mut i = 1;\n"
+    + "    loop {\n"
+    + "        if i >= argv.length { break; }\n"
+    + "        print(\"[\" + argv[i] + \"]\");\n"
+    + "        i = i + 1;\n"
+    + "    }\n"
+    + "    return 0;\n"
+    + "}\n";
+
+fn _child_env(label: string) -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch(label));
+}
+
+// `-o` is honoured verbatim, so the built path carries `.exe` only where the
+// target adds one. Both spellings are probed rather than branching on the
+// host, which keeps the selection an observation instead of an assumption.
+fn _built_path(base: string) -> string ![io] {
+    if fs.exists(base + ".exe") { return base + ".exe"; }
+    return base;
+}
+
+// Builds the probe once per test (the scratch root is per-invocation) and
+// returns the launchable path, or "" when the build failed.
+fn _build_probe(label: string) -> string ![io] {
+    let dir = default_scratch_dir() + "/argv-quoting-" + label;
+    fs.createDirectory(dir, true);
+    let src = dir + "/argv_probe.sfn";
+    fs.writeFile(src, PROBE_SRC);
+    let base = dir + "/argv_probe";
+    let rc = process.run_capture([sfn_bin_abs_path(), "build", "-o", base, src], _child_env("argvq-build-"
+        + label));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if rc != 0 { return ""; }
+    return _built_path(base);
+}
+
+// The shapes an always-quote encoder cannot express. Each is asserted on its
+// own bracketed line, so a merged pair fails even though its bytes are all
+// still present somewhere in the output.
+test "process: run_capture delivers argv elements verbatim" ![io] {
+    let probe = _build_probe("verbatim");
+    assert probe.length > 0;
+
+    let rc = process.run_capture([probe, "plain", "has space", "C:\\dir\\sub", "a\"b", "--flag=\"quoted value\""], _child_env("argvq-run"));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 0;
+    assert contains(out, "[plain]");
+    assert contains(out, "[has space]");
+    assert contains(out, "[C:\\dir\\sub]");
+    assert contains(out, "[a\"b]");
+    assert contains(out, "[--flag=\"quoted value\"]");
+}
+
+// A backslash run that ENDS a quoted argument is the encoder's sharpest
+// corner: it sits directly in front of the closing quote, so it must double
+// or the quote stops terminating the argument. Split from the case above
+// because the failure is a RUN-ON — the next element disappears into this
+// one — and pinning that needs a following element to disappear.
+test "process: a trailing backslash does not run the argument on" ![io] {
+    let probe = _build_probe("trailing");
+    assert probe.length > 0;
+
+    let rc = process.run_capture([probe, "C:\\dir with space\\", "next"], _child_env("argvq-trailing"));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 0;
+    assert contains(out, "[C:\\dir with space\\]");
+    assert contains(out, "[next]");
+}
+
+// An empty element has no bytes to quote, so it survives only if the encoder
+// emits the quote pair for it explicitly — otherwise it collapses into the
+// separator run and the child sees one fewer argument.
+test "process: an empty argv element survives the round trip" ![io] {
+    let probe = _build_probe("empty");
+    assert probe.length > 0;
+
+    let rc = process.run_capture([probe, "before", "", "after"], _child_env("argvq-empty"));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 0;
+    assert contains(out, "[before]\n[]\n[after]");
+}

@@ -58,28 +58,80 @@ fn _link_escape_gnu(arg: string) -> string {
     return out;
 }
 
-// The exact length `CreateProcess` receives, mirroring the cmdline
-// builder in `runtime/sfn/platform/process_windows.sfn`
-// (`sfn_process_run` and `_pw_build_cmdline`): that loop adds
-// `strlen(arg) + 3` for EVERY arg — two wrapping quotes plus one
-// separating space — unconditionally, not only for args containing
-// whitespace. Modelling it any more cheaply undercounts by ~2 chars per
-// arg, which silently eats the threshold's margin at exactly the argv
-// sizes this exists to catch.
+// Whether `_pw_build_cmdline` wraps this argument in quotes — the same
+// predicate as `_pw_arg_needs_quotes`. VT (0x0B) and CR (0x0D) are in the
+// runtime's set but not modelled here: neither is expressible as a
+// Sailfin string escape, and a linker argv (object paths and flags)
+// cannot contain one. The divergence would cost 2 uncounted chars on an
+// argument that cannot occur, against 2,767 chars of threshold headroom.
+fn _link_win_arg_needs_quotes(arg: string) -> boolean {
+    if arg.length == 0 { return true; }
+    let mut i: int = 0;
+    loop {
+        if i >= arg.length { break; }
+        let ch = arg[i];
+        if ch == " " { return true; }
+        if ch == "\t" { return true; }
+        if ch == "\n" { return true; }
+        if ch == "\"" { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// The encoded length of one argument under the `CommandLineToArgvW`
+// quoting rule `_pw_write_arg` implements: an unquoted argument costs its
+// own length; a quoted one costs two quotes plus its bytes, with every
+// backslash run that precedes a `"` — or that ends the argument, since
+// the closing quote follows it — doubled, and each embedded `"` carrying
+// one further escaping backslash.
+fn link_win_arg_encoded_length(arg: string) -> int {
+    if !_link_win_arg_needs_quotes(arg) { return arg.length; }
+    let mut total: int = 2;
+    let mut backslashes: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= arg.length { break; }
+        let ch = arg[i];
+        if ch == "\\" { backslashes += 1; } else if ch == "\"" {
+            total = total + backslashes * 2 + 2;
+            backslashes = 0;
+        } else {
+            total = total + backslashes + 1;
+            backslashes = 0;
+        }
+        i += 1;
+    }
+    return total + backslashes * 2;
+}
+
+// The length `CreateProcess` receives, mirroring the cmdline builder in
+// `runtime/sfn/platform/process_windows.sfn` (`_pw_build_cmdline`): one
+// encoded argument each, plus a separating space. The separator is
+// counted for every argument rather than for the `n - 1` that really
+// carry one, so the result is the true length plus one — the direction
+// that keeps the threshold conservative.
+//
+// Modelling the quoting rather than assuming a fixed per-argument
+// overhead matters in both directions: the old `strlen(arg) + 3` form
+// over-counted every whitespace-free path by 2 (the runtime no longer
+// quotes those at all) and under-counted an argument whose backslash run
+// doubles.
 fn link_argv_flat_length(argv: string[]) -> int {
     let mut total: int = 0;
     let mut i: int = 0;
     loop {
         if i >= argv.length { break; }
-        total = total + argv[i].length + 3;
+        total = total + link_win_arg_encoded_length(argv[i]) + 1;
         i += 1;
     }
     return total;
 }
 
 // 2,767 chars below the 32,767 `CreateProcess` cap. Since
-// `link_argv_flat_length` is now exact rather than approximate, this is
-// pure headroom for argv growth between the measurement and the spawn.
+// `link_argv_flat_length` models the encoding rather than estimating it,
+// and rounds up by one separator, this is pure headroom for argv growth
+// between the measurement and the spawn.
 fn link_response_threshold() -> int { return 30000; }
 
 // Build the `@file` response-file body: `argv[1]` onward (argv[0] stays

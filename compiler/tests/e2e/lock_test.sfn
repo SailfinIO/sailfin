@@ -19,7 +19,7 @@
 // (and on out-of-tree marker files that survive the temp-dir teardown) after
 // the closure returns — the `sfn/test` idiom (see
 // `compiler/tests/e2e/sailfin_main_entry_test.sfn`).
-import { find } from "sfn/strings";
+import { find, int_to_string } from "sfn/strings";
 import {
     default_scratch_dir,
     report_child_failure_pending,
@@ -137,6 +137,13 @@ test "lock: outside a workspace errors cleanly" ![io] {
         let rc = process.run_capture([sfn_bin_path(), "lock", "--work-dir", dir], []);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
+        print.err("[lock-outside-workspace] child exit=" + int_to_string(rc)
+            + " dir="
+            + dir
+            + " stdout:\n"
+            + out
+            + "\nstderr:\n"
+            + err);
         fs.writeFile(err_marker, out + err);
         fs.writeFile(lockfile_marker, bool_to_marker(fs.exists(dir
             + "/workspace.lock")));
@@ -147,6 +154,10 @@ test "lock: outside a workspace errors cleanly" ![io] {
     assert exit != 0;
     let message = fs.readFile(err_marker);
     let lockfile = fs.readFile(lockfile_marker);
+    print.err("[lock-outside-workspace] err_marker=<<<" + message
+        + ">>> lockfile_marker=<<<"
+        + lockfile
+        + ">>>");
     fs.deleteFile(err_marker);
     fs.deleteFile(lockfile_marker);
     assert find(message, "workspace", 0) >= 0;
