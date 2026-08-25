@@ -36,7 +36,8 @@ import {
     default_scratch_dir,
     report_child_failure,
     report_child_failure_pending,
-    sfn_bin_path
+    sfn_bin_path,
+    sfn_source_literal
 } from "sfn/test";
 
 // Derived by subtraction from the real environment rather than a
@@ -69,9 +70,9 @@ fn _write_prog() -> string ![io] {
         + "    return http.get_body(url);\n"
         + "}\n\n"
         + "fn main() -> int ![io, net, clock] {\n"
-        + "    let path = \""
-        + marker
-        + "\";\n"
+        + "    let path = "
+        + sfn_source_literal(marker)
+        + ";\n"
         + "    fs.writeFile(path, \"implicit-capsule-ok\");\n"
         + "    let contents = fs.readFile(path);\n"
         + "    sleep(1);\n"

@@ -433,6 +433,28 @@ fn target_uses_gnu_link_gc(triple: string) -> boolean {
     return triple_abi(triple) != "msvc";
 }
 
+// Does the FINAL LINK discard sections nothing references? This is a
+// different question from `target_uses_gnu_link_gc` above, which answers
+// "which flag syntax expresses that" and stays false for msvc because
+// `lld-link` rejects `--gc-sections`/`-u`. The answer here is true
+// EVERYWHERE, msvc included: lld-link enables `/OPT:REF,ICF,LBR` by
+// default unless `/DEBUG` is passed, and the msvc link runs `clang
+// --target=x86_64-pc-windows-msvc -fuse-ld=lld` with no `-g`, so nothing
+// disables it (SFN-943 §3.1, measured with `SAILFIN_TRACE_LINK=1`).
+//
+// The two must stay separate. `runtime_link_dead_strips` needs THIS one —
+// whether stripping happens at all — while `link.sfn`'s flag push needs
+// the other. Collapsing them by flipping `target_uses_gnu_link_gc` true
+// for msvc would emit `-Wl,--gc-sections` and `-Wl,-u,<sym>` to lld-link,
+// which rejects both.
+//
+// A caution for anyone extending this: on COFF, stripping does NOT forgive
+// a dangling reference out of a discarded section the way ELF does —
+// lld-link resolves undefined symbols before it discards. A true answer
+// here means "unreferenced code is removed", never "a dangling reference
+// is safe".
+fn target_link_dead_strips(triple: string) -> boolean { return true; }
+
 // Drop POSIX-only link libraries for the msvc ABI (UCRT): `-lm`/
 // `-lpthread` have no MSVC equivalent (`ws2_32`/`kernel32` are
 // auto-linked by clang). The windows-gnu ABI links against mingw-w64's
@@ -517,8 +539,8 @@ fn target_extra_link_libs(triple: string) -> string[] {
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
 // `rlimit.sfn`/`terminal.sfn`/`rand.sfn`/`fs_exec_mode.sfn`/`fd_io.sfn`/
-// `socket_ops.sfn`/`rename_ops.sfn`/`cert_roots.sfn` already live in
-// `platform/`, so their siblings are joined directly onto that same
+// `socket_ops.sfn`/`rename_ops.sfn`/`cert_roots.sfn`/`file_stat.sfn` already
+// live in `platform/`, so their siblings are joined directly onto that same
 // directory rather than appending another `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
     if !target_os_is_windows(target_os) { return sources; }
@@ -526,8 +548,8 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
     // Anchor for the append block below — the `platform/` directory,
     // discovered from whichever of rlimit.sfn/terminal.sfn/rand.sfn/tls.sfn/
     // fs_exec_mode.sfn/fd_io.sfn/socket_ops.sfn/rename_ops.sfn/cert_roots.sfn/
-    // exec.sfn happens to be present in `sources`, since none of these
-    // is guaranteed by this function's own contract.
+    // file_stat.sfn/exec.sfn happens to be present in `sources`, since none
+    // of these is guaranteed by this function's own contract.
     let mut platform_dir: string = "";
     let mut i: int = 0;
     loop {
@@ -621,6 +643,16 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // (SFN-808).
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "cert_roots_windows.sfn"));
+        } else if base == "file_stat.sfn" {
+            // Already in platform/ — same as the six above. POSIX
+            // `struct stat` field offsets are not portable across
+            // glibc/Darwin, so the POSIX module is a stub that always
+            // reports "not available"; the sibling reads
+            // `WIN32_FILE_ATTRIBUTE_DATA` directly, a stable documented
+            // ABI, backing the cache GC size/mtime probes that were
+            // previously shell-bound and inert on Windows (SFN-754).
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "file_stat_windows.sfn"));
         } else if base == "exec.sfn" {
             // exec.sfn itself is unchanged (its `realpath` extern is
             // satisfied by the appended sibling below, not by swapping

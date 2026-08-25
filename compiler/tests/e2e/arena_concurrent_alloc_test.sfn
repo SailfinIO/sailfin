@@ -31,6 +31,8 @@
 // under the parallel pool (`docs/conventions/e2e-tests.md`).
 import { contains, ends_with, find } from "sfn/strings";
 import {
+    c_math_link_flags,
+    c_thread_link_flags,
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
@@ -235,8 +237,22 @@ fn _asan_relink(work_dir: string, bin: string) -> string ![io] {
         }
         i += 1;
     }
-    link_args.push("-lpthread");
-    link_args.push("-lm");
+    // `-lpthread`/`-lm` have no MSVC counterpart; the helpers answer the
+    // empty list on a Windows host (SFN-1114).
+    let thread_flags = c_thread_link_flags();
+    let mut tf: int = 0;
+    loop {
+        if tf >= thread_flags.length { break; }
+        link_args.push(thread_flags[tf]);
+        tf += 1;
+    }
+    let math_flags = c_math_link_flags();
+    let mut mf: int = 0;
+    loop {
+        if mf >= math_flags.length { break; }
+        link_args.push(math_flags[mf]);
+        mf += 1;
+    }
     link_args.push("-o");
     link_args.push(bin);
     let lexit = run_external_c_oracle(link_args);

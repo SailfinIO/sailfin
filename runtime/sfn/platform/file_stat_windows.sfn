@@ -1,0 +1,159 @@
+// runtime/sfn/platform/file_stat_windows.sfn
+//
+// Windows sibling of `file_stat.sfn`, swapped in for a Windows target by
+// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
+// and the `runtime/capsule.toml` `[targets.<triple>]` tables. Backs the
+// cache GC size/mtime probes in `compiler/src/build_cache.sfn` (SFN-754),
+// which were shell-bound (`stat`/`du`) and therefore silent no-ops under
+// `_shell_read_cmd`'s `host_is_windows()` guard — `sfn cache prune` never
+// evicted anything on a native Windows host.
+//
+// `WIN32_FILE_ATTRIBUTE_DATA` is stable, documented Win32 ABI (unlike
+// POSIX `struct stat`, whose field offsets differ across glibc/Darwin —
+// see `file_stat.sfn`'s header), so both probes read it directly via
+// `GetFileAttributesExA` rather than needing a codegen intrinsic.
+extern fn GetFileAttributesExA(path: *u8, level: i32, out: *u8) -> i32;
+
+// `CreateFileA`/`SetFileTime`/`GetSystemTimeAsFileTime`/`CloseHandle` back
+// `sfn_fs_touch_now`, the write-side counterpart of the two read probes
+// above — real `SetFileTime` is what makes `cache_touch_entry`
+// (`compiler/src/build_cache.sfn`) refresh an entry's recency on a hit,
+// now that `sfn_fs_stat_mtime_epoch` above makes the age axis live on
+// Windows (SFN-754).
+extern fn CreateFileA(path: *u8, access: i32, share: i32, sa: *u8, disp: i32, flags: i32, tmpl: *u8) -> i64;
+
+extern fn SetFileTime(h: i64, creation: *u8, access: *u8, write: *u8) -> i32;
+
+extern fn GetSystemTimeAsFileTime(out: *u8) -> void;
+
+extern fn CloseHandle(h: i64) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+// `GetFileExInfoStandard`.
+let GET_FILE_EX_INFO_STANDARD: i32 = 0;
+
+// `sizeof(WIN32_FILE_ATTRIBUTE_DATA)`.
+let WIN32_FILE_ATTRIBUTE_DATA_SIZE: i64 = 36;
+
+// `sizeof(FILETIME)` — the buffer `GetSystemTimeAsFileTime` fills.
+let FILETIME_SIZE: i64 = 8;
+
+// Verified against the Win32 headers (`winnt.h`/`fileapi.h`):
+//   FILE_WRITE_ATTRIBUTES              = 0x0100
+//   FILE_SHARE_READ | _WRITE | _DELETE = 0x1 | 0x2 | 0x4
+//   OPEN_EXISTING                      = 3
+//   FILE_FLAG_BACKUP_SEMANTICS         = 0x02000000
+//   INVALID_HANDLE_VALUE               = -1 (i.e. `(HANDLE)-1`)
+let FILE_WRITE_ATTRIBUTES: i32 = 256;
+
+let FILE_SHARE_READ_WRITE_DELETE: i32 = 7;
+
+let OPEN_EXISTING: i32 = 3;
+
+// REQUIRED here, not optional: without it `CreateFileA` refuses any path
+// that resolves to a DIRECTORY rather than a file, and what
+// `cache_touch_entry` touches is always an entry DIRECTORY (never one of
+// its artifact files) — this flag is what lets `CreateFileA` hand back a
+// directory handle at all.
+let FILE_FLAG_BACKUP_SEMANTICS: i32 = 33554432;
+
+let INVALID_HANDLE_VALUE: i64 = -1;
+
+// FILETIME's tick offset from 1601-01-01 UTC (its own epoch) to
+// 1970-01-01 UTC (the Unix epoch), in 100 ns intervals.
+let FILETIME_UNIX_EPOCH_TICKS: i64 = 116444736000000000;
+
+// 100 ns intervals per second — FILETIME's tick rate.
+let FILETIME_TICKS_PER_SECOND: i64 = 10000000;
+
+// Read a little-endian DWORD out of the `WIN32_FILE_ATTRIBUTE_DATA` buffer
+// at `offset`, via the same `load_byte` primitive
+// `runtime/sfn/platform/process_windows.sfn` uses for Win32 struct reads
+// (seed 0.7.0-alpha.41 carries the builtin — `runtime/sfn/string.sfn`).
+// Composed as an UNSIGNED 32-bit value: a DWORD whose top bit is set (a
+// file at or beyond 2 GiB in one half, or a post-2038 tick word) must not
+// sign-extend.
+fn _fsw_read_u32(buf: *u8, offset: i64) -> i64 {
+    let base: i64 = buf as i64;
+    let b0: i64 = load_byte(base + offset);
+    let b1: i64 = load_byte(base + offset + 1);
+    let b2: i64 = load_byte(base + offset + 2);
+    let b3: i64 = load_byte(base + offset + 3);
+    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+}
+
+// Populate `out` (a `WIN32_FILE_ATTRIBUTE_DATA_SIZE`-byte buffer) for
+// `path`. False on a null path or a failed Win32 call — the shared
+// not-available sentinel both probes below map to `-1`.
+fn _fsw_get_attrs(path: *u8, out: *u8) -> boolean {
+    if (path as i64) == 0 { return false; }
+    return GetFileAttributesExA(path, GET_FILE_EX_INFO_STANDARD, out) != 0;
+}
+
+// `WIN32_FILE_ATTRIBUTE_DATA` layout (little-endian):
+//   offset  0  DWORD    dwFileAttributes
+//   offset  4  FILETIME ftCreationTime     (low@4,  high@8)
+//   offset 12  FILETIME ftLastAccessTime   (low@12, high@16)
+//   offset 20  FILETIME ftLastWriteTime    (low@20, high@24)
+//   offset 28  DWORD    nFileSizeHigh
+//   offset 32  DWORD    nFileSizeLow
+fn sfn_fs_stat_size(path: *u8) -> i64 {
+    let buf: *u8 = malloc(WIN32_FILE_ATTRIBUTE_DATA_SIZE as usize);
+    if (buf as i64) == 0 { return -1; }
+    if !_fsw_get_attrs(path, buf) {
+        free(buf);
+        return -1;
+    }
+    let high: i64 = _fsw_read_u32(buf, 28);
+    let low: i64 = _fsw_read_u32(buf, 32);
+    free(buf);
+    return (high << 32) | low;
+}
+
+fn sfn_fs_stat_mtime_epoch(path: *u8) -> i64 {
+    let buf: *u8 = malloc(WIN32_FILE_ATTRIBUTE_DATA_SIZE as usize);
+    if (buf as i64) == 0 { return -1; }
+    if !_fsw_get_attrs(path, buf) {
+        free(buf);
+        return -1;
+    }
+    let low: i64 = _fsw_read_u32(buf, 20);
+    let high: i64 = _fsw_read_u32(buf, 24);
+    free(buf);
+    let ticks: i64 = (high << 32) | low;
+    let unix_ticks: i64 = ticks - FILETIME_UNIX_EPOCH_TICKS;
+    if unix_ticks < 0 { return -1; }
+    return unix_ticks / FILETIME_TICKS_PER_SECOND;
+}
+
+// Set `path`'s last-write time to now. `path` is always an entry
+// DIRECTORY here (see the `FILE_FLAG_BACKUP_SEMANTICS` note above), never
+// a file. Returns `0` on success, `-1` on a null path or any Win32
+// failure — opening the handle, allocating the FILETIME buffer, or the
+// `SetFileTime` call itself.
+//
+// The creation- and access-time parameters are passed `null`: Win32
+// leaves a `null` FILETIME field untouched, so only the write time
+// (the one `sfn_fs_stat_mtime_epoch` reads back) advances.
+fn sfn_fs_touch_now(path: *u8) -> i32 {
+    if (path as i64) == 0 { return -1; }
+    let h: i64 = CreateFileA(path, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ_WRITE_DELETE, null, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, null);
+    if h == INVALID_HANDLE_VALUE { return -1; }
+
+    let now: *u8 = malloc(FILETIME_SIZE as usize);
+    if (now as i64) == 0 {
+        CloseHandle(h);
+        return -1;
+    }
+    GetSystemTimeAsFileTime(now);
+    let ok: i32 = SetFileTime(h, null, null, now);
+    free(now);
+    CloseHandle(h);
+    if ok == 0 { return -1; }
+    return 0;
+}
+
+export { sfn_fs_stat_mtime_epoch, sfn_fs_stat_size, sfn_fs_touch_now };

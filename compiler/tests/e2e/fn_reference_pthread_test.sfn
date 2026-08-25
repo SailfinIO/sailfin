@@ -36,7 +36,13 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
+import {
+    c_math_link_flags,
+    c_thread_link_flags,
+    default_scratch_dir,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. The round-trip leg spawns clang + the
@@ -229,8 +235,25 @@ test "fn-ref: linked pthread_create round-trip runs the worker" ![io] {
         + "}\n");
 
     let bin = dir + "/roundtrip";
-    let clang_exit = run_external_c_oracle(["-Wno-override-module", "-DSPAWN_JOIN="
-        + spawn_sym, harness, ll, "-o", bin, "-lpthread", "-lm"]);
+    // `-lpthread`/`-lm` have no MSVC counterpart; the helpers answer the
+    // empty list on a Windows host (SFN-1114).
+    let mut clang_argv: string[] = ["-Wno-override-module", "-DSPAWN_JOIN="
+        + spawn_sym, harness, ll, "-o", bin];
+    let thread_flags = c_thread_link_flags();
+    let mut tf: int = 0;
+    loop {
+        if tf >= thread_flags.length { break; }
+        clang_argv.push(thread_flags[tf]);
+        tf += 1;
+    }
+    let math_flags = c_math_link_flags();
+    let mut mf: int = 0;
+    loop {
+        if mf >= math_flags.length { break; }
+        clang_argv.push(math_flags[mf]);
+        mf += 1;
+    }
+    let clang_exit = run_external_c_oracle(clang_argv);
     let _co = process.capture_take_stdout();
     let _ce = process.capture_take_stderr();
     if clang_exit != 0 {

@@ -33,13 +33,36 @@ fn _repo_root() -> string ![io] {
     return ".";
 }
 
+// The recorded symlink target for `path`, or `""` if there is no link record.
+//
+// git stores `site/public/llms.txt` with mode `120000` — a symlink — but only
+// materializes it as one when `core.symlinks` is true, which needs Developer
+// Mode or elevation on Windows and is therefore `false` on an ordinary
+// checkout. Where it is false git writes a REGULAR FILE whose entire contents
+// are the link target text. The repository invariant is identical in both
+// cases and lives in the index either way; only the working-tree shape
+// differs, so reading just `fs.read_link` would report a drift that does not
+// exist.
+//
+// This does not soften the guard. A regression that replaced the link with a
+// genuine second copy would make these contents the whole of llms.txt, which
+// is not the expected target string, so the caller's equality check still
+// fails — which is the whole point of comparing against an exact target
+// rather than merely checking that something is there.
+fn _link_target(path: string) -> string ![io] {
+    let native = fs.read_link(path);
+    if native.length > 0 { return native; }
+    if !fs.exists(path) { return ""; }
+    return trim(fs.readFile(path));
+}
+
 test "llms.txt: site copy is a symlink to the repo-root llms.txt" ![io] {
     let root = _repo_root();
     let site_copy = root + "/site/public/llms.txt";
 
-    // 1a. It must be a symlink: `fs.read_link` returns the raw target
-    //     (non-empty). A non-symlink or missing path returns "".
-    let target = fs.read_link(site_copy);
+    // 1a. A link record must exist — a real symlink, or git's non-symlink
+    //     materialization of one. A plain file that is not a link is "".
+    let target = _link_target(site_copy);
     assert target.length > 0;
 
     // 1b. Single-hop raw target must point at the repo-root llms.txt.
@@ -47,12 +70,20 @@ test "llms.txt: site copy is a symlink to the repo-root llms.txt" ![io] {
     //     link stores `../../llms.txt` verbatim (no canonicalization).
     assert target == "../../llms.txt";
 
-    // 1c. Single source of truth: the file reached through the symlink
-    //     is byte-identical to the repo-root copy it resolves to.
-    let site_text = fs.readFile(site_copy);
-    let root_text = fs.readFile(root + "/llms.txt");
-    assert site_text.length > 0;
-    assert site_text == root_text;
+    // 1c. Single source of truth: the file the link names really is the
+    //     repo-root copy. Where the symlink is materialized, read it THROUGH
+    //     the link and require byte-identity — that also proves the link is
+    //     not dangling. Where it is not, the working tree holds only the
+    //     target text, so there is nothing to dereference and the reachable
+    //     claim is that the named file exists; 1b already pinned which file.
+    let resolved = root + "/llms.txt";
+    assert fs.exists(resolved);
+    let root_text = fs.readFile(resolved);
+    assert root_text.length > 0;
+    if fs.read_link(site_copy).length > 0 {
+        let site_text = fs.readFile(site_copy);
+        assert site_text == root_text;
+    }
 }
 
 // Extract the value of the first `version = "..."` line in a TOML file:

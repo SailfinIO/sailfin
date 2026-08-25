@@ -29,6 +29,7 @@
 import { contains, ends_with } from "sfn/strings";
 import {
     clean_runner_env,
+    host_is_windows,
     nested_runner_scratch,
     report_child_failure,
     report_child_failure_pending,
@@ -228,7 +229,24 @@ test "runtime gates: module count stays under the ceiling" ![io] {
     let asm = _sfn_asm_files(leaves);
     // A ceiling, not an exact band — before this change it was 69; after,
     // ~29. An exact count is a cross-platform flake generator.
-    assert asm.length <= 40;
+    //
+    // The ceiling is host-conditioned because the narrowed set legitimately
+    // differs by target, not because Windows is allowed to narrow less well.
+    // `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
+    // appends eight Windows-only modules that have no POSIX counterpart to
+    // swap from — `realpath`, `clock`, `pthread`, `popen`, `mkstemp`,
+    // `strcasestr`, `opendir`, `mkdtemp` — on top of the `_windows` swaps.
+    // Those are additions to the retained set that no POSIX build performs,
+    // so one number cannot bound both hosts without slackening the POSIX
+    // guard to the point of hiding a real POSIX regression.
+    //
+    // Measured on a native Windows host: 41 with `sfn/platform/file_stat.sfn`
+    // added for SFN-754. It was 40 before that — exactly on the old shared
+    // ceiling, which is why adding one ungated module tripped a guard that
+    // was never meant to be a Windows exact-count assertion.
+    if host_is_windows() { assert asm.length <= 48; } else {
+        assert asm.length <= 40;
+    }
 }
 
 test "runtime gates: a net-demanding program still links and runs" ![io] {

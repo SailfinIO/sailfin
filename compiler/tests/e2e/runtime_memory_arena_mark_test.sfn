@@ -16,7 +16,12 @@
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
 import { contains, find } from "sfn/strings";
-import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
+import {
+    c_math_link_flags,
+    default_scratch_dir,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _scratch(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -185,7 +190,17 @@ test "mark → alloc → rewind reclaims post-mark bump (C harness via clang)" !
 
     // Compile and run
     let bin = dir + "/roundtrip";
-    let clang_exit = run_external_c_oracle(["-Wno-override-module", harness, arena_ll, "-o", bin, "-lm"]);
+    // `-lm` has no MSVC counterpart; `c_math_link_flags()` answers the empty
+    // list on a Windows host (SFN-1114).
+    let mut clang_argv: string[] = ["-Wno-override-module", harness, arena_ll, "-o", bin];
+    let math_flags = c_math_link_flags();
+    let mut mf: int = 0;
+    loop {
+        if mf >= math_flags.length { break; }
+        clang_argv.push(math_flags[mf]);
+        mf += 1;
+    }
+    let clang_exit = run_external_c_oracle(clang_argv);
     let clang_out = process.capture_take_stdout();
     let clang_err = process.capture_take_stderr();
     if clang_exit != 0 {

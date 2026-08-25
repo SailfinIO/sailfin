@@ -95,12 +95,21 @@ struct ResolverConsumer {
     // SFN-882: opt this resolution out of demand-driven runtime `sfn-source`
     // selection — the demand set is forced to `"*"` and nothing is narrowed.
     //
-    // Set by `sfn test`, whose link path does not dead-strip: the prelude's
-    // `serve` wrapper survives into every test binary and its reference to
-    // `sailfin_runtime_serve` (in gated `serve.sfn`) must resolve. It lives on
-    // the CONSUMER rather than at the link site because C1 and the link must
-    // consume one demand set; opting out at only one of them reintroduces the
-    // divergence as either an undefined symbol or a link-contract refusal.
+    // Set by `sfn test`, whose link path does not dead-strip, so any reference
+    // from an always-compiled source into a gated module must resolve rather
+    // than being discarded. It lives on the CONSUMER rather than at the link
+    // site because C1 and the link must consume one demand set; opting out at
+    // only one of them reintroduces the divergence as either an undefined
+    // symbol or a link-contract refusal.
+    //
+    // The concrete reference this was written for — the prelude's `serve`
+    // wrapper reaching `sailfin_runtime_serve` — no longer exists: SFN-943
+    // moved that definition into `runtime/prelude.sfn` itself, and
+    // `runtime_source_gates_test.sfn` now proves statically that no prelude
+    // binding lowers into a gated module. The opt-out is kept because the
+    // no-dead-strip property of the test link is unchanged and the test-side
+    // demand computation has not been audited against it — not because that
+    // one symbol still forces it. Revisiting it is separate work.
     retain_full_runtime: boolean;
 }
 

@@ -1,10 +1,11 @@
 # SFN-943 — Make the msvc link narrow correctly
 
-Design gate for SFN-943, re-scoped. **Design only — no compiler code
-written.** Evidence: the native-Windows e2e run captured in
-`.wintest/e2e_full_new.log`. Related: SFN-882 (shipped, design note
-`runtime-demand-driven-sources.md`), SFN-860 (design note only, not
-implemented), SFEP-0021 (`0021-windows-native-selfhost.md`), SFEP-0068
+Design gate for SFN-943, re-scoped, **now implemented** — see §1a for the
+implementation outcome and its deviations from the plan below. Evidence: the
+native-Windows e2e run captured in `.wintest/e2e_full_new.log`. Related:
+SFN-882 (shipped, design note `runtime-demand-driven-sources.md`), SFN-860
+(design note only, not implemented), SFEP-0021
+(`0021-windows-native-selfhost.md`), SFEP-0068
 (`0068-native-cross-target-build.md`).
 
 SFN-943's prior scope was narrower than this note — it read as "msvc
@@ -30,15 +31,74 @@ msvc-specific expectations into the five failing tests (§8).
 Deferred to a successor: `/INCLUDE:` retain roots on msvc (§6). Orthogonal
 — it changes binary *contents*, not link success.
 
-**Interim disposition while this is deferred:** the five tests stay **red
-and documented**, explicitly **not** `skip()`ed (§9).
+**Disposition:** implemented. All six tests (§2) now pass — see §1a.
+
+---
+
+## 1a. Implementation outcome
+
+SFN-943 is implemented. All six e2e tests named in §2 now pass, and
+`SAILFIN_TRACE_RUNTIME_GATES=1` on a `![io]`-only hello-world, measured on a
+native Windows host, prints `demand: io rand clock` — not `*`.
+
+Four deviations from the plan in §4.2 and §7, recorded plainly:
+
+1. **§4.2 and §7 Step 1's recommendation to move `sailfin_runtime_serve`
+   into ungated `runtime/sfn/concurrency/scheduler.sfn` was tried and is
+   NOT where it ended up.** It did not work: `scheduler.sfn` is itself an
+   `sfn-sources` member, and the minimal-runtime fixtures under
+   `compiler/tests/e2e/` hand-write a much shorter `sfn-sources` list that
+   omits it. The undefined symbol simply moved from `serve.sfn` to
+   `scheduler.sfn`, and `runtime_sfn_sources_link_consumer_test.sfn` still
+   failed with `lld-link: error: undefined symbol: sailfin_runtime_serve`.
+   The definition now lives in `runtime/prelude.sfn` itself — it now
+   DEFINES the `sailfin_runtime_serve` no-op directly, and
+   `runtime/sfn/concurrency/serve.sfn` no longer defines it — so reference
+   and definition land in the same object on every target. See §4.2 for
+   the superseded reasoning and why it was sound but rested on a false
+   premise.
+
+   The durable, generalized lesson: **the prelude constraint is stronger
+   than "the prelude may not reference a GATED module".** A runtime
+   capsule chooses its own `sfn-sources`, so a prelude reference into ANY
+   `sfn-sources` member is only as sound as the weakest runtime that must
+   satisfy it. §2, §3.3, and §4's framing treats gatedness as the whole
+   problem; it is not.
+
+2. **§2 undercounted the failing tests as five. There were six.**
+   `compiler/tests/e2e/workspace_capability_gate_test.sfn` was also a
+   casualty of the same fail-open — its failure log carries the identical
+   signature (`capsule-resolver: could not locate source for "sfn/strings"`
+   followed by `lld-link: error: undefined symbol:
+   int_to_string__sfn__strings__mod` referenced from
+   `der_oid_string__sfn__crypto__der`). It now passes, 9/9. See §2's
+   updated count below.
+
+3. **Step 2's new "Windows-conditioned source set" invariant case (§7 Step
+   2) found a real classification gap.**
+   `target_condition_runtime_sfn_sources` swaps gated
+   `platform/socket_ops.sfn` and `platform/cert_roots.sfn` for `*_windows.sfn`
+   siblings, but the gate table lists only the POSIX spelling, so a naive
+   membership test reads the swapped name as ungated. The real pipeline
+   never hits this because selection runs before conditioning (§4.1's last
+   bullet); the test had to undo the swap itself to check the post-swap
+   name against the gate table.
+
+4. `runtime_implicit_capsule_link_test.sfn` needed a second, unrelated fix
+   beyond SFN-943's scope to pass.
+
+§3.2's ELF-vs-COFF explanation is confirmed again in the implementation
+pass, independent of the LLD-source caveat that section still carries:
+`llvm-nm` on a linked Windows PE reports `no symbols` and exits `0`, while
+the COFF `.o` objects that feed the link carry full symbol tables.
 
 ---
 
 ## 2. The problem, and why it is one problem
 
-Five e2e tests fail on a native Windows host. They are one root cause, not
-five bugs. The chain:
+Six e2e tests fail on a native Windows host (§1a deviation 2 — this note
+originally undercounted five). They are one root cause, not six bugs. The
+chain:
 
 1. `target_uses_gnu_link_gc(triple)` (`compiler/src/build/target.sfn:432-434`)
    is `false` for the msvc ABI.
@@ -70,6 +130,12 @@ Observed:
   gate; they fail directly, with 69 modules instead of ~29.
 - `runtime_implicit_capsule_link_test.sfn`,
   `standalone_workspace_implicit_import_test.sfn`.
+- `workspace_capability_gate_test.sfn` — carries the identical signature to
+  the previous bullet's `sfn/strings` symptom: `capsule-resolver: could not
+  locate source for "sfn/strings"` followed by `lld-link: error: undefined
+  symbol: int_to_string__sfn__strings__mod` referenced from
+  `der_oid_string__sfn__crypto__der`. Missed in the original sweep (§1a
+  deviation 2); now passes, 9/9.
 
 The `standalone_workspace_implicit_import_test` failure carries a
 `capsule-resolver: could not locate source for "sfn/strings"` line
@@ -277,6 +343,18 @@ rather than hopeful.
   `rlimit.sfn`/`fd_io.sfn`/`exec.sfn` are ungated.
 
 ### 4.2 The fix is a relocation, not a rewrite
+
+**Superseded — see §1a.** The `scheduler.sfn` recommendation below was
+tried and did not hold: `scheduler.sfn` is itself an `sfn-sources` member,
+and the minimal-runtime e2e fixtures hand-write a shorter `sfn-sources`
+list that omits it, so the undefined symbol just moved from `serve.sfn` to
+`scheduler.sfn`. The reasoning that follows was sound on its own premise —
+it correctly identifies that the target module must be ungated — but that
+premise, "ungated implies always-present in `sfn-sources`", is false: a
+runtime capsule chooses its own `sfn-sources` per fixture, so gatedness is
+not the only axis that matters (§1a deviation 1). The definition landed in
+`runtime/prelude.sfn` instead, which is present in every build by
+construction. Left as originally written below for the record.
 
 `runtime/sfn/concurrency/serve.sfn:1246` is:
 
@@ -521,7 +599,11 @@ the row" — not "assert the bug."
 
 ---
 
-## 9. Interim disposition
+## 9. Interim disposition (historical)
+
+**Historical — describes the deferred period before implementation; see
+§1a.** SFN-943 is now implemented and all six tests pass. Left as
+originally written below for the record.
 
 While this issue is deferred, the five tests stay **red and documented**.
 They are **not** `skip()`ed, and their assertions are **not** relaxed.

@@ -1,0 +1,30 @@
+// `sfn_source_literal` (`capsules/sfn/test/src/scratch.sfn`) escapes a runtime
+// string into a Sailfin source-level string literal, quotes included, so a
+// test that generates `.sfn` source and embeds a host path cannot reproduce
+// the defect where `decode_string_literal_escapes`
+// (`compiler/capsules/syntax/src/parser/utils.sfn`) silently drops the
+// backslash of an unrecognized escape. Found via the Windows e2e run, where
+// an embedded scratch path silently lost its separators. Pinned as pure
+// string logic, with no filesystem and no Windows host required to exercise
+// it, so the rule is guarded on every runner rather than only where it broke.
+import { expect_eq_str, sfn_source_literal } from "sfn/test";
+
+test "sfn_source_literal: escapes a Windows absolute path" ![pure] {
+    assert expect_eq_str(sfn_source_literal("C:\\Users\\a\\b.txt"), "\"C:\\\\Users\\\\a\\\\b.txt\"").ok;
+}
+
+test "sfn_source_literal: a POSIX path is unchanged apart from the added quotes" ![pure] {
+    assert expect_eq_str(sfn_source_literal("/tmp/a/b.txt"), "\"/tmp/a/b.txt\"").ok;
+}
+
+test "sfn_source_literal: an embedded double quote is escaped" ![pure] {
+    assert expect_eq_str(sfn_source_literal("a\"b"), "\"a\\\"b\"").ok;
+}
+
+test "sfn_source_literal: a backslash immediately followed by a quote escapes both independently and in order" ![pure] {
+    assert expect_eq_str(sfn_source_literal("a\\\"b"), "\"a\\\\\\\"b\"").ok;
+}
+
+test "sfn_source_literal: the empty string produces just the two quote characters" ![pure] {
+    assert expect_eq_str(sfn_source_literal(""), "\"\"").ok;
+}

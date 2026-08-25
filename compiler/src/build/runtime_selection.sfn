@@ -49,7 +49,11 @@ import { collect_effect_tokens, collect_scoped_import_specs } from "../capsule_i
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { contains_string, substring } from "../string_utils";
 import { _shell_read_cmd } from "./fs";
-import { build_target_triple, target_uses_gnu_link_gc } from "./target";
+import {
+    build_target_triple,
+    target_link_dead_strips,
+    target_uses_gnu_link_gc
+} from "./target";
 
 // The retain-everything sentinel. A demand set containing it makes every
 // selection an identity — the pre-SFN-882 behaviour, exactly.
@@ -78,24 +82,52 @@ fn runtime_source_gates_disabled() -> boolean ![io] {
 //
 // This is the invariant the whole design rests on, and it is worth stating
 // plainly because it is invisible at every call site. An ungated module may
-// hold a reference to a gated module's symbol that is dead in practice — the
-// prelude's `serve` wrapper (`runtime/prelude.sfn`, lowered via
-// `registry_concurrency.sfn` to `@sailfin_runtime_serve` in the `net`-gated
-// `serve.sfn`) is exactly that. `--gc-sections` / `-dead_strip` drops the
-// uncalled wrapper and its reference with it, so the gated module is never
-// needed. Without that pass the reference survives into the link and must
-// resolve, and a program that never mentions TLS fails with an undefined
-// symbol.
+// hold a reference to a gated module's symbol that is dead in practice: the
+// call is never made, but the relocation is still emitted. On ELF and Mach-O
+// `--gc-sections` / `-dead_strip` drops the uncalled code and its reference
+// with it, so the gated module is never needed. Without that pass the
+// reference survives into the link and must resolve, and a program that never
+// mentions TLS fails with an undefined symbol.
 //
-// Two link paths skip the strip (`build/link.sfn`): the msvc ABI, whose
+// The prelude's `serve` wrapper (`runtime/prelude.sfn`, lowered via
+// `registry_concurrency.sfn` to `@sailfin_runtime_serve`) used to be exactly
+// such a reference. It is no longer one — SFN-943 moved that definition into
+// `runtime/prelude.sfn` ITSELF, because on COFF the argument above
+// does not hold: lld-link resolves undefined symbols BEFORE it discards
+// sections, so a dead reference is still a hard error. No reference of this
+// class remains, and `runtime_source_gates_test.sfn` is what keeps it that
+// way. Do not add one back on the strength of the ELF paragraph alone.
+//
+// Two link paths used to skip the strip (`build/link.sfn`): the msvc ABI, whose
 // `lld-link` rejects the GNU/Mach-O flags outright, and a host where `nm` is
-// unavailable so the retain-root enumeration comes back empty. Both must
-// therefore retain everything. Deciding it HERE rather than at the link is
+// unavailable so the retain-root enumeration comes back empty. Only the second
+// still forces retain-everything. Deciding it HERE rather than at the link is
 // deliberate: the link-contract preflight and the dep-staging loop derive from
 // the same demand set, so widening at the link alone would leave the contract
 // still demanding `sfn/crypto` while nothing staged it — the §6 landmine.
+//
+// msvc no longer widens (SFN-943). `lld-link` runs `/OPT:REF` unconditionally,
+// so whether the link strips is a property of the TARGET and the host toolchain
+// has no bearing on it — carrying the `nm` probe across would have kept the
+// fail-open alive on Windows permanently, since `_shell_read_cmd` returns `""`
+// on a Windows host regardless of what is installed (`build/fs.sfn`). The probe
+// therefore applies only on the branch whose flag it actually gates: on
+// GNU/Mach-O an empty enumeration makes `link.sfn` withhold `--gc-sections`,
+// and retaining everything is the matching fail-safe. There is no msvc flag to
+// withhold, so there is nothing to be safe about.
+//
+// What narrowing rests on differs by target, and this is the part to keep in
+// mind before adding a gate entry. On ELF and Mach-O a reference into a
+// dropped section is forgiven, so an imprecise retained set still links. On
+// COFF it is a hard `lld-link: error: undefined symbol` — undefined symbols
+// resolve before sections are discarded. msvc therefore needs the retained
+// closure to be EXACT, not merely dead-strippable, which is why the prelude's
+// `sailfin_runtime_serve` reference had to move to an ungated module and why
+// `runtime_source_gates_test.sfn` checks that closure statically.
 fn runtime_link_dead_strips() -> boolean ![io] {
-    if !target_uses_gnu_link_gc(build_target_triple()) { return false; }
+    let triple = build_target_triple();
+    if !target_link_dead_strips(triple) { return false; }
+    if !target_uses_gnu_link_gc(triple) { return true; }
     // Mirrors `_runtime_retain_root_flags`' own dependency: it shells
     // `nm | awk`, and an empty result there disables the strip.
     return _shell_read_cmd("command -v nm 2>/dev/null").length > 0;
@@ -210,10 +242,29 @@ fn _rs_absorb_tokens(demand: string[], source_text: string) -> string[] {
 // Returns `"*"` on `full_runtime`, on the env kill-switch, or on any source it
 // cannot read — see the fail-open note in this module's header for why an
 // unreadable source escalates instead of contributing nothing.
+// Each widening path announces itself under `SAILFIN_TRACE_RUNTIME_GATES=1`.
+// Returning `runtime_demand_all()` silently made the trace flag useless for
+// the one question it exists to answer — a build that stages the whole
+// runtime printed no line at all, so "no trace output" meant both "gates are
+// off" and "gates escalated", which are opposite diagnoses. Naming the reason
+// is what lets a Windows build distinguish an unresolved source path (the
+// `fs.exists` miss below) from the msvc fail-open that SFN-943 closed.
+fn _rs_trace_demand_all(reason: string) -> string[] ![io] {
+    if runtime_gates_trace_enabled() {
+        print.err("[runtime-gates] demand: * (retain everything — " + reason
+            + ")");
+    }
+    return runtime_demand_all();
+}
+
 fn compute_runtime_demand(source_paths: string[], capabilities_required: string[], full_runtime: boolean) -> string[] ![io] {
-    if full_runtime { return runtime_demand_all(); }
-    if runtime_source_gates_disabled() { return runtime_demand_all(); }
-    if !runtime_link_dead_strips() { return runtime_demand_all(); }
+    if full_runtime { return _rs_trace_demand_all("full-runtime = true"); }
+    if runtime_source_gates_disabled() {
+        return _rs_trace_demand_all("SAILFIN_RUNTIME_SOURCE_GATES=off");
+    }
+    if !runtime_link_dead_strips() {
+        return _rs_trace_demand_all("link does not dead-strip");
+    }
     let mut demand: string[] = [];
     let mut c: int = 0;
     loop {
@@ -230,7 +281,9 @@ fn compute_runtime_demand(source_paths: string[], capabilities_required: string[
         let path = source_paths[i];
         i += 1;
         if path.length == 0 { continue; }
-        if !fs.exists(path) { return runtime_demand_all(); }
+        if !fs.exists(path) {
+            return _rs_trace_demand_all("unresolved source path: " + path);
+        }
         demand = _rs_absorb_tokens(demand, fs.readFile(path));
     }
     if runtime_gates_trace_enabled() {
