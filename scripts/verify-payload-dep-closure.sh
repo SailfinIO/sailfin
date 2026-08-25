@@ -27,7 +27,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-tar -xzf "${tarball}" -C "${extract_dir}"
+# GNU tar reads an `X:` drive-letter prefix on the archive-file argument as
+# `[user@]host:path` remote-archive syntax and refuses to open it locally --
+# fatal for every `SAILFIN_TEST_SCRATCH`-derived tarball path on a native
+# Windows host. `--force-local` disables that parse but is a GNU extension
+# bsdtar (macOS) does not reliably carry, so no flag is safe on every host;
+# running from the tarball's own directory with a bare basename argument
+# removes the ambiguity everywhere instead (mirrors
+# `sfn_package_test.sfn::_tar_list`, same rationale).
+tarball_dir="$(dirname -- "${tarball}")"
+tarball_base="$(basename -- "${tarball}")"
+(cd "${tarball_dir}" && tar -xzf "${tarball_base}" -C "${extract_dir}")
 
 root_dir="${extract_dir}"
 if [ ! -d "${extract_dir}/runtime" ]; then

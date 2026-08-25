@@ -34,6 +34,7 @@ import {
     starts_with
 } from "sfn/strings";
 import {
+    c_math_link_flags,
     clean_runner_env,
     default_scratch_dir,
     report_child_failure,
@@ -258,7 +259,21 @@ test "rc roundtrip: alloc -> retain -> release -> release frees exactly once" ![
     let harness = dir + "/harness.c";
     fs.writeFile(harness, _rc_harness_c());
     let bin = dir + "/roundtrip";
-    let link_exit = run_external_c_oracle(["-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm"]);
+    // `-lm` has no MSVC counterpart — `c_math_link_flags()` (SFN-1114) answers
+    // the empty list on a Windows host, where libm's contents are already in
+    // `libcmt.lib`. Hard-coding it made this link fail with `could not open
+    // 'm.lib'` and, unlike its sibling oracle tests, this one asserts the link
+    // exit rather than swallowing it — so it failed honestly instead of
+    // reporting a green that skipped the roundtrip.
+    let mut link_argv: string[] = ["-Wno-override-module", harness, ll, tm_o, "-o", bin];
+    let math_flags = c_math_link_flags();
+    let mut mf: int = 0;
+    loop {
+        if mf >= math_flags.length { break; }
+        link_argv.push(math_flags[mf]);
+        mf += 1;
+    }
+    let link_exit = run_external_c_oracle(link_argv);
     let _lo = process.capture_take_stdout();
     let lerr = process.capture_take_stderr();
     assert find(lerr, "doesn't exist", 0) < 0;

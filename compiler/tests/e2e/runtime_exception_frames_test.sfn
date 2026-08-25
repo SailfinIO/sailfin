@@ -31,7 +31,12 @@
 // IR assertions use `sfn/strings` predicates — the `sfn/test` `expect_*`
 // matchers are `![pure]` and cannot be called from an `![io]` test (#842).
 import { contains, find } from "sfn/strings";
-import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
+import {
+    c_math_link_flags,
+    default_scratch_dir,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs (PATH for clang/nm, SAILFIN_TEST_SCRATCH
@@ -335,7 +340,17 @@ test "cross-frame unwind: inline setjmp + sfn_throw round-trips message" ![io] {
     fs.writeFile(harness, _harness_c());
     let bin = dir + "/roundtrip";
     if fs.exists(bin) { fs.deleteFile(bin); }
-    let link = run_external_c_oracle(["-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm"]);
+    // `-lm` has no MSVC counterpart; `c_math_link_flags()` answers the empty
+    // list on a Windows host (SFN-1114).
+    let mut link_argv: string[] = ["-Wno-override-module", harness, ll, tm_o, "-o", bin];
+    let math_flags = c_math_link_flags();
+    let mut mf: int = 0;
+    loop {
+        if mf >= math_flags.length { break; }
+        link_argv.push(math_flags[mf]);
+        mf += 1;
+    }
+    let link = run_external_c_oracle(link_argv);
     let _l1 = process.capture_take_stdout();
     let _l2 = process.capture_take_stderr();
     // A link that fails for missing toolchain is a skip, not a failure.

@@ -75,6 +75,7 @@ sfn-sources = [
     "sfn/platform/rename_ops.sfn",
     "sfn/platform/exclusive_create.sfn",
     "sfn/platform/cert_roots.sfn",
+    "sfn/platform/file_stat.sfn",
     "sfn/adapters/filesystem.sfn",
     "sfn/adapters/http.sfn",
     "sfn/adapters/websocket.sfn",
@@ -131,6 +132,7 @@ sfn-sources-replace = [
     "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_windows.sfn",
     "sfn/platform/exclusive_create.sfn=sfn/platform/exclusive_create_windows.sfn",
     "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn",
+    "sfn/platform/file_stat.sfn=sfn/platform/file_stat_windows.sfn",
 ]
 # `sysconf` has no standalone provider: it is defined in
 # `pthread_windows.sfn`, which is therefore listed here even though MinGW
@@ -193,6 +195,7 @@ sfn-sources-replace = [
     "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_windows.sfn",
     "sfn/platform/exclusive_create.sfn=sfn/platform/exclusive_create_windows.sfn",
     "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn",
+    "sfn/platform/file_stat.sfn=sfn/platform/file_stat_windows.sfn",
 ]
 # Order is load-bearing: the fallback appends these as a fixed tail, and the
 # manifest path appends in declaration order, so a reorder here breaks the
@@ -248,26 +251,51 @@ link-libs-add = []
 #
 # THE PRELUDE CONSTRAINT. `runtime/prelude.sfn` is compiled and linked into
 # every binary unconditionally — it is not an `sfn-sources` member and the
-# selector never sees it — and it binds `runtime_serve_fn = runtime.serve`,
-# giving it a reference to `sailfin_runtime_serve` in gated `serve.sfn`. That
-# reference is safe ONLY because it is dead-strippable: the prelude's `serve`
-# wrapper does not match the `sfn*` retain-root pattern, so `--gc-sections`
-# removes it from any binary that never calls `serve`, and a binary that DOES
-# call it must declare `![net]`, which opens the gate. A link path that neither
-# dead-strips nor narrows would see an undefined `sailfin_runtime_serve`; that
-# is why `sfn test` opts out of selection entirely rather than gating (SFN-882).
+# selector never sees it — so every symbol the prelude references must resolve
+# in EVERY link, on every target. That is a stronger constraint than "the
+# prelude may not reference a GATED module": a runtime capsule chooses its own
+# `sfn-sources`, and every minimal-runtime test fixture in
+# `compiler/tests/e2e/` lists far fewer entries than this manifest does. A
+# prelude reference into ANY `sfn-sources` member is therefore only as sound as
+# the weakest runtime that has to satisfy it.
 #
-# Do not try to "fix" this by ungating the group. The closure is by SYMBOL
-# REFERENCE, not import — `serve.sfn` and `http.sfn` have no imports at all, yet
-# both call the bare `tls_*` API (`tls_client_ctx`, `tls_read`, `tls_write`) in
-# `tls.sfn`, which imports `sfn/crypto`. Ungating serve/http therefore drags in
-# TLS and all 33 crypto modules, erasing the entire win. An import-only audit
-# sees a false all-clear here; `runtime_source_gates_test.sfn` checks symbols.
+# `sailfin_runtime_serve` is the reference that proved it, and it is now
+# defined in `runtime/prelude.sfn` ITSELF rather than in any runtime module
+# (SFN-943). It sat in gated `serve.sfn` for as long as SFN-882 existed.
+#
+# The older rationale — that the reference was safe because `--gc-sections`
+# would discard the prelude's unused `serve` wrapper — held only on ELF and
+# Mach-O. COFF resolves undefined symbols BEFORE it discards sections, so on
+# msvc a dangling reference out of a discarded section is a hard
+# `lld-link: error: undefined symbol`. Dead-strippability is a size argument,
+# never a link-correctness one; the retained closure must be exact. A new
+# prelude binding into a gated module reintroduces the break on Windows while
+# staying green on Linux, which is why
+# `compiler/tests/unit/runtime_source_gates_test.sfn` checks it statically.
+#
+# Do not try to "fix" a gate entry by ungating the group. The closure is by
+# SYMBOL REFERENCE, not import — `serve.sfn` and `http.sfn` have no imports at
+# all, yet both call the bare `tls_*` API (`tls_client_ctx`, `tls_read`,
+# `tls_write`) in `tls.sfn`, which imports `sfn/crypto`. Ungating serve/http
+# therefore drags in TLS and all 33 crypto modules, erasing the entire win. An
+# import-only audit sees a false all-clear here; `runtime_source_gates_test.sfn`
+# checks symbols.
+# `cert_roots.sfn` is deliberately NOT gated. It reads the PLATFORM TRUST
+# STORE, which is a filesystem/OS operation rather than a networking one, and
+# its only consumer is `capsules/sfn/crypto` (`src/trust_store.sfn` externs
+# `sfn_cert_roots_blob`) — a capsule whose manifest declares
+# `required = []`. Gating it on `net` therefore made the gate premise false:
+# a build could stage `sfn/crypto` without demanding `net`, drop the defining
+# module, and leave the extern unresolved. ELF dead-strips that dangling
+# reference; COFF diagnoses it, so on msvc it was a hard
+# `lld-link: error: undefined symbol: sfn_cert_roots_blob` (SFN-943). Ungating
+# costs nothing: the module has no imports, references no other gated symbol,
+# and its Windows form needs only crypt32, which is already on every link
+# line. `runtime_capsule_extern_gates_test.sfn` keeps the general rule.
 [sfn-source-gates]
 net = [
     "sfn/platform/tls.sfn",
     "sfn/platform/tls_record.sfn",
-    "sfn/platform/cert_roots.sfn",
     "sfn/platform/socket_ops.sfn",
     "sfn/adapters/http.sfn",
     "sfn/adapters/websocket.sfn",

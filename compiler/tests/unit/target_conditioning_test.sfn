@@ -52,6 +52,7 @@ import {
     target_extra_link_libs,
     target_filter_link_libs,
     target_forced_linker_flag,
+    target_link_dead_strips,
     target_linker_driver,
     target_linker_driver_flags,
     target_os_is_windows,
@@ -273,6 +274,26 @@ test "target: GNU section-GC flags are skipped only for msvc" ![pure] {
     assert expect_eq_bool(target_uses_gnu_link_gc("x86_64-apple-darwin"), true).ok;
     assert expect_eq_bool(target_uses_gnu_link_gc("x86_64-w64-mingw32"), true).ok;
     assert expect_eq_bool(target_uses_gnu_link_gc("x86_64-pc-windows-msvc"), false).ok;
+}
+
+// The companion predicate, and the reason it is a SEPARATE function
+// rather than a widened `target_uses_gnu_link_gc`. The two answer
+// different questions: this one is "does the link discard unreferenced
+// sections at all", the other is "which flag syntax expresses that".
+// msvc is the only target where they disagree — `lld-link` strips via
+// `/OPT:REF` by default while rejecting the GNU spelling — and that
+// disagreement is the whole content of SFN-943. Pinned as a pair so a
+// future edit cannot quietly collapse them back into one predicate and
+// re-open the msvc fail-open.
+test "target: every target dead-strips, but only non-msvc says so with GNU flags" ![pure] {
+    assert expect_eq_bool(target_link_dead_strips("x86_64-unknown-linux-gnu"), true).ok;
+    assert expect_eq_bool(target_link_dead_strips("x86_64-apple-darwin"), true).ok;
+    assert expect_eq_bool(target_link_dead_strips("x86_64-w64-mingw32"), true).ok;
+    assert expect_eq_bool(target_link_dead_strips("x86_64-pc-windows-msvc"), true).ok;
+
+    // msvc is the sole divergence.
+    assert expect_eq_bool(target_uses_gnu_link_gc("x86_64-pc-windows-msvc"), false).ok;
+    assert expect_eq_bool(target_link_dead_strips("x86_64-pc-windows-msvc"), true).ok;
 }
 
 // ---- Link-lib filtering ----
@@ -544,6 +565,26 @@ test "target: host targets keep the POSIX rename module" ![pure] {
     // publishes through MoveFileExA, which does not exist outside kernel32.
     // Windows is the exception, not the default (SFN-720).
     let sources: string[] = ["/rt/sfn/platform/rename_ops.sfn", "/rt/sfn/io.sfn"];
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
+}
+
+test "target: Windows file_stat swap survives without the other platform anchors" ![pure] {
+    // file_stat.sfn is itself a platform/ anchor, so the swap must fire
+    // with rlimit/rand/tls/exec all absent — same coupling guard as the
+    // fs_exec_mode test above (SFN-754).
+    let sources: string[] = ["/rt/sfn/platform/file_stat.sfn"];
+    let out = target_condition_runtime_sfn_sources(sources, "Windows");
+    assert expect_eq_str(out[0], "/rt/sfn/platform/file_stat_windows.sfn").ok;
+    assert expect_eq_bool(out.length > 1, true).ok;
+}
+
+test "target: host targets keep the POSIX file_stat module" ![pure] {
+    // The identity contract (#1112): `struct stat` field offsets are not
+    // portable across glibc/Darwin, so Linux and macOS must keep the
+    // always-"-1" `platform/file_stat.sfn` stub rather than the Windows
+    // sibling's `GetFileAttributesExA` reads (SFN-754).
+    let sources: string[] = ["/rt/sfn/platform/file_stat.sfn", "/rt/sfn/io.sfn"];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
 }

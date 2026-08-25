@@ -1,0 +1,33 @@
+// runtime/sfn/platform/file_stat.sfn
+//
+// POSIX stub of the native file-stat probe pair backing the cache GC size
+// and mtime reads in `compiler/src/build_cache.sfn` (SFN-754). Swapped for
+// `file_stat_windows.sfn` on a Windows target by
+// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
+// and the `runtime/capsule.toml` `[targets.<triple>]` tables — the same
+// swap treatment `fd_io.sfn` gets.
+//
+// Deliberately NOT a native POSIX implementation. `struct stat` field
+// offsets are not portable across POSIX targets — Linux glibc x86_64/
+// aarch64 and macOS arm64 all differ, which is why `sfn_fs_get_perms`
+// routes through a codegen intrinsic rather than reading the struct
+// directly (`runtime/sfn/platform/sizes_linux.sfn` resolves the same class
+// of problem for `struct dirent` with a runtime `/proc/self/status`
+// probe). Both probes below always return `-1` ("not available"), and
+// their compiler-side callers (`_entry_mtime_epoch`, `_dir_size_bytes` in
+// `compiler/src/build_cache.sfn`) already carry the pre-existing shelled
+// `stat`/`du` fallback for exactly that sentinel — this is a documented
+// boundary, not a placeholder: a genuine POSIX implementation needs the
+// same per-platform offset treatment `sizes_linux.sfn` gives, and is out
+// of scope for SFN-754, which targets Windows only.
+fn sfn_fs_stat_size(path: *u8) -> i64 { return -1; }
+
+fn sfn_fs_stat_mtime_epoch(path: *u8) -> i64 { return -1; }
+
+// Same not-available contract as the two probes above: this stays a stub
+// on POSIX (`cache_touch_entry` in `compiler/src/build_cache.sfn` already
+// carries the pre-existing `process.run(["touch", dir])` fallback for the
+// `-1` sentinel).
+fn sfn_fs_touch_now(path: *u8) -> i32 { return -1; }
+
+export { sfn_fs_stat_mtime_epoch, sfn_fs_stat_size, sfn_fs_touch_now };
