@@ -15,6 +15,8 @@
 // `io.poll_any` over the two raw handle fds, a single-`read(2)` chunk from
 // the ready stream, terminating on the two `*_at_eof` predicates — proving
 // the transport before the runner (a separate seed-gated PR) depends on it.
+import { host_is_windows, skip } from "sfn/test";
+
 test "handle fd/kill/eof accessors: zero handle reports the dead-handle sentinels" ![io] {
     // No child: the zero-handle contract must match the sibling read
     // builtins (fds -> -1, chunk read -> "", stderr_at_eof -> true, kill -> -1).
@@ -26,6 +28,9 @@ test "handle fd/kill/eof accessors: zero handle reports the dead-handle sentinel
 }
 
 test "handle_stdout_fd/handle_stderr_fd: expose distinct live child fds" ![io] {
+    if host_is_windows() {
+        skip("SFN-1130: native Windows process handles do not expose pollable CRT file descriptors");
+    }
     let id = process.spawn_with_env(["sh", "-c", "printf 'out'; printf 'err' 1>&2"], []);
     assert id != 0;
     let ofd = process.handle_stdout_fd(id);
@@ -42,6 +47,9 @@ test "handle_stdout_fd/handle_stderr_fd: expose distinct live child fds" ![io] {
 }
 
 test "handle_read_bytes_stderr: returns at most n bytes preserving the remainder" ![io] {
+    if host_is_windows() {
+        skip("SFN-1130: this fixture requires a POSIX sh child and pollable CRT file descriptors");
+    }
     let id = process.spawn_with_env(["sh", "-c", "printf 'abcdefgh' 1>&2"], []);
     assert id != 0;
     // Live stderr, not yet drained.
@@ -63,6 +71,9 @@ test "handle_read_bytes_stderr: returns at most n bytes preserving the remainder
 }
 
 test "poll_any demux: stdout(user) and stderr(records) separate cleanly" ![io] {
+    if host_is_windows() {
+        skip("SFN-1130: native Windows process handles use framed reads instead of io.poll_any file descriptors");
+    }
     // The child writes distinct payloads to each stream. The loop is the
     // streamed-runner transport in miniature: poll both raw fds, read one
     // chunk from whichever is ready, accumulate per stream, terminate when
@@ -107,6 +118,9 @@ test "poll_any demux: stdout(user) and stderr(records) separate cleanly" ![io] {
 }
 
 test "handle_kill: SIGKILLs a running child; handle_wait reports signal death" ![io] {
+    if host_is_windows() {
+        skip("SFN-1130: this assertion pins POSIX SIGKILL exit semantics");
+    }
     // A child that would outlive the test by far; kill it through the handle
     // (no external `timeout(1)`), then reap. `handle_wait` after SIGKILL(9)
     // returns 128 + 9 = 137 — signal death, never a clean 0.
