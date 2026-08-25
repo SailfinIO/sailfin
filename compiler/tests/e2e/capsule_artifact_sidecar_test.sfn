@@ -49,6 +49,17 @@ fn _binc_sidecar() -> string {
     return "build/capsules/demo/widgetcli/manifest.json";
 }
 
+// The canonical-default binary path is derived through `target_exe_name`
+// (`compiler/src/cli/commands/build.sfn:422-427`), which appends `.exe` on
+// a Windows target; an explicit `-o` bypasses that derivation entirely
+// (`build.sfn:382`), which is why `capsule_build_test.sfn`'s sibling test
+// never needed this probe. Both spellings are probed rather than branching
+// on the host — `process_exec_test.sfn`'s idiom.
+fn _built_path(base: string) -> string ![io] {
+    if fs.exists(base + ".exe") { return base + ".exe"; }
+    return base;
+}
+
 // Create the in-tree fixtures (idempotent). They must be materialized at
 // runtime — a fresh CI checkout has no build/ tree — so every build path
 // below ensures them first. Content is deterministic; within-file tests run
@@ -96,6 +107,47 @@ fn _run_build(args: string[]) -> int ![io] {
     return exit;
 }
 
+// Reverses `_ca_json_escape` (`compiler/src/capsule_artifact.sfn:495-509`)
+// over a raw JSON-escaped slice, mirroring the exact five-form escape set
+// that function emits — `\\`, `\"`, `\n`, `\r`, `\t` — so a comparison
+// against an unescaped Sailfin string (a raw Windows scratch path with
+// backslashes, for instance) matches rather than comparing against the
+// escaped bytes.
+fn _json_unescape(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = s[i];
+        if ch == "\\" && i + 1 < s.length {
+            let next = s[i + 1];
+            if next == "\\" {
+                out = out + "\\";
+                i += 2;
+            } else if next == "\"" {
+                out = out + "\"";
+                i += 2;
+            } else if next == "n" {
+                out = out + "\n";
+                i += 2;
+            } else if next == "r" {
+                out = out + "\r";
+                i += 2;
+            } else if next == "t" {
+                out = out + "\t";
+                i += 2;
+            } else {
+                out = out + ch;
+                i += 1;
+            }
+        } else {
+            out = out + ch;
+            i += 1;
+        }
+    }
+    return out;
+}
+
 // Extract the value of a JSON string field from a flat JSON object.
 // Returns "" if not found. Works for simple string values only.
 // e.g. _json_str_field("{\"k\":\"v\"}", "k") -> "v"
@@ -109,9 +161,15 @@ fn _json_str_field(json: string, key: string) -> string {
         if val_end >= json.length { break; }
         let ch = json[val_end];
         if ch == "\"" { break; }
-        val_end += 1;
+        // An escaped character is two source bytes (`\\`, `\"`, `\n`,
+        // `\r`, or `\t` — `_ca_json_escape`'s exact set, and the only
+        // producer of this JSON); skip both together so an escaped
+        // quote is never mistaken for the value's closing delimiter.
+        if ch == "\\" && val_end + 1 < json.length { val_end += 2; } else {
+            val_end += 1;
+        }
     }
-    return substring(json, val_start, val_end);
+    return _json_unescape(substring(json, val_start, val_end));
 }
 
 // ---- Test 1: sfn build -p writes build/capsules/<scope>/<name>/manifest.json ----
@@ -249,8 +307,9 @@ test "sidecar: kind=binary lands at build/capsules/<scope>/<name>/bin/<bin-name>
 
     let content = fs.readFile(_binc_sidecar());
     assert _json_str_field(content, "kind") == "binary";
-    assert _json_str_field(content, "out") == "build/capsules/demo/widgetcli/bin/widgetcli";
-    assert fs.exists("build/capsules/demo/widgetcli/bin/widgetcli");
+    let bin = _built_path("build/capsules/demo/widgetcli/bin/widgetcli");
+    assert _json_str_field(content, "out") == bin;
+    assert fs.exists(bin);
 }
 
 // ---- Test 15: binary at canonical path runs and prints expected marker ----
@@ -258,7 +317,7 @@ test "sidecar: binary at canonical path runs and prints expected marker" ![io] {
     let exit = _run_build([sfn_bin_path(), "build", "-p", _bin_root()]);
     assert exit == 0;
 
-    let bin = "build/capsules/demo/widgetcli/bin/widgetcli";
+    let bin = _built_path("build/capsules/demo/widgetcli/bin/widgetcli");
     assert fs.exists(bin);
 
     let run_exit = process.run_capture([bin], _child_env());

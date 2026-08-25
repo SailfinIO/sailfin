@@ -3,8 +3,21 @@
 // + the Makefile's shell-driven install/fingerprint dance. Native (no-bash)
 // `*_test.sfn` per `.claude/rules/no-bash-e2e.md`: it builds a fully
 // synthetic repo in a scratch dir and drives the compiler-under-test against
-// it as cwd, with a stub seed executable standing in for a real self-host
-// build (a real build takes ~10 minutes — far too slow for the suite).
+// it as cwd, with a stub seed standing in for a real self-host build (a real
+// build takes ~10 minutes — far too slow for the suite).
+//
+// The stub seed is a COMPILED Sailfin fixture, not a `#!/bin/sh` text file:
+// a shebang script has no PE header and no extension Win32's `CreateProcess`
+// maps, so it is silently unlaunchable on a native Windows host and the
+// compiler falls through to a real network fetch of a nonexistent release.
+// `_install_seed` below builds each variant with `sfn build -o <path>`
+// (`process_exec_test.sfn::_build_fixture`'s shape) at the exact HOST-gated
+// path `_bootstrap_seed_bin` (`compiler/src/cli/commands/dev.sfn`) resolves.
+// The generated fixture sources read the scratch paths they need
+// (`SFN172_MARKER`, `SFN172_OK_BIN`) from the environment rather than a
+// spliced literal: an absolute Windows scratch path can carry a backslash,
+// which `decode_string_literal_escapes` would silently rewrite inside a
+// string literal (SFN-1001, `fs_copy_binary_test.sfn`).
 //
 // Pins, in order, against the shared child env/scratch of a single test
 // body:
@@ -27,15 +40,19 @@
 //   9. a build whose seed fails outright, or whose seed "succeeds" but
 //      produces a binary that does not run, leaves any previously
 //      installed binary and stored fingerprint untouched.
-import { find, split } from "sfn/strings";
+import { free_bytes, read_bytes } from "sfn/fs";
+import { find, int_to_string, split } from "sfn/strings";
 import {
     clean_runner_env,
     default_scratch_dir,
+    host_is_windows,
     nested_runner_scratch,
     report_child_failure,
     report_child_failure_pending,
     sfn_bin_abs_path
 } from "sfn/test";
+
+import { sha256_hex_of_bytes } from "../../src/build/hash";
 
 // A per-invocation scratch root for the synthetic repo. `SAILFIN_TEST_SCRATCH`
 // keeps it unique under the parallel pool; `/tmp` is the standalone fallback.
@@ -109,61 +126,240 @@ fn _write_bootstrap_toml(repo: string) -> void ![io] {
         + "required = true\n");
 }
 
-// Seed a ready store entry `<repo>/seed-store/999.0.0/sailfin`: a stub that
-// appends a line to `marker` (so the test can count invocations), then
-// fabricates `build/capsules/sfn/compiler/bin/compiler` in whatever directory
-// it is run from
-// (the repo root, via the child's cwd), regardless of the argv it is
-// invoked with. The `.sha256` completeness marker is written last so the
-// entry reads as ready without a real fetch/verify pass.
-//
-// `build/capsules/sfn/compiler/bin/compiler` must itself be a genuinely
-// runnable script (not
-// opaque bytes): SFN-679 fix 3 smoke-verifies the installed binary with
-// `<binary> version` before recording a freshness claim, so a
-// non-executable stub would fail every build in this file.
-fn _seed_stub(repo: string, marker: string) -> void ![io] {
-    let dir = repo + "/seed-store/999.0.0";
+// A directory OUTSIDE any fingerprinted root for this test's own build
+// fixtures (the trivial always-succeeds stand-in, the generated seed
+// sources) — sibling to `repo` rather than nested inside it, so nothing
+// built here is ever a candidate `[workspace]` member or fingerprint input.
+fn _fixtures_dir(repo: string) -> string ![io] {
+    let dir = repo + "-fixtures";
     fs.createDirectory(dir, true);
-    let bin = dir + "/sailfin";
-    fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
-        + "mkdir -p build/capsules/sfn/compiler/bin\n"
-        + "printf '#!/bin/sh\\necho stub-version\\nexit 0\\n' > build/capsules/sfn/compiler/bin/compiler\n"
-        + "chmod +x build/capsules/sfn/compiler/bin/compiler\n"
-        + "exit 0\n");
-    process.run(["chmod", "+x", bin]);
-    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+    return dir;
 }
 
-// A seed stub that always fails the build outright: it records an
-// invocation, but never produces the scoped compiler artifact and exits
+// `-o <path>` is honored verbatim, so on Windows the built file may carry a
+// `.exe` suffix the base path did not ask for. Both spellings are probed
+// rather than branching on the host
+// (`process_argv_quoting_test.sfn::_built_path`).
+fn _built_path(base: string) -> string ![io] {
+    if fs.exists(base + ".exe") { return base + ".exe"; }
+    return base;
+}
+
+// Build `src` to `binpath` with the compiler-under-test; returns the build
+// exit code. `report_child_failure_pending` prints the captured output only
+// on a nonzero exit, so a passing build stays quiet.
+fn _build_fixture(sfn: string, child_env: string[], src: string, binpath: string, label: string) -> int ![io] {
+    let exit = process.run_capture([sfn, "build", "-o", binpath, src], child_env);
+    report_child_failure_pending(label, exit);
+    return exit;
+}
+
+// A trivial always-succeeds compiled program: it ignores argv and exits 0,
+// the entire observable contract fix 3's smoke-verify (`<binary> version`)
+// requires of a scoped compiler artifact. Reused as both that artifact
+// (copied into place by the generated seed programs below) and the
+// `install --from` fixture directly.
+fn _ok_program_src() -> string {
+    return "fn main() -> int ![io] {\n" + "    print(\"stub-version\");\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Build `_ok_program_src()` once into `fixtures`, returning its resolved
+// (suffix-probed) path, or "" on a build failure.
+fn _build_ok_program(sfn: string, child_env: string[], fixtures: string) -> string ![io] {
+    let src = fixtures + "/ok_program.sfn";
+    fs.writeFile(src, _ok_program_src());
+    let base = fixtures + "/ok_program";
+    let rc = _build_fixture(sfn, child_env, src, base, "bootstrap-install-gate ok-program");
+    if rc != 0 { return ""; }
+    return _built_path(base);
+}
+
+// The seed binary path within the synthetic store, mirroring
+// `_bootstrap_seed_bin` (`compiler/src/cli/commands/dev.sfn`): HOST-gated
+// (SFN-1007/SFN-693), since this names a binary THIS machine has to probe
+// and execute.
+fn _seed_bin_path(repo: string) -> string ![io] {
+    let base = repo + "/seed-store/999.0.0/sailfin";
+    if host_is_windows() { return base + ".exe"; }
+    return base;
+}
+
+// The installed compiler path, mirroring `native_install_path()`
+// (`compiler/src/build/source_fingerprint.sfn`, `host_exe_name("build/bin/sfn")`):
+// HOST-gated (SFN-693/SFN-1007), for the same reason as `_seed_bin_path` —
+// this names a binary THIS machine has to probe and execute, and
+// `install_built_compiler` writes it with the suffix already attached.
+fn _installed_bin_path(repo: string) -> string ![io] {
+    let base = repo + "/build/bin/sfn";
+    if host_is_windows() { return base + ".exe"; }
+    return base;
+}
+
+// Where the scoped compiler artifact must land, mirroring
+// `built_program_path()` (`compiler/src/build/source_fingerprint.sfn`).
+// HOST-gated rather than target-gated like the real function: this suite
+// only ever exercises a same-host, non-cross build, where the two coincide.
+fn _compiler_dest_rel() -> string ![io] {
+    if host_is_windows() {
+        return "build/capsules/sfn/compiler/bin/compiler.exe";
+    }
+    return "build/capsules/sfn/compiler/bin/compiler";
+}
+
+// The seed's success behaviour: record an invocation, then place a
+// genuinely runnable artifact at the scoped compiler path. `SFN172_MARKER`/
+// `SFN172_OK_BIN` travel through the child's environment (`_install_seed`'s
+// caller threads them onto `child_env`, which `process.run` inherits at
+// every hop) rather than a spliced literal — see the file header. `copy`,
+// not `fs.writeFile`, is required: the artifact is a real executable with
+// interior NULs. `copy` streams raw bytes and does not preserve the
+// source's mode bits, so the artifact needs its own executable bit set on
+// POSIX (a no-op on Windows, where launchability is PE-content-derived,
+// not a permission bit).
+fn _seed_ok_src(compiler_dest: string) -> string {
+    return "import { copy } from \"sfn/fs\";\n\n" + "fn main() -> int ![io] {\n"
+        + "    fs.appendFile(env.get(\"SFN172_MARKER\"), \"invoked\\n\");\n"
+        + "    fs.createDirectory(\"build/capsules/sfn/compiler/bin\", true);\n"
+        + "    let _ok = copy(env.get(\"SFN172_OK_BIN\"), \""
+        + compiler_dest
+        + "\");\n"
+        + "    fs.set_perms(\""
+        + compiler_dest
+        + "\", 493);\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// A seed that always fails the build outright: it records an invocation,
+// but never leaves a runnable scoped compiler artifact behind and exits
 // non-zero.
-fn _seed_stub_failing_build(repo: string, marker: string) -> void ![io] {
-    let dir = repo + "/seed-store/999.0.0";
-    fs.createDirectory(dir, true);
-    let bin = dir + "/sailfin";
-    fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
-        + "rm -f build/capsules/sfn/compiler/bin/compiler\n"
-        + "exit 1\n");
-    process.run(["chmod", "+x", bin]);
-    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+fn _seed_failing_build_src(compiler_dest: string) -> string {
+    return "fn main() -> int ![io] {\n"
+        + "    fs.appendFile(env.get(\"SFN172_MARKER\"), \"invoked\\n\");\n"
+        + "    fs.deleteFile(\""
+        + compiler_dest
+        + "\");\n"
+        + "    return 1;\n"
+        + "}\n";
 }
 
-// A seed stub that "succeeds" (exit 0) and produces
-// the scoped compiler artifact, but that program is not actually runnable (no
-// shebang, not a real executable) — the case fix 3's smoke-verify exists
-// to catch.
-fn _seed_stub_unrunnable_program(repo: string, marker: string) -> void ![io] {
-    let dir = repo + "/seed-store/999.0.0";
-    fs.createDirectory(dir, true);
-    let bin = dir + "/sailfin";
-    fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
-        + "mkdir -p build/capsules/sfn/compiler/bin\n"
-        + "printf 'not-a-real-executable' > build/capsules/sfn/compiler/bin/compiler\n"
-        + "chmod +x build/capsules/sfn/compiler/bin/compiler\n"
-        + "exit 0\n");
-    process.run(["chmod", "+x", bin]);
-    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+// A seed that "succeeds" (exit 0) and produces the scoped compiler
+// artifact, but whose content is not actually launchable — the case fix
+// 3's smoke-verify exists to catch. The executable bit is still set (not
+// dropped, unlike the failing-build case) so the failure is attributable
+// to the CONTENT, not to a permission the seed also forgot.
+fn _seed_unrunnable_src(compiler_dest: string) -> string {
+    return "fn main() -> int ![io] {\n"
+        + "    fs.appendFile(env.get(\"SFN172_MARKER\"), \"invoked\\n\");\n"
+        + "    fs.createDirectory(\"build/capsules/sfn/compiler/bin\", true);\n"
+        + "    fs.writeFile(\""
+        + compiler_dest
+        + "\", \"not-a-real-executable\");\n"
+        + "    fs.set_perms(\""
+        + compiler_dest
+        + "\", 493);\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Compile `src_text` to the store's seed binary path and mark the store
+// entry ready (`.sha256`, written last so a partial write never reads as
+// complete). Returns the seed FIXTURE's own build exit code (whether it
+// compiled), not what it reports when later run.
+fn _install_seed(repo: string, sfn: string, child_env: string[], src_text: string, label: string) -> int ![io] {
+    let store_dir = repo + "/seed-store/999.0.0";
+    fs.createDirectory(store_dir, true);
+    let fixtures = _fixtures_dir(repo);
+    let src = fixtures + "/" + label + ".sfn";
+    fs.writeFile(src, src_text);
+    let rc = _build_fixture(sfn, child_env, src, _seed_bin_path(repo), "bootstrap-install-gate "
+        + label);
+    fs.writeFile(store_dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+    return rc;
+}
+
+fn _seed_stub(repo: string, sfn: string, child_env: string[]) -> int ![io] {
+    return _install_seed(repo, sfn, child_env, _seed_ok_src(_compiler_dest_rel()), "seed-ok");
+}
+
+fn _seed_stub_failing_build(repo: string, sfn: string, child_env: string[]) -> int ![io] {
+    return _install_seed(repo, sfn, child_env, _seed_failing_build_src(_compiler_dest_rel()), "seed-failing-build");
+}
+
+fn _seed_stub_unrunnable_program(repo: string, sfn: string, child_env: string[]) -> int ![io] {
+    return _install_seed(repo, sfn, child_env, _seed_unrunnable_src(_compiler_dest_rel()), "seed-unrunnable");
+}
+
+// ---------------------------------------------------------------------
+// Diagnostics only, below. None of these change what is asserted; each
+// prints the state a nearby assertion depends on, unconditionally, so a
+// failing run explains itself instead of leaving a bare `assert false`.
+// ---------------------------------------------------------------------
+fn _diag_bool(b: boolean) -> string {
+    if b { return "yes"; }
+    return "no";
+}
+
+// Whether the seed fixture actually ran: the marker's raw content and the
+// derived invocation count.
+fn _report_marker(marker: string) -> void ![io] {
+    if !fs.exists(marker) {
+        print.err("[bootstrap-install-gate] marker " + marker
+            + ": absent (seed never invoked)");
+        return;
+    }
+    print.err("[bootstrap-install-gate] marker " + marker + ": count="
+        + int_to_string(_marker_count(marker))
+        + " content=<<<"
+        + fs.readFile(marker)
+        + ">>>");
+}
+
+// Binary-safe (`read_bytes`, not `fs.readFile` — SFN-1008: `build/bin/sfn`
+// is a real executable with interior NULs): reports whether `path` exists
+// and, if so, its length, executable bit, and digest.
+fn _report_binary_state(label: string, path: string) -> void ![io] {
+    if !fs.exists(path) {
+        print.err("[bootstrap-install-gate] " + label + " " + path + ": absent");
+        return;
+    }
+    let bytes = read_bytes(path);
+    if bytes.status != 0 {
+        print.err("[bootstrap-install-gate] " + label + " " + path
+            + ": exists, read_bytes status="
+            + int_to_string(bytes.status));
+        return;
+    }
+    print.err("[bootstrap-install-gate] " + label + " " + path
+        + ": exists, length="
+        + int_to_string(bytes.length)
+        + " executable="
+        + _diag_bool(fs.is_executable(path))
+        + " sha256="
+        + sha256_hex_of_bytes(bytes.addr, bytes.length));
+    free_bytes(bytes);
+}
+
+// Text-safe: only for the plain-hex fingerprint files, never `build/bin/sfn`.
+fn _report_text_state(label: string, path: string) -> void ![io] {
+    if !fs.exists(path) {
+        print.err("[bootstrap-install-gate] " + label + " " + path + ": absent");
+        return;
+    }
+    print.err("[bootstrap-install-gate] " + label + " " + path + ": <<<" + fs.readFile(path)
+        + ">>>");
+}
+
+// Unconditional child-output print, for a spawn whose EXPECTED outcome is
+// a NONZERO exit — `report_child_failure`'s exit==0-is-fine convention
+// would stay silent on exactly the runs that need to be seen.
+fn _report_child_always(tag: string, exit: int, out: string, err: string) -> void ![io] {
+    print.err("[" + tag + "] child exit=" + int_to_string(exit) + " stdout:\n"
+        + out
+        + "\nstderr:\n"
+        + err);
 }
 
 test "bootstrap install gate: build installs, short-circuits, and refuses a stale publish" ![io] {
@@ -174,23 +370,35 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     fs.createDirectory(repo + "/compiler/capsules/syntax/src", true);
 
     let marker = repo + "/seed-invocations.marker";
+    let installed = _installed_bin_path(repo);
     _write_bootstrap_toml(repo);
-    _seed_stub(repo, marker);
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate"));
+    let fixtures = _fixtures_dir(repo);
+    let ok_bin = _build_ok_program(sfn, child_env, fixtures);
+    assert ok_bin.length > 0;
+    child_env.push("SFN172_MARKER=" + marker);
+    child_env.push("SFN172_OK_BIN=" + ok_bin);
+    let seed_rc = _seed_stub(repo, sfn, child_env);
+    assert seed_rc == 0;
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/compiler/capsules/syntax/src/mod.sfn", "fn syntax_value() -> int { return 3; }\n");
     fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
-
-    let sfn = sfn_bin_abs_path();
-    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate"));
 
     // 1. First build: installs a working binary from the stub seed.
     let first_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
     let first_out = process.capture_take_stdout();
     let first_err = process.capture_take_stderr();
     report_child_failure("bootstrap-install-gate build 1", first_exit, first_out, first_err);
+    _report_binary_state("build/bin/sfn (build 1)", installed);
+    _report_text_state("fingerprint (build 1)", repo
+        + "/build/.compiler-source-fingerprint");
+    _report_marker(marker);
+    print.err("[bootstrap-install-gate] build 1 combined output:\n" + first_out
+        + first_err);
     assert first_exit == 0;
-    assert fs.exists(repo + "/build/bin/sfn");
-    assert fs.is_executable(repo + "/build/bin/sfn");
+    assert fs.exists(installed);
+    assert fs.is_executable(installed);
     assert fs.exists(repo + "/build/.compiler-source-fingerprint");
     assert fs.readFile(repo + "/build/.compiler-source-fingerprint").length > 0;
     assert _marker_count(marker) == 1;
@@ -201,6 +409,9 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let second_out = process.capture_take_stdout();
     let second_err = process.capture_take_stderr();
     report_child_failure("bootstrap-install-gate build 2", second_exit, second_out, second_err);
+    _report_marker(marker);
+    print.err("[bootstrap-install-gate] build 2 combined output:\n" + second_out
+        + second_err);
     assert second_exit == 0;
     assert find(second_out + second_err, "is up to date", 0) >= 0;
     assert _marker_count(marker) == 1;
@@ -211,6 +422,9 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let third_out = process.capture_take_stdout();
     let third_err = process.capture_take_stderr();
     report_child_failure("bootstrap-install-gate build 3", third_exit, third_out, third_err);
+    _report_marker(marker);
+    print.err("[bootstrap-install-gate] build 3 combined output:\n" + third_out
+        + third_err);
     assert third_exit == 0;
     assert _marker_count(marker) == 2;
     assert find(third_out + third_err, "is up to date", 0) < 0;
@@ -222,6 +436,10 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let capsule_out = process.capture_take_stdout();
     let capsule_err = process.capture_take_stderr();
     report_child_failure("bootstrap-install-gate build capsule-edit", capsule_exit, capsule_out, capsule_err);
+    _report_marker(marker);
+    print.err("[bootstrap-install-gate] build capsule-edit combined output:\n"
+        + capsule_out
+        + capsule_err);
     assert capsule_exit == 0;
     assert _marker_count(marker) == 3;
     assert find(capsule_out + capsule_err, "is up to date", 0) < 0;
@@ -229,21 +447,38 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     // 5. --force re-invokes the seed even on an unchanged tree.
     let fourth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--force"], child_env, repo);
     report_child_failure_pending("bootstrap-install-gate build force", fourth_exit);
+    _report_marker(marker);
     assert fourth_exit == 0;
     assert _marker_count(marker) == 4;
 
     // 6. install --from publishes an arbitrary file directly. It must be a
-    // genuinely runnable script — fix 3's smoke-verify runs `<binary>
-    // version` against it before recording a freshness claim.
-    let fresh = repo + "/fresh-binary.bin";
-    fs.writeFile(fresh, "#!/bin/sh\necho fresh-stub-version\nexit 0\n");
-    process.run(["chmod", "+x", fresh]);
+    // genuinely runnable program — fix 3's smoke-verify runs `<binary>
+    // version` against it before recording a freshness claim. `read_bytes`/
+    // `sha256_hex_of_bytes` (not `fs.readFile`/`==`) compare it: a real
+    // executable carries interior NULs, which `fs.readFile` aborts on
+    // rather than silently truncating (SFN-1008, `fs_copy_binary_test.sfn`).
+    let fresh_src = fixtures + "/fresh-binary.sfn";
+    fs.writeFile(fresh_src, _ok_program_src());
+    let fresh_build = _build_fixture(sfn, child_env, fresh_src, fixtures
+        + "/fresh-binary", "bootstrap-install-gate fresh-binary");
+    assert fresh_build == 0;
+    let fresh = _built_path(fixtures + "/fresh-binary");
     let fifth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install", "--from", fresh], child_env, repo);
     report_child_failure_pending("bootstrap-install-gate install fresh", fifth_exit);
+    _report_binary_state("build/bin/sfn (after install --from fresh)", installed);
+    _report_binary_state("fresh fixture", fresh);
     assert fifth_exit == 0;
-    let installed_after_fifth = fs.readFile(repo + "/build/bin/sfn");
-    assert installed_after_fifth == fs.readFile(fresh);
-    assert fs.is_executable(repo + "/build/bin/sfn");
+    let fresh_bytes = read_bytes(fresh);
+    let installed_bytes = read_bytes(installed);
+    assert fresh_bytes.status == 0;
+    assert installed_bytes.status == 0;
+    assert installed_bytes.length == fresh_bytes.length;
+    let installed_hash = sha256_hex_of_bytes(installed_bytes.addr, installed_bytes.length);
+    assert installed_hash == sha256_hex_of_bytes(fresh_bytes.addr, fresh_bytes.length);
+    let installed_len = installed_bytes.length;
+    free_bytes(fresh_bytes);
+    free_bytes(installed_bytes);
+    assert fs.is_executable(installed);
 
     // 7. A well-formed but stale `.pending` digest makes `install` refuse to
     // publish, leaving the previously installed binary untouched. Contents
@@ -252,11 +487,17 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let stale_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", stale_digest);
     let sixth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install"], child_env, repo);
-    let _sixth_out = process.capture_take_stdout();
+    let sixth_out = process.capture_take_stdout();
     let sixth_err = process.capture_take_stderr();
+    _report_child_always("bootstrap-install-gate install stale-pending", sixth_exit, sixth_out, sixth_err);
+    _report_binary_state("build/bin/sfn (after stale-pending refusal)", installed);
     assert sixth_exit != 0;
     assert find(sixth_err, "refusing to publish a stale binary", 0) >= 0;
-    assert fs.readFile(repo + "/build/bin/sfn") == installed_after_fifth;
+    let after_refusal = read_bytes(installed);
+    assert after_refusal.status == 0;
+    assert after_refusal.length == installed_len;
+    assert sha256_hex_of_bytes(after_refusal.addr, after_refusal.length) == installed_hash;
+    free_bytes(after_refusal);
 
     process.run(["rm", "-rf", repo]);
 }
@@ -269,23 +510,32 @@ test "bootstrap install gate: a malformed .pending is treated as no snapshot, no
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
 
+    let sfn = sfn_bin_abs_path();
+    let installed = _installed_bin_path(repo);
+    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_malformed_pending"));
+    let fixtures = _fixtures_dir(repo);
+
     // Fabricate a build output directly (bypassing `dev bootstrap build`) so
     // `install` runs with only the malformed `.pending` a pre-SFN-679
     // binary would have left there — a usage line, not a digest.
     fs.createDirectory(repo + "/build/capsules/sfn/compiler/bin", true);
-    fs.writeFile(repo + "/build/capsules/sfn/compiler/bin/compiler", "#!/bin/sh\necho stub-version\nexit 0\n");
-    process.run(["chmod", "+x", repo
-        + "/build/capsules/sfn/compiler/bin/compiler"]);
+    let compiler_src = fixtures + "/compiler-stub.sfn";
+    fs.writeFile(compiler_src, _ok_program_src());
+    let compiler_build = _build_fixture(sfn, child_env, compiler_src, repo + "/"
+        + _compiler_dest_rel(), "bootstrap-install-gate test2-compiler-stub");
+    assert compiler_build == 0;
     fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", "usage: sfn dev bootstrap <fetch|build|check|pin>");
-
-    let sfn = sfn_bin_abs_path();
-    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_malformed_pending"));
 
     let install_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install"], child_env, repo);
     report_child_failure_pending("bootstrap-install-gate install malformed-pending", install_exit);
+    _report_binary_state("build/bin/sfn (after install)", installed);
+    _report_text_state("fingerprint", repo
+        + "/build/.compiler-source-fingerprint");
+    _report_text_state("pending fingerprint", repo
+        + "/build/.compiler-source-fingerprint.pending");
     assert install_exit == 0;
-    assert fs.exists(repo + "/build/bin/sfn");
-    assert fs.is_executable(repo + "/build/bin/sfn");
+    assert fs.exists(installed);
+    assert fs.is_executable(installed);
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint");
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
 
@@ -300,17 +550,27 @@ test "bootstrap install gate: a matching raw-v1 pending digest is never promoted
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/compiler/capsules/syntax/src/mod.sfn", "fn syntax_value() -> int { return 2; }\n");
     fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 3; }\n");
-    let built = repo + "/build/capsules/sfn/compiler/bin/compiler";
-    fs.createDirectory(repo + "/build/capsules/sfn/compiler/bin", true);
-    fs.writeFile(built, "#!/bin/sh\necho raw-v1-candidate\nexit 0\n");
-    process.run(["chmod", "+x", built]);
 
     let sfn = sfn_bin_abs_path();
+    let installed = _installed_bin_path(repo);
     let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_raw_v1"));
+    let fixtures = _fixtures_dir(repo);
+    fs.createDirectory(repo + "/build/capsules/sfn/compiler/bin", true);
+    let compiler_src = fixtures + "/compiler-stub.sfn";
+    fs.writeFile(compiler_src, _ok_program_src());
+    let built = repo + "/" + _compiler_dest_rel();
+    let compiler_build = _build_fixture(sfn, child_env, compiler_src, built, "bootstrap-install-gate test3-compiler-stub");
+    assert compiler_build == 0;
+
     let fp_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "fingerprint", "compiler/src", "compiler/capsules", "runtime"], child_env, repo);
     let raw_v1 = process.capture_take_stdout();
     let fp_err = process.capture_take_stderr();
     report_child_failure("bootstrap-install-gate fingerprint raw-v1", fp_exit, raw_v1, fp_err);
+    print.err("[bootstrap-install-gate] fingerprint raw-v1 stdout length="
+        + int_to_string(raw_v1.length)
+        + " content=<<<"
+        + raw_v1
+        + ">>>");
     assert fp_exit == 0;
     assert raw_v1.length == 65;
     fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", raw_v1);
@@ -319,8 +579,14 @@ test "bootstrap install gate: a matching raw-v1 pending digest is never promoted
     let install_out = process.capture_take_stdout();
     let install_err = process.capture_take_stderr();
     report_child_failure("bootstrap-install-gate install raw-v1", install_exit, install_out, install_err);
+    _report_binary_state("build/bin/sfn (after install)", installed);
+    _report_text_state("fingerprint", repo
+        + "/build/.compiler-source-fingerprint");
+    print.err("[bootstrap-install-gate] install raw-v1 combined output:\n"
+        + install_out
+        + install_err);
     assert install_exit == 0;
-    assert fs.exists(repo + "/build/bin/sfn");
+    assert fs.exists(installed);
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint");
     assert find(install_out, "freshness record not written", 0) >= 0;
     process.run(["rm", "-rf", repo]);
@@ -333,33 +599,58 @@ test "bootstrap install gate: a failed build leaves the installed binary and fin
     _create_fingerprint_roots(repo);
 
     let marker = repo + "/seed-invocations.marker";
+    let installed = _installed_bin_path(repo);
     _write_bootstrap_toml(repo);
-    _seed_stub(repo, marker);
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_failed_build"));
+    let fixtures = _fixtures_dir(repo);
+    let ok_bin = _build_ok_program(sfn, child_env, fixtures);
+    assert ok_bin.length > 0;
+    child_env.push("SFN172_MARKER=" + marker);
+    child_env.push("SFN172_OK_BIN=" + ok_bin);
+    let seed_rc = _seed_stub(repo, sfn, child_env);
+    assert seed_rc == 0;
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
-
-    let sfn = sfn_bin_abs_path();
-    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_failed_build"));
 
     // Establish a real installed binary and recorded fingerprint first, so
     // there is something to check for corruption.
     let setup_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
     report_child_failure_pending("bootstrap-install-gate build setup-failed-build", setup_exit);
+    _report_binary_state("build/bin/sfn (setup)", installed);
     assert setup_exit == 0;
-    let installed_before = fs.readFile(repo + "/build/bin/sfn");
+    // Binary-safe: `build/bin/sfn` is now a real executable with interior
+    // NULs (SFN-1008, see scenario 6 above for the full rationale).
+    let installed_before = read_bytes(installed);
+    assert installed_before.status == 0;
+    let installed_before_hash = sha256_hex_of_bytes(installed_before.addr, installed_before.length);
+    let installed_before_len = installed_before.length;
+    free_bytes(installed_before);
     let fingerprint_before = fs.readFile(repo
         + "/build/.compiler-source-fingerprint");
 
     // Edit a source file (so the fingerprint gate cannot short-circuit),
     // then swap in a seed that fails the build outright.
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 2; }\n");
-    _seed_stub_failing_build(repo, marker);
+    let swap_rc = _seed_stub_failing_build(repo, sfn, child_env);
+    assert swap_rc == 0;
 
     let fail_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
-    let _fail_out = process.capture_take_stdout();
-    let _fail_err = process.capture_take_stderr();
+    let fail_out = process.capture_take_stdout();
+    let fail_err = process.capture_take_stderr();
+    _report_child_always("bootstrap-install-gate build failed-build", fail_exit, fail_out, fail_err);
+    _report_binary_state("build/bin/sfn (after failed build)", installed);
+    _report_text_state("fingerprint (after failed build)", repo
+        + "/build/.compiler-source-fingerprint");
+    _report_text_state("pending fingerprint (after failed build)", repo
+        + "/build/.compiler-source-fingerprint.pending");
+    _report_marker(marker);
     assert fail_exit != 0;
-    assert fs.readFile(repo + "/build/bin/sfn") == installed_before;
+    let after_fail = read_bytes(installed);
+    assert after_fail.status == 0;
+    assert after_fail.length == installed_before_len;
+    assert sha256_hex_of_bytes(after_fail.addr, after_fail.length) == installed_before_hash;
+    free_bytes(after_fail);
     assert fs.readFile(repo + "/build/.compiler-source-fingerprint") == fingerprint_before;
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
 
@@ -373,39 +664,62 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
     _create_fingerprint_roots(repo);
 
     let marker = repo + "/seed-invocations.marker";
+    let installed = _installed_bin_path(repo);
     _write_bootstrap_toml(repo);
-    _seed_stub(repo, marker);
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_unrunnable"));
+    let fixtures = _fixtures_dir(repo);
+    let ok_bin = _build_ok_program(sfn, child_env, fixtures);
+    assert ok_bin.length > 0;
+    child_env.push("SFN172_MARKER=" + marker);
+    child_env.push("SFN172_OK_BIN=" + ok_bin);
+    let seed_rc = _seed_stub(repo, sfn, child_env);
+    assert seed_rc == 0;
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
-
-    let sfn = sfn_bin_abs_path();
-    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_unrunnable"));
 
     // Establish a real installed binary and recorded fingerprint first, so
     // there is something to check for corruption.
     let setup_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
     report_child_failure_pending("bootstrap-install-gate build setup-unrunnable", setup_exit);
+    _report_binary_state("build/bin/sfn (setup)", installed);
     assert setup_exit == 0;
-    let installed_before = fs.readFile(repo + "/build/bin/sfn");
+    let installed_before = read_bytes(installed);
+    assert installed_before.status == 0;
+    let installed_before_hash = sha256_hex_of_bytes(installed_before.addr, installed_before.length);
+    let installed_before_len = installed_before.length;
+    free_bytes(installed_before);
     let fingerprint_before = fs.readFile(repo
         + "/build/.compiler-source-fingerprint");
 
     // Edit a source file (so the fingerprint gate cannot short-circuit),
-    // then swap in a seed that "succeeds" but whose produced
-    // The scoped compiler artifact does not actually run.
+    // then swap in a seed that "succeeds" but whose produced scoped
+    // compiler artifact does not actually run.
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 2; }\n");
-    _seed_stub_unrunnable_program(repo, marker);
+    let swap_rc = _seed_stub_unrunnable_program(repo, sfn, child_env);
+    assert swap_rc == 0;
 
     let fail_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
-    let _fail_out = process.capture_take_stdout();
+    let fail_out = process.capture_take_stdout();
     let fail_err = process.capture_take_stderr();
+    _report_child_always("bootstrap-install-gate build unrunnable", fail_exit, fail_out, fail_err);
+    _report_binary_state("build/bin/sfn (after unrunnable build)", installed);
+    _report_text_state("fingerprint (after unrunnable build)", repo
+        + "/build/.compiler-source-fingerprint");
+    _report_text_state("pending fingerprint (after unrunnable build)", repo
+        + "/build/.compiler-source-fingerprint.pending");
+    _report_marker(marker);
     assert fail_exit != 0;
     assert find(fail_err, "smoke check", 0) >= 0;
     // The smoke check runs against the scoped compiler artifact BEFORE it is
     // published, so an unrunnable build never reaches `build/bin/sfn`: the
     // previously installed compiler survives intact, and the unchanged
     // freshness record forces the next build to retry (SFN-679).
-    assert fs.readFile(repo + "/build/bin/sfn") == installed_before;
+    let after_fail = read_bytes(installed);
+    assert after_fail.status == 0;
+    assert after_fail.length == installed_before_len;
+    assert sha256_hex_of_bytes(after_fail.addr, after_fail.length) == installed_before_hash;
+    free_bytes(after_fail);
     assert fs.readFile(repo + "/build/.compiler-source-fingerprint") == fingerprint_before;
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
 

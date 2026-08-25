@@ -12,8 +12,12 @@
 //   1. inline IR shape — the compiler-emitted `@sailfin_user_main`
 //      function body, for a `try { ... } catch (e) { ... }`, contains:
 //        (a) `call void @sfn_exception_push_frame(i8* %tN)` at try entry
-//        (b) `call i32 @setjmp(i8* %tN)` immediately after, whose return
-//            value is branched on (0 → try body, non-zero → catch)
+//        (b) a target-specific setjmp call immediately after, whose
+//            return value is branched on (0 → try body, non-zero →
+//            catch): POSIX `call i32 @setjmp(i8* %tN)` on every target
+//            except Windows, which lowers to the UCRT two-parameter
+//            `_setjmp` ABI (SFN-647, `target_setjmp_call_line` in
+//            `codegen-llvm/src/lowering_debug_state.sfn`)
 //        (c) NO `call i32 @sfn_try_enter(...)` — SFN-940 deleted
 //            `@sfn_try_enter` from `runtime/sfn/exception.sfn` because its
 //            function form was C11 §7.13.2 UB on every target and its
@@ -26,6 +30,14 @@
 //   2. runtime catch behavior — `try { throw "boom"; } catch (e) { print(e); }`
 //      compiles, links, runs, prints `boom`, exits 0; the try/catch/finally
 //      and try/finally(no-catch) guarantees run finally too.
+//
+// The (a)/(b)/(c) IR-shape assertions that key on the setjmp spelling are
+// forced onto BOTH `SAILFIN_TARGET_OS=Linux` and `=Windows` rather than
+// gated on the host, so every host checks both target shapes — `sfn emit
+// llvm` is a pure front-end + lowering step with no link, so both are
+// emittable everywhere. `clean_runner_env` strips the ambient
+// `SAILFIN_TARGET_OS` first (SFN-925) so the pushed value is the only
+// occurrence.
 //
 // IR assertions use `sfn/strings` predicates — the `sfn/test` `expect_*`
 // matchers are `![pure]` and cannot be called from an `![io]` test (#842).
@@ -113,12 +125,17 @@ fn _runtime_fixture() -> string ![io] {
 }
 
 // Emit LLVM IR for `src_path` to `out_path` and read it back; "" on a
-// non-zero exit or missing output.
-fn _emit_ir(tag: string, src_path: string) -> string ![io] {
+// non-zero exit or missing output. `target_os` forces the emit target via
+// `SAILFIN_TARGET_OS` when non-empty; "" leaves the host default.
+fn _emit_ir(tag: string, src_path: string, target_os: string) -> string ![io] {
     let dir = _scratch_dir();
     let out_path = dir + "/" + tag + ".ll";
     if fs.exists(out_path) { fs.deleteFile(out_path); }
-    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_path, "llvm", src_path], _child_env());
+    let mut child_env = _child_env();
+    if target_os.length > 0 {
+        child_env.push("SAILFIN_TARGET_OS=" + target_os);
+    }
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_path, "llvm", src_path], child_env);
     report_child_failure_pending("try-catch-frames emit " + tag, exit);
     if exit != 0 { return ""; }
     if !fs.exists(out_path) { return ""; }
@@ -127,22 +144,40 @@ fn _emit_ir(tag: string, src_path: string) -> string ![io] {
 
 // The user-function body for the runtime fixture, scoped to
 // `@sailfin_user_main`.
-fn _user_main_body(tag: string) -> string ![io] {
-    let ll = _emit_ir(tag, _runtime_fixture());
+fn _user_main_body(tag: string, target_os: string) -> string ![io] {
+    let ll = _emit_ir(tag, _runtime_fixture(), target_os);
     if ll.length == 0 { return ""; }
     return _fn_body(ll, "@sailfin_user_main");
 }
 
-test "try-catch: push_frame fires at try entry inside the user function" ![io] {
-    let body = _user_main_body("push");
+// The setjmp symbol a given target lowers to (SFN-647,
+// `target_setjmp_symbol` in `codegen-llvm/src/lowering_debug_state.sfn`):
+// Windows targets the UCRT two-parameter `_setjmp` ABI, every other
+// target keeps the POSIX one-parameter spelling.
+fn _setjmp_symbol(target_os: string) -> string {
+    if target_os == "Windows" { return "_setjmp"; }
+    return "setjmp";
+}
+
+fn _assert_push_frame_fires(target_os: string, tag: string) ![io] {
+    let body = _user_main_body(tag, target_os);
     assert body.length > 0;
     assert _count(body, "call void @sfn_exception_push_frame(i8* %t") == 1;
 }
 
-test "try-catch: setjmp inline in user function, branched on its result" ![io] {
-    let body = _user_main_body("setjmp");
+test "try-catch: push_frame fires at try entry inside the user function for a Linux target" ![io] {
+    _assert_push_frame_fires("Linux", "push-linux");
+}
+
+test "try-catch: push_frame fires at try entry inside the user function for a Windows target" ![io] {
+    _assert_push_frame_fires("Windows", "push-windows");
+}
+
+fn _assert_setjmp_inline(target_os: string, tag: string) ![io] {
+    let body = _user_main_body(tag, target_os);
     assert body.length > 0;
-    assert _count(body, "call i32 @setjmp(i8* %t") == 1;
+    let symbol = _setjmp_symbol(target_os);
+    assert _count(body, "call i32 @" + symbol + "(i8* %t") == 1;
     // The result feeds an icmp eq 0 + br to (try, catch).
     assert contains(body, "icmp eq i32 %t");
     assert contains(body, ", 0");
@@ -151,11 +186,20 @@ test "try-catch: setjmp inline in user function, branched on its result" ![io] {
     assert contains(body, ", label %catch");
 }
 
-test "try-catch: push_frame precedes setjmp with no intervening call" ![io] {
-    let body = _user_main_body("order");
+test "try-catch: setjmp inline in user function, branched on its result for a Linux target" ![io] {
+    _assert_setjmp_inline("Linux", "setjmp-linux");
+}
+
+test "try-catch: setjmp inline in user function, branched on its result for a Windows target" ![io] {
+    _assert_setjmp_inline("Windows", "setjmp-windows");
+}
+
+fn _assert_push_precedes_setjmp(target_os: string, tag: string) ![io] {
+    let body = _user_main_body(tag, target_os);
     assert body.length > 0;
     let push_idx = find(body, "call void @sfn_exception_push_frame", 0);
-    let setjmp_idx = find(body, "call i32 @setjmp", 0);
+    let symbol = _setjmp_symbol(target_os);
+    let setjmp_idx = find(body, "call i32 @" + symbol, 0);
     assert push_idx >= 0;
     assert setjmp_idx >= 0;
     assert push_idx < setjmp_idx;
@@ -168,8 +212,16 @@ test "try-catch: push_frame precedes setjmp with no intervening call" ![io] {
     assert _count(between, "call ") == 1;
 }
 
+test "try-catch: push_frame precedes setjmp with no intervening call for a Linux target" ![io] {
+    _assert_push_precedes_setjmp("Linux", "order-linux");
+}
+
+test "try-catch: push_frame precedes setjmp with no intervening call for a Windows target" ![io] {
+    _assert_push_precedes_setjmp("Windows", "order-windows");
+}
+
 test "try-catch: no compiler-emitted call to @sfn_try_enter" ![io] {
-    let body = _user_main_body("notryenter");
+    let body = _user_main_body("notryenter", "");
     assert body.length > 0;
     // SFN-940: `@sfn_try_enter` no longer exists in `runtime/sfn/exception.sfn`.
     // This assertion guards a lowering change that reintroduces a call to it.
@@ -177,7 +229,7 @@ test "try-catch: no compiler-emitted call to @sfn_try_enter" ![io] {
 }
 
 test "try-catch: catch handler reads message via @sfn_take_exception(frame)" ![io] {
-    let body = _user_main_body("take");
+    let body = _user_main_body("take", "");
     assert body.length > 0;
     let catch_body = _between(body, "catch", "merge");
     assert contains(catch_body, "call i8* @sfn_take_exception(i8* %t");

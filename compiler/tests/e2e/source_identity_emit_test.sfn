@@ -1,12 +1,18 @@
 // SFN-930: direct emit must resolve the same manifest-owned identity as build
 // and relative traversal, without a `--module-name` override.
-import { contains, trim_right } from "sfn/strings";
+import { contains } from "sfn/strings";
 import {
     clean_runner_env,
-    report_child_failure,
+    nested_runner_scratch,
     report_child_failure_pending,
     sfn_bin_path
 } from "sfn/test";
+
+// Declared directly rather than resolved through the compiler under
+// test, matching the SFN-635 no-cross-module-extern convention
+// `compiler/src/build/fs.sfn:59` and `cli/entry.sfn` follow for the
+// same symbol.
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 
 // The child env is derived by subtraction from the real environment, not
 // assembled key by key (SFN-1114).
@@ -14,13 +20,21 @@ fn _child_env() -> string[] ![io] {
     return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
 }
 
+// The current working directory, replacing a `pwd` shellout: on this
+// host `pwd` resolves to the MSYS `pwd`, which prints an MSYS-style
+// `/c/...` path a native Windows binary cannot open. Mirrors `_cwd_cmd`
+// (`compiler/src/build/fs.sfn:217`, SFN-888) — no `host_is_windows()`
+// gate is needed because `@realpath` is provided on a native Windows
+// host by `runtime/sfn/platform/realpath_windows.sfn` over `_fullpath`.
 fn _cwd() -> string ![io] {
-    let exit = process.run_capture(["pwd"], []);
-    let out = process.capture_take_stdout();
-    let _stderr = process.capture_take_stderr();
-    report_child_failure("source-identity pwd", exit, out, _stderr);
-    if exit != 0 { return ""; }
-    return trim_right(out);
+    let resolved: *u8 = realpath("." as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    // `PWD` is maintained by a shell, so it is absent when `sfn` is
+    // spawned by a non-shell parent and absent on native Windows —
+    // fallback only, matching `_cwd_cmd`.
+    let pwd = env.get("PWD");
+    if pwd.length > 0 { return pwd; }
+    return ".";
 }
 
 fn _emit_native(source: string, output: string) -> string ![io] {
@@ -105,7 +119,19 @@ test "relative traversal: absolute-path library test converges on provider ident
     fs.writeFile(ws + "/lib/src/mod.sfn", "fn answer() -> int { return 42; }\n");
     let test_source = ws + "/lib/tests/mod_test.sfn";
     fs.writeFile(test_source, "import { answer } from \"../src/mod\";\n\ntest \"provider identity\" { assert answer() == 42; }\n");
-    let exit = process.run_capture([sfn_bin_path(), "test", test_source], _child_env());
+    // `nested_runner_scratch`, not `_child_env()`: `test_source` names a
+    // single `.sfn` file, so this nested `sfn test` takes the
+    // single-process compile path (`cli/commands/test/single_process_run.
+    // sfn:73,77`), which writes a FIXED `<scratch>/test.ll` /
+    // `<scratch>/test.exe` with no isolation of its own — unlike the
+    // multi-file path, which mints its own `fs.mkdtemp` root regardless of
+    // what it is handed. `_child_env()` passes the parent's own
+    // `SAILFIN_TEST_SCRATCH` straight through, so without a dedicated
+    // label this would share that fixed name with any other nested
+    // single-file `sfn test` sharing the same pool worker, and Windows
+    // (unlike POSIX) refuses to overwrite a `test.exe` still open
+    // elsewhere (SFN-401 idiom; see `runner_slowest_summary_test.sfn`).
+    let exit = process.run_capture([sfn_bin_path(), "test", test_source], clean_runner_env(nested_runner_scratch("mod-test")));
     report_child_failure_pending("source-identity test", exit);
     assert exit == 0;
 }

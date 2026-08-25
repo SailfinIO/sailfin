@@ -226,9 +226,22 @@ fn _await_listening(port: i64) -> boolean ![clock, io, net] {
 }
 
 // Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
-// to `out_path`. `http.download` writes the file only on a successful
-// round-trip, so its presence + content is the round-trip proof.
-fn _write_client(dir: string, port_str: string, out_path: string) -> string ![io] {
+// to `<argv[1]>/body.out`. `http.download` writes the file only on a
+// successful round-trip, so its presence + content is the round-trip proof.
+//
+// The scratch dir travels through `argv[1]`, never spliced into this source
+// text. `SAILFIN_TEST_SCRATCH`/`TEMP` is a native Windows backslash path,
+// and a literal `+ dir +` here would silently corrupt it the same way SFN-1001
+// already diagnosed and fixed in `runtime_tls_anchor_cache_test.sfn`:
+// `decode_string_literal_escapes` (`compiler/capsules/syntax/src/parser/utils.sfn:84-113`)
+// drops the backslash for any `\<char>` it does not recognize as an escape
+// when the nested build re-lexes this generated file, turning
+// `C:\Users\...` into `C:Users...` — a different, non-existent path that
+// `http.download` would then write to, invisibly to the caller's own
+// (uncorrupted) `out_path` check. Also prints a startup marker and reports
+// a missing scratch dir, so a corrupted path shows up in the client's own
+// captured output instead of only as an unexplained "no body".
+fn _write_client(dir: string, port_str: string) -> string ![io] {
     let root = dir + "/client";
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
@@ -242,12 +255,17 @@ fn _write_client(dir: string, port_str: string, out_path: string) -> string ![io
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
-    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![net, io] {\n"
+    fs.writeFile(root + "/src/main.sfn", "fn main(argv: string[]) -> int ![net, io] {\n"
+        + "    let dir = argv[1];\n"
+        + "    let out_path = dir + \"/body.out\";\n"
+        + "    if !fs.exists(dir) {\n"
+        + "        print.err(\"[tls-aes-gcm-cli] scratch dir missing: \" + dir);\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "    print.info(\"[tls-aes-gcm-cli] starting, target \" + out_path);\n"
         + "    let _ = http.download(\"https://localhost:"
         + port_str
-        + "/\", \""
-        + out_path
-        + "\");\n"
+        + "/\", out_path);\n"
         + "    return 0;\n"
         + "}\n");
     return root + "/src/main.sfn";
@@ -268,9 +286,10 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
 // 10s) already turn a stalled peer into a clean `null` return, but the
 // extra deadline keeps a genuinely wedged client from hanging the test
 // runner.
-fn _client_body(client_bin: string, run_env: Env, out_path: string) -> string ![clock, io] {
-    let _rm = process.run(["rm", "-f", out_path]);
-    let outcome = run_bounded([client_bin], run_env, "", 30000);
+fn _client_body(client_bin: string, run_env: Env, dir: string) -> string ![clock, io] {
+    let out_path = dir + "/body.out";
+    let _rm = fs.deleteFile(out_path);
+    let outcome = run_bounded([client_bin, dir], run_env, "", 30000);
     if outcome.exit != 0 { return ""; }
     if !fs.exists(out_path) { return ""; }
     return fs.readFile(out_path);
@@ -280,7 +299,7 @@ fn _client_body(client_bin: string, run_env: Env, out_path: string) -> string ![
 // only for the positive round-trip legs. Naps in-process via `wait_until` rather than
 // shelling `sleep` per tick; ~10s budget, matching the previous
 // 20-attempts x 0.5s shape.
-fn _client_body_retry(client_bin: string, run_env: Env, out_path: string) -> string ![clock, io] {
+fn _client_body_retry(client_bin: string, run_env: Env, dir: string) -> string ![clock, io] {
     // The closure below must capture an annotated local, never `run_env`
     // directly. Capturing a by-value struct PARAMETER emits invalid IR: the
     // parameter arrives as `%Env*`, the capture-env field is the `%Env`
@@ -292,7 +311,7 @@ fn _client_body_retry(client_bin: string, run_env: Env, out_path: string) -> str
     let captured_env: Env = run_env;
     let mut last_body: string = "";
     let _ready = wait_until(fn () -> boolean {
-        let body: string = _client_body(client_bin, captured_env, out_path);
+        let body: string = _client_body(client_bin, captured_env, dir);
         if body.length > 0 {
             last_body = body;
             return true;
@@ -300,6 +319,13 @@ fn _client_body_retry(client_bin: string, run_env: Env, out_path: string) -> str
         return false;
     }, 10000, 500);
     return last_body;
+}
+
+// Renders a downloaded body for a diagnostic print: length plus a bounded
+// prefix, so the print stays useful without risking a multi-KB dump.
+fn _describe_body(body: string) -> string {
+    return "length=" + number_to_string(body.length) + " prefix=\"" + substring(body, 0, 200)
+        + "\"";
 }
 
 fn _skip_ready() -> boolean ![io] {
@@ -324,8 +350,7 @@ test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clo
     fs.createDirectory(dir, true);
     assert _gen_cert(dir);
 
-    let out_path: string = dir + "/body.out";
-    let main_path = _write_client(dir, port_str, out_path);
+    let main_path = _write_client(dir, port_str);
     let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
@@ -347,8 +372,9 @@ test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clo
         // `encode_client_hello` offers it, so a server that speaks ONLY
         // this suite must still complete the handshake and round-trip the
         // body.
-        let body = _client_body_retry(client_bin, run_env, out_path);
-        print.info("[tls-aes-gcm] AES-128-GCM round-trip body received");
+        let body = _client_body_retry(client_bin, run_env, dir);
+        print.info("[tls-aes-gcm] AES-128-GCM round-trip body: "
+            + _describe_body(body));
         assert body.length > 0;
         assert contains(body, "Ciphers");
         return 0;
@@ -369,8 +395,7 @@ test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (
     fs.createDirectory(dir, true);
     assert _gen_cert(dir);
 
-    let out_path: string = dir + "/body.out";
-    let main_path = _write_client(dir, port_str, out_path);
+    let main_path = _write_client(dir, port_str);
     let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
@@ -386,8 +411,9 @@ test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (
         // Control leg: proves the AES-128-GCM leg above discriminates by
         // cipher suite rather than passing for an unrelated reason (e.g.
         // the server ignoring `-ciphersuites` entirely).
-        let body = _client_body_retry(client_bin, run_env, out_path);
-        print.info("[tls-aes-gcm] ChaCha20-Poly1305 round-trip body received");
+        let body = _client_body_retry(client_bin, run_env, dir);
+        print.info("[tls-aes-gcm] ChaCha20-Poly1305 round-trip body: "
+            + _describe_body(body));
         assert body.length > 0;
         assert contains(body, "Ciphers");
         return 0;
@@ -408,8 +434,7 @@ test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only serve
     fs.createDirectory(dir, true);
     assert _gen_cert(dir);
 
-    let out_path: string = dir + "/body.out";
-    let main_path = _write_client(dir, port_str, out_path);
+    let main_path = _write_client(dir, port_str);
     let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
@@ -422,8 +447,9 @@ test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only serve
         assert server.handle.handle_id != 0;
         assert _await_listening(port);
 
-        let body = _client_body_retry(client_bin, run_env, out_path);
-        print.info("[tls-aes-gcm] AES-256-GCM/SHA-384 round-trip body received");
+        let body = _client_body_retry(client_bin, run_env, dir);
+        print.info("[tls-aes-gcm] AES-256-GCM/SHA-384 round-trip body: "
+            + _describe_body(body));
         assert body.length > 0;
         assert contains(body, "Ciphers");
         return 0;

@@ -44,13 +44,14 @@
 import { Env, env_from_current } from "sfn/os";
 import { contains, find } from "sfn/strings";
 import {
-    Background,
     default_scratch_dir,
+    report_child_failure,
     report_child_failure_pending,
     sfn_bin_path,
+    start_background,
+    stop_background,
     tool_present,
-    wait_until,
-    with_background
+    wait_until
 } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
@@ -147,8 +148,8 @@ fn _plain_port_str() -> string { return "18895"; }
 // per-invocation under the parallel pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
-// The same environment in `sfn/os`'s typed form, for `with_background`
-// (the `sfn/test` scoped-server fixture takes an `Env`, not the flat array).
+// The same environment in `sfn/os`'s typed form, for `start_background`
+// (the `sfn/test` background-server spawn takes an `Env`, not the flat array).
 fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // Parent environment with any inherited `SAILFIN_TLS_CAFILE` entry
@@ -250,31 +251,61 @@ fn _owned_and_handle(marker: string) -> string {
 
 // Write the TLS server fixture: the shared handler body plus a `main` that
 // starts `sfn_serve_tls` (declared `extern`; the linker resolves it to
-// `runtime/sfn/concurrency/serve.sfn`) with the baked cert/key paths.
-fn _write_tls_server(dir: string, cert: string, key: string) -> string ![io] {
+// `runtime/sfn/concurrency/serve.sfn`) with the cert/key paths read back
+// from `argv[1]` (the scratch dir) rather than spliced into this source
+// text. `SAILFIN_TEST_SCRATCH`/`TEMP` is a native Windows backslash path,
+// and a literal `+ dir +` here would silently corrupt it the same way SFN-1001
+// already diagnosed and fixed in `runtime_tls_anchor_cache_test.sfn`:
+// `decode_string_literal_escapes` (`compiler/capsules/syntax/src/parser/utils.sfn:84-113`)
+// drops the backslash for any `\<char>` it does not recognize as an escape
+// when the nested build re-lexes this generated file, turning
+// `C:\Users\...` into `C:Users...` — a different, non-existent path that
+// `sfn_fs_read_file` then silently fails to open, so `tls_server_ctx`
+// returns null and `sfn_serve_tls` returns before ever binding. Also prints
+// a startup marker and checks both paths exist before serving, so a future
+// regression here announces itself instead of a bare "never became
+// connectable".
+fn _write_tls_server(dir: string) -> string ![io] {
     let src = dir + "/tlssrv.sfn";
     fs.writeFile(src, "extern fn sfn_serve_tls(handler: * u8, port: i32, cert: * u8, key: * u8) -> void;\n"
         + _owned_and_handle("TLS-RT-OK-7c1e")
-        + "fn main() -> int ![net, io] {\n"
+        + "fn main(argv: string[]) -> int ![net, io] {\n"
+        + "    let dir = argv[1];\n"
+        + "    let cert = dir + \"/cert.pem\";\n"
+        + "    let key = dir + \"/key.pem\";\n"
+        + "    if !fs.exists(cert) {\n"
+        + "        print.err(\"[tls-loopback-srv] missing cert at \" + cert);\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "    if !fs.exists(key) {\n"
+        + "        print.err(\"[tls-loopback-srv] missing key at \" + key);\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "    print.info(\"[tls-loopback-srv] starting TLS on port "
+        + _tls_port_str()
+        + "\");\n"
         + "    sfn_serve_tls(handle as * u8, "
         + _tls_port_str()
-        + ", \""
-        + cert
-        + "\" as * u8, \""
-        + key
-        + "\" as * u8);\n"
+        + ", cert as * u8, key as * u8);\n"
         + "    return 0;\n"
         + "}\n");
     return src;
 }
 
 // Write the plaintext server fixture: the shared handler body plus a `main`
-// that starts `sfn_serve` (the plaintext transport, unchanged by TLS).
+// that starts `sfn_serve` (the plaintext transport, unchanged by TLS). No
+// filesystem path is baked into the source here, so it is not exposed to
+// the corruption `_write_tls_server` guards against — the startup marker is
+// added anyway so a silent-return regression on this leg would also
+// announce itself.
 fn _write_plain_server(dir: string) -> string ![io] {
     let src = dir + "/plainsrv.sfn";
     fs.writeFile(src, "extern fn sfn_serve(handler: * u8, port: i32) -> void;\n"
         + _owned_and_handle("PLAIN-RT-OK-7c1e")
         + "fn main() -> int ![net, io] {\n"
+        + "    print.info(\"[tls-loopback-srv] starting plaintext on port "
+        + _plain_port_str()
+        + "\");\n"
         + "    sfn_serve(handle as * u8, "
         + _plain_port_str()
         + ");\n"
@@ -284,11 +315,20 @@ fn _write_plain_server(dir: string) -> string ![io] {
 }
 
 // Write a client fixture capsule whose `main` downloads `url` to
-// `out_path`. `http.download` writes the file ONLY on a successful
-// round-trip (a failed connect/handshake/verify returns null before the
-// file is opened), so its presence + content is the round-trip proof and
-// its absence is the verify-rejected proof.
-fn _write_client(dir: string, url: string, out_path: string) -> string ![io] {
+// `<argv[1]>/body.out`. `http.download` writes the file ONLY on a
+// successful round-trip (a failed connect/handshake/verify returns null
+// before the file is opened), so its presence + content is the round-trip
+// proof and its absence is the verify-rejected proof.
+//
+// The scratch dir travels through `argv[1]`, never spliced into this
+// source text — see `_write_tls_server`'s header for why (SFN-1001). Also
+// prints a startup marker and whether the download landed. The client
+// cannot itself tell a corrupted scratch dir from an intended
+// verify-rejection (an absent `out_path` is the correct outcome for that
+// leg), so a missing `out_path` is reported but does not fail the run — the
+// pre-flight `dir` check above is what actually catches a corrupted path,
+// since `dir` itself is never legitimately missing.
+fn _write_client(dir: string, url: string) -> string ![io] {
     let root = dir + "/client";
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
@@ -302,12 +342,23 @@ fn _write_client(dir: string, url: string, out_path: string) -> string ![io] {
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
-    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![net, io] {\n"
+    fs.writeFile(root + "/src/main.sfn", "fn main(argv: string[]) -> int ![net, io] {\n"
+        + "    let dir = argv[1];\n"
+        + "    let out_path = dir + \"/body.out\";\n"
+        + "    if !fs.exists(dir) {\n"
+        + "        print.err(\"[tls-loopback-cli] scratch dir missing: \" + dir);\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "    print.info(\"[tls-loopback-cli] starting, target \" + out_path);\n"
         + "    let _ = http.download(\""
         + url
-        + "\", \""
-        + out_path
-        + "\");\n"
+        + "\", out_path);\n"
+        + "    if fs.exists(out_path) {\n"
+        + "        print.info(\"[tls-loopback-cli] wrote \" + out_path);\n"
+        + "    } else {\n"
+        + "        print.info(\"[tls-loopback-cli] no file at \" + out_path\n"
+        + "            + \" (expected for a verify-rejection leg)\");\n"
+        + "    }\n"
         + "    return 0;\n"
         + "}\n");
     return root + "/src/main.sfn";
@@ -328,7 +379,8 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
 // budget. Captures nothing — reaches the port through the file-local
 // `_tls_port()` rather than closing over a parameter (SFN-843).
 fn _await_tls_listening() -> boolean ![clock, io, net] {
-    return wait_until(fn () -> boolean {
+    let start_ms: int = monotonic_millis();
+    let ok = wait_until(fn () -> boolean {
         let fd: i32 = _tll_connect(_tls_port());
         if fd >= 0 {
             sfn_socket_close(fd);
@@ -336,12 +388,22 @@ fn _await_tls_listening() -> boolean ![clock, io, net] {
         }
         return false;
     }, 30000, 500);
+    if !ok {
+        let elapsed: int = monotonic_millis() - start_ms;
+        print.info("[tls-loopback] probe: no listener on 127.0.0.1:"
+            + _tls_port_str()
+            + " after "
+            + number_to_string(elapsed)
+            + "ms");
+    }
+    return ok;
 }
 
 // Same probe for the plaintext server's port. See `_await_tls_listening` for
 // the no-capture rationale.
 fn _await_plain_listening() -> boolean ![clock, io, net] {
-    return wait_until(fn () -> boolean {
+    let start_ms: int = monotonic_millis();
+    let ok = wait_until(fn () -> boolean {
         let fd: i32 = _tll_connect(_plain_port());
         if fd >= 0 {
             sfn_socket_close(fd);
@@ -349,17 +411,45 @@ fn _await_plain_listening() -> boolean ![clock, io, net] {
         }
         return false;
     }, 30000, 500);
+    if !ok {
+        let elapsed: int = monotonic_millis() - start_ms;
+        print.info("[tls-loopback] probe: no listener on 127.0.0.1:"
+            + _plain_port_str()
+            + " after "
+            + number_to_string(elapsed)
+            + "ms");
+    }
+    return ok;
 }
 
 // Run the client once with `run_env` and return the downloaded body (or ""
-// if `http.download` wrote nothing — a failed round-trip/verify). Removes
-// any stale output first so the result reflects THIS run only.
-fn _client_body(client_bin: string, run_env: string[], out_path: string) -> string ![io] {
-    let _rm = process.run(["rm", "-f", out_path]);
-    let cexit = process.run_capture([client_bin], run_env);
-    report_child_failure_pending("tls-loopback client body run", cexit);
+// if `http.download` wrote nothing — a failed round-trip/verify). `dir` is
+// passed as the client's `argv[1]` (see `_write_client`'s header for why —
+// SFN-1001), and `out_path` is recomputed here identically to how the
+// fixture computes it internally. Removes any stale output first so the
+// result reflects THIS run only.
+fn _client_body(client_bin: string, run_env: string[], dir: string) -> string ![io] {
+    let out_path = dir + "/body.out";
+    let _rm = fs.deleteFile(out_path);
+    let cexit = process.run_capture([client_bin, dir], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("tls-loopback client body run", cexit, out, err);
     if cexit != 0 { return ""; }
-    if !fs.exists(out_path) { return ""; }
+    if !fs.exists(out_path) {
+        // Distinguishes "the client failed to run" (report_child_failure
+        // above, exit != 0) from "the client ran and wrote nothing" — both
+        // previously collapsed into the identical empty `body` a caller
+        // sees, with no way to tell them apart from the retry loop alone.
+        print.info("[tls-loopback] client exited 0 but wrote no file at "
+            + out_path
+            + "; stdout=\""
+            + substring(out, 0, 2048)
+            + "\" stderr=\""
+            + substring(err, 0, 2048)
+            + "\"");
+        return "";
+    }
     return fs.readFile(out_path);
 }
 
@@ -368,10 +458,12 @@ fn _client_body(client_bin: string, run_env: string[], out_path: string) -> stri
 // verify-rejection (the fixture returns 0 and `http.download` writes no
 // file) from an unrelated CRASH (non-zero exit, which also leaves no file):
 // the crash must FAIL the test, not masquerade as a rejection the way a
-// body-only check would. Removes stale output first.
-fn _client_exit(client_bin: string, run_env: string[], out_path: string) -> i64 ![io] {
-    let _rm = process.run(["rm", "-f", out_path]);
-    let cexit = process.run_capture([client_bin], run_env);
+// body-only check would. `dir` travels as `argv[1]`, same as `_client_body`.
+// Removes stale output first.
+fn _client_exit(client_bin: string, run_env: string[], dir: string) -> i64 ![io] {
+    let out_path = dir + "/body.out";
+    let _rm = fs.deleteFile(out_path);
+    let cexit = process.run_capture([client_bin, dir], run_env);
     report_child_failure_pending("tls-loopback client exit run", cexit);
     return cexit;
 }
@@ -380,16 +472,23 @@ fn _client_exit(client_bin: string, run_env: string[], out_path: string) -> i64 
 // latency — used only for the POSITIVE round-trip (where a body IS
 // expected), never to conclude a negative (an untrusted peer never
 // succeeds no matter how many retries).
-fn _client_body_retry(client_bin: string, run_env: string[], out_path: string) -> string ![io] {
+fn _client_body_retry(client_bin: string, run_env: string[], dir: string) -> string ![clock, io] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 20 { break; }
-        let body = _client_body(client_bin, run_env, out_path);
+        let body = _client_body(client_bin, run_env, dir);
         if body.length > 0 { return body; }
-        let _ = process.run(["sleep", "0.5"]);
+        sleep(500);
         attempt = attempt + 1;
     }
     return "";
+}
+
+// Renders a downloaded body for a diagnostic print: length plus a bounded
+// prefix, so the print stays useful without risking a multi-KB dump.
+fn _describe_body(body: string) -> string {
+    return "length=" + number_to_string(body.length) + " prefix=\"" + substring(body, 0, 200)
+        + "\"";
 }
 
 test "tls loopback: native serve ↔ native https client round-trips + verify-failure" ![clock, io, net] {
@@ -411,33 +510,45 @@ test "tls loopback: native serve ↔ native https client round-trips + verify-fa
 
     // Build the native TLS server binary up front (synchronous), so the cold
     // compile is not inside the readiness poll window.
-    let srv_main = _write_tls_server(dir, cert, key);
+    let srv_main = _write_tls_server(dir);
     let srv_bin = _build_bin(srv_main, dir + "/tlssrv-bin");
     assert srv_bin.length > 0;
 
     // Build the native https client fixture.
     let out_path = dir + "/body.out";
     let cli_main = _write_client(dir, "https://localhost:" + _tls_port_str()
-        + "/", out_path);
-    // SFN-843: typed explicitly because the `with_background` body below
-    // captures it — an untyped call-initialized `let` mistypes the capture's
-    // env slot as `i8*`.
-    let cli_bin: string = _build_bin(cli_main, dir + "/client-bin");
+        + "/");
+    let cli_bin = _build_bin(cli_main, dir + "/client-bin");
     assert cli_bin.length > 0;
 
-    // `with_background` owns the blocking server's lifetime: it is killed
-    // and reaped on scope exit, including when an assertion below throws —
-    // replacing the previous `timeout <secs>` argv vehicle, which was the
-    // ONLY teardown mechanism and forced a SKIP on any host without
-    // coreutils.
-    let _served = with_background([srv_bin], _child_env_typed(), "", "tls-loopback-server", fn (server: Background) -> int {
-        assert server.handle.handle_id != 0;
-        assert _await_tls_listening();
+    // Managed explicitly (`start_background`/`stop_background`) rather than
+    // through the scoped `with_background` fixture: `with_background`'s own
+    // catch drains and DISCARDS the child's streams before rethrowing, so a
+    // server that never becomes connectable always reported bare "assertion
+    // failed" with no signal from the server side. Draining here on the
+    // specific readiness-failure path keeps that signal. `dir` rides as
+    // `argv[1]` (see `_write_tls_server`'s header — SFN-1001).
+    let server = start_background([srv_bin, dir], _child_env_typed(), "", "tls-loopback-server");
+    assert server.handle.handle_id != 0;
 
+    let up = _await_tls_listening();
+    if !up {
+        let drain = stop_background(server);
+        print.info("[tls-loopback] TLS server never became connectable; exit="
+            + number_to_string(drain.exit)
+            + " stdout=\""
+            + substring(drain.stdout, 0, 4096)
+            + "\" stderr=\""
+            + substring(drain.stderr, 0, 4096)
+            + "\"");
+    }
+    assert up;
+
+    try {
         // SUCCESS leg (acceptance #1): trusted via CAFILE -> the full
         // handshake + request→response cycle round-trips the handler body.
-        let body = _client_body_retry(cli_bin, _trusted_env(cert), out_path);
-        print.info("[tls-loopback] round-trip body received");
+        let body = _client_body_retry(cli_bin, _trusted_env(cert), dir);
+        print.info("[tls-loopback] round-trip body: " + _describe_body(body));
         assert body.length > 0;
         assert contains(body, "TLS-RT-OK-7c1e");
 
@@ -455,14 +566,20 @@ test "tls loopback: native serve ↔ native https client round-trips + verify-fa
         // identical no-body signal as a correctly rejected untrusted peer.
         // `runtime_tls_ca_bundle_realistic_size_test.sfn` (SFN-813) covers the
         // loader itself so a regression there cannot hide behind this leg again.
-        let uexit = _client_exit(cli_bin, _untrusted_env(), out_path);
+        let uexit = _client_exit(cli_bin, _untrusted_env(), dir);
         assert uexit == 0;
         assert ! fs.exists(out_path);
-        return 0;
-    });
+        let _ = stop_background(server);
+    } catch (err) {
+        // Reap first, then re-throw, so the failing test still fails with
+        // its own message rather than a teardown error — mirrors
+        // `with_background`'s own catch (SFN-402/SFEP-0050 §5.1).
+        let _ = stop_background(server);
+        throw err;
+    }
 
-    // Best-effort cleanup. The server itself was already killed and reaped by
-    // `with_background` on scope exit.
+    // Best-effort cleanup. The server itself was already killed and reaped
+    // above.
     let _rm = process.run(["rm", "-rf", dir]);
 }
 
@@ -477,24 +594,39 @@ test "tls loopback: plaintext serve still round-trips (regression guard)" ![cloc
     // Build the native http client fixture (plaintext scheme).
     let out_path = dir + "/body.out";
     let cli_main = _write_client(dir, "http://localhost:" + _plain_port_str()
-        + "/", out_path);
-    // SFN-843: typed explicitly — see the TLS test above.
-    let cli_bin: string = _build_bin(cli_main, dir + "/client-bin");
+        + "/");
+    let cli_bin = _build_bin(cli_main, dir + "/client-bin");
     assert cli_bin.length > 0;
 
-    // `with_background` owns the blocking server's lifetime; see the TLS
-    // test above for why this replaced the `timeout <secs>` vehicle.
-    let _served = with_background([srv_bin], _child_env_typed(), "", "plain-loopback-server", fn (server: Background) -> int {
-        assert server.handle.handle_id != 0;
-        assert _await_plain_listening();
+    // See the TLS test above for why this manages the server explicitly
+    // instead of through `with_background`.
+    let server = start_background([srv_bin], _child_env_typed(), "", "plain-loopback-server");
+    assert server.handle.handle_id != 0;
 
+    let up = _await_plain_listening();
+    if !up {
+        let drain = stop_background(server);
+        print.info("[tls-loopback] plaintext server never became connectable; exit="
+            + number_to_string(drain.exit)
+            + " stdout=\""
+            + substring(drain.stdout, 0, 4096)
+            + "\" stderr=\""
+            + substring(drain.stderr, 0, 4096)
+            + "\"");
+    }
+    assert up;
+
+    try {
         // Plaintext round-trip still works alongside the TLS surface.
-        let body = _client_body_retry(cli_bin, _child_env(), out_path);
-        print.info("[tls-loopback] plaintext round-trip body received");
+        let body = _client_body_retry(cli_bin, _child_env(), dir);
+        print.info("[tls-loopback] plaintext round-trip body: " + _describe_body(body));
         assert body.length > 0;
         assert contains(body, "PLAIN-RT-OK-7c1e");
-        return 0;
-    });
+        let _ = stop_background(server);
+    } catch (err) {
+        let _ = stop_background(server);
+        throw err;
+    }
 
     let _rm = process.run(["rm", "-rf", dir]);
 }

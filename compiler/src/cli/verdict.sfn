@@ -113,6 +113,52 @@ fn verdict_emit(v: Verdict) -> void ![io] {
     print("===END-SAILFIN-RESULT===");
 }
 
+// Windows has no signals, so none of the `128 + signal` codes in
+// `verdict_classify` below can ever occur there. An unhandled hardware or
+// CRT fault terminates the process with the raising NT status AS its exit
+// code; `GetExitCodeProcess` hands that back as a DWORD which the runtime
+// sign-extends (`runtime/sfn/platform/process_windows.sfn`), so every
+// Windows crash reaches the classifier as a large NEGATIVE number — where
+// its `-1` never-ran rule would otherwise claim it as `setup-error`. That
+// misattribution is precisely the one `crash_attribution_test.sfn` exists
+// to prevent: it reports a crashed child as a broken harness.
+//
+// CURATED, not range-matched. The `0xC0000000` severity-error space also
+// holds genuine never-ran failures — `STATUS_DLL_NOT_FOUND` (`0xC0000135`)
+// and `STATUS_ENTRYPOINT_NOT_FOUND` (`0xC0000139`) mean the image was
+// never entered — and those ARE `setup-error`, which the classifier's
+// fall-through already answers correctly. Matching the whole range would
+// relabel them as crashes and destroy the very distinction the classifier
+// draws. What belongs here is the set a process raises by EXECUTING,
+// which is what the POSIX crash set means too.
+//
+// Decimal literals, with the status spelled in the comment above each: a
+// hex literal folds to `0` on the pinned seed (the same constraint
+// recorded at the `INFINITE` timeout in `process_windows.sfn`), and a
+// silently-zero constant here would classify a CLEAN exit as a crash.
+fn _verdict_is_nt_crash_status(rc: int) -> boolean {
+    // 0xC0000005 STATUS_ACCESS_VIOLATION
+    if rc == -1073741819 { return true; }
+    // 0xC0000006 STATUS_IN_PAGE_ERROR
+    if rc == -1073741818 { return true; }
+    // 0xC000001D STATUS_ILLEGAL_INSTRUCTION
+    if rc == -1073741795 { return true; }
+    // 0xC000008E STATUS_FLOAT_DIVIDE_BY_ZERO
+    if rc == -1073741682 { return true; }
+    // 0xC0000094 STATUS_INTEGER_DIVIDE_BY_ZERO
+    if rc == -1073741676 { return true; }
+    // 0xC0000096 STATUS_PRIVILEGED_INSTRUCTION
+    if rc == -1073741674 { return true; }
+    // 0xC00000FD STATUS_STACK_OVERFLOW
+    if rc == -1073741571 { return true; }
+    // 0xC0000374 STATUS_HEAP_CORRUPTION
+    if rc == -1073740940 { return true; }
+    // 0xC0000409 STATUS_STACK_BUFFER_OVERRUN — what `__fastfail` raises,
+    // and what an aborting Sailfin runtime produces on Windows.
+    if rc == -1073740791 { return true; }
+    return false;
+}
+
 // -------------------------------------------------------------------
 // Classification (SFEP-0014 §3.7)
 // -------------------------------------------------------------------
@@ -142,6 +188,9 @@ fn verdict_classify(rc: int, kind: string) -> string {
     if rc == 135 { return "crash"; }
     if rc == 136 { return "crash"; }
     if rc == 132 { return "crash"; }
+    // Must precede the `rc < 0` rule below, which would otherwise swallow
+    // every one of these.
+    if _verdict_is_nt_crash_status(rc) { return "crash"; }
     // A spawn that never produced a process: `run_capture` reports -1,
     // the handle API reports a 0 handle which `_dv_run_bounded` maps to
     // 127. Neither is the tool disagreeing with you; both mean it never

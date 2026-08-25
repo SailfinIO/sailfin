@@ -13,22 +13,44 @@ import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
 
 import { link_argv_flat_length, link_response_body, link_response_threshold } from "../../src/build/link_response";
 
-test "link response: flat length counts three overhead chars per argument" ![pure] {
-    // Mirrors `_pw_build_cmdline`: every arg gets two wrapping quotes
-    // plus one separator, unconditionally. "ld"(2+3) + "-o"(2+3) +
-    // "out"(3+3) = 16.
+test "link response: flat length charges one separator per unquoted argument" ![pure] {
+    // Mirrors `_pw_build_cmdline`: an argument with no separator and no
+    // quote of its own is emitted bare, so it costs only its bytes plus
+    // the separating space. "ld"(2+1) + "-o"(2+1) + "out"(3+1) = 10.
     let argv = ["ld", "-o", "out"];
-    assert expect_eq_int(link_argv_flat_length(argv), 16).ok;
+    assert expect_eq_int(link_argv_flat_length(argv), 10).ok;
 }
 
-test "link response: flat length overhead does not depend on whitespace" ![pure] {
-    // The runtime quotes every arg whether or not it contains a space,
-    // so a space costs only its own character. Modelling the quotes as
-    // whitespace-triggered undercounts the real command line.
+test "link response: flat length charges the quotes a space forces" ![pure] {
+    // A space is what makes the runtime wrap the argument, so it costs
+    // its own character plus the two quotes it triggers.
     let plain = ["ld", "-o", "abcdefghi"];
     let spaced = ["ld", "-o", "abcde fghi"];
     assert expect_eq_int(link_argv_flat_length(spaced), link_argv_flat_length(plain)
-        + 1).ok;
+        + 3).ok;
+}
+
+test "link response: flat length leaves a Windows object path unquoted" ![pure] {
+    // The payload this gate exists for. Backslashes inside an otherwise
+    // separator-free path neither force quotes nor double, so the path
+    // costs exactly its own length.
+    let argv = ["C:\\build\\link-obj\\x.o"];
+    assert expect_eq_int(link_argv_flat_length(argv), 22).ok;
+}
+
+test "link response: flat length doubles a trailing backslash run" ![pure] {
+    // `a b\` encodes as `"a b\\"` — the run sits before the closing
+    // quote, so it doubles. 2 quotes + "a b" + 2 backslashes = 7, plus
+    // the separator.
+    let argv = ["a b\\"];
+    assert expect_eq_int(link_argv_flat_length(argv), 8).ok;
+}
+
+test "link response: flat length escapes an embedded quote" ![pure] {
+    // `a"b` encodes as `"a\"b"`: 2 quotes + a + escape + " + b = 6,
+    // plus the separator.
+    let argv = ["a\"b"];
+    assert expect_eq_int(link_argv_flat_length(argv), 7).ok;
 }
 
 test "link response: threshold stays below the Windows CreateProcess cap" ![pure] {

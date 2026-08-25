@@ -1,22 +1,28 @@
 // compiler/tests/e2e/crash_attribution_test.sfn
 //
-// Regression for #1206: a test child that CRASHES (SIGSEGV, exit 139)
-// must
+// Regression for #1206: a test child that CRASHES (SIGSEGV on POSIX, an NT
+// fault status on Windows — `_verdict_is_nt_crash_status`,
+// `compiler/src/cli/verdict.sfn`) must
 //   (a) be named in a `[test] FAIL:` line in human output,
 //   (b) leave an in-flight `RUN  <test>` breadcrumb on stderr, and
 //   (c) classify as `crash` via the shared classifier
 //       (`compiler/src/cli/verdict.sfn::verdict_classify`) — never
-//       `setup-error` (the original observed symptom) and never
-//       `test-failure`.
+//       `setup-error` (the original #1206 symptom, and also the
+//       misattribution a Windows NT crash status hit before `verdict.sfn`
+//       gained `_verdict_is_nt_crash_status`) and never `test-failure`.
 //
 // Parts (a)/(b) were delivered by #1303's `_emit_crash_diagnostic` /
 // `_is_signal_exit`; this test pins the attribution and the classifier's
 // `crash` arm so neither regresses.
 //
-// (c) is asserted as two composed halves rather than through a verdict
-// block, because observing a real crash *through* one required the bash
-// wrapper SFN-726 deleted, and no native verb emits a trailer for `sfn
-// test` yet. The end-to-end form returns once one does.
+// (c) is asserted by calling the shared classifier directly rather than
+// through a verdict block, because observing a real crash *through* one
+// required the bash wrapper SFN-726 deleted, and no native verb emits a
+// trailer for `sfn test` yet. The end-to-end form returns once one does.
+// The raw exit code is deliberately not asserted alongside it: POSIX
+// encodes a crash as `128 + signal` while Windows encodes it as a
+// sign-extended NT status, so asserting the classifier's OUTPUT is the one
+// assertion that states the same property on both.
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`: drives subprocesses via
 // `process.run_capture` and asserts on captured output with `sfn/strings`.
@@ -31,11 +37,12 @@ import {
 import { verdict_classify } from "../../src/cli/verdict";
 
 // A fixture whose second test overflows the stack — non-tail recursion
-// (work after the call) defeats TCO, so it faults with SIGSEGV (exit
-// 139) rather than looping into a timeout, and leaves no assertion
-// record. The first test passes, so a correct runner names the *file*
-// (the in-flight test within it is unrecoverable in JSON mode but
-// visible via the `RUN` breadcrumb in human mode).
+// (work after the call) defeats TCO, so it faults with a stack-overflow
+// crash (SIGSEGV on POSIX, STATUS_STACK_OVERFLOW on Windows) rather than
+// looping into a timeout, and leaves no assertion record. The first test
+// passes, so a correct runner names the *file* (the in-flight test within
+// it is unrecoverable in JSON mode but visible via the `RUN` breadcrumb in
+// human mode).
 fn _crash_fixture_src() -> string {
     return "fn _deep(n: int) -> int {\n" + "    let x = _deep(n + 1);\n"
         + "    return x + 1;\n"
@@ -75,7 +82,7 @@ fn _child_env() -> string[] ![io] {
     return e;
 }
 
-test "crash #1206: SIGSEGV names the crashed file and classifies as crash" ![io] {
+test "crash #1206: a fatal fault names the crashed file and classifies as crash" ![io] {
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/crash_signal_probe.sfn";
         fs.writeFile(src, _crash_fixture_src());
@@ -86,12 +93,10 @@ test "crash #1206: SIGSEGV names the crashed file and classifies as crash" ![io]
         // (a) the crash is reported as a FAIL naming the crashed file.
         assert find(combined, "[test] FAIL:", 0) >= 0;
         assert find(combined, "crash_signal_probe.sfn", 0) >= 0;
-        // (c) the crashed child's status reaches the caller intact — 139,
-        // not merely non-zero, since the exact signal status is what the
-        // classifier reads ...
-        assert exit == 139;
-        // ... and the shared classifier maps it to `crash`, never
-        // `setup-error` (the #1206 symptom) or `test-failure`.
+        // (c) the shared classifier maps the crashed child's exit status
+        // to `crash`, never `setup-error` (the #1206 symptom) or
+        // `test-failure` — see the file header for why the raw exit code
+        // itself is not asserted.
         assert verdict_classify(exit, "test") == "crash";
         return 0;
     });

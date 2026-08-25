@@ -3,10 +3,13 @@
 // live in `runtime/sfn/io.sfn` (`sfn_read_fd` / `sfn_read_line`) over the
 // `read` extern there; `runtime_helpers.sfn` maps the `io.read_fd` /
 // `io.read_line` descriptors onto them and `lowering_helpers.sfn`
-// declare-tracks the symbols. These tests drive a real `pipe(2)` so the
+// declare-tracks the symbols. These tests drive a real pipe via
+// `sfn_fd_pipe` (`runtime/sfn/platform/fd_io.sfn`) rather than the raw
+// POSIX `pipe(2)`, which the UCRT does not expose under that name, so the
 // read transitions are deterministic: bytes written to the write end are
 // read back through the builtins from the read end. The `{ rd, wr }`
-// overlay over the two-int `pipe` buffer mirrors `io_poll_readable_test`.
+// overlay over the two-int `sfn_fd_pipe` buffer mirrors
+// `io_poll_readable_test`.
 struct PipeFds {
     rd: i32;
     wr: i32;
@@ -19,7 +22,7 @@ struct OwnedBuf {
     arena_addr: i64;
 }
 
-extern fn pipe(fds: *i32) -> i32;
+extern fn sfn_fd_pipe(fds: *i32) -> i32;
 
 extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
@@ -32,7 +35,7 @@ extern fn free(ptr: *u8) -> void;
 // `io.read_fd(fd, n)` returns at most `n` bytes from a single `read(2)`.
 test "io.read_fd: returns up to n bytes from the read end" ![io] {
     let buf: *u8 = malloc(8 as usize);
-    assert pipe(buf as *i32) == 0;
+    assert sfn_fd_pipe(buf as *i32) == 0;
     let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
@@ -53,7 +56,7 @@ test "io.read_fd: returns up to n bytes from the read end" ![io] {
 // A request larger than the buffered bytes returns just those bytes.
 test "io.read_fd: a short read returns fewer than n bytes" ![io] {
     let buf: *u8 = malloc(8 as usize);
-    assert pipe(buf as *i32) == 0;
+    assert sfn_fd_pipe(buf as *i32) == 0;
     let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
@@ -78,7 +81,7 @@ test "io.read_fd: a short read returns fewer than n bytes" ![io] {
 // newline, so successive frames stay intact.
 test "io.read_line: reads successive newline-terminated lines" ![io] {
     let buf: *u8 = malloc(8 as usize);
-    assert pipe(buf as *i32) == 0;
+    assert sfn_fd_pipe(buf as *i32) == 0;
     let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
@@ -96,7 +99,7 @@ test "io.read_line: reads successive newline-terminated lines" ![io] {
 // A final line without a trailing newline is returned on EOF.
 test "io.read_line: an unterminated final line is returned at EOF" ![io] {
     let buf: *u8 = malloc(8 as usize);
-    assert pipe(buf as *i32) == 0;
+    assert sfn_fd_pipe(buf as *i32) == 0;
     let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
@@ -115,7 +118,7 @@ test "io.read_line: an unterminated final line is returned at EOF" ![io] {
 // distinguishing "no line at all" from a blank line.
 test "io.read_line: immediate EOF returns null" ![io] {
     let buf: *u8 = malloc(8 as usize);
-    assert pipe(buf as *i32) == 0;
+    assert sfn_fd_pipe(buf as *i32) == 0;
     let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
@@ -130,7 +133,7 @@ test "io.read_line: immediate EOF returns null" ![io] {
 // A line consisting solely of a newline is a blank line, distinct from EOF.
 test "io.read_line: a blank line returns empty string not null" ![io] {
     let buf: *u8 = malloc(8 as usize);
-    assert pipe(buf as *i32) == 0;
+    assert sfn_fd_pipe(buf as *i32) == 0;
     let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;

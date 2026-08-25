@@ -49,6 +49,14 @@ fn _runner_env(label: string) -> string[] ![io] {
     return clean_runner_env(nested_runner_scratch(label));
 }
 
+// A compiler-derived Windows executable carries `.exe` from birth
+// (`target_exe_name`, `compiler/src/build/target.sfn`; SFN-693), so a
+// member's built binary is found under either spelling. Probing both is an
+// observation; branching on the host would be an assumption.
+fn _member_binary_built(base: string) -> bool ![io] {
+    return fs.exists(base) || fs.exists(base + ".exe");
+}
+
 test "workspace defaults: bare build and test select only default members" ![io] {
     let sfn = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
@@ -60,7 +68,8 @@ test "workspace defaults: bare build and test select only default members" ![io]
         assert build_rc == 0;
         assert find(build_out + build_err, "sfn build: member fixture/good (good)", 0) >= 0;
         assert find(build_out + build_err, "fixture/omitted", 0) < 0;
-        assert fs.exists(dir + "/build/capsules/fixture/good/bin/good");
+        assert _member_binary_built(dir
+            + "/build/capsules/fixture/good/bin/good");
 
         let test_rc = process.run_capture_cwd([sfn, "test", "--jobs", "1", "--no-test-cache"], _runner_env("workspace-default-test"), dir);
         let test_out = process.capture_take_stdout();
@@ -84,7 +93,8 @@ test "workspace defaults: build and test aggregate failures and continue" ![io] 
         assert build_rc != 0;
         assert find(build_out + build_err, "fixture/bad-build", 0) >= 0;
         assert find(build_out + build_err, "fixture/late", 0) >= 0;
-        assert fs.exists(dir + "/build/capsules/fixture/late/bin/late");
+        assert _member_binary_built(dir
+            + "/build/capsules/fixture/late/bin/late");
 
         _write_workspace(dir, "[\"bad-test\", \"good\"]");
         let test_rc = process.run_capture_cwd([sfn, "test", "--jobs", "1", "--no-test-cache"], _runner_env("workspace-aggregate-test"), dir);
