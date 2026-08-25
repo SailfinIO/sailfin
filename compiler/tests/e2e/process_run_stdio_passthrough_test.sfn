@@ -26,7 +26,12 @@
 // on Windows this exercises `sfn_process_run` at two levels and a failure
 // does not localize to one of them on its own.
 import { contains, find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 // Sentinels distinct enough not to collide with ordinary build chatter
 // (diagnostics, clang/linker noise) that might also land on the nested
@@ -80,6 +85,7 @@ test "process.run: passes a nested child's stdout/stderr through to the caller (
     let exit = process.run_capture([sfn_bin_path(), "run", src], clean_runner_env(scratch));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("process-run-stdio-passthrough run", exit, out, err);
 
     assert exit == 0;
     // The nested `sfn run` process's own captured stdout/stderr must contain
@@ -102,7 +108,8 @@ test "process.run_capture: still captures rather than passing through (SFN-546)"
     // `PATH` rather than from `envp`.
     let exit = process.run_capture(["echo", "SFN546_CAPTURE_SENTINEL_7ab1"], []);
     let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("process-run-stdio-passthrough run-capture", exit, out, err);
 
     assert exit == 0;
     assert find(out, "SFN546_CAPTURE_SENTINEL_7ab1", 0) >= 0;

@@ -233,8 +233,26 @@ fn _tw_check_symlink_target(target: string, rel_path: string) -> Result<int, Arc
 }
 
 // "Executable" per SFEP-0071 §3.7: membership in `exec_paths`, else
-// `fs.is_executable` on POSIX (a no-op-shaped `false` on Windows, where
-// `access(X_OK)` cannot answer meaningfully).
+// `fs.is_executable`.
+//
+// ON WINDOWS THE FALLBACK ANSWERS `true` FOR ANY FILE THAT EXISTS, not
+// `false`. `fs_exec_mode_windows.sfn` passes `F_OK` (0) rather than
+// `X_OK` (1) — deliberately, because UCRT's `_access` fast-fails the
+// process on a mode it rejects (SFN-649) and Windows has no execute bit
+// to interrogate. Its own header states the consequence: `fs.is_executable`
+// is equivalent to `fs.exists` there.
+//
+// So on Windows every staged member is marked executable and `exec_paths`
+// membership decides nothing. That is a property of the platform, not a
+// gap to fill: the archive's exec bits are only meaningful to a POSIX
+// extractor, and a Windows-built archive extracted on POSIX will mark
+// everything executable. A caller that needs the distinction must pass
+// `exec_paths` and not rely on the probe.
+//
+// An earlier revision of this comment claimed the Windows fallback was
+// "a no-op-shaped `false`" — the opposite of what it does, and the reason
+// `compiler/tests/e2e/sfn_package_target_exe_suffix_test.sfn`'s exec-bit
+// assertions passed on that host no matter what `exec_paths` contained.
 fn _tw_is_executable(full_path: string, rel_path: string, exec_paths: string[]) -> boolean ![io] {
     let mut i: int = 0;
     loop {

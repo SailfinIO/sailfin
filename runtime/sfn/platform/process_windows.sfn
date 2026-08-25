@@ -117,6 +117,21 @@ extern fn PeekNamedPipe(handle: i64, buffer: *u8, buf_size: i32, read_count: *i3
 
 extern fn GetStdHandle(which: i32) -> i64;
 
+// ── fd → HANDLE bridge for `io.poll_readable` / `io.poll_any`.
+// The `io.*` builtins take a CRT file descriptor, which is what POSIX
+// `poll(2)` wants; every Win32 readiness primitive wants a HANDLE.
+// `_get_osfhandle` is the UCRT's own bridge between the two — the leading
+// underscore is the C symbol, not the Sailfin module-private convention.
+// It answers `-1` for an fd that was never opened and `-2` for one with no
+// underlying handle.
+extern fn _get_osfhandle(fd: i32) -> i64;
+
+// `GetFileType(handle)` — `FILE_TYPE_UNKNOWN` 0, `FILE_TYPE_DISK` 1,
+// `FILE_TYPE_CHAR` 2, `FILE_TYPE_PIPE` 3. Only a pipe has a non-blocking
+// peek, so this is what decides whether readiness is measurable or must be
+// assumed.
+extern fn GetFileType(handle: i64) -> i32;
+
 // `DuplicateHandle` / `GetCurrentProcess` — the `run` passthrough path
 // hands the child inheritable copies of the parent's standard handles
 // rather than flipping `HANDLE_FLAG_INHERIT` on the parent's own
@@ -144,6 +159,13 @@ extern fn Sleep(ms: i32) -> void;
 extern fn QueryPerformanceCounter(out_count: *i64) -> i32;
 
 extern fn QueryPerformanceFrequency(out_freq: *i64) -> i32;
+
+// `K32GetProcessMemoryInfo(process, counters, cb)` — peak working set for the
+// metered `run_capture` (SFN-1520 family). Deliberately the `K32`-prefixed
+// spelling: it is exported from `kernel32.dll`, which the msvc link already
+// pulls in, whereas the unprefixed `GetProcessMemoryInfo` lives in `psapi` and
+// would add a link library to every Windows binary for one call site.
+extern fn K32GetProcessMemoryInfo(process: i64, counters: *u8, cb: i32) -> i32;
 
 // ── Win32 async-handle family (SFN-497). `WriteFile` feeds the child's
 // stdin pipe; `TerminateProcess` is the `handle_kill` primitive (Windows
@@ -245,14 +267,31 @@ let mut pw_capture_stdout_addr: i64 = 0;
 let mut pw_capture_stderr_addr: i64 = 0;
 
 // Metered-capture slots for `run_capture_metered` (#1520 / epic #1503),
-// the measurement primitive the native `sfn bench` driver uses. Windows
-// has no `getrusage`/`wait4`, so wall-clock and peak-RSS metering degrade
-// to `0` here (bench's timing/memory leg is Linux/WSL-only per epic #1503);
-// the subprocess drive and stdout/stderr capture stay real. `i64` slots to
-// dodge the same non-`i64` module-mutable-global quirk noted above.
+// the measurement primitive the native `sfn bench` driver uses. Windows has
+// no `getrusage`/`wait4`, but it does have equivalents for both halves —
+// `QueryPerformanceCounter` for wall time and `K32GetProcessMemoryInfo`'s
+// `PeakWorkingSetSize` for peak memory — so these carry real measurements
+// rather than the `0` the earlier degraded contract returned.
+//
+// Peak WORKING SET is not the same quantity as POSIX `ru_maxrss`, though
+// both are "the most physical memory this process ever held". Neither counts
+// paged-out pages, and the two are close enough for a budget check; they are
+// NOT close enough to compare a Linux and a Windows number against one
+// shared threshold. A per-target budget is the honest use.
+//
+// `i64` slots to dodge the same non-`i64` module-mutable-global quirk noted
+// above.
 let mut pw_capture_wall_ms: i64 = 0;
 
 let mut pw_capture_peak_rss_kb: i64 = 0;
+
+// Whether the NEXT `_pw_run_capture_impl` should measure. Metering is opt-in
+// so a plain `run_capture` reports `0` for both, exactly as the POSIX body
+// does — `sfn_process_run_capture_metered` is the only thing that arms it,
+// and the impl disarms it as it consumes it. Without this, a plain capture on
+// Windows would hand back numbers its POSIX counterpart does not, and the two
+// platforms' builtin contracts would quietly diverge.
+let mut pw_capture_meter_armed: i64 = 0;
 
 // A zero-initialized pointer-sized cell is `SRWLOCK_INIT`. Keeping the lock in
 // this provider avoids depending on either pthread implementation: MinGW links
@@ -377,51 +416,14 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     let len: i64 = argv.length;
     if len <= 0 { return 127.0; }
 
-    // 1-char source buffers for the quote / space separators, copied via
-    // `memcpy` (no single-byte store — a word-RMW byte store would
-    // over-read past a `malloc`'d buffer's tail; #1316-class hazard).
-    let quote: string = "\"";
-    let space: string = " ";
-    let empty: string = "";
-    let q: *u8 = sfn_str_to_cstr(quote as *u8, quote.length, null);
-    let sp: *u8 = sfn_str_to_cstr(space as *u8, space.length, null);
-    let nul: *u8 = sfn_str_to_cstr(empty as *u8, empty.length, null);
-
-    // Command-line length: each arg contributes its bytes + two quotes +
-    // one separating space, plus a trailing NUL.
-    let mut total: i64 = 0;
-    let mut i: i64 = 0;
-    loop {
-        if i >= len { break; }
-        let a: *u8 = sfn_str_to_cstr(argv[i] as *u8, argv[i].length, null);
-        total = total + (strlen(a) as i64) + 3;
-        i = i + 1;
-    }
-
-    let cmdline: *u8 = malloc((total + 1) as usize);
+    // One encoder for every spawn site. This body used to build its own
+    // copy of the command line inline; the two drifted the moment
+    // `_pw_build_cmdline` learned the `CommandLineToArgvW` quoting rule,
+    // and a `process.run` that mangles its argv differently from a
+    // `process.run_capture` is the kind of divergence nothing observes
+    // until a path with a space in it reaches only one of them.
+    let cmdline: *u8 = _pw_build_cmdline(argv);
     if cmdline as i64 == 0 { return 127.0; }
-    let base: i64 = cmdline as i64;
-    let mut wp: i64 = 0;
-    i = 0;
-    loop {
-        if i >= len { break; }
-        if i > 0 {
-            memcpy((base + wp) as *u8, sp, 1 as usize);
-            wp = wp + 1;
-        }
-        memcpy((base + wp) as *u8, q, 1 as usize);
-        wp = wp + 1;
-        let a: *u8 = sfn_str_to_cstr(argv[i] as *u8, argv[i].length, null);
-        let n: i64 = strlen(a) as i64;
-        if n > 0 {
-            memcpy((base + wp) as *u8, a, n as usize);
-            wp = wp + n;
-        }
-        memcpy((base + wp) as *u8, q, 1 as usize);
-        wp = wp + 1;
-        i = i + 1;
-    }
-    memcpy((base + wp) as *u8, nul, 1 as usize);
 
     // STARTUPINFOA: zeroed, `.cb = 104`.
     let si: *u8 = malloc(104 as usize);
@@ -536,29 +538,128 @@ fn _pw_empty_cstr() -> *u8 {
     return p;
 }
 
-// `_pw_build_cmdline(argv)` — single quoted Win32 command line
-// (`"arg0" "arg1" ...`), the form `CreateProcessA` parses. Same quoting
-// the real `sfn_process_run` builds inline; factored out here so
-// `run_capture` shares it without touching the existing `run` body.
+// `_pw_arg_needs_quotes(a, n)` — whether one argv element has to be
+// wrapped in quotes to survive `CommandLineToArgvW` tokenization. An
+// empty argument does (it is otherwise indistinguishable from the
+// separator run), as does any argument containing a separator character
+// or a quote of its own.
+fn _pw_arg_needs_quotes(a: *u8, n: i64) -> boolean {
+    if n == 0 { return true; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        let b: i64 = load_byte((a as i64) + i);
+        // space, tab, LF, VT, CR, `"`
+        if b == 32 { return true; }
+        if b == 9 { return true; }
+        if b == 10 { return true; }
+        if b == 11 { return true; }
+        if b == 13 { return true; }
+        if b == 34 { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `_pw_write_arg(base, wp, a, n, q, bs)` — encode one argv element at
+// `base + wp` under the `CommandLineToArgvW` quoting rule, returning the
+// new write offset.
+//
+// The rule (documented for `CommandLineToArgvW`, and what the MSVC CRT
+// startup code parses): a backslash run is literal UNLESS it precedes a
+// `"`, in which case each backslash must be doubled and the quote itself
+// escaped with one more backslash. A backslash run that ends the
+// argument sits in front of the CLOSING quote, so it doubles too. Runs
+// are therefore buffered in `nbs` and flushed by whatever follows them.
+//
+// Wrapping every element in a bare quote pair — what this built before —
+// encodes `C:\dir\` as `"C:\dir\"`, whose trailing `\"` the tokenizer
+// reads as an escaped quote, so the argument swallows the separator and
+// the rest of the command line. It also cannot express an argument that
+// contains a quote at all: the callers that pass one (a `bash -c` script
+// with quoted paths inside it) observed every backslash in a Windows
+// path vanish.
+fn _pw_write_arg(base: i64, wp: i64, a: *u8, n: i64, q: *u8, bs: *u8) -> i64 {
+    let mut w: i64 = wp;
+    if !_pw_arg_needs_quotes(a, n) {
+        memcpy((base + w) as *u8, a, n as usize);
+        return w + n;
+    }
+    memcpy((base + w) as *u8, q, 1 as usize);
+    w = w + 1;
+    let mut nbs: i64 = 0;
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        let b: i64 = load_byte((a as i64) + i);
+        if b == 92 { nbs = nbs + 1; } else if b == 34 {
+            let run: i64 = nbs * 2 + 1;
+            let mut k: i64 = 0;
+            loop {
+                if k >= run { break; }
+                memcpy((base + w) as *u8, bs, 1 as usize);
+                w = w + 1;
+                k = k + 1;
+            }
+            memcpy((base + w) as *u8, q, 1 as usize);
+            w = w + 1;
+            nbs = 0;
+        } else {
+            let mut k: i64 = 0;
+            loop {
+                if k >= nbs { break; }
+                memcpy((base + w) as *u8, bs, 1 as usize);
+                w = w + 1;
+                k = k + 1;
+            }
+            nbs = 0;
+            memcpy((base + w) as *u8, ((a as i64) + i) as *u8, 1 as usize);
+            w = w + 1;
+        }
+        i = i + 1;
+    }
+    let tail: i64 = nbs * 2;
+    let mut t: i64 = 0;
+    loop {
+        if t >= tail { break; }
+        memcpy((base + w) as *u8, bs, 1 as usize);
+        w = w + 1;
+        t = t + 1;
+    }
+    memcpy((base + w) as *u8, q, 1 as usize);
+    return w + 1;
+}
+
+// `_pw_build_cmdline(argv)` — the space-separated Win32 command line
+// `CreateProcessA` takes as `lpCommandLine`, with each element encoded
+// by `_pw_write_arg`. Both spawn paths (`sfn_process_run` and
+// `_pw_run_capture_impl`) share it; `lpApplicationName` names the
+// program independently (`_pw_app_name`), so element 0 needs no special
+// case here.
 // Returns a malloc'd, NUL-terminated buffer the caller frees, or null on
 // OOM. The buffer is writable (CreateProcessA may edit lpCommandLine in
-// place). 1-char separators are `memcpy`'d (no single-byte store — a
+// place). 1-char writes are `memcpy`'d (no single-byte store — a
 // word-RMW byte store would over-read a malloc tail; #1316-class hazard).
 fn _pw_build_cmdline(argv: string[]) -> *u8 {
     let len: i64 = argv.length;
     let quote: string = "\"";
     let space: string = " ";
+    let backslash: string = "\\";
     let empty: string = "";
     let q: *u8 = sfn_str_to_cstr(quote as *u8, quote.length, null);
     let sp: *u8 = sfn_str_to_cstr(space as *u8, space.length, null);
+    let bs: *u8 = sfn_str_to_cstr(backslash as *u8, backslash.length, null);
     let nul: *u8 = sfn_str_to_cstr(empty as *u8, empty.length, null);
 
+    // Upper bound, not the exact length: an element of `n` bytes encodes
+    // to at most `2n` (every byte a backslash, every one doubled) plus
+    // two quotes plus one separator.
     let mut total: i64 = 0;
     let mut i: i64 = 0;
     loop {
         if i >= len { break; }
         let a: *u8 = sfn_str_to_cstr(argv[i] as *u8, argv[i].length, null);
-        total = total + (strlen(a) as i64) + 3;
+        total = total + (strlen(a) as i64) * 2 + 3;
         i = i + 1;
     }
 
@@ -573,16 +674,8 @@ fn _pw_build_cmdline(argv: string[]) -> *u8 {
             memcpy((base + wp) as *u8, sp, 1 as usize);
             wp = wp + 1;
         }
-        memcpy((base + wp) as *u8, q, 1 as usize);
-        wp = wp + 1;
         let a: *u8 = sfn_str_to_cstr(argv[i] as *u8, argv[i].length, null);
-        let n: i64 = strlen(a) as i64;
-        if n > 0 {
-            memcpy((base + wp) as *u8, a, n as usize);
-            wp = wp + n;
-        }
-        memcpy((base + wp) as *u8, q, 1 as usize);
-        wp = wp + 1;
+        wp = _pw_write_arg(base, wp, a, strlen(a) as i64, q, bs);
         i = i + 1;
     }
     memcpy((base + wp) as *u8, nul, 1 as usize);
@@ -736,6 +829,15 @@ fn _pw_drain(out_rd: i64, err_rd: i64, gb_out: *PwGrowBuf, gb_err: *PwGrowBuf) -
 // with `CreatePipe`/`CreateProcessA`/`ReadFile` in place of
 // `pipe`/`posix_spawnp`/`read`.
 fn _pw_run_capture_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
+    // Consume the metering arm-flag ONCE, up front. Read-and-clear here rather
+    // than at the reporting site because this function has a dozen early
+    // returns: leaving the flag set on any of them would meter the NEXT,
+    // unrelated capture.
+    let metered: i64 = pw_capture_meter_armed;
+    pw_capture_meter_armed = 0;
+    let meter_freq: i64 = _pw_qpc_freq();
+    let meter_start: i64 = _pw_qpc_now();
+
     // Drop any capture left pending from a previous call.
     if pw_capture_stdout_addr != 0 {
         free(pw_capture_stdout_addr as *u8);
@@ -950,6 +1052,16 @@ fn _pw_run_capture_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![i
     let mut code: i32 = 0;
     let code_ptr: *i32 = & code;
     let _g: i32 = GetExitCodeProcess(h_process, code_ptr);
+    // Peak memory MUST be read before the close — see
+    // `_pw_peak_working_set_kb`. Wall time is taken here too so both readings
+    // describe the same span: spawn through reap, matching what the POSIX body
+    // brackets.
+    if metered != 0 {
+        pw_capture_peak_rss_kb = _pw_peak_working_set_kb(h_process);
+        if meter_freq > 0 {
+            pw_capture_wall_ms = ((_pw_qpc_now() - meter_start) * 1000) / meter_freq;
+        }
+    }
     let _cp: i32 = CloseHandle(h_process);
     let _ct: i32 = CloseHandle(h_thread);
     free(si);
@@ -1018,18 +1130,60 @@ fn sfn_process_capture_take_stderr() -> *u8 ![io] {
 }
 
 // ── process.run_capture_metered (Windows) ─────────────────────────
+// `_pw_peak_working_set_kb(process)` — the child's peak working set in KB, or
+// `0` when it cannot be read.
+//
+// `PROCESS_MEMORY_COUNTERS` on x86_64: `cb` (DWORD@0), `PageFaultCount`
+// (DWORD@4), then eight `SIZE_T`s — `PeakWorkingSetSize` first, at offset 8 —
+// for 72 bytes total. `cb` must be set to that size before the call; the API
+// rejects a struct whose declared size it does not recognise, which is how a
+// caller that got the layout wrong finds out.
+//
+// MUST be called while the process handle is still open. Once
+// `CloseHandle(h_process)` runs the counters are unreachable, and a peak read
+// after the close silently answers `0` rather than failing — so the call site
+// sits between `GetExitCodeProcess` and the close, not after it.
+fn _pw_peak_working_set_kb(process: i64) -> i64 ![io] {
+    let buf: *u8 = malloc(72 as usize);
+    if buf as i64 == 0 { return 0; }
+    memset(buf, 0, 72 as usize);
+    let cb_view: *PwDword = buf as *PwDword;
+    cb_view.v = 72;
+    let ok: i32 = K32GetProcessMemoryInfo(process, buf, 72);
+    if ok == 0 {
+        free(buf);
+        return 0;
+    }
+    let peak_bytes: i64 = atomic_load((buf as i64 + 8) as *i64);
+    free(buf);
+    if peak_bytes <= 0 { return 0; }
+    return peak_bytes / 1024;
+}
+
 // Metered variant for the native `sfn bench` driver (#1520 / epic #1503).
-// The POSIX body (`process.sfn`) brackets the child with the monotonic
-// clock and threads a `struct rusage` through `wait4` for `ru_maxrss`;
-// neither is available here, so this delegates to the real `run_capture`
-// (subprocess drive + stdout/stderr capture stay honest) and reports `0`
-// wall time / peak RSS — the degraded-but-linking contract this module
-// documents for families it can't yet fully implement. Keeps the same
-// `![clock, io]` signature as the POSIX body so the builtin descriptor
-// (`llvm/runtime_helpers.sfn`) is platform-uniform.
+//
+// The POSIX body (`process.sfn`) brackets the child with the monotonic clock
+// and threads a `struct rusage` through `wait4` for `ru_maxrss`. Windows has
+// neither call, but it has both quantities: `QueryPerformanceCounter` (already
+// used by this module's bounded pipe pump, SFN-1092) and
+// `K32GetProcessMemoryInfo`'s `PeakWorkingSetSize`. This arms the measurement
+// and delegates to the real `run_capture`, which takes both readings at the
+// points where they are available — the wall clock around the whole spawn, and
+// the peak while the process handle is still open.
+//
+// Before this, both readings were hard-coded `0`, which is worse than an
+// absent feature: `sfn bench --budget-mem` compares a measured peak against a
+// threshold, and a peak that is always `0` can never exceed any budget, so the
+// budget silently passed everything on this target
+// (`compiler/tests/e2e/bench_runtime_runner_test.sfn` asserts exit 2 on an
+// unmeetable budget and got exit 0).
+//
+// Keeps the same `![clock, io]` signature as the POSIX body so the builtin
+// descriptor (`llvm/runtime_helpers.sfn`) is platform-uniform.
 fn sfn_process_run_capture_metered(argv: string[], env_flat: string[]) -> i64 ![clock, io] {
     pw_capture_wall_ms = 0;
     pw_capture_peak_rss_kb = 0;
+    pw_capture_meter_armed = 1;
     return sfn_process_run_capture(argv, env_flat);
 }
 
@@ -1110,8 +1264,14 @@ fn _pw_qpc_freq() -> i64 ![io] {
 
 // `_pw_h_pump(h, want_err, to_eof)` — pump both pipes until the requested
 // stream (`want_err` 0 = stdout, 1 = stderr) is satisfied: to EOF when
-// `to_eof` is 1 (the full-drain reads), or until its stash holds at least
-// one byte when `to_eof` is 0 (the framed reads).
+// `to_eof` is 1 (the full-drain reads), or until THIS CALL has appended at
+// least one byte to its stash when `to_eof` is 0 (the framed reads).
+//
+// "This call has appended" rather than "the stash is non-empty": a caller
+// that leaves bytes in the stash between calls — `handle_read_line_stdout`
+// holding a partial line while it looks for the newline — needs the pump to
+// keep reading the pipe, and the weaker spelling let it return without
+// reading at all.
 //
 // Unbounded: parks until a byte or EOF. The framing CONTRACT is
 // preserved exactly — an empty return still cannot occur — though the
@@ -1192,6 +1352,28 @@ fn _pw_h_pump_bounded(h: *PwProcHandle, want_err: i64, to_eof: i64, budget_ms: i
         // instantly, and turn the caller's park into a 100% CPU spin.
         if started > 0 { bounded = 1; }
     }
+    // The stash length THIS CALL started with. `to_eof == 0` means "return
+    // once this call has appended something", and that is not the same
+    // question as "is the stash non-empty" — the two coincide only when the
+    // caller drains to empty before every call.
+    //
+    // `handle_read_bytes_stdout`/`_stderr` do drain first (they only pump
+    // when `gb.len == 0`), so a zero baseline leaves them behaving exactly
+    // as before. `handle_read_line_stdout` does NOT: it keeps a partial line
+    // in the stash and pumps again looking for the newline. Against the old
+    // `have > 0` spelling that call broke out of this loop on its first
+    // iteration, BEFORE `_pw_h_pump_once` ran — so the pipe was never read
+    // again, the remaining bytes and the eventual EOF were never observed,
+    // and the caller span at full CPU forever. Any child whose write reached
+    // the parent in more than one fragment hit it; one that arrived whole
+    // did not, which is why it looked intermittent rather than broken.
+    //
+    // The POSIX peer has no equivalent short-circuit — `_framed_fill`
+    // (`runtime/sfn/process.sfn`) always issues a real blocking `read(2)` and
+    // returns only once it has appended or hit EOF — so this restores the
+    // mirror the header claims.
+    let mut baseline: i64 = 0;
+    if want_err != 0 { baseline = egb.len; } else { baseline = ogb.len; }
     let mut idle_sleep_ms: i32 = 1;
     loop {
         let mut open: i64 = 0;
@@ -1206,7 +1388,7 @@ fn _pw_h_pump_bounded(h: *PwProcHandle, want_err: i64, to_eof: i64, budget_ms: i
         // EOF on the requested stream ends every mode.
         if open == 0 { break; }
         if to_eof == 0 {
-            if have > 0 { break; }
+            if have > baseline { break; }
         }
         // Checked before the pump pass, NOT only on an idle one.
         // `_pw_h_pump_once` sums BOTH pipes, so a child that is silent on
@@ -1217,11 +1399,12 @@ fn _pw_h_pump_bounded(h: *PwProcHandle, want_err: i64, to_eof: i64, budget_ms: i
         // one, not an edge case: the test runner's frame protocol rides
         // the child's stderr while stdout is often empty.
         //
-        // Already-stashed bytes are never abandoned — the `have > 0`
-        // break above fires first. A pass that WOULD have fetched new
-        // bytes can be skipped, but `_pw_h_pump_once` never ran, so
-        // nothing was consumed from the pipe and the next call retrieves
-        // them. That is the no-progress-return invariant in the header.
+        // Bytes appended by THIS call are never abandoned — the
+        // `have > baseline` break above fires first. A pass that WOULD
+        // have fetched new bytes can be skipped, but `_pw_h_pump_once`
+        // never ran, so nothing was consumed from the pipe and the next
+        // call retrieves them. That is the no-progress-return invariant
+        // in the header.
         if bounded == 1 {
             // Multiply the ELAPSED tick delta, not the absolute counter:
             // the counter is ticks-since-boot and would overflow i64 when
@@ -1873,34 +2056,257 @@ fn sfn_process_handle_kill(handle_id: i64) -> i64 ![io] {
     return -1;
 }
 
-// `sfn_io_poll_readable(fd, timeout_ms)` — Windows stub for the
-// `io.poll_readable` builtin (#1580). The POSIX body
-// (`runtime/sfn/process.sfn`) wraps `poll(2)`, which mingw lacks for
-// stdio/pipe fds (`WSAPoll` covers sockets only). Until Windows gains an
-// fd multiplexer covering stdio/pipe fds, report "not readable" so a
-// caller falls back to a blocking read rather than spinning. Mirrors the
-// `sfn_process_handle_*` Windows stubs above.
-fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] { return false; }
+// `_pw_fd_handle(fd)` — the Win32 HANDLE behind a CRT file descriptor, or
+// `0` when the descriptor carries none. `_get_osfhandle`'s two failure
+// answers (`-1` never opened, `-2` no handle) collapse to that one `0`,
+// which is not itself a valid handle for any fd this reaches.
+fn _pw_fd_handle(fd: i64) -> i64 {
+    if fd < 0 { return 0; }
+    let h: i64 = _get_osfhandle(fd as i32);
+    if h == -1 { return 0; }
+    if h == -2 { return 0; }
+    return h;
+}
 
-// `sfn_io_poll_any(fds, timeout_ms)` — Windows stub for the `io.poll_any`
-// builtin (SFN-155). The POSIX body (`runtime/sfn/process.sfn`) wraps a
-// multi-slot `poll(2)`, which mingw lacks for stdio/pipe fds. Until
-// Windows gains an fd multiplexer covering those fds, report "none ready"
-// (`-1`) so a caller falls back to a blocking read rather than spinning.
-// Mirrors the `sfn_io_poll_readable` Windows stub above.
-fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] { return -1; }
+// `_pw_handle_readable_now(h)` — one NON-BLOCKING readiness probe, `1`
+// when a follow-up read must run and `0` when the pipe is open and empty.
+//
+// That phrasing is the POSIX contract this mirrors, not "bytes are
+// waiting": `poll(2)` reports a slot ready on data, EOF (`POLLHUP`), or
+// error, because all three are conditions under which `read(2)` has to be
+// called to make progress. So a `PeekNamedPipe` FAILURE is `1`, not `0` —
+// it means the writer is gone, and the caller's read will report EOF.
+// Answering `0` there would park a caller forever on a pipe that will
+// never produce another byte, which is the deadlock this exists to avoid.
+//
+// A non-pipe handle has no peek primitive at all. A disk file is always
+// readable in the `read(2)`-makes-progress sense, so `1` is right for it.
+// For a console handle and for a socket (`GetFileType` also answers
+// `FILE_TYPE_PIPE` for sockets, where `PeekNamedPipe` fails) `1` is a
+// DEGRADE: the caller runs a read that may block. That is strictly better
+// than the stub this replaces, which answered "never readable" for every
+// handle and made a multiplexing caller hang outright, but it is not
+// equivalent to `poll(2)` and a caller that must not block on a console
+// or socket needs a real overlapped-I/O or `WSAPoll` path.
+fn _pw_handle_readable_now(h: i64) -> i64 ![io] {
+    // 3 = FILE_TYPE_PIPE, the only type with a non-blocking peek.
+    if GetFileType(h) != 3 { return 1; }
+    let mut avail: i32 = 0;
+    let mut peeked: i32 = 0;
+    let mut left: i32 = 0;
+    let avail_ptr: *i32 = & avail;
+    let peek_ptr: *i32 = & peeked;
+    let left_ptr: *i32 = & left;
+    let ok: i32 = PeekNamedPipe(h, null, 0, peek_ptr, avail_ptr, left_ptr);
+    if ok == 0 { return 1; }
+    if avail > 0 { return 1; }
+    return 0;
+}
 
-// `sfn_process_exec(argv, env_flat)` — Windows stub for the `process.exec`
-// re-exec primitive (SFN-199; consumed by toolchain dispatch, SFN-172). The
-// POSIX body (`runtime/sfn/process.sfn`) replaces the process image via
-// `execve(2)`; Windows has no equivalent image replacement (the CRT `_exec*`
-// family spawns a child and terminates the parent, so exit codes/signals do
-// not pass through transparently). Until a native Windows re-exec lands,
-// return the exec-failed sentinel `-1` — the toolchain dispatcher then falls
-// back to its actionable error rather than dispatching. Mirrors the
-// degraded-but-linking `sfn_process_spawn_with_env` stub above, and keeps the
-// cross-windows link resolved now that a caller references the symbol.
+// `_pw_poll_deadline_exceeded(start, freq, timeout_ms)` — whether a
+// bounded wait that began at `start` ticks has run out. A `freq` of `0`
+// means `QueryPerformanceFrequency` was unavailable, and the wait cannot
+// be bounded at all; that answers "exceeded" so a finite timeout degrades
+// to a single probe rather than to an unbounded spin.
+fn _pw_poll_deadline_exceeded(start: i64, freq: i64, timeout_ms: i64) -> boolean ![io] {
+    if timeout_ms < 0 { return false; }
+    if freq <= 0 { return true; }
+    let elapsed_ms: i64 = ((_pw_qpc_now() - start) * 1000) / freq;
+    return elapsed_ms >= timeout_ms;
+}
+
+// `sfn_io_poll_readable(fd, timeout_ms)` — the `io.poll_readable` builtin
+// (#1580) on Windows, over `PeekNamedPipe` rather than `poll(2)`.
+//
+// mingw has no `poll(2)` for stdio/pipe fds (`WSAPoll` covers sockets
+// only), which is why this was a `return false` stub. That stub was not a
+// safe degrade: `io.poll_readable` exists so bidirectional stdio
+// forwarding can wait on `{own stdin, child stdout, child stderr}`
+// together, and a permanent "not readable" makes such a caller wait on a
+// stream that is never announced — `compiler/tests/integration/
+// process_framed_stdio_test.sfn` hung to its 900-second per-file deadline
+// on a native Windows host rather than failing.
+//
+// Timeout contract matches the POSIX body: `< 0` blocks until readable,
+// `0` probes once and returns, `> 0` waits up to that many milliseconds.
+// The wait is a 1 ms `Sleep` poll loop, the same shape (and the same
+// reason) as `_pw_drain`'s idle sleep — Win32 offers no single wait that
+// covers an anonymous pipe's byte availability.
+fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
+    let h: i64 = _pw_fd_handle(fd);
+    if h == 0 { return false; }
+    if _pw_handle_readable_now(h) == 1 { return true; }
+    if timeout_ms == 0 { return false; }
+    let freq: i64 = _pw_qpc_freq();
+    let start: i64 = _pw_qpc_now();
+    loop {
+        Sleep(1);
+        if _pw_handle_readable_now(h) == 1 { return true; }
+        if _pw_poll_deadline_exceeded(start, freq, timeout_ms) { return false; }
+    }
+}
+
+// `sfn_io_poll_any(fds, timeout_ms)` — the multi-fd `io.poll_any` builtin
+// (SFN-155) on Windows. Returns the READY FD (not its index), matching the
+// POSIX body, or `-1` when none became ready within `timeout_ms`.
+//
+// Where POSIX arms every slot in one `poll(2)`, this scans the fds in
+// order per round. The scan order is therefore a priority order — a
+// permanently-hot fd early in the array can starve a later one — which
+// `poll(2)` does not impose. Callers multiplexing a small fixed set
+// (stdin/stdout/stderr) are unaffected because each is drained on every
+// wake; a caller that cannot tolerate it should poll each fd itself.
+//
+// An fds array in which NOT ONE entry resolves to a handle returns `-1`
+// immediately rather than sleeping out the timeout: there is nothing that
+// could become ready, so waiting only delays the caller's error path.
+fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
+    let n: i64 = fds.length;
+    if n <= 0 { return -1; }
+    let freq: i64 = _pw_qpc_freq();
+    let start: i64 = _pw_qpc_now();
+    loop {
+        let mut any_handle: i64 = 0;
+        let mut i: i64 = 0;
+        loop {
+            if i >= n { break; }
+            let fd: i64 = fds[i];
+            let h: i64 = _pw_fd_handle(fd);
+            if h != 0 {
+                any_handle = 1;
+                if _pw_handle_readable_now(h) == 1 { return fd; }
+            }
+            i = i + 1;
+        }
+        if any_handle == 0 { return -1; }
+        if timeout_ms == 0 { return -1; }
+        Sleep(1);
+        if _pw_poll_deadline_exceeded(start, freq, timeout_ms) { return -1; }
+    }
+}
+
+// `sfn_process_exec(argv, env_flat)` — the `process.exec` re-exec primitive
+// (SFN-199; consumed by toolchain dispatch, SFN-172) on Windows.
+//
+// Win32 has no `execve(2)`: no call replaces a running process image. What
+// it has is spawn-wait-exit, and the OBSERVABLE contract `process.exec`
+// actually carries is satisfiable that way — the child's exit code becomes
+// the caller's, the child owns the parent's stdio, and control never returns
+// to the code after the call. So this waits on the child and exits with its
+// code instead of returning.
+//
+// Three ways it still diverges from `execve`, all of them stated rather than
+// papered over:
+//
+//   * the parent process lives on, blocked in `WaitForSingleObject`, so a
+//     dispatch chain costs one live process per hop rather than reusing one;
+//   * `execve` keeps the process id, this does not — anything holding the
+//     pre-exec pid (a job object, a supervisor) still sees the parent;
+//   * POSIX signal pass-through has no Win32 counterpart. Console Ctrl-C
+//     reaches both processes because they share a console group, which is
+//     the behaviour that matters for an interactive dispatch, but a child
+//     killed by `TerminateProcess` reports its exit code, not a signal.
+//
+// The failure contract is `execve`'s exactly: a return AT ALL means the exec
+// did not happen, and the value is the `-1` sentinel. `CreateProcessA`
+// failing to find the program is that case, and the toolchain dispatcher's
+// actionable-error fallback still runs.
+//
+// The CRT `_exec*` family is deliberately not used. It is the same
+// spawn-and-terminate emulation with less control — it terminates the parent
+// immediately rather than waiting, so the child's exit code is LOST and the
+// shell sees the parent's, which is the one property a dispatcher cannot
+// give up.
 fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
+    let len: i64 = argv.length;
+    if len <= 0 { return -1; }
+
+    let cmdline: *u8 = _pw_build_cmdline(argv);
+    if cmdline as i64 == 0 { return -1; }
+    // Explicit environment, matching `execve`'s `envp`: an empty
+    // `env_flat` means the EMPTY environment, never "inherit".
+    let env_block: *u8 = _pw_build_env_block(env_flat);
+    if env_block as i64 == 0 {
+        free(cmdline);
+        return -1;
+    }
+
+    // STARTUPINFOA: zeroed, `.cb = 104`.
+    let si: *u8 = malloc(104 as usize);
+    if si as i64 == 0 {
+        free(cmdline);
+        free(env_block);
+        return -1;
+    }
+    memset(si, 0, 104 as usize);
+    let si_view: *WinStartupInfo = si as *WinStartupInfo;
+    si_view.cb = 104;
+
+    // PROCESS_INFORMATION (24 bytes), zeroed.
+    let pi: *u8 = malloc(24 as usize);
+    if pi as i64 == 0 {
+        free(cmdline);
+        free(env_block);
+        free(si);
+        return -1;
+    }
+    memset(pi, 0, 24 as usize);
+
+    // The child must own the parent's streams — that is what makes the
+    // replacement look like one from the outside. Same inheritable-duplicate
+    // discipline as `sfn_process_run` (SFN-546), taken under the same lock so
+    // a concurrent `run_capture` cannot see these handles.
+    _pw_lock_inheritable_spawn();
+    let self_proc: i64 = GetCurrentProcess();
+    let h_in: i64 = _pw_dup_inheritable(self_proc, GetStdHandle(-10));
+    let h_out: i64 = _pw_dup_inheritable(self_proc, GetStdHandle(-11));
+    let h_err: i64 = _pw_dup_inheritable(self_proc, GetStdHandle(-12));
+    let mut inherit: i32 = 0;
+    if h_in != 0 || h_out != 0 || h_err != 0 {
+        let flags_view: *PwDword = (si as i64 + 60) as *PwDword;
+        flags_view.v = 256;
+        atomic_store((si as i64 + 80) as *i64, h_in);
+        atomic_store((si as i64 + 88) as *i64, h_out);
+        atomic_store((si as i64 + 96) as *i64, h_err);
+        inherit = 1;
+    }
+
+    let app: *u8 = _pw_app_name(argv[0]);
+    let ok: i32 = CreateProcessA(app, cmdline, null, null, inherit, 0, env_block, null, si, pi);
+    free(cmdline);
+    _pw_close_dup(h_in);
+    _pw_close_dup(h_out);
+    _pw_close_dup(h_err);
+    _pw_unlock_inheritable_spawn();
+    free(env_block);
+    if ok == 0 {
+        free(si);
+        free(pi);
+        return -1;
+    }
+
+    let h_process: i64 = atomic_load(pi as *i64);
+    let h_thread: i64 = atomic_load((pi as i64 + 8) as *i64);
+
+    // INFINITE = 0xFFFFFFFF, passed as i32 `-1` (same bit pattern; a hex
+    // literal folds to 0 on the seed and would make the wait non-blocking,
+    // racing the exit-code read).
+    let _wait: i32 = WaitForSingleObject(h_process, -1);
+
+    let mut code: i32 = 0;
+    let code_ptr: *i32 = & code;
+    let _got: i32 = GetExitCodeProcess(h_process, code_ptr);
+
+    let _c1: i32 = CloseHandle(h_process);
+    let _c2: i32 = CloseHandle(h_thread);
+    free(si);
+    free(pi);
+
+    // Past this point the call has succeeded, so it must not return — a
+    // return is the failure signal. Handles and heap are released above
+    // rather than left to process teardown so the exit is clean under a
+    // leak checker.
+    exit(code);
     return -1;
 }
 

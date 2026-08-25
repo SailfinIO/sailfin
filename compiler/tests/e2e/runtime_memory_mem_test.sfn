@@ -33,8 +33,12 @@ import {
 import {
     clean_runner_env,
     default_scratch_dir,
+    host_is_windows,
+    report_child_failure,
+    report_child_failure_pending,
     run_external_c_oracle,
-    sfn_bin_path
+    sfn_bin_path,
+    skip
 } from "sfn/test";
 
 // Derived by subtraction from the real environment rather than a
@@ -59,8 +63,7 @@ fn _emit_module(tag: string, module_path: string) -> string ![io] {
     let dir = _scratch_dir();
     let outpath = dir + "/" + tag + ".ll";
     let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-mem emit " + tag, exit);
     if exit != 0 { return "EMIT_FAILED"; }
     return fs.readFile(outpath);
 }
@@ -115,14 +118,14 @@ test "runtime/sfn/memory/mem.sfn typechecks cleanly" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "check", "runtime/sfn/memory/mem.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("runtime-memory-mem check", exit, out, err);
     assert exit == 0;
     assert find(out + err, "ok", 0) >= 0;
 }
 
 test "runtime/sfn/memory/mem.sfn is fmt-canonical" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "fmt", "--check", "runtime/sfn/memory/mem.sfn"], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-mem fmt", exit);
     assert exit == 0;
 }
 
@@ -162,6 +165,11 @@ test "mem emit: does not collide with legacy C runtime names" ![io] {
 // it to return 0 (arena off) so free forwards to a counting shim.
 // bounds_check's abort path and sfn_alloc_struct's OOM path are verified
 // out-of-process via fork so the abort doesn't kill the harness.
+//
+// POSIX-only by construction: `fork()`/`waitpid(2)`/`<sys/wait.h>`/
+// `<unistd.h>` have no Windows equivalent (MinGW does not implement a
+// working `fork()`), so the roundtrip test this backs is skipped there
+// rather than attempted — see that test.
 fn _mem_harness_c() -> string {
     return "#include <stddef.h>\n" + "#include <stdio.h>\n"
         + "#include <stdint.h>\n"
@@ -228,11 +236,13 @@ fn _mem_harness_c() -> string {
 // `sfn/test`; this oracle does not participate in production linking.
 // (No sanitizer leg in the original — nothing omitted here.)
 test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io] {
+    if host_is_windows() {
+        skip("the C harness verifies the abort paths (bounds_check, sfn_alloc_struct OOM) via fork()/waitpid(2)/WIFSIGNALED/WTERMSIG/SIGABRT, none of which exist on Windows (MinGW does not implement a working fork()) — a genuine platform absence, not a product gap");
+    }
     let dir = _scratch_dir();
     let ll = dir + "/mem.ll";
     let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", "runtime/sfn/memory/mem.sfn"], _child_env());
-    let _eo = process.capture_take_stdout();
-    let _ee = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-mem roundtrip emit", emit_exit);
     assert emit_exit == 0;
 
     let harness = dir + "/harness.c";
@@ -247,7 +257,6 @@ test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io
     assert link_exit == 0;
 
     let run_exit = process.run_capture([bin], _child_env());
-    let _ro = process.capture_take_stdout();
-    let _re = process.capture_take_stderr();
+    report_child_failure_pending("runtime-memory-mem roundtrip run", run_exit);
     assert run_exit == 0;
 }

@@ -32,12 +32,14 @@
 import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
-    Background,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_path,
+    start_background,
+    stop_background,
     tool_present,
-    wait_until,
-    with_background
+    wait_until
 } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
@@ -128,7 +130,7 @@ fn _tlp_connect(port: i64) -> i32 ![net] {
 // per-invocation under the parallel pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
-// The same environment in `sfn/os`'s typed form, for `with_background`.
+// The same environment in `sfn/os`'s typed form, for `start_background`.
 fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // The client run-env plus `SAILFIN_TLS_CAFILE` pointed at the generated
@@ -158,14 +160,14 @@ fn _gen_cert(dir: string) -> boolean ![io] {
     let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "ed25519", "-keyout", dir
         + "/key.pem", "-out", dir
         + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost"], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-tls-https-client cert-gen", exit);
     return exit == 0;
 }
 
 // The `openssl s_server -www` argv (an HTTP status-page server), for
-// `with_background` to spawn directly — no external `timeout` wrapper
-// needed, since `with_background` owns the child's lifetime itself.
+// `start_background` to spawn directly — no external `timeout` wrapper
+// needed, since the test owns the child's lifetime itself
+// (`start_background`/`stop_background`).
 fn _server_argv(dir: string) -> string[] {
     let mut argv: string[] = [];
     argv.push("openssl");
@@ -185,7 +187,8 @@ fn _server_argv(dir: string) -> string[] {
 // budget. Captures nothing — reaches the port through the file-local
 // `_tls_port()` rather than closing over a parameter (SFN-843).
 fn _await_listening() -> boolean ![clock, io, net] {
-    return wait_until(fn () -> boolean {
+    let start_ms: int = monotonic_millis();
+    let ok = wait_until(fn () -> boolean {
         let fd: i32 = _tlp_connect(_tls_port());
         if fd >= 0 {
             sfn_socket_close(fd);
@@ -193,12 +196,41 @@ fn _await_listening() -> boolean ![clock, io, net] {
         }
         return false;
     }, 30000, 500);
+    if !ok {
+        let elapsed: int = monotonic_millis() - start_ms;
+        print.info("[tls-https] probe: no listener on 127.0.0.1:"
+            + _tls_port_str()
+            + " after "
+            + number_to_string(elapsed)
+            + "ms");
+    }
+    return ok;
+}
+
+// Renders a downloaded body for a diagnostic print: length plus a bounded
+// prefix.
+fn _describe_body(body: string) -> string {
+    return "length=" + number_to_string(body.length) + " prefix=\"" + substring(body, 0, 200)
+        + "\"";
 }
 
 // Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
-// to `out_path`. `http.download` writes the file only on a successful
-// round-trip, so its presence + content is the round-trip proof.
-fn _write_client(dir: string, out_path: string) -> string ![io] {
+// to `<argv[1]>/body.out`. `http.download` writes the file only on a
+// successful round-trip, so its presence + content is the round-trip proof.
+//
+// The scratch dir travels through `argv[1]`, never spliced into this source
+// text. `SAILFIN_TEST_SCRATCH`/`TEMP` is a native Windows backslash path,
+// and a literal `+ dir +` here would silently corrupt it the same way SFN-1001
+// already diagnosed and fixed in `runtime_tls_anchor_cache_test.sfn`:
+// `decode_string_literal_escapes` (`compiler/capsules/syntax/src/parser/utils.sfn:84-113`)
+// drops the backslash for any `\<char>` it does not recognize as an escape
+// when the nested build re-lexes this generated file, turning
+// `C:\Users\...` into `C:Users...` — a different, non-existent path that
+// `http.download` would then write to, invisibly to the test's own
+// (uncorrupted) `out_path` check. Also prints a startup marker and whether
+// the download landed, so a corrupted path shows up in the client's own
+// captured stdout instead of only as an empty body one layer up.
+fn _write_client(dir: string) -> string ![io] {
     let root = dir + "/client";
     fs.createDirectory(root + "/src", true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
@@ -212,12 +244,22 @@ fn _write_client(dir: string, out_path: string) -> string ![io] {
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
-    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![net, io] {\n"
+    fs.writeFile(root + "/src/main.sfn", "fn main(argv: string[]) -> int ![net, io] {\n"
+        + "    let dir = argv[1];\n"
+        + "    let out_path = dir + \"/body.out\";\n"
+        + "    if !fs.exists(dir) {\n"
+        + "        print.err(\"[tls-https-cli] scratch dir missing: \" + dir);\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "    print.info(\"[tls-https-cli] starting, target \" + out_path);\n"
         + "    let _ = http.download(\"https://localhost:"
         + _tls_port_str()
-        + "/\", \""
-        + out_path
-        + "\");\n"
+        + "/\", out_path);\n"
+        + "    if fs.exists(out_path) {\n"
+        + "        print.info(\"[tls-https-cli] wrote \" + out_path);\n"
+        + "    } else {\n"
+        + "        print.info(\"[tls-https-cli] no file at \" + out_path);\n"
+        + "    }\n"
         + "    return 0;\n"
         + "}\n");
     return root + "/src/main.sfn";
@@ -225,8 +267,7 @@ fn _write_client(dir: string, out_path: string) -> string ![io] {
 
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-tls-https-client build", exit);
     if exit != 0 { return ""; }
     return bin;
 }
@@ -247,35 +288,52 @@ test "runtime tls: https GET round-trips against a local openssl s_server" ![clo
 
     // Build the client fixture up front (cold build once).
     let out_path = dir + "/body.out";
-    let _rm = process.run(["rm", "-f", out_path]);
-    let main_path = _write_client(dir, out_path);
-    // SFN-843: typed explicitly — the `with_background` body below captures
-    // it, and an untyped call-initialized `let` mistypes the capture's env
-    // slot as `i8*`.
-    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
+    let _rm = fs.deleteFile(out_path);
+    let main_path = _write_client(dir);
+    let client_bin = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    // `with_background` owns `s_server`'s lifetime: it is killed and reaped
-    // on scope exit, including when an assertion below throws — replacing
-    // the previous `timeout <secs>` argv vehicle, which was the ONLY
-    // teardown mechanism and forced a SKIP on any host without coreutils.
-    let _served = with_background(_server_argv(dir), _child_env_typed(), "", "tls-https-server", fn (server: Background) -> int {
-        assert server.handle.handle_id != 0;
-        let up = _await_listening();
-        assert up;
+    // Managed explicitly (`start_background`/`stop_background`) rather than
+    // through the scoped `with_background` fixture: `with_background`'s own
+    // catch drains and DISCARDS the child's streams before rethrowing, so a
+    // server that never becomes connectable always reported bare "assertion
+    // failed" with no signal from `s_server` itself. Draining here on the
+    // specific readiness-failure path keeps that signal.
+    let server = start_background(_server_argv(dir), _child_env_typed(), "", "tls-https-server");
+    assert server.handle.handle_id != 0;
 
+    let up = _await_listening();
+    if !up {
+        let drain = stop_background(server);
+        print.info("[tls-https] s_server never became connectable; exit="
+            + number_to_string(drain.exit)
+            + " stdout=\""
+            + substring(drain.stdout, 0, 4096)
+            + "\" stderr=\""
+            + substring(drain.stderr, 0, 4096)
+            + "\"");
+    }
+    assert up;
+
+    try {
         // Run the client (with SAILFIN_TLS_CAFILE trusting the self-signed
         // cert), retrying briefly to absorb any residual startup latency. A
         // non-empty output file proves the https round-trip succeeded.
         let cenv = _client_env(dir + "/cert.pem");
         let mut body = "";
+        let mut last_cexit: i64 = -1;
+        let mut last_cout: string = "";
+        let mut last_cerr: string = "";
         let mut attempt: i64 = 0;
         loop {
             if attempt >= 20 { break; }
-            let _rm2 = process.run(["rm", "-f", out_path]);
-            let cexit = process.run_capture([client_bin], cenv);
-            let _co = process.capture_take_stdout();
-            let _ce = process.capture_take_stderr();
+            let _rm2 = fs.deleteFile(out_path);
+            let cexit = process.run_capture([client_bin, dir], cenv);
+            last_cexit = cexit;
+            last_cout = process.capture_take_stdout();
+            last_cerr = process.capture_take_stderr();
+            report_child_failure("runtime-tls-https-client run attempt "
+                + number_to_string(attempt), cexit, last_cout, last_cerr);
             if cexit == 0 {
                 if fs.exists(out_path) {
                     let content = fs.readFile(out_path);
@@ -285,20 +343,42 @@ test "runtime tls: https GET round-trips against a local openssl s_server" ![clo
                     }
                 }
             }
-            let _ = process.run(["sleep", "0.5"]);
+            sleep(500);
             attempt = attempt + 1;
         }
 
-        print.info("[tls-https] body length: received");
+        if body.length == 0 {
+            // Distinguishes "the client failed to run" (report_child_failure
+            // above, per attempt, exit != 0) from "the client ran and wrote
+            // nothing on every attempt" — both previously collapsed into the
+            // identical bare "assertion failed" below.
+            print.info("[tls-https] client never produced a body after "
+                + number_to_string(attempt)
+                + " attempts; last exit="
+                + number_to_string(last_cexit)
+                + " stdout=\""
+                + substring(last_cout, 0, 2048)
+                + "\" stderr=\""
+                + substring(last_cerr, 0, 2048)
+                + "\"");
+        } else {
+            print.info("[tls-https] round-trip body: " + _describe_body(body));
+        }
         // Round-trip proof: a non-empty body came back over TLS. `s_server
         // -www` returns an HTML status page listing the negotiated ciphers.
         assert body.length > 0;
         assert contains(body, "Ciphers");
-        return 0;
-    });
+        let _ = stop_background(server);
+    } catch (err) {
+        // Reap first, then re-throw, so the failing test still fails with
+        // its own message rather than a teardown error — mirrors
+        // `with_background`'s own catch (SFN-402/SFEP-0050 §5.1).
+        let _ = stop_background(server);
+        throw err;
+    }
 
     // Best-effort cleanup. The server itself was already killed and reaped
-    // by `with_background` on scope exit.
+    // above.
     let _rmd = process.run(["rm", "-rf", dir + "/client"]);
-    let _rmo = process.run(["rm", "-f", out_path]);
+    let _rmo = fs.deleteFile(out_path);
 }

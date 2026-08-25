@@ -433,13 +433,20 @@ export {
 } from "./fixtures";
 
 // ---------------------------------------------------------------------------
-// Child-process failure diagnostics (SFN-87 / #1726)
+// Child-process failure diagnostics (SFN-87 / #1726, SFN-1115)
 // ---------------------------------------------------------------------------
 // `report_child_failure(tag, exit, out, err)` prints a failed child's exit
 // code and captured stdout/stderr to stderr, and is a no-op on success — so
 // a call site stays a single unconditional line before its `assert exit ==
-// 0`. See `child_diag.sfn`.
-export { report_child_failure } from "./child_diag";
+// 0`. Each stream is clipped to `SAILFIN_TEST_CHILD_DIAG_BYTES` bytes
+// (default 8192, `0` = unlimited) keeping head and tail, so a heavily-failing
+// run cannot bury the tier log. `report_child_failure_pending(tag, exit)` is
+// the borrow-free form: it *drains* both captured streams (taking ownership,
+// like the `let _o`/`let _e` pair it replaces) before forwarding to
+// `report_child_failure`, so it must not be used where a caller still needs
+// the streams afterwards — use `report_child_failure` directly and bind
+// `out`/`err` first in that case. See `child_diag.sfn`.
+export { report_child_failure, report_child_failure_pending } from "./child_diag";
 
 // ---------------------------------------------------------------------------
 // Host tool-presence probing (SFN-840)

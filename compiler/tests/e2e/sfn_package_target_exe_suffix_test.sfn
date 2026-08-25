@@ -44,10 +44,15 @@ import { contains, split } from "sfn/strings";
 import {
     clean_runner_env,
     default_scratch_dir,
+    host_is_windows,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_abs_path,
     sfn_bin_path,
     tool_present
 } from "sfn/test";
+
+import { _dirname, _path_basename } from "../../src/build/paths";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -70,17 +75,52 @@ fn _child_env() -> string[] ![io] {
 
 // `tar -tvzf <tarball>` -> full verbose listing text (permission bits +
 // member path per line), the only `tar` listing form that carries mode.
+// Run with `tar`'s cwd set to the tarball's own directory and a bare
+// basename argument, never the full path: GNU tar reads an `X:`
+// drive-letter prefix as `[user@]host:path` remote-archive syntax and
+// refuses to open it locally — fatal for every one of this file's paths
+// (native Windows scratch roots). `--force-local` is a GNU extension
+// bsdtar (macOS) does not reliably carry, so dropping the path argument
+// entirely is the only fix safe on every host (`sfn_package_test.sfn::_tar_list`,
+// same rationale).
 fn _tar_list_verbose(tarball: string) -> string ![io] {
-    let exit = process.run_capture(["tar", "-tvzf", tarball], _child_env());
+    let dir = _dirname(tarball);
+    let base = _path_basename(tarball);
+    let exit = process.run_capture_cwd(["tar", "-tvzf", base], _child_env(), dir);
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package-exe-suffix tar-list", exit, out, err);
     if exit != 0 { return ""; }
+    return out;
+}
+
+// Split on `\n` and strip a trailing `\r` from each line. MSYS `tar`
+// writes CRLF into a native Win32 pipe (a foreign consumer as far as its
+// own newline handling is concerned — confirmed by measurement in
+// `sfn_package_test.sfn::_split_lines`, the source of this shape): the CR
+// is invisible in any printed log and fatal to a suffix or equality
+// comparison against a `\n`-split line, while leaving the line COUNT
+// untouched. Stripped once at the split point rather than at each
+// comparison, so every consumer built on top inherits the fix.
+fn _split_lines(text: string) -> string[] {
+    let raw = split(text, "\n");
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= raw.length { break; }
+        let mut line = raw[i];
+        if line.length > 0 && substring(line, line.length - 1, line.length) == "\r" {
+            line = substring(line, 0, line.length - 1);
+        }
+        out.push(line);
+        i += 1;
+    }
     return out;
 }
 
 // The verbose listing line whose path ends in `suffix`, or "" if none.
 fn _verbose_line_for_suffix(listing: string, suffix: string) -> string {
-    let lines = split(listing, "\n");
+    let lines = _split_lines(listing);
     let mut i = 0;
     loop {
         if i >= lines.length { break; }
@@ -120,12 +160,10 @@ fn _nonexec_compiler_bin(root: string, src: string) -> string ![io] {
     fs.createDirectory(root + "/cbin", true);
     let bin = root + "/cbin/sfn";
     let cp_exit = process.run_capture(["cp", src, bin], _child_env());
-    let _co = process.capture_take_stdout();
-    let _ce = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix cp", cp_exit);
     if cp_exit != 0 { return ""; }
     let chmod_exit = process.run_capture(["chmod", "644", bin], _child_env());
-    let _mo = process.capture_take_stdout();
-    let _me = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix chmod", chmod_exit);
     if chmod_exit != 0 { return ""; }
     return bin;
 }
@@ -160,8 +198,7 @@ test "sfn package (compiler mode): windows target stages .exe members with exec 
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix compiler-win build", exit);
     assert exit == 0;
 
     let tarball = _find_tarball(dist, "sailfin-native-windows-x86_64-");
@@ -178,9 +215,19 @@ test "sfn package (compiler mode): windows target stages .exe members with exec 
     assert _verbose_line_for_suffix(listing, "/bin/sailfin") == "";
 
     // The exec-bit trap (SFN-972): the rename must be reflected in
-    // `exec_paths` too, or these members silently archive 0644.
-    assert _line_is_exec(sfn_line);
-    assert _line_is_exec(sailfin_line);
+    // `exec_paths` too, or these members silently archive 0644. POSIX
+    // only: `fs.is_executable` collapses to `fs.exists` on Windows by
+    // design (`runtime/sfn/platform/fs_exec_mode_windows.sfn:27`, SFN-649
+    // — UCRT's `_access` fast-fails on `X_OK`, and Windows has no execute
+    // bit to ask about), so `_tw_is_executable`'s `exec_paths` fallback
+    // answers `true` for every staged member regardless of `exec_paths`
+    // there — a platform fact, not a stub awaiting implementation. The
+    // suffix presence/absence asserted above is the whole SFN-972 claim
+    // this host can check.
+    if !host_is_windows() {
+        assert _line_is_exec(sfn_line);
+        assert _line_is_exec(sailfin_line);
+    }
 }
 
 test "sfn package (compiler mode): linux target keeps today's suffixless members" ![io] {
@@ -195,8 +242,7 @@ test "sfn package (compiler mode): linux target keeps today's suffixless members
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix compiler-linux build", exit);
     assert exit == 0;
 
     let tarball = _find_tarball(dist, "sailfin-native-linux-x86_64-");
@@ -209,8 +255,14 @@ test "sfn package (compiler mode): linux target keeps today's suffixless members
     assert sailfin_line.length > 0;
     assert ! contains(listing, "/bin/sfn.exe");
     assert ! contains(listing, "/bin/sailfin.exe");
-    assert _line_is_exec(sfn_line);
-    assert _line_is_exec(sailfin_line);
+    // POSIX only — see the windows-target test above for why:
+    // `fs.is_executable` collapses to `fs.exists` on Windows (SFN-649,
+    // `fs_exec_mode_windows.sfn:27`), so `_line_is_exec` has no
+    // discriminating power there.
+    if !host_is_windows() {
+        assert _line_is_exec(sfn_line);
+        assert _line_is_exec(sailfin_line);
+    }
 }
 
 // =====================================================================
@@ -228,8 +280,7 @@ test "sfn package --installer: windows target stages .exe members with exec bit"
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "windows-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix installer-win build", exit);
     assert exit == 0;
 
     let tarball = _find_tarball(dist, "installer-windows-x86_64");
@@ -244,8 +295,14 @@ test "sfn package --installer: windows target stages .exe members with exec bit"
     // not duplicated under both names.
     assert _verbose_line_for_suffix(listing, "bin/sfn") == "";
     assert _verbose_line_for_suffix(listing, "bin/sailfin") == "";
-    assert _line_is_exec(sfn_line);
-    assert _line_is_exec(sailfin_line);
+    // The exec-bit trap (SFN-972), POSIX only — see the compiler-mode
+    // windows-target test for why: `fs.is_executable` collapses to
+    // `fs.exists` on Windows (SFN-649, `fs_exec_mode_windows.sfn:27`), so
+    // `_line_is_exec` has no discriminating power there.
+    if !host_is_windows() {
+        assert _line_is_exec(sfn_line);
+        assert _line_is_exec(sailfin_line);
+    }
 }
 
 test "sfn package --installer: linux target keeps today's suffixless members" ![io] {
@@ -260,8 +317,7 @@ test "sfn package --installer: linux target keeps today's suffixless members" ![
     assert bin.length > 0;
 
     let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package-exe-suffix installer-linux build", exit);
     assert exit == 0;
 
     let tarball = _find_tarball(dist, "installer-linux-x86_64");
@@ -274,6 +330,12 @@ test "sfn package --installer: linux target keeps today's suffixless members" ![
     assert sailfin_line.length > 0;
     assert ! contains(listing, "bin/sfn.exe");
     assert ! contains(listing, "bin/sailfin.exe");
-    assert _line_is_exec(sfn_line);
-    assert _line_is_exec(sailfin_line);
+    // POSIX only — see the compiler-mode windows-target test for why:
+    // `fs.is_executable` collapses to `fs.exists` on Windows (SFN-649,
+    // `fs_exec_mode_windows.sfn:27`), so `_line_is_exec` has no
+    // discriminating power there.
+    if !host_is_windows() {
+        assert _line_is_exec(sfn_line);
+        assert _line_is_exec(sailfin_line);
+    }
 }

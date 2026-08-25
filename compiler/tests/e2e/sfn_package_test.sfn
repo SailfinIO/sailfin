@@ -24,12 +24,18 @@ import {
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_abs_path,
     sfn_bin_path,
     tool_present
 } from "sfn/test";
 
+import { _cwd_cmd } from "../../src/build/fs";
+import { copy_tree } from "../../src/build/fs_tree";
+import { _dirname, _path_basename } from "../../src/build/paths";
 import { compiler_manifest_from_workspace } from "../../src/installer_staging";
+import { is_absolute_path } from "../../src/string_utils";
 import { toml_get_version } from "../../src/toml_parser";
 
 fn _scratch_dir() -> string ![io] {
@@ -59,9 +65,42 @@ fn _child_env_with_home(home: string) -> string[] ![io] {
     return e;
 }
 
+// Split `text` on `\n`, stripping a trailing `\r` from each line. Every
+// caller in this file that parses a child process's line-oriented stdout
+// (`tar`, `jq`, `sha256sum`) goes through this rather than a raw
+// `split(text, "\n")`, so the strip happens once at the source.
+//
+// The general rule, not a fact about any one tool: a child's stdout can
+// arrive CRLF on Windows even when the same binary emits plain `\n` to a
+// terminal or a same-family pipe. `_tar_list` captures through a bare
+// Win32 `CreatePipe` inherited by a compiled Sailfin PE — a foreign
+// consumer as far as an MSYS-built tool's own newline handling is
+// concerned — so it falls back to CRLF on write, while piping the exact
+// same binary MSYS-to-MSYS (as a manual check from a Git-Bash shell would)
+// stays LF. The CR is invisible in any printed log (a lone `\r` renders as
+// nothing) and silently breaks any suffix or equality comparison against
+// the `\n`-split line, while leaving the line COUNT untouched — so a bug
+// here reads as "the content is wrong" or "the assertion is wrong," never
+// as a line-ending problem, unless something prints the length.
+fn _split_lines(text: string) -> string[] {
+    let raw = split(text, "\n");
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= raw.length { break; }
+        let mut line = raw[i];
+        if line.length > 0 && substring(line, line.length - 1, line.length) == "\r" {
+            line = substring(line, 0, line.length - 1);
+        }
+        out.push(line);
+        i += 1;
+    }
+    return out;
+}
+
 // First line of a captured stdout, trailing newline dropped.
 fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
+    let lines = _split_lines(text);
     if lines.length == 0 { return text; }
     return lines[0];
 }
@@ -70,24 +109,78 @@ fn _first_line(text: string) -> string {
 fn _jq(field: string, file: string) -> string ![io] {
     let exit = process.run_capture(["jq", "-r", "." + field, file], _child_env());
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package jq " + field, exit, out, err);
     if exit != 0 { return ""; }
     return _first_line(out);
 }
 
-// `tar -tzf <tarball>` -> full listing text.
+// `tar -tzf <tarball>` -> full listing text. Run with `tar`'s cwd set to
+// the tarball's own directory and a bare basename argument, never the
+// full path: GNU tar reads an `X:` drive-letter prefix as
+// `[user@]host:path` remote-archive syntax and refuses to open it
+// locally, which is fatal for every one of this file's paths (they are
+// all native Windows scratch roots). No flag exists that is safe across
+// hosts (`--force-local` is a GNU extension bsdtar does not reliably
+// carry, so it would need its own host branch); dropping the colon from
+// the argument entirely removes the ambiguity on every platform.
 fn _tar_list(tarball: string) -> string ![io] {
-    let exit = process.run_capture(["tar", "-tzf", tarball], _child_env());
+    let dir = _dirname(tarball);
+    let base = _path_basename(tarball);
+    let exit = process.run_capture_cwd(["tar", "-tzf", base], _child_env(), dir);
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package tar-list", exit, out, err);
     if exit != 0 { return ""; }
+    // A successful-but-empty listing is otherwise indistinguishable from
+    // the exit != 0 case above once `_listing_has_suffix` gets it — both
+    // read as "not found". Say so explicitly rather than let the caller
+    // infer it from a later assertion failure.
+    if out.length == 0 {
+        print.err("sfn-package tar-list: exit 0 but empty stdout for " + tarball
+            + " (cwd="
+            + dir
+            + ", argv=[tar, -tzf, "
+            + base
+            + "])");
+    }
     return out;
+}
+
+// Diagnostic-only: print the tarball path, the cwd handed to `tar`, the
+// member count, and up to `max_lines` entries, so a suffix-check failure
+// shows what the listing actually contained (or that it never got one)
+// instead of just "assertion failed". Bounded so the installer bundle's
+// full listing (whole runtime + capsules tree) is never dumped.
+fn _describe_listing(tag: string, tarball: string, listing: string, max_lines: int) ![io] {
+    let dir = _dirname(tarball);
+    print.err("sfn-package " + tag + ": tarball=" + tarball + " cwd=" + dir);
+    if listing.length == 0 {
+        print.err("sfn-package " + tag + ": listing is empty");
+        return;
+    }
+    let lines = _split_lines(listing);
+    print.err("sfn-package " + tag + ": " + number_to_string(lines.length)
+        + " listing line(s)");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if i >= max_lines { break; }
+        // `len=` alongside each entry: a trailing `\r` a terminal or log
+        // would render invisibly (`split` only cuts on `\n`) shows up here
+        // as a length one longer than the visible text.
+        print.err("sfn-package " + tag + ": [" + number_to_string(i) + "] len="
+            + number_to_string(lines[i].length)
+            + " "
+            + lines[i]);
+        i += 1;
+    }
 }
 
 // A listing line ends with `suffix` (anchors the `tar -tzf ... grep -qE
 // "<suffix>$"` checks).
 fn _listing_has_suffix(listing: string, suffix: string) -> bool {
-    let lines = split(listing, "\n");
+    let lines = _split_lines(listing);
     let mut i = 0;
     loop {
         if i >= lines.length { break; }
@@ -107,7 +200,7 @@ fn _listing_contains(listing: string, needle: string) -> bool {
 }
 
 fn _listing_suffix_count(listing: string, suffix: string) -> int {
-    let lines = split(listing, "\n");
+    let lines = _split_lines(listing);
     let mut count: int = 0;
     let mut i: int = 0;
     loop {
@@ -123,12 +216,28 @@ fn _listing_suffix_count(listing: string, suffix: string) -> int {
 }
 
 // `sha256sum <file>` -> the 64-char hex (first whitespace-delimited field).
+// Run with `sha256sum`'s cwd set to the file's own directory and a bare
+// basename argument: GNU coreutils escapes its whole output line with a
+// leading `\` whenever the filename argument carries a backslash or
+// newline (every path in this file does, on a native Windows host), which
+// corrupted the hash this function returns.
 fn _sha256_hex(file: string) -> string ![io] {
-    let exit = process.run_capture(["sha256sum", file], _child_env());
+    let dir = _dirname(file);
+    let base = _path_basename(file);
+    let exit = process.run_capture_cwd(["sha256sum", base], _child_env(), dir);
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("sfn-package sha256sum", exit, out, err);
     if exit != 0 { return ""; }
-    let line = _first_line(out);
+    let mut line = _first_line(out);
+    // Defence in depth, not the fix: the cwd + bare-basename call above is
+    // what keeps a backslash out of the argument in the first place, so
+    // this should never fire. Kept so a future caller that reintroduces a
+    // path argument gets a wrong-looking hash rejected by `_is_hex64`
+    // rather than silently accepted.
+    if line.length > 0 && substring(line, 0, 1) == "\\" {
+        line = substring(line, 1, line.length);
+    }
     let parts = split(line, " ");
     if parts.length == 0 { return ""; }
     return parts[0];
@@ -217,9 +326,16 @@ test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
     assert version.length > 0;
 
     // Run from repo root (the runner's cwd) so workspace.toml is found.
-    let exit = process.run_capture([sfn_bin_path(), "package", "--out", dist, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    // `--target linux-x86_64` is pinned rather than left to the host
+    // default: the staged member names below are target-gated
+    // (`target_exe_name`, SFN-972/SFN-693) and this file tests the
+    // manifest/tarball CONTRACT, not the target-suffix rule — that is
+    // `sfn_package_target_exe_suffix_test.sfn`'s job, exhaustively, with
+    // both targets forced. Pinning keeps this file's expected shape
+    // host-independent instead of silently depending on which platform
+    // happens to run it.
+    let exit = process.run_capture([sfn_bin_path(), "package", "--target", "linux-x86_64", "--out", dist, "--compiler-bin", bin], _child_env());
+    report_child_failure_pending("sfn-package compiler-mode build", exit);
     assert exit == 0;
 
     // Discover tarball `sailfin-native-*-<version>.tar.gz`.
@@ -237,6 +353,7 @@ test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
 
     // Tarball lists bin/sailfin + bin/sfn.
     let listing = _tar_list(tarball);
+    _describe_listing("compiler-mode", tarball, listing, 20);
     assert _listing_has_suffix(listing, "/bin/sailfin");
     assert _listing_has_suffix(listing, "/bin/sfn");
 
@@ -290,9 +407,15 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
     // `package`, so a relative `--out` (the runner-managed SAILFIN_TEST_SCRATCH
     // can be the relative `build/sailfin/...`) would resolve against the
     // fixture cwd while `_find_tarball` resolves against the repo root.
-    let repo_root = _first_line_pwd();
+    // `_cwd_cmd()` (`realpath(".", null)`) rather than a `pwd` shellout: a
+    // Git-Bash `pwd` prints the POSIX-mount spelling (`/c/Users/...`) on a
+    // native Windows host, which is a different path style than the
+    // Win32-native absolute path `fs.mkdtemp` returns below, and
+    // concatenating the two produced the garbled
+    // `/c/Users/.../sailfin/C:\Users\...` `ln` target this replaces.
+    let repo_root = _cwd_cmd();
     let mut root = fs.mkdtemp(_scratch_dir() + "/sfnpkg-widget-");
-    if root.length > 0 && substring(root, 0, 1) != "/" {
+    if root.length > 0 && !is_absolute_path(root) {
         root = repo_root + "/" + root;
     }
     let widget = root + "/widget-fixture";
@@ -301,14 +424,13 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
     // Project the moved source member into the stable installed capsule
     // layout consumed by an out-of-tree project. Stage only the declared
     // dependency so this fixture cannot resolve it through an unrelated
-    // repository tree.
+    // repository tree. A real copy rather than a symlink: the link itself
+    // is not under test, so there is no reason to keep the `ln` shellout
+    // (`.claude/rules/no-bash-e2e.md`) once a native alternative covers the
+    // same need — `stdlib/math` is a handful of small files, so
+    // `copy_tree`'s cost is negligible.
     fs.createDirectory(widget + "/capsules/sfn", true);
-    let link_exit = process.run_capture(["ln", "-sfn", repo_root
-        + "/stdlib/math", widget
-        + "/capsules/sfn/math"], _child_env());
-    let _lo = process.capture_take_stdout();
-    let _le = process.capture_take_stderr();
-    assert link_exit == 0;
+    assert copy_tree(repo_root + "/stdlib/math", widget + "/capsules/sfn/math");
     let isolated_home = root + "/home";
     fs.createDirectory(isolated_home, true);
 
@@ -317,27 +439,22 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
 
     // Precondition: build the capsule so the C2c sidecar exists. The .sh ran
     // `build -p .` / `package -p .` from INSIDE the fixture dir, so the build
-    // cache + sidecar and the package lookup share one cwd. `run_capture`
-    // cannot chdir, so reproduce that with a `cd <widget> && ...` bash vehicle
-    // and an absolute compiler path.
+    // cache + sidecar and the package lookup share one cwd, reproduced here
+    // via `run_capture_cwd` with an absolute compiler path.
     let sfn_abs = sfn_bin_abs_path();
-    let build_exit = process.run_capture(["bash", "-c", "cd \"" + widget
-        + "\" && \""
-        + sfn_abs
-        + "\" build -p ."], _child_env_with_home(isolated_home));
-    let _bo = process.capture_take_stdout();
-    let _be = process.capture_take_stderr();
+    let build_exit = process.run_capture_cwd([sfn_abs, "build", "-p", "."], _child_env_with_home(isolated_home), widget);
+    report_child_failure_pending("sfn-package widget build", build_exit);
     assert build_exit == 0;
 
     let userdist = root + "/dist-widget";
-    let pkg_exit = process.run_capture(["bash", "-c", "cd \"" + widget
-        + "\" && \""
-        + sfn_abs
-        + "\" package -p . --out \""
-        + userdist
-        + "\""], _child_env_with_home(isolated_home));
-    let _po = process.capture_take_stdout();
-    let _pe = process.capture_take_stderr();
+    // `--target linux-x86_64` pinned for the same reason as compiler mode
+    // and installer mode: the tarball STEM embeds `target`
+    // (`demo-widget-<target>-<version>.tar.gz`), so leaving this
+    // host-derived makes even a target-invariant assertion downstream of a
+    // host-dependent value, and this file's job is the manifest/tarball
+    // contract, not the host default.
+    let pkg_exit = process.run_capture_cwd([sfn_abs, "package", "-p", ".", "--target", "linux-x86_64", "--out", userdist], _child_env_with_home(isolated_home), widget);
+    report_child_failure_pending("sfn-package widget package", pkg_exit);
     assert pkg_exit == 0;
 
     let tarball = _find_tarball(userdist, "demo-widget-");
@@ -350,6 +467,7 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
 
     // Library-kind tarball: obj/mod.o + manifest.json + capsule.toml.
     let listing = _tar_list(tarball);
+    _describe_listing("widget-library", tarball, listing, 20);
     assert _listing_has_suffix(listing, "/obj/mod.o");
     assert _listing_has_suffix(listing, "/manifest.json");
     assert _listing_has_suffix(listing, "/capsule.toml");
@@ -357,15 +475,6 @@ test "sfn package -p (user capsule): build then package, library manifest" ![io]
     assert _jq("kind", manifest) == "library";
     assert _jq("capsule", manifest) == "demo/widget";
     assert _jq("name", manifest) == "demo-widget";
-}
-
-// pwd helper colocated near its only caller (the link setup).
-fn _first_line_pwd() -> string ![io] {
-    let exit = process.run_capture(["pwd"], _child_env());
-    let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    if exit != 0 { return "."; }
-    return _first_line(out);
 }
 
 // =====================================================================
@@ -387,9 +496,13 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     let version = _compiler_version();
     assert version.length > 0;
 
-    let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--out", inst, "--compiler-bin", bin], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    // `--target linux-x86_64` pinned for the same reason as compiler mode
+    // above: the staged member names are target-gated, and the round-trip
+    // "repeat" build below reuses this run's manifest `target` field
+    // rather than hardcoding its own, so pinning here is the only edit
+    // this test needs.
+    let exit = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", "linux-x86_64", "--out", inst, "--compiler-bin", bin], _child_env());
+    report_child_failure_pending("sfn-package installer build", exit);
     assert exit == 0;
 
     // Tarball `installer-*.tar.gz` (NO version in the stem).
@@ -408,6 +521,7 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     // leading `./` the way the .sh did (BSD vs GNU tar): the suffix-anchored
     // check matches both `bin/sailfin` and `./bin/sailfin`.
     let listing = _tar_list(tarball);
+    _describe_listing("installer", tarball, listing, 30);
     assert _listing_has_suffix(listing, "bin/sailfin");
     assert _listing_has_suffix(listing, "bin/sfn");
     assert _listing_has_suffix(listing, "workspace.toml");
@@ -437,8 +551,7 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
     // part of the installed payload.
     let inst_again = root + "/dist-installer-again";
     let repeat = process.run_capture([sfn_bin_path(), "package", "--installer", "--target", _jq("target", manifest), "--out", inst_again, "--compiler-bin", bin], _child_env());
-    let _repeat_out = process.capture_take_stdout();
-    let _repeat_err = process.capture_take_stderr();
+    report_child_failure_pending("sfn-package installer repeat", repeat);
     assert repeat == 0;
     let repeated_tarball = _find_tarball(inst_again, "installer-");
     assert repeated_tarball.length > 0;

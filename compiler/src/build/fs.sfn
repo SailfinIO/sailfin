@@ -33,7 +33,7 @@ import { host_is_windows } from "./target";
 // `runtime/sfn/platform/socket_ops.sfn:34-43`). That note also
 // documents `close`/`_close` as FATAL on a Windows `SOCKET` handle,
 // which is not an index into the CRT's low-fd table — the fd closed
-// here comes from `mkstemp_windows.sfn:49`'s `_open`, a genuine CRT
+// here comes from the `_open` in `mkstemp_windows.sfn`, a genuine CRT
 // descriptor, so this call site is not that hazard.
 extern fn mkstemp(template: *u8) -> i32;
 

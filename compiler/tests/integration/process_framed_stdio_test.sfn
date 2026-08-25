@@ -6,13 +6,149 @@
 // `sfn_process_handle_write_bytes`); the `process.*` descriptor rows in
 // `compiler/capsules/codegen-llvm/src/runtime_helpers/registry_process.sfn` flip the builtin surface onto
 // them. These pin the raw builtins independently of any `sfn/os`
-// wrapper, mirroring `process_spawn_with_env_test.sfn`. All assume a
-// POSIX `sh`/`cat`/`printf` (the same platform assumption the sibling
-// `spawn_with_env` tests rely on).
+// wrapper, mirroring `process_spawn_with_env_test.sfn`.
+//
+// The children are two Sailfin fixtures this file builds itself
+// (`_writer_bin` / `_echo_bin`), mirroring `process_exec_test.sfn`'s
+// build-your-own-fixture pattern, rather than the MSYS `sh -c printf ...`
+// / `cat` this file used to spawn. That removal is not a style
+// preference: spawning `cat` and writing to its stdin while it stayed
+// running (the "reads from a live child without closing the pipe" test
+// below) reliably hung this file for the full 900s per-file test
+// timeout on a native Windows host. `cat`'s stdout is fully buffered
+// (not line-buffered) once it is not attached to a terminal, so it does
+// not flush an echoed line back until its internal buffer fills or it
+// observes EOF — neither of which happens while the parent is itself
+// blocked reading the echo first. That is a stdio-buffering deadlock in
+// the spawned coreutil, not a bug in `sfn_process_handle_read_line_stdout`'s
+// blocking-read contract (`runtime/sfn/platform/process_windows.sfn`),
+// which is unbuffered end to end. The `_echo_bin` fixture writes each
+// chunk back via `sfn_write_fd` (a raw, unbuffered write) as soon as it
+// is read, so it cannot reproduce that deadlock, and it measures our own
+// framed stdio instead of the host's coreutils.
+import {
+    clean_runner_env,
+    report_child_failure,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
+
+// Derived by subtraction from the real environment rather than a
+// hand-rolled allowlist (SFN-1114).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
+}
+
+// A stable (not mkdtemp) per-file scratch dir: both fixtures are
+// content-identical across every test below, so they build once and are
+// reused — the tests in this file run sequentially in one process, so a
+// stable path carries no concurrent-build race.
+fn _fixtures_dir() -> string ![io] {
+    let dir = scratch_root() + "/sfn-framed-stdio-fixtures";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// `-o` is honoured verbatim, so on Windows the built file may carry a
+// `.exe` suffix the base path did not ask for. Both spellings are probed
+// rather than branching on the host (`process_exec_test.sfn`'s pattern).
+fn _built_path(base: string) -> string ![io] {
+    if fs.exists(base + ".exe") { return base + ".exe"; }
+    return base;
+}
+
+// Brackets the nested build with unconditional before/after stderr markers
+// (not gated on failure, unlike `report_child_failure_pending`, which prints
+// nothing on the success path) — a fixture that fails to compile is
+// otherwise invisible, and one line per build costs nothing on every other
+// run.
+fn _build_fixture(src: string, binpath: string) -> int ![io] {
+    print.err("[framed-stdio] building " + src + " -> " + binpath);
+    let exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("process-framed-stdio build " + src, exit, out, err);
+    print.err("[framed-stdio] built " + src + " exit=" + number_to_string(exit)
+        + " stdout=["
+        + out
+        + "] stderr=["
+        + err
+        + "]");
+    return exit;
+}
+
+// Writes `argv[1]` to stdout and, if present, `argv[2]` to stderr, then
+// exits — the replacement for `sh -c "printf ...; printf ... 1>&2"`.
+// `sfn_write_fd` (declared as an extern per the SFN-635 cross-module
+// convention `io.sfn` itself documents) is a raw, length-exact write with
+// no appended newline, so a caller controls the exact bytes including an
+// unterminated final line.
+fn _writer_bin() -> string ![io] {
+    let dir = _fixtures_dir();
+    let existing = _built_path(dir + "/writer");
+    if fs.exists(existing) { return existing; }
+    let src = dir + "/writer.sfn";
+    fs.writeFile(src, "extern fn sfn_write_fd(fd: i32, buf: *u8, count: usize) -> i64;\n\n"
+        + "fn main(argv: string[]) -> int ![io] {\n"
+        + "    let out = argv[1];\n"
+        + "    let _wo = sfn_write_fd(1, out as *u8, out.length as usize);\n"
+        + "    if argv.length > 2 {\n"
+        + "        let err = argv[2];\n"
+        + "        let _we = sfn_write_fd(2, err as *u8, err.length as usize);\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n");
+    let exit = _build_fixture(src, dir + "/writer");
+    assert exit == 0;
+    return _built_path(dir + "/writer");
+}
+
+// Byte-for-byte stdin-to-stdout passthrough — the replacement for `cat`.
+// Loops `io.read_fd(0, ...)` (the same builtin `io_read_fd_test.sfn`
+// pins) and echoes each chunk back immediately via `sfn_write_fd`, so
+// nothing is buffered on the fixture's side to reproduce the coreutils
+// deadlock this file used to hit. Guarded per the input-driven-loop rule
+// (`.claude/rules/code-style.md`) with a diagnostic on exhaustion rather
+// than a bare assert — each iteration blocks on real child I/O, so the
+// ceiling is a backstop, not an expected trip, and if it ever does trip
+// the stderr line says so instead of leaving only "assertion failed".
+fn _echo_bin() -> string ![io] {
+    let dir = _fixtures_dir();
+    let existing = _built_path(dir + "/echo");
+    if fs.exists(existing) { return existing; }
+    let src = dir + "/echo.sfn";
+    fs.writeFile(src, "struct OwnedBuf {\n" + "    ptr_addr: i64;\n"
+        + "    len: i64;\n"
+        + "    cap: i64;\n"
+        + "    arena_addr: i64;\n"
+        + "}\n\n"
+        + "extern fn sfn_write_fd(fd: i32, buf: *u8, count: usize) -> i64;\n\n"
+        + "extern fn free(ptr: *u8) -> void;\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let mut guard: int = 0;\n"
+        + "    loop {\n"
+        + "        guard += 1;\n"
+        + "        if guard >= 5000 {\n"
+        + "            let exhausted = \"echo-fixture: read loop exhausted its guard without observing EOF\\n\";\n"
+        + "            let _we = sfn_write_fd(2, exhausted as *u8, exhausted.length as usize);\n"
+        + "            return 97;\n"
+        + "        }\n"
+        + "        let chunk: OwnedBuf = io.read_fd(0, 4096);\n"
+        + "        if chunk.len == 0 { break; }\n"
+        + "        let _w = sfn_write_fd(1, chunk.ptr_addr as *u8, chunk.len as usize);\n"
+        + "        if chunk.arena_addr == 0 { free(chunk.ptr_addr as *u8); }\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n");
+    let exit = _build_fixture(src, dir + "/echo");
+    assert exit == 0;
+    return _built_path(dir + "/echo");
+}
+
 test "handle_read_line_stdout: reads framed lines and buffers the remainder" ![io] {
     // One child write delivers three `\n`-framed lines in a single read;
     // each call returns one line (newline stripped) and stashes the rest.
-    let id = process.spawn_with_env(["sh", "-c", "printf 'one\\ntwo\\nthree\\n'"], []);
+    let id = process.spawn_with_env([_writer_bin(), "one\ntwo\nthree\n"], []);
     assert id != 0;
     let a = process.handle_read_line_stdout(id);
     assert a == "one";
@@ -30,7 +166,7 @@ test "handle_read_line_stdout: reads framed lines and buffers the remainder" ![i
 test "handle_read_line_stdout: returns the final unterminated line then empty" ![io] {
     // "a\nb" — the trailing "b" has no newline; it is returned on EOF,
     // then subsequent calls return the empty string.
-    let id = process.spawn_with_env(["sh", "-c", "printf 'a\\nb'"], []);
+    let id = process.spawn_with_env([_writer_bin(), "a\nb"], []);
     assert id != 0;
     let a = process.handle_read_line_stdout(id);
     assert a == "a";
@@ -43,10 +179,11 @@ test "handle_read_line_stdout: returns the final unterminated line then empty" !
 }
 
 test "handle_read_line_stdout: reads from a live child without closing the pipe" ![io] {
-    // `cat` echoes each block as it reads — write one frame, read it back
-    // while the child is still running (stdin not yet closed), then a
-    // second frame, proving the pipe stays open across calls.
-    let id = process.spawn_with_env(["cat"], []);
+    // The echo fixture writes each block back as it reads it — write one
+    // frame, read it back while the child is still running (stdin not yet
+    // closed), then a second frame, proving the pipe stays open across
+    // calls.
+    let id = process.spawn_with_env([_echo_bin()], []);
     assert id != 0;
     let w1 = process.handle_write_bytes(id, "ping\n", 5);
     assert w1 == 5;
@@ -62,7 +199,7 @@ test "handle_read_line_stdout: reads from a live child without closing the pipe"
 }
 
 test "handle_read_bytes_stdout: returns at most n bytes preserving the remainder" ![io] {
-    let id = process.spawn_with_env(["sh", "-c", "printf 'abcdefgh'"], []);
+    let id = process.spawn_with_env([_writer_bin(), "abcdefgh"], []);
     assert id != 0;
     // First call caps at 3 bytes; the remaining 5 stay buffered.
     let p1 = process.handle_read_bytes_stdout(id, 3);
@@ -81,11 +218,11 @@ test "framed drain: an fd-free loop over both streams terminates at EOF" ![io] {
     // The runner fallback in `compiler/src/cli/commands/test/exec.sfn` drains a
     // child with no fd and no `io.poll_any` — the only path available on
     // Windows — and terminates on both-streams-at-EOF rather than on an fd
-    // list. Pin that loop shape here on POSIX, where the same framed
-    // builtins back it, so a regression in the termination predicate is
-    // caught without a Windows host. The guard counter is the no-busy-spin
-    // assertion: a loop that fails to observe EOF trips it.
-    let id = process.spawn_with_env(["sh", "-c", "printf 'out1out2'; printf 'errA\\nerrB\\n' 1>&2"], []);
+    // list. Pin that loop shape here, where the same framed builtins back
+    // it, so a regression in the termination predicate is caught without
+    // relying on a live Windows host too. The guard counter is the
+    // no-busy-spin assertion: a loop that fails to observe EOF trips it.
+    let id = process.spawn_with_env([_writer_bin(), "out1out2", "errA\nerrB\n"], []);
     assert id != 0;
     let mut out_buf: string = "";
     let mut err_buf: string = "";
@@ -114,7 +251,7 @@ test "framed drain: an fd-free loop over both streams terminates at EOF" ![io] {
 }
 
 test "handle_write_bytes: writes exactly len bytes rather than strlen" ![io] {
-    let id = process.spawn_with_env(["cat"], []);
+    let id = process.spawn_with_env([_echo_bin()], []);
     assert id != 0;
     // An 11-char buffer but len=5: only "hello" must reach the child,
     // proving the body honors `len` instead of strlen-truncating.
@@ -128,7 +265,7 @@ test "handle_write_bytes: writes exactly len bytes rather than strlen" ![io] {
 }
 
 test "handle_write_bytes: a zero length writes nothing and returns 0" ![io] {
-    let id = process.spawn_with_env(["cat"], []);
+    let id = process.spawn_with_env([_echo_bin()], []);
     assert id != 0;
     let w = process.handle_write_bytes(id, "ignored", 0);
     assert w == 0;

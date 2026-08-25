@@ -26,12 +26,32 @@ import {
     parse_int,
     substring
 } from "sfn/strings";
-import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 // env-safe (SFN-1114): derived by subtraction from the real environment
-// rather than a hand-rolled allowlist.
-fn _child_env() -> string[] ![io] {
-    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
+// rather than a hand-rolled allowlist. `nested_runner_scratch(label)`
+// rather than the parent's own `SAILFIN_TEST_SCRATCH` passed straight
+// through: a directory resolving to a single test file takes the
+// single-process compile path (`cli/commands/test/single_process_run.sfn:
+// 73,77`), which writes a FIXED `<scratch>/test.ll` / `<scratch>/test.exe`
+// with no isolation of its own — unlike the multi-file path, which mints
+// its own `fs.mkdtemp` root regardless of what it is handed
+// (`cache_scratch.sfn:9-22`). Sharing the parent's scratch root across
+// this file's six nested runs (five of which happen to be multi-file, and
+// so safe only by that OTHER code path's own isolation, not by anything
+// this file guarantees) let a stale/still-mapped `test.exe` from a prior
+// invocation collide with a fresh one; POSIX silently allows overwriting
+// a file still open elsewhere, Windows does not
+// (`lld-link: ... permission denied`, the SFN-393/SFEP-0050
+// `nested_runner_no_collision_test.sfn` idiom this now matches).
+fn _child_env(label: string) -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch(label));
 }
 
 // A scratch directory with 3 trivially-passing test files.
@@ -79,9 +99,10 @@ fn _parse_rank_cs(out: string, rank: int) -> int {
 // ---- Test 1: per-file PASS lines carry an elapsed time ----
 test "test runner: per-file PASS lines carry an elapsed time" ![io] {
     let dir = _make_pass_dir("t1");
-    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env("t1"));
     let out = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("runner-slowest-summary pass-lines run", exit, out, err);
 
     assert exit == 0;
     assert find(out, "[test] PASS:", 0) >= 0;
@@ -96,9 +117,10 @@ test "test runner: per-file PASS lines carry an elapsed time" ![io] {
 // ---- Test 2: multi-file run ends with a slowest summary ----
 test "test runner: multi-file run ends with a slowest summary" ![io] {
     let dir = _make_pass_dir("t2");
-    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env("t2"));
     let out = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("runner-slowest-summary summary run", exit, out, err);
 
     assert exit == 0;
     assert find(out, "[test] slowest ", 0) >= 0;
@@ -108,9 +130,10 @@ test "test runner: multi-file run ends with a slowest summary" ![io] {
 // ---- Test 3: slowest summary is ordered descending ----
 test "test runner: slowest summary is ordered descending" ![io] {
     let dir = _make_pass_dir("t3");
-    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env("t3"));
     let out = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("runner-slowest-summary descending run", exit, out, err);
 
     assert exit == 0;
     let cs1 = _parse_rank_cs(out, 1);
@@ -123,9 +146,10 @@ test "test runner: slowest summary is ordered descending" ![io] {
 // ---- Test 4: slowest summary is suppressed with --slowest 0 ----
 test "test runner: slowest summary is suppressed with --slowest 0" ![io] {
     let dir = _make_pass_dir("t4");
-    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--slowest", "0", "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--slowest", "0", "--jobs", "1"], _child_env("t4"));
     let out = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("runner-slowest-summary suppressed run", exit, out, err);
 
     assert exit == 0;
     assert find(out, "[test] slowest ", 0) < 0;
@@ -134,9 +158,10 @@ test "test runner: slowest summary is suppressed with --slowest 0" ![io] {
 // ---- Test 5: slowest summary survives a pooled run ----
 test "test runner: slowest summary survives a pooled run" ![io] {
     let dir = _make_pass_dir("t5");
-    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "2"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "2"], _child_env("t5"));
     let out = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("runner-slowest-summary pooled run", exit, out, err);
 
     assert exit == 0;
     assert find(out, "[test] slowest ", 0) >= 0;
@@ -155,9 +180,10 @@ test "test runner: a directory resolving to one test file runs cleanly" ![io] {
     let dir = base + "/sfn-runner-slowest-t6";
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/solo_test.sfn", "test \"solo: one\" { assert 1 == 1; }\n");
-    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "test", dir, "--jobs", "1"], _child_env("t6"));
     let out = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("runner-slowest-summary single-file run", exit, out, err);
 
     assert exit == 0;
     assert find(out, "[test] PASS:", 0) >= 0;

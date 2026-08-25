@@ -135,6 +135,21 @@ fn _bc_child_env(cache_root: string, scratch: string) -> string[] ![io] {
     if home.length > 0 { e.push("HOME=" + home); }
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    // `clang` locates the MSVC toolchain by reading
+    // `%ProgramData%\Microsoft\VisualStudio\Packages\_Instances\<id>\state.json`,
+    // so a curated child env that omits `ProgramData` leaves it with no MSVC
+    // headers and no import libraries at all. `run_capture`'s env array IS the
+    // child's whole environment — nothing is inherited — so every nested
+    // `sfn build` spawned from here linked against nothing and died with
+    // `lld-link: error: could not open 'libcmt.lib'`, which the driver then
+    // reported as an ICE (SFN-1115).
+    //
+    // Measured on a native Windows host: `ProgramData` alone is both
+    // necessary and sufficient; `SystemRoot` does nothing for discovery. On
+    // POSIX the variable does not exist, so this is a no-op there rather than
+    // a platform branch.
+    let program_data = env.get("ProgramData");
+    if program_data.length > 0 { e.push("ProgramData=" + program_data); }
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_root);
     e.push("SAILFIN_TEST_SCRATCH=" + scratch + "/sfn");
     return e;

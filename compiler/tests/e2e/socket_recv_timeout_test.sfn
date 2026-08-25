@@ -52,9 +52,25 @@ extern fn accept(sockfd: i32, addr: *u8, addrlen: *i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+// `sfn_socket_send` / `sfn_socket_recv`, not the raw libc `send`/`recv` —
+// Winsock declares both `int`, so a raw `-> i64` extern zero-extends the
+// `-1` error return into `4294967295` and defeats every `<= 0` / `< 0`
+// guard downstream (SFN-927, the socket counterpart of `fd_io_windows.sfn`).
+// That is precisely what this test's load-bearing `assert n2 < 0` checks,
+// so the raw externs made the timeout leg unfalsifiable on Windows. The
+// runtime helpers narrow correctly on both targets (SFN-1115).
+extern fn sfn_socket_send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+extern fn sfn_socket_recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
+
+// `sfn_socket_set_timeouts`, not a hand-rolled `setsockopt` pair. A 16-byte
+// POSIX `struct timeval` is not portable here: Winsock accepts the macOS
+// option numbers but reads the buffer as a `DWORD` of MILLISECONDS, so a
+// `secs=1` timeval arms 1 ms rather than 1 s. Measured, the hand-rolled
+// version returned in 11 ms against the helper's 1010 ms — the assertion
+// still passed, so the fixture proved the wrong layout and would have
+// passed with the budget off by 1000x.
+extern fn sfn_socket_set_timeouts(fd: i32, secs: i32) -> void;
 
 // `sfn_socket_close`, not the raw libc `close` — on Windows `close()` on a
 // Winsock SOCKET is not an error return but a process-killing
@@ -63,6 +79,9 @@ extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 // (`socket_ops.sfn:101`), so it is correct on every target (SFN-1114).
 extern fn sfn_socket_close(fd: i32) -> i32;
 
+// Still needed for SO_REUSEADDR on the listener (`_st_bind_listen`), which
+// takes a 4-byte int optval and is portable as-is — unlike the timeval
+// pair, which is not.
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
 // Fixed loopback port for this test. High + uncommon, and — critically —
@@ -171,45 +190,19 @@ fn _st_connect(port: i64) -> i32 ![net] {
     return 0 - 1;
 }
 
-// Arm SO_RCVTIMEO + SO_SNDTIMEO with a `secs`-second budget — the EXACT
-// `struct timeval` layout (16 bytes, tv_sec as the low byte at offset 0,
-// little-endian, tv_usec zero) and dual-platform option numbers the fix
-// uses. Linux SOL_SOCKET=1 / SO_RCVTIMEO=20 / SO_SNDTIMEO=21; macOS
-// SOL_SOCKET=0xffff / SO_RCVTIMEO=0x1006 / SO_SNDTIMEO=0x1005. On POSIX
-// the wrong-platform variant returns ENOPROTOOPT (ignored) — that claim
-// does NOT extend to Windows, where the same macOS constants resolve to
-// a real `SO_RCVTIMEO`/`SO_SNDTIMEO` with a different optval type
-// (SFN-927; see `platform/socket_ops.sfn` for the corrected mechanism).
-// This fixture inlines its own raw `socket`/`close`/`setsockopt` rather
-// than routing through `platform/socket_ops.sfn`'s
-// `sfn_socket_set_timeouts` and so duplicates that logic; it cannot run
-// on a Windows host regardless (POSIX `close` on a Winsock `SOCKET`
-// fastfails the process), so it stays a Linux/macOS-only regression
-// fixture rather than being ported.
-fn _st_set_timeouts(fd: i32, secs: i64) -> void {
-    let tv: *u8 = malloc(16 as usize);
-    if tv as i64 == 0 { return; }
-    memset(tv, 0, 16 as usize);
-    memset(_st_ptr_off(tv, 0), secs as i32, 1 as usize);
-    setsockopt(fd, 1, 20, tv, 16);
-    setsockopt(fd, 1, 21, tv, 16);
-    setsockopt(fd, 65535, 4102, tv, 16);
-    setsockopt(fd, 65535, 4101, tv, 16);
-    free(tv);
-}
 
 fn _st_send_all(fd: i32, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
-        let n: i64 = send(fd, _st_ptr_off(buf, sent), total - sent, 0);
+        let n: i64 = sfn_socket_send(fd, _st_ptr_off(buf, sent), total - sent, 0);
         if n <= 0 { return false; }
         sent = sent + n;
     }
     return true;
 }
 
-test "socket recv timeout: silent peer times out; normal recv unaffected" ![io, net] {
+test "socket recv timeout: silent peer times out; normal recv unaffected" ![clock, io, net] {
     let port = _st_port();
     let lfd = _st_bind_listen(port);
     assert lfd >= 0;
@@ -223,7 +216,7 @@ test "socket recv timeout: silent peer times out; normal recv unaffected" ![io, 
 
     // Arm a short (1s) recv/send budget on the client — the mechanism the
     // fix installs on real connect/accept sockets.
-    _st_set_timeouts(cfd, 1);
+    sfn_socket_set_timeouts(cfd, 1);
 
     let buf: *u8 = malloc(64 as usize);
     assert buf as i64 != 0;
@@ -232,17 +225,27 @@ test "socket recv timeout: silent peer times out; normal recv unaffected" ![io, 
     // sends, the client receives the bytes.
     let payload: string = "OK";
     assert _st_send_all(sfd, payload as *u8, 2);
-    let n1: i64 = recv(cfd, buf, 64, 0);
+    let n1: i64 = sfn_socket_recv(cfd, buf, 64, 0);
     print.info("[socket-timeout] normal recv n=" + (n1 as string));
     assert n1 == 2;
 
     // Case A — the load-bearing assertion: the server now stays silent, so
-    // the client's recv must return on the SO_RCVTIMEO deadline (< 0,
-    // EAGAIN) rather than blocking forever. A wrong constant / timeval would
-    // hang here (caught by the suite timeout).
-    let n2: i64 = recv(cfd, buf, 64, 0);
+    // the client's recv must return on the SO_RCVTIMEO deadline rather than
+    // blocking forever. A wrong constant / timeval would hang here (caught
+    // by the suite timeout).
+    //
+    // The sign alone is NOT sufficient, and that gap is why the Windows
+    // defect survived: a timeval misread as a millisecond DWORD armed 1 ms
+    // instead of 1 s, returned a correct-looking negative, and passed. The
+    // elapsed floor is what makes the budget itself falsifiable — measured,
+    // the broken arming returned in 11 ms against 1010 ms for the helper,
+    // so 500 separates them by two orders of magnitude without being
+    // flaky on a loaded host (SFN-1115).
+    let started_ms = monotonic_millis();
+    let n2: i64 = sfn_socket_recv(cfd, buf, 64, 0);
     print.info("[socket-timeout] silent recv n=" + (n2 as string));
     assert n2 < 0;
+    assert (monotonic_millis() - started_ms) >= 500;
 
     free(buf);
     sfn_socket_close(cfd);

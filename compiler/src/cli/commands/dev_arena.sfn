@@ -101,6 +101,15 @@ fn _arena_child_env(arena: string) -> string[] ![io] {
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    // Carried for the reason `bench_consumer.sfn::_bc_child_env` documents in
+    // full: without `ProgramData` a curated child env gives clang no MSVC
+    // toolchain on Windows. Inert today because the emit children spawned
+    // below never reach a link — `emit_validate` defaults false
+    // (`emit.sfn`), and only an explicit `--validate` triggers the
+    // llvm-as/clang round-trip, which these argv do not pass. Present so a
+    // later caller cannot lose it silently (SFN-1115).
+    let program_data = env.get("ProgramData");
+    if program_data.length > 0 { e.push("ProgramData=" + program_data); }
     e.push("SAILFIN_USE_ARENA=" + arena);
     return e;
 }

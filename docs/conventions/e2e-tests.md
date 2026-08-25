@@ -169,22 +169,47 @@ fails. Also thread `SAILFIN_TEST_SCRATCH`: the compiler routes the
 `program.ll` build-cache dir under it (#1333), so a parallel run
 (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
 
+**Use `clean_runner_env`, not a hand-rolled allowlist.**
+
 ```sfn
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    return clean_runner_env(nested_runner_scratch("my-label"));
 }
 // ...
 let exit = process.run_capture(
     [sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env());
+```
+
+`clean_runner_env` *filters* `process.environ()` — it strips the pool-managed
+and caller-override keys and re-points `SAILFIN_TEST_SCRATCH`, passing
+everything else through. That is the difference that matters: an allowlist can
+only carry the variables whoever wrote it thought of, and a toolchain needs
+variables that are not obvious.
+
+The concrete case (SFN-1115): on a native Windows host `clang` locates the
+MSVC toolchain by reading
+`%ProgramData%\Microsoft\VisualStudio\Packages\_Instances\<id>\state.json`. A
+`PATH`/`HOME`/`TMPDIR` allowlist omits `ProgramData`, so the child gets no
+MSVC headers and no import libraries — the nested build dies at the link with
+`lld-link: error: could not open 'libcmt.lib'`, which the driver then reports
+as an internal compiler error. Measured: `ProgramData` alone is necessary and
+sufficient; `SystemRoot` does nothing for discovery.
+
+An allowlist would have to grow that entry, and the next one nobody has hit
+yet. A filter never needed it. **Do not hand-roll the array below** — it is
+recorded only so the shape is recognisable when you meet it in an older test:
+
+```sfn
+// Legacy shape. Do not copy — see SFN-1115.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    // ... HOME, TMPDIR, SAILFIN_TEST_SCRATCH
+    return e;
+}
 ```
 
 This works for `sfn build`, `sfn run`, and bare dispatch alike (it is the

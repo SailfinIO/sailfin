@@ -28,6 +28,7 @@ import {
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    sfn_bin_abs_path,
     sfn_bin_path,
     wait_until,
     with_background
@@ -117,24 +118,6 @@ fn _first_line(text: string) -> string {
     let lines = split(text, "\n");
     if lines.length == 0 { return text; }
     return lines[0];
-}
-
-// Absolute path to the compiler under test. Needed for the `sh -c "cd ... &&
-// exec ..."` cwd-discovery test, since a relative binary path would not
-// resolve after the shell changes directory.
-fn _abs_sfn_bin() -> string ![io] {
-    let bin = sfn_bin_path();
-    if substring(bin, 0, 1) == "/" { return bin; }
-    let exit = process.run_capture(["pwd"], _child_env());
-    let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    // Fail here rather than returning a bogus path: a failed or empty `pwd`
-    // would otherwise make the cwd test fail inside the shell, for a reason
-    // that has nothing to do with the gate under test.
-    assert exit == 0;
-    let pwd = _first_line(out);
-    assert pwd.length > 0;
-    return pwd + "/" + bin;
 }
 
 // ── Fixture registry server (SFN-496) ──────────────────────────────
@@ -619,7 +602,7 @@ test "publish: cwd discovery cannot bypass the private gate" ![io] {
     let workdir = root + "/work";
     _write_credentials(home);
     _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
-    let bin = _abs_sfn_bin();
+    let bin = sfn_bin_abs_path();
     let e = _env_for(home, []);
     let _exit = process.run_capture(["sh", "-c", "cd '" + workdir
         + "' && exec '"

@@ -11,32 +11,23 @@
 //     root is discovered from it — no `cd` needed, and the enforce-mode gate
 //     fails before any emit/link so an empty child env (no PATH/clang) suffices.
 //   * `sfn capabilities audit` discovers the workspace from the current
-//     directory, so it runs through a `cd <root> && <sfn> ...` bash vehicle
-//     with an absolute compiler path (`run_capture` cannot chdir — see
-//     `.claude/rules/no-bash-e2e.md`).
+//     directory, so it runs via `run_capture_cwd` with the workspace root as
+//     the child cwd and an absolute compiler path.
 //
 // `mode = "warn"` turns the same drift into a report that does not fail.
-import { find, split } from "sfn/strings";
+import { find } from "sfn/strings";
 import {
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_abs_path,
     sfn_bin_path,
     with_tmp_dir
 } from "sfn/test";
 
-import { _copy_file_preserving_mode } from "../../src/build/fs";
-
-// First line of a captured stdout, trailing newline dropped. Still needed
-// by `_implicit_override_env` below, which resolves `SAILFIN_RUNTIME_ROOT`
-// via its own `pwd` call — a distinct concern from the compiler-binary path
-// `sfn_bin_abs_path()` now owns.
-fn _first_line(text: string) -> string {
-    let lines = split(text, "\n");
-    if lines.length == 0 { return text; }
-    return lines[0];
-}
+import { _copy_file_preserving_mode, _cwd_cmd } from "../../src/build/fs";
 
 // The child env is derived by subtraction from the real environment, not
 // assembled key by key (SFN-1114). No nested scratch: the audit does not
@@ -101,9 +92,7 @@ test "capabilities audit: prints table and exits non-zero on drift (enforce)" ![
     let sfn_abs = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, false);
-        let rc = process.run_capture(["bash", "-c", "cd \"" + dir + "\" && \""
-            + sfn_abs
-            + "\" capabilities audit"], _child_env());
+        let rc = process.run_capture_cwd([sfn_abs, "capabilities", "audit"], _child_env(), dir);
         fs.writeFile(out_marker, process.capture_take_stdout());
         fs.writeFile(err_marker, process.capture_take_stderr());
         return rc;
@@ -129,8 +118,10 @@ test "capability gate: mode = warn reports drift without failing sfn check" ![io
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, true);
         let rc = process.run_capture([sfn_bin_path(), "check", dir], []);
-        let _out = process.capture_take_stdout();
-        fs.writeFile(err_marker, process.capture_take_stderr());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        report_child_failure("workspace-capability-gate warn check", rc, out, err);
+        fs.writeFile(err_marker, err);
         return rc;
     });
     assert exit == 0;
@@ -147,11 +138,11 @@ test "capabilities audit: mode = warn reports drift and exits zero" ![io] {
     let sfn_abs = sfn_bin_abs_path();
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws(dir, true);
-        let rc = process.run_capture(["bash", "-c", "cd \"" + dir + "\" && \""
-            + sfn_abs
-            + "\" capabilities audit"], _child_env());
-        fs.writeFile(out_marker, process.capture_take_stdout());
-        let _e = process.capture_take_stderr();
+        let rc = process.run_capture_cwd([sfn_abs, "capabilities", "audit"], _child_env(), dir);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        report_child_failure("workspace-capability-gate warn audit", rc, out, err);
+        fs.writeFile(out_marker, out);
         return rc;
     });
     assert exit == 0;
@@ -174,15 +165,13 @@ test "capability gate: no [workspace.capabilities] is a no-op" ![io] {
     let exit = with_tmp_dir(fn (dir: string) -> int {
         _make_ws_bare(dir);
         let check_rc = process.run_capture([sfn_bin_path(), "check", dir], []);
-        let _co = process.capture_take_stdout();
-        let _ce = process.capture_take_stderr();
+        report_child_failure_pending("workspace-capability-gate bare check", check_rc);
         fs.writeFile(check_marker, _rc_marker(check_rc));
-        let audit_rc = process.run_capture(["bash", "-c", "cd \"" + dir
-            + "\" && \""
-            + sfn_abs
-            + "\" capabilities audit"], _child_env());
-        fs.writeFile(audit_out_marker, process.capture_take_stdout());
-        let _ae = process.capture_take_stderr();
+        let audit_rc = process.run_capture_cwd([sfn_abs, "capabilities", "audit"], _child_env(), dir);
+        let audit_out = process.capture_take_stdout();
+        let audit_err = process.capture_take_stderr();
+        report_child_failure("workspace-capability-gate bare audit", audit_rc, audit_out, audit_err);
+        fs.writeFile(audit_out_marker, audit_out);
         fs.writeFile(audit_code_marker, _rc_marker(audit_rc));
         return 0;
     });
@@ -313,16 +302,23 @@ fn _make_implicit_override_toolchain(root: string) -> string ![io] {
     return compiler;
 }
 
-// SAILFIN_RUNTIME_ROOT is named in the strip list so an inherited outer
-// value cannot shadow the push below.
+// `_make_implicit_override_toolchain` copies the compiler binary alone
+// (`_copy_file_preserving_mode`, no adjacent `runtime/`), so
+// `resolve_runtime_root`'s exe-relative walk
+// (`runtime/sfn/platform/exec.sfn`) cannot find it there; this override
+// points the copy back at the repo's own runtime bundle. SAILFIN_RUNTIME_ROOT
+// is named in the strip list so an inherited outer value cannot shadow the
+// push below.
+//
+// `_cwd_cmd()` (`realpath(".", null)`) rather than a `pwd` shellout: a
+// Git-Bash `pwd` prints the POSIX-mount spelling (`/c/Users/...`) on a
+// native Windows host, which `resolve_runtime_root` returns verbatim and the
+// runtime-manifest lookup then cannot resolve as a real Win32 path — the
+// override was silently pointing nowhere, surfacing as "runtime
+// bundle/manifest missing".
 fn _implicit_override_env() -> string[] ![io] {
     let mut child = clean_runner_env_without("", ["SAILFIN_RUNTIME_ROOT"]);
-    let exit = process.run_capture(["pwd"], _child_env());
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit == 0 {
-        child.push("SAILFIN_RUNTIME_ROOT=" + _first_line(out) + "/runtime");
-    }
+    child.push("SAILFIN_RUNTIME_ROOT=" + _cwd_cmd() + "/runtime");
     return child;
 }
 
@@ -332,8 +328,7 @@ test "capability gate: explicit implicit-provider override obeys workspace grant
         if compiler.length == 0 { return 97; }
         let entry = _make_implicit_override_ws(root + "/consumer", true, false);
         let exit = process.run_capture([compiler, "run", entry], _implicit_override_env());
-        let _out = process.capture_take_stdout();
-        let _err = process.capture_take_stderr();
+        report_child_failure_pending("workspace-capability-gate override-grant run", exit);
         return exit;
     });
     assert result == 0;

@@ -39,6 +39,8 @@
 import { contains } from "sfn/strings";
 import {
     clean_runner_env_without,
+    report_child_failure,
+    report_child_failure_pending,
     sfn_bin_path,
     skip,
     symbol_reader
@@ -157,6 +159,38 @@ fn _setup_workspace(ws: string, marker_second_fn: boolean) ![io] {
     _copy("runtime/sfn/platform/fd_io.sfn", ws
         + "/runtime/sfn/platform/fd_io.sfn");
 
+    // SFN-1115: stage the Windows half of the runtime platform set too.
+    // On a native Windows host `target_condition_runtime_sfn_sources`
+    // (`compiler/src/build/target.sfn`) rewrites the `fd_io.sfn` entry to
+    // `fd_io_windows.sfn` AND — because any platform entry anchors its
+    // `platform_dir` — unconditionally appends eight Windows-only modules
+    // that have no POSIX counterpart to swap from. `sfn emit` hard-fails on
+    // a missing source, so a fixture staging only the POSIX half dies with
+    // `file not found` before a single module is compiled.
+    //
+    // Copied unconditionally rather than behind `host_is_windows()`: an
+    // unreferenced extra file costs one copy on POSIX and keeps the staged
+    // tree identical on every host. Keep this list in step with that
+    // function's append block.
+    _copy("runtime/sfn/platform/fd_io_windows.sfn", ws
+        + "/runtime/sfn/platform/fd_io_windows.sfn");
+    _copy("runtime/sfn/platform/realpath_windows.sfn", ws
+        + "/runtime/sfn/platform/realpath_windows.sfn");
+    _copy("runtime/sfn/platform/clock_windows.sfn", ws
+        + "/runtime/sfn/platform/clock_windows.sfn");
+    _copy("runtime/sfn/platform/pthread_windows.sfn", ws
+        + "/runtime/sfn/platform/pthread_windows.sfn");
+    _copy("runtime/sfn/platform/popen_windows.sfn", ws
+        + "/runtime/sfn/platform/popen_windows.sfn");
+    _copy("runtime/sfn/platform/mkstemp_windows.sfn", ws
+        + "/runtime/sfn/platform/mkstemp_windows.sfn");
+    _copy("runtime/sfn/platform/strcasestr_windows.sfn", ws
+        + "/runtime/sfn/platform/strcasestr_windows.sfn");
+    _copy("runtime/sfn/platform/opendir_windows.sfn", ws
+        + "/runtime/sfn/platform/opendir_windows.sfn");
+    _copy("runtime/sfn/platform/mkdtemp_windows.sfn", ws
+        + "/runtime/sfn/platform/mkdtemp_windows.sfn");
+
     _write_marker(ws, marker_second_fn);
 
     fs.writeFile(ws + "/capsules/sfn/test-app/capsule.toml", "[capsule]\n"
@@ -219,7 +253,8 @@ fn _nm_has_defined(obj: string, sym: string) -> boolean ![io] {
     let no_extra: string[] = [];
     let exit = process.run_capture([reader, obj], _child_env_with("", no_extra));
     let out = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("runtime-sfn-sources-link-consumer nm " + sym, exit, out, err);
     if exit != 0 { return false; }
     return contains(out, " " + sym) || contains(out, "_" + sym);
 }
@@ -234,8 +269,7 @@ test "runtime sfn-source consumer fires and produces a cached .o/.ll (#308)" ![i
     let no_extra: string[] = [];
     let exit = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-sfn-sources-link-consumer build positive", exit);
     assert exit == 0;
 
     // `_compile_runtime_sfn_sources` materialized the content-keyed
@@ -309,8 +343,7 @@ test "source edit busts the runtime sfn-source object cache (#969)" ![io] {
     let no_extra: string[] = [];
     let exit1 = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
-    let _o1 = process.capture_take_stdout();
-    let _e1 = process.capture_take_stderr();
+    report_child_failure_pending("runtime-sfn-sources-link-consumer build cachebust-1", exit1);
     assert exit1 == 0;
     assert fs.exists(marker_o);
 
@@ -325,8 +358,7 @@ test "source edit busts the runtime sfn-source object cache (#969)" ![io] {
 
     let exit2 = process.run_capture([sfn_bin_path(), "build", "-p", ws
         + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
-    let _o2 = process.capture_take_stdout();
-    let _e2 = process.capture_take_stderr();
+    report_child_failure_pending("runtime-sfn-sources-link-consumer build cachebust-2", exit2);
     assert exit2 == 0;
 
     // With the old existence-only cache the .o would be stale and this

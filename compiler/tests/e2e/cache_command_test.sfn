@@ -13,7 +13,12 @@
 // the mtime-on-hit test drives a real `sfn build` twice because the
 // touch only fires on a genuine cache hit.
 import { find } from "sfn/strings";
-import { clean_runner_env_without, scratch_root, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env_without,
+    report_child_failure,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
 
 struct Run {
     exit: int,
@@ -81,6 +86,7 @@ fn _build(cache_base: string, work: string, src: string, out: string) -> Run ![i
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", out, src], e);
     let so = process.capture_take_stdout();
     let se = process.capture_take_stderr();
+    report_child_failure("cache-command build", exit, so, se);
     return Run { exit: exit, out: so + se };
 }
 

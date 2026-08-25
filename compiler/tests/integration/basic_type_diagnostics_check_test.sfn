@@ -3,6 +3,7 @@
 // Each case drives the built CLI so it pins the rendered E-code, source span,
 // and non-zero process exit rather than only exercising a leaf helper.
 import { remove_all } from "sfn/fs";
+import { sfn_bin_path } from "sfn/test";
 
 struct CheckResult {
     exit_code: i64;
@@ -31,7 +32,7 @@ fn _run_check(name: string, source: string) -> CheckResult ![io] {
     assert dir.length > 0;
     let path = dir + "/" + name;
     fs.writeFile(path, source);
-    let exit_code = process.run_capture(["build/bin/sfn", "check", path], []);
+    let exit_code = process.run_capture([sfn_bin_path(), "check", path], []);
     let output = process.capture_take_stdout() + process.capture_take_stderr();
     return CheckResult {
         exit_code: exit_code,

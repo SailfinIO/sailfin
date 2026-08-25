@@ -31,7 +31,13 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
 // an `![io]` test. (#842.)
 import { contains } from "sfn/strings";
-import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
+    sfn_bin_path
+} from "sfn/test";
 
 // Derived by subtraction from the real environment rather than a
 // hand-rolled allowlist (SFN-1114).
@@ -83,8 +89,7 @@ test "implicit capsule: build links via the implicit runtime capsule" ![io] {
     let prog = _write_prog();
     let exe = _scratch_dir() + "/implicit_link_prog";
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", exe, prog], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    report_child_failure_pending("runtime-implicit-capsule-link build", exit);
     // `sfn build` has no seed fallback, so a real link failure is fatal.
     assert exit == 0;
     assert fs.exists(exe);
@@ -94,14 +99,14 @@ test "implicit capsule: built binary runs and prints the marker" ![io] {
     let prog = _write_prog();
     let exe = _scratch_dir() + "/implicit_link_prog";
     let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", exe, prog], _child_env());
-    let _bo = process.capture_take_stdout();
-    let _be = process.capture_take_stderr();
+    report_child_failure_pending("runtime-implicit-capsule-link build", build_exit);
     assert build_exit == 0;
     assert fs.exists(exe);
 
     let run_exit = process.run_capture([exe], _child_env());
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();
+    report_child_failure("runtime-implicit-capsule-link run", run_exit, run_out, run_err);
     assert run_exit == 0;
     assert contains(run_out + run_err, "implicit-capsule-ok");
 }

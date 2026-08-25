@@ -43,7 +43,16 @@ awk -F '\t' '
 ' "$rename_map"
 
 normalize() {
-    awk -v map_file="$rename_map" '
+    # `RENAME_MAP_FILE=... awk` (an environment assignment), not
+    # `awk -v map_file=...`: POSIX awk runs a `-v`/command-line assignment's
+    # VALUE through the same escape processing as a string literal, so an
+    # unrecognized `\<letter>` silently loses its backslash. A native
+    # Windows path (`C:\Users\...`) is exactly that shape — every backslash
+    # in it vanishes, `map_file` becomes a nonexistent path, `getline`
+    # never loads a single rename pair, and every valid rename reads as
+    # drift. `ENVIRON` values are NOT escape-processed, so the path survives
+    # intact. Do not "simplify" this back to `-v`.
+    RENAME_MAP_FILE="$rename_map" awk '
         function replace_fixed(text, needle, replacement,    at, out) {
             if (needle == "") { return text }
             out = ""
@@ -55,6 +64,7 @@ normalize() {
         }
         BEGIN {
             FS = "\t"
+            map_file = ENVIRON["RENAME_MAP_FILE"]
             while ((getline map_line < map_file) > 0) {
                 if (map_line ~ /^[[:space:]]*$/ || map_line ~ /^#/) { continue }
                 split(map_line, fields, "\t")

@@ -1,5 +1,5 @@
 // capsules/sfn/test/src/child_diag.sfn — Child-process failure diagnostics
-// (SFN-87 / #1726).
+// (SFN-87 / #1726, clipping + drain form: SFN-1115).
 //
 // E2e tests that spawn a nested `sfn run`/`build`/`check`/`emit` via
 // `process.run_capture` and assert `exit == 0` tend to discard the child's
@@ -11,11 +11,70 @@
 //
 // `report_child_failure` is `![io]` (it prints) and therefore cannot be
 // built from the `expect_*` matchers in this capsule, which are `![pure]`.
+import { parse_int } from "sfn/strings";
+
+// Default per-stream clipping budget in bytes. A sweep-scale caller count
+// (~640 sites, SFN-1115) turns "dump the whole stream" from free into a
+// way to bury the signal of a heavily-failing Windows run in megabytes of
+// tier log. Overridable via `SAILFIN_TEST_CHILD_DIAG_BYTES` — bytes only,
+// no `K`/`M`/`G` suffixes, matching the `SAILFIN_MEM_LIMIT` convention
+// (`.claude/rules/compiler-safety.md`) of rejecting unit suffixes rather
+// than silently truncating them. `0` disables clipping.
+fn _child_diag_budget() -> int ![io] {
+    let raw = env.get("SAILFIN_TEST_CHILD_DIAG_BYTES");
+    if raw.length == 0 { return 8192; }
+    match parse_int(raw) {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return 8192; }
+    }
+    return 8192;
+}
+
+// Clips `text` to the budget by keeping the first `budget/2` bytes and the
+// last `budget/2` bytes, with an elision marker between them. Both head and
+// tail are kept — a compiler child's real error is usually at the tail
+// (the failing line) while its invocation banner is at the head, and either
+// alone can be the wrong half to keep.
+fn _clip_stream(text: string) -> string ![io] {
+    let budget = _child_diag_budget();
+    if budget <= 0 { return text; }
+    if text.length <= budget { return text; }
+    let half = budget / 2;
+    let head = substring(text, 0, half);
+    let tail = substring(text, text.length - half, text.length);
+    let elided = text.length - (half * 2);
+    return head + "\n... " + number_to_string(elided) + " bytes elided ...\n"
+        + tail;
+}
+
 fn report_child_failure(tag: string, exit: int, out: string, err: string) ![io] {
     if exit == 0 { return; }
-    print.err("[" + tag + "] child failed exit=" + number_to_string(exit)
-        + " stdout:\n"
-        + out
-        + "\nstderr:\n"
-        + err);
+    let mut message = "[" + tag + "] child failed exit=" + number_to_string(exit);
+    if exit == -1 {
+        // `_run_capture_impl` (runtime/sfn/process.sfn:916) and
+        // `_pw_run_capture_impl` (runtime/sfn/platform/process_windows.sfn:738)
+        // both return -1, with both streams empty, for a spawn/reap failure —
+        // the child never ran. Without this hint the diagnostic reads
+        // "stdout:\n\nstderr:\n" and teaches the reader nothing; on Windows
+        // this is the single most likely code for a missing `bash`/`tar`/
+        // `chmod`/`rm` in a test's argv (SFN-1115, SFN-1128).
+        message = message
+            + " (run_capture could not spawn or reap the child: argv[0] not"
+            + " found on PATH, not executable, or a pipe/spawn failure. The"
+            + " child never ran, so both streams are empty. Check argv[0] and"
+            + " the child env's PATH.)";
+    }
+    print.err(message + " stdout:\n" + _clip_stream(out) + "\nstderr:\n"
+        + _clip_stream(err));
+}
+
+// Drains both captured streams unconditionally — byte-identical drain
+// semantics to the `let _o = process.capture_take_stdout(); let _e =
+// process.capture_take_stderr();` pair it replaces, including on the
+// success path — then forwards to `report_child_failure`. Do NOT use this
+// where the streams are needed afterwards: it takes and discards them.
+fn report_child_failure_pending(tag: string, exit: int) ![io] {
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure(tag, exit, out, err);
 }

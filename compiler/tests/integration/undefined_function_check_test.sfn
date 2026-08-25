@@ -25,6 +25,7 @@
 // the test exercises the shipped defaults deterministically instead of
 // inheriting an ambient shell setting.
 import { remove_all } from "sfn/fs";
+import { sfn_bin_path } from "sfn/test";
 
 import { module_name_from_path } from "../../src/module_paths";
 
@@ -59,14 +60,14 @@ fn _mint_fixture(name: string, source: string) -> string ![io] {
 // return the combined stdout+stderr so a case can assert on diagnostic
 // text regardless of which stream the renderer used.
 fn _check_output(path: string) -> string ![io] {
-    let _rc = process.run_capture(["build/bin/sfn", "check", path], []);
+    let _rc = process.run_capture([sfn_bin_path(), "check", path], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return out + err;
 }
 
 fn _check_exit(path: string) -> i64 ![io] {
-    let rc = process.run_capture(["build/bin/sfn", "check", path], []);
+    let rc = process.run_capture([sfn_bin_path(), "check", path], []);
     // Drain the stashed capture buffers so a later `_check_output` /
     // `capture_take_*` call doesn't hand back this run's streams.
     let _o = process.capture_take_stdout();
@@ -145,7 +146,7 @@ test "SFN-544: workspace export missing from imports reports span and provider" 
     fs.writeFile(consumer, "// SFN-544 regression fixture.\n\n"
         + "fn unresolved_identifier_repro() -> string { return compile_to_sailfin(\"x\"); }\n");
 
-    let build_rc = process.run_capture(["build/bin/sfn", "build", "-p", dir, "-o", out_bin], process.environ());
+    let build_rc = process.run_capture([sfn_bin_path(), "build", "-p", dir, "-o", out_bin], process.environ());
     let build_log = process.capture_take_stdout() + process.capture_take_stderr();
     if build_rc != 0 { print.err(build_log); }
     assert build_rc == 0;
@@ -178,7 +179,7 @@ test "check resolver: a broken configured entry does not fail a healthy file" ![
     fs.writeFile(broken, "fn broken( {\n");
     fs.writeFile(healthy, "fn healthy() -> int { return 1; }\n");
 
-    let rc = process.run_capture(["build/bin/sfn", "check", healthy], []);
+    let rc = process.run_capture([sfn_bin_path(), "check", healthy], []);
     let combined = process.capture_take_stdout() + process.capture_take_stderr();
     assert rc == 0;
     assert ! _contains(combined, "failed to stage import-context");
@@ -210,7 +211,7 @@ test "check resolver: a stale entry artifact is not provider inventory" ![io] {
     fs.writeFile(artifact_base + ".layout-manifest", "");
     fs.writeFile(artifact_base + ".srchash", "definitely-stale");
 
-    let rc = process.run_capture(["build/bin/sfn", "check", consumer], []);
+    let rc = process.run_capture([sfn_bin_path(), "check", consumer], []);
     let combined = process.capture_take_stdout() + process.capture_take_stderr();
     assert rc != 0;
     assert _contains(combined, "undefined function `stale_export`");

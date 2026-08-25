@@ -36,17 +36,33 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
+// `realpath(path, resolved)` with `resolved = null` has libc allocate the
+// resolved buffer. Declared directly rather than imported: a capsule test
+// cannot reach into `compiler/src` (capsule-boundary rule), and this
+// mirrors `sfn_bin.sfn`'s own inline declaration, needed there for the same
+// SFN-635 no-cross-module-extern reason.
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
 // The test process's own cwd, needed here (and only here, for test setup)
 // to predict what a child that inherits it will resolve `.` to, and to
 // absolutize `_scratch_dir()` when it falls back to the relative literal.
 // Not a stand-in for `sfn_bin_abs_path` under test — that function is
 // exercised exclusively through the compiled fixture below.
+//
+// `realpath(".", null)` rather than a `pwd` shellout (SFN-995): a Git-Bash
+// `pwd` prints the POSIX-mount spelling (`/c/Users/...`) on a native
+// Windows host, a path style `_cwd()` under test (`sfn_bin.sfn:101-107`)
+// never produces — its own `realpath`-based resolution returns a
+// Win32-native path — so the two would never compare equal here regardless
+// of which case is being asserted. Mirrors `_cwd()`'s exact body so the
+// value computed for the assertion is produced by the same primitive as
+// the code under test, `PWD`-fallback included.
 fn _repo_root() -> string ![io] {
-    let exit = process.run_capture(["pwd"], process.environ());
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    assert exit == 0;
-    return trim(out);
+    let resolved: *u8 = realpath("." as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    let pwd = env.get("PWD");
+    if pwd.length > 0 { return pwd; }
+    return ".";
 }
 
 // `_scratch_dir()` always returns the relative in-tree literal, so this is
@@ -169,10 +185,12 @@ test "sfn_bin_abs: SAILFIN_BIN set to an absolute Windows path passes through un
 //    root and fail this assertion; a `realpath(".")`-first one answers with
 //    the directory the child is really in.
 //
-//    (`_repo_root()` is logical `pwd` while `_cwd()` is physical `realpath`,
-//    so this and test 5 would diverge under a symlinked checkout — not the
-//    case on any supported runner, but the reason to reach for
-//    `realpath`-based setup first if that ever changes.)
+//    (`_repo_root()` mirrors `_cwd()`'s `realpath(".")`-first body exactly
+//    now, rather than a `pwd` shellout's logical answer, so the two agree
+//    even under a symlinked checkout — SFN-995: a Git-Bash `pwd` returns
+//    the wrong path STYLE on a native Windows host, a divergence no
+//    checkout topology could paper over. This test's discriminating power
+//    comes entirely from the SHIFTED cwd `with_cwd` places the child in.)
 test "sfn_bin_abs: a relative bin path resolves against the child's real cwd, not the inherited PWD" ![io] {
     let different_cwd = _abs_path(_scratch_dir());
     let out = _probe_bin_abs_path("relative-different-cwd", "Linux", "", different_cwd);

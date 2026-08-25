@@ -25,7 +25,13 @@
 // `workspace.toml` ancestor is discoverable and the cache path (not the
 // workspace-implicit path) is the one under test.
 import { find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
+import {
+    default_scratch_dir,
+    report_child_failure,
+    report_child_failure_pending,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 // Child environment for the spawned `sfn build`, with `HOME` overridden
 // to the throwaway cache root. Start from the parent snapshot (PATH plus
@@ -46,6 +52,14 @@ fn _child_env_with_home(home: string) -> string[] ![io] {
     }
     e.push("HOME=" + home);
     return e;
+}
+
+// `-o` is honoured verbatim, so on Windows the built file may carry a
+// `.exe` suffix the base path did not ask for. Both spellings are probed
+// rather than branching on the host (`process_argv_quoting_test.sfn::_built_path`).
+fn _built_path(base: string) -> string ![io] {
+    if fs.exists(base + ".exe") { return base + ".exe"; }
+    return base;
 }
 
 // A fresh marker-file path under the runner's scratch dir (or `/tmp`),
@@ -91,13 +105,18 @@ fn _build_and_run(out_marker: string) -> int ![io] {
 
         let binpath = dir + "/main";
         let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env_with_home(dir));
-        let _bo = process.capture_take_stdout();
-        let _be = process.capture_take_stderr();
+        report_child_failure_pending("cli-bare-file-cached-capsule-import build", build_exit);
         if build_exit != 0 { return -100; }
 
-        let run_exit = process.run_capture([binpath], []);
+        // Resolve the launchable path AFTER the build: an extensionless
+        // path is not merely unfound but unlaunchable on Windows (SFN-693,
+        // `_bootstrap_seed_bin`'s comment, `compiler/src/cli/commands/dev.sfn:145-147`)
+        // — `CreateProcessA` fails `ERROR_FILE_NOT_FOUND` outright rather
+        // than falling back the way a PATH search would.
+        let run_exit = process.run_capture([_built_path(binpath)], []);
         let out = process.capture_take_stdout();
-        let _re = process.capture_take_stderr();
+        let err = process.capture_take_stderr();
+        report_child_failure("cli-bare-file-cached-capsule-import run", run_exit, out, err);
         fs.writeFile(out_marker, out);
         return run_exit;
     });

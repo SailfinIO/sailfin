@@ -19,7 +19,7 @@
 // no-bash-e2e.md`).
 import { remove_all } from "sfn/fs";
 import { int_to_string } from "sfn/strings";
-import { nested_runner_scratch } from "sfn/test";
+import { nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 import { assemble_link_inputs } from "../../src/build/clang_argv";
 import {
@@ -50,7 +50,7 @@ test "parallel emit: fan-out emits and publishes every task" ![io] {
 
     let tasks: ParallelEmitTask[] = [_write_task(dir, "task0", _valid_source(0)), _write_task(dir, "task1", _valid_source(1)), _write_task(dir, "task2", _valid_source(2))];
 
-    let ok = _cr_run_parallel_emit(tasks, "native", "build/bin/sfn", 3, "");
+    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 3, "");
     assert ok;
 
     let mut i = 0;
@@ -73,7 +73,7 @@ test "parallel emit: a failing child fails the round" ![io] {
     // Syntactically invalid: `sfn emit` for this task exits non-zero.
     _write_task(dir, "broken", "fn broken( {\n"), _write_task(dir, "good1", _valid_source(1))];
 
-    let ok = _cr_run_parallel_emit(tasks, "native", "build/bin/sfn", 3, "");
+    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 3, "");
     assert ! ok;
 
     // The pool drains the whole queue and reports failure rather than
@@ -95,7 +95,7 @@ test "parallel emit: jobs above task count still completes" ![io] {
 
     // jobs (8) exceeds tasks.length (2): the top-up loop's
     // `launched >= tasks.length` guard must still hold and complete.
-    let ok = _cr_run_parallel_emit(tasks, "native", "build/bin/sfn", 8, "");
+    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 8, "");
     assert ok;
 
     assert fs.exists(tasks[0].output_path);
@@ -116,11 +116,11 @@ test "parallel process pool: exit codes preserve task order" ![io] {
     fs.writeFile(broken, "fn broken( {\n");
     fs.writeFile(good1, _valid_source(1));
     let tasks: ParallelProcessTask[] = [ParallelProcessTask {
-        argv: ["build/bin/sfn", "check", good0]
-    }, ParallelProcessTask { argv: ["build/bin/sfn", "check", broken] }, ParallelProcessTask {
-        argv: ["build/bin/sfn", "check", good1]
-    }, ParallelProcessTask { argv: ["build/bin/sfn", "check", good0] }, ParallelProcessTask {
-        argv: ["build/bin/sfn", "check", good1]
+        argv: [sfn_bin_path(), "check", good0]
+    }, ParallelProcessTask { argv: [sfn_bin_path(), "check", broken] }, ParallelProcessTask {
+        argv: [sfn_bin_path(), "check", good1]
+    }, ParallelProcessTask { argv: [sfn_bin_path(), "check", good0] }, ParallelProcessTask {
+        argv: [sfn_bin_path(), "check", good1]
     }];
 
     // Five tasks through a two-worker window must exercise top-up after a

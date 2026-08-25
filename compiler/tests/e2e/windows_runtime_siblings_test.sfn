@@ -130,7 +130,20 @@ test "windows siblings: mkstemp_windows.sfn emits and defines mkstemp" ![io] {
     let ir = _emit_windows("runtime/sfn/platform/mkstemp_windows.sfn", "mkstemp-windows-emit");
     assert ir.length > 0;
     assert contains(ir, "define i32 @mkstemp(");
-    assert contains(ir, "declare i32 @_mktemp_s(");
+    // The suffix is now generated in-process from the pid and tick count and
+    // the file is created with an exclusive `_open`, rather than asking
+    // `_mktemp_s` for a name (SFN-1115). `_mktemp_s` returns the LOWEST free
+    // `<letter><pid>` name in the directory, so removing a temp made the very
+    // next mint hand back the identical path.
+    //
+    // Pinning the pid/tick seeds guards the uniqueness source, which is the
+    // property that actually regressed. The previous pin — `declare i32
+    // @_mktemp_s(` — asserted the presence of the defective call, so it could
+    // only ever fail once the defect was fixed.
+    assert contains(ir, "declare i32 @_open(");
+    assert contains(ir, "declare i32 @GetCurrentProcessId(");
+    assert contains(ir, "declare i32 @GetTickCount(");
+    assert ! contains(ir, "@_mktemp_s(");
 }
 
 test "windows siblings: strcasestr_windows.sfn emits and defines strcasestr" ![io] {

@@ -4,6 +4,8 @@
 // exception round-trip and an on-device `struct stat.st_mode` read.
 import { default_scratch_dir } from "sfn/test";
 
+import { host_is_windows } from "../../../src/build/target";
+
 struct Pair {
     left: int,
     right: int
@@ -27,8 +29,21 @@ fn main() -> void ![io] {
         path = default_scratch_dir() + "/sfn-aarch64-bootstrap-probe";
     }
     fs.writeFile(path, "probe");
-    assert fs.set_perms(path, 384);
-    assert fs.get_perms(path) == 384;
+    // Both callers of this fixture (the plain run and the SFN-579
+    // sibling-`sailfin`-directory self-path run) fail identically here,
+    // which is what pins the cause to this permission round-trip rather
+    // than to self-path resolution — that mechanic is fine on Windows;
+    // this fixture just never accounted for the platform it was running
+    // permission checks on. SFN-888 / `filesystem.sfn:1047-1057`:
+    // `fs.get_perms` is a documented `-1` stub on Windows (no `st_mode`
+    // read), and `fs.set_perms` only ever toggles the read-only attribute
+    // there, so a full POSIX mode round-trip is unclaimable — only
+    // existence is, matching `config_test.sfn`'s "config dir/file
+    // permissions are restricted" test.
+    if host_is_windows() { assert fs.exists(path); } else {
+        assert fs.set_perms(path, 384);
+        assert fs.get_perms(path) == 384;
+    }
     fs.deleteFile(path);
     print("aarch64 bootstrap probe ok");
 }

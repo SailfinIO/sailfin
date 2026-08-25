@@ -22,8 +22,16 @@
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
 // unusable from an `![io]` test (#842); assert directly on values instead.
+import { free_bytes, read_bytes } from "sfn/fs";
 import { find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure_pending,
+    sfn_bin_path
+} from "sfn/test";
+
+import { sha256_hex_of_bytes } from "../../src/build/hash";
 
 // Declared directly rather than resolved through the compiler under
 // test: calling the runtime symbol as an extern lets this test prove the
@@ -94,8 +102,7 @@ fn _build_fixture(dir: string, name: string, src_text: string, label: string) ->
     let bin = dir + "/" + name + ".exe";
     fs.writeFile(src, src_text);
     let exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch(label)));
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("rename-running-image build " + name, exit);
     if exit != 0 { return ""; }
     return bin;
 }
@@ -121,10 +128,26 @@ test "rename running image (windows): displace-then-publish replaces a locked ru
 
     let replacement = _build_fixture(dir, "replacement", _replacement_source(), "rename_running_image-replacement");
     assert replacement.length > 0;
-    let replacement_bytes = fs.readFile(replacement);
+    // SFN-1008: `replacement`/`victim` are compiled PE images with interior
+    // NUL bytes, which `fs.readFile` aborts on rather than silently
+    // truncates, so compare by SHA-256 digest via `read_bytes` instead —
+    // the idiom `fs_copy_binary_test.sfn` uses for the same reason. The
+    // `status`/length asserts below are load-bearing, not decoration:
+    // `sha256_hex_of_bytes` returns "" for a failed (zero-length or
+    // null-addr) read, so two failed reads would otherwise hash equal and
+    // pass vacuously.
+    let replacement_read = read_bytes(replacement);
+    assert replacement_read.status == 0;
+    assert replacement_read.length > 0;
+    let replacement_hash = sha256_hex_of_bytes(replacement_read.addr, replacement_read.length);
+    free_bytes(replacement_read);
     // Captured before the replace so the displaced copy can be checked
     // byte-for-byte below.
-    let victim_bytes = fs.readFile(victim);
+    let victim_read = read_bytes(victim);
+    assert victim_read.status == 0;
+    assert victim_read.length > 0;
+    let victim_hash = sha256_hex_of_bytes(victim_read.addr, victim_read.length);
+    free_bytes(victim_read);
 
     // Spawn the victim so its image is genuinely locked — precedent
     // `process_handle_windows_test.sfn:90`/`:98`.
@@ -143,14 +166,25 @@ test "rename running image (windows): displace-then-publish replaces a locked ru
 
     let old_path = victim + ".old";
     assert fs.exists(old_path);
-    assert fs.readFile(victim) == replacement_bytes;
+    let published_read = read_bytes(victim);
+    assert published_read.status == 0;
+    assert published_read.length > 0;
+    let published_hash = sha256_hex_of_bytes(published_read.addr, published_read.length);
+    free_bytes(published_read);
+    assert published_hash == replacement_hash;
     // The displaced image is intact, not merely present. This is the
     // machine-checkable form of the module header's claim that
     // displace-then-publish never destroys `dst`'s bytes — the property
     // that distinguishes it from the delete-then-rename that header
     // rejects, and the precondition for the rollback path being able to
-    // restore anything.
-    assert fs.readFile(old_path) == victim_bytes;
+    // restore anything. Compared by digest (see above) rather than
+    // `fs.readFile` equality, for the same SFN-1008 reason.
+    let old_read = read_bytes(old_path);
+    assert old_read.status == 0;
+    assert old_read.length > 0;
+    let old_hash = sha256_hex_of_bytes(old_read.addr, old_read.length);
+    free_bytes(old_read);
+    assert old_hash == victim_hash;
 
     // Let the still-running (now displaced) child exit, then reap it.
     fs.writeFile(sentinel, "go");

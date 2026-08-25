@@ -39,7 +39,7 @@
 // forbid) and only guards a `+dev.<hash>` stripping detail — not the core
 // cache contract. The four legs below fully cover the hit/miss/store/bust
 // behavior.
-import { find } from "sfn/strings";
+import { find, int_to_string } from "sfn/strings";
 import { clean_runner_env_without, sfn_bin_path } from "sfn/test";
 
 // Derived by subtraction, not assembled key by key (SFN-1114). The runtime
@@ -65,10 +65,20 @@ fn _run_suite(test_dir: string, cache_dir: string, extra: string[]) -> string ![
         argv.push(extra[i]);
         i += 1;
     }
-    let _exit = process.run_capture(argv, _suite_env(cache_dir));
+    let exit = process.run_capture(argv, _suite_env(cache_dir));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    return out + err;
+    let log = out + err;
+    // Unconditional, not `report_child_failure`-style: callers assert on
+    // `log`'s cache-state substrings, not on the exit code, so the
+    // exit==0-is-fine convention would say nothing about a wrong hit/miss
+    // count riding an otherwise-clean exit.
+    print.err("[test-bin-cache] dir=" + test_dir + " cache=" + cache_dir
+        + " child exit="
+        + int_to_string(exit)
+        + " combined output:\n"
+        + log);
+    return log;
 }
 
 // A kernel-unique per-invocation root (mirrors the bash `mktemp -d`). A
