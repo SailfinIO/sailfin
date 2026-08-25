@@ -266,19 +266,47 @@ jobs:
           # transitional. This one is structural.
           SAILFIN_BOOTSTRAP: "off"
         run: |
-          $ErrorActionPreference = "Continue"
+          $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force build/selfhost/fp1, build/selfhost/fp2 | Out-Null
-          & $env:NATIVE_SFN selfhost `
-            --work-dir build/selfhost/native `
-            --first-pass $env:NATIVE_SFN `
-            --seedcheck-out build/selfhost/fp1/sfn-selfhost1.exe `
-            --stage3-out build/selfhost/fp2/sfn-selfhost2.exe `
-            --no-promote `
-            --strict `
-            --json 2>&1 | Tee-Object -FilePath build/selfhost/selfhost.jsonl
-          $rc = $LASTEXITCODE
+
+          # The composite action discovers the compiler from Git Bash and
+          # exports `/d/a/.../compiler.exe`. PowerShell cannot invoke that
+          # spelling, so normalize the MSYS drive prefix before both executing
+          # the driver and passing it back as `--first-pass`.
+          $nativeSfn = $env:NATIVE_SFN
+          if ($nativeSfn -match '^/([A-Za-z])/(.*)$') {
+            $nativeSfn = "$($Matches[1]):/$($Matches[2])"
+          }
+          if (-not (Test-Path -LiteralPath $nativeSfn -PathType Leaf)) {
+            "failure_kind=selfhost" >> $env:GITHUB_OUTPUT
+            Write-Host "::error::native compiler is not executable from PowerShell: $nativeSfn"
+            exit 1
+          }
+
+          $rc = 1
+          try {
+            & $nativeSfn selfhost `
+              --work-dir build/selfhost/native `
+              --first-pass $nativeSfn `
+              --seedcheck-out build/selfhost/fp1/sfn-selfhost1.exe `
+              --stage3-out build/selfhost/fp2/sfn-selfhost2.exe `
+              --no-promote `
+              --strict `
+              --json 2>&1 | Tee-Object -FilePath build/selfhost/selfhost.jsonl
+            $rc = $LASTEXITCODE
+          } catch {
+            "failure_kind=selfhost" >> $env:GITHUB_OUTPUT
+            Write-Host "::error::failed to invoke native self-host driver: $($_.Exception.Message)"
+            exit 1
+          }
+
           $failureKind = "selfhost"
-          $envelope = Get-Content build/selfhost/selfhost.jsonl |
+          if (-not (Test-Path -LiteralPath build/selfhost/selfhost.jsonl -PathType Leaf)) {
+            "failure_kind=$failureKind" >> $env:GITHUB_OUTPUT
+            Write-Host "::error::native self-host driver produced no JSON report"
+            exit 1
+          }
+          $envelope = Get-Content -LiteralPath build/selfhost/selfhost.jsonl |
             Where-Object { $_ -match '^\{"schema_version":"sailfin-selfhost/1"' } |
             Select-Object -Last 1
           if ($envelope) {
@@ -288,6 +316,19 @@ jobs:
             }
           }
           "failure_kind=$failureKind" >> $env:GITHUB_OUTPUT
+          if ($rc -eq 0) {
+            $expectedOutputs = @(
+              "build/selfhost/fp1/sfn-selfhost1.exe",
+              "build/selfhost/fp2/sfn-selfhost2.exe"
+            )
+            $missingOutputs = @($expectedOutputs | Where-Object {
+              -not (Test-Path -LiteralPath $_ -PathType Leaf)
+            })
+            if ($missingOutputs.Count -gt 0) {
+              Write-Host "::error::native self-host completed without expected output(s): $($missingOutputs -join ', ')"
+              exit 1
+            }
+          }
           exit $rc
 
       # Comparison only — the passes ran in the step above. Anything that
