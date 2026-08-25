@@ -285,11 +285,16 @@ jobs:
 
           $rc = 1
           try {
+            # Each generation lives in its own directory, but the filename
+            # stays canonical. The multi-file test runner resolves its child
+            # compiler by probing the running binary's directory for
+            # `sfn.exe`/`sailfin.exe`; a generation-specific filename lets the
+            # parent start but makes every per-file child spawn fail (exit 127).
             & $nativeSfn selfhost `
               --work-dir build/selfhost/native `
               --first-pass $nativeSfn `
-              --seedcheck-out build/selfhost/fp1/sfn-selfhost1.exe `
-              --stage3-out build/selfhost/fp2/sfn-selfhost2.exe `
+              --seedcheck-out build/selfhost/fp1/sfn.exe `
+              --stage3-out build/selfhost/fp2/sfn.exe `
               --no-promote `
               --strict `
               --json 2>&1 | Tee-Object -FilePath build/selfhost/selfhost.jsonl
@@ -318,8 +323,8 @@ jobs:
           "failure_kind=$failureKind" >> $env:GITHUB_OUTPUT
           if ($rc -eq 0) {
             $expectedOutputs = @(
-              "build/selfhost/fp1/sfn-selfhost1.exe",
-              "build/selfhost/fp2/sfn-selfhost2.exe"
+              "build/selfhost/fp1/sfn.exe",
+              "build/selfhost/fp2/sfn.exe"
             )
             $missingOutputs = @($expectedOutputs | Where-Object {
               -not (Test-Path -LiteralPath $_ -PathType Leaf)
@@ -342,11 +347,11 @@ jobs:
         timeout-minutes: 5
         run: |
           set -euo pipefail
-          ls -lh build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe
-          (sha256sum build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe 2>/dev/null || shasum -a 256 build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe || true)
-          if ! cmp -s build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; then
+          ls -lh build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe
+          (sha256sum build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe 2>/dev/null || shasum -a 256 build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe || true)
+          if ! cmp -s build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe; then
             echo "[error] fixed-point mismatch: pass-2 differs from pass-1" >&2
-            cmp -l build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe | head -n 20 || true
+            cmp -l build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe | head -n 20 || true
             exit 1
           fi
           echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
@@ -361,7 +366,7 @@ jobs:
         shell: pwsh
         timeout-minutes: 5
         run: |
-          $testRoots = @(& build/selfhost/fp1/sfn-selfhost1.exe dev inventory tests)
+          $testRoots = @(& build/selfhost/fp1/sfn.exe dev inventory tests)
           $inventoryRc = $LASTEXITCODE
           if ($inventoryRc -ne 0 -or $testRoots.Count -eq 0) {
             Write-Error "workspace test inventory is empty or failed (exit=$inventoryRc)"
@@ -380,11 +385,17 @@ jobs:
         timeout-minutes: 240
         env:
           SAILFIN_BOOTSTRAP: "off"
+          # fp1 lives one directory deeper than the normal `build/bin/sfn.exe`
+          # dev layout, so the runtime-root walk cannot reach `<repo>/runtime`
+          # within its supported two-parent search. This is the documented
+          # operator override for CI scratch layouts, and the pooled children
+          # inherit it through the runner's complete environment snapshot.
+          SAILFIN_RUNTIME_ROOT: ${{ github.workspace }}/runtime
         run: |
           $ErrorActionPreference = "Continue"
           $testRoots = @(Get-Content build/selfhost/windows-native-test-roots.txt)
           $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          & build/selfhost/fp1/sfn-selfhost1.exe test @testRoots --no-test-cache --json 2>&1 |
+          & build/selfhost/fp1/sfn.exe test @testRoots --no-test-cache --json 2>&1 |
             Tee-Object -FilePath build/selfhost/windows-native-tests.jsonl
           $rc = $LASTEXITCODE
           $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
