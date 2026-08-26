@@ -54,13 +54,12 @@ fn _ends_with(text: string, suffix: string) -> boolean {
 // "run-" — the per-invocation naming scheme (`_unique_run_stem` in
 // `compiler/src/cli/commands/run.sfn`).
 //
-// The `.ll` exclusion is load-bearing, not tidiness. It used to be free:
+// The `.ll` and `.work` exclusions are load-bearing, not tidiness. It used to be free:
 // the IR was the fixed `run.ll`, which starts with "run." and so never
 // matched the "run-" prefix. SFN-1004 moved the IR onto the same
 // per-invocation stem as the exe, so `run-<millis>.ll` now sits beside
-// `run-<millis>[.exe]` and WOULD match. Without this filter every count
-// here doubles and the assertions below silently stop meaning what they
-// say.
+// `run-<millis>[.exe]`; SFN-1144 adds `run-<millis>.work` for transient
+// runtime/link artifacts. Both would match without the suffix filters.
 fn _count_run_exe_entries(dir: string) -> int ![io] {
     if !fs.exists(dir) { return 0; }
     let entries = fs.listDirectory(dir);
@@ -69,7 +68,9 @@ fn _count_run_exe_entries(dir: string) -> int ![io] {
     loop {
         if i >= entries.length { break; }
         let name = entries[i];
-        if find(name, "run-", 0) == 0 && !_ends_with(name, ".ll") { count += 1; }
+        if find(name, "run-", 0) == 0 && !_ends_with(name, ".ll") && !_ends_with(name, ".work") {
+            count += 1;
+        }
         i += 1;
     }
     return count;
@@ -90,7 +91,7 @@ fn _wait_for_run_exe_entry(dir: string, deadline_ms: int) -> boolean ![clock, io
 }
 
 // Every EXECUTABLE entry directly under `dir` whose name starts with
-// "run-" (SFN-974), mirroring `_count_run_exe_entries`'s filter.
+// "run-" (SFN-974), mirroring `_count_run_exe_entries`'s filters.
 fn _run_exe_names(dir: string) -> string[] ![io] {
     if !fs.exists(dir) { return []; }
     let entries = fs.listDirectory(dir);
@@ -99,7 +100,7 @@ fn _run_exe_names(dir: string) -> string[] ![io] {
     loop {
         if i >= entries.length { break; }
         let name = entries[i];
-        if find(name, "run-", 0) == 0 && !_ends_with(name, ".ll") {
+        if find(name, "run-", 0) == 0 && !_ends_with(name, ".ll") && !_ends_with(name, ".work") {
             names.push(name);
         }
         i += 1;
@@ -117,6 +118,23 @@ fn _count_run_ll_entries(dir: string) -> int ![io] {
         if i >= entries.length { break; }
         let name = entries[i];
         if find(name, "run-", 0) == 0 && _ends_with(name, ".ll") { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+// Every per-invocation runtime/link workspace (SFN-1144).
+fn _count_run_work_entries(dir: string) -> int ![io] {
+    if !fs.exists(dir) { return 0; }
+    let entries = fs.listDirectory(dir);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        if find(name, "run-", 0) == 0 && _ends_with(name, ".work") {
+            count += 1;
+        }
         i += 1;
     }
     return count;
@@ -175,6 +193,7 @@ test "run: unguarded default path mints a per-invocation exe name and cleans up 
     // per-invocation scheme stays bounded rather than accumulating a new
     // binary on every `sfn run`.
     assert _count_run_exe_entries(sailfin_dir) == 0;
+    assert _count_run_work_entries(sailfin_dir) == 0;
 }
 
 // SFN-974: three, not two and not four — three is enough to demonstrate
@@ -263,4 +282,5 @@ test "run: three overlapping invocations in one directory all succeed with disti
     // exe AND its per-invocation `.ll` are gone once all three have joined.
     assert _count_run_exe_entries(sailfin_dir) == 0;
     assert _count_run_ll_entries(sailfin_dir) == 0;
+    assert _count_run_work_entries(sailfin_dir) == 0;
 }

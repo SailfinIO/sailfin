@@ -53,6 +53,14 @@ fn _rel_sfn() -> string ![io] {
     return "build/bin/sfn";
 }
 
+// The same executable named relative to `build`, for exercising the child-cwd
+// variants. This path is deliberately absent from the repo root: the spawn can
+// succeed only if executable resolution applies the requested cwd first.
+fn _rel_sfn_from_build() -> string ![io] {
+    if fs.exists("build/bin/sfn.exe") { return "bin/sfn.exe"; }
+    return "bin/sfn";
+}
+
 // Not a skip-guard. Every `sfn/test` consumer already depends on a repo-root
 // working directory, because `sfn_bin_path()`'s unoverridden default is this
 // same relative path — so if this assertion ever fails, the cwd contract has
@@ -81,6 +89,19 @@ test "process: run_capture spawns a working-directory-relative argv[0]" ![io] {
     assert expect_eq_int(rc, 0).ok;
 }
 
+// `posix_spawn` applies its child chdir action before executable resolution.
+// `CreateProcessA` resolves a relative `lpApplicationName` against the parent
+// cwd instead, so the Windows runtime must combine the requested cwd with a
+// separator-bearing relative argv[0] itself (SFN-1144).
+test "process: run_capture_cwd resolves argv[0] from the requested cwd" ![io] {
+    let scratch = nested_runner_scratch("sfn1144-capture-cwd");
+    fs.createDirectory(scratch, true);
+    let rc = process.run_capture_cwd([_rel_sfn_from_build(), "--version"], clean_runner_env(scratch), "build");
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert expect_eq_int(rc, 0).ok;
+}
+
 // ── The Linux-runnable half of the SFN-1104 guard ─────────────────────
 // `runtime/sfn/platform/process_windows.sfn` is selected only by the runtime
 // manifest's Windows target table, so nothing on a Linux or macOS run
@@ -97,12 +118,12 @@ test "process: run_capture spawns a working-directory-relative argv[0]" ![io] {
 test "process: the Windows spawn resolves a relative argv[0] itself (SFN-1104)" ![io] {
     let src = fs.readFile("runtime/sfn/platform/process_windows.sfn");
 
-    assert expect_eq_bool(contains(src, "fn _pw_app_name("), true).ok;
+    assert expect_eq_bool(contains(src, "fn _pw_app_name(argv0: string, cwd: *u8)"), true).ok;
 
     // Both directions of the split are load-bearing, so both are pinned. A
     // separator-bearing name is returned for `lpApplicationName`, which
     // `CreateProcessA` resolves against the working directory...
-    assert expect_eq_bool(contains(src, "if b == 47 || b == 92 { return a; }"), true).ok;
+    assert expect_eq_bool(contains(src, "if b == 47 || b == 92 {"), true).ok;
 
     // ...and a bare name yields NULL, keeping the `PATH` search that `clang`
     // and `llvm-link` are spawned by. Naming a bare one in
@@ -110,10 +131,14 @@ test "process: the Windows spawn resolves a relative argv[0] itself (SFN-1104)" 
     // suppresses the implicit `.exe` suffix.
     assert expect_eq_bool(contains(src, "return 0 as *u8;"), true).ok;
 
-    // All three call sites, not just the one a given test happens to reach.
+    // Null-cwd calls pass through a relative path, while the cwd-aware capture
+    // and spawn calls resolve it from the requested directory.
+    assert expect_eq_bool(contains(src, "let app: *u8 = _pw_app_name(argv[0], null);"), true).ok;
+    assert expect_eq_bool(contains(src, "let app: *u8 = _pw_app_name(argv[0], cwd);"), true).ok;
+    assert expect_eq_bool(contains(src, "let joined: string = (cwd as string) + \"/\" + argv0;"), true).ok;
+
     // The passthrough path keeps its computed `inherit` flag; the capture
     // path and `_pw_spawn_impl` pass a literal `1` with an `env_block`.
-    assert expect_eq_bool(contains(src, "let app: *u8 = _pw_app_name(argv[0]);"), true).ok;
     assert expect_eq_bool(contains(src, "CreateProcessA(app, cmdline, null, null, inherit,"), true).ok;
     assert expect_eq_bool(contains(src, "CreateProcessA(app, cmdline, null, null, 1, 0, env_block,"), true).ok;
 }
