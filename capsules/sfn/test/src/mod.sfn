@@ -481,6 +481,7 @@ export { first_present_tool, symbol_reader, tool_present } from "./tool_probe";
 export {
     ExternalCOracle,
     c_math_link_flags,
+    c_thread_link_flags,
     external_c_oracle,
     require_external_c_oracle,
     run_external_c_oracle
@@ -524,7 +525,7 @@ export { sfn_bin_abs_path } from "./sfn_bin";
 // on POSIX. It is the single definition of a fallback that 230 test files
 // under `compiler/tests/` had each hand-copied as the POSIX-only literal
 // `"/tmp"`, unrunnable on a native Windows host. See `scratch.sfn`.
-export { default_scratch_dir, scratch_root } from "./scratch";
+export { default_scratch_dir, scratch_root, sfn_source_literal } from "./scratch";
 
 // ---------------------------------------------------------------------------
 // Voluntary test skips (SFN-815)

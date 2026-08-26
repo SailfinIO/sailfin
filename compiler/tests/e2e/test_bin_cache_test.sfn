@@ -40,14 +40,30 @@
 // cache contract. The four legs below fully cover the hit/miss/store/bust
 // behavior.
 import { find, int_to_string } from "sfn/strings";
-import { clean_runner_env_without, sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 // Derived by subtraction, not assembled key by key (SFN-1114). The runtime
 // root is resolved relative to the runner's cwd (repo root), so no
 // --runtime-root is threaded. SAILFIN_BUILD_CACHE_DIR is named in the strip
 // list so an inherited outer value cannot shadow the per-invocation push.
-fn _suite_env(cache_dir: string) -> string[] ![io] {
-    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_BUILD_CACHE_DIR"]);
+// The child gets its OWN scratch root, minted per label — not the parent's.
+//
+// Threading `env.get("SAILFIN_TEST_SCRATCH")` here handed the nested `sfn test`
+// the PARENT runner's scratch, and `_test_scratch_root`
+// (`compiler/src/cli/commands/test/cache_scratch.sfn`) honours that variable
+// for `test.ll` and the linked test executable alike. Both runners therefore
+// aimed at one `test.exe`. On POSIX that is a silent cross-contamination the
+// pool tolerates; on Windows an executable cannot be replaced while it is
+// held open, so the child died with `lld-link: error: failed to write output
+// ...test.exe: permission denied`, reported `skip_kind: setup_failed`, and
+// every hit-rate assertion below read a summary for a suite that never ran.
+//
+// `nested_runner_scratch` is the idiom the nested-runner rule requires
+// (SFN-401, `.claude/rules/no-bash-e2e.md`); the label keeps the four legs
+// from colliding with each other as well as with the parent.
+fn _suite_env(cache_dir: string, label: string) -> string[] ![io] {
+    let mut e = clean_runner_env_without(nested_runner_scratch("test-bin-cache-"
+        + label), ["SAILFIN_BUILD_CACHE_DIR"]);
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
     return e;
 }
@@ -57,7 +73,7 @@ fn _suite_env(cache_dir: string) -> string[] ![io] {
 // file keeps the runner on the in-process leaf path (test_files.length == 1,
 // no per-file subprocess fan-out) so the cache read/write and the `cache`
 // summary object are exercised directly.
-fn _run_suite(test_dir: string, cache_dir: string, extra: string[]) -> string ![io] {
+fn _run_suite(test_dir: string, cache_dir: string, extra: string[], label: string) -> string ![io] {
     let mut argv: string[] = [sfn_bin_path(), "test", test_dir, "--json"];
     let mut i = 0;
     loop {
@@ -65,7 +81,7 @@ fn _run_suite(test_dir: string, cache_dir: string, extra: string[]) -> string ![
         argv.push(extra[i]);
         i += 1;
     }
-    let exit = process.run_capture(argv, _suite_env(cache_dir));
+    let exit = process.run_capture(argv, _suite_env(cache_dir, label));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let log = out + err;
@@ -112,7 +128,7 @@ test "cold run: every test misses, hit_rate 0.0000" ![io] {
     let cache = root + "/cache";
     let dir = _write_fixture(root, _truth_one());
 
-    let log = _run_suite(dir, cache, []);
+    let log = _run_suite(dir, cache, [], "cold");
 
     // The summary line must carry the cache object.
     assert find(log, "\"cache\":", 0) >= 0;
@@ -132,9 +148,9 @@ test "warm rerun: every test hits, hit_rate 1.0000" ![io] {
     let dir = _write_fixture(root, _truth_one());
 
     // First run warms the binary cache.
-    let _cold = _run_suite(dir, cache, []);
+    let _cold = _run_suite(dir, cache, [], "warm");
     // Second run with no source change -> every test hits.
-    let log = _run_suite(dir, cache, []);
+    let log = _run_suite(dir, cache, [], "warm");
 
     assert find(log, "\"test_bin_hits\":0", 0) < 0;
     assert find(log, "\"test_bin_misses\":0", 0) >= 0;
@@ -149,7 +165,7 @@ test "--no-test-cache: no read or write, hit_rate 0.0000" ![io] {
     let cache = root + "/cache";
     let dir = _write_fixture(root, _truth_one());
 
-    let log = _run_suite(dir, cache, ["--no-test-cache"]);
+    let log = _run_suite(dir, cache, ["--no-test-cache"], "nocache");
 
     // Neither counter advances: hits=0 AND misses=0.
     assert find(log, "\"test_bin_hits\":0", 0) >= 0;
@@ -166,12 +182,12 @@ test "edited source content-busts the key (miss, no stale hit)" ![io] {
     let dir = _write_fixture(root, _truth_one());
 
     // Warm the cache with the original source.
-    let _warm = _run_suite(dir, cache, []);
+    let _warm = _run_suite(dir, cache, [], "bust");
 
     // Change the source bytes: a changed source -> changed key -> miss
     // (never a stale-binary hit).
     fs.writeFile(dir + "/cache_fixture_test.sfn", _truth_two());
-    let log = _run_suite(dir, cache, []);
+    let log = _run_suite(dir, cache, [], "bust");
 
     assert find(log, "\"test_bin_hits\":0", 0) >= 0;
     assert find(log, "\"test_bin_misses\":0", 0) < 0;

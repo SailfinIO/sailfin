@@ -33,7 +33,7 @@
 //   * `runtime_monotonic_millis_fn` → `sfn_clock_millis`
 //     (`runtime/sfn/clock.sfn`).
 //   * `runtime_serve_fn` → `sailfin_runtime_serve`
-//     (`runtime/sfn/concurrency/serve.sfn`, a no-op stub).
+//     (defined in this file — see the note above `fn serve`, a no-op stub).
 //   * `runtime_array_map_fn`, `runtime_array_filter_fn`,
 //     `runtime_array_reduce_fn` → `sfn_array_sfn_map/filter/reduce`
 //     (`runtime/sfn/array.sfn`, placeholders returning the input;
@@ -617,6 +617,28 @@ fn check_type(value: any, descriptor: string) -> boolean {
     let parsed = parse_type_descriptor(descriptor);
     return check_type_descriptor(value, parsed);
 }
+
+// The no-op `@sailfin_runtime_serve` body lives HERE, in the prelude, rather
+// than in a runtime module (SFN-943). `serve` below is bound unconditionally
+// and the prelude is compiled into every binary, so the reference exists in
+// every link — but the module that used to define it is an `sfn-sources`
+// member, and a runtime capsule is free to list fewer of those. On ELF and
+// Mach-O that mismatch is invisible: the reference sits in a section
+// `--gc-sections` discards whenever nothing calls `serve`. COFF resolves
+// undefined symbols BEFORE it discards sections, so on msvc the same
+// mismatch is a hard `lld-link: error: undefined symbol` — for every
+// minimal-runtime test fixture, and for any user runtime whose `sfn-sources`
+// omits the defining module. Defining it in the prelude makes reference and
+// definition land in the same object on every target, which is a closure
+// argument rather than a dead-strip one.
+//
+// #1308: this is the legacy untyped `serve(handler, config?)` path and has
+// always been a pure no-op — the real HTTP server is the typed
+// `serve(handler, port)` syntax form, which the bespoke `Serve`-node lowering
+// routes directly to `sfn_serve` in `runtime/sfn/concurrency/serve.sfn`.
+// Retiring the dead fallback is a separate API cleanup; this move is
+// behaviour-identical (no-op -> no-op).
+fn sailfin_runtime_serve(handler: *u8, config: *u8) -> void { }
 
 fn serve(handler: any, config: any? = null) -> void ![io, net] {
     runtime_serve_fn(handler, config);

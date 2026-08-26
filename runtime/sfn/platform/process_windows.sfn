@@ -1899,15 +1899,32 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
     return code as i64;
 }
 
-// The fd accessors stay `-1` on Windows BY DESIGN, not as a leftover stub
-// (SFN-497 scopes them Out): a Windows HANDLE is not a file descriptor, and
-// there is no numbering space to project one onto. Their only consumer is
-// `io.poll_any`, which is itself unavailable here (`poll(2)` does not cover
-// pipe handles under mingw, and `WSAPoll` is sockets-only), and which
-// already treats a negative fd as parked. A caller needing deadlock-free
-// stdout/stderr demux on Windows uses the framed reads below instead: they
-// pump BOTH pipes on every call, so neither stream can wedge the other —
-// which is the property `poll_any` buys on POSIX.
+// The fd accessors still answer `-1` on Windows, but the reason recorded
+// here previously no longer holds and is corrected rather than repeated.
+//
+// It claimed two things. First, that "a Windows HANDLE is not a file
+// descriptor, and there is no numbering space to project one onto" — the
+// UCRT provides exactly that space in both directions: `_get_osfhandle`
+// (declared above, and used by `_pw_fd_handle`) maps fd -> HANDLE, and its
+// counterpart `_open_osfhandle` maps HANDLE -> fd. Second, that the only
+// consumer, `io.poll_any`, "is itself unavailable here" — it is available:
+// `sfn_io_poll_readable` and `sfn_io_poll_any` below are implemented over
+// `PeekNamedPipe` and answer for pipe handles.
+//
+// So this is a genuine unimplemented capability (SFN-499), not a platform
+// impossibility, and it should be described as one. What it costs is
+// HANDLE OWNERSHIP: `_open_osfhandle` TRANSFERS the handle to the returned
+// descriptor, so `_close` on the fd closes the underlying handle. A handle
+// projected here would therefore have to be minted once, cached on the
+// `PwHandle`, and released through the fd instead of through
+// `CloseHandle(h_stdout)`/`CloseHandle(h_stderr)` in the teardown paths —
+// or duplicated first. Getting that wrong is a double-close affecting every
+// spawned child, which is why it is a deliberate piece of work rather than
+// a one-line fix, and why the accessors stay honest at `-1` until it lands.
+//
+// Callers needing deadlock-free stdout/stderr demux on Windows today use
+// the framed reads below: they pump BOTH pipes on every call, so neither
+// stream can wedge the other — the property `poll_any` buys on POSIX.
 fn sfn_process_handle_stdout_fd(handle_id: i64) -> i64 ![io] { return -1; }
 
 fn sfn_process_handle_stderr_fd(handle_id: i64) -> i64 ![io] { return -1; }

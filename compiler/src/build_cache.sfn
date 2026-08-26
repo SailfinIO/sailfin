@@ -179,6 +179,37 @@ import { host_is_windows } from "./build/target";
 import { _get_env_cmd } from "./build_flags";
 import { char_code_at_text, find_last_index_of_char, substring } from "./string_utils";
 
+// The Windows-only native probes backing the cache GC helpers below
+// (SFN-754). Declared module-locally per the SFN-720 convention
+// `build/fs.sfn` documents for `sfn_rename_replace`/`sfn_create_exclusive`
+// — an extern over a runtime symbol resolves against the pinned seed and
+// needs no seed cut, unlike importing the defining module.
+//
+// `sfn_fs_stat_size`/`sfn_fs_stat_mtime_epoch` are defined by
+// `runtime/sfn/platform/file_stat.sfn` (POSIX stub, always `-1`) and
+// swapped for `file_stat_windows.sfn` (real `GetFileAttributesExA` read)
+// on a Windows target by `target_condition_runtime_sfn_sources`. Both
+// return `-1` to mean "not available, fall back to the shell reading" —
+// the POSIX leg always does, since `struct stat` field offsets are not
+// portable across glibc/Darwin (`runtime/sfn/platform/sizes_linux.sfn`).
+extern fn sfn_fs_stat_size(path: *u8) -> i64;
+
+extern fn sfn_fs_stat_mtime_epoch(path: *u8) -> i64;
+
+// The write-side counterpart of the two probes above, backing
+// `cache_touch_entry` below. Same `-1`-means-"not available" contract:
+// the POSIX stub always returns it, so `cache_touch_entry` unconditionally
+// falls back to the pre-existing `process.run(["touch", dir])` there.
+extern fn sfn_fs_touch_now(path: *u8) -> i32;
+
+// The existing runtime realtime clock (`runtime/sfn/clock.sfn`), real on
+// every target — POSIX and Windows both resolve the `clock_gettime` it
+// calls (the Windows leg through `sfn/platform/clock_windows.sfn`,
+// appended by `target_condition_runtime_sfn_sources`). Out-param + status
+// return, matching the defining signature exactly rather than the
+// simpler plain-return shape a fresh symbol would get.
+extern fn sfn_clock_unix_millis(out_millis: *i64) -> i32;
+
 // ----------------------------------------------------------------
 // Schema version
 // ----------------------------------------------------------------
@@ -363,14 +394,14 @@ fn cache_touch_entry(root: string, key: CacheKey) -> boolean ![io] {
     if !_is_valid_digest(key.digest) { return false; }
     let dir = _cache_entry_dir(root, key);
     if !fs.exists(dir) { return false; }
-    // A Windows host has no `touch`. The reader of this mtime
-    // (`_entry_mtime_epoch`) is still shell-bound and yields 0 there, so
-    // `cache_prune`'s age axis is inert on that host and no local consumer
-    // exists for the hint — report success rather than failing a restore
-    // over it. This short-circuit must be deleted by the same change that
-    // makes the reader real (SFN-754), or hits would silently stop
-    // refreshing recency on the one host whose age axis just came alive.
-    if host_is_windows() { return true; }
+    // The age axis is live on Windows now (`_now_epoch`/`_entry_mtime_epoch`
+    // both have a real native path there, SFN-754), so a hit here has to
+    // genuinely refresh recency or `cache_prune --max-age` sweeps entries
+    // that were just served. `sfn_fs_touch_now` (native `SetFileTime`) is
+    // what keeps that true on Windows; POSIX still shells `touch`
+    // unconditionally, since the native probe there is an always-`-1`
+    // stub, matching `_entry_mtime_epoch`/`_dir_size_bytes` above.
+    if sfn_fs_touch_now(dir as *u8) == 0 { return true; }
     return process.run(["touch", dir]) == 0;
 }
 
@@ -433,9 +464,16 @@ fn _cache_entry_dirs(root: string) -> string[] ![io] {
     return live;
 }
 
-// Directory mtime in epoch seconds. Tries GNU `stat -c %Y` then BSD
-// `stat -f %m` so the LRU signal is portable across Linux and macOS.
+// Directory mtime in epoch seconds. Tries the native Windows probe first
+// (`sfn_fs_stat_mtime_epoch`, real only on a Windows target — see the
+// extern's header note); its `-1` "not available" sentinel is always what
+// the POSIX stub returns, so POSIX unconditionally falls through to the
+// pre-existing shell reading below, byte-identical to before SFN-754.
+// That fallback tries GNU `stat -c %Y` then BSD `stat -f %m` so the LRU
+// signal is portable across Linux and macOS.
 fn _entry_mtime_epoch(dir: string) -> int ![io] {
+    let native = sfn_fs_stat_mtime_epoch(dir as *u8);
+    if native >= 0 { return native as int; }
     let q = _shell_single_quote_arg(dir);
     let out = _shell_read_cmd("stat -c %Y " + q + " 2>/dev/null || stat -f %m "
         + q
@@ -443,23 +481,79 @@ fn _entry_mtime_epoch(dir: string) -> int ![io] {
     return _parse_nonneg_int(out);
 }
 
-// On-disk size of `dir` in bytes. `du -sk` (1024-byte blocks) is
-// portable across GNU and BSD; block-rounding is the correct notion of
-// "on-disk size" and is precise enough for both `info` and LRU compares.
+// On-disk size of `dir` in bytes. Tries the native Windows per-file walk
+// first (`_dir_size_bytes_native`); its `-1` sentinel is always what a
+// POSIX host produces (the underlying probe is the same always-`-1` stub
+// `_entry_mtime_epoch` falls back from), so POSIX unconditionally falls
+// through to the pre-existing shell reading below, byte-identical to
+// before SFN-754. `du -sk` (1024-byte blocks) is portable across GNU and
+// BSD; block-rounding is the correct notion of "on-disk size" and is
+// precise enough for both `info` and LRU compares.
 fn _dir_size_bytes(dir: string) -> int ![io] {
+    let native = _dir_size_bytes_native(dir);
+    if native >= 0 { return native; }
     let q = _shell_single_quote_arg(dir);
     let out = _shell_read_cmd("du -sk " + q + " 2>/dev/null | awk '{print $1}'");
     return _parse_nonneg_int(out) * 1024;
 }
 
-// Deliberately still shelled, and it must stay that way until
-// `_entry_mtime_epoch` moves with it (SFN-754). `_shell_read_cmd` yields
-// `""` on a Windows host, so this returns 0 and `cache_prune`'s `now > 0`
-// guard switches the age axis off there entirely. De-shelling this alone
-// would open that guard while the mtime read still returned 0, making
-// every entry read as infinitely old — a single `sfn cache prune` would
-// then evict the whole cache. The two are one change, not two.
+// `dir`'s total size in bytes via `sfn_fs_stat_size`, summed over every
+// regular file the tree contains. Walks with `walk_dirs`
+// (`build/fs_tree.sfn`), which already bounds the traversal
+// (`FS_TREE_MAX_DEPTH`/`FS_TREE_MAX_NODES`) rather than reimplementing a
+// guarded BFS here. A single native read failing anywhere — including
+// every read on POSIX, where the probe is an always-`-1` stub — abandons
+// the walk immediately and returns `-1`, so a partial sum can never be
+// reported as the total; `-1` is also returned for a file-less tree (no
+// probe ever ran), so an empty directory falls back to the shell `du`
+// reading exactly as it always has, rather than reporting a native `0`
+// that disagrees with `du`'s minimum block accounting.
+fn _dir_size_bytes_native(dir: string) -> int ![io] {
+    let dirs = walk_dirs(dir, 0, 16);
+    let mut total: i64 = 0;
+    let mut saw_file: boolean = false;
+    let mut d: int = 0;
+    loop {
+        if d >= dirs.length { break; }
+        let entries = fs.listDirectory(dirs[d]);
+        let mut e: int = 0;
+        loop {
+            if e >= entries.length { break; }
+            let full = dirs[d] + "/" + entries[e];
+            if !fs.is_directory(full) {
+                let sz = sfn_fs_stat_size(full as *u8);
+                if sz < 0 { return -1; }
+                saw_file = true;
+                total += sz;
+            }
+            e += 1;
+        }
+        d += 1;
+    }
+    if !saw_file { return -1; }
+    return total as int;
+}
+
+// Current time in epoch seconds. Tries the native runtime clock first
+// (`sfn_clock_unix_millis`, real on every target) on a Windows host only
+// — POSIX stays on the pre-existing shell reading unconditionally, so its
+// behaviour is byte-identical to before SFN-754, matching
+// `_entry_mtime_epoch`/`_dir_size_bytes` above.
+//
+// All three moved together, for the reason this comment used to warn
+// about: de-shelling the mtime/size reads alone while `now` stayed
+// shell-bound (returning 0 on Windows) would have switched
+// `cache_prune`'s `now > 0` age-eviction guard off — now that `now` is
+// real too, that guard is live, so a real mtime is exactly what it needs.
+// POSIX shells all three exactly as before, so the invariant holds there
+// too: the age axis and the mtime/size reads move in lockstep on every
+// host, never independently.
 fn _now_epoch() -> int ![io] {
+    if host_is_windows() {
+        let mut millis: i64 = 0;
+        let status = sfn_clock_unix_millis(& millis);
+        if status != 0 && millis > 0 { return (millis / 1000) as int; }
+    }
     return _parse_nonneg_int(_shell_read_cmd("date +%s"));
 }
 

@@ -12,6 +12,7 @@ import {
 import {
     clean_runner_env,
     default_scratch_dir,
+    host_is_windows,
     nested_runner_scratch,
     report_child_failure,
     sfn_bin_abs_path,
@@ -159,6 +160,65 @@ fn _implicit_build_env(label: string) -> string[] ![io] {
     return child;
 }
 
+// The nested build's link-input objects, for the Windows symbol read below
+// (SFN-943). The nested build runs with `SAILFIN_TEST_SCRATCH` pointed at
+// `nested_runner_scratch(label)` (`_implicit_build_env`), and
+// `assemble_link_inputs` (`compiler/src/build/link.sfn:308`) writes the
+// per-module objects it produces to `<cache-dir>/link-obj` — confirmed
+// against this host's own nested-build scratch tree, which held
+// `.o` files there and nowhere else.
+fn _nested_object_files(label: string) -> string[] ![io] {
+    let dir = nested_runner_scratch(label) + "/link-obj";
+    let mut objects: string[] = [];
+    if !fs.exists(dir) { return objects; }
+    let entries = fs.listDirectory(dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if ends_with(entries[i], ".o") {
+            objects.push(dir + "/" + entries[i]);
+        }
+        i += 1;
+    }
+    return objects;
+}
+
+// Counts only DEFINED occurrences of `symbol` in one `llvm-nm` output. An
+// `nm` line's type letter — the single character between the address field
+// and the name — of `U`, `u`, `w`, `W`, `v`, or `V` marks an undefined or
+// weak-undefined reference, which the `ends_with` suffix match alone cannot
+// tell apart from a definition. That collapse was harmless reading a fully
+// linked ELF binary, which lists no undefined entries, and stops being
+// harmless once a caller reads object files, which do carry undefined
+// references to symbols the compilation unit merely calls.
+fn _count_defined_symbol(output: string, symbol: string) -> int {
+    let lines = split(output, "\n");
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        let mut suffix = "";
+        if ends_with(line, " " + symbol) { suffix = " " + symbol; } else if ends_with(line, "_"
+            + symbol) { suffix = "_" + symbol; } else { continue; }
+        let prefix = substring(line, 0, line.length - suffix.length);
+        let mut end = prefix.length;
+        loop {
+            if end <= 0 { break; }
+            if substring(prefix, end - 1, end) != " " { break; }
+            end -= 1;
+        }
+        if end <= 0 { continue; }
+        let letter = substring(prefix, end - 1, end);
+        if letter == "U" || letter == "u" || letter == "w" || letter == "W"
+            || letter == "v"
+            || letter == "V" { continue; }
+        count += 1;
+    }
+    return count;
+}
+
 // `llvm-nm` rather than `nm` because LLVM is already a hard toolchain
 // dependency and reads ELF, Mach-O and COFF uniformly, whereas `nm` is
 // absent on a native Windows host (SFN-1114).
@@ -168,23 +228,42 @@ fn _defined_symbol_count(binary: string, symbol: string, label: string) -> int !
         skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
         return -1;
     }
-    let exit = process.run_capture([reader, binary], _implicit_build_env(label));
+    // A linked Windows PE carries no symbol table for `llvm-nm` to read: the
+    // reader exits 0 and prints "no symbols" rather than erroring, so
+    // reading `binary` here would silently see zero occurrences on Windows
+    // instead of failing loudly. The COFF `.o` objects the nested build
+    // produced before the link step DO carry a symbol table, and the
+    // single-definition claim under test is settled at compile time, before
+    // those objects ever reach the link line — so reading them asserts the
+    // same claim one pipeline stage earlier (SFN-943).
+    if host_is_windows() {
+        let objects = _nested_object_files(label);
+        let mut total: int = 0;
+        let mut oi: int = 0;
+        loop {
+            if oi >= objects.length { break; }
+            let exit = process.run_capture([reader, objects[oi]], _implicit_build_env(label
+                + "-nm"));
+            let output = process.capture_take_stdout();
+            let error = process.capture_take_stderr();
+            report_child_failure("standalone-workspace-implicit-import symbol-count "
+                + label
+                + "-nm", exit, output, error);
+            if exit != 0 { return -1; }
+            total += _count_defined_symbol(output, symbol);
+            oi += 1;
+        }
+        return total;
+    }
+    let exit = process.run_capture([reader, binary], _implicit_build_env(label
+        + "-nm"));
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     report_child_failure("standalone-workspace-implicit-import symbol-count "
-        + label, exit, output, error);
+        + label
+        + "-nm", exit, output, error);
     if exit != 0 { return -1; }
-    let lines = split(output, "\n");
-    let mut count: int = 0;
-    let mut i: int = 0;
-    loop {
-        if i >= lines.length { break; }
-        if ends_with(lines[i], " " + symbol) || ends_with(lines[i], "_" + symbol) {
-            count += 1;
-        }
-        i += 1;
-    }
-    return count;
+    return _count_defined_symbol(output, symbol);
 }
 
 fn _has_effect_error(message: string) -> boolean {
@@ -208,9 +287,7 @@ fn _build_with_bundled_implicit(root: string, explicit_dep: boolean, label: stri
     if exit != 0 { fs.writeFile(root + "/build-error.txt", out + err); }
     if exit == 0 {
         let symbol = "__sfn_module_type_init__demoimplicitmod";
-        if _defined_symbol_count(output, symbol, label + "-nm") != 1 {
-            return 98;
-        }
+        if _defined_symbol_count(output, symbol, label) != 1 { return 98; }
     }
     return exit;
 }
@@ -263,13 +340,34 @@ fn _build_implicit_provenance_fixture(root: string, label: string) -> int ![io] 
         skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
         return 95;
     }
-    let nm_exit = process.run_capture([reader, output], _implicit_build_env(label
-        + "-nm"));
-    let symbols = process.capture_take_stdout();
-    let nm_err = process.capture_take_stderr();
-    report_child_failure("standalone-workspace-implicit-import provenance-nm "
-        + label, nm_exit, symbols, nm_err);
-    if nm_exit != 0 { return 95; }
+    let mut symbols: string = "";
+    if host_is_windows() {
+        // A linked Windows PE carries no symbol table for `llvm-nm` to
+        // read — see `_defined_symbol_count` above — so the combined output
+        // of the nested build's COFF objects stands in here too (SFN-943).
+        let objects = _nested_object_files(label);
+        let mut oi: int = 0;
+        loop {
+            if oi >= objects.length { break; }
+            let nm_exit = process.run_capture([reader, objects[oi]], _implicit_build_env(label
+                + "-nm"));
+            let obj_symbols = process.capture_take_stdout();
+            let nm_err = process.capture_take_stderr();
+            report_child_failure("standalone-workspace-implicit-import provenance-nm "
+                + label, nm_exit, obj_symbols, nm_err);
+            if nm_exit != 0 { return 95; }
+            symbols = symbols + obj_symbols;
+            oi += 1;
+        }
+    } else {
+        let nm_exit = process.run_capture([reader, output], _implicit_build_env(label
+            + "-nm"));
+        symbols = process.capture_take_stdout();
+        let nm_err = process.capture_take_stderr();
+        report_child_failure("standalone-workspace-implicit-import provenance-nm "
+            + label, nm_exit, symbols, nm_err);
+        if nm_exit != 0 { return 95; }
+    }
     if !contains(symbols, "implicit_value__demo__implicit__mod") { return 94; }
     if contains(symbols, "implicit_value__demo__app") { return 93; }
     if !contains(symbols, "__sfn_module_type_init__demoimplicitmod") {

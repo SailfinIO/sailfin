@@ -20,7 +20,12 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text directly.
 import { contains, find } from "sfn/strings";
-import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
+import {
+    default_scratch_dir,
+    host_is_windows,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -48,6 +53,30 @@ fn _is_darwin() -> boolean ![io] {
 // `SDKROOT` / `LIBRARY_PATH` are intentionally NOT forwarded — the whole
 // point is that the compiler supplies the SDK itself. `SAILFIN_TRACE_LINK`
 // echoes the resolved clang link argv to stderr.
+//
+// On Windows the OS base set goes through too, and that is not a weakening of
+// the claim above. "Only PATH, HOME and TMPDIR" is a POSIX-shaped notion of a
+// minimal environment: on Windows those three do not describe a running
+// process, they describe a broken one. clang resolves the MSVC toolchain by
+// probing the filesystem and registry rather than by reading `LIB`, and that
+// probe goes through the standard installation-root variables. Withholding
+// them does not test SDK independence — it removes the machine, and the link
+// fails with `lld-link: error: could not open 'libcmt.lib'` no matter how the
+// compiler behaves. Measured directly: the allowlist below links, and
+// dropping the Windows block from it does not.
+//
+// What is still withheld on Windows is the part that carries the claim — the
+// msvc analogues of `SDKROOT`/`LIBRARY_PATH`: `LIB`, `INCLUDE`, `LIBPATH`,
+// `VCINSTALLDIR`, `VCToolsInstallDir`, `WindowsSdkDir`, `UCRTVersion`. None
+// is forwarded, so a passing Windows leg still proves the link resolves the
+// platform libraries without ambient SDK configuration, exactly as the Darwin
+// leg does. The Darwin and Linux paths are untouched.
+//
+// A stronger version of this test would assert the compiler self-supplies
+// `-libpath:` on msvc the way it self-supplies `-isysroot` on Darwin. It does
+// not today — it delegates to clang's own discovery — and building that needs
+// MSVC/SDK version selection of its own, so it is separate work rather than a
+// line in this fixture.
 fn _stripped_traced_env() -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
@@ -56,10 +85,28 @@ fn _stripped_traced_env() -> string[] ![io] {
     if home.length > 0 { e.push("HOME=" + home); }
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    if host_is_windows() {
+        let keys = _windows_base_env_keys();
+        let mut i: int = 0;
+        loop {
+            if i >= keys.length { break; }
+            let value = env.get(keys[i]);
+            if value.length > 0 { e.push(keys[i] + "=" + value); }
+            i += 1;
+        }
+    }
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
     e.push("SAILFIN_TRACE_LINK=1");
     return e;
+}
+
+// The Windows OS base set — installation roots and system directories, no SDK
+// configuration among them. Listed rather than derived because the point is
+// that each entry is auditable as "the operating system", so a future edit
+// cannot quietly add `LIB` and call it a base variable.
+fn _windows_base_env_keys() -> string[] {
+    return ["SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "PATHEXT", "OS", "PROGRAMFILES", "ProgramFiles(x86)", "ProgramW6432", "COMMONPROGRAMFILES", "ProgramData"];
 }
 
 // A program that pulls the runtime link libs (`-lm`/`-lpthread`): `parallel`

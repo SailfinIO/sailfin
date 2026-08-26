@@ -12,6 +12,8 @@
 // `sfn_bin_path()` in `sfn_bin.sfn` (SFN-977): host detection goes through
 // `_host_is_windows()`, exported from that module rather than duplicated
 // here, for the same capsule-boundary reason documented there.
+import { char_at_index } from "sfn/strings";
+
 import { _host_is_windows } from "./sfn_bin";
 
 // The host-conditioned scratch-dir fallback used when `SAILFIN_TEST_SCRATCH`
@@ -55,4 +57,32 @@ fn scratch_root() -> string ![io] {
     let configured = env.get("SAILFIN_TEST_SCRATCH");
     if configured.length > 0 { return configured; }
     return default_scratch_dir();
+}
+
+// A generated-source-safe Sailfin string literal for `value`, quotes included.
+//
+// A test that builds `.sfn` source by string concatenation and embeds a host
+// path — `scratch_root()`'s own output on a native Windows host is
+// `C:\Users\...` — cannot hand-wrap it in `"` and `"`: `decode_string_literal_escapes`
+// (`compiler/capsules/syntax/src/parser/utils.sfn`) only recognizes `\n \t \r
+// \" \\ \$`, and for anything else its final `else` branch keeps the escaped
+// character but drops the backslash (TypeScript/JS semantics — this is not a
+// parser bug). So `"C:\Users\..."` silently decodes to `C:Users...`, and any
+// test writing a `.sfn` file that embeds a host path must route it through
+// this helper instead of hand-written `\"` quoting. It returns the quotes
+// along with the escaped body, deliberately: a helper that returned only the
+// body would still let a caller hand-wrap it in unescaped quotes and reproduce
+// the exact defect this exists to close.
+fn sfn_source_literal(value: string) -> string {
+    let mut literal: string = "\"";
+    let mut index: int = 0;
+    loop {
+        if index >= value.length { break; }
+        let ch = char_at_index(value, index);
+        if ch == "\\" { literal = literal + "\\\\"; } else if ch == "\"" {
+            literal = literal + "\\\"";
+        } else { literal = literal + ch; }
+        index += 1;
+    }
+    return literal + "\"";
 }

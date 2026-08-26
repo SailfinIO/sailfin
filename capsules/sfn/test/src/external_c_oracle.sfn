@@ -215,6 +215,22 @@ fn c_math_link_flags() -> string[] ![io] {
     return ["-lm"];
 }
 
+// The link flags this host needs for POSIX threads in a C oracle harness, to
+// be spliced into an oracle argv instead of a hard-coded `-lpthread`
+// (SFN-1114). Win32 threads live in the CRT/kernel32, not a separate pthread
+// library, so `-lpthread` fails there the same way `-lm` does; the answer on
+// that host is again the empty list.
+//
+// Keyed on the HOST for the same reason as `c_math_link_flags`: the harness
+// is compiled by the host C compiler to run on this machine.
+fn c_thread_link_flags() -> string[] ![io] {
+    if host_is_windows() {
+        let none: string[] = [];
+        return none;
+    }
+    return ["-lpthread"];
+}
+
 // run_external_c_oracle runs the optional oracle with `args` appended after
 // its resolved executable. Callers consume stdout/stderr through the ordinary
 // `process.capture_take_*` builtins, matching `process.run_capture`'s idiom.

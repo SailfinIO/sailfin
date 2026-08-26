@@ -433,18 +433,25 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
         // SFN-882: `sfn test` opts OUT of demand-driven selection entirely, on
         // both sides — this is deliberate and load-bearing, not an oversight.
         //
-        // The test-link path does not dead-strip, so the prelude's `serve`
-        // wrapper survives into every test binary and its reference to
-        // `sailfin_runtime_serve` (gated `serve.sfn`) must resolve. Gating here
-        // produces `ld.lld: error: undefined symbol: sailfin_runtime_serve`
-        // referenced by prelude.sfn, in EVERY test binary. `sfn build` is
-        // unaffected because `--gc-sections` removes the unused wrapper.
+        // The test-link path does not dead-strip, so a reference from an
+        // always-compiled source into a gated module survives into every test
+        // binary and must resolve. `sfn build` is unaffected because the strip
+        // removes an unused wrapper along with its reference.
+        //
+        // The specific reference this was written for is closed: SFN-943 moved
+        // `sailfin_runtime_serve` out of gated `serve.sfn` into
+        // `runtime/prelude.sfn` itself, so the prelude no longer reaches any
+        // runtime module at all, and
+        // `runtime_source_gates_test.sfn` proves that statically for every
+        // registry-lowered prelude binding. The opt-out stays because the
+        // no-dead-strip property is unchanged and the test-side demand set has
+        // not been audited against it; narrowing here is a perf question to
+        // answer on its own evidence, not a corollary of that move.
         //
         // Forcing `"*"` here rather than only at the link site keeps C1 and the
         // link consuming ONE demand set. Narrowing the closure here while the
         // link stayed wide is the divergence that makes the contract preflight
         // reject `sfn/crypto`, and vice versa produces undefined symbols.
-        //
         // Nothing is lost: the pooled runner warms the runtime once per
         // invocation and every child cache-hits it, so this path was already
         // amortised. The win is paid by the NESTED builds e2e tests spawn,

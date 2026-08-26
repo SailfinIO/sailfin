@@ -1,0 +1,333 @@
+// SFN-943: pins the invariant that `runtime/capsule.toml`'s
+// `[sfn-source-gates]` table exists alongside — the gate drops a runtime
+// module from the link unless the build's demand set contains the gating
+// effect, but a CAPSULE under `capsules/` or `stdlib/` can `extern fn` a
+// symbol DEFINED in a gated module while its own `capsule.toml` declares
+// no such requirement. When that capsule builds without demanding the
+// gating effect, the defining module is dropped and the extern is left
+// unresolved at link time.
+//
+// That break is platform-asymmetric, which is why it went unnoticed for
+// as long as it did: on ELF and Mach-O the dangling reference sits in a
+// section `--gc-sections` discards, so it never surfaces. COFF's
+// `lld-link` resolves undefined symbols BEFORE it discards sections, so
+// the same tree is a hard `lld-link: error: undefined symbol` on Windows.
+//
+// The concrete instance: `capsules/sfn/crypto/src/trust_store.sfn`
+// declared `extern fn sfn_cert_roots_blob()`, defined in
+// `runtime/sfn/platform/cert_roots.sfn`, which was gated on `net`. But
+// `capsules/sfn/crypto/capsule.toml` declares `[capabilities] required =
+// []`. A build staging `sfn/crypto` without demanding `net` produced
+// `lld-link: error: undefined symbol: sfn_cert_roots_blob` on a native
+// Windows host, breaking four e2e tests. The fix ungated `cert_roots.sfn`
+// (it reads the platform trust store, an OS operation rather than a
+// networking one); `runtime/capsule.toml`'s `[sfn-source-gates]` header
+// comment records that fix by name.
+//
+// This test asserts the general rule the fix only patched one instance
+// of, and does it as pure file reads — no build, no subprocess, no nested
+// runner (`.claude/rules/no-bash-e2e.md`), and no native Windows host
+// required, so the rule is guarded on every runner rather than only on
+// the platform where it broke.
+import { canonical_effects, effect_root } from "sfn/analyzer/effect_taxonomy";
+import {
+    ends_with,
+    find,
+    join,
+    split,
+    starts_with,
+    trim
+} from "sfn/strings";
+
+import { toml_get_sfn_source_gate } from "../../src/toml_parser";
+
+let _runtime_manifest_path: string = "runtime/capsule.toml";
+let _runtime_root: string = "runtime";
+let _extern_scan_roots: string[] = ["capsules", "stdlib"];
+// Bounds the directory recursion below; `capsules/` and `stdlib/` are a
+// handful of levels deep, so this is well clear of any real tree while
+// still guarding against a symlink cycle or similarly pathological input.
+let _extern_walk_max_depth: int = 20;
+
+// Drop everything from the first `//` on each line. Not string-literal
+// aware — deliberately, mirroring
+// `runtime_source_gates_test.sfn::_strip_line_comments`. That file's
+// helpers are not imported here: a unit test should not depend on
+// another test file's private helpers, so the small amount of logic
+// needed is re-derived rather than shared.
+fn _strip_line_comments(text: string) -> string {
+    let lines = split(text, "\n");
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        let idx = find(line, "//", 0);
+        if idx < 0 { out.push(line); } else {
+            out.push(substring(line, 0, idx));
+        }
+    }
+    return join(out, "\n");
+}
+
+// Every public (non `_`-prefixed) `fn` name declared at column 0 of
+// `source`. Mirrors `runtime_source_gates_test.sfn::_public_fn_names` for
+// the same reason as `_strip_line_comments` above.
+fn _public_fn_names(source: string) -> string[] {
+    let mut out: string[] = [];
+    let lines = split(_strip_line_comments(source), "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        if !starts_with(line, "fn ") { continue; }
+        let rest = substring(line, 3, line.length);
+        let mut n: int = 0;
+        loop {
+            if n >= rest.length { break; }
+            if rest[n] == "(" { break; }
+            n += 1;
+        }
+        if n == 0 { continue; }
+        let name = substring(rest, 0, n);
+        if starts_with(name, "_") { continue; }
+        if name.length > 0 { out.push(name); }
+    }
+    return out;
+}
+
+// One `[sfn-source-gates]` member paired with the effect that gates it.
+struct GateEntry {
+    module: string;
+    effect: string;
+}
+
+// Every gate-list member across the canonical six effects, paired with
+// its gating effect — the pairing `runtime_source_gates_test.sfn`'s flat
+// `_all_gated_sources` discards and this test needs.
+fn _gate_entries(manifest: string) -> GateEntry[] {
+    let mut out: GateEntry[] = [];
+    let effects = canonical_effects();
+    let mut e: int = 0;
+    loop {
+        if e >= effects.length { break; }
+        let effect = effects[e];
+        let gate = toml_get_sfn_source_gate(manifest, effect);
+        let mut g: int = 0;
+        loop {
+            if g >= gate.length { break; }
+            out.push(GateEntry { module: gate[g], effect: effect });
+            g += 1;
+        }
+        e += 1;
+    }
+    return out;
+}
+
+// A gated module's `_windows` sibling, e.g. `sfn/platform/cert_roots.sfn`
+// -> `sfn/platform/cert_roots_windows.sfn`. A Windows target swaps to the
+// sibling (`target_condition_runtime_sfn_sources`), so its public names
+// are equally gated; the caller skips this when the sibling file does not
+// exist.
+fn _windows_sibling(module: string) -> string {
+    let cut = module.length - 4;
+    return substring(module, 0, cut) + "_windows.sfn";
+}
+
+// One gated symbol paired with the effect whose absence drops it.
+struct SymbolGate {
+    symbol: string;
+    effect: string;
+}
+
+// Every public symbol a gated module (or its `_windows` sibling) defines,
+// paired with the effect that gates it.
+fn _gated_symbol_gates(manifest: string) -> SymbolGate[] ![io.fs] {
+    let mut out: SymbolGate[] = [];
+    let entries = _gate_entries(manifest);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let entry = entries[i];
+        i += 1;
+        let candidates: string[] = [_runtime_root + "/" + entry.module, _runtime_root
+            + "/"
+            + _windows_sibling(entry.module)];
+        let mut c: int = 0;
+        loop {
+            if c >= candidates.length { break; }
+            let path = candidates[c];
+            c += 1;
+            if !fs.exists(path) { continue; }
+            let names = _public_fn_names(fs.readFile(path));
+            let mut n: int = 0;
+            loop {
+                if n >= names.length { break; }
+                out.push(SymbolGate {
+                    symbol: names[n], effect: entry.effect
+                });
+                n += 1;
+            }
+        }
+    }
+    return out;
+}
+
+// The gating effect for `symbol`, or "" if `symbol` names no gated
+// module's public function.
+fn _symbol_gate_effect(gates: SymbolGate[], symbol: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= gates.length { break; }
+        if gates[i].symbol == symbol { return gates[i].effect; }
+        i += 1;
+    }
+    return "";
+}
+
+// Recursively collect `.sfn` files under `dir`, skipping any directory
+// literally named `tests` — a test fixture's externs are not shipped
+// code and are not part of a build's link closure.
+fn _collect_extern_source_files(dir: string, depth: int, acc: string[]) -> string[] ![io.fs] {
+    let mut out = acc;
+    if depth > _extern_walk_max_depth { return out; }
+    let entries = fs.listDirectory(dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if name == "." || name == ".." { continue; }
+        let full = dir + "/" + name;
+        if fs.is_directory(full) {
+            if name == "tests" { continue; }
+            out = _collect_extern_source_files(full, depth + 1, out);
+        } else if ends_with(name, ".sfn") { out.push(full); }
+    }
+    return out;
+}
+
+// Every `extern fn <name>` declaration's `<name>` in `source`.
+fn _extern_fn_names(source: string) -> string[] {
+    let mut out: string[] = [];
+    let lines = split(_strip_line_comments(source), "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = trim(lines[i]);
+        i += 1;
+        if !starts_with(line, "extern fn ") { continue; }
+        let rest = substring(line, 10, line.length);
+        let mut n: int = 0;
+        loop {
+            if n >= rest.length { break; }
+            if rest[n] == "(" { break; }
+            n += 1;
+        }
+        if n == 0 { continue; }
+        out.push(substring(rest, 0, n));
+    }
+    return out;
+}
+
+// Walk upward from `file_path` to the nearest ancestor directory holding
+// a `capsule.toml`, returning its path or "" if none is found before the
+// scan root.
+fn _nearest_capsule_manifest(file_path: string) -> string ![io.fs] {
+    let parts = split(file_path, "/");
+    let mut depth = parts.length - 1;
+    loop {
+        if depth <= 0 { break; }
+        let mut prefix = "";
+        let mut i: int = 0;
+        loop {
+            if i >= depth { break; }
+            if i > 0 { prefix = prefix + "/"; }
+            prefix = prefix + parts[i];
+            i += 1;
+        }
+        let candidate = prefix + "/capsule.toml";
+        if fs.exists(candidate) { return candidate; }
+        depth -= 1;
+    }
+    return "";
+}
+
+// The `[capabilities] required = [...]` array of a capsule manifest,
+// parsed as a narrow single-line read sufficient for these manifests'
+// shape — not a general TOML reader. Finds the line whose trimmed form
+// starts with `required` and collects the double-quoted tokens on it;
+// `required = []` yields an empty array.
+fn _capsule_required_effects(manifest_text: string) -> string[] {
+    let mut out: string[] = [];
+    let lines = split(manifest_text, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = trim(lines[i]);
+        i += 1;
+        if !starts_with(line, "required") { continue; }
+        let mut pos: int = 0;
+        loop {
+            let open = find(line, "\"", pos);
+            if open < 0 { break; }
+            let close = find(line, "\"", open + 1);
+            if close < 0 { break; }
+            out.push(substring(line, open + 1, close));
+            pos = close + 1;
+        }
+        break;
+    }
+    return out;
+}
+
+// Does `required` declare `gating_effect`, allowing for a sub-effect
+// spelling like `net.http` via `effect_root`?
+fn _required_satisfies(required: string[], gating_effect: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= required.length { break; }
+        if effect_root(required[i]) == gating_effect { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "runtime capsule externs: no capsule externs a gated runtime symbol without declaring its effect" ![io] {
+    let manifest = fs.readFile(_runtime_manifest_path);
+    let gates = _gated_symbol_gates(manifest);
+
+    let mut files: string[] = [];
+    let mut r: int = 0;
+    loop {
+        if r >= _extern_scan_roots.length { break; }
+        let root = _extern_scan_roots[r];
+        r += 1;
+        if !fs.exists(root) { continue; }
+        files = _collect_extern_source_files(root, 0, files);
+    }
+
+    let mut f: int = 0;
+    loop {
+        if f >= files.length { break; }
+        let path = files[f];
+        f += 1;
+        let externs = _extern_fn_names(fs.readFile(path));
+        let mut x: int = 0;
+        loop {
+            if x >= externs.length { break; }
+            let symbol = externs[x];
+            x += 1;
+            let gating_effect = _symbol_gate_effect(gates, symbol);
+            if gating_effect.length == 0 { continue; }
+
+            let capsule_manifest_path = _nearest_capsule_manifest(path);
+            assert capsule_manifest_path.length > 0;
+
+            let required = _capsule_required_effects(fs.readFile(capsule_manifest_path));
+            assert _required_satisfies(required, gating_effect);
+        }
+    }
+}

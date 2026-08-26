@@ -34,7 +34,12 @@
 // cannot be called from an `![io]` test. Assert on captured stdout/IR with
 // `sfn/strings` predicates instead. (#842.)
 import { contains, find, split } from "sfn/strings";
-import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
+import {
+    c_thread_link_flags,
+    default_scratch_dir,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment, not "inherit".
 // Thread the variables the toolchain needs: the roundtrip leg spawns clang
@@ -231,7 +236,17 @@ test "runtime: payload survives the producer thread's scope exit (clang + pthrea
 
     // Plain link + run — must always work when clang is available.
     let bin = dir + "/roundtrip";
-    let link_exit = run_external_c_oracle(["-Wno-override-module", harness, ll, "-o", bin, "-lpthread"]);
+    // `-lpthread` has no MSVC counterpart; `c_thread_link_flags()` answers the
+    // empty list on a Windows host (SFN-1114).
+    let mut link_argv: string[] = ["-Wno-override-module", harness, ll, "-o", bin];
+    let thread_flags = c_thread_link_flags();
+    let mut tf: int = 0;
+    loop {
+        if tf >= thread_flags.length { break; }
+        link_argv.push(thread_flags[tf]);
+        tf += 1;
+    }
+    let link_exit = run_external_c_oracle(link_argv);
     let _lo = process.capture_take_stdout();
     let lerr = process.capture_take_stderr();
     if link_exit != 0 {
@@ -252,7 +267,16 @@ test "runtime: payload survives the producer thread's scope exit (clang + pthrea
     // a real FAIL (the sender-side-release regression signal); a startup abort
     // without that line is a skip.
     let bin_asan = dir + "/roundtrip_asan";
-    let asan_link = run_external_c_oracle(["-fsanitize=address", "-Wno-override-module", harness, ll, "-o", bin_asan, "-lpthread"]);
+    // `-lpthread` has no MSVC counterpart; `c_thread_link_flags()` answers the
+    // empty list on a Windows host (SFN-1114).
+    let mut asan_argv: string[] = ["-fsanitize=address", "-Wno-override-module", harness, ll, "-o", bin_asan];
+    let mut atf: int = 0;
+    loop {
+        if atf >= thread_flags.length { break; }
+        asan_argv.push(thread_flags[atf]);
+        atf += 1;
+    }
+    let asan_link = run_external_c_oracle(asan_argv);
     let _alo = process.capture_take_stdout();
     let _ale = process.capture_take_stderr();
     if asan_link != 0 {
