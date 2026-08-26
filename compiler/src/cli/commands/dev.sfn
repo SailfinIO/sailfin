@@ -39,7 +39,7 @@ import {
     with_flag,
     with_subcommand
 } from "sfn/cli";
-import { int_to_string } from "sfn/strings";
+import { ascii_lowercase, int_to_string } from "sfn/strings";
 
 import {
     BOOTSTRAP_MANIFEST_PATH,
@@ -56,7 +56,9 @@ import {
     _create_exclusive_cmd,
     _cwd_cmd,
     _mktemp_sibling_cmd,
+    _rename_noreplace_preserving_source_on_failure,
     _rename_preserving_source_on_failure,
+    _set_current_directory,
     _sha256_of_file,
     _toml_trim_cmd
 } from "../../build/fs";
@@ -74,7 +76,12 @@ import {
     source_fingerprint_path,
     write_fingerprint
 } from "../../build/source_fingerprint";
-import { build_target_triple, host_exe_name, host_target_triple } from "../../build/target";
+import {
+    build_target_triple,
+    host_exe_name,
+    host_is_windows,
+    host_target_triple
+} from "../../build/target";
 import { stage_installer_workspace_assets } from "../../installer_staging";
 import { _source_identity_normalize_path } from "../../module_paths";
 import {
@@ -188,36 +195,106 @@ fn _bootstrap_path_contains(root: string, path: string) -> boolean {
     return is_path_separator(substring(path, root.length, root.length + 1));
 }
 
-// Prepare only the portion beneath DESTDIR, rejecting symlink components
-// before directory creation. This makes the staging root a containment
-// boundary instead of letting an existing `<destdir>/usr` link redirect a
-// package publish into the live filesystem. Returns 1 for a live filesystem
-// root, 0 for a contained staging root, and -1 on validation failure.
-fn _bootstrap_prepare_destdir(destdir: string, bin_dir: string) -> int ![io] {
-    if !ensure_dir_p(destdir) {
-        print.err("error: could not create DESTDIR " + destdir);
-        return -1;
+fn _bootstrap_physical_paths_equal(a: string, b: string) -> boolean ![io] {
+    let normalized_a = _source_identity_normalize_path(a);
+    let normalized_b = _source_identity_normalize_path(b);
+    if host_is_windows() {
+        return strings_equal(ascii_lowercase(normalized_a), ascii_lowercase(normalized_b));
     }
-    if fs.read_link(destdir).length > 0 {
-        print.err("error: DESTDIR must not be a symbolic link: " + destdir);
-        return -1;
+    return strings_equal(normalized_a, normalized_b);
+}
+
+// Create `path` one component at a time from its filesystem root (or the
+// physical cwd for a relative spelling). Resolving only the final path is too
+// late: recursive directory creation follows a symlink or NTFS junction in an
+// ancestor before the caller can classify DESTDIR as staging. Each component
+// must therefore resolve to the direct physical child of its validated parent.
+fn _bootstrap_prepare_destdir_root(destdir: string) -> string ![io] {
+    let lexical_root = _source_identity_normalize_path(_bootstrap_abspath(destdir));
+    let root_len = path_root_prefix_len(lexical_root);
+    if root_len <= 0 {
+        print.err("error: could not resolve DESTDIR root " + destdir);
+        return "";
     }
 
-    let resolved_root = _bootstrap_realpath(destdir);
-    if resolved_root.length == 0 {
-        print.err("error: could not resolve DESTDIR " + destdir);
-        return -1;
+    let mut cursor = substring(lexical_root, 0, root_len);
+    let mut resolved_parent = _bootstrap_realpath(cursor);
+    if resolved_parent.length == 0 {
+        print.err("error: could not resolve DESTDIR root " + cursor);
+        return "";
     }
-    if _bootstrap_destdir_is_live_root(resolved_root) { return 1; }
+    let mut start = root_len;
+    if start < lexical_root.length && is_path_separator(substring(lexical_root, start, start
+        + 1)) { start += 1; }
+    let mut i = start;
+    loop {
+        if i > lexical_root.length { break; }
+        let at_end = i == lexical_root.length;
+        if at_end || is_path_separator(substring(lexical_root, i, i + 1)) {
+            if i > start {
+                let segment = substring(lexical_root, start, i);
+                cursor = _path_join(cursor, segment);
+                if fs.read_link(cursor).length > 0 {
+                    if _bootstrap_physical_paths_equal(cursor, lexical_root) {
+                        print.err("error: DESTDIR must not be a symbolic link: "
+                            + destdir);
+                    } else {
+                        print.err("error: DESTDIR path contains a symbolic link: "
+                            + cursor);
+                    }
+                    return "";
+                }
+                if !fs.exists(cursor) && !fs.createDirectory(cursor, false) {
+                    print.err("error: could not create DESTDIR component "
+                        + cursor);
+                    return "";
+                }
+                let resolved_cursor = _bootstrap_realpath(cursor);
+                let expected_cursor = _source_identity_normalize_path(_path_join(resolved_parent, segment));
+                if resolved_cursor.length == 0 || !_bootstrap_physical_paths_equal(expected_cursor, resolved_cursor) {
+                    print.err("error: DESTDIR path contains a redirecting filesystem component: "
+                        + cursor);
+                    return "";
+                }
+                resolved_parent = resolved_cursor;
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    return resolved_parent;
+}
+
+struct BootstrapDestdirPreparation {
+    kind: int;
+    physical_bin: string;
+}
+
+// Prepare only the portion beneath DESTDIR, rejecting redirecting components
+// before publication. This makes the staging root a containment boundary
+// instead of letting an existing `<destdir>/usr` link or junction redirect a
+// package publish into the live filesystem. `kind` is 1 for a live filesystem
+// root, 0 for a contained staging root, and -1 on validation failure. The
+// staged result carries the physical bin path produced by this same validated
+// component walk, so the caller never re-resolves an attacker-swappable alias.
+fn _bootstrap_prepare_destdir(destdir: string, bin_dir: string) -> BootstrapDestdirPreparation ![io] {
+    let resolved_root = _bootstrap_prepare_destdir_root(destdir);
+    if resolved_root.length == 0 {
+        return BootstrapDestdirPreparation { kind: -1, physical_bin: "" };
+    }
+    if _bootstrap_destdir_is_live_root(resolved_root) {
+        return BootstrapDestdirPreparation { kind: 1, physical_bin: "" };
+    }
 
     let lexical_root = _source_identity_normalize_path(_bootstrap_abspath(destdir));
     let lexical_bin = _source_identity_normalize_path(_bootstrap_abspath(bin_dir));
     if !_bootstrap_path_contains(lexical_root, lexical_bin) {
         print.err("error: resolved install prefix escapes DESTDIR: " + bin_dir);
-        return -1;
+        return BootstrapDestdirPreparation { kind: -1, physical_bin: "" };
     }
 
     let mut cursor = lexical_root;
+    let mut resolved_parent = resolved_root;
     let mut start: int = lexical_root.length;
     if start < lexical_bin.length && is_path_separator(substring(lexical_bin, start, start
         + 1)) { start += 1; }
@@ -231,25 +308,47 @@ fn _bootstrap_prepare_destdir(destdir: string, bin_dir: string) -> int ![io] {
                 if fs.read_link(cursor).length > 0 {
                     print.err("error: install path beneath DESTDIR contains a symbolic link: "
                         + cursor);
-                    return -1;
+                    return BootstrapDestdirPreparation {
+                        kind: -1,
+                        physical_bin: ""
+                    };
                 }
                 if !fs.exists(cursor) && !fs.createDirectory(cursor, false) {
                     print.err("error: could not create staged install directory "
                         + cursor);
-                    return -1;
+                    return BootstrapDestdirPreparation {
+                        kind: -1,
+                        physical_bin: ""
+                    };
                 }
                 let resolved_cursor = _bootstrap_realpath(cursor);
-                if resolved_cursor.length == 0 || !_bootstrap_path_contains(resolved_root, resolved_cursor) {
+                let expected_cursor = _source_identity_normalize_path(_path_join(resolved_parent, substring(lexical_bin, start, i)));
+                if resolved_cursor.length == 0 || !_bootstrap_physical_paths_equal(expected_cursor, resolved_cursor) {
+                    print.err("error: install path beneath DESTDIR contains a redirecting filesystem component: "
+                        + cursor);
+                    return BootstrapDestdirPreparation {
+                        kind: -1,
+                        physical_bin: ""
+                    };
+                }
+                if !_bootstrap_path_contains(resolved_root, resolved_cursor) {
                     print.err("error: resolved install path escapes DESTDIR: "
                         + cursor);
-                    return -1;
+                    return BootstrapDestdirPreparation {
+                        kind: -1,
+                        physical_bin: ""
+                    };
                 }
+                resolved_parent = resolved_cursor;
             }
             start = i + 1;
         }
         i += 1;
     }
-    return 0;
+    return BootstrapDestdirPreparation {
+        kind: 0,
+        physical_bin: resolved_parent
+    };
 }
 
 // Resolve a prefixed install from an already host-conditioned executable
@@ -372,31 +471,53 @@ struct BootstrapInstallBackup {
     path: string;
 }
 
-fn _bootstrap_backup_install_path(live: string) -> BootstrapInstallBackup ![io] {
+fn _bootstrap_backup_install_path(live: string, fixed_backup: string) -> BootstrapInstallBackup ![io] {
     if !_bootstrap_path_entry_exists(live) {
         return BootstrapInstallBackup { ok: true, existed: false, path: "" };
     }
-    let backup = _mktemp_sibling_cmd(live);
-    if backup.length == 0 {
-        return BootstrapInstallBackup { ok: false, existed: true, path: "" };
+    let mut backup = fixed_backup;
+    if backup.length > 0 {
+        if _bootstrap_path_entry_exists(backup) && !remove_tree(backup) {
+            return BootstrapInstallBackup {
+                ok: false,
+                existed: true,
+                path: ""
+            };
+        }
+    } else {
+        backup = _mktemp_sibling_cmd(live);
+        if backup.length == 0 {
+            return BootstrapInstallBackup {
+                ok: false,
+                existed: true,
+                path: ""
+            };
+        }
+        fs.deleteFile(backup);
     }
-    fs.deleteFile(backup);
     if !_rename_preserving_source_on_failure(live, backup) {
         return BootstrapInstallBackup { ok: false, existed: true, path: "" };
     }
     return BootstrapInstallBackup { ok: true, existed: true, path: backup };
 }
 
-fn _bootstrap_restore_install_paths(live_paths: string[], backups: BootstrapInstallBackup[]) -> boolean ![io] {
-    let mut restored: boolean = true;
-    let mut i: int = backups.length - 1;
+fn _bootstrap_discard_install_backup(backup: BootstrapInstallBackup) -> boolean ![io] {
+    if !backup.existed || backup.path.length == 0 { return true; }
+    return remove_tree(backup.path);
+}
+
+fn _bootstrap_restore_captured_paths_no_clobber(live_paths: string[], backups: BootstrapInstallBackup[]) -> boolean ![io] {
+    let mut restored = true;
+    let mut i = backups.length - 1;
     loop {
         if i < 0 { break; }
-        if _bootstrap_path_entry_exists(live_paths[i]) && !remove_tree(live_paths[i]) {
+        if _bootstrap_path_entry_exists(live_paths[i]) {
+            if !_bootstrap_discard_install_backup(backups[i]) {
+                restored = false;
+            }
             restored = false;
-        }
-        if backups[i].existed && backups[i].path.length > 0 {
-            if !_rename_preserving_source_on_failure(backups[i].path, live_paths[i]) {
+        } else if backups[i].existed && backups[i].path.length > 0 {
+            if !_rename_noreplace_preserving_source_on_failure(backups[i].path, live_paths[i]) {
                 restored = false;
             }
         }
@@ -405,32 +526,55 @@ fn _bootstrap_restore_install_paths(live_paths: string[], backups: BootstrapInst
     return restored;
 }
 
+// After the executable claim there is no portable compare-and-delete primitive
+// that binds a digest check to the exact directory entry removed. Rollback must
+// therefore never delete a live path: another writer could replace it after any
+// inspection. Captured paths return only to names that remain absent through an
+// atomic no-clobber move; occupied names are preserved and our backups discarded.
+fn _bootstrap_restore_after_entry_claim(live_paths: string[], backups: BootstrapInstallBackup[], _published_digest: string) -> boolean ![io] {
+    return _bootstrap_restore_captured_paths_no_clobber(live_paths, backups);
+}
+
 // Commit a complete same-filesystem bundle. Every source is staged before a
-// live path moves; any failed backup or publish restores the prior bundle.
-// The caller holds the per-entry install lock, so two writers cannot
-// interleave their backup sets.
+// live path moves. Failures before the executable claim restore the prior
+// bundle; later failures preserve occupied names and restore only absent ones
+// because deleting a live path could remove a concurrent external publish.
+// The caller holds the per-entry install lock, so cooperating dev writers do
+// not interleave their backup sets.
 fn _bootstrap_commit_dev_payload(staging: string, out: string, record_owner: boolean) -> boolean ![io] {
     let bin_dir = _dirname(out);
     let marker = _bootstrap_dev_owner_marker_path(out);
-    let live_paths = [bin_dir + "/runtime", bin_dir + "/capsules", bin_dir
-        + "/workspace.toml", out, marker];
-    let mut staged_paths = [staging + "/runtime", staging + "/capsules", staging
-        + "/workspace.toml", staging
-        + "/"
-        + _path_basename(out), ""];
+    // Capture the entry and its ownership proof before moving any companion
+    // path. The pre-commit digest check is advisory only: an external writer
+    // can replace `out` immediately afterward. Moving it first atomically
+    // selects the exact bytes this transaction would overwrite; validating
+    // that captured backup against the captured marker closes that race.
+    let live_paths = [out, marker, bin_dir + "/runtime", bin_dir + "/capsules", bin_dir
+        + "/workspace.toml"];
+    let mut staged_paths = [staging + "/" + _path_basename(out), "", staging
+        + "/runtime", staging
+        + "/capsules", staging
+        + "/workspace.toml"];
     if record_owner {
-        staged_paths[4] = staging + "/" + _path_basename(marker);
+        staged_paths[1] = staging + "/" + _path_basename(marker);
     }
 
     let mut backups: BootstrapInstallBackup[] = [];
     let mut i: int = 0;
     loop {
-        if i >= live_paths.length { break; }
-        let backup = _bootstrap_backup_install_path(live_paths[i]);
+        if i >= 2 { break; }
+        // Windows permits a running image to move but keeps the displaced
+        // file locked until this process exits. A unique backup would leak one
+        // compiler per self-reinstall. Reuse one fixed executable backup, as
+        // `sfn_rename_replace` does for its bounded `.old` sibling; the next
+        // invocation sweeps it after the prior process has released the lock.
+        let mut fixed_backup = "";
+        if i == 0 { fixed_backup = out + ".sfn-dev-install.old"; }
+        let backup = _bootstrap_backup_install_path(live_paths[i], fixed_backup);
         if !backup.ok {
-            let restored = _bootstrap_restore_install_paths(live_paths, backups);
+            let restored = _bootstrap_restore_captured_paths_no_clobber(live_paths, backups);
             if !restored {
-                print.err("error: failed to restore the prior local compiler bundle");
+                print.err("error: failed to restore captured install paths without replacing a foreign entry");
             }
             return false;
         }
@@ -438,19 +582,81 @@ fn _bootstrap_commit_dev_payload(staging: string, out: string, record_owner: boo
         i += 1;
     }
 
-    i = 0;
+    if record_owner {
+        let captured_any = backups[0].existed || backups[1].existed;
+        let captured_both = backups[0].existed && backups[1].existed;
+        let mut captured_matches = !captured_any;
+        if captured_both {
+            let expected = _toml_trim_cmd(fs.readFile(backups[1].path));
+            let actual = _sha256_of_file(backups[0].path);
+            captured_matches = expected.length > 0 && actual.length > 0
+                && strings_equal(expected, actual);
+        }
+        if !captured_matches {
+            let restored = _bootstrap_restore_captured_paths_no_clobber(live_paths, backups);
+            if !restored {
+                print.err("error: failed to restore captured install paths without replacing a foreign entry");
+            }
+            print.err("error: the entry executable changed before it could be captured for publication");
+            return false;
+        }
+    }
+
+    let published_digest = _sha256_of_file(staged_paths[0]);
+    if published_digest.length == 0 || !_rename_noreplace_preserving_source_on_failure(staged_paths[0], live_paths[0]) {
+        let restored = _bootstrap_restore_after_entry_claim(live_paths, backups, "");
+        if !restored {
+            print.err("error: a foreign entry executable appeared during local compiler publication and was preserved");
+        }
+        return false;
+    }
+
+    i = 2;
+    loop {
+        if i >= live_paths.length { break; }
+        let backup = _bootstrap_backup_install_path(live_paths[i], "");
+        if !backup.ok {
+            let restored = _bootstrap_restore_after_entry_claim(live_paths, backups, published_digest);
+            if !restored {
+                print.err("error: failed to restore the prior local compiler bundle without replacing a foreign entry");
+            }
+            return false;
+        }
+        backups.push(backup);
+        i += 1;
+    }
+
+    i = 2;
     loop {
         if i >= live_paths.length { break; }
         if staged_paths[i].length > 0 {
             if !_atomic_rename_into_place(staged_paths[i], live_paths[i]) {
-                let restored = _bootstrap_restore_install_paths(live_paths, backups);
+                let restored = _bootstrap_restore_after_entry_claim(live_paths, backups, published_digest);
                 if !restored {
-                    print.err("error: failed to restore the prior local compiler bundle");
+                    print.err("error: failed to restore the prior local compiler bundle without replacing a foreign entry");
                 }
                 return false;
             }
         }
         i += 1;
+    }
+
+    if record_owner {
+        if !_rename_noreplace_preserving_source_on_failure(staged_paths[1], live_paths[1]) {
+            let restored = _bootstrap_restore_after_entry_claim(live_paths, backups, published_digest);
+            if !restored {
+                print.err("error: failed to restore the prior local compiler bundle without replacing a foreign entry");
+            }
+            return false;
+        }
+        let current_digest = _sha256_of_file(live_paths[0]);
+        if current_digest.length == 0 || !strings_equal(current_digest, published_digest) {
+            let restored = _bootstrap_restore_after_entry_claim(live_paths, backups, published_digest);
+            if !restored {
+                print.err("error: a foreign entry executable appeared during local compiler publication and was preserved");
+            }
+            return false;
+        }
     }
 
     i = 0;
@@ -929,7 +1135,7 @@ fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) ->
     }
 
     let effective_prefix = _dev_bootstrap_install_prefix(prefix, destdir);
-    let out = _dev_bootstrap_install_path(prefix, destdir);
+    let mut out = _dev_bootstrap_install_path(prefix, destdir);
     if out.length == 0 {
         print.err("error: could not determine the default install prefix because the home directory is unset");
         return 1;
@@ -950,10 +1156,18 @@ fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) ->
 
     let canonical = _bootstrap_install_is_canonical(prefix, destdir);
     let mut live_prefixed = !canonical && destdir.length == 0;
+    let mut staged_prefixed = false;
     if !canonical && destdir.length > 0 {
-        let destdir_kind = _bootstrap_prepare_destdir(destdir, _dirname(out));
-        if destdir_kind < 0 { return 1; }
-        live_prefixed = destdir_kind == 1;
+        let prepared_destdir = _bootstrap_prepare_destdir(destdir, _dirname(out));
+        if prepared_destdir.kind < 0 { return 1; }
+        live_prefixed = prepared_destdir.kind == 1;
+        staged_prefixed = prepared_destdir.kind == 0;
+        if staged_prefixed {
+            // Stop using the caller's lexical DESTDIR after validation. A
+            // later swap of an alias/junction ancestor must not retarget the
+            // lock, staging tree, backups, or publication paths.
+            out = _path_join(prepared_destdir.physical_bin, _path_basename(out));
+        }
     }
     if live_prefixed && !_bootstrap_dev_owns_install(out) {
         print.err("error: refusing to overwrite the existing entry executable at "
@@ -988,6 +1202,13 @@ fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) ->
             print.err("error: another local compiler install owns " + lock_path);
             return 1;
         }
+        let validated_publish_bin = _bootstrap_realpath(_dirname(out));
+        if validated_publish_bin.length == 0 || (staged_prefixed && !_bootstrap_physical_paths_equal(validated_publish_bin, _dirname(out))) {
+            fs.deleteFile(lock_path);
+            print.err("error: install path changed after destination validation: "
+                + _dirname(out));
+            return 1;
+        }
         let payload_staging = _bootstrap_stage_dev_payload(src, out, live_prefixed);
         if payload_staging.length == 0 {
             fs.deleteFile(lock_path);
@@ -1007,14 +1228,52 @@ fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) ->
             print.err("  remove it explicitly before publishing a local self-build to this prefix");
             return 1;
         }
-        if !_bootstrap_commit_dev_payload(payload_staging, out, live_prefixed) {
-            remove_tree(payload_staging);
-            fs.deleteFile(lock_path);
+        let resolved_publish_bin = _bootstrap_realpath(_dirname(out));
+        if resolved_publish_bin.length == 0 || !_bootstrap_physical_paths_equal(resolved_publish_bin, validated_publish_bin) {
+            print.err("error: install path changed before publication: "
+                + _dirname(out));
+            print.err("  transaction artifacts were preserved because the original directory can no longer be addressed safely");
+            return 1;
+        }
+        // Switch the process cwd to the validated physical bin directory and
+        // publish only relative names. Both POSIX and Win32 retain the current
+        // directory as a stable kernel reference, so a concurrent rename or
+        // junction swap of a DESTDIR ancestor cannot retarget the transaction.
+        let prior_cwd = _cwd_cmd();
+        let publish_bin = _bootstrap_realpath(_dirname(out));
+        if prior_cwd.length == 0 || publish_bin.length == 0 || !_bootstrap_physical_paths_equal(publish_bin, validated_publish_bin)
+            || !_set_current_directory(publish_bin) {
+            print.err("error: could not anchor the install directory for publication: "
+                + _dirname(out));
+            print.err("  transaction artifacts were preserved because the original directory can no longer be addressed safely");
+            return 1;
+        }
+        let anchored_cwd = _cwd_cmd();
+        if !_bootstrap_physical_paths_equal(anchored_cwd, publish_bin) {
+            remove_tree(_path_basename(payload_staging));
+            fs.deleteFile(_path_basename(lock_path));
+            _set_current_directory(prior_cwd);
+            print.err("error: install directory changed while publication was being anchored: "
+                + _dirname(out));
+            return 1;
+        }
+        let relative_staging = _path_basename(payload_staging);
+        let relative_lock = _path_basename(lock_path);
+        let committed = _bootstrap_commit_dev_payload(relative_staging, _path_basename(out), live_prefixed);
+        // Keep cleanup within the stable cwd reference. Releasing the anchor
+        // first would let absolute names re-traverse a replaced DESTDIR tree.
+        if !committed { remove_tree(relative_staging); }
+        fs.deleteFile(relative_lock);
+        let cwd_restored = _set_current_directory(prior_cwd);
+        if !cwd_restored {
+            print.err("error: installed the compiler but could not restore the working directory "
+                + prior_cwd);
+        }
+        if !committed || !cwd_restored {
             print.err("error: could not commit the local compiler bundle at "
                 + out);
             return 1;
         }
-        fs.deleteFile(lock_path);
         print("sfn dev bootstrap: installed " + out);
         return 0;
     }
@@ -1242,6 +1501,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
 }
 
 export {
+    BootstrapInstallBackup,
     bootstrap_gate_or_dispatch,
     command_def,
     run,
@@ -1252,5 +1512,6 @@ export {
     _bootstrap_install_is_canonical,
     _bootstrap_commit_dev_payload,
     _bootstrap_prefixed_install_path,
+    _bootstrap_restore_after_entry_claim,
     _bootstrap_target_is_cross
 };

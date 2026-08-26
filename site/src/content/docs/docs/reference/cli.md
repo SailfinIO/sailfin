@@ -429,15 +429,18 @@ prefix install records a SHA-256 ownership sidecar beside the executable. A
 later invocation may replace that entry only while the sidecar still matches;
 an unmarked or externally changed executable is refused because it may be
 owned by a package manager. Remove such an entry explicitly before replacing
-it with a local self-build. DESTDIR installs are staging output and do not
-carry the live-entry ownership sidecar; parent components in the staged prefix
+it with a local self-build. Non-root DESTDIR installs are staging output and
+do not carry the live-entry ownership sidecar; parent components in the staged prefix
 or DESTDIR are rejected and path aliases are normalized. POSIX staging links
 are rejected; Windows reparse points are physically resolved and must remain
 beneath the resolved staging root. A filesystem root used as DESTDIR retains
-the live-entry guard. Bundle publication is staged on
-the destination filesystem and rolls back to the prior complete bundle if any
-artifact cannot commit. A prefixed or staged install never updates the
-repo-local source-fingerprint record for `build/bin/sfn`.
+the live-entry guard. Bundle publication is staged on the destination
+filesystem and atomically claims the executable without replacing a
+concurrently published entry. Before that claim, failures restore captured
+paths. After it, rollback preserves every occupied live name and restores
+backups only to names that remain absent; a late companion or marker failure
+can therefore require explicit cleanup or retry. A prefixed or staged install
+never updates the repo-local source-fingerprint record for `build/bin/sfn`.
 
 ---
 

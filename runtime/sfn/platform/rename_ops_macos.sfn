@@ -1,0 +1,20 @@
+// runtime/sfn/platform/rename_ops_macos.sfn
+//
+// Darwin sibling of `rename_ops.sfn`. macOS exposes the same atomic replace
+// contract through rename(2), while exclusive file-or-directory publication
+// uses renamex_np(RENAME_EXCL).
+extern fn rename(oldpath: *u8, newpath: *u8) -> i32;
+
+extern fn renamex_np(oldpath: *u8, newpath: *u8, flags: i32) -> i32;
+
+extern fn chdir(path: *u8) -> i32;
+
+fn sfn_rename_replace(src: *u8, dst: *u8) -> i32 { return rename(src, dst); }
+
+fn sfn_rename_noreplace(src: *u8, dst: *u8) -> i32 {
+    return renamex_np(src, dst, 4);
+}
+
+fn sfn_set_current_directory(path: *u8) -> i32 { return chdir(path); }
+
+export { sfn_rename_noreplace, sfn_rename_replace, sfn_set_current_directory };

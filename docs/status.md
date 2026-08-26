@@ -340,11 +340,15 @@ here.
   explicit-path mode follows the CLI flags; DESTDIR and its components are
   normalized and physically resolved before live/staged classification.
   POSIX symlinks are rejected and Windows reparse points must remain within
-  the resolved staging root. Noncanonical installs stage the complete bundle on the destination filesystem, serialize
-  writers with an exclusive entry lock, and commit through backup/rollback so
-  no copy or marker failure strands a partial replacement. Staged installs do
-  not claim ownership, and prefixed installs do not update the canonical build
-  fingerprint.
+  the resolved staging root. Noncanonical installs stage the complete bundle
+  on the destination filesystem, serialize writers with an exclusive entry
+  lock, and atomically claim the executable without replacing a concurrently
+  published entry. Before that claim, failures restore captured paths. After
+  it, rollback never deletes an occupied live name: backups return only to
+  still-absent names, so a late companion or marker failure can leave the
+  claimed developer executable in place and requires an explicit cleanup or
+  retry. Staged installs do not claim ownership, and prefixed installs do not
+  update the canonical build fingerprint.
   `sfn dev bootstrap build -- <build-arg>...` forwards the trailing arguments
   verbatim to the pinned seed's `build -p compiler` invocation (SFN-1076), so
   native self-host diagnostics can use `--no-cache`, `--cache-trace`, and

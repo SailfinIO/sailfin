@@ -2,7 +2,7 @@
 //
 // End-to-end coverage for publishing a locally built compiler under an
 // install prefix or packaging DESTDIR through `sfn dev bootstrap install`.
-import { find } from "sfn/strings";
+import { find, replace } from "sfn/strings";
 import {
     clean_runner_env,
     clean_runner_env_without,
@@ -47,6 +47,14 @@ fn _wait_for_path(path: string, deadline_ms: int) -> boolean ![clock, io] {
     }
 }
 
+fn _windows_create_junction(link_path: string, target_path: string) -> boolean ![io] {
+    return process.run(["cmd.exe", "/d", "/c", "mklink", "/J", replace(link_path, "/", "\\"), replace(target_path, "/", "\\")]) == 0;
+}
+
+fn _windows_remove_junction(link_path: string) -> boolean ![io] {
+    return process.run(["cmd.exe", "/d", "/c", "rmdir", replace(link_path, "/", "\\")]) == 0;
+}
+
 test "dev-bootstrap install: prefix publishes a runnable host executable" ![io] {
     let root = nested_runner_scratch("dev_bootstrap_prefix_install");
     let prefix = root + "/prefix";
@@ -57,7 +65,7 @@ test "dev-bootstrap install: prefix publishes a runnable host executable" ![io] 
 
     assert rc == 0;
     assert err.length == 0;
-    assert find(out, installed, 0) >= 0;
+    assert find(out, "sfn dev bootstrap: installed ", 0) >= 0;
     assert fs.is_executable(installed);
 
     let version_rc = process.run_capture([installed, "version"], clean_runner_env(root));
@@ -249,6 +257,21 @@ test "dev-bootstrap install: DESTDIR symlinks cannot redirect publication" ![io]
     assert find(linked_err, "DESTDIR must not be a symbolic link", 0) >= 0;
     assert fs.readFile(live_entry) == "symlink-redirected-entry";
 
+    let physical_parent = root + "/physical-parent";
+    let ancestor_entry = host_exe_name(physical_parent + "/usr/local/bin/sfn");
+    fs.createDirectory(physical_parent + "/usr/local/bin", true);
+    fs.writeFile(ancestor_entry, "ancestor-symlink-entry");
+    fs.set_perms(ancestor_entry, 493);
+    let alias_parent = root + "/alias-parent";
+    assert fs.symlink(physical_parent, alias_parent);
+    let ancestor_rc = _run_install(root, ["--prefix", "/local", "--destdir", alias_parent
+        + "/usr"]);
+    let _ancestor_out = process.capture_take_stdout();
+    let ancestor_err = process.capture_take_stderr();
+    assert ancestor_rc != 0;
+    assert find(ancestor_err, "DESTDIR path contains a symbolic link", 0) >= 0;
+    assert fs.readFile(ancestor_entry) == "ancestor-symlink-entry";
+
     let staged = root + "/stage";
     fs.createDirectory(staged + "/usr", true);
     assert fs.symlink(live_prefix, staged + "/usr/local");
@@ -258,4 +281,45 @@ test "dev-bootstrap install: DESTDIR symlinks cannot redirect publication" ![io]
     assert child_rc != 0;
     assert find(child_err, "contains a symbolic link", 0) >= 0;
     assert fs.readFile(live_entry) == "symlink-redirected-entry";
+}
+
+test "dev-bootstrap install: Windows junctions cannot redirect DESTDIR" ![io] {
+    if !host_is_windows() {
+        skip("NTFS junction coverage runs only on native Windows");
+    }
+    let root = nested_runner_scratch("dev_bootstrap_destdir_junction");
+
+    let physical_parent = root + "/physical-parent";
+    let ancestor_entry = host_exe_name(physical_parent + "/usr/local/bin/sfn");
+    fs.createDirectory(physical_parent + "/usr/local/bin", true);
+    fs.writeFile(ancestor_entry, "ancestor-junction-entry");
+    fs.set_perms(ancestor_entry, 493);
+    let alias_parent = root + "/alias-parent";
+    assert _windows_create_junction(alias_parent, physical_parent);
+    let ancestor_rc = _run_install(root, ["--prefix", "/local", "--destdir", alias_parent
+        + "/usr"]);
+    let _ancestor_out = process.capture_take_stdout();
+    let ancestor_err = process.capture_take_stderr();
+    let ancestor_removed = _windows_remove_junction(alias_parent);
+
+    assert ancestor_removed;
+    assert ancestor_rc != 0;
+    assert find(ancestor_err, "redirecting filesystem component", 0) >= 0;
+    assert fs.readFile(ancestor_entry) == "ancestor-junction-entry";
+
+    let staged = root + "/stage";
+    let child_target = root + "/child-target";
+    fs.createDirectory(staged, true);
+    fs.createDirectory(child_target, true);
+    let child_junction = staged + "/usr";
+    assert _windows_create_junction(child_junction, child_target);
+    let child_rc = _run_install(root, ["--prefix", "/usr/local", "--destdir", staged]);
+    let _child_out = process.capture_take_stdout();
+    let child_err = process.capture_take_stderr();
+    let child_removed = _windows_remove_junction(child_junction);
+
+    assert child_removed;
+    assert child_rc != 0;
+    assert find(child_err, "redirecting filesystem component", 0) >= 0;
+    assert ! fs.exists(child_target + "/local/bin/sfn.exe");
 }
