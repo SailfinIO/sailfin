@@ -32,6 +32,7 @@ import { contains } from "sfn/strings";
 import { expect_eq_bool, expect_eq_str } from "sfn/test";
 
 import {
+    _runtime_obj_key_with_host,
     _runtime_obj_key_with_slug,
     _runtime_obj_key_with_target,
     _runtime_obj_stem
@@ -69,21 +70,28 @@ test "runtime-obj identity: key folds the raw target under a scheme tag" ![pure]
     // A host target contributes no clang flags, so the fold is exactly the
     // scheme tag plus the raw target string. Pinning the literal keeps the
     // scheme greppable and makes an accidental format change loud.
-    // SFN-774 / SFEP-0068 §3.6: the marker bumped `tgt1:` -> `tgt2:` when
+    // SFN-1117 bumps the marker through `tgt3:` so runtime objects falsely
+    // labelled aarch64 by the previously inert clang leg cannot be reused.
+    // SFN-774 / SFEP-0068 §3.6 first bumped `tgt1:` -> `tgt2:` when
     // the fold input moved from `target_os` to the triple, so a
     // pre-promotion entry can never collide with a post-promotion one.
-    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Linux"), "BASE\ntgt2:Linux").ok;
+    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Linux"), "BASE\ntgt3:Linux").ok;
 }
 
 test "runtime-obj identity: key folds the raw target and nothing after it" ![pure] {
     // The fold is exactly the scheme tag plus the raw target string,
     // for every target including Windows. It deliberately does NOT
-    // append `target_clang_flags`: those are a total function of
-    // the triple, so they add no distinguishing power, and appending
-    // them let a crafted target spell the same key (see the absorption
-    // test below). Pinning the literal keeps the scheme greppable and
-    // makes an accidental format change loud.
-    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Windows"), "BASE\ntgt2:Windows").ok;
+    // append target-derived flags: doing so would let a crafted target spell
+    // the same key (see the absorption test below). The host triple that now
+    // selects native-vs-cross flags is folded INSIDE this final component.
+    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Windows"), "BASE\ntgt3:Windows").ok;
+}
+
+test "runtime-obj identity: host baseline distinguishes native and cross clang argv" ![pure] {
+    let native = _runtime_obj_key_with_target(_runtime_obj_key_with_host("BASE", "aarch64-unknown-linux-gnu"), "aarch64-unknown-linux-gnu");
+    let cross = _runtime_obj_key_with_target(_runtime_obj_key_with_host("BASE", "x86_64-unknown-linux-gnu"), "aarch64-unknown-linux-gnu");
+    assert expect_eq_bool(native == cross, false).ok;
+    assert expect_eq_str(native, "BASE\nhost1:aarch64-unknown-linux-gnu\ntgt3:aarch64-unknown-linux-gnu").ok;
 }
 
 test "runtime-obj identity: a crafted target cannot absorb a following component" ![pure] {
@@ -191,7 +199,7 @@ test "runtime-obj identity: one source yields a distinct stem and key per target
 // `_runtime_obj_key_with_slug` fails the discrimination tests below.
 test "runtime-obj identity: key folds the slug under a scheme tag" ![pure] {
     // Pinning the literal keeps the scheme greppable and makes an
-    // accidental format change loud, matching the `tgt2:` pin above.
+    // accidental format change loud, matching the `tgt3:` pin above.
     assert expect_eq_str(_runtime_obj_key_with_slug("BASE", "runtime/sfn/string"), "BASE\nobj1:runtime/sfn/string").ok;
 }
 
@@ -244,7 +252,7 @@ test "runtime-obj identity: the slug fold nests inside the target fold, leaving 
     // preserving the SFN-677 absorption guarantee that the target fold's
     // own comment documents.
     let composed = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("BASE", "runtime/sfn/string"), "Linux");
-    assert expect_eq_str(composed, "BASE\nobj1:runtime/sfn/string\ntgt2:Linux").ok;
+    assert expect_eq_str(composed, "BASE\nobj1:runtime/sfn/string\ntgt3:Linux").ok;
 }
 
 test "runtime-obj identity: one base key yields a distinct composed key per slug at one target" ![pure] {
@@ -254,8 +262,8 @@ test "runtime-obj identity: one base key yields a distinct composed key per slug
     let a = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("SAME-BASE", "runtime/sfn/util"), "Linux");
     let b = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("SAME-BASE", "runtime/vendor/sfn/util"), "Linux");
     assert expect_eq_bool(a == b, false).ok;
-    assert expect_eq_bool(contains(a, "\ntgt2:Linux"), true).ok;
-    assert expect_eq_bool(contains(b, "\ntgt2:Linux"), true).ok;
+    assert expect_eq_bool(contains(a, "\ntgt3:Linux"), true).ok;
+    assert expect_eq_bool(contains(b, "\ntgt3:Linux"), true).ok;
 }
 
 test "runtime-obj identity: the slug fold reshapes the key, orphaning pre-SFN-870 entries" ![pure] {

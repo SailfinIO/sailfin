@@ -1399,13 +1399,11 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
     // while `llvm/lowering_debug_state.sfn` emitted different IR for each
     // — reintroducing this very bug for one input pair.
     //
-    // Those flags were also pure redundancy: `target_clang_flags` is a
-    // total function of the triple alone, so appending `f(x)` after `x`
-    // cannot separate two tuples that `x` does not already separate. If
-    // it ever gains an input NOT derived from the triple (an arch env
-    // var, say), that input must enter this key in its own right — a
-    // derived value can never stand in for its input, which is the
-    // SFN-661 lesson recorded above.
+    // Those flags were also irrelevant to this cache: it stores compiler-
+    // emitted module IR, while clang target flags affect the later IR-to-object
+    // assembly cache. SFN-1117 made the flags depend on the host triple to
+    // distinguish native from cross invocations; that host input is folded by
+    // the object caches that consume clang, not by this IR key.
     // SFN-923: marker bumped `tgt2:` -> `tgt3:`. This is NOT cosmetic. The
     // key folds the PARENT-resolved triple, but before SFN-923 the artifact
     // stored under it could have been emitted by a HOST-flavoured emit

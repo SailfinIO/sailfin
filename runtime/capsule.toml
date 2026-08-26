@@ -120,6 +120,14 @@ prelude-entry = "prelude.sfn"
 # are deterministic manifest-order tails. The compiler retains its current
 # hardcoded Windows mapping only as a one-seed fallback for manifests that do
 # not declare this table.
+[targets.aarch64-unknown-linux-gnu]
+sfn-sources-replace = []
+sfn-sources-add = []
+sfn-sources-drop = []
+ll-sources-add = []
+link-libs-drop = []
+link-libs-add = []
+
 [targets.x86_64-apple-darwin]
 sfn-sources-replace = [
     "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_macos.sfn",

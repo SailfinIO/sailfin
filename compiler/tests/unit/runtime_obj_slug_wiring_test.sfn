@@ -5,7 +5,7 @@
 // COMPOSER half — the fold's own behaviour in isolation — but never calls
 // the call site itself, so a regression that drops the wrapper from
 // `_prepare_runtime_sfn_object` (compiler/src/build/runtime_objs.sfn,
-// `_runtime_obj_key_with_target(_runtime_obj_key_with_slug(...), target_triple)`
+// `_runtime_obj_key_for_build(_runtime_obj_key_with_slug(...), target_triple)`
 // around line 903) would leave every existing test green. This file closes
 // that gap: it is the WIRING half, exercising `_prepare_runtime_sfn_object`
 // itself rather than the composer functions it calls.
@@ -27,8 +27,8 @@ import { default_scratch_dir } from "sfn/test";
 import {
     RuntimeSfnObjectPlan,
     _prepare_runtime_sfn_object,
-    _runtime_obj_key_with_slug,
-    _runtime_obj_key_with_target
+    _runtime_obj_key_for_build,
+    _runtime_obj_key_with_slug
 } from "../../src/build/runtime_objs";
 import {
     CacheKey,
@@ -109,7 +109,7 @@ test "runtime-obj slug wiring: a shared entry stored under one slug is never ser
     // behaviour in `runtime_objs.sfn`.
     let alpha_slug = "runtime/alpha";
     let base_key = runtime_object_cache_key_with_identity(alpha_src, opt_flag, compiler_identity);
-    let alpha_key = _runtime_obj_key_with_target(_runtime_obj_key_with_slug(base_key, alpha_slug), target_triple);
+    let alpha_key = _runtime_obj_key_for_build(_runtime_obj_key_with_slug(base_key, alpha_slug), target_triple);
 
     // Store a sentinel object under that exact key.
     let sentinel_path = out_dir_store + "/sentinel.o";

@@ -384,6 +384,15 @@ here.
   `ci-cross-windows` target, duplicated `RUNTIME_MODS`, `llvm-link` bridge,
   `build/native/raw` staging, and `runtime/ir/windows_stubs.ll` are deleted;
   PR, release, and nightly workflows call the native commands directly.
+- **Native aarch64 Linux cross build** (SFN-1117, SFEP-0068).
+  `sfn build --target=aarch64-unknown-linux-gnu` on an x86_64 Linux host now
+  passes the target triple to clang for assembly and fallback linking while a
+  host-native Linux build keeps its byte-identical no-`-target` argv. The Tier-2
+  ARM job supplies its glibc/GCC cross sysroot explicitly, and Sailfin's direct
+  `ld.lld` contract discovers those paths; no target-owned linker or sysroot
+  override is needed. The runtime manifest declares the aarch64 target, the
+  e2e suite asserts both the aarch64 `st_mode` layout and ELF `e_machine`, and
+  CI no longer shadows `clang` with a target-injecting shell wrapper.
 - **Native clean command** (SFN-680). `sfn dev clean build|dist|all
   [--include-seed] [--dry-run]` (`compiler/src/cli/commands/dev_clean.sfn`)
   replaces the `make clean-build` / `make clean` / `make clean-all` shell
