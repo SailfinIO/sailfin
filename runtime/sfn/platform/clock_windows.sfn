@@ -1,8 +1,8 @@
 // runtime/sfn/platform/clock_windows.sfn
 //
 // Windows sibling providing `clock_gettime` and `nanosleep` (SFN-549),
-// APPENDED by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`) for a Windows target — there is no
+// added by the matching table in `runtime/capsule.toml` for a Windows
+// target — there is no
 // POSIX `.sfn` module to swap FROM here (both are bare libc symbols
 // `runtime/sfn/platform/posix.sfn` externs, not Sailfin-authored modules),
 // the same append shape `realpath_windows.sfn`/`rand_windows.sfn` use.

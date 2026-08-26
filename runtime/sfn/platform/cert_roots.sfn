@@ -18,7 +18,7 @@
 // store silently indistinguishable from a working POSIX one.
 //
 // The Windows sibling (`cert_roots_windows.sfn`) is swapped in by
-// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`),
+// the matching table in `runtime/capsule.toml`,
 // the same basename swap `rand.sfn` uses. Exactly one of the two is compiled
 // into a given binary, so the two modules never link together and need no
 // layout parity beyond this signature and the blob format the Windows side

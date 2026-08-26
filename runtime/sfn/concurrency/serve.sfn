@@ -134,7 +134,7 @@ extern fn strtoll(s: *u8, end: *u8, base: i32) -> i64;
 // optval is a millisecond `DWORD` rather than a `struct timeval`, and its
 // `recv`/`send` are 32-bit rather than POSIX's 64-bit `ssize_t` (SFN-927).
 // That module is swapped for `socket_ops_windows.sfn` on a Windows target
-// by `target_condition_runtime_sfn_sources`, so these stay ordinary
+// by manifest target conditioning, so these stay ordinary
 // externs and the linker binds whichever sibling was compiled — the
 // same shape as `_sfn_fs_access_exec_mode` in `filesystem.sfn`
 // (SFN-671).

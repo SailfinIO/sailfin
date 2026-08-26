@@ -1,8 +1,8 @@
 // runtime/sfn/platform/pthread_windows.sfn
 //
 // Windows sibling providing the 11 `pthread_*` symbols plus `sysconf`
-// (SFN-549), APPENDED by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`) for a Windows target. There is no
+// (SFN-549), added by the matching table in `runtime/capsule.toml` for a
+// Windows target. There is no
 // POSIX `.sfn` module to swap FROM: `pthread.sfn` (the orphaned typecheck
 // skeleton) and `sysconf`'s declaration in `concurrency/scheduler.sfn`
 // are `extern fn` surfaces, not compiled runtime modules, so — like
@@ -12,15 +12,11 @@
 // scheduler consumer.
 //
 // `sysconf` DELIBERATELY LIVES HERE rather than in a `sysconf_windows.sfn`
-// of its own (SFN-1039). The pinned seed compiles working-tree runtime
-// source (`_compile_runtime_sfn_sources`,
-// `compiler/src/build/runtime_objs.sfn`), and a seed predating SFEP-0068
-// cannot read `runtime/capsule.toml`'s `[targets.*]` table — it selects
-// Windows siblings from the hardcoded list in
-// `target_condition_runtime_sfn_sources`, which names this file and knows
-// nothing of a split-out provider. A separate provider is therefore
-// unreachable on the native MSVC leg and the link fails with
-// `undefined symbol: sysconf`.
+// of its own (SFN-1039). Seed 0.10.4 compiled working-tree runtime source but
+// could not read the manifest target tables; its hardcoded provider list knew
+// only this combined file, so the attempted split left `sysconf` unreachable
+// on the native MSVC leg. Seed 0.10.5 reads both Windows target tables, and
+// SFN-777 deleted that hardcoded list.
 //
 // MinGW escaped that break only because its cross build runs on a FRESH
 // self-hosted compiler, which does read the `[targets.*]` table — not
@@ -28,8 +24,8 @@
 // mingw-w64 leaves `sysconf` undefined, which is why
 // `[targets.x86_64-w64-mingw32] sfn-sources-add` names THIS file. Do not
 // remove it there on the theory that winpthreads supplies `sysconf`.
-// Split this back out only once a pinned seed carries the `[targets.*]`
-// table (`.claude/rules/seed-dependency.md`).
+// A future split must update both Windows target tables and verify both native
+// MSVC self-hosting and the MinGW cross build.
 //
 // SRWLOCK/CONDITION_VARIABLE ARE the mutex/cond storage: both Win32
 // primitives are 8-byte pointer-sized handles that live in place at the

@@ -1,7 +1,7 @@
 # Status
 
-Updated: 2026-08-25 (SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035, SFN-1034,
-SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726). Seed pinned to `0.10.4` (`bootstrap.toml`
+Updated: 2026-08-26 (SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
+SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726). Seed pinned to `0.10.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -379,8 +379,10 @@ here.
   the target, assembles with clang `-femulated-tls`, and links statically
   through `x86_64-w64-mingw32-gcc`; `sfn package --installer --target
   windows-x86_64` stages the installer. Runtime substitutions, additions, and
-  link libraries are declared once in
-  `runtime/capsule.toml [targets.x86_64-w64-mingw32]`. The Makefile
+  link libraries are declared once in the
+  `runtime/capsule.toml` tables for `x86_64-w64-mingw32` and
+  `x86_64-pc-windows-msvc`; compiler source has no fallback provider list, and
+  a missing Windows target table fails the build explicitly (SFN-777). The Makefile
   `ci-cross-windows` target, duplicated `RUNTIME_MODS`, `llvm-link` bridge,
   `build/native/raw` staging, and `runtime/ir/windows_stubs.ll` are deleted;
   PR, release, and nightly workflows call the native commands directly.

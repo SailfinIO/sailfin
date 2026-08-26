@@ -19,12 +19,12 @@ import {
     trim
 } from "sfn/strings";
 
+import { condition_runtime_capsules_for_target } from "../../src/build/runtime_objs";
 import {
     runtime_demand_all,
     runtime_source_gate_effect,
     select_runtime_sfn_sources
 } from "../../src/build/runtime_selection";
-import { target_condition_runtime_sfn_sources } from "../../src/build/target";
 import { runtime_capsule_from_root } from "../../src/runtime_capsule_resolver";
 import { toml_get_sfn_source_gate, toml_get_sfn_sources } from "../../src/toml_parser";
 
@@ -434,13 +434,12 @@ test "runtime source gates: no prelude binding lowers to a gated module's symbol
     }
 }
 
-// `toml_get_sfn_sources` returns POSIX module names; a Windows target
-// swaps some for `_windows` siblings and appends others
-// (`target_condition_runtime_sfn_sources`, `compiler/src/build/target.sfn:545`).
+// `toml_get_sfn_sources` returns POSIX module names; the Windows manifest
+// table swaps some for `_windows` siblings and appends others.
 // Test 4 never scans that conditioned set, so a gated-symbol reference
 // living only inside a Windows-only module is invisible on Linux CI.
-// A gated source's Windows sibling is gated too. `target_condition_runtime_sfn_sources`
-// swaps `platform/socket_ops.sfn` -> `platform/socket_ops_windows.sfn` and
+// A gated source's Windows sibling is gated too. The target manifest swaps
+// `platform/socket_ops.sfn` -> `platform/socket_ops_windows.sfn` and
 // `platform/cert_roots.sfn` -> `platform/cert_roots_windows.sfn`, and both
 // originals are `net` gate members — but the gate table lists only the POSIX
 // spelling, so a naive membership test reads the swapped name as ungated and
@@ -463,15 +462,21 @@ test "runtime source gates: the Windows-conditioned source set references no gat
     let gated_symbols = _gated_symbol_set(manifest);
     let gated = _all_gated_sources(manifest);
 
-    let sources = toml_get_sfn_sources(manifest);
-    let win = target_condition_runtime_sfn_sources(sources, "Windows");
+    let caps = runtime_capsule_from_root(_runtime_root);
+    let conditioned = condition_runtime_capsules_for_target(caps, "Windows", "x86_64-pc-windows-msvc");
+    assert conditioned.length == 1;
+    let win = conditioned[0].sfn_sources;
 
     let mut always: string[] = [_runtime_root + "/prelude.sfn"];
     let mut s: int = 0;
     loop {
         if s >= win.length { break; }
-        let src = win[s];
+        let path = win[s];
         s += 1;
+        let mut src = path;
+        if starts_with(path, _runtime_root + "/") {
+            src = substring(path, _runtime_root.length + 1, path.length);
+        }
         if _gate_excludes_after_conditioning(gated, src) { continue; }
         always.push(_runtime_root + "/" + src);
     }

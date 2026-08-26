@@ -1,8 +1,7 @@
 // runtime/sfn/platform/cert_roots_windows.sfn
 //
-// Windows sibling of `runtime/sfn/platform/cert_roots.sfn` (SFN-808), swapped
-// in by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`) for a Windows target. Enumerates the
+// Windows sibling of `runtime/sfn/platform/cert_roots.sfn` (SFN-808), selected
+// by the matching table in `runtime/capsule.toml` for a Windows target. Enumerates the
 // system `ROOT` certificate store through Crypt32 and hands the raw DER back
 // to `capsules/sfn/crypto/src/trust_store.sfn`.
 //

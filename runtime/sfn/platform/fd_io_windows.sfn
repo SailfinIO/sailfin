@@ -1,8 +1,7 @@
 // runtime/sfn/platform/fd_io_windows.sfn
 //
-// Windows sibling of `fd_io.sfn`, swapped in for a Windows target by
-// `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`). See that module's header for the
+// Windows sibling of `fd_io.sfn`, selected for a Windows target by the
+// matching table in `runtime/capsule.toml`. See that module's header for the
 // full rationale (SFN-927): the UCRT's `_read`/`_write` are `int`
 // (32-bit), not POSIX's `ssize_t` (64-bit), so a raw `-> i64` extern
 // against them silently promotes a `-1` error into `4294967295`.

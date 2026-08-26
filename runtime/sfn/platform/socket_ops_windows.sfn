@@ -1,8 +1,7 @@
 // runtime/sfn/platform/socket_ops_windows.sfn
 //
-// Windows sibling of `socket_ops.sfn`, swapped in for a Windows
-// target by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`). See that module's header for why
+// Windows sibling of `socket_ops.sfn`, selected for a Windows target by the
+// matching table in `runtime/capsule.toml`. See that module's header for why
 // creation, disposal, timeouts, and recv/send are the ones conditioned;
 // everything else in the socket surface is byte-compatible with POSIX
 // and resolves from `ws2_32.dll`, already linked by
