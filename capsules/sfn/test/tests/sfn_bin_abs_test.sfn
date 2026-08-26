@@ -73,6 +73,26 @@ fn _abs_path(path: string) -> string ![io] {
     return _repo_root() + "/" + path;
 }
 
+// Win32 canonicalization returns `\` even when a caller supplied `/`.
+// Compare path identity rather than separator spelling so the shifted-cwd
+// case keeps measuring real cwd versus stale `PWD` on every host.
+fn _paths_equal_ignoring_sep(a: string, b: string) -> boolean {
+    if a.length != b.length { return false; }
+    let mut i = 0;
+    loop {
+        if i >= a.length { break; }
+        let ca = a[i];
+        let cb = b[i];
+        if ca != cb {
+            let a_sep = ca == "/" || ca == "\\";
+            let b_sep = cb == "/" || cb == "\\";
+            if !a_sep || !b_sep { return false; }
+        }
+        i += 1;
+    }
+    return true;
+}
+
 // A fresh marker-file path for `tag`, used to ferry the child's stdout out
 // of the `with_cwd` body closure — the closure returns `int`, not a string
 // (same idiom `sfn_bin_test.sfn` uses).
@@ -194,5 +214,5 @@ test "sfn_bin_abs: SAILFIN_BIN set to an absolute Windows path passes through un
 test "sfn_bin_abs: a relative bin path resolves against the child's real cwd, not the inherited PWD" ![io] {
     let different_cwd = _abs_path(_scratch_dir());
     let out = _probe_bin_abs_path("relative-different-cwd", "Linux", "", different_cwd);
-    assert out == different_cwd + "/build/bin/sfn";
+    assert _paths_equal_ignoring_sep(out, different_cwd + "/build/bin/sfn");
 }
