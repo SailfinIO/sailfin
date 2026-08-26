@@ -14,10 +14,15 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import {
+  assertDistributionFresh,
+  writeBuildFingerprint,
+} from "../src/build-freshness.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Layout: tsc emits src/*.ts -> dist-test/src/*.js and this file to
-// dist-test/test/smoke.test.js, so the server is one dir up and over.
-const SERVER = path.resolve(__dirname, "../src/index.js");
+// Exercise the artifact clients actually load, not the separately compiled
+// test copy. `pretest` builds dist/ before this suite runs.
+const SERVER = path.resolve(__dirname, "../../dist/index.js");
 
 interface Rpc {
   jsonrpc: "2.0";
@@ -37,17 +42,21 @@ function makeStubWorkspace(opts: {
   exitCode?: number;
   stdoutBody?: string;
   stderrBody?: string;
+  echoArgs?: boolean;
 } = {}): string {
   const exit = opts.exitCode ?? 0;
   const stdoutBody = opts.stdoutBody ?? "sailfin 0.0.0-stub";
   const stderrBody = opts.stderrBody ?? "";
+  const stdoutCommand = opts.echoArgs
+    ? "printf '%s' \"$*\""
+    : `printf '%s' ${JSON.stringify(stdoutBody)}`;
 
   const root = mkdtempSync(path.join(tmpdir(), "sailfin-mcp-test-"));
   mkdirSync(path.join(root, "build", "bin"), { recursive: true });
 
   const stub = `#!/usr/bin/env bash
 # Stub compiler for MCP smoke tests.
-printf '%s' ${JSON.stringify(stdoutBody)}
+${stdoutCommand}
 >&2 printf '%s' ${JSON.stringify(stderrBody)}
 exit ${exit}
 `;
@@ -136,7 +145,7 @@ async function withServer<T>(
   }
 }
 
-test("tools/list exposes all ten tools with correct names", async () => {
+test("tools/list exposes all fourteen tools from the built artifact", async () => {
   const workspace = makeStubWorkspace();
   await withServer(workspace, async (client) => {
     const resp = await client.request("tools/list");
@@ -145,15 +154,79 @@ test("tools/list exposes all ten tools with correct names", async () => {
     assert.deepEqual(names, [
       "sailfin_bench",
       "sailfin_build",
+      "sailfin_capabilities_audit",
       "sailfin_check",
+      "sailfin_dev_verify_fast",
       "sailfin_diagnostics",
       "sailfin_emit_llvm",
       "sailfin_emit_native",
       "sailfin_fmt_check",
       "sailfin_fmt_write",
+      "sailfin_selfhost_build",
+      "sailfin_symbols",
       "sailfin_test",
       "sailfin_version",
     ]);
+  });
+});
+
+test("build fingerprint rejects stale dist output", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "sailfin-mcp-freshness-"));
+  const sourceDir = path.join(root, "src");
+  const distDir = path.join(root, "dist");
+  const manifestPath = path.join(distDir, ".source-fingerprint");
+  mkdirSync(sourceDir, { recursive: true });
+  mkdirSync(distDir, { recursive: true });
+  writeFileSync(path.join(sourceDir, "index.ts"), "export const tools = 10;\n");
+  writeBuildFingerprint(sourceDir, manifestPath);
+
+  assert.doesNotThrow(() => assertDistributionFresh(sourceDir, manifestPath));
+  writeFileSync(path.join(sourceDir, "index.ts"), "export const tools = 14;\n");
+  assert.throws(
+    () => assertDistributionFresh(sourceDir, manifestPath),
+    /built MCP server is stale/,
+  );
+});
+
+test("native maintenance tools pass through exact bounded commands", async () => {
+  const workspace = makeStubWorkspace({ echoArgs: true });
+  await withServer(workspace, async (client) => {
+    const cases = [
+      {
+        name: "sailfin_selfhost_build",
+        arguments: { force: true },
+        expected: "dev bootstrap build --force",
+      },
+      {
+        name: "sailfin_dev_verify_fast",
+        arguments: { json: true },
+        expected: "dev verify --fast --json",
+      },
+      {
+        name: "sailfin_symbols",
+        arguments: { capsule: "sfn/strings", json: true },
+        expected: "symbols --capsule sfn/strings --json",
+      },
+      {
+        name: "sailfin_capabilities_audit",
+        arguments: {},
+        expected: "capabilities audit",
+      },
+    ];
+
+    for (const item of cases) {
+      const resp = await client.request("tools/call", {
+        name: item.name,
+        arguments: item.arguments,
+      });
+      const result = resp.result as {
+        isError?: boolean;
+        structuredContent?: { stdout: string; timed_out: boolean };
+      };
+      assert.notEqual(result.isError, true, `${item.name} should succeed`);
+      assert.equal(result.structuredContent!.stdout, item.expected);
+      assert.equal(result.structuredContent!.timed_out, false);
+    }
   });
 });
 
@@ -255,7 +328,7 @@ test("missing compiler binary returns a clean actionable error", async () => {
     };
     assert.equal(result.isError, true);
     assert.ok(
-      result.content[0].text.includes("Run `make compile` first"),
+      result.content[0].text.includes("Run `sfn dev bootstrap build` first"),
       `expected actionable hint, got: ${result.content[0].text}`,
     );
   });
