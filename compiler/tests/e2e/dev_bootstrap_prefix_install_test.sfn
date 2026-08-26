@@ -21,6 +21,10 @@ extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 
 fn _physical_scratch(label: string) -> string ![io] {
     let root = nested_runner_scratch(label);
+    // `nested_runner_scratch` returns a per-file child path when the pool owns
+    // the outer scratch, but deliberately leaves that child uncreated.
+    // `realpath` requires the final component to exist on POSIX.
+    if !fs.exists(root) && !fs.createDirectory(root, true) { return root; }
     let resolved: *u8 = realpath(root as *u8, null);
     if resolved as i64 != 0 { return resolved as string; }
     return root;
