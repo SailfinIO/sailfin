@@ -357,16 +357,20 @@ runs:
         "$NATIVE_SFN" run examples/concurrency/channels.sfn
         echo "ok: R3 struct-channel ran"
 
-    # Gate R4 — the first `sfn test` ever executed on a Windows host.
+    # Gate R4 — the fast per-build native-Windows `sfn test` smoke.
     #
-    # Until this step, no Windows leg ran the test suite at all: four ladder
-    # rungs plus five bespoke inline gates, and nothing else. That is why the
-    # SFN-927 Winsock fixes could be shipped without being demonstrable on the
-    # one platform they exist for — the readback assertion guarding them runs
+    # SFN-981 adds the complete cold workspace inventory downstream in the
+    # nightly workflow. Keep this focused gate in the shared build action so
+    # every caller, including the path-filtered PR build, still proves the
+    # test runner and SFN-927 Winsock fixes on one bounded portable fixture
+    # without paying the full-suite cost.
+    # That coverage matters because the fixes could otherwise ship without
+    # being demonstrable on the one platform they exist for — the readback
+    # assertion guarding them runs
     # on Linux, where it exercises the POSIX sibling, not the Windows one.
     #
-    # `socket_ops_timeout_readback_test.sfn` is the deliberate first choice
-    # rather than the whole suite. It is the only socket e2e that is portable
+    # `socket_ops_timeout_readback_test.sfn` is the focused choice for this
+    # build action rather than the whole suite. It is the only socket e2e that is portable
     # as written: it imports nothing from `sfn/test`, spawns no subprocess,
     # and touches no `/tmp` or `/bin/sh` — just malloc/socket externs and the
     # `sfn_socket_*` wrappers, binding loopback in-process. Most of its
