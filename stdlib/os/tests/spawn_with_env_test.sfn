@@ -92,14 +92,20 @@ test "spawn_with_env: heavy stderr does not deadlock sequential read_stdout" ![i
 }
 
 test "spawn_with_env: cwd runs the spawned child in the given directory (#1167)" ![io] {
-    // `pwd` rooted at "/" prints "/" on every POSIX platform. The
-    // per-child chdir happens via posix_spawn_file_actions, never a
-    // process-global chdir.
-    let h = spawn_with_env(["pwd"], env_empty(), "/");
+    // `pwd` trusts a stale logical `PWD` under Git Bash on Windows. A marker
+    // reachable only from the requested directory proves the real cwd for
+    // the asynchronous spawn path without depending on path spelling.
+    let dir = "build/sailfin/spawn-with-env-cwd-probe";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/cwd-probe", "present\n");
+    let child_env = env_set(env_empty(), "PWD", "/stale-parent-cwd");
+    let h = spawn_with_env(["sh", "-c", "test -f cwd-probe"], child_env, dir);
     assert h.handle_id != 0;
     handle_close_stdin(h);
     let out = handle_read_stdout(h);
-    assert strings_equal(out, "/\n");
+    let err = handle_read_stderr(h);
+    assert strings_equal(out, "");
+    assert strings_equal(err, "");
     let exit = handle_wait(h);
     assert exit == 0;
 }

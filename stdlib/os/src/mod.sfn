@@ -263,9 +263,8 @@ fn env_from_current() -> Env ![io] {
 //
 // `cwd` (#1167) is the child's working directory: `""` inherits the
 // parent's cwd (the prior behaviour), a non-empty path runs the child
-// in that directory via `posix_spawn_file_actions_addchdir_np` — no
-// process-global `chdir`, so it is safe under the concurrent runner.
-// Posix-only; ignored on Windows.
+// in that directory via a per-child spawn attribute — no process-global
+// `chdir`, so it is safe under the concurrent runner on POSIX and Windows.
 fn run_capture(args: string[], env: Env, cwd: string) -> ProcessOutput ![io] {
     let env_flat = env_to_flat(env);
     let exit_code = process.run_capture_cwd(args, env_flat, cwd);
@@ -285,8 +284,8 @@ fn run_capture(args: string[], env: Env, cwd: string) -> ProcessOutput ![io] {
 // `handle_wait`. Returns a handle whose `handle_id` is 0 on spawn
 // failure — call sites can branch on that to surface a typed error.
 //
-// `cwd` (#1167): `""` inherits the parent's working directory; a
-// non-empty path runs the child there (posix-only, no global `chdir`).
+// `cwd` (#1167): `""` inherits the parent's working directory; a non-empty
+// path runs the child there on POSIX and Windows, with no global `chdir`.
 fn spawn_with_env(args: string[], env: Env, cwd: string) -> ProcessHandle ![io] {
     let env_flat = env_to_flat(env);
     let id = process.spawn_with_env_cwd(args, env_flat, cwd);
