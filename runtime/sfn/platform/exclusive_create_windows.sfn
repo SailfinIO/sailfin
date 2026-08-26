@@ -1,8 +1,7 @@
 // runtime/sfn/platform/exclusive_create_windows.sfn
 //
-// Windows sibling of `exclusive_create.sfn`, swapped in for a Windows
-// target by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`). See that module's header for the
+// Windows sibling of `exclusive_create.sfn`, selected for a Windows target
+// by the matching table in `runtime/capsule.toml`. See that module's header for the
 // return contract (SFN-974); the short version is 0 = created, 1 =
 // already existed, -1 = a real filesystem fault.
 //

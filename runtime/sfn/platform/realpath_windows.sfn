@@ -5,7 +5,7 @@
 // here — `realpath(3)` is a bare libc symbol on POSIX, not a
 // Sailfin-authored runtime module — so this file is APPENDED for a
 // Windows target rather than substituted for an existing basename
-// (`target_condition_runtime_sfn_sources`, `compiler/src/build/target.sfn`).
+// by the matching table in `runtime/capsule.toml`.
 //
 // Consumers each inline their own
 // `extern fn realpath(path: *u8, resolved: *u8) -> *u8;` per the SFN-635

@@ -25,7 +25,7 @@ import { host_is_windows } from "./target";
 // `mkstemp` and `close` are POSIX spellings absent from the MSVC UCRT
 // (which exports `_close`).
 // `mkstemp` resolves against `runtime/sfn/platform/mkstemp_windows.sfn`
-// (SFN-549, appended by `target_condition_runtime_sfn_sources`) — the
+// (SFN-549, added by the matching manifest target table) — the
 // same sibling-module treatment `@realpath` gets from
 // `platform/realpath_windows.sfn`. `close` has no such sibling and
 // needs none: it resolves on the native MSVC leg via `oldnames.lib`
@@ -44,8 +44,8 @@ extern fn close(fd: i32) -> i32;
 // question; reading the entries out is `fs.listDirectory`'s job.
 //
 // On the native MSVC leg these resolve against
-// `runtime/sfn/platform/opendir_windows.sfn` (SFN-903, appended by
-// `target_condition_runtime_sfn_sources`), the same sibling-module
+// `runtime/sfn/platform/opendir_windows.sfn` (SFN-903, added by the
+// matching manifest target table), the same sibling-module
 // treatment `mkstemp` gets above from `platform/mkstemp_windows.sfn`. On
 // mingw the symbols are unchanged: libmingwex implements `opendir` there.
 extern fn opendir(path: *u8) -> *u8;
@@ -205,8 +205,8 @@ fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
 //
 // Unlike `_shell_read_cmd("pwd")` this needs no `host_is_windows()` gate:
 // `@realpath` is provided on a native Windows host by
-// `runtime/sfn/platform/realpath_windows.sfn` over `_fullpath`, appended
-// for Windows targets by `target_condition_runtime_sfn_sources` — the same
+// `runtime/sfn/platform/realpath_windows.sfn` over `_fullpath`, added by
+// the matching Windows manifest target table — the same
 // sibling-module treatment `mkstemp` gets. That sibling returns
 // BACKSLASH-separated paths; consumers concatenate forward-slash suffixes
 // onto the result and Win32 accepts both separators, so the mixed spelling
@@ -259,8 +259,8 @@ fn _set_perms_or_skip(path: string, mode: int) -> boolean ![io] {
 // removed and false returned.
 //
 // Routed through `sfn_rename_replace` (`platform/rename_ops.sfn`,
-// swapped for its Windows sibling by
-// `target_condition_runtime_sfn_sources`) rather than calling libc
+// swapped for its Windows sibling by manifest target conditioning) rather
+// than calling libc
 // `rename` directly, because REPLACING an existing destination is the
 // load-bearing half of this contract and Windows does not do it: the
 // CRT's `rename()` returns `EEXIST` where POSIX `rename(2)` replaces

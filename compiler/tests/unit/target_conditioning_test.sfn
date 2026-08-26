@@ -47,7 +47,6 @@ import {
     target_artifact_tag,
     target_clang_flags,
     target_clang_triple,
-    target_condition_runtime_sfn_sources,
     target_exe_name,
     target_extra_link_libs,
     target_filter_link_libs,
@@ -320,44 +319,9 @@ test "target: windows-gnu keeps -lm/-lpthread, unlike msvc" ![pure] {
 }
 
 // ---- Runtime module-set conditioning ----
-test "target: host runtime module set is unchanged" ![pure] {
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/io.sfn"];
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
-}
-
-// SFN-1084. Two mechanisms select the Windows runtime source set, and both
-// are live until SFN-777 deletes the second after a seed cut:
-//   - the `[targets.<triple>]` tables in `runtime/capsule.toml` — working-tree
-//     data the seed reads, so an edit takes effect immediately;
-//   - `target_condition_runtime_sfn_sources` — baked into the seed binary, so
-//     an edit takes effect only after a seed cut.
-//
-// A divergence between them is silent. It does not fail `make compile`; it
-// surfaces as an undefined symbol at link on the Windows leg, which is
-// precisely what SFN-1039 was. So resolve the REAL manifest both ways and
-// compare member-for-member rather than asserting substrings against the
-// TOML text — a substring check passes a table that is present but wrong.
-//
-// `runtime_capsule_from_root` reads `runtime/capsule.toml` from the repo
-// root, the same relative-path convention the `fs.readFile` wiring guards
-// in this file already use.
-//
-// Scope of the proof: this compares the UNGATED `sfn-sources`. In a real
-// build `[sfn-source-gates]` selection runs first, and there the two
-// mechanisms are not identically shaped — the fallback's eight appends are
-// conditional on having found a `platform_dir` anchor, while
-// `sfn-sources-add` is unconditional. They cannot diverge today because
-// `exec.sfn`, `rlimit.sfn`, `terminal.sfn`, and `fd_io.sfn` are ungated and
-// so always anchor, but that is an argument, not an assertion — a future
-// gate on all four would break the equivalence without failing this test.
-//
-// `_declares_target` is not decoration. With NO table for a triple,
-// `_condition_runtime_capsules` falls through to the very fallback these
-// tests compare against, so the equivalence assertion alone passes
-// vacuously — verified by deleting the MSVC table and watching both tests
-// stay green. Proving the table parsed is what makes the comparison mean
-// anything.
+// SFN-777: the target manifest is the sole Windows runtime policy. The real
+// manifest tests below prove both tables parse and select their ABI-specific
+// sources and libraries; a missing Windows table fails closed.
 fn _declares_target(caps: RuntimeCapsuleArtifacts[], triple: string) -> boolean ![pure] {
     if caps.length != 1 { return false; }
     let entries = caps[0].target_artifacts;
@@ -370,43 +334,39 @@ fn _declares_target(caps: RuntimeCapsuleArtifacts[], triple: string) -> boolean 
     return false;
 }
 
-test "target: the MSVC manifest table matches the hardcoded Windows fallback" ![io] {
+test "target: the MSVC manifest table selects native providers" ![io] {
     let caps = runtime_capsule_from_root("runtime");
     assert caps.length == 1;
     assert _declares_target(caps, "x86_64-pc-windows-msvc");
 
     let via_manifest = condition_runtime_capsules_for_target(caps, "Windows", "x86_64-pc-windows-msvc");
     assert via_manifest.length == 1;
-    let via_fallback = target_condition_runtime_sfn_sources(caps[0].sfn_sources, "Windows");
-    assert expect_eq_str_array(via_manifest[0].sfn_sources, via_fallback).ok;
+    assert _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/platform/process_windows.sfn");
+    assert _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/platform/rlimit_windows.sfn");
+    assert _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/platform/pthread_windows.sfn");
+    assert ! _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/process.sfn");
+    assert ! _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/platform/rlimit.sfn");
 
-    // The one intended asymmetry: the MSVC table adds no link libs, because
+    // MSVC adds no manifest link libs because
     // `target_extra_link_libs` already supplies them for this ABI. Asserting
-    // it here is what stops someone "fixing" the table by copying mingw's
+    // it here stops someone copying MinGW's
     // `link-libs-add` across and double-adding them.
     assert expect_eq_str_array(via_manifest[0].link_libs, caps[0].link_libs).ok;
     assert expect_eq_str_array(target_extra_link_libs("x86_64-pc-windows-msvc"), ["-lbcrypt", "-lcrypt32", "-lws2_32"]).ok;
 
-    // `ll-sources-add` has no fallback counterpart to compare against, so the
-    // equivalence above cannot see it: a plausible-looking `.ll` entry passes
-    // `_rcr_target_identity_inputs_valid` (it only checks the path sits under
-    // the member root), reaches the msvc link, and leaves every other
-    // assertion here green. Pin it to the unconditioned list instead.
     assert expect_eq_str_array(via_manifest[0].ll_sources, caps[0].ll_sources).ok;
 }
 
-// The same equivalence for mingw. It held before SFN-1084 by inspection
-// only; asserting it means a future edit to either mechanism fails here
-// rather than on a Windows link.
-test "target: the MinGW manifest table matches the hardcoded Windows fallback" ![io] {
+test "target: the MinGW manifest table selects native providers" ![io] {
     let caps = runtime_capsule_from_root("runtime");
     assert caps.length == 1;
     assert _declares_target(caps, "x86_64-w64-mingw32");
 
     let via_manifest = condition_runtime_capsules_for_target(caps, "Windows", "x86_64-w64-mingw32");
     assert via_manifest.length == 1;
-    let via_fallback = target_condition_runtime_sfn_sources(caps[0].sfn_sources, "Windows");
-    assert expect_eq_str_array(via_manifest[0].sfn_sources, via_fallback).ok;
+    assert _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/platform/process_windows.sfn");
+    assert _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/platform/pthread_windows.sfn");
+    assert ! _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/process.sfn");
 
     // Mingw gets the three Windows import libs from its own table, since
     // `target_extra_link_libs` returns nothing for the gnu ABI.
@@ -418,70 +378,19 @@ test "target: the MinGW manifest table matches the hardcoded Windows fallback" !
     assert expect_eq_str_array(via_manifest[0].ll_sources, caps[0].ll_sources).ok;
 }
 
-test "target: Windows swaps platform sources and appends native providers" ![pure] {
-    // SFN-549: rlimit.sfn used to be dropped here; the native Windows paths
-    // need the real memory-budget provider, so
-    // rlimit.sfn now swaps to its own Win32 sibling instead of vanishing.
-    // terminal.sfn swaps to terminal_windows.sfn (`isatty` -> `_isatty`).
-    // rand.sfn swaps the same way (BCryptGenRandom in place of
-    // getentropy/`/dev/urandom`). tls.sfn is no longer swapped (SFN-341
-    // deleted the OpenSSL link surface, so there is no OpenSSL-backed
-    // module left to replace). process.sfn → its existing Win32 sibling.
-    // fs_exec_mode.sfn swaps to fs_exec_mode_windows.sfn: POSIX X_OK (1)
-    // is not a legal UCRT `_access` mode, and passing it terminates the
-    // process via `_invalid_parameter_noinfo` -> `__fastfail` (0xC0000409)
-    // rather than returning an error, so the sibling supplies F_OK
-    // (SFN-649). cert_roots.sfn swaps to cert_roots_windows.sfn: Windows
-    // has no CA-bundle file anywhere, so the system `ROOT` certificate
-    // store reached through Crypt32 is the only trust source there
-    // (SFN-808). The eight anchor-less siblings (realpath_windows.sfn,
-    // clock_windows.sfn, pthread_windows.sfn, popen_windows.sfn,
-    // mkstemp_windows.sfn, strcasestr_windows.sfn, opendir_windows.sfn,
-    // mkdtemp_windows.sfn) have no POSIX .sfn
-    // counterpart to swap FROM (each backs a bare libc/pthreads symbol,
-    // not a Sailfin module), so they are APPENDED at the end rather than
-    // replacing a matched basename. Every other module is preserved in
-    // order. sysconf is folded into pthread_windows.sfn rather than its own
-    // sibling (SFN-1039): a standalone sysconf_windows.sfn was wired in only
-    // via a `[targets.x86_64-w64-mingw32]` manifest table the pinned seed
-    // cannot read, so the native MSVC link saw an undefined `sysconf`.
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/terminal.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/platform/cert_roots.sfn", "/rt/sfn/io.sfn",];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/terminal_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/platform/cert_roots_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn", "/rt/sfn/platform/mkdtemp_windows.sfn",];
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
+test "target: a missing Windows manifest table fails closed" ![io] {
+    let caps = runtime_capsule_from_root("runtime");
+    assert caps.length == 1;
+    let missing = condition_runtime_capsules_for_target(caps, "Windows", "x86_64-unknown-windows-gnu");
+    assert expect_eq_bool(missing.length == 0, true).ok;
 }
 
-test "target: Windows conditioning never double-joins platform/platform" ![pure] {
-    // rlimit.sfn/rand.sfn/tls.sfn already live in platform/, so their
-    // siblings must join directly onto that same directory rather than
-    // appending a second platform/ segment; process.sfn does NOT live in
-    // platform/, so it alone gets the platform/ prefix. This double-join
-    // bug was caught pre-ship once already (SFN-549) — assert no emitted
-    // path, swapped or appended, ever contains platform/platform.
-    let sources: string[] = ["/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn"];
-    let out = target_condition_runtime_sfn_sources(sources, "Windows");
-    let mut i: int = 0;
-    loop {
-        if i >= out.length { break; }
-        assert expect_eq_bool(contains(out[i], "platform/platform"), false).ok;
-        i += 1;
-    }
-}
-
-test "target: Windows append anchors on exec.sfn when rlimit.sfn/rand.sfn/tls.sfn are absent" ![pure] {
-    // The append doesn't require rlimit.sfn/rand.sfn/tls.sfn specifically —
-    // any of the four platform/ modules anchors it, exec.sfn included.
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn"];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn", "/rt/sfn/platform/opendir_windows.sfn", "/rt/sfn/platform/mkdtemp_windows.sfn",];
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
-}
-
-test "target: Windows skips the anchor-less appends with no platform/ anchor present" ![pure] {
-    // No rlimit.sfn / rand.sfn / tls.sfn / exec.sfn in this fixture, so
-    // there is nothing to anchor the appends on — the function does not
-    // guess a path, it just leaves the list as swapped (unchanged here,
-    // since nothing else matches either).
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/io.sfn"];
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), sources).ok;
+test "target: a missing non-Windows manifest table preserves the runtime" ![io] {
+    let caps = runtime_capsule_from_root("runtime");
+    assert caps.length == 1;
+    let linux = condition_runtime_capsules_for_target(caps, "Linux", "x86_64-unknown-linux-gnu");
+    assert expect_eq_bool(linux.length == caps.length, true).ok;
+    assert expect_eq_str_array(linux[0].sfn_sources, caps[0].sfn_sources).ok;
 }
 
 test "target: compiler-global extra link libs are MSVC-only" ![pure] {
@@ -506,98 +415,44 @@ test "target: compiler-global extra link libs are MSVC-only" ![pure] {
     assert expect_eq_str_array(target_extra_link_libs("x86_64-apple-darwin"), none).ok;
 }
 
-test "target: Windows fs_exec_mode swap survives without the other platform anchors" ![pure] {
-    // fs_exec_mode.sfn is itself a platform/ anchor, so the swap must
-    // work (and the anchor-less appends must still fire) even when
-    // rlimit/rand/tls/exec are all absent. Guards against the swap being
-    // reachable only via another module's anchor discovery — the same
-    // class of coupling the exec.sfn anchor test above pins.
-    let sources: string[] = ["/rt/sfn/platform/fs_exec_mode.sfn"];
-    let out = target_condition_runtime_sfn_sources(sources, "Windows");
-    assert expect_eq_str(out[0], "/rt/sfn/platform/fs_exec_mode_windows.sfn").ok;
-    assert expect_eq_bool(out.length > 1, true).ok;
-}
-
-test "target: Windows socket_ops swap survives without the other platform anchors" ![pure] {
-    // socket_ops.sfn is itself a platform/ anchor, so the swap must fire
-    // with rlimit/rand/tls/exec all absent — same coupling guard as the
-    // fs_exec_mode test above (SFN-671).
-    let sources: string[] = ["/rt/sfn/platform/socket_ops.sfn"];
-    let out = target_condition_runtime_sfn_sources(sources, "Windows");
-    assert expect_eq_str(out[0], "/rt/sfn/platform/socket_ops_windows.sfn").ok;
-    assert expect_eq_bool(out.length > 1, true).ok;
-}
-
-test "target: Windows cert_roots swap survives without the other platform anchors" ![pure] {
-    // cert_roots.sfn is itself a platform/ anchor, so the swap must fire
-    // with rlimit/rand/tls/exec all absent — same coupling guard as the
-    // fs_exec_mode test above (SFN-808).
-    let sources: string[] = ["/rt/sfn/platform/cert_roots.sfn"];
-    let out = target_condition_runtime_sfn_sources(sources, "Windows");
-    assert expect_eq_str(out[0], "/rt/sfn/platform/cert_roots_windows.sfn").ok;
-    assert expect_eq_bool(out.length > 1, true).ok;
-}
-
-test "target: host targets keep the POSIX close/socket module" ![pure] {
-    // The identity contract (#1112). This one is load-bearing beyond
-    // byte-identity: swapping socket_ops_windows.sfn in for every target
-    // would route POSIX disposal through `closesocket`, which does not
-    // exist outside ws2_32, and would call `WSAStartup` on Linux. Windows
-    // is the exception here, not the default (SFN-671).
-    let sources: string[] = ["/rt/sfn/platform/socket_ops.sfn", "/rt/sfn/io.sfn"];
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
-}
-
-test "target: Windows rename_ops swap survives without the other platform anchors" ![pure] {
-    // rename_ops.sfn is itself a platform/ anchor, so the swap must fire
-    // with rlimit/rand/tls/exec all absent — same coupling guard as the
-    // fs_exec_mode test above (SFN-720).
-    let sources: string[] = ["/rt/sfn/platform/rename_ops.sfn"];
-    let out = target_condition_runtime_sfn_sources(sources, "Windows");
-    assert expect_eq_str(out[0], "/rt/sfn/platform/rename_ops_windows.sfn").ok;
-    assert expect_eq_bool(out.length > 1, true).ok;
-}
-
-test "target: host targets keep the POSIX rename module" ![pure] {
+test "target: host targets keep the POSIX rename module" ![io] {
     // The identity contract (#1112), and load-bearing beyond byte-identity:
     // swapping rename_ops_windows.sfn in for every target would route POSIX
     // publishes through MoveFileExA, which does not exist outside kernel32.
     // Windows is the exception, not the default (SFN-720).
-    let sources: string[] = ["/rt/sfn/platform/rename_ops.sfn", "/rt/sfn/io.sfn"];
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
+    let caps = runtime_capsule_from_root("runtime");
+    let linux = condition_runtime_capsules_for_target(caps, "Linux", "x86_64-unknown-linux-gnu");
+    assert _argv_contains(linux[0].sfn_sources, "runtime/sfn/platform/rename_ops.sfn");
 }
 
-test "target: Windows file_stat swap survives without the other platform anchors" ![pure] {
-    // file_stat.sfn is itself a platform/ anchor, so the swap must fire
-    // with rlimit/rand/tls/exec all absent — same coupling guard as the
-    // fs_exec_mode test above (SFN-754).
-    let sources: string[] = ["/rt/sfn/platform/file_stat.sfn"];
-    let out = target_condition_runtime_sfn_sources(sources, "Windows");
-    assert expect_eq_str(out[0], "/rt/sfn/platform/file_stat_windows.sfn").ok;
-    assert expect_eq_bool(out.length > 1, true).ok;
+test "target: the Windows manifest swaps the file_stat provider" ![io] {
+    // The resolved real manifest must replace the POSIX provider for the
+    // complete runtime source set (SFN-754).
+    let caps = runtime_capsule_from_root("runtime");
+    let out = condition_runtime_capsules_for_target(caps, "Windows", "x86_64-pc-windows-msvc");
+    assert _argv_contains(out[0].sfn_sources, "runtime/sfn/platform/file_stat_windows.sfn");
+    assert ! _argv_contains(out[0].sfn_sources, "runtime/sfn/platform/file_stat.sfn");
 }
 
-test "target: host targets keep the POSIX file_stat module" ![pure] {
+test "target: host targets keep the POSIX file_stat module" ![io] {
     // The identity contract (#1112): `struct stat` field offsets are not
     // portable across glibc/Darwin, so Linux and macOS must keep the
     // always-"-1" `platform/file_stat.sfn` stub rather than the Windows
     // sibling's `GetFileAttributesExA` reads (SFN-754).
-    let sources: string[] = ["/rt/sfn/platform/file_stat.sfn", "/rt/sfn/io.sfn"];
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
+    let caps = runtime_capsule_from_root("runtime");
+    let darwin = condition_runtime_capsules_for_target(caps, "Darwin", "x86_64-apple-darwin");
+    assert _argv_contains(darwin[0].sfn_sources, "runtime/sfn/platform/file_stat.sfn");
 }
 
-test "target: host targets keep the POSIX X_OK fs_exec_mode module" ![pure] {
+test "target: host targets keep the POSIX X_OK fs_exec_mode module" ![io] {
     // The identity contract (#1112): Linux and macOS DO have an execute
     // permission bit, so they must keep platform/fs_exec_mode.sfn and its
     // X_OK. Swapping in F_OK for every target would "fix" Windows by
     // silently downgrading the executable check to a mere existence
     // check on the two platforms where it is meaningful (SFN-649).
-    let sources: string[] = ["/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/io.sfn"];
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
-    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
+    let caps = runtime_capsule_from_root("runtime");
+    let linux = condition_runtime_capsules_for_target(caps, "Linux", "x86_64-unknown-linux-gnu");
+    assert _argv_contains(linux[0].sfn_sources, "runtime/sfn/platform/fs_exec_mode.sfn");
 }
 
 // ---- Assemble argv splicing ----

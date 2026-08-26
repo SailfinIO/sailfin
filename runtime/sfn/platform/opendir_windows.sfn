@@ -1,8 +1,8 @@
 // runtime/sfn/platform/opendir_windows.sfn
 //
-// Windows sibling providing `opendir` / `closedir` (SFN-903), APPENDED by
-// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
-// for a Windows target — like `mkstemp_windows.sfn`, `opendir(3)` /
+// Windows sibling providing `opendir` / `closedir` (SFN-903), added by the
+// matching table in `runtime/capsule.toml` for a Windows target — like
+// `mkstemp_windows.sfn`, `opendir(3)` /
 // `closedir(3)` are bare libc symbols on POSIX, not Sailfin-authored
 // modules, so there is no POSIX `.sfn` module to swap FROM.
 // `compiler/src/build/fs.sfn:60-62` declares the two externs `opendir`

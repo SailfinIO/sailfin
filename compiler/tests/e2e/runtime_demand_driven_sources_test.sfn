@@ -232,8 +232,8 @@ test "runtime gates: module count stays under the ceiling" ![io] {
     //
     // The ceiling is host-conditioned because the narrowed set legitimately
     // differs by target, not because Windows is allowed to narrow less well.
-    // `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
-    // appends eight Windows-only modules that have no POSIX counterpart to
+    // The Windows manifest table appends eight Windows-only modules that have
+    // no POSIX counterpart to
     // swap from — `realpath`, `clock`, `pthread`, `popen`, `mkstemp`,
     // `strcasestr`, `opendir`, `mkdtemp` — on top of the `_windows` swaps.
     // Those are additions to the retained set that no POSIX build performs,

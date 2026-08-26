@@ -1,8 +1,7 @@
 // runtime/sfn/platform/rand_windows.sfn
 //
-// Windows sibling of `runtime/sfn/platform/rand.sfn` (SFN-549), swapped in by
-// `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn:137-153`) for a Windows target. Backs
+// Windows sibling of `runtime/sfn/platform/rand.sfn` (SFN-549), selected by
+// the matching table in `runtime/capsule.toml` for a Windows target. Backs
 // `sfn_rand_fill` with `BCryptGenRandom` (bcrypt.dll) instead of
 // `getentropy`/`/dev/urandom`, neither of which exists under MSVC.
 //

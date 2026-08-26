@@ -51,19 +51,13 @@ import {
     _resolve_self_path
 } from "./paths";
 import { runtime_demanded_dep_specs } from "./runtime_selection";
-// Target conditioning (SFN-52, SFEP-0021 §4.2(A)): rewrite the runtime
-// module set for a Windows target — `process`/`rlimit`/`rand` swap to
-// their `platform/*_windows` siblings. Identity off Windows, so
-// Linux/macOS link inputs are byte-identical.
-//
-// SFN-775: both Windows ABIs now use real Sailfin runtime providers. The
-// retired MinGW bridge stubs would duplicate those definitions and are no
-// longer part of the workspace or installer.
+// Target conditioning (SFN-52, SFEP-0021 §4.2(A)): both Windows ABIs select
+// their runtime providers from `runtime/capsule.toml [targets.<triple>]`.
+// Identity off Windows, so Linux/macOS link inputs are byte-identical.
 import {
     build_target_os,
     build_target_triple,
     target_artifact_tag,
-    target_condition_runtime_sfn_sources,
     target_os_is_windows,
     triple_artifact_tags
 } from "./target";
@@ -1705,14 +1699,11 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
 // (`cli_commands.sfn::_clang_link_test_cmd_with_deps`, which imports
 // this through the `cli_main <-> cli_commands` cycle) so the two
 // paths resolve the runtime identically.
-// Rewrite the runtime capsule set for `target_os` (SFN-52). Only the
-// `sfn_sources` list is target-conditioned here (the POSIX↔Windows process
-// swap + rlimit drop); the `link_libs` POSIX filter is applied once at the
+// Resolve the manifest-owned artifact set for the exact target triple
+// (SFN-775, SFN-777). The `link_libs` POSIX filter is applied once at the
 // final link (`LlvmTextBackend.link`), so it covers the `sfn test` link
-// layout too. Non-Windows returns the input array verbatim (identity), so
-// every downstream compile iterates the same list as before. A free
-// function taking `target_os` as a string keeps it pure; the `![io]`
-// caller resolves the target.
+// layout too. A missing Windows target table fails closed before compilation;
+// targets without a matching table retain the base artifact set unchanged.
 fn _runtime_target_artifacts(targets: RuntimeTargetArtifacts[], triple: string) -> RuntimeTargetArtifacts {
     let mut i: int = 0;
     loop {
@@ -1805,26 +1796,10 @@ fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: strin
             ll_sources = _runtime_condition_paths(c.ll_sources, no_replacements, no_drops, target.ll_sources_add);
             link_libs = _runtime_condition_values(c.link_libs, target.link_libs_drop, target.link_libs_add);
         } else if target_os_is_windows(target_os) {
-            // One-seed migration fallback (SFEP-0068 §3.3): a released seed
-            // that predates `[targets.*]` still selects the Win32 siblings.
-            //
-            // This branch appends `pthread_windows.sfn` for BOTH Windows
-            // ABIs, MinGW included, and that is deliberate: the file carries
-            // `sysconf` as well as the `pthread_*` bodies, and a statically
-            // linked mingw-w64 does not resolve `sysconf` from winpthreads,
-            // so excluding it leaves `sfn_scheduler_resolve_thread_count`
-            // with an undefined reference (SFN-1039). Its Win32 definitions
-            // win over the archive's, so no duplicate-symbol conflict
-            // arises.
-            sfn_sources = target_condition_runtime_sfn_sources(c.sfn_sources, target_os);
-            if target_triple == "x86_64-w64-mingw32" {
-                // `target_extra_link_libs` supplies these on the MSVC ABI
-                // only, so the MinGW leg must add the three Windows import
-                // libs itself.
-                let no_lib_drops: string[] = [];
-                let mingw_libs: string[] = ["-lbcrypt", "-lcrypt32", "-lws2_32"];
-                link_libs = _runtime_condition_values(c.link_libs, no_lib_drops, mingw_libs);
-            }
+            // SFN-777: Windows runtime conditioning is manifest-only. Returning
+            // no capsules makes a missing target table fail closed instead of
+            // silently compiling the POSIX providers into a Windows binary.
+            return [];
         }
         out.push(RuntimeCapsuleArtifacts {
             capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: ll_sources, sfn_sources: sfn_sources, include_dirs: c.include_dirs, link_libs: link_libs, prelude_entry: c.prelude_entry, sfn_source_root: c.sfn_source_root, sfn_module_prefix: c.sfn_module_prefix, capsule_deps: c.capsule_deps, sfn_source_gates: c.sfn_source_gates, target_artifacts: c.target_artifacts
@@ -1838,21 +1813,26 @@ fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: strin
 // identity that represents its outputs. Keeping one transformation prevents a
 // target replacement/addition or link-lib change from compiling one input set
 // while the linked-test cache hashes another.
-fn condition_runtime_capsules_for_target(caps: RuntimeCapsuleArtifacts[], target_os: string, target_triple: string) -> RuntimeCapsuleArtifacts[] {
-    return _condition_runtime_capsules(caps, target_os, target_triple);
+fn condition_runtime_capsules_for_target(caps: RuntimeCapsuleArtifacts[], target_os: string, target_triple: string) -> RuntimeCapsuleArtifacts[] ![io] {
+    let conditioned = _condition_runtime_capsules(caps, target_os, target_triple);
+    if target_os_is_windows(target_os) && conditioned.length != caps.length {
+        print("sfn build: runtime capsule manifest has no [targets."
+            + target_triple
+            + "] section");
+    }
+    return conditioned;
 }
 
 fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
-    // SFN-52 (SFEP-0021 §4.2(A), M6): condition the runtime capsule set for
-    // the build target before any compile iterates it — Windows swaps
-    // process.sfn→process_windows.sfn and drops the Linux-only rlimit.sfn.
-    // Identity off Windows, so Linux/macOS link inputs are byte-identical.
-    // Kept OS-keyed (both Windows triples need this identically);
-    // `target_triple` below feeds only the tag / cache-key folds that
-    // genuinely diverge by ABI (SFN-774).
+    // SFN-775/SFN-777 (SFEP-0068 §3.3): apply the exact triple's manifest
+    // table before any compile iterates the runtime capsule set. A missing
+    // Windows table returns a sentinel length mismatch and fails immediately.
     let target_os = build_target_os();
     let target_triple = build_target_triple();
     let capsules = condition_runtime_capsules_for_target(runtime_capsules, target_os, target_triple);
+    if capsules.length != runtime_capsules.length {
+        return _failed_runtime_link_inputs();
+    }
     // One resolution feeds every clang phase, preserving the emit pool's
     // CPU/RAM ceiling and the SAILFIN_BUILD_JOBS=1 bisect path (SFN-612).
     let jobs = _cr_resolve_jobs();

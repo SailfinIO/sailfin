@@ -179,7 +179,7 @@ test "http emit: define for every sfn_http_* export" ![io] {
 // `SO_RCVTIMEO`/`SO_SNDTIMEO` optval is a millisecond DWORD (not a
 // `struct timeval`), so all four now route through
 // `platform/socket_ops.sfn`, which is swapped for its Windows sibling by
-// `target_condition_runtime_sfn_sources`. The rest of the surface is
+// manifest target conditioning. The rest of the surface is
 // exported under the same names by `ws2_32.dll` and stays a bare libc
 // declaration. Asserting the ABSENCE of the POSIX-only declares is the
 // half that matters: it is what would catch a regression that

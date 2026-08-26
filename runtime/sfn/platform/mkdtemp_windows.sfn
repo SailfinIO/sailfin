@@ -1,8 +1,8 @@
 // runtime/sfn/platform/mkdtemp_windows.sfn
 //
-// Windows sibling providing `mkdtemp` (SFN-993), APPENDED by
-// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
-// for a Windows target — like `mkstemp_windows.sfn` / `opendir_windows.sfn`,
+// Windows sibling providing `mkdtemp` (SFN-993), added by the matching table
+// in `runtime/capsule.toml` for a Windows target — like
+// `mkstemp_windows.sfn` / `opendir_windows.sfn`,
 // `mkdtemp(3)` is a bare libc symbol on POSIX, not a Sailfin-authored
 // module, so there is no POSIX `.sfn` module to swap FROM.
 // `runtime/sfn/adapters/filesystem.sfn:194` declares

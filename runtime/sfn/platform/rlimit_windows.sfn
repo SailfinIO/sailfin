@@ -1,9 +1,8 @@
 // runtime/sfn/platform/rlimit_windows.sfn
 //
-// Windows sibling of `runtime/sfn/platform/rlimit.sfn` (SFN-549), swapped in
-// by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`) for a Windows target, which otherwise
-// DROPS `rlimit.sfn` outright — leaving `apply_default_mem_limit`
+// Windows sibling of `runtime/sfn/platform/rlimit.sfn` (SFN-549), selected by
+// the matching table in `runtime/capsule.toml` for a Windows target. Omitting
+// that replacement would leave `apply_default_mem_limit`
 // unresolved, since `compiler/src/cli/entry.sfn:156` calls it from `fn main`
 // on every compiler run.
 //

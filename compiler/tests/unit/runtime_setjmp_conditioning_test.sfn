@@ -14,9 +14,9 @@
 // declares it, it is live on the `sfn_throw` path, and the symbol is spelled
 // identically on both ABIs.
 //
-// The audit set is derived from `target_condition_runtime_sfn_sources`
-// itself rather than a hand-maintained list, so it stays self-maintaining
-// as Windows siblings are added — the manifest never lists them directly.
+// The audit set is derived from the real runtime manifest's base and Windows
+// target entries rather than a hand-maintained list, so it stays
+// self-maintaining as Windows siblings are added.
 // No build, no subprocess, no nested runner (`.claude/rules/no-bash-e2e.md`).
 import {
     contains,
@@ -25,8 +25,8 @@ import {
     split
 } from "sfn/strings";
 
-import { target_condition_runtime_sfn_sources } from "../../src/build/target";
-import { toml_get_sfn_sources } from "../../src/toml_parser";
+import { condition_runtime_capsules_for_target } from "../../src/build/runtime_objs";
+import { runtime_capsule_from_root } from "../../src/runtime_capsule_resolver";
 
 // Drop everything from the first `//` on each line. Whole-file `contains`
 // over `![io]`-read text is the stable form here — the array-parsing-with
@@ -49,16 +49,18 @@ fn _strip_line_comments(text: string) -> string {
 }
 
 test "runtime: no runtime source declares or calls setjmp" ![io] {
-    let manifest = fs.readFile("runtime/capsule.toml");
-    let sources = toml_get_sfn_sources(manifest);
+    let caps = runtime_capsule_from_root("runtime");
+    assert caps.length == 1;
     let mut audit: string[] = [];
     let mut i: int = 0;
     loop {
-        if i >= sources.length { break; }
-        audit.push("runtime/" + sources[i]);
+        if i >= caps[0].sfn_sources.length { break; }
+        audit.push(caps[0].sfn_sources[i]);
         i += 1;
     }
-    let windows_sources = target_condition_runtime_sfn_sources(audit, "Windows");
+    let windows = condition_runtime_capsules_for_target(caps, "Windows", "x86_64-pc-windows-msvc");
+    assert windows.length == 1;
+    let windows_sources = windows[0].sfn_sources;
     let mut w: int = 0;
     loop {
         if w >= windows_sources.length { break; }

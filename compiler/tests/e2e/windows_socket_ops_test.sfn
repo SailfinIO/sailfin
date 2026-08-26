@@ -150,8 +150,8 @@ test "socket-ops: the POSIX module keeps close and never links Winsock" ![io] {
 
 // Both halves must define the same seven symbols, or the swap produces a
 // link with an unresolved reference on whichever target loses. This is
-// the contract `target_condition_runtime_sfn_sources` depends on and
-// that no type checker enforces across a module swap.
+// the manifest replacement contract, which no type checker enforces across
+// a module swap.
 test "socket-ops: both siblings define the same exported surface" ![io] {
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         let posix = _emit("sockposix2", "runtime/sfn/platform/socket_ops.sfn", dir);

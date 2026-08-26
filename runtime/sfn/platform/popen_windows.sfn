@@ -1,8 +1,8 @@
 // runtime/sfn/platform/popen_windows.sfn
 //
-// Windows sibling providing `popen`/`pclose` (SFN-549), APPENDED by
-// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
-// for a Windows target — `popen(3)`/`pclose(3)` are bare libc symbols on
+// Windows sibling providing `popen`/`pclose` (SFN-549), added by the matching
+// table in `runtime/capsule.toml` for a Windows target — `popen(3)`/`pclose(3)`
+// are bare libc symbols on
 // POSIX, not Sailfin-authored modules, so — like `realpath_windows.sfn` —
 // there is no POSIX `.sfn` module to swap FROM. `runtime/sfn/io.sfn:121-123`
 // declares `extern fn popen(cmd: *u8, mode: *u8) -> *u8;` /

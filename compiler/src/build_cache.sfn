@@ -188,7 +188,7 @@ import { char_code_at_text, find_last_index_of_char, substring } from "./string_
 // `sfn_fs_stat_size`/`sfn_fs_stat_mtime_epoch` are defined by
 // `runtime/sfn/platform/file_stat.sfn` (POSIX stub, always `-1`) and
 // swapped for `file_stat_windows.sfn` (real `GetFileAttributesExA` read)
-// on a Windows target by `target_condition_runtime_sfn_sources`. Both
+// by the matching Windows table in `runtime/capsule.toml`. Both
 // return `-1` to mean "not available, fall back to the shell reading" —
 // the POSIX leg always does, since `struct stat` field offsets are not
 // portable across glibc/Darwin (`runtime/sfn/platform/sizes_linux.sfn`).
@@ -205,7 +205,7 @@ extern fn sfn_fs_touch_now(path: *u8) -> i32;
 // The existing runtime realtime clock (`runtime/sfn/clock.sfn`), real on
 // every target — POSIX and Windows both resolve the `clock_gettime` it
 // calls (the Windows leg through `sfn/platform/clock_windows.sfn`,
-// appended by `target_condition_runtime_sfn_sources`). Out-param + status
+// added by the matching manifest target table). Out-param + status
 // return, matching the defining signature exactly rather than the
 // simpler plain-return shape a fresh symbol would get.
 extern fn sfn_clock_unix_millis(out_millis: *i64) -> i32;
