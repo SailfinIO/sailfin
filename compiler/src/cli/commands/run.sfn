@@ -51,6 +51,7 @@ import {
     CREATE_EXCLUSIVE_MODE_EXE,
     _create_exclusive_cmd
 } from "../../build/fs";
+import { remove_tree } from "../../build/fs_tree";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ends_with, _ensure_dir } from "../../build/paths";
 import { _runtime_bundle_exists } from "../../build/runtime_objs";
@@ -116,10 +117,12 @@ fn _unique_run_stem(run_cache_dir: string) -> string ![clock, io] {
 
 // Delete the artifacts this invocation claimed. No-op on the guarded
 // (`SAILFIN_TEST_SCRATCH`) branch, which keeps the fixed `run` name and
-// claims nothing. `keep_ll` is true only on the link-failure path, where
-// the SFN-34 backend-failure banner names the IR file.
-fn _release_run_stem(claimed: boolean, exe_path: string, ll_path: string, keep_ll: boolean) -> void ![io] {
+// claims nothing. The per-invocation link workspace is always disposable;
+// `keep_ll` is true only on the link-failure path, where the SFN-34
+// backend-failure banner names the top-level IR file.
+fn _release_run_stem(claimed: boolean, exe_path: string, ll_path: string, work_dir: string, keep_ll: boolean) -> void ![io] {
     if !claimed { return; }
+    if fs.exists(work_dir) { remove_tree(work_dir); }
     if fs.exists(exe_path) { fs.deleteFile(exe_path); }
     if keep_ll { return; }
     if fs.exists(ll_path) { fs.deleteFile(ll_path); }
@@ -220,6 +223,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // renaming it would churn cache keys for no gain.
     let run_exe_unguarded = env.get("SAILFIN_TEST_SCRATCH").length == 0;
     let mut run_stem = run_cache_dir + "/run";
+    let mut run_work_dir = run_cache_dir;
     if run_exe_unguarded {
         run_stem = _unique_run_stem(run_cache_dir);
         if run_stem.length == 0 {
@@ -227,6 +231,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                 + run_cache_dir);
             return 1;
         }
+        // The executable and top-level IR were already unique, but runtime
+        // emits, object sidecars, and link inputs still used the shared
+        // `build/sailfin` directory. Cold overlapping runs then raced on
+        // fixed `*.ll.old` promotion paths and failed before linking their
+        // distinct executables. Keep that whole transient surface under the
+        // claimed stem as well (SFN-1144).
+        run_work_dir = run_stem + ".work";
     }
     let exe_path = target_exe_name(run_stem, build_target_os());
     let ll_path = run_stem + ".ll";
@@ -264,7 +275,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     };
     let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, run_consumer, "", ctx.compiler_path, "", binary_dir);
     if !run_capsule_result.success {
-        _release_run_stem(run_exe_unguarded, exe_path, ll_path, false);
+        _release_run_stem(run_exe_unguarded, exe_path, ll_path, run_work_dir, false);
         return 1;
     }
     let capsule_lls = run_capsule_result.ll_paths;
@@ -274,7 +285,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let ok = compile_to_llvm_file_with_module_imports_and_implicit(source, module_name, ll_path, "", run_capsule_result.entry_import_asm_paths, run_capsule_result.implicit_provider_asm_paths);
     if !ok {
         print("failed to compile LLVM for: " + input_path);
-        _release_run_stem(run_exe_unguarded, exe_path, ll_path, false);
+        _release_run_stem(run_exe_unguarded, exe_path, ll_path, run_work_dir, false);
         return 1;
     }
 
@@ -298,7 +309,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if run_cache_config.enabled {
         run_shared_cache_root = cache_root(run_cache_config.capsule_name);
     }
-    let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "", run_shared_cache_root);
+    let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, run_work_dir, run_shared_cache_root);
     let link_rc = link_result.rc;
     if link_rc != 0 {
         // A native link failure is a real compiler/runtime bug to fix at the
@@ -314,7 +325,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
         }
         // `keep_ll = true`: the banner just printed names `ll_path`.
-        _release_run_stem(run_exe_unguarded, exe_path, ll_path, true);
+        _release_run_stem(run_exe_unguarded, exe_path, ll_path, run_work_dir, true);
         return link_rc;
     }
 
@@ -344,7 +355,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // touching an artifact another live invocation owns. SFN-1004: the
     // `.ll` is per-invocation now too, so it is released alongside the exe
     // rather than left to grow the shared directory without bound.
-    _release_run_stem(run_exe_unguarded, exe_path, ll_path, false);
+    _release_run_stem(run_exe_unguarded, exe_path, ll_path, run_work_dir, false);
     return run_rc;
 }
 
