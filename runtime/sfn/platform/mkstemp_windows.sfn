@@ -1,8 +1,8 @@
 // runtime/sfn/platform/mkstemp_windows.sfn
 //
-// Windows sibling providing `mkstemp` (SFN-549), APPENDED by
-// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
-// for a Windows target — `mkstemp(3)` is a bare libc symbol on POSIX, not
+// Windows sibling providing `mkstemp` (SFN-549), added by the matching table
+// in `runtime/capsule.toml` for a Windows target — `mkstemp(3)` is a bare
+// libc symbol on POSIX, not
 // a Sailfin-authored module, so — like `realpath_windows.sfn` — there is
 // no POSIX `.sfn` module to swap FROM. `compiler/src/build/fs.sfn:38`
 // declares `extern fn mkstemp(template: *u8) -> i32;` for the staging

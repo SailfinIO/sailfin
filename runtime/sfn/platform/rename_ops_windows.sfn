@@ -1,8 +1,7 @@
 // runtime/sfn/platform/rename_ops_windows.sfn
 //
-// Windows sibling of `rename_ops.sfn`, swapped in for a Windows target
-// by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`). See that module's header for why
+// Windows sibling of `rename_ops.sfn`, selected for a Windows target by the
+// matching table in `runtime/capsule.toml`. See that module's header for why
 // the operation is conditioned at all; the short version is that the
 // CRT's `rename()` fails `EEXIST` on an existing destination where
 // POSIX `rename(2)` atomically replaces, which broke every republish in

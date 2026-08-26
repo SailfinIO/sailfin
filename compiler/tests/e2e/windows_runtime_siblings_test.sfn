@@ -6,9 +6,9 @@
 // `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`,
 // `opendir_windows.sfn` — added by SFN-903 — and `mkdtemp_windows.sfn` —
 // added by SFN-993) are
-// the native Windows runtime providers. SFN-1039 folds `sysconf` back into
-// `pthread_windows.sfn` (its former standalone sibling only worked through a
-// `[targets.x86_64-w64-mingw32]` manifest table the pinned seed cannot read).
+// the native Windows runtime providers. SFN-1039 folded `sysconf` back into
+// `pthread_windows.sfn` while seed 0.10.4 could not read the MinGW manifest
+// table; seed 0.10.5 now reads both Windows tables.
 // SFN-808 adds
 // `runtime/sfn/platform/cert_roots_windows.sfn` to the same swap set, for
 // the system `ROOT` certificate store reached through Crypt32. Pins that
@@ -16,8 +16,7 @@
 // the symbol it provides — via a basename swap for rlimit/rand/cert_roots,
 // and via a pure append for the eight anchor-less siblings
 // (no POSIX `.sfn` counterpart to swap from) — in
-// `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`). The native TLS stack (SFN-341) needs no
+// the manifest target table. The native TLS stack (SFN-341) needs no
 // OpenSSL, so there is no absent-OpenSSL Windows sibling to pin here.
 //
 // No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives `sfn emit llvm`

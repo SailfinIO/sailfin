@@ -1,8 +1,7 @@
 // runtime/sfn/platform/fs_exec_mode_windows.sfn
 //
-// Windows sibling of `fs_exec_mode.sfn`, swapped in for a Windows
-// target by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`). See that module's header for the
+// Windows sibling of `fs_exec_mode.sfn`, selected for a Windows target by
+// the matching table in `runtime/capsule.toml`. See that module's header for the
 // full rationale; the short version is that POSIX `X_OK` (1) is not a
 // legal UCRT `_access` mode and passing it terminates the process.
 //

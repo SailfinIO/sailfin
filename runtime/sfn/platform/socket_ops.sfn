@@ -3,8 +3,7 @@
 // Socket creation, disposal, timeouts, and recv/send, isolated behind
 // five symbols so the Windows divergence is expressible as a module
 // swap. Swapped for `socket_ops_windows.sfn` on a Windows target by
-// `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`) — the same mechanism that swaps
+// the matching table in `runtime/capsule.toml` — the same mechanism that swaps
 // `fs_exec_mode.sfn`, and for the same reason (SFN-671).
 //
 // Why these operations and not the whole socket surface: they are the

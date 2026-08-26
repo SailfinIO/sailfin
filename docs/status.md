@@ -1,7 +1,7 @@
 # Status
 
-Updated: 2026-08-25 (SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035, SFN-1034,
-SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726). Seed pinned to `0.10.4` (`bootstrap.toml`
+Updated: 2026-08-26 (SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
+SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726). Seed pinned to `0.10.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -379,8 +379,10 @@ here.
   the target, assembles with clang `-femulated-tls`, and links statically
   through `x86_64-w64-mingw32-gcc`; `sfn package --installer --target
   windows-x86_64` stages the installer. Runtime substitutions, additions, and
-  link libraries are declared once in
-  `runtime/capsule.toml [targets.x86_64-w64-mingw32]`. The Makefile
+  link libraries are declared once in the
+  `runtime/capsule.toml` tables for `x86_64-w64-mingw32` and
+  `x86_64-pc-windows-msvc`; compiler source has no fallback provider list, and
+  a missing Windows target table fails the build explicitly (SFN-777). The Makefile
   `ci-cross-windows` target, duplicated `RUNTIME_MODS`, `llvm-link` bridge,
   `build/native/raw` staging, and `runtime/ir/windows_stubs.ll` are deleted;
   PR, release, and nightly workflows call the native commands directly.
@@ -601,7 +603,11 @@ here.
   30 days) and is opt-in only (no implicit prune on builds), and `clean
   [--all-schemas]` removes the current schema tree, optionally sweeping stale
   sibling `v<M>` schema trees too. Runtime C/LL/sfn objects share the same
-  cache across work-dirs (#915, #1096). `sfn test` content-addresses each
+  cache across work-dirs (#915, #1096). Unguarded `sfn run` invocations claim
+  distinct executable/IR names and keep their runtime/link scratch in matching
+  per-invocation workspaces, removed after the child exits, so cold overlapping
+  runs never race on fixed promotion sidecars or locked `.exe` images
+  (SFN-1144). `sfn test` content-addresses each
   linked test binary by the compiler binary's SHA-256 as well as its source,
   dependency, runtime, and flag inputs; byte-identical compilers share entries
   across commits, while different compiler binaries always miss (SFN-545,
@@ -1371,7 +1377,7 @@ stay under `capsules/sfn/*`. Their manifest identities and imports are unchanged
 | `sfn/toml` | `"toml"` | Shipped | None | TOML v1.0 parsing, serialization, dotted-path access |
 | `sfn/fs` | `"fs"` | Shipped | `io` | File read/write/append, exists, mkdir, read_dir, perms, mkdtemp, is_directory, symlink, read_link. Binary-safe `FileBytes` API (`read_bytes`, `write_bytes`, `byte_at`, `free_bytes`, `copy`) added for content with interior NULs; `read`/`readFile` now aborts with a diagnostic on an interior NUL instead of silently truncating (SFN-1008) |
 | `sfn/archive` | `"sfn/archive"` | Partial (tar read only; compression codecs shipped, tar write missing) | `io` (`targz_extract` only; everything else pure) | New capsule (SFEP-0071, layering + issue map in `stdlib/archive/src/mod.sfn:9-19`). Pure-Sailfin CRC-32 (RFC 1952 §8), DEFLATE inflate (RFC 1951, SFN-896) *and* compress (`deflate_all`, fixed Huffman + greedy LZ77, dynamic Huffman parsed but rejected `UnsupportedFeature`, SFN-897), gzip header parse *and* write (`gzip_write_all`, `src/gzip.sfn:262`), and POSIX ustar header **decode** with GNU long-name/long-link and PAX extended-header support (`ustar.sfn`, SFN-898) — all already two-directional except tar itself. `targz_extract(archive_path, dest_dir, opts) -> Result<ExtractSummary, ArchiveError> ![io]` (`src/tar_read.sfn:500`, SFN-898) composes gzip → inflate → ustar → the mandatory 8-rule path-traversal guard (`path_guard.sfn`, SFEP-0071 §3.6, enforced on every member before any filesystem call) → filesystem write; bounded by caller-supplied `max_total_bytes`/`max_members` (decompression-bomb guard) and a 4 GiB in-memory inflate cap. Sole consumer today: `sfn toolchain install`'s seed-tarball extraction (`cli/commands/toolchain.sfn:605`), retiring its `tar` shell-out. **No tar writer** — a ustar header encoder and a composing tar-creation entry point don't exist yet (tracked as SFN-899 in `mod.sfn`'s layering comment), so `sfn package`'s three `tar -czf` sites (see the `sfn package` bullet below, same section) are untouched and SFEP-0071 stays `Accepted`. |
-| `sfn/os` | `"os"` | Shipped | `clock`, `io` | Env vars, home dir, exec, exit; typed `Env` (`env_empty`/`env_set`/`env_from_current`) and `run_capture(args, env, cwd)`; child-process control over a `ProcessHandle` — `spawn_with_env`, framed stdout line/chunk reads plus the stderr chunk twin, `handle_stdout_fd`/`handle_stderr_fd` and the `*_at_eof` predicates for `io.poll_any` demultiplexing, and `handle_kill` (SIGKILL). `drain_to_exit(h, deadline_ms)` pumps both streams to exit under an optional wall-clock deadline and reports `timed_out` as a boolean rather than remapping the exit code (a SIGKILL wait yields 137, indistinguishable from an OOM kill); `run_bounded` pairs it with `spawn_with_env`. `![clock]` is scoped to the deadline paths |
+| `sfn/os` | `"os"` | Shipped | `clock`, `io` | Env vars, home dir, exec, exit; typed `Env` (`env_empty`/`env_set`/`env_from_current`) follows the host contract: Windows keys compare case-insensitively while POSIX keys remain case-sensitive, and an empty `Env` is always an explicit empty child environment rather than inheritance. Also provides `run_capture(args, env, cwd)`; both blocking capture and asynchronous `spawn_with_env` honor a per-child cwd on POSIX and Windows without mutating the parent, including when the child environment carries a stale `PWD`. Child-process control over a `ProcessHandle` includes framed stdout line/chunk reads plus the stderr chunk twin, `handle_stdout_fd`/`handle_stderr_fd` and the `*_at_eof` predicates for `io.poll_any` demultiplexing, and `handle_kill` (SIGKILL). `drain_to_exit(h, deadline_ms)` pumps both streams to exit under an optional wall-clock deadline and reports `timed_out` as a boolean rather than remapping the exit code (a SIGKILL wait yields 137, indistinguishable from an OOM kill); `run_bounded` pairs it with `spawn_with_env`. `![clock]` is scoped to the deadline paths |
 | `sfn/log` | `"log"` | Shipped | `io`, `clock` | Structured leveled logging with named loggers |
 | `sfn/time` | `"time"` | Shipped | `clock` | Sleep, monotonic timing/elapsed, and fallible signed Unix epoch milliseconds via `unix_millis() -> Result<int, string> ![clock]`; realtime reads ship on Linux x86-64, Linux arm64, macOS arm64, and Windows x86-64, fail closed on provider error, and may move in either direction after clock adjustment |
 | `sfn/cli` | `"cli"` | Shipped | `io` | Arg parsing, subcommands, help generation, TTY-aware ANSI terminal styling with `NO_COLOR` and `auto|always|never` policy |
@@ -1448,7 +1454,7 @@ unit; history in the linked issues.
 | Phase-scoped arena reclamation (`compiler/src/arena_relocate.sfn`) | **Shipped** (SFEP-0043, branch `claude/reduce-peak-rss-arena-phase-rewind`) | Takes an arena mark before `parse_program`; after emit produces `native_lines`, joins them to a single flat string via `lines_to_native_text`, relocates that string's data buffer to malloc'd memory via `relocate_string_to_heap` (`compiler/src/arena_relocate.sfn`), rewinds the arena to reclaim the entire AST/typecheck/emit region, lowers via the flat-text artifact entry `lower_native_text_to_llvm_artifact[_with_context]`, then frees the heap buffer. `import_asm_paths` is allocated below the mark and survives natively. Gated by `SAILFIN_ARENA_PHASE_REWIND` (default ON). Byte-identical `.ll` output confirmed by `compiler/tests/e2e/arena_phase_rewind_ll_identity_test.sfn`; self-hosts clean, no seed cut. **Measured (199 modules, rewind OFF vs ON):** peak RSS 1,211 MB → 1,009 MB (−16.7%); sum of per-module peak RSS 72.4 GB → 56.1 GB (−22.5%); mean 364 MB → 282 MB; wall time neutral (−0.5%). Global win across all pipeline stages (typecheck −26%, parser −28%, effect_checker −27%, lowering −17–23%). Known regressions: `capsule_resolver` +18%, `core_literals_lowering` +8% — front-half modules where copy exceeds reclaimed garbage; neither sets the new peak. |
 | Atomic refcounting (`memory/rc.sfn`) | **Shipped** (M2.3 #395) | drop_fn invocation deferred to destructor synthesis (M2.4/M2.6) |
 | Memory primitives (`memory/mem.sfn`) | **Shipped** (#927) | `get_field`/`copy_bytes`/`bounds_check`/`free`; carries `seed-blocker` |
-| Process spawning (`process.sfn`) | **Shipped** (M2.9 #405) | `posix_spawnp` + `waitpid`; framed stdout/stderr consumption fails closed on allocation failure by dropping the unread stash, so drain-to-EOF loops make progress and never expose uncompacted bytes as valid (SFN-505; mirrored by `platform/process_windows.sfn`); same-generation compiler resolution requires an executable candidate so a sibling `sailfin` cache directory cannot be passed to `run_capture` on native Linux (SFN-579); the Windows process family lives in `platform/process_windows.sfn` |
+| Process spawning (`process.sfn`) | **Shipped** (M2.9 #405) | `posix_spawnp` + `waitpid`; framed stdout/stderr consumption fails closed on allocation failure by dropping the unread stash, so drain-to-EOF loops make progress and never expose uncompacted bytes as valid (SFN-505; mirrored by `platform/process_windows.sfn`); same-generation compiler resolution requires an executable candidate so a sibling `sailfin` cache directory cannot be passed to `run_capture` on native Linux (SFN-579); on Windows, separator-bearing relative `argv[0]` paths resolve against the requested child cwd while bare names retain `PATH` lookup (SFN-1144); the Windows process family lives in `platform/process_windows.sfn` |
 | Type-metadata registry (`type_meta.sfn`) | **Shipped** (M2.10 #402) | Descriptor globals + module-init ctors; value-side tagging deferred |
 | Prelude facade flipped to `sfn_*` symbols | **M2 closed** (M2.12, #407/#408) | Every M2-replaced call lands on the canonical `sfn_*` symbol; M3 lifts the remaining C trampolines |
 | Filesystem adapter wave 1a (`adapters/filesystem.sfn`) | **Shipped** (M3.1a #814) | read/write/append; `fs.appendFile` reports `false` on open, short-write, or flush failure without deleting pre-existing content (SFN-577); wave 1b (dir ops, #815) next; bulk C deletion at M3.9 after a seed cut |

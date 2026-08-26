@@ -66,7 +66,7 @@ every target-divergent decision natively:
 | linker choice | `target_forced_linker_flag` | `$(MINGW_CC)` (`:1276`) |
 | GNU link GC | `target_uses_gnu_link_gc` | implicit |
 | link libs | `target_filter_link_libs` / `target_extra_link_libs` | `-lm -lpthread -lws2_32` (`:1281`) |
-| **runtime module swap** | **`target_condition_runtime_sfn_sources`** | **`RUNTIME_MODS` (`:1230`)** |
+| **runtime module swap** | **manifest `[targets.<triple>]` conditioning** | **`RUNTIME_MODS` (`:1230`)** |
 | artifact path tag | `target_artifact_tag` | `build/windows/obj` |
 | `.exe` suffix | `target_exe_name` | hardcoded |
 
@@ -118,8 +118,8 @@ MinGW uses statically linked winpthreads for the `pthread_*` ABI, but also
 selects the Sailfin `pthread_windows.sfn` shim for `sysconf` — winpthreads
 does not resolve it, and the shim's Win32 definitions link without conflict
 against the winpthreads archive. MSVC gets `pthread_windows.sfn` for both
-`pthread_*` and `sysconf` via the same seed-visible fallback list in
-`target_condition_runtime_sfn_sources` (§5 amendment, SFN-1039).
+`pthread_*` and `sysconf` via its manifest target table (§5 amendment,
+SFN-1039).
 The ABI component keys the link decisions that diverge:
 
 | Decision | `windows-msvc` | `windows-gnu` |
@@ -213,17 +213,16 @@ schema is genuinely additive.
 the manifest boundary. `build/runtime_objs.sfn` applies the selected triple's
 replacements, additions, drops, IR additions, and link-library edits through a
 single shared transformation used by both compilation and linked-test cache
-identity. `target_condition_runtime_sfn_sources` remains only as the one-seed
-migration fallback described below.
+identity. As of SFN-777, this is the sole Windows runtime-conditioning path; a
+missing Windows target table fails closed with an explicit diagnostic.
 
-**Migration constraint (load-bearing).** Do **not** delete the hardcoded
+**Migration constraint (completed by SFN-777).** Do **not** delete the hardcoded
 compiler-source table in the same change that adds the manifest table. On the
 `windows-native-selfhost.yml` `native-build` job, the **seed** runs
-`build -p compiler` on `windows-latest`, so the seed's own copy of
-`target_condition_runtime_sfn_sources` performs the swap. A seed that cannot
-read the manifest tables would build the Windows runtime with POSIX modules.
-Keep the hardcoded table as the fallback when the manifest declares no
-`[targets.<triple>]` section; delete it one seed later (see §5).
+`build -p compiler` on `windows-latest`, so it must understand the manifest
+target tables before it can select the Windows runtime providers. The
+hardcoded table remained as the fallback until seed 0.10.5 carried both
+Windows manifest tables; SFN-777 then deleted it (see §5).
 
 ### 3.4 Real runtime providers replace the curated stub architecture
 
@@ -312,12 +311,12 @@ through `llvm_provider_context.sfn`.
   and runtime primitives; they do not call a compiler capability absent from
   the pinned seed. The fresh compiler built from that compatible seed selects
   and compiles them through the manifest table.
-- **One genuine seed gate exists, and it is a deletion.** Removing the
-  hardcoded Windows swap table from `build/target.sfn` requires a pinned seed
-  that reads the manifest tables, because the seed performs that swap on the
-  native-Windows leg (§3.3). Handle it as a fallback retained for one seed and
-  a follow-up deletion issue that queues on the cadence bump (SFEP-0026 WS-C),
-  **not** as a `seed-blocker` predecessor gating the main work.
+- **The one genuine seed gate was the fallback deletion.** Removing the
+  hardcoded Windows swap table from `build/target.sfn` required a pinned seed
+  that could read the manifest tables used by the native-Windows leg (§3.3).
+  Seed 0.10.5 satisfies that gate, and SFN-777 removed the one-seed fallback;
+  target conditioning is now manifest-only and fails closed when a required
+  Windows target table is absent.
 - **Splitting the triple axis from the mingw table does not manufacture a seed
   cut.** Both are compiler source with compiler-source consumers, so
   `make compile` bridges them. The split is therefore honest, not
@@ -336,10 +335,9 @@ through `llvm_provider_context.sfn`.
   `sysconf_windows.sfn` explicitly under `sfn-sources-add`; only the seed-driven
   native MSVC leg, restricted to the hardcoded fallback list, was broken.
   `sysconf` has been folded back into `pthread_windows.sfn`, which both ABIs
-  now select. Re-splitting it into a standalone module is gated on
-  a pinned seed that reads the `[targets.*]` manifest table — the same
-  fallback-retirement gate §3.3 already describes for the hardcoded table
-  generally.
+  now select. Seed 0.10.5 now reads the `[targets.*]` manifest table, so that
+  seed-visibility gate is satisfied; a future standalone split would still
+  need its own behavior change and verification.
 
 **Every migration step leaves a self-hosting compiler:** the triple axis is
 introduced with identity behaviour for the host triple, so the host self-host
@@ -356,9 +354,10 @@ resolver owns its CRT and library discovery, so neither the linker nor the
 sysroot becomes a target-table property.
 
 SFEP-0068 and its registry row remain **Accepted**, not `Implemented`.
-SFN-777 still owns retirement of the seed-visible hardcoded Windows runtime
-fallback, so Stage1 readiness is not yet end-to-end even though the aarch64
-slice is complete.
+SFN-777 has since retired the seed-visible hardcoded Windows runtime fallback,
+so that gate is closed, but graduation is a separate owner-approved step: it
+needs the Stage1 readiness sweep run against the whole `--target` surface, not
+just the aarch64 slice this issue adds.
 
 ## 6. Alternatives considered
 
@@ -379,11 +378,11 @@ driver with no benefit this feature needs, and no precedent. The
 `test_runner_state.sfn` cell is the established answer to exactly this shape.
 Deferred, not rejected — the cell's accessor is the natural future seam.
 
-**Keep the swap table in compiler source and skip the manifest.** Simpler, and
-avoids the one-seed fallback. Rejected because the table is *data about a
-package*, the parser seam already exists unused, and SFEP-0006 Stage D
-explicitly specifies `[targets.*]` manifest reads. Note the fallback makes the
-migration cost near-zero anyway.
+**Keep the swap table in compiler source and skip the manifest.** Rejected
+because the table is *data about a package*, the parser seam already exists,
+and SFEP-0006 Stage D explicitly specifies `[targets.*]` manifest reads. The
+temporary fallback kept the migration cost near-zero and was removed once the
+pinned seed carried the manifest path.
 
 **Emit-once, cross-link-many (keep `build/native/raw/`).** Preserves the
 current CI wall-time. Rejected: it is exactly the mechanism that gives the
@@ -417,8 +416,8 @@ to survive in whatever replaces the Makefile.
   unknown triple is rejected with a diagnostic, not silently coerced.
 - `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn` — a driver-native
   `--target=x86_64-w64-mingw32` build of a small capsule produces a PE
-  binary; asserts the manifest target table and the compiler-source fallback
-  table agree (the replacement for
+  binary; asserts the manifest owns the Windows runtime policy and that no
+  compiler-source fallback remains (the replacement for
   `cross_windows_runtime_modules_test.sfn`, whose Makefile-drift contract dies
   with the Makefile target).
 

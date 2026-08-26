@@ -5,7 +5,7 @@
 // `rand.sfn` / `tls.sfn` — there is no POSIX `.sfn` module to swap FROM:
 // `strcasestr(3)` is a bare GNU/BSD libc symbol, not a Sailfin-authored
 // runtime module, so this file is APPENDED for a Windows target
-// (`target_condition_runtime_sfn_sources`, `compiler/src/build/target.sfn`).
+// by the matching table in `runtime/capsule.toml`.
 //
 // The sole consumer inlines its own extern per the SFN-635 convention (no
 // cross-module extern import): `runtime/sfn/concurrency/serve.sfn:114`,

@@ -80,30 +80,36 @@ test "run_capture: spawn failure surfaces as exit == -1" ![io] {
 }
 
 test "run_capture: cwd runs the child in the given directory (#1167)" ![io] {
-    // `pwd` in the root directory prints "/" on every POSIX platform,
-    // with no symlink indirection (unlike /tmp -> /private/tmp on
-    // macOS). A non-empty cwd must place the child there.
-    let result = run_capture(["pwd"], env_empty(), "/");
+    // `pwd` reports the inherited logical `PWD` under Git Bash on Windows,
+    // even when CreateProcessA placed the child somewhere else. Prove the
+    // real cwd instead: this marker exists only in the requested directory.
+    let dir = "build/sailfin/run-capture-cwd-probe";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/cwd-probe", "present\n");
+    let child_env = env_set(env_empty(), "PWD", "/stale-parent-cwd");
+    let result = run_capture(["sh", "-c", "test -f cwd-probe"], child_env, dir);
     assert result.exit == 0;
-    assert strings_equal(result.stdout, "/\n");
+    assert strings_equal(result.stdout, "");
+    assert strings_equal(result.stderr, "");
 }
 
 test "run_capture: empty cwd inherits parent cwd and leaves it unchanged (#1167)" ![io] {
-    // Baseline: the parent's working directory (the test runner's cwd,
-    // which is not the root "/").
-    let before = run_capture(["pwd"], env_empty(), "");
+    let dir = "build/sailfin/run-capture-cwd-isolation";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/cwd-probe", "present\n");
+    let child_env = env_set(env_empty(), "PWD", "/stale-parent-cwd");
+
+    // The inherited parent cwd is the repository root, where the compiler
+    // manifest exists. A stale `PWD` must not affect that real cwd.
+    let before = run_capture(["sh", "-c", "test -f compiler/capsule.toml"], child_env, "");
     assert before.exit == 0;
-    assert ! strings_equal(before.stdout, "/\n");
 
-    // Run a child rooted at "/". The per-child chdir must NOT leak into
-    // the parent process (no global chdir).
-    let moved = run_capture(["pwd"], env_empty(), "/");
+    // The marker is visible only after the per-child cwd is applied.
+    let moved = run_capture(["sh", "-c", "test -f cwd-probe"], child_env, dir);
     assert moved.exit == 0;
-    assert strings_equal(moved.stdout, "/\n");
 
-    // A subsequent inherit-cwd ("") child still reports the original
-    // parent directory — proof the parent cwd was never mutated.
-    let after = run_capture(["pwd"], env_empty(), "");
+    // A subsequent inherit-cwd child still sees the repository root, proving
+    // the parent process was never moved.
+    let after = run_capture(["sh", "-c", "test -f compiler/capsule.toml"], child_env, "");
     assert after.exit == 0;
-    assert strings_equal(after.stdout, before.stdout);
 }

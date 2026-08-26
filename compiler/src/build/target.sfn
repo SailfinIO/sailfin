@@ -23,7 +23,6 @@
 // runtime module set is only ever rewritten for a Windows target.
 import { _get_env_cmd } from "../build_flags";
 import { ends_with, index_of } from "../string_utils";
-import { _dirname, _path_basename, _path_join } from "./paths";
 // SFN-774 / SFEP-0068 §3.2: the `--target` process cell. `build_target_triple`
 // below checks it FIRST, ahead of the env-var/host-probe fallbacks, so an
 // explicit flag always wins for the running invocation.
@@ -135,10 +134,10 @@ fn target_os_is_windows(target_os: string) -> boolean {
 // A closed set of `sfn build --target=<triple>` values. Unknown triples are
 // REJECTED at the flag (`cli/commands/build.sfn`), never coerced — a typo'd
 // triple must fail loudly rather than silently fall back to a host default.
-// `target_os_is_windows` above and `target_condition_runtime_sfn_sources`
-// below stay keyed on the OS component: both Windows triples need the
-// identical POSIX->Win32 runtime-module swap and the identical `.exe`
-// naming. The ABI component (`triple_abi`) keys only the four link
+// `target_os_is_windows` above stays keyed on the OS component: both Windows
+// triples need identical `.exe` naming. Runtime-module selection is keyed by
+// the full triple in `runtime/capsule.toml`. The ABI component (`triple_abi`)
+// keys only the four link
 // decisions that genuinely diverge between the two Windows ABIs —
 // `target_clang_triple`, `target_forced_linker_flag`,
 // `target_uses_gnu_link_gc`, `target_filter_link_libs` /
@@ -304,8 +303,7 @@ fn host_target_triple() -> string ![io] {
 // resolver for every ABI-conditioned decision (`target_clang_triple`,
 // `target_forced_linker_flag`, `target_uses_gnu_link_gc`,
 // `target_filter_link_libs`/`target_extra_link_libs`, `target_artifact_tag`);
-// `build_target_os()` above remains the OS-only resolver for the decisions
-// that stay OS-keyed (`target_exe_name`, `target_condition_runtime_sfn_sources`).
+// `build_target_os()` above remains the OS-only resolver for `target_exe_name`.
 fn build_target_triple() -> string ![io] {
     let active = active_build_target();
     if active.length > 0 { return active; }
@@ -323,8 +321,8 @@ fn build_target_triple() -> string ![io] {
 // user-supplied `-o` is honored verbatim, matching Windows `clang.exe`'s
 // own behaviour of never rewriting an explicit output path.
 //
-// The suffix is required, not cosmetic: every runtime spawn site
-// (`runtime/sfn/platform/process_windows.sfn`) calls `CreateProcessA` with
+// The suffix is required, not cosmetic: the Win32 runtime spawn provider
+// calls `CreateProcessA` with
 // `lpApplicationName = null`, so Win32 derives the module name by parsing
 // the command line and appends `.exe` only when the parsed name already
 // has no extension of its own — an extensionless PE built by this
@@ -504,213 +502,13 @@ fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
 //                 net/websocket runtime modules are always linked in
 //                 (SFN-649).
 //
-// The GNU-Windows equivalents are runtime-provider policy and now come from
-// `runtime/capsule.toml [targets.x86_64-w64-mingw32]` (SFN-775). The
-// manifest-absent migration fallback is applied in `runtime_objs.sfn`, so
-// this compiler-global helper remains MSVC-only.
+// The GNU-Windows equivalents are runtime-provider policy and come from
+// `runtime/capsule.toml [targets.x86_64-w64-mingw32]` (SFN-775), so this
+// compiler-global helper remains MSVC-only.
 fn target_extra_link_libs(triple: string) -> string[] {
     let abi = triple_abi(triple);
     if abi == "msvc" { return ["-lbcrypt", "-lcrypt32", "-lws2_32"]; }
     return [];
-}
-
-// Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
-// Windows, POSIX-only modules are swapped for their Win32 siblings:
-// `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
-// `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
-// (SFN-549 — previously dropped outright, leaving
-// `apply_default_mem_limit` unresolved), `terminal.sfn` (`isatty`) for
-// `platform/terminal_windows.sfn` (`_isatty`), `rand.sfn`
-// (getentropy/`/dev/urandom`) for
-// `platform/rand_windows.sfn` (SFN-549, `BCryptGenRandom`), and
-// `fs_exec_mode.sfn` (POSIX `X_OK`) for
-// `platform/fs_exec_mode_windows.sfn` (SFN-649 — `X_OK` is not a legal
-// UCRT `_access` mode and terminates the process via
-// `_invalid_parameter_noinfo` -> `__fastfail` instead of returning an
-// error; the sibling supplies `F_OK`, the strongest question Windows
-// can answer where no execute permission bit exists), and `cert_roots.sfn`
-// (returns null; POSIX's trust store is a CA-bundle file, already covered
-// by `trust_store_default_paths()`) for `platform/cert_roots_windows.sfn`
-// (SFN-808 — Windows has no CA-bundle file anywhere, so the system `ROOT`
-// certificate store reached through Crypt32 is the only trust source
-// there). Additional Win32 providers with no POSIX `.sfn` counterpart are
-// appended below. This function is the one-seed migration fallback for a
-// runtime manifest without `[targets.<triple>]`; current manifests use the
-// generic table-driven conditioner in `runtime_objs.sfn`. Every other target
-// returns the list unchanged.
-//
-// `sources` are already runtime-root-resolved absolute paths; match on the
-// basename so the manifest-root prefix is irrelevant, and rebuild the
-// swapped path from the source's own directory so it stays correctly
-// rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
-// `rlimit.sfn`/`terminal.sfn`/`rand.sfn`/`fs_exec_mode.sfn`/`fd_io.sfn`/
-// `socket_ops.sfn`/`rename_ops.sfn`/`cert_roots.sfn`/`file_stat.sfn` already
-// live in `platform/`, so their siblings are joined directly onto that same
-// directory rather than appending another `platform/` segment.
-fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
-    if !target_os_is_windows(target_os) { return sources; }
-    let mut out: string[] = [];
-    // Anchor for the append block below — the `platform/` directory,
-    // discovered from whichever of rlimit.sfn/terminal.sfn/rand.sfn/tls.sfn/
-    // fs_exec_mode.sfn/fd_io.sfn/socket_ops.sfn/rename_ops.sfn/cert_roots.sfn/
-    // file_stat.sfn/exec.sfn happens to be present in `sources`, since none
-    // of these is guaranteed by this function's own contract.
-    let mut platform_dir: string = "";
-    let mut i: int = 0;
-    loop {
-        if i >= sources.length { break; }
-        let src = sources[i];
-        let base = _path_basename(src);
-        if base == "rlimit.sfn" {
-            // Already in platform/ (unlike process.sfn below): the sibling
-            // sits next to it, not one level down.
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "rlimit_windows.sfn"));
-        } else if base == "terminal.sfn" {
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "terminal_windows.sfn"));
-        } else if base == "process.sfn" {
-            out.push(_path_join(_dirname(src), "platform/process_windows.sfn"));
-        } else if base == "rand.sfn" {
-            // Already in platform/ — same as rlimit.sfn above.
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "rand_windows.sfn"));
-        } else if base == "tls.sfn" {
-            // NOT swapped (SFN-341): the module's OpenSSL externs are gone,
-            // replaced by the native TLS 1.3 stack over `sfn/crypto`, so
-            // there is no OpenSSL-backed module left to fail closed for and
-            // `openssl_absent_windows.sfn` is deleted. It still anchors
-            // `platform_dir` for the append block below, and passes through
-            // to the emitted list unchanged.
-            platform_dir = _dirname(src);
-            out.push(src);
-        } else if base == "fs_exec_mode.sfn" {
-            // Already in platform/ — same as rlimit.sfn/rand.sfn above.
-            // POSIX `X_OK` (1) is not a legal UCRT `_access` mode and
-            // fastfails the process rather than returning an error, so
-            // the Windows sibling supplies `F_OK` (0) instead (SFN-649).
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "fs_exec_mode_windows.sfn"));
-        } else if base == "fd_io.sfn" {
-            // Already in platform/ — same as the four above. The UCRT's
-            // `_read`/`_write` are `int` (32-bit) rather than POSIX's
-            // `ssize_t` (64-bit), so a raw `-> i64` extern silently
-            // promotes a `-1` error into `4294967295`, defeating every
-            // downstream `<= 0`/`< 0` guard in `io.sfn`/`assert.sfn`
-            // (SFN-927 — the generic-fd counterpart of `socket_ops.sfn`'s
-            // `recv`/`send` fix below; kept in a separate module because
-            // `socket_ops.sfn` is gated behind the `net` effect and
-            // `io.sfn`/`assert.sfn` are not).
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "fd_io_windows.sfn"));
-        } else if base == "socket_ops.sfn" {
-            // Already in platform/ — same as the four above. POSIX
-            // `close` on a Winsock `SOCKET` fastfails the process
-            // (`0xC0000409`) exactly like `X_OK` above, and Winsock
-            // additionally refuses every call until `WSAStartup` runs,
-            // which nothing did — so sockets were non-functional on
-            // native Windows rather than merely leaky. The sibling
-            // supplies `closesocket` and the missing initialization
-            // (SFN-671).
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "socket_ops_windows.sfn"));
-        } else if base == "rename_ops.sfn" {
-            // Already in platform/ — same as the four above. The CRT's
-            // `rename()` fails EEXIST on an existing destination where
-            // POSIX `rename(2)` replaces atomically, so every
-            // publish-into-place in the toolchain worked once per
-            // destination and then failed forever. The sibling uses
-            // `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING` (SFN-720).
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "rename_ops_windows.sfn"));
-        } else if base == "exclusive_create.sfn" {
-            // Already in platform/ — same as the six above. `open`'s
-            // `O_CREAT`/`O_EXCL` flag words are POSIX-only and the
-            // Windows leg claims via `CreateFileA`/`CREATE_NEW` instead —
-            // an entirely different syscall family, not a flag
-            // substitution (SFN-974). The compiler that emits this leg is
-            // always CURRENT-TREE, never the pinned seed (no released
-            // native Windows seed yet, `docs/runbooks/windows-native.md`),
-            // so this swap carries no seed dependency today
-            // (`.claude/rules/seed-dependency.md`) — re-derive the day a
-            // native Windows seed ships.
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "exclusive_create_windows.sfn"));
-        } else if base == "cert_roots.sfn" {
-            // Already in platform/ — same as the five above. POSIX has no
-            // enumerable trust store to swap in for: the CA bundle is a
-            // file, already covered by `trust_store_default_paths()`, so
-            // the POSIX leg returns null and the caller falls through to
-            // that path probe. Windows has no CA-bundle file anywhere, so
-            // the system `ROOT` certificate store reached through Crypt32
-            // is the only trust source there — the sibling enumerates it
-            // via `CertOpenSystemStoreA`/`CertEnumCertificatesInStore`
-            // (SFN-808).
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "cert_roots_windows.sfn"));
-        } else if base == "file_stat.sfn" {
-            // Already in platform/ — same as the six above. POSIX
-            // `struct stat` field offsets are not portable across
-            // glibc/Darwin, so the POSIX module is a stub that always
-            // reports "not available"; the sibling reads
-            // `WIN32_FILE_ATTRIBUTE_DATA` directly, a stable documented
-            // ABI, backing the cache GC size/mtime probes that were
-            // previously shell-bound and inert on Windows (SFN-754).
-            platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "file_stat_windows.sfn"));
-        } else if base == "exec.sfn" {
-            // exec.sfn itself is unchanged (its `realpath` extern is
-            // satisfied by the appended sibling below, not by swapping
-            // exec.sfn out) — captured here only as a fourth possible
-            // anchor for platform_dir.
-            platform_dir = _dirname(src);
-            out.push(src);
-        } else { out.push(src); }
-        i += 1;
-    }
-    // `realpath_windows.sfn`, `clock_windows.sfn`, `pthread_windows.sfn`,
-    // `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`,
-    // `opendir_windows.sfn`, and `mkdtemp_windows.sfn` have no POSIX
-    // `.sfn` counterpart to swap FROM (SFN-549, SFN-903, SFN-993):
-    // `realpath(3)`, `clock_gettime`/`nanosleep`, the `pthread_*`/
-    // `sysconf` surface, `popen`/`pclose`/`mkstemp`, `strcasestr(3)`,
-    // `opendir`/`closedir`, and `mkdtemp(3)` are bare libc/pthreads
-    // symbols on POSIX, not Sailfin-authored runtime modules, so — unlike
-    // the swaps above — these are pure ADDITIONS with nothing in `sources`
-    // to replace. Each satisfies its `extern fn` declaration(s) elsewhere
-    // in the runtime via ordinary link-time symbol resolution; see each
-    // module's own header for the full rationale. Skipped (rather than
-    // guessing a path) if none of the eight platform/ modules above were
-    // present to anchor on.
-    //
-    // SEED-VISIBILITY RULE — read before editing the list below.
-    // A released native Windows seed now exists (0.10.4), so the note this
-    // list used to carry ("the Windows leg is always emitted by the current
-    // tree, never the pinned seed") no longer holds — exactly as that note
-    // said it would stop holding once a real Windows seed shipped. The
-    // pinned seed compiles working-tree runtime source
-    // (`_compile_runtime_sfn_sources`, `build/runtime_objs.sfn`) and selects
-    // it with ITS OWN copy of this list, which a working-tree edit cannot
-    // change. Two failure modes follow, and BOTH break the native MSVC leg:
-    //   - ADDING an entry the pinned seed does not also append leaves the
-    //     symbol undefined at link. That is how SFN-1039 broke the nightly.
-    //     A genuinely new provider is a seed-blocker
-    //     (`.claude/rules/seed-dependency.md`) — land it alone, pin a seed
-    //     carrying it, then add its consumer.
-    //   - REMOVING an entry is safe only if the file stays on disk. The seed
-    //     still names it and hands it to `sfn emit`, which hard-fails on a
-    //     missing source. Delete the file only once no pinned seed names it.
-    if platform_dir.length > 0 {
-        out.push(_path_join(platform_dir, "realpath_windows.sfn"));
-        out.push(_path_join(platform_dir, "clock_windows.sfn"));
-        out.push(_path_join(platform_dir, "pthread_windows.sfn"));
-        out.push(_path_join(platform_dir, "popen_windows.sfn"));
-        out.push(_path_join(platform_dir, "mkstemp_windows.sfn"));
-        out.push(_path_join(platform_dir, "strcasestr_windows.sfn"));
-        out.push(_path_join(platform_dir, "opendir_windows.sfn"));
-        out.push(_path_join(platform_dir, "mkdtemp_windows.sfn"));
-    }
-    return out;
 }
 
 // A path-safe token for a build TRIPLE, for use in cache-artifact
@@ -748,7 +546,6 @@ export {
     target_uses_gnu_link_gc,
     target_filter_link_libs,
     target_extra_link_libs,
-    target_condition_runtime_sfn_sources,
     target_artifact_tag,
     triple_abi,
     triple_artifact_tags,

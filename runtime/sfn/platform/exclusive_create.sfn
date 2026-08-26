@@ -2,8 +2,8 @@
 //
 // Atomically claim `path`: create it as an empty regular file iff it does
 // not already exist. Swapped for `exclusive_create_windows.sfn` on a
-// Windows target by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`), the same mechanism `rename_ops.sfn`
+// Windows target by the matching table in `runtime/capsule.toml`, the same
+// mechanism `rename_ops.sfn`
 // uses (SFN-720) — swap, not append, because `sfn_create_exclusive` is a
 // Sailfin-authored symbol whose body differs per target, unlike a bare
 // libc symbol POSIX already supplies for free.

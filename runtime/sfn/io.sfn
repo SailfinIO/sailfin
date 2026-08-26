@@ -89,7 +89,7 @@
 // reasoning, including why the `net`-gate is NOT the justification
 // (the gate does not bound link inputs; SFN-943).
 // `platform/fd_io.sfn` is swapped for its Windows
-// sibling by `target_condition_runtime_sfn_sources`, so linking against
+// sibling by manifest target conditioning, so linking against
 // these two symbols here is a plain cross-module runtime reference —
 // the same shape `adapters/http.sfn` uses for the socket wrappers.
 extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;

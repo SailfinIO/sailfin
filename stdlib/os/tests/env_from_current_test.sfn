@@ -8,12 +8,30 @@
 import {
     Env,
     EnvEntry,
+    _env_case_policy,
+    env_empty,
     env_from_current,
     env_get,
     env_has,
     env_set,
     env_to_flat
 } from "../src/mod";
+
+fn _is_windows() -> boolean ![io] {
+    if fs.exists("/proc/self/status") { return false; }
+    if fs.exists("/System/Library/CoreServices") { return false; }
+    if env.get("SystemRoot").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    if env.get("ComSpec").length > 0 { return true; }
+    return fs.exists("NUL");
+}
+
+test "Env: POSIX evidence wins over Windows-shaped variables" {
+    assert ! _env_case_policy(true, false, true, true);
+    assert ! _env_case_policy(false, true, true, true);
+    assert _env_case_policy(false, false, true, false);
+    assert _env_case_policy(false, false, false, true);
+}
 
 test "env_from_current: snapshot is non-empty and includes PATH" ![io] {
     let e = env_from_current();
@@ -57,4 +75,18 @@ test "env_from_current: env_set layers an override on the snapshot" ![io] {
     let e = env_set(env_from_current(), "SFN_ENV_FROM_CURRENT_TEST", "layered");
     assert env_has(e, "PATH");
     assert strings_equal(env_get(e, "SFN_ENV_FROM_CURRENT_TEST"), "layered");
+}
+
+test "Env: key comparison follows the host contract" ![io] {
+    let once = env_set(env_empty(), "SFN_ENV_CASE_TEST", "first");
+    let twice = env_set(once, "sfn_env_case_test", "second");
+    if _is_windows() {
+        assert twice.entries.length == 1;
+        assert env_get(twice, "SFN_ENV_CASE_TEST") == "second";
+        assert env_get(twice, "sFn_EnV_cAsE_tEsT") == "second";
+    } else {
+        assert twice.entries.length == 2;
+        assert env_get(twice, "SFN_ENV_CASE_TEST") == "first";
+        assert env_get(twice, "sfn_env_case_test") == "second";
+    }
 }

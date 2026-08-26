@@ -160,18 +160,16 @@ fn _setup_workspace(ws: string, marker_second_fn: boolean) ![io] {
         + "/runtime/sfn/platform/fd_io.sfn");
 
     // SFN-1115: stage the Windows half of the runtime platform set too.
-    // On a native Windows host `target_condition_runtime_sfn_sources`
-    // (`compiler/src/build/target.sfn`) rewrites the `fd_io.sfn` entry to
-    // `fd_io_windows.sfn` AND — because any platform entry anchors its
-    // `platform_dir` — unconditionally appends eight Windows-only modules
-    // that have no POSIX counterpart to swap from. `sfn emit` hard-fails on
+    // On a native Windows host manifest target conditioning rewrites the
+    // `fd_io.sfn` entry to `fd_io_windows.sfn` and adds eight Windows-only
+    // modules that have no POSIX counterpart to replace. `sfn emit` hard-fails on
     // a missing source, so a fixture staging only the POSIX half dies with
     // `file not found` before a single module is compiled.
     //
     // Copied unconditionally rather than behind `host_is_windows()`: an
     // unreferenced extra file costs one copy on POSIX and keeps the staged
-    // tree identical on every host. Keep this list in step with that
-    // function's append block.
+    // tree identical on every host. Keep this list in step with the Windows
+    // target tables in `runtime/capsule.toml`.
     _copy("runtime/sfn/platform/fd_io_windows.sfn", ws
         + "/runtime/sfn/platform/fd_io_windows.sfn");
     _copy("runtime/sfn/platform/realpath_windows.sfn", ws

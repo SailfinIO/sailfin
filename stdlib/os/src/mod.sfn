@@ -48,6 +48,10 @@ struct EnvEntry {
 
 struct Env {
     entries: EnvEntry[];
+    // Windows environment names compare case-insensitively; POSIX names do
+    // not. Capture that host policy when the Env is constructed so the map
+    // operations below stay pure and preserve their existing effect shape.
+    case_insensitive_keys: boolean;
 }
 
 // Captured output from `run_capture`. `exit` is the child's exit code
@@ -81,11 +85,52 @@ struct OwnedBuf {
     arena_addr: i64;
 }
 
-// Return an empty `Env`. The resulting environment passed to the
-// runtime is literally empty — the child sees no environment
-// variables. Use `env_from_current` to seed from the parent.
-fn env_empty() -> Env {
-    return Env { entries: [] };
+// Resolve the environment-key policy from already-observed host evidence.
+// POSIX filesystem evidence wins over stray Windows-shaped variables: setting
+// `ComSpec` in a Linux process must not change that process's key semantics.
+fn _env_case_policy(is_linux: boolean, is_darwin: boolean, has_windows_env: boolean, has_nul: boolean) -> boolean {
+    if is_linux || is_darwin { return false; }
+    return has_windows_env || has_nul;
+}
+
+// The host environment-key policy. The variable rungs cover ordinary Windows
+// processes (where getenv itself is case-insensitive); `NUL` is the backstop
+// for a process launched under an explicitly empty environment.
+fn _env_keys_are_case_insensitive() -> boolean ![io] {
+    let has_windows_env = env.get("SystemRoot").length > 0 || env.get("windir").length > 0
+        || env.get("ComSpec").length > 0;
+    return _env_case_policy(fs.exists("/proc/self/status"), fs.exists("/System/Library/CoreServices"), has_windows_env, fs.exists("NUL"));
+}
+
+// Compare environment names under the policy captured by `Env`. Windows'
+// ANSI environment surface is byte-oriented here, so ASCII folding matches
+// the key family this capsule and the compiler manage without touching value
+// bytes or changing POSIX semantics.
+fn _env_key_equal(left: string, right: string, case_insensitive: boolean) -> boolean {
+    if !case_insensitive { return strings_equal(left, right); }
+    if left.length != right.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= left.length { break; }
+        let mut lc: int = char_code(left[i]);
+        let mut rc: int = char_code(right[i]);
+        if lc >= 65 && lc <= 90 { lc += 32; }
+        if rc >= 65 && rc <= 90 { rc += 32; }
+        if lc != rc { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Return an empty `Env`. The resulting environment passed to the runtime is
+// literally empty — the child sees no inherited environment variables. The
+// host read records how later `env_set`/`env_get` operations compare keys.
+// Use `env_from_current` to seed entries from the parent.
+fn env_empty() -> Env ![io] {
+    return Env {
+        entries: [],
+        case_insensitive_keys: _env_keys_are_case_insensitive()
+    };
 }
 
 // Return `e` with `name` set to `value`. If `name` already exists,
@@ -98,7 +143,7 @@ fn env_set(e: Env, name: string, value: string) -> Env {
     loop {
         if i >= e.entries.length { break; }
         let entry = e.entries[i];
-        if entry.name == name {
+        if _env_key_equal(entry.name, name, e.case_insensitive_keys) {
             out.push(EnvEntry { name: name, value: value });
             found = true;
         } else { out.push(entry); }
@@ -107,7 +152,10 @@ fn env_set(e: Env, name: string, value: string) -> Env {
     if !found {
         out.push(EnvEntry { name: name, value: value });
     }
-    return Env { entries: out };
+    return Env {
+        entries: out,
+        case_insensitive_keys: e.case_insensitive_keys
+    };
 }
 
 // Look up `name`'s value. Returns the empty string if not set; use
@@ -117,7 +165,9 @@ fn env_get(e: Env, name: string) -> string {
     loop {
         if i >= e.entries.length { break; }
         let entry = e.entries[i];
-        if entry.name == name { return entry.value; }
+        if _env_key_equal(entry.name, name, e.case_insensitive_keys) {
+            return entry.value;
+        }
         i += 1;
     }
     return "";
@@ -128,7 +178,9 @@ fn env_has(e: Env, name: string) -> boolean {
     let mut i = 0;
     loop {
         if i >= e.entries.length { break; }
-        if e.entries[i].name == name { return true; }
+        if _env_key_equal(e.entries[i].name, name, e.case_insensitive_keys) {
+            return true;
+        }
         i += 1;
     }
     return false;
@@ -174,15 +226,15 @@ fn _env_index_of_eq(text: string) -> int {
 // `Env` as "empty environment" rather than "inherit", so
 // `env_from_current()` is the way to build an inheriting child env.
 //
-// Windows caveat: `process.environ()` is currently shimmed to return
-// an empty array on Windows (`runtime/native/src/sailfin_runtime.c`,
-// `_WIN32` block), so this snapshot is empty there until a real
-// `GetEnvironmentStringsA` enumeration lands.
+// Windows preserves the spelling returned by `GetEnvironmentStringsA`, while
+// the `Env` policy makes lookups and overlays case-insensitive. POSIX keeps
+// exact key comparison.
 //
 // `![io]` — reading the process environment is an environment read,
 // the same gate as `env.get`.
 fn env_from_current() -> Env ![io] {
     let flat = process.environ();
+    let case_insensitive = _env_keys_are_case_insensitive();
     let mut entries: EnvEntry[] = [];
     let mut i = 0;
     loop {
@@ -196,7 +248,7 @@ fn env_from_current() -> Env ![io] {
         }
         i += 1;
     }
-    return Env { entries: entries };
+    return Env { entries: entries, case_insensitive_keys: case_insensitive };
 }
 
 // ── Capturing / streaming process APIs ────────────────────────────
@@ -211,9 +263,8 @@ fn env_from_current() -> Env ![io] {
 //
 // `cwd` (#1167) is the child's working directory: `""` inherits the
 // parent's cwd (the prior behaviour), a non-empty path runs the child
-// in that directory via `posix_spawn_file_actions_addchdir_np` — no
-// process-global `chdir`, so it is safe under the concurrent runner.
-// Posix-only; ignored on Windows.
+// in that directory via a per-child spawn attribute — no process-global
+// `chdir`, so it is safe under the concurrent runner on POSIX and Windows.
 fn run_capture(args: string[], env: Env, cwd: string) -> ProcessOutput ![io] {
     let env_flat = env_to_flat(env);
     let exit_code = process.run_capture_cwd(args, env_flat, cwd);
@@ -233,8 +284,8 @@ fn run_capture(args: string[], env: Env, cwd: string) -> ProcessOutput ![io] {
 // `handle_wait`. Returns a handle whose `handle_id` is 0 on spawn
 // failure — call sites can branch on that to surface a typed error.
 //
-// `cwd` (#1167): `""` inherits the parent's working directory; a
-// non-empty path runs the child there (posix-only, no global `chdir`).
+// `cwd` (#1167): `""` inherits the parent's working directory; a non-empty
+// path runs the child there on POSIX and Windows, with no global `chdir`.
 fn spawn_with_env(args: string[], env: Env, cwd: string) -> ProcessHandle ![io] {
     let env_flat = env_to_flat(env);
     let id = process.spawn_with_env_cwd(args, env_flat, cwd);

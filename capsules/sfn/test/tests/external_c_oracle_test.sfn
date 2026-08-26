@@ -1,17 +1,34 @@
 // capsules/sfn/test/tests/external_c_oracle_test.sfn
 //
 // Contract coverage for SFN-1107's optional external C test oracle.
-import { contains, starts_with } from "sfn/strings";
+import { ascii_lowercase, contains, starts_with } from "sfn/strings";
 import { external_c_oracle, skip } from "sfn/test";
 
-fn _flat_env_value(entries: string[], name: string) -> string {
-    let prefix = name + "=";
+fn _host_env_keys_case_insensitive() -> boolean ![io] {
+    if fs.exists("/proc/self/status") { return false; }
+    if fs.exists("/System/Library/CoreServices") { return false; }
+    if env.get("SystemRoot").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    if env.get("ComSpec").length > 0 { return true; }
+    return fs.exists("NUL");
+}
+
+fn _flat_env_value(entries: string[], name: string, case_insensitive: boolean) -> string {
     let mut i: int = 0;
     loop {
         if i >= entries.length { break; }
         let entry = entries[i];
-        if entry.length >= prefix.length && substring(entry, 0, prefix.length) == prefix {
-            return substring(entry, prefix.length, entry.length);
+        let mut eq: int = 0;
+        loop {
+            if eq >= entry.length || substring(entry, eq, eq + 1) == "=" {
+                break;
+            }
+            eq += 1;
+        }
+        if eq < entry.length {
+            let key = substring(entry, 0, eq);
+            let matches = key == name || (case_insensitive && ascii_lowercase(key) == ascii_lowercase(name));
+            if matches { return substring(entry, eq + 1, entry.length); }
         }
         i += 1;
     }
@@ -31,13 +48,14 @@ test "external C oracle: returns a coherent available or unavailable result" ![i
 
 test "external C oracle: preserves the complete parent environment" ![io] {
     let oracle = external_c_oracle();
+    let case_insensitive = _host_env_keys_case_insensitive();
     let parent_path = env.get("PATH");
     if parent_path.length > 0 {
-        assert _flat_env_value(oracle.environment, "PATH") == parent_path;
+        assert _flat_env_value(oracle.environment, "PATH", case_insensitive) == parent_path;
     }
     let parent_home = env.get("HOME");
     if parent_home.length > 0 {
-        assert _flat_env_value(oracle.environment, "HOME") == parent_home;
+        assert _flat_env_value(oracle.environment, "HOME", case_insensitive) == parent_home;
     }
 }
 
@@ -51,5 +69,5 @@ test "Darwin external C oracle: uses Apple discovery and carries SDKROOT" ![io] 
     let oracle = external_c_oracle();
     if !oracle.available { skip(oracle.unavailable_reason); }
     assert starts_with(oracle.compiler, "/");
-    assert _flat_env_value(oracle.environment, "SDKROOT").length > 0;
+    assert _flat_env_value(oracle.environment, "SDKROOT", false).length > 0;
 }

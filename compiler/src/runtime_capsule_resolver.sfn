@@ -117,8 +117,8 @@ struct RuntimeCapsuleArtifacts {
     // source absent from every record is always compiled.
     //
     // A record list rather than an array parallel to `sfn_sources` because
-    // `target_condition_runtime_sfn_sources` rewrites that list — substituting
-    // and appending platform siblings — so any positional alignment is stale
+    // manifest target conditioning rewrites that list — substituting and
+    // appending platform siblings — so any positional alignment is stale
     // the moment conditioning runs. Keying on the path makes the lookup
     // independent of both ordering and length, which is what lets selection and
     // conditioning compose in either order (SFN-882 design note §4.7).
@@ -582,8 +582,8 @@ fn _rcr_parse_dep_specs(deps_text: string) -> string[] {
 // canonical effect names are consulted, which is the fail-open direction: a
 // misspelled or non-canonical key is never read, so its sources match no record
 // and stay compiled. An entry naming a source that is not in `sfn-sources` is
-// inert; the two `_windows` spellings are exactly that until
-// `target_condition_runtime_sfn_sources` appends them.
+// inert; the two `_windows` spellings are exactly that until a Windows target
+// manifest entry selects them.
 fn _rcr_resolve_source_gates(manifest_dir: string, manifest_text: string) -> string[] {
     let mut out: string[] = [];
     let effects = canonical_effects();

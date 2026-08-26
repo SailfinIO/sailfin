@@ -117,9 +117,8 @@ prelude-entry = "prelude.sfn"
 # SFN-775 / SFEP-0068: target differences belong to the runtime provider,
 # not to CI or the build frontend. Replacements preserve the base list's
 # order (and therefore compose with demand-driven source gates); additions
-# are deterministic manifest-order tails. The compiler retains its current
-# hardcoded Windows mapping only as a one-seed fallback for manifests that do
-# not declare this table.
+# are deterministic manifest-order tails. These target tables are the sole
+# source of runtime target conditioning; a missing table fails the build.
 [targets.aarch64-unknown-linux-gnu]
 sfn-sources-replace = []
 sfn-sources-add = []
@@ -159,8 +158,8 @@ sfn-sources-replace = [
 # `sysconf`` at `sfn_scheduler_resolve_thread_count` when this entry was
 # omitted — so both Windows ABIs take the Win32 implementation from that
 # file. Splitting the shim out into its own module broke the native MSVC
-# leg, whose pinned seed cannot read this table (SFN-1039); see
-# `pthread_windows.sfn`'s header for the seed-visibility rule.
+# leg while seed 0.10.4 could not read this table (SFN-1039); see
+# `pthread_windows.sfn`'s header for the historical seed-visibility rule.
 sfn-sources-add = [
     "sfn/platform/realpath_windows.sfn",
     "sfn/platform/clock_windows.sfn",
@@ -176,31 +175,16 @@ ll-sources-add = []
 link-libs-drop = []
 link-libs-add = ["-lbcrypt", "-lcrypt32", "-lws2_32"]
 
-# SFN-1084 / SFEP-0068 §3.3. The native MSVC ABI, declared for the same
-# reason mingw is: with no table here, `_condition_runtime_capsules`
-# (`compiler/src/build/runtime_objs.sfn`) falls through to the compiler's
-# hardcoded `target_condition_runtime_sfn_sources`, which lives *inside the
-# seed binary*. A provider added to that list in the working tree is
-# invisible to the pinned seed, which is exactly how SFN-1039 left `sysconf`
-# undefined at link on this leg. Manifest data the seed reads takes effect
-# immediately; the baked-in list needs a seed cut.
-#
-# The source set is identical to mingw's above — the hardcoded fallback keys
-# on `target_os`, not the triple, so both Windows ABIs already receive the
-# same modules. That equivalence is asserted, not assumed:
-# `compiler/tests/unit/target_conditioning_test.sfn` resolves this manifest
-# both ways and compares member-for-member, so the two mechanisms cannot
-# drift while both exist.
+# SFN-1084 / SFEP-0068 §3.3. The native MSVC ABI is declared explicitly so
+# both Windows triples receive the same runtime providers from manifest data.
+# Keeping the tables complete is required: the compiler fails closed when a
+# selected Windows triple has no matching target section.
 #
 # `link-libs-add` is the one real difference, and it must stay empty:
 # `target_extra_link_libs` (`compiler/src/build/target.sfn`) already returns
 # `-lbcrypt`/`-lcrypt32`/`-lws2_32` for the msvc ABI. Mingw adds them in its
 # table precisely because it does not get them from there — duplicating them
 # here would be the mirror-image mistake.
-#
-# Deleting the hardcoded fallback is SFN-777, and waits on a seed cut
-# carrying SFN-775's manifest branch (merged after v0.10.4 was tagged, so
-# the pinned seed cannot read either table yet).
 [targets.x86_64-pc-windows-msvc]
 sfn-sources-replace = [
     "sfn/process.sfn=sfn/platform/process_windows.sfn",
@@ -215,10 +199,9 @@ sfn-sources-replace = [
     "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn",
     "sfn/platform/file_stat.sfn=sfn/platform/file_stat_windows.sfn",
 ]
-# Order is load-bearing: the fallback appends these as a fixed tail, and the
-# manifest path appends in declaration order, so a reorder here breaks the
-# equivalence assertion rather than silently diverging. `pthread_windows.sfn`
-# carries `sysconf` as well as the `pthread_*` bodies (SFN-1039).
+# Order is load-bearing because the manifest appends sources in declaration
+# order. `pthread_windows.sfn` carries `sysconf` as well as the `pthread_*`
+# bodies (SFN-1039).
 sfn-sources-add = [
     "sfn/platform/realpath_windows.sfn",
     "sfn/platform/clock_windows.sfn",
@@ -254,10 +237,10 @@ link-libs-add = []
 #
 # Unnecessary, because selection runs BEFORE target conditioning: the call
 # sites narrow, and `_condition_runtime_capsules` runs later inside
-# `assemble_runtime_capsule_link_inputs`. `target_condition_runtime_sfn_sources`
-# appends a Windows sibling only when it still sees the POSIX module it swaps
-# from, so when `net` is undemanded that module is already gone and the sibling
-# is never appended. When `net` IS demanded the module survives, the sibling is
+# `assemble_runtime_capsule_link_inputs`. Manifest replacement adds a Windows
+# sibling only when it still sees the POSIX module it replaces, so when `net`
+# is undemanded that module is already gone and the sibling is never appended.
+# When `net` IS demanded the module survives, the sibling is
 # appended, and it is wanted. Both branches are correct with no entry here; that
 # ordering is therefore load-bearing, not incidental.
 #

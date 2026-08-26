@@ -3,7 +3,7 @@
 // The POSIX `access(2)` mode `sfn_fs_is_executable`
 // (`adapters/filesystem.sfn`) tests with. Swapped for
 // `fs_exec_mode_windows.sfn` on a Windows target by
-// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`),
+// the matching table in `runtime/capsule.toml`,
 // the same mechanism that swaps `rand.sfn` for `rand_windows.sfn`.
 //
 // Why this is a module and not a literal at the call site (SFN-649):

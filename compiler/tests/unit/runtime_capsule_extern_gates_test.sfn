@@ -127,8 +127,8 @@ fn _gate_entries(manifest: string) -> GateEntry[] {
 }
 
 // A gated module's `_windows` sibling, e.g. `sfn/platform/cert_roots.sfn`
-// -> `sfn/platform/cert_roots_windows.sfn`. A Windows target swaps to the
-// sibling (`target_condition_runtime_sfn_sources`), so its public names
+// -> `sfn/platform/cert_roots_windows.sfn`. A Windows manifest table swaps to
+// the sibling during target conditioning, so its public names
 // are equally gated; the caller skips this when the sibling file does not
 // exist.
 fn _windows_sibling(module: string) -> string {

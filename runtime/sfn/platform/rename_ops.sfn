@@ -3,8 +3,8 @@
 // Publish-into-place: move `src` onto `dst`, REPLACING `dst` when it
 // already exists. Isolated behind one symbol so the Windows divergence
 // is expressible as a module swap — swapped for `rename_ops_windows.sfn`
-// on a Windows target by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`), the same mechanism used for
+// on a Windows target by the matching table in `runtime/capsule.toml`, the
+// same mechanism used for
 // `fs_exec_mode.sfn` and `socket_ops.sfn` (SFN-720).
 //
 // Why this needs conditioning at all. The whole toolchain publishes

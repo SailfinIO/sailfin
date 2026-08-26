@@ -3,8 +3,7 @@
 // Generic-fd `read`/`write`, isolated behind two symbols so the Windows
 // divergence is expressible as a module swap. Swapped for
 // `fd_io_windows.sfn` on a Windows target by
-// `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn`) — the same mechanism that swaps
+// the matching table in `runtime/capsule.toml` — the same mechanism that swaps
 // `fs_exec_mode.sfn`, and for the same reason (SFN-671).
 //
 // This module is deliberately separate from `socket_ops.sfn`, which

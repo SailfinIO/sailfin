@@ -3,8 +3,7 @@
 // POSIX stub of the native file-stat probe pair backing the cache GC size
 // and mtime reads in `compiler/src/build_cache.sfn` (SFN-754). Swapped for
 // `file_stat_windows.sfn` on a Windows target by
-// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
-// and the `runtime/capsule.toml` `[targets.<triple>]` tables — the same
+// the `runtime/capsule.toml` `[targets.<triple>]` tables — the same
 // swap treatment `fd_io.sfn` gets.
 //
 // Deliberately NOT a native POSIX implementation. `struct stat` field
