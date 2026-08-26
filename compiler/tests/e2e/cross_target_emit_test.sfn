@@ -34,6 +34,7 @@ import {
     report_child_failure,
     sfn_bin_abs_path,
     skip,
+    tool_present,
     with_tmp_dir
 } from "sfn/test";
 
@@ -43,8 +44,21 @@ fn _write_fixture(dir: string) -> void ![io] {
     fs.writeFile(dir + "/probe.sfn", "struct Point {\n    x: int;\n    y: int;\n}\nfn main() -> int {\n    let p = Point { x: 1, y: 2 };\n    return p.x;\n}\n");
 }
 
+// The fixture declares `stat` itself. `sailfin_intrinsic_fs_get_perms`
+// lowers to a `call i32 @stat(...)` whose DECLARE is not emitted by the
+// lowering: the fs-intrinsic family deliberately carries no concrete `stat`
+// registry row and relies on the extern-is-the-declare-source contract
+// recorded alongside `readlink`/`symlink`/`mkdtemp`
+// (`runtime_helpers/registry_platform.sfn`). The one production caller,
+// `runtime/sfn/adapters/filesystem.sfn`, satisfies it with its own
+// `extern fn stat` (:218). A fixture that calls the sentinel directly has
+// to do the same or the module links against an undeclared `@stat` —
+// unlike `st_mode_arch_layout_test.sfn`, which only inspects `sfn emit`
+// text and so never reaches the linker. Same style as that file's fixture,
+// which likewise declares the externs it uses.
 fn _write_aarch64_fixture(dir: string) -> void ![io] {
-    fs.writeFile(dir + "/aarch64_probe.sfn", "fn read_perms(path: * u8) -> i64 ![io] {\n"
+    fs.writeFile(dir + "/aarch64_probe.sfn", "extern fn stat(path: *u8, statbuf: *u8) -> i32;\n\n"
+        + "fn read_perms(path: * u8) -> i64 ![io] {\n"
         + "    return sailfin_intrinsic_fs_get_perms(path);\n"
         + "}\n\n"
         + "fn main() -> int { return 0; }\n");
@@ -59,14 +73,13 @@ fn _aarch64_cross_toolchain_ready() -> boolean ![io] {
     if !fs.exists("/lib/ld-linux-aarch64.so.1") { return false; }
     if !fs.exists("/usr/lib/aarch64-linux-gnu/Scrt1.o") { return false; }
     if !fs.exists("/usr/lib/gcc/aarch64-linux-gnu") { return false; }
-    let clang_exit = process.run_capture(["clang", "--version"], process.environ());
-    let _clang_out = process.capture_take_stdout();
-    let _clang_err = process.capture_take_stderr();
-    if clang_exit != 0 { return false; }
-    let lld_exit = process.run_capture(["ld.lld", "--version"], process.environ());
-    let _lld_out = process.capture_take_stdout();
-    let _lld_err = process.capture_take_stderr();
-    return lld_exit == 0;
+    // `tool_present` is the shell-free PATH probe every e2e file shares
+    // (`capsules/sfn/test/src/tool_probe.sfn`), and it is the only spelling
+    // `no_shell_tool_probe_test.sfn` accepts: that ratchet scans raw file
+    // text for a C compiler named directly in a `process.run_capture` argv,
+    // so naming one here — even inside a comment — would re-trip it.
+    if !tool_present("clang") { return false; }
+    return tool_present("ld.lld");
 }
 
 // Test A (design note §7.2): the flag reaches `sfn emit` directly, with no

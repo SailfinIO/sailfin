@@ -214,8 +214,8 @@ test "target flag: the two Windows triples occupy distinct cache-key and artifac
         let msvc_key_content = fs.readFile(msvc_key);
         let gnu_key_content = fs.readFile(gnu_key);
         assert msvc_key_content != gnu_key_content;
-        assert contains(msvc_key_content, "tgt2:x86_64-pc-windows-msvc");
-        assert contains(gnu_key_content, "tgt2:x86_64-w64-mingw32");
+        assert contains(msvc_key_content, "tgt3:x86_64-pc-windows-msvc");
+        assert contains(gnu_key_content, "tgt3:x86_64-w64-mingw32");
 
         return 0;
     });
