@@ -177,11 +177,14 @@ test "with_env: parent environment is unchanged by a scoped child env" ![io] {
     assert after.length == 0;
 }
 
-// An empty `Env` means "empty", not "inherit": the child's environment
-// listing (via the `env` coreutil) is empty.
+// An empty `Env` means "empty", not "inherit": a runner-owned ambient key is
+// absent in the child. Testing the whole `env` listing is incorrect on native
+// Windows because the MSYS runtime synthesizes HOME/TERM even when Win32 gave
+// the process an empty environment block; those values were not inherited.
 test "with_env: empty Env yields a child with no environment" ![io] {
-    let r = with_env(["env"], env_empty(), fn (out: ProcessOutput) -> int {
-        if out.exit != 0 { return -1; }
+    assert env.get("SAILFIN_TEST_SCRATCH").length > 0;
+    let r = with_env(["printenv", "SAILFIN_TEST_SCRATCH"], env_empty(), fn (out: ProcessOutput) -> int {
+        if out.exit != 1 { return -1; }
         return out.stdout.length;
     });
     assert r == 0;
