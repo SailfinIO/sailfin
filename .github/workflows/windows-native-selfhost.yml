@@ -7,8 +7,10 @@
 # digest-verified before it is executed (SFN-994) — then drives the SFN-53
 # ladder plus the boot / check / run / R1 (try-throw) / R3 (struct-channel)
 # ABI gates via the shared `.github/actions/sailfin-build-windows` composite,
-# and runs the self-host fixed point: the native compiler rebuilds itself
-# twice and pass-2 must be byte-identical to pass-1.
+# and runs the strict self-host fixed point: the native compiler rebuilds
+# itself twice, canonical per-module IR must match, and pass-2 must be
+# byte-identical to pass-1. The fixed-point compiler then runs the complete
+# workspace test inventory cold (`--no-test-cache`).
 #
 # `cross-seed` no longer feeds it. It exercises the native MinGW target build
 # on Linux and keeps the `seed_source: cross` escape hatch proven; the two jobs
@@ -147,7 +149,12 @@ jobs:
   native-build:
     name: Native MSVC build from release seed [windows-2025]
     runs-on: windows-2025 # pinned, not `windows-latest` — SFN-55 Risk R3
-    timeout-minutes: 90
+    # The native build + strict fixed point measures ~30 minutes, but their
+    # individual successful-path caps total 65 minutes before seed staging,
+    # diagnostic rungs, and ABI gates. The cold suite therefore gets a
+    # 240-minute phase cap below, leaving a two-hour job envelope so its own
+    # timeout, summary, and failure classifier run before this 360-minute cap.
+    timeout-minutes: 360
     # The whole job runs with the Windows target seam active. SFN-52's
     # build_target_os() would also probe %SystemRoot% natively, but the
     # explicit override is the reliable selector (child processes may see
@@ -180,13 +187,11 @@ jobs:
         with:
           seed_source: release
 
-      # M8 (SFN-54): the native compiler self-hosts twice and pass-2 must be
-      # byte-identical to pass-1. Mirrors the POSIX fixed-point gate
-      # (`Fixed-point rebuild check (linux-x86_64)` in ci.yml): two
-      # `--work-dir`-isolated builds, each with its own
-      # `SAILFIN_TEST_SCRATCH` so pass-2's per-module `.ll` outputs cannot
-      # clobber pass-1's, then `--no-cache` on both so the comparison is a
-      # genuine re-emit rather than a cache hit.
+      # M8 (SFN-54) + SFN-981: use the compiler-owned self-host driver for
+      # the two isolated no-cache rebuilds and strict canonical module-IR
+      # comparison. `NATIVE_SFN` is the working-tree compiler; it builds fp1,
+      # then fp1 builds fp2. `--strict` makes any per-module divergence fatal,
+      # and the separate step below keeps Windows' stronger byte-identity gate.
       #
       # A byte compare is trustworthy here specifically because SFN-920
       # threads `/Brepro` through `lld-link` for MSVC targets — without it,
@@ -200,16 +205,13 @@ jobs:
       # path into the debug directory, and the two distinct `--work-dir`s
       # below turn from an isolation property into a guaranteed mismatch.
       #
-      # Placed last, after the cheap R1/R3 ABI gates: this step is two full
+      # Placed after the cheap R1/R3 ABI gates: this step is two full
       # native self-hosts of the ~281-module compiler, by far the most
       # expensive step in the job, so the fast gates should fail first and
       # leave this one uncharged.
-      # 30 minutes is >2x the observed ~7 min/pass. Deliberately not 45:
-      # the job's own 90-minute budget is already largely committed by the
-      # staging/MSVC/ladder steps and the 30-minute build, and a step
-      # timeout that outruns the job's remainder yields GitHub's generic
-      # job cancellation instead of this step's own timeout message —
-      # a worse diagnostic, not a wrong verdict.
+      # 30 minutes is >2x the observed ~7 min/pass. It remains a distinct
+      # phase cap inside the 360-minute job so a self-host regression is
+      # attributed here instead of consuming the full-suite allowance.
       #
       # The two passes are a SEPARATE step from the comparison below on
       # purpose (SFN-1035). Both observed release-commit failures were
@@ -218,9 +220,9 @@ jobs:
       # check — so triage started at "the compiler is non-deterministic"
       # when the compiler had not run. A step reports one verdict; these are
       # two.
-      - name: Self-host pass 1 + pass 2 (native MSVC)
+      - name: Self-host fp1 + fp2 and gate canonical module IR (native MSVC)
         id: selfhost_passes
-        shell: bash
+        shell: pwsh
         timeout-minutes: 30
         env:
           # SFN-1035: a `chore(release): X` commit bumps
@@ -264,55 +266,75 @@ jobs:
           # transitional. This one is structural.
           SAILFIN_BOOTSTRAP: "off"
         run: |
-          set -euo pipefail
-          # SFN-922: each pass writes into its own EMPTY directory, and that
-          # is load-bearing. Under `-p` (`walk_src`), the binary that emits
-          # all ~281 modules is not the one invoked here: `build.sfn:455`
-          # resolves it via `_resolve_self_path(binary_dir)`, which probes
-          # `sfn`/`sfn.exe`/`sailfin`/`sailfin.exe` inside `binary_dir` FIRST
-          # and only falls back to `exe_path()` — the actually running binary
-          # — when all four miss (SFN-904, `build/paths.sfn:226-234`).
-          #
-          # These outputs used to land in `build/bin/`. That happened to be
-          # correct here only because nothing on this runner puts a
-          # probe-matching name there; the same shape in `ci.yml` WAS wrong,
-          # emitting both passes with `build/bin/sfn` (SFN-922). Correct by
-          # accident is not correct, and folding this step into `ci.yml`
-          # under SFN-55 would have inherited the accident.
-          #
-          # Not inside the work dirs either: `<work-dir>/sailfin` is the
-          # cache directory (`build/cache.sfn:184-189`), the SFN-579 shape
-          # the `!fs.is_directory` guard at `paths.sfn:201` catches.
-          #
-          # The `.exe` suffix on `-o` is load-bearing: an explicit `-o` is
-          # honored verbatim (`build.sfn:346`, `build/target.sfn:234-236`),
-          # and an extensionless image cannot be launched by `CreateProcessA`
-          # with a null `lpApplicationName` (SFN-693), so pass 2 would fail
-          # to spawn on Windows only.
-          rm -rf build/selfhost/native-w1 build/selfhost/native-w2 \
-                 build/selfhost/fp1 build/selfhost/fp2
-          mkdir -p build/selfhost/native-w1 build/selfhost/native-w2 \
-                   build/selfhost/fp1 build/selfhost/fp2
-          SAILFIN_TEST_SCRATCH="build/selfhost/native-w1/scratch" \
-            "$NATIVE_SFN" build --no-cache -p compiler \
-              --work-dir build/selfhost/native-w1 \
-              -o build/selfhost/fp1/sfn-selfhost1.exe
-          # Assert the invariant above rather than trusting it: a
-          # probe-matching name beside pass-1's output would send pass-2's
-          # emit back through that binary and quietly re-vacuum the gate.
-          for probe in sfn sfn.exe sailfin sailfin.exe; do
-            if [ -e "build/selfhost/fp1/$probe" ]; then
-              echo "[error] build/selfhost/fp1/$probe exists; pass-2 would emit with it, not with pass-1 (SFN-922)" >&2
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force build/selfhost/fp1, build/selfhost/fp2 | Out-Null
+
+          # The composite action discovers the compiler from Git Bash and
+          # exports `/d/a/.../compiler.exe`. PowerShell cannot invoke that
+          # spelling, so normalize the MSYS drive prefix before both executing
+          # the driver and passing it back as `--first-pass`.
+          $nativeSfn = $env:NATIVE_SFN
+          if ($nativeSfn -match '^/([A-Za-z])/(.*)$') {
+            $nativeSfn = "$($Matches[1]):/$($Matches[2])"
+          }
+          if (-not (Test-Path -LiteralPath $nativeSfn -PathType Leaf)) {
+            "failure_kind=selfhost" >> $env:GITHUB_OUTPUT
+            Write-Host "::error::native compiler is not executable from PowerShell: $nativeSfn"
+            exit 1
+          }
+
+          $rc = 1
+          try {
+            # Each generation lives in its own directory, but the filename
+            # stays canonical. The multi-file test runner resolves its child
+            # compiler by probing the running binary's directory for
+            # `sfn.exe`/`sailfin.exe`; a generation-specific filename lets the
+            # parent start but makes every per-file child spawn fail (exit 127).
+            & $nativeSfn selfhost `
+              --work-dir build/selfhost/native `
+              --first-pass $nativeSfn `
+              --seedcheck-out build/selfhost/fp1/sfn.exe `
+              --stage3-out build/selfhost/fp2/sfn.exe `
+              --no-promote `
+              --strict `
+              --json 2>&1 | Tee-Object -FilePath build/selfhost/selfhost.jsonl
+            $rc = $LASTEXITCODE
+          } catch {
+            "failure_kind=selfhost" >> $env:GITHUB_OUTPUT
+            Write-Host "::error::failed to invoke native self-host driver: $($_.Exception.Message)"
+            exit 1
+          }
+
+          $failureKind = "selfhost"
+          if (-not (Test-Path -LiteralPath build/selfhost/selfhost.jsonl -PathType Leaf)) {
+            "failure_kind=$failureKind" >> $env:GITHUB_OUTPUT
+            Write-Host "::error::native self-host driver produced no JSON report"
+            exit 1
+          }
+          $envelope = Get-Content -LiteralPath build/selfhost/selfhost.jsonl |
+            Where-Object { $_ -match '^\{"schema_version":"sailfin-selfhost/1"' } |
+            Select-Object -Last 1
+          if ($envelope) {
+            $report = $envelope | ConvertFrom-Json
+            if ($report.failed_phase -eq "fixed-point") {
+              $failureKind = "fixed-point"
+            }
+          }
+          "failure_kind=$failureKind" >> $env:GITHUB_OUTPUT
+          if ($rc -eq 0) {
+            $expectedOutputs = @(
+              "build/selfhost/fp1/sfn.exe",
+              "build/selfhost/fp2/sfn.exe"
+            )
+            $missingOutputs = @($expectedOutputs | Where-Object {
+              -not (Test-Path -LiteralPath $_ -PathType Leaf)
+            })
+            if ($missingOutputs.Count -gt 0) {
+              Write-Host "::error::native self-host completed without expected output(s): $($missingOutputs -join ', ')"
               exit 1
-            fi
-          done
-          SAILFIN_TEST_SCRATCH="build/selfhost/native-w2/scratch" \
-            build/selfhost/fp1/sfn-selfhost1.exe build --no-cache -p compiler \
-              --work-dir build/selfhost/native-w2 \
-              -o build/selfhost/fp2/sfn-selfhost2.exe
-          for f in build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; do
-            [ -s "$f" ] || { echo "[error] pass artifact missing or empty: $f" >&2; exit 1; }
-          done
+            }
+          }
+          exit $rc
 
       # Comparison only — the passes ran in the step above. Anything that
       # fails HERE is a genuine determinism break, which is what makes this
@@ -325,14 +347,119 @@ jobs:
         timeout-minutes: 5
         run: |
           set -euo pipefail
-          ls -lh build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe
-          (sha256sum build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe 2>/dev/null || shasum -a 256 build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe || true)
-          if ! cmp -s build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; then
+          ls -lh build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe
+          (sha256sum build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe 2>/dev/null || shasum -a 256 build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe || true)
+          if ! cmp -s build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe; then
             echo "[error] fixed-point mismatch: pass-2 differs from pass-1" >&2
-            cmp -l build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe | head -n 20 || true
+            cmp -l build/selfhost/fp1/sfn.exe build/selfhost/fp2/sfn.exe | head -n 20 || true
             exit 1
           fi
           echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
+
+      # SFN-981: fp1 is the Windows analogue of `make check`'s seedcheck
+      # compiler. Resolve the same manifest-backed test-root inventory that
+      # `make test` consumes, omit `--jobs` so the native Windows CPU/RAM
+      # budget selects concurrency, and disable every test-binary/runtime-
+      # object cache for a genuine cold backstop.
+      - name: Prepare complete workspace test inventory
+        id: prepare_native_tests
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $testRoots = @(& build/selfhost/fp1/sfn.exe dev inventory tests)
+          $inventoryRc = $LASTEXITCODE
+          if ($inventoryRc -ne 0 -or $testRoots.Count -eq 0) {
+            Write-Error "workspace test inventory is empty or failed (exit=$inventoryRc)"
+            exit 2
+          }
+          $testRoots | Set-Content build/selfhost/windows-native-test-roots.txt
+          $testFiles = @(Get-ChildItem $testRoots -Recurse -File -Filter "*_test.sfn")
+          $testDeclarations = @($testFiles | Select-String -Pattern '^\s*test\s+"')
+          "discovered_files=$($testFiles.Count)" >> $env:GITHUB_OUTPUT
+          "discovered_tests=$($testDeclarations.Count)" >> $env:GITHUB_OUTPUT
+          "started_ms=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" >> $env:GITHUB_OUTPUT
+
+      - name: Gate — complete cold workspace test inventory (fp1)
+        id: native_tests
+        shell: pwsh
+        timeout-minutes: 240
+        env:
+          SAILFIN_BOOTSTRAP: "off"
+          # fp1 lives one directory deeper than the normal `build/bin/sfn.exe`
+          # dev layout, so the runtime-root walk cannot reach `<repo>/runtime`
+          # within its supported two-parent search. This is the documented
+          # operator override for CI scratch layouts, and the pooled children
+          # inherit it through the runner's complete environment snapshot.
+          SAILFIN_RUNTIME_ROOT: ${{ github.workspace }}/runtime
+        run: |
+          $ErrorActionPreference = "Continue"
+          $testRoots = @(Get-Content build/selfhost/windows-native-test-roots.txt)
+          $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+          & build/selfhost/fp1/sfn.exe test @testRoots --no-test-cache --json 2>&1 |
+            Tee-Object -FilePath build/selfhost/windows-native-tests.jsonl
+          $rc = $LASTEXITCODE
+          $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+          "exit_code=$rc" >> $env:GITHUB_OUTPUT
+          "wall_ms=$elapsed" >> $env:GITHUB_OUTPUT
+          exit $rc
+
+      - name: Summarize native Windows tests
+        if: always()
+        shell: pwsh
+        env:
+          TEST_RESULT: ${{ steps.native_tests.outcome }}
+          TEST_EXIT_CODE: ${{ steps.native_tests.outputs.exit_code }}
+          TEST_WALL_MS: ${{ steps.native_tests.outputs.wall_ms }}
+          TEST_STARTED_MS: ${{ steps.prepare_native_tests.outputs.started_ms }}
+          PREPARED_FILES: ${{ steps.prepare_native_tests.outputs.discovered_files }}
+          PREPARED_TESTS: ${{ steps.prepare_native_tests.outputs.discovered_tests }}
+        run: |
+          $roots = @()
+          if (Test-Path build/selfhost/windows-native-test-roots.txt) {
+            $roots = @(Get-Content build/selfhost/windows-native-test-roots.txt)
+          }
+          $files = if ($roots.Count -gt 0) {
+            @(Get-ChildItem $roots -Recurse -File -Filter "*_test.sfn")
+          } else {
+            @()
+          }
+          $summary = $null
+          $start = $null
+          if (Test-Path build/selfhost/windows-native-tests.jsonl) {
+            $events = @(Get-Content build/selfhost/windows-native-tests.jsonl |
+              ForEach-Object {
+                try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+              })
+            $start = $events | Where-Object { $_.event -eq "start" } | Select-Object -First 1
+            $summary = $events | Where-Object { $_.event -eq "summary" } | Select-Object -Last 1
+          }
+          $passed = if ($summary) { $summary.passed } else { "unavailable" }
+          $failed = if ($summary) { $summary.failed } else { "unavailable" }
+          $skipped = if ($summary) { $summary.skipped } else { "unavailable" }
+          $tests = if ($start) { $start.total } elseif ($env:PREPARED_TESTS) { $env:PREPARED_TESTS } elseif ($summary) { $summary.passed + $summary.failed + $summary.skipped } else { "unavailable" }
+          $fileCount = if ($env:PREPARED_FILES) { $env:PREPARED_FILES } else { $files.Count }
+          $wallMs = if ($env:TEST_WALL_MS) {
+            [int64]$env:TEST_WALL_MS
+          } elseif ($env:TEST_STARTED_MS) {
+            [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [int64]$env:TEST_STARTED_MS
+          } else {
+            0
+          }
+          $wall = [TimeSpan]::FromMilliseconds($wallMs).ToString("hh\:mm\:ss")
+          @"
+          ## Native Windows cold suite
+
+          | Metric | Result |
+          |---|---:|
+          | Discovered files | $fileCount |
+          | Discovered tests | $tests |
+          | Passed | $passed |
+          | Failed | $failed |
+          | Skipped (cited platform exclusions) | $skipped |
+          | Step result | $env:TEST_RESULT |
+          | Exit code | $env:TEST_EXIT_CODE |
+          | Wall time | $wall |
+          "@ >> $env:GITHUB_STEP_SUMMARY
 
       # SFN-57 / SFEP-0021 M11: package the fixed-point-proven binary as a
       # native MSVC installer archive every night, so the release-tag.yml
@@ -375,10 +502,11 @@ jobs:
       # the old title. Each value should name a distinct failure mode, in
       # words that cannot be misread.
       #
-      # Four values, and every step that can fail maps to exactly one:
+      # Five values, and every step that can fail maps to exactly one:
       #
       #   windows-selfhost-passes  the compiler did not self-host (SFN-1035)
       #   windows-fixed-point      it self-hosted twice and the two differed
+      #   windows-native-tests     the complete cold workspace suite failed
       #   windows-native-package   the installer was not produced or uploaded
       #   windows-native-build     anything earlier — seed staging, the
       #                            ladder, the Stage 2 build, an ABI gate
@@ -404,10 +532,16 @@ jobs:
           # skipped, not failed, and a skipped step must not read as a pass.
           # Quoting is load-bearing: a step that never ran yields '', and an
           # unquoted `[ = "failure" ]` would be a syntax error, not a false.
-          if [ "${{ steps.selfhost_passes.outcome }}" = "failure" ]; then
+          if [ "${{ steps.selfhost_passes.outcome }}" = "failure" ] \
+            && [ "${{ steps.selfhost_passes.outputs.failure_kind }}" = "fixed-point" ]; then
+            gate=windows-fixed-point
+          elif [ "${{ steps.selfhost_passes.outcome }}" = "failure" ]; then
             gate=windows-selfhost-passes
           elif [ "${{ steps.fixed_point.outcome }}" = "failure" ]; then
             gate=windows-fixed-point
+          elif [ "${{ steps.prepare_native_tests.outcome }}" = "failure" ] \
+            || [ "${{ steps.native_tests.outcome }}" = "failure" ]; then
+            gate=windows-native-tests
           elif [ "${{ steps.package_installer.outcome }}" = "failure" ] \
             || [ "${{ steps.upload_installer.outcome }}" = "failure" ]; then
             gate=windows-native-package
@@ -428,7 +562,7 @@ jobs:
     name: Open regression issue + PR comment on failure
     needs: [cross-seed, native-build]
     # `always()`, not `!cancelled()`: a `timeout-minutes` expiry on the
-    # job-level 90-minute caps (either `cross-seed` or `native-build`)
+    # job-level caps (`cross-seed`: 90 minutes; `native-build`: 360 minutes)
     # surfaces as a `cancelled` job conclusion — a step-level timeout (the
     # fixed-point step's own 30 min) instead marks the step and the job
     # `failure`, already caught by the `== 'failure'` disjuncts below without
