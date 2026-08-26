@@ -13,6 +13,19 @@ import { skip } from "sfn/test/skip";
 
 import { host_exe_name, host_is_windows } from "../../src/build/target";
 
+// macOS spells its temporary directory beneath `/var`, whose physical path
+// starts at `/private/var`. DESTDIR validation intentionally rejects lexical
+// symlink ancestors, so containment fixtures must begin from the physical
+// scratch root before adding the symlinks each test owns.
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+fn _physical_scratch(label: string) -> string ![io] {
+    let root = nested_runner_scratch(label);
+    let resolved: *u8 = realpath(root as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    return root;
+}
+
 fn _run_install(root: string, extra: string[]) -> int ![io] {
     let bin = sfn_bin_abs_path();
     let mut argv = [bin, "dev", "bootstrap", "install", "--from", bin];
@@ -109,7 +122,7 @@ test "dev-bootstrap install: prefix publishes a runnable host executable" ![io] 
 }
 
 test "dev-bootstrap install: DESTDIR stages the requested prefix" ![io] {
-    let root = nested_runner_scratch("dev_bootstrap_destdir_install");
+    let root = _physical_scratch("dev_bootstrap_destdir_install");
     let destdir = root + "/package-root";
     let rc = _run_install(root, ["--prefix", "/usr/local", "--destdir", destdir]);
     let _out = process.capture_take_stdout();
@@ -241,7 +254,7 @@ test "dev-bootstrap install: DESTDIR symlinks cannot redirect publication" ![io]
     if host_is_windows() {
         skip("native Windows does not provide the POSIX symlink fixture used by this containment test");
     }
-    let root = nested_runner_scratch("dev_bootstrap_destdir_symlink");
+    let root = _physical_scratch("dev_bootstrap_destdir_symlink");
     let live_prefix = root + "/symlink-target";
     fs.createDirectory(live_prefix + "/bin", true);
     let live_entry = host_exe_name(live_prefix + "/bin/sfn");
