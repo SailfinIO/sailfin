@@ -202,7 +202,7 @@ dependency installation and the supported build flags.
 make compile          # Build the self-hosted native compiler
 make test             # Run the test suite with an existing build
 make check            # Build as needed, build seedcheck, and run the full gate
-make install          # Install to PREFIX/bin, defaulting to ~/.local/bin
+build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 make clean            # Remove packaged artifacts under dist/
 sfn dev clean dist    # Native equivalent (also: `dev clean build`, `dev clean all`)
 ```

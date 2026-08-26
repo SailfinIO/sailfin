@@ -94,6 +94,11 @@ test "windows siblings: realpath_windows.sfn emits and defines realpath" ![io] {
     assert ir.length > 0;
     assert contains(ir, "define i8* @realpath(");
     assert contains(ir, "declare i8* @_fullpath(");
+    assert contains(ir, "declare i64 @CreateFileA(");
+    assert contains(ir, "declare i32 @GetFinalPathNameByHandleA(");
+    assert contains(ir, "call i32 @GetFinalPathNameByHandleA(");
+    assert contains(ir, "declare i8* @memmove(");
+    assert contains(ir, "call i8* @memmove(");
 }
 
 test "windows siblings: clock_windows.sfn emits and defines clock_gettime" ![io] {

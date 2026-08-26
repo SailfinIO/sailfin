@@ -7,7 +7,7 @@
 // Windows target rather than substituted for an existing basename
 // (`target_condition_runtime_sfn_sources`, `compiler/src/build/target.sfn`).
 //
-// Two independent consumers each inline their own
+// Consumers each inline their own
 // `extern fn realpath(path: *u8, resolved: *u8) -> *u8;` per the SFN-635
 // convention (no cross-module extern import): `runtime/sfn/platform/exec.sfn`
 // (`exe_path`/`resolve_runtime_root`) and the compiler's own
@@ -18,41 +18,94 @@
 // extern of that name), so this one definition satisfies both `@realpath`
 // references at the final Windows link.
 //
-// `_fullpath(resolved, path, maxlen)` is MSVC's `realpath` equivalent, but
-// differs from it in both argument ORDER and ARITY — this is a reorder,
-// not a rename. `260` is Win32's `MAX_PATH`; all four current callers
-// pass `resolved = null` (`exec.sfn:283`, `:358`, `entry.sfn:224`, and
-// `compiler/src/build/fs.sfn::_cwd_cmd`, SFN-888), and the
-// CRT mallocs its own buffer whenever `resolved` is null — `maxlen` is
-// documented as ignored on that path, so the constant is inert for every
-// caller today. Kept to serve a future non-null caller correctly, should one
-// appear.
-//
-// Two behavioral differences from POSIX `realpath`, both confirmed benign
-// at all three current call sites:
-//   - `_fullpath` succeeds on a path that does not exist (pure lexical
-//     normalization; POSIX `realpath` fails with ENOENT). `exec.sfn:358`
-//     is only reached after `sfn_fs_exists` already confirmed existence;
-//     `exec.sfn:283`'s input traces to a live loaded module
-//     (`GetModuleFileNameA` via the `sailfin_intrinsic_exe_path`
-//     sentinel); `entry.sfn:224`'s argv[0] fallback already branches on a
-//     null return with its own `else` arm, so a `_fullpath` "success" on
-//     a bad argv[0] just skips that branch rather than breaking it — a
-//     downstream `resolve_runtime_root` existence probe still catches a
-//     genuinely bad path.
-//   - `_fullpath` returns backslash-separated paths where POSIX
-//     `realpath` returns forward-slash paths. Every consumer of these
-//     three call sites' results builds further paths by concatenation
-//     onto that SAME string (`exec.sfn`'s dir-walk, the compiler's runtime
-//     capsule resolver), so the separator convention is self-consistent
-//     end to end, and Windows APIs accept `/` and `\` interchangeably in
-//     a mixed path either way.
+// `_fullpath(resolved, path, maxlen)` preserves the legacy non-null-buffer
+// contract. Null-buffer calls take a physical leg through
+// `GetFinalPathNameByHandleA`, which resolves NTFS
+// symlinks and junctions like POSIX `realpath`. SFN-1075 needs that property
+// to keep a packaging DESTDIR from redirecting publication into a live tree.
 extern fn _fullpath(resolved: *u8, path: *u8, maxlen: i32) -> *u8;
 
-// realpath(path, resolved) — see the module header for the argument
-// reorder and the `260` (MAX_PATH) rationale. `![io]` matches every other
-// OS-state-touching wrapper in this file family (`apply_default_mem_limit`,
-// `exe_path`/`resolve_runtime_root` in `exec.sfn`).
+extern fn CreateFileA(path: *u8, desired_access: i32, share_mode: i32, security: *u8, creation: i32, flags: i32, template_file: i64) -> i64;
+
+extern fn GetFinalPathNameByHandleA(handle: i64, path: *u8, size: i32, flags: i32) -> i32;
+
+extern fn CloseHandle(handle: i64) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memmove(dst: *u8, src: *u8, n: usize) -> *u8;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+let FILE_SHARE_ALL: i32 = 7;
+
+let OPEN_EXISTING: i32 = 3;
+
+let FILE_FLAG_BACKUP_SEMANTICS: i32 = 33554432;
+
+let INVALID_HANDLE_VALUE: i64 = -1;
+
+fn _realpath_windows_existing(path: *u8) -> *u8 ![io] {
+    let handle = CreateFileA(path, 0, FILE_SHARE_ALL, null, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+    if handle == INVALID_HANDLE_VALUE { return null; }
+
+    let required = GetFinalPathNameByHandleA(handle, null, 0, 0);
+    if required <= 0 {
+        CloseHandle(handle);
+        return null;
+    }
+    let cap = required + 1;
+    let buf = malloc(cap as usize);
+    if buf as i64 == 0 {
+        CloseHandle(handle);
+        return null;
+    }
+    let written = GetFinalPathNameByHandleA(handle, buf, cap, 0);
+    CloseHandle(handle);
+    if written <= 0 || written >= cap {
+        free(buf);
+        return null;
+    }
+
+    // `VOLUME_NAME_DOS` returns `\\?\C:\...` or
+    // `\\?\UNC\server\share\...`. Convert both to ordinary Win32 path
+    // spellings so the shared root parser sees drive and UNC roots normally.
+    if written >= 8 && load_byte(buf as i64) == 92 && load_byte((buf as i64) + 1) == 92
+        && load_byte((buf as i64)
+        + 2) == 63
+        && load_byte((buf as i64)
+        + 3) == 92
+        && load_byte((buf as i64)
+        + 4) == 85
+        && load_byte((buf as i64)
+        + 5) == 78
+        && load_byte((buf as i64)
+        + 6) == 67
+        && load_byte((buf as i64)
+        + 7) == 92 {
+        memmove(((buf as i64) + 2) as *u8, ((buf as i64) + 8) as *u8, (written - 7) as usize);
+        memset(buf, 92, 2 as usize);
+        return buf;
+    }
+    if written >= 4 && load_byte(buf as i64) == 92 && load_byte((buf as i64) + 1) == 92
+        && load_byte((buf as i64)
+        + 2) == 63
+        && load_byte((buf as i64)
+        + 3) == 92 {
+        memmove(buf, ((buf as i64) + 4) as *u8, (written - 3) as usize);
+        return buf;
+    }
+    return buf;
+}
+
+// Null-buffer calls either resolve physical redirectors or fail closed,
+// matching POSIX `realpath`: a lexical fallback would let containment callers
+// mistake an unresolved reparse path for a physical path. Preserve `_fullpath`
+// only for a future non-null caller because this ABI carries no buffer
+// capacity for a safe final-path write.
 fn realpath(path: *u8, resolved: *u8) -> *u8 ![io] {
-    return _fullpath(resolved, path, 260);
+    if resolved as i64 != 0 { return _fullpath(resolved, path, 260); }
+    return _realpath_windows_existing(path);
 }

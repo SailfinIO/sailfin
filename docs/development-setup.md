@@ -136,14 +136,20 @@ build/bin/sfn run examples/basics/hello-world.sfn
 build/bin/sfn fmt --check compiler/src runtime
 ```
 
-Install the built compiler into `~/.local/bin`:
+Install the built compiler into `~/.local/bin` through the native toolchain:
 
 ```bash
-make install
+build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 ```
 
-Use `PREFIX=/some/prefix make install` or `BINDIR=/some/bin make install` to
-install somewhere else.
+Change `--prefix` to install somewhere else. Packagers can stage the same
+layout with `--destdir <staging-root>`; for example,
+`--prefix /usr/local --destdir /tmp/sfn-package` writes
+`/tmp/sfn-package/usr/local/bin/sfn` (`.exe` on Windows). A direct prefix
+install refuses to overwrite an unmarked or externally changed entry because
+it may be package-manager-owned. The command also installs the local runtime
+and compiler dependency closure beside the binary, so the PATH command can
+build and run programs outside this checkout.
 
 ## Common workflows
 
@@ -196,7 +202,6 @@ invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
 | `CHECK_FULL_PASS1=1` | `make check` | off | Restores the older full first-pass suite before seedcheck; useful for bisects. |
 | `SELFHOST_STRICT=1` | `make check` | off locally | Makes a seedcheck/fixed-point rebuild mismatch fatal. `make check-strict` sets it. |
 | `TEST_BIN_CACHE_FLAGS` | `make test` | empty | Extra flags for `sfn test`; `make check` sets `--no-test-cache`. |
-| `PREFIX`, `BINDIR`, `INSTALL_NAME`, `DESTDIR` | `make install` | `~/.local`, `$(PREFIX)/bin`, `sfn`, empty | Installation path/name controls. |
 | `BENCH_ARGS` | `make bench` | empty | Extra args for compiler compile-time benchmarks. |
 | `BENCH_RUNTIME_ARGS` | `make bench-runtime` | empty | Extra args for runtime execution benchmarks. |
 | `ARENA_ARGS` | `make test-arena` | empty | Args forwarded to the native arena IR gate (`sfn dev arena`), e.g. `--all` or a module path. |

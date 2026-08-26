@@ -18,7 +18,12 @@
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
 import { contains, find } from "sfn/strings";
-import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 // The build spawns a nested `clang` + linker, so the child needs `PATH`
 // (an empty `run_capture` env is the *empty* environment, not "inherit").
@@ -69,9 +74,14 @@ fn _make_capsule(tag: string) -> string ![io] {
 test "cross-module char_at call resolves its signature, links, runs (#1572)" ![io] {
     let root = _make_capsule("link");
     let out_bin = root + "/prog";
-    let exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "-o", out_bin], _child_env());
+    // Shard workers run test files concurrently. Keep this nested capsule
+    // build out of the checkout-global `build/sailfin` tree so another file's
+    // link cannot replace its program.ll or runtime objects mid-command.
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "--work-dir", root
+        + "/work", "-o", out_bin], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("cross-module char_at build", exit, out, err);
     let log = out + err;
 
     // The #1572 signal: no spurious lowering fatal for `char_at`.

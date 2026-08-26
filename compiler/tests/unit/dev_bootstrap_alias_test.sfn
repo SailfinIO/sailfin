@@ -14,10 +14,23 @@
 // `EEXIST` on an existing path, so without the `fs.deleteFile` that
 // replaced `ln`'s `-f` the second bootstrap would silently keep a stale
 // alias.
-import { _cwd_cmd } from "../../src/build/fs";
+import {
+    _cwd_cmd,
+    _rename_noreplace_preserving_source_on_failure,
+    _rename_preserving_source_on_failure,
+    _sha256_of_file
+} from "../../src/build/fs";
 import { built_program_path, native_install_path } from "../../src/build/source_fingerprint";
-import { host_is_windows } from "../../src/build/target";
-import { _bootstrap_alias, _bootstrap_is_absolute } from "../../src/cli/commands/dev";
+import { host_is_windows, target_exe_name } from "../../src/build/target";
+import {
+    BootstrapInstallBackup,
+    _bootstrap_alias,
+    _bootstrap_commit_dev_payload,
+    _bootstrap_install_is_canonical,
+    _bootstrap_is_absolute,
+    _bootstrap_prefixed_install_path,
+    _bootstrap_restore_after_entry_claim
+} from "../../src/cli/commands/dev";
 
 // Same scratch shape as `fs_tree_test.sfn`: the per-invocation test
 // scratch when the pool provides one, else a repo-relative path rather
@@ -44,6 +57,187 @@ test "dev-bootstrap: scoped build artifact installs as sfn" ![io] {
     assert built == "build/capsules/sfn/compiler/bin/compiler" || built == "build/capsules/sfn/compiler/bin/compiler.exe";
     let installed = native_install_path();
     assert installed == "build/bin/sfn" || installed == "build/bin/sfn.exe";
+}
+
+test "dev-bootstrap: prefixed install resolves bin beneath prefix and DESTDIR" {
+    assert _bootstrap_prefixed_install_path("/opt/sailfin", "", "sfn") == "/opt/sailfin/bin/sfn";
+    assert _bootstrap_prefixed_install_path("/usr/local", "/tmp/package-root", "sfn") == "/tmp/package-root/usr/local/bin/sfn";
+    assert _bootstrap_prefixed_install_path("/usr/local/", "/tmp/package-root/", "sfn") == "/tmp/package-root/usr/local/bin/sfn";
+    assert _bootstrap_prefixed_install_path("build", ".", "sfn") == "build/bin/sfn";
+    assert _bootstrap_prefixed_install_path("/usr/local", "/.", "sfn") == "/usr/local/bin/sfn";
+}
+
+test "dev-bootstrap: prefixed install preserves the shared Windows executable suffix rule" {
+    let windows_exe = target_exe_name("sfn", "Windows");
+    assert windows_exe == "sfn.exe";
+    assert _bootstrap_prefixed_install_path("C:/Sailfin", "", windows_exe) == "C:/Sailfin/bin/sfn.exe";
+    assert _bootstrap_prefixed_install_path("C:/Sailfin", "D:/package-root", windows_exe) == "D:/package-root/Sailfin/bin/sfn.exe";
+}
+
+test "dev-bootstrap: explicit install path flags never select canonical publication" {
+    assert _bootstrap_install_is_canonical("", "");
+    assert ! _bootstrap_install_is_canonical("build", "");
+    assert ! _bootstrap_install_is_canonical("build", ".");
+}
+
+test "dev-bootstrap: failed backup move preserves its only source" ![io] {
+    let root = _scratch_dir() + "/preserve-failed-backup";
+    fs.createDirectory(root, true);
+    let src = root + "/only-copy";
+    let blocking_dir = root + "/blocking-dir";
+    fs.writeFile(src, "recovery-copy");
+    fs.createDirectory(blocking_dir, true);
+
+    assert ! _rename_preserving_source_on_failure(src, blocking_dir);
+    assert fs.readFile(src) == "recovery-copy";
+    assert fs.exists(blocking_dir);
+}
+
+test "dev-bootstrap: no-clobber publish preserves a foreign destination" ![io] {
+    let root = _scratch_dir() + "/preserve-foreign-publish";
+    fs.createDirectory(root, true);
+    let src = root + "/staged-entry";
+    let dst = root + "/live-entry";
+    fs.writeFile(src, "dev-entry");
+    fs.writeFile(dst, "package-manager-entry");
+
+    assert ! _rename_noreplace_preserving_source_on_failure(src, dst);
+    assert fs.readFile(src) == "dev-entry";
+    assert fs.readFile(dst) == "package-manager-entry";
+
+    fs.deleteFile(dst);
+    assert _rename_noreplace_preserving_source_on_failure(src, dst);
+    assert ! fs.exists(src);
+    assert fs.readFile(dst) == "dev-entry";
+}
+
+test "dev-bootstrap: failed post-claim publish never deletes the live executable" ![io] {
+    let root = _scratch_dir() + "/restore-failed-publish";
+    let bin_dir = root + "/bin";
+    let out = bin_dir + "/sfn";
+    let staging = bin_dir + "/staging";
+    fs.createDirectory(bin_dir + "/runtime", true);
+    fs.createDirectory(bin_dir + "/capsules", true);
+    fs.writeFile(bin_dir + "/runtime/old", "old-runtime");
+    fs.writeFile(bin_dir + "/capsules/old", "old-capsules");
+    fs.writeFile(bin_dir + "/workspace.toml", "old-workspace");
+    fs.writeFile(out, "old-compiler");
+
+    // Leave `staging/runtime` absent so the first publish rename fails after
+    // every live component has been backed up.
+    fs.createDirectory(staging + "/capsules", true);
+    fs.writeFile(staging + "/capsules/new", "new-capsules");
+    fs.writeFile(staging + "/workspace.toml", "new-workspace");
+    fs.writeFile(staging + "/sfn", "new-compiler");
+
+    assert ! _bootstrap_commit_dev_payload(staging, out, false);
+    assert fs.readFile(bin_dir + "/runtime/old") == "old-runtime";
+    assert fs.readFile(bin_dir + "/capsules/old") == "old-capsules";
+    assert fs.readFile(bin_dir + "/workspace.toml") == "old-workspace";
+    // After the no-clobber claim, rollback never deletes a live name because
+    // it cannot atomically prove another writer has not replaced that entry.
+    assert fs.readFile(out) == "new-compiler";
+}
+
+test "dev-bootstrap: foreign entry rollback preserves its companion payload" ![io] {
+    let root = _scratch_dir() + "/preserve-foreign-bundle";
+    let bin_dir = root + "/bin";
+    let live_paths = [bin_dir + "/sfn", bin_dir + "/sfn.sfn-dev-install.sha256", bin_dir
+        + "/runtime", bin_dir
+        + "/capsules", bin_dir
+        + "/workspace.toml"];
+    let backup_paths = [bin_dir + "/old-sfn", bin_dir + "/old-marker", bin_dir
+        + "/old-runtime", bin_dir
+        + "/old-capsules", bin_dir
+        + "/old-workspace.toml"];
+    fs.createDirectory(live_paths[2], true);
+    fs.createDirectory(live_paths[3], true);
+    fs.createDirectory(backup_paths[2], true);
+    fs.createDirectory(backup_paths[3], true);
+    fs.writeFile(live_paths[0], "package-manager-compiler");
+    fs.writeFile(live_paths[1], "package-manager-marker");
+    fs.writeFile(live_paths[2] + "/foreign", "package-manager-runtime");
+    fs.writeFile(live_paths[3] + "/foreign", "package-manager-capsules");
+    fs.writeFile(live_paths[4], "package-manager-workspace");
+    fs.writeFile(backup_paths[0], "old-dev-compiler");
+    fs.writeFile(backup_paths[1], "old-dev-marker");
+    fs.writeFile(backup_paths[2] + "/old", "old-dev-runtime");
+    fs.writeFile(backup_paths[3] + "/old", "old-dev-capsules");
+    fs.writeFile(backup_paths[4], "old-dev-workspace");
+    let backups = [BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[0]
+    }, BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[1]
+    }, BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[2]
+    }, BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[3]
+    }, BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[4]
+    }];
+
+    assert ! _bootstrap_restore_after_entry_claim(live_paths, backups, "dev-published-digest");
+    assert fs.readFile(live_paths[0]) == "package-manager-compiler";
+    assert fs.readFile(live_paths[2] + "/foreign") == "package-manager-runtime";
+    assert fs.readFile(live_paths[3] + "/foreign") == "package-manager-capsules";
+    assert fs.readFile(live_paths[4]) == "package-manager-workspace";
+    assert ! fs.exists(backup_paths[2]);
+    assert ! fs.exists(backup_paths[3]);
+    assert ! fs.exists(backup_paths[4]);
+}
+
+test "dev-bootstrap: foreign marker rollback preserves every current live path" ![io] {
+    let root = _scratch_dir() + "/preserve-foreign-marker-bundle";
+    let bin_dir = root + "/bin";
+    let live_paths = [bin_dir + "/sfn", bin_dir + "/sfn.sfn-dev-install.sha256", bin_dir
+        + "/runtime", bin_dir
+        + "/capsules", bin_dir
+        + "/workspace.toml"];
+    let backup_paths = [bin_dir + "/old-sfn", bin_dir + "/old-marker", bin_dir
+        + "/old-runtime", bin_dir
+        + "/old-capsules", bin_dir
+        + "/old-workspace.toml"];
+    fs.createDirectory(live_paths[2], true);
+    fs.createDirectory(live_paths[3], true);
+    fs.createDirectory(backup_paths[2], true);
+    fs.createDirectory(backup_paths[3], true);
+    fs.writeFile(live_paths[0], "this-transaction-compiler");
+    let published_digest = _sha256_of_file(live_paths[0]);
+    fs.writeFile(live_paths[1], "foreign-marker");
+    fs.writeFile(live_paths[2] + "/current", "current-runtime");
+    fs.writeFile(live_paths[3] + "/current", "current-capsules");
+    fs.writeFile(live_paths[4], "current-workspace");
+    let mut i = 0;
+    loop {
+        if i >= backup_paths.length { break; }
+        if i != 2 && i != 3 {
+            fs.writeFile(backup_paths[i], "old-dev-path");
+        }
+        i += 1;
+    }
+    fs.writeFile(backup_paths[2] + "/old", "old-dev-runtime");
+    fs.writeFile(backup_paths[3] + "/old", "old-dev-capsules");
+    let backups = [BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[0]
+    }, BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[1]
+    }, BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[2]
+    }, BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[3]
+    }, BootstrapInstallBackup {
+        ok: true, existed: true, path: backup_paths[4]
+    }];
+
+    assert published_digest.length > 0;
+    assert ! _bootstrap_restore_after_entry_claim(live_paths, backups, published_digest);
+    assert fs.readFile(live_paths[0]) == "this-transaction-compiler";
+    assert fs.readFile(live_paths[1]) == "foreign-marker";
+    assert fs.readFile(live_paths[2] + "/current") == "current-runtime";
+    assert fs.readFile(live_paths[3] + "/current") == "current-capsules";
+    assert fs.readFile(live_paths[4]) == "current-workspace";
+    assert ! fs.exists(backup_paths[0]);
+    assert ! fs.exists(backup_paths[1]);
 }
 
 test "dev-bootstrap: _bootstrap_alias points an alias at the target" ![io] {

@@ -65,6 +65,10 @@ extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 // (SFN-720). Returns 0 on success, like `rename(2)`.
 extern fn sfn_rename_replace(src: *u8, dst: *u8) -> i32;
 
+extern fn sfn_rename_noreplace(src: *u8, dst: *u8) -> i32;
+
+extern fn sfn_set_current_directory(path: *u8) -> i32;
+
 // Atomically claim `path`, creating it as an empty regular file iff it
 // does not already exist. Defined by
 // `runtime/sfn/platform/exclusive_create.sfn` and swapped for its
@@ -285,6 +289,26 @@ fn _atomic_rename_into_place(tmp_path: string, dst_path: string) -> boolean ![io
         return false;
     }
     return true;
+}
+
+// Move a non-disposable source without deleting it when the platform rename
+// fails. Backup and rollback paths must use this instead of
+// `_atomic_rename_into_place`: that helper owns a temporary source and removes
+// it on failure, while these callers hold the only live/recovery copy.
+fn _rename_preserving_source_on_failure(src_path: string, dst_path: string) -> boolean ![io] {
+    return sfn_rename_replace(src_path as *u8, dst_path as *u8) == 0;
+}
+
+// Move a sibling-staged regular file only when the destination is absent.
+// Both platform implementations leave `src_path` untouched on failure, so a
+// caller can preserve a concurrently published destination and still roll
+// back or clean its own staging path.
+fn _rename_noreplace_preserving_source_on_failure(src_path: string, dst_path: string) -> boolean ![io] {
+    return sfn_rename_noreplace(src_path as *u8, dst_path as *u8) == 0;
+}
+
+fn _set_current_directory(path: string) -> boolean ![io] {
+    return sfn_set_current_directory(path as *u8) == 0;
 }
 
 // A null or empty line array publishes a zero-length artifact, matching
@@ -920,6 +944,9 @@ export {
     _cwd_cmd,
     _set_perms_or_skip,
     _atomic_rename_into_place,
+    _rename_preserving_source_on_failure,
+    _rename_noreplace_preserving_source_on_failure,
+    _set_current_directory,
     _publish_lines_atomic,
     _copy_file,
     _copy_file_preserving_mode,

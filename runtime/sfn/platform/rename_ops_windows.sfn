@@ -130,4 +130,22 @@ fn sfn_rename_replace(src: *u8, dst: *u8) -> i32 {
     return -1;
 }
 
-export { sfn_rename_replace };
+// `flags = 0` makes MoveFileExA fail atomically when `dst` already exists.
+// Unlike the replace path above, no running-image fallback is appropriate:
+// the entire contract is to preserve an independently published destination.
+fn sfn_rename_noreplace(src: *u8, dst: *u8) -> i32 {
+    if MoveFileExA(src, dst, 0) != 0 { return 0; }
+    return -1;
+}
+
+extern fn SetCurrentDirectoryA(path: *u8) -> i32;
+
+// Win32 retains the current-directory reference and prevents its directory
+// from being removed while it is current. Relative publication therefore does
+// not re-traverse a caller-mutable DESTDIR ancestor between validation and use.
+fn sfn_set_current_directory(path: *u8) -> i32 {
+    if SetCurrentDirectoryA(path) != 0 { return 0; }
+    return -1;
+}
+
+export { sfn_rename_noreplace, sfn_rename_replace, sfn_set_current_directory };

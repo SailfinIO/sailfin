@@ -325,6 +325,30 @@ here.
   retries instead of wedging on a false "up to date". New leaves: `sfn dev
   bootstrap fingerprint [<root>...]` prints the digest; `sfn dev bootstrap
   install [--from <path>]` publishes an already-built binary and records it.
+  SFN-1075 extends that install leaf with `--prefix <dir>` and
+  `--destdir <dir>`: no flags still publish the canonical `build/bin/sfn`, a
+  prefix publishes the host-named executable under `<prefix>/bin`, and
+  DESTDIR stages that prefix for packagers. Prefixed and staged installs also
+  publish the resolved runtime/dependency workspace beside the executable, so
+  the installed compiler builds and runs outside the checkout. A live
+  prefixed install records a digest sidecar and replaces the entry only while
+  that digest still matches; an unmarked or externally changed entry is
+  refused as potentially package-manager-owned, consistent with SFEP-0073
+  §3.5. Parent components are rejected beneath DESTDIR, a filesystem-root
+  DESTDIR retains the live ownership guard, and drive-qualified prefixes are
+  stripped to a valid path beneath a Windows staging root. Canonical versus
+  explicit-path mode follows the CLI flags; DESTDIR and its components are
+  normalized and physically resolved before live/staged classification.
+  POSIX symlinks are rejected and Windows reparse points must remain within
+  the resolved staging root. Noncanonical installs stage the complete bundle
+  on the destination filesystem, serialize writers with an exclusive entry
+  lock, and atomically claim the executable without replacing a concurrently
+  published entry. Before that claim, failures restore captured paths. After
+  it, rollback never deletes an occupied live name: backups return only to
+  still-absent names, so a late companion or marker failure can leave the
+  claimed developer executable in place and requires an explicit cleanup or
+  retry. Staged installs do not claim ownership, and prefixed installs do not
+  update the canonical build fingerprint.
   `sfn dev bootstrap build -- <build-arg>...` forwards the trailing arguments
   verbatim to the pinned seed's `build -p compiler` invocation (SFN-1076), so
   native self-host diagnostics can use `--no-cache`, `--cache-trace`, and

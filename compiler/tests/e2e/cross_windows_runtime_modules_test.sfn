@@ -58,6 +58,23 @@ test "cross-windows manifest selects every Win32 runtime sibling" ![io] {
     assert expect_contains_str(manifest, "sfn/platform/mkdtemp_windows.sfn").ok;
 }
 
+test "cross-Darwin manifest selects directory-safe no-clobber rename" ![io] {
+    let manifest = fs.readFile("runtime/capsule.toml");
+    assert expect_contains_str(manifest, "[targets.x86_64-apple-darwin]").ok;
+    assert expect_contains_str(manifest, "[targets.arm64-apple-darwin]").ok;
+    assert expect_contains_str(manifest, "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_macos.sfn").ok;
+    let provider = fs.readFile("runtime/sfn/platform/rename_ops_macos.sfn");
+    assert expect_contains_str(provider, "renamex_np").ok;
+    assert expect_contains_str(provider, "return renamex_np(src, dst, 4)").ok;
+}
+
+test "Linux no-clobber rename supports captured directories" ![io] {
+    let provider = fs.readFile("runtime/sfn/platform/rename_ops.sfn");
+    assert expect_contains_str(provider, "renameat2").ok;
+    assert expect_contains_str(provider, "return renameat2(-100, src, -100, dst, 1)").ok;
+    assert expect_eq_bool(contains(provider, "link(src, dst)"), false).ok;
+}
+
 test "cross-windows native linker is driver-owned" ![io] {
     let target = fs.readFile("compiler/src/build/target.sfn");
     let backend = fs.readFile("compiler/src/backend.sfn");
