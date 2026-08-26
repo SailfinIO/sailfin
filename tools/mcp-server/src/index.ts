@@ -13,19 +13,23 @@
 //   - sailfin_build           — build a .sfn file / capsule to a binary
 //   - sailfin_test            — run a targeted suite or single test
 //   - sailfin_bench           — benchmark compiler build or runtime workloads
+//   - sailfin_selfhost_build  — self-host the compiler from the pinned seed
+//   - sailfin_dev_verify_fast — check the complete maintainer source inventory
+//   - sailfin_symbols         — deterministic compiler API index
+//   - sailfin_capabilities_audit — capability-envelope drift report
 //
 // Every tool goes through runSailfin(), which enforces the timeout
 // and keeps invocations inside the workspace.
 //
-// Design rule: every tool is a *pure passthrough* to a single `sailfin`
-// subcommand. No build/test orchestration lives here — e.g. compiler
-// self-host (seed resolution + extern pre-staging) stays in `make
-// compile`, and sailfin_build deliberately does not replicate it.
+// Design rule: every tool is a *pure passthrough* to a single `sfn`
+// subcommand. No build/test orchestration lives here; native driver verbs
+// own self-hosting and verification.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+import { assertDistributionFresh } from "./build-freshness.js";
 import {
   resolveInsideWorkspace,
   runSailfin,
@@ -215,6 +219,8 @@ const BUILD_TIMEOUT_MS = 600_000; // 10 min
 const TEST_TIMEOUT_MS = 600_000; // 10 min
 const FMT_WRITE_TIMEOUT_MS = 120_000; // 2 min — dir-wide fmt touches many files
 const BENCH_TIMEOUT_MS = 600_000; // 10 min — compiler-mode walks the whole compiler/src tree
+const SELFHOST_BUILD_TIMEOUT_MS = 1_200_000; // 20 min — cold seed builds can take minutes
+const DEV_VERIFY_FAST_TIMEOUT_MS = 600_000; // 10 min — checks the complete maintainer inventory
 
 server.registerTool(
   "sailfin_version",
@@ -390,7 +396,7 @@ server.registerTool(
   {
     title: "Build a Sailfin file or capsule to a binary",
     description:
-      "Compile a Sailfin source file or capsule to a native binary via `sailfin build`. Provide exactly one of `path` (a single .sfn file) or `capsule` (a capsule directory, built via -p). Optionally `json` for machine-readable output. Pure passthrough — this does NOT self-host the compiler itself: the self-host build needs seed resolution + extern pre-staging that lives in `make compile`, and this tool deliberately does not replicate it. Runs under a 10-minute timeout (cold builds take minutes).",
+      "Compile a Sailfin source file or capsule to a native binary via `sfn build`. Provide exactly one of `path` (a single .sfn file) or `capsule` (a capsule directory, built via -p). Optionally `json` for machine-readable output. Use sailfin_selfhost_build instead when rebuilding the compiler itself. Runs under a 10-minute timeout (cold builds take minutes).",
     inputSchema: { path: buildFileSchema, capsule: capsuleSchema, json: jsonSchema },
   },
   async ({ path: userPath, capsule, json }) => {
@@ -411,6 +417,117 @@ server.registerTool(
       return formatResult("sailfin build", result);
     });
     return out as ToolResult;
+  },
+);
+
+server.registerTool(
+  "sailfin_selfhost_build",
+  {
+    title: "Self-host the Sailfin compiler",
+    description:
+      "Run `sfn dev bootstrap build` using the pinned released seed. Pass `force: true` to rebuild even when the source fingerprint is unchanged. Writes build artifacts and runs under a 20-minute timeout.",
+    inputSchema: {
+      force: z
+        .boolean()
+        .optional()
+        .describe("Rebuild even when the source fingerprint is unchanged (--force)."),
+    },
+  },
+  async ({ force }) => {
+    try {
+      const args = ["dev", "bootstrap", "build"];
+      if (force) {
+        args.push("--force");
+      }
+      const result = await runSailfin(args, {
+        timeoutMs: SELFHOST_BUILD_TIMEOUT_MS,
+      });
+      return formatResult("sailfin dev bootstrap build", result);
+    } catch (err) {
+      return errorResult(
+        err instanceof SailfinError ? err.message : String(err),
+      );
+    }
+  },
+);
+
+server.registerTool(
+  "sailfin_dev_verify_fast",
+  {
+    title: "Run fast maintainer verification",
+    description:
+      "Run `sfn dev verify --fast` across the complete compiler maintainer-source inventory. Optionally emit machine-readable output with `json`. Runs under a 10-minute timeout; the full hour-scale verification gate is intentionally not exposed through MCP.",
+    inputSchema: { json: jsonSchema },
+  },
+  async ({ json }) => {
+    try {
+      const args = ["dev", "verify", "--fast"];
+      if (json) {
+        args.push("--json");
+      }
+      const result = await runSailfin(args, {
+        timeoutMs: DEV_VERIFY_FAST_TIMEOUT_MS,
+      });
+      return formatResult("sailfin dev verify --fast", result);
+    } catch (err) {
+      return errorResult(
+        err instanceof SailfinError ? err.message : String(err),
+      );
+    }
+  },
+);
+
+server.registerTool(
+  "sailfin_symbols",
+  {
+    title: "List Sailfin API symbols",
+    description:
+      "Run `sfn symbols` to return the deterministic API index. Optionally restrict results to one capsule slug and/or request the sailfin-symbols/1 JSON envelope.",
+    inputSchema: {
+      capsule: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Restrict the index to one capsule slug (--capsule SLUG)."),
+      json: jsonSchema,
+    },
+  },
+  async ({ capsule, json }) => {
+    try {
+      const args = ["symbols"];
+      if (typeof capsule === "string") {
+        args.push("--capsule", capsule);
+      }
+      if (json) {
+        args.push("--json");
+      }
+      const result = await runSailfin(args);
+      return formatResult("sailfin symbols", result);
+    } catch (err) {
+      return errorResult(
+        err instanceof SailfinError ? err.message : String(err),
+      );
+    }
+  },
+);
+
+server.registerTool(
+  "sailfin_capabilities_audit",
+  {
+    title: "Audit capability envelopes",
+    description:
+      "Run `sfn capabilities audit` from the workspace root to report capability-envelope drift, including E0402 and E0403 findings.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const result = await runSailfin(["capabilities", "audit"]);
+      return formatResult("sailfin capabilities audit", result);
+    } catch (err) {
+      return errorResult(
+        err instanceof SailfinError ? err.message : String(err),
+      );
+    }
   },
 );
 
@@ -544,6 +661,7 @@ server.registerTool(
 );
 
 async function main(): Promise<void> {
+  assertDistributionFresh();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Emit a single startup breadcrumb on stderr so integrators can tell

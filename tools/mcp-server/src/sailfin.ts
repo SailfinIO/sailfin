@@ -47,7 +47,7 @@ export function assertCompilerExists(): void {
   const bin = compilerPath();
   if (!existsSync(bin)) {
     throw new SailfinError(
-      `build/bin/sfn not found at ${bin}. Run \`make compile\` first.`,
+      `build/bin/sfn not found at ${bin}. Run \`sfn dev bootstrap build\` first.`,
     );
   }
 }

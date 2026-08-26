@@ -18,22 +18,30 @@ Part of the "AI agents are users" strategy described in [`CLAUDE.md`](../../CLAU
 | `sailfin_build` | `sfn build <file>` / `-p <capsule>` | Build a single `.sfn` file or a capsule to a native binary. **Not** the compiler self-host (see below). |
 | `sailfin_test` | `sfn test <path> [-k <name>] [--jobs N] [--json]` | Run a targeted suite directory or a single `_test.sfn` file. `path` required. |
 | `sailfin_bench` | `sfn bench [--compiler] [<path>] --json` | Benchmark compiler per-module build (compiler mode) or runtime workloads, returning the `sailfin.bench/v1` JSON envelope. |
+| `sailfin_selfhost_build` | `sfn dev bootstrap build [--force]` | Self-host the compiler from the pinned seed. Writes `build/`. |
+| `sailfin_dev_verify_fast` | `sfn dev verify --fast [--json]` | Check the complete maintainer-source inventory without the hour-scale full gate. |
+| `sailfin_symbols` | `sfn symbols [--capsule SLUG] [--json]` | Return the deterministic compiler API index. |
+| `sailfin_capabilities_audit` | `sfn capabilities audit` | Report capability-envelope drift. |
 
-**Design rule:** every tool is a *pure passthrough* to one `sailfin` subcommand — no build/test orchestration lives in the server. In particular, `sailfin_build` does **not** self-host the compiler: that build needs seed resolution and extern pre-staging (`make rebuild`), and the tool deliberately does not replicate it. Use `make compile` for the self-host build until that orchestration folds into the driver.
+**Design rule:** every tool is a *pure passthrough* to one `sfn` subcommand — no build/test orchestration lives in the server. `sailfin_build` builds a consumer file or capsule; `sailfin_selfhost_build` delegates the compiler's seed resolution and self-host orchestration to the native `sfn dev bootstrap build` verb.
 
 `sailfin_test` requires a `path` on purpose — agents target one file or one suite (e.g. `compiler/tests/unit`) rather than the full serial suite, which can take ~45 min and is intentionally not exposed as a single call. The broad `compiler/tests/integration` and `compiler/tests/e2e` directories can still take several minutes.
 
-Timeouts: `sailfin_build`, `sailfin_test`, and `sailfin_bench` run under a 10-minute budget, `sailfin_fmt_write` under 2 minutes, and the analysis/emit tools under 60 seconds. The compiler self-applies its 8 GiB memory budget on Linux (see the [`compiler-safety` rule](../../.claude/rules/compiler-safety.md)); paths that resolve outside the workspace root are refused.
+Timeouts: `sailfin_selfhost_build` runs under a 20-minute budget; `sailfin_dev_verify_fast`, `sailfin_build`, `sailfin_test`, and `sailfin_bench` under 10 minutes; `sailfin_fmt_write` under 2 minutes; and the analysis, emit, symbols, and capabilities tools under 60 seconds. The full `sfn dev verify` gate is intentionally not exposed because it can exceed an hour. The compiler self-applies its 8 GiB memory budget on Linux (see the [`compiler-safety` rule](../../.claude/rules/compiler-safety.md)); paths that resolve outside the workspace root are refused.
 
 ## Build
 
 ```bash
 cd tools/mcp-server
-npm install
+npm ci --no-audit --no-fund
 npm run build
 ```
 
 Artifacts land in `dist/`.
+
+The build also records a fingerprint of `src/`. At startup the server compares
+that fingerprint with the current sources and exits loudly when `dist/` is
+missing or stale, preventing clients from silently loading an older tool set.
 
 ## Register with a client
 
@@ -54,7 +62,7 @@ npx @modelcontextprotocol/inspector node tools/mcp-server/dist/index.js
 ## Contract
 
 - Tools **never throw** on compiler non-zero exit — they return `isError: true` with structured `{exit, stdout, stderr, duration_ms, timed_out}` so the caller can iterate on diagnostics.
-- If `build/bin/sfn` is missing, every tool returns a clean error telling the caller to run `make compile`.
+- If `build/bin/sfn` is missing, every tool returns a clean error telling the caller to run `sfn dev bootstrap build`.
 - Paths outside the workspace (e.g. `/etc/passwd`, `../../elsewhere`) are rejected before invocation.
 
 ## Roadmap

@@ -46,7 +46,7 @@ Optional tools:
 | Tool | Why it is useful |
 |---|---|
 | GNU `timeout` (`timeout` / `gtimeout`) | Bounds direct compiler invocations and some Makefile validation paths. |
-| `npm` | Required only for `make mcp-server`. |
+| `npm` | Required only for the TypeScript MCP server under `tools/mcp-server/`. |
 | `x86_64-w64-mingw32-gcc` | Required for `sfn build --target=x86_64-w64-mingw32`. |
 
 ## Install dependencies
@@ -166,7 +166,7 @@ build and run programs outside this checkout.
 | Capsule tests only | `make test-capsules` |
 | Format touched compiler/runtime files | `build/bin/sfn fmt --write <files>` then `build/bin/sfn fmt --check <files>` |
 | Package release artifacts | `make package` |
-| Build MCP server | `make mcp-server` |
+| Build MCP server | `(cd tools/mcp-server && npm ci --no-audit --no-fund && npm run build)` |
 | Cross-compile Windows artifact | `build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe` |
 
 Before committing changes under `compiler/src/` or `runtime/`, run
