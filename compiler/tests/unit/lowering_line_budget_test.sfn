@@ -32,10 +32,16 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     // partial struct literal at lowering (`E1002`), so every literal and
     // every forwarding frame in these modules must name it. No net-zero form
     // exists; each ceiling is pinned to its exact new length.
+    //
+    // SFN-1061 raises `instructions_match.sfn` 926 -> 928 for the same
+    // reason: `MatchCaseStructure` gained `span` and `MatchCaseCondition`
+    // gained `diags`, so the two case literals and the condition forwarding
+    // frame each cost a line. Without the `diags` carrier an `error` diag
+    // raised in match-condition lowering could never reach `has_error_diag`.
     if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1547; }
     if path == LOWERING_ROOT + "/lowering_recovery.sfn" { return 1056; }
     if path == LOWERING_ROOT + "/instructions_let.sfn" { return 1037; }
-    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 926; }
+    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 928; }
     if path == LOWERING_ROOT + "/instructions.sfn" { return 861; }
     if path == LOWERING_ROOT + "/instructions_helpers.sfn" { return 849; }
     if path == LOWERING_ROOT + "/instructions_if.sfn" { return 832; }
