@@ -1186,7 +1186,7 @@ jobs:
           build/bin/sfn version
 
       # This is the cache-independent backstop. Do not restore or save a
-      # test-bin cache here, and do not pin TEST_JOBS: on this 4-vCPU/16-GiB
+      # test-bin cache here, and do not pin SAILFIN_TEST_JOBS: on this 4-vCPU/16-GiB
       # runner the native policy selects 2 after SFN-781 measured --jobs 4 at
       # 17.26 GiB tree RSS and an OOM kill.
       - name: Run cold unsharded Sailfin test suite

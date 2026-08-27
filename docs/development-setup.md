@@ -176,12 +176,14 @@ compiler binary.
 ## Supported Makefile overrides
 
 These are the supported knobs for source builds and local validation. Prefer
-command-line Make variables (`make test TEST_JOBS=4`) for one-off runs and
-environment variables for shell-wide behavior.
+command-line Make variables for one-off runs and environment variables for
+shell-wide behavior.
 
-Direct `sfn test` invocations auto-size their per-file worker pool from CPU and
-RAM. Pin `SAILFIN_TEST_JOBS=N` for a shell or CI job, or pass `--jobs N` for one
-invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
+`make test`/`make check` invocations (and direct `sfn test` calls) auto-size
+their per-file worker pool from CPU and RAM. Pin `SAILFIN_TEST_JOBS=N` for a
+shell or CI job — it covers `make check`'s cold seedcheck leg too — or pass
+`--jobs N` for one invocation; the explicit flag wins, and `--jobs 1` selects
+the serial path.
 
 | Override | Applies to | Default | Notes |
 |---|---|---|---|
@@ -196,8 +198,6 @@ invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
 | `SAILFIN_CC` | Native macOS final links and transitional Makefile recipes | `/usr/bin/clang` | Explicit Darwin clang-driver override; object assembly still follows `PATH`. |
 | `CLANG_LL_FLAGS` | LLVM IR compilation | empty | Extra flags when compiling `.ll`; use only for platform quirks such as opaque-pointer mode. |
 | `NATIVE_LL_TIMEOUT_SECONDS` | LLVM IR compilation | `600` | Wall-clock cap for individual clang jobs when `timeout` is available. |
-| `TEST_JOBS` | `make test*` | auto-detected | Parallel `sfn test --jobs N` children. Lower it on memory-constrained hosts. |
-| `CHECK_TEST_JOBS` | `make check` | `TEST_JOBS` | Parallelism for the full cold seedcheck suite. |
 | `CHECK_TEST_TIMEOUT` | `make check` | `1800` | Per-test timeout for the cold full-suite leg. |
 | `CHECK_FULL_PASS1=1` | `make check` | off | Restores the older full first-pass suite before seedcheck; useful for bisects. |
 | `SELFHOST_STRICT=1` | `make check` | off locally | Makes a seedcheck/fixed-point rebuild mismatch fatal. `make check-strict` sets it. |

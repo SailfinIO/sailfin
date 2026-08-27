@@ -45,7 +45,7 @@ inputs:
     required: false
     default: ""
   test_jobs:
-    description: "Parallel test children for the full-suite path (TEST_JOBS, forwarded to `make test` — see Makefile). Empty = use the Makefile's native CPU+RAM budget. Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N only after measuring the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap."
+    description: "Parallel test children for the full-suite path (pins SAILFIN_TEST_JOBS for `make test`). Empty = use the native runner's CPU+RAM auto-budget. Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N only after measuring the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap."
     required: false
     default: ""
   shard_test_jobs:
@@ -440,17 +440,22 @@ runs:
         # ~6x unit throughput, peak RSS a fraction of the runner budget).
         # Forwarded via SAILFIN_TEST_JOBS, which `sfn dev shard run` reads.
         # Empty/unset lets the native runner apply its CPU+RAM auto-budget.
-        if [ -n "${{ inputs.shard_test_jobs }}" ]; then
-          export SAILFIN_TEST_JOBS="${{ inputs.shard_test_jobs }}"
-        fi
         run_tests() {
           if [ -n "${{ inputs.shard }}" ]; then
+            # Scoped to this arm: with the Makefile no longer passing an
+            # explicit `--jobs`, an exported SAILFIN_TEST_JOBS would other-
+            # wise also size the full-suite pool, contradicting this input's
+            # "only consulted when `shard` is set" contract (SFN-1158).
+            if [ -n "${{ inputs.shard_test_jobs }}" ]; then
+              export SAILFIN_TEST_JOBS="${{ inputs.shard_test_jobs }}"
+            fi
             make test-shard SHARD="${{ inputs.shard }}"
           elif [ -n "${{ inputs.test_jobs }}" ]; then
             # Full-suite path with parallel test children (#843 Track A).
-            # Forwarded only when explicitly set so the default invocation
-            # stays byte-identical to the historical `make test`.
-            make test TEST_JOBS="${{ inputs.test_jobs }}"
+            # Pinned only when explicitly set so the default invocation
+            # stays byte-identical to the historical `make test`, which
+            # lets the native runner apply its own CPU+RAM auto-budget.
+            SAILFIN_TEST_JOBS="${{ inputs.test_jobs }}" make test
           else
             make test
           fi

@@ -365,8 +365,8 @@ jobs:
     # (SFN-431 — this reverses the earlier cold-producer choice; the cold
     # build was producer hygiene, never a soundness requirement, which
     # belongs only to the `build-quality` determinism gate). The suite runs
-    # in ONE parallel pool (`make test` sizes its `--jobs` budget to the
-    # runner via scripts/detect_test_jobs.sh), not the old serial-shard `for`
+    # in ONE parallel pool (`make test` omits `--jobs` and lets the native
+    # auto-budget size the pool to the runner), not the old serial-shard `for`
     # loop whose ~53-min cold floor (shards run one-at-a-time, files serial
     # within each) kept tipping past the cap and leaving the cache unsaved,
     # so the next run paid the cold cost again (SFN-394).
@@ -525,8 +525,8 @@ jobs:
       # `build/cache/test-bin/v<schema>`. `make test` walks the same
       # unit+integration+e2e+capsules union the old serial-shard `for` loop
       # covered (shard-cover parity, `sfn dev shard cover`), so no coverage
-      # is lost, and it sizes its `--jobs` budget to the runner's CPU/RAM
-      # (scripts/detect_test_jobs.sh) instead of running shards one-at-a-time
+      # is lost, and it omits `--jobs`, letting the native auto-budget size
+      # the pool to the runner's CPU/RAM instead of running shards one-at-a-time
       # with serial files inside each — the ~53-min cold floor this job kept
       # hitting (SFN-394). The saved cache is content-addressed by the
       # compiler binary SHA-256 (SFN-545), so entries this pass produces

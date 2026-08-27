@@ -129,35 +129,17 @@ together:
 1. **Across-leg sharding** — the eight named CI shards, run as separate
    jobs (see below).
 2. **Per-file parallelism within a leg** — `_test_jobs_budget(memsize_bytes,
-   nproc, is_darwin)` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:89-122`):
+   nproc, is_darwin)` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:85-118`):
    `min(cores, (usable_RAM - 5 GiB) / 3 GiB)`, floored at 1, capped at 16,
    and capped at 2 on Darwin, where `usable_RAM` is 80% of total RAM (the
    same name the code gives the pre-subtraction slice) and the 5 GiB
    subtrahend reserves the parent runner (SFN-781). Resolution precedence in
-   `_resolve_test_jobs` (`:171-180`): an explicit `--jobs` flag beats
-   `SAILFIN_TEST_JOBS`, which beats the native host probe.
-   `scripts/detect_test_jobs.sh` reimplements the identical policy in bash
-   for the Makefile's `TEST_JOBS ?=` default; the comment at
-   `arg_and_jobs.sfn:74-76` states the two must stay in lockstep — there is
-   no shared source for the policy across the two languages, so a change to
-   one budget function still requires the mirrored edit in the other.
-   `compiler/tests/integration/test_jobs_budget_parity_test.sfn` (SFN-794)
-   enforces that lockstep: it drives both implementations over one shared
-   table of structural boundaries — the parent reserve, the `by_mem < 1`
-   floor, the job thresholds, the Darwin and global caps — and fails when
-   they disagree, so a one-sided edit is caught by CI rather than by review.
-   The script takes injected `mem_mb`/`cores`/`uname_s` arguments for that
-   test; called with no arguments it probes the real host exactly as the
-   Makefile expects.
-
-   Two properties of that test are worth knowing before editing a constant.
-   It pins the agreed values as well as the agreement, so a *coordinated*
-   edit also goes red and has to re-derive the table deliberately. And a
-   separate case asserts each job threshold steps at an exact MiB boundary,
-   which is what makes the bash form's whole-MiB truncation lossless — that
-   is the assertion that fails if a future slice or reserve lands a threshold
-   at a fractional MiB, a divergence the table alone cannot see because it
-   samples whole-MiB inputs.
+   `_resolve_test_jobs` (`:189-198`): an explicit `--jobs` flag beats
+   `SAILFIN_TEST_JOBS`, which beats the native host probe. The Makefile no
+   longer computes its own default (SFN-1158 / SFEP-0074 §5.2 retired the
+   pre-binary bash duplicate and the parity test that cross-checked it) —
+   `make test`/`make check` omit `--jobs` and let the native probe size the
+   pool; `SAILFIN_TEST_JOBS=N` is the sole override.
 
 Pooled test children are pinned to `SAILFIN_BUILD_JOBS=1`
 (`compiler/src/cli/commands/test/pool.sfn:219-221`) so a pooled child that
@@ -231,7 +213,7 @@ The design for the content-addressed key derivation lives in
   merge queues without depending on every matrix child separately (SFN-476).
 - **Scheduled aarch64-Linux soak** — `soak-aarch64-linux` downloads the same
   verified native compiler artifact but runs one unsharded full suite with
-  `--no-test-cache`. It restores no test-bin cache, pins no `TEST_JOBS`, and a
+  `--no-test-cache`. It restores no test-bin cache, pins no `SAILFIN_TEST_JOBS`, and a
   failure fails the scheduled workflow.
 - **Windows** — boot/frontend smoke only via `smoke-windows`; no suite run. This
   is the whole of the Windows contract: Tier 3, best effort
