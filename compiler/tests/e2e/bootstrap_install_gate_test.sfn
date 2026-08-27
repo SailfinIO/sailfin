@@ -40,7 +40,13 @@
 //   9. a build whose seed fails outright, or whose seed "succeeds" but
 //      produces a binary that does not run, leaves any previously
 //      installed binary and stored fingerprint untouched.
-import { free_bytes, read_bytes } from "sfn/fs";
+//  10. the real `install.sh`, not a hand-mirrored copy of it, lands a seed
+//      at the exact path `_bootstrap_seed_bin` (`compiler/src/cli/commands/
+//      dev.sfn`) probes — closing the gap between install.sh:807,832's
+//      seed-store layout and the native dispatch's expectation of it
+//      (SFN-1163), then proves the round trip: `sfn dev bootstrap build`
+//      finds and invokes that installer-produced seed.
+import { copy, free_bytes, read_bytes } from "sfn/fs";
 import { find, int_to_string, split } from "sfn/strings";
 import {
     clean_runner_env,
@@ -49,7 +55,9 @@ import {
     nested_runner_scratch,
     report_child_failure,
     report_child_failure_pending,
-    sfn_bin_abs_path
+    sfn_bin_abs_path,
+    skip,
+    tool_present
 } from "sfn/test";
 
 import { sha256_hex_of_bytes } from "../../src/build/hash";
@@ -722,6 +730,111 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
     free_bytes(after_fail);
     assert fs.readFile(repo + "/build/.compiler-source-fingerprint") == fingerprint_before;
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "bootstrap: install.sh lands the seed where the native dispatch probes" ![io] {
+    // install.sh is a bash script; there is no bash to drive it on native
+    // Windows (SFN-1163).
+    if host_is_windows() {
+        skip("install.sh is a bash script and there is no bash to drive it on native Windows");
+    }
+    if !tool_present("bash") || !tool_present("tar") || !tool_present("jq") || !tool_present("curl") {
+        skip("bash/tar/jq/curl are all required to drive the real install.sh, and not all are present on PATH");
+    }
+
+    let repo = _scratch_repo("seed-store-layout-repo");
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    _create_fingerprint_roots(repo);
+    _write_bootstrap_toml(repo);
+
+    let marker = repo + "/seed-invocations.marker";
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env(nested_runner_scratch("seed_store_layout"));
+    let fixtures = _fixtures_dir(repo);
+    let ok_bin = _build_ok_program(sfn, child_env, fixtures);
+    assert ok_bin.length > 0;
+    child_env.push("SFN172_MARKER=" + marker);
+    child_env.push("SFN172_OK_BIN=" + ok_bin);
+
+    // The seed FIXTURE itself: same content `_seed_stub` compiles straight to
+    // `_seed_bin_path(repo)` (the hand-mirror this test exists to close the
+    // gap on) — built here to a plain fixtures path instead, so it can be
+    // archived and installed through the REAL `install.sh` rather than
+    // written directly to the store.
+    let seed_src = fixtures + "/seed-store-layout-seed.sfn";
+    fs.writeFile(seed_src, _seed_ok_src(_compiler_dest_rel()));
+    let seed_base = fixtures + "/seed-store-layout-seed";
+    let seed_build_rc = _build_fixture(sfn, child_env, seed_src, seed_base, "bootstrap-install-gate seed-store-layout seed");
+    assert seed_build_rc == 0;
+    let seed_payload = _built_path(seed_base);
+
+    // `BINARY=sailfin` is what install.sh's archive-root probe looks for
+    // (install.sh:773-777) — the basename in the tarball must be exactly
+    // that, not whatever HOST-suffixed name the fixture build produced.
+    let payload_dir = fixtures + "/payload";
+    fs.createDirectory(payload_dir, true);
+    let payload_bin = payload_dir + "/sailfin";
+    assert copy(seed_payload, payload_bin);
+    fs.set_perms(payload_bin, 493);
+
+    let archive = fixtures + "/seed.tar.gz";
+    let tar_exit = process.run_capture(["tar", "-czf", archive, "-C", payload_dir, "sailfin"], child_env);
+    let tar_out = process.capture_take_stdout();
+    let tar_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate seed-store-layout tar", tar_exit, tar_out, tar_err);
+    assert tar_exit == 0;
+
+    // `bootstrap.toml` (`_write_bootstrap_toml`) pins `install_base =
+    // "seed-store"` / `bin_dir = "seed-store-bin"`, relative to the repo
+    // cwd `_dev_bootstrap_build` resolves against — so the installer must be
+    // pointed at the same paths, as absolutes, regardless of THIS test
+    // process's own cwd.
+    let install_base = repo + "/seed-store";
+    let global_bin_dir = repo + "/seed-store-bin";
+    let mut installer_env = clean_runner_env(nested_runner_scratch("seed_store_layout_installer"));
+    installer_env.push("SAILFIN_BOOTSTRAP_SEED_STORE=1");
+    installer_env.push("INSTALL_BASE=" + install_base);
+    installer_env.push("GLOBAL_BIN_DIR=" + global_bin_dir);
+    installer_env.push("VERSION=999.0.0");
+    installer_env.push("BINARY=sailfin");
+    installer_env.push("SAILFIN_LOCAL_ARCHIVE=" + archive);
+    installer_env.push("SAILFIN_ALLOW_UNVERIFIED=1");
+
+    // `install.sh` is invoked as a RELATIVE path deliberately: this test's
+    // own cwd is the repo root the suite runs from, so it resolves to the
+    // real installer under test, not a synthetic stand-in. `SAILFIN_LOCAL_
+    // ARCHIVE` + an explicit `VERSION` is install.sh's documented offline
+    // path (install.sh:28-33,344,700-721); no network is used.
+    let install_exit = process.run_capture(["bash", "install.sh"], installer_env);
+    let install_out = process.capture_take_stdout();
+    let install_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate seed-store-layout install.sh", install_exit, install_out, install_err);
+    assert install_exit == 0;
+
+    // The contract under test: install.sh (install.sh:807,832) and
+    // `_bootstrap_seed_bin` (compiler/src/cli/commands/dev.sfn) must agree
+    // on where the seed lands, or the native dispatch falls through to a
+    // network fetch of a version that was never published (SFN-1163).
+    let seed_bin = _seed_bin_path(repo);
+    if !fs.exists(seed_bin) {
+        print.err("[bootstrap-install-gate] seed-store layout contract broken: install.sh (install.sh:807,832) did not write the seed where _bootstrap_seed_bin (compiler/src/cli/commands/dev.sfn) probes: "
+            + seed_bin);
+    }
+    assert fs.exists(seed_bin);
+    assert fs.exists(global_bin_dir + "/sfn");
+
+    // The round trip: `sfn dev bootstrap build` must find and invoke the
+    // installer-produced seed instead of falling through to a network fetch.
+    let build_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    report_child_failure("bootstrap-install-gate seed-store-layout build", build_exit, build_out, build_err);
+    _report_marker(marker);
+    assert build_exit == 0;
+    assert _marker_count(marker) == 1;
 
     process.run(["rm", "-rf", repo]);
 }
