@@ -6,7 +6,7 @@ type: tooling
 created: 2026-08-27
 updated: 2026-08-27
 author: "agent:Sailbot; project owner direction"
-tracking: https://linear.app/sailfin/project/makefile-retirement-sfn-owns-buildcheckbootstrap-aa904424bbf4
+tracking: https://linear.app/sailfin/project/repo-tooling-ownership-13d4826f99a9
 supersedes:
 superseded-by:
 graduates-to:
