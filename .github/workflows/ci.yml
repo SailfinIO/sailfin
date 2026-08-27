@@ -481,7 +481,7 @@ jobs:
         shell: bash
         run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
-      - name: Build native compiler (via Makefile)
+      - name: Build native compiler
         uses: ./.github/actions/sailfin-build
         env:
           # PR CI should not require a PAT.
@@ -658,7 +658,7 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      - name: Build native compiler (via Makefile)
+      - name: Build native compiler
         uses: ./.github/actions/sailfin-build
         env:
           # PR CI should not require a PAT.
@@ -1033,7 +1033,7 @@ jobs:
           restore-keys: |
             test-bin-linux-arm64-${{ matrix.shard }}-
 
-      - name: Test shard (via Makefile)
+      - name: Test shard
         uses: ./.github/actions/sailfin-build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1316,7 +1316,7 @@ jobs:
           restore-keys: |
             test-bin-${{ runner.os }}-${{ matrix.shard }}-
 
-      - name: Test + package (via Makefile)
+      - name: Test + package
         uses: ./.github/actions/sailfin-build
         env:
           # PR CI should not require a PAT.
@@ -1831,7 +1831,7 @@ jobs:
           restore-keys: |
             test-bin-${{ runner.os }}-${{ matrix.shard }}-
 
-      - name: Test + package (via Makefile)
+      - name: Test + package
         uses: ./.github/actions/sailfin-build
         env:
           # PR CI should not require a PAT.
