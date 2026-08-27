@@ -22,12 +22,12 @@
 //      `auto` falls through to a fail-closed install that names the hint.
 //   5. `off` (and `--skip-toolchain-check`) skips the gate and proceeds.
 //   6. an explicit `<version>` knob forces that version as the target.
+import { copy } from "sfn/fs";
 import { contains } from "sfn/strings";
 import {
     default_scratch_dir,
     host_is_windows,
     report_child_failure,
-    run_external_c_oracle,
     sfn_bin_abs_path,
     sfn_bin_path,
     skip
@@ -58,7 +58,7 @@ fn _marker() -> string { return "DISPATCH_STUB_EXEC_OK_7f3a"; }
 
 // Full parent environment plus the caller's extra `KEY=VALUE` entries
 // (`run_capture`'s empty env is EMPTY, not "inherit", so the child needs
-// PATH etc. to resolve `chmod`/`uname` and, on dispatch, the stub's `sh`).
+// PATH etc. to resolve compiler and toolchain subprocesses on the host).
 fn _env_with(extra: string[]) -> string[] ![io] {
     let mut e = process.environ();
     let mut i: int = 0;
@@ -82,28 +82,25 @@ fn _stub_bin(dir: string) -> string ![io] {
     return dir + "/sailfin";
 }
 
-// Write a stub at `_stub_bin(dir)` that prints `marker` and exits 0.
-//
-// On POSIX that is a `#!/bin/sh` script, which costs nothing. Windows has
-// no shebang: `CreateProcessA` cannot launch a script at all, so the stub
-// has to be a real PE image. The external C oracle already exists for
-// exactly this (`sfn/test`, SFN-1107) and compiles a `<stdio.h>` harness
-// cleanly here — the `<stdlib.h>` SDK conflict its header documents does
-// not reach this stub. A host without a usable C compiler SKIPS rather
-// than fails, which is the honest outcome: nothing about toolchain
-// dispatch can be proven there.
-fn _write_marker_stub(dir: string, marker: string) -> void ![io] {
+// Build a native Sailfin stub that prints `marker` and exits 0. Compiling
+// the fixture makes the executable portable across Windows and POSIX and
+// exercises the same compiler-under-test that launches it. Return the
+// actual executable path because explicit `-o` names are honored verbatim,
+// including the `.exe` suffix the helper selects on Windows.
+fn _write_marker_stub(dir: string, marker: string) -> string ![io] {
+    let src = dir + "/dispatch-stub.sfn";
+    fs.writeFile(src, "fn main() -> int ![io] {\n" + "    print(\"" + marker
+        + "\");\n"
+        + "    return 0;\n"
+        + "}\n");
     let bin = _stub_bin(dir);
-    if !host_is_windows() {
-        fs.writeFile(bin, "#!/bin/sh\necho \"" + marker + "\"\nexit 0\n");
-        process.run(["chmod", "+x", bin]);
-        return;
-    }
-    let csrc = dir + "/stub.c";
-    fs.writeFile(csrc, "#include <stdio.h>\nint main(void){ puts(\"" + marker
-        + "\"); return 0; }\n");
-    let rc = run_external_c_oracle([csrc, "-o", bin]);
-    assert rc == 0;
+    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", bin, src], _env_with([]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch stub build", exit, out, err);
+    assert exit == 0;
+    assert fs.exists(bin);
+    return bin;
 }
 
 // Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a stub that
@@ -115,7 +112,7 @@ fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> 
     let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
     process.run(["rm", "-rf", dir]);
     fs.createDirectory(dir, true);
-    _write_marker_stub(dir, marker);
+    let _ = _write_marker_stub(dir, marker);
     if complete {
         fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
     }
@@ -125,7 +122,7 @@ fn _seed_legacy_stub(store: string, ver: string, marker: string) -> void ![io] {
     let dir = store + "/" + ver;
     process.run(["rm", "-rf", dir]);
     fs.createDirectory(dir, true);
-    _write_marker_stub(dir, marker);
+    let _ = _write_marker_stub(dir, marker);
     fs.writeFile(dir + "/.sha256", "legacy-archive-marker\n");
 }
 
@@ -417,11 +414,8 @@ test "toolchain dispatch: a modified bundled runtime input refuses a build-like 
     fs.createDirectory(scratch, true);
 
     let copied_bin = _stub_bin(scratch);
-    let cp_exit = process.run_capture(["cp", sfn_bin_abs_path(), copied_bin], _env_with([]));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_exit == 0;
-    process.run(["chmod", "+x", copied_bin]);
+    assert copy(sfn_bin_abs_path(), copied_bin);
+    fs.set_perms(copied_bin, 493);
 
     fs.createDirectory(scratch + "/runtime", true);
     let payload_path = scratch + "/runtime/bundled-probe.sfn";
