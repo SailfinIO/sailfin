@@ -466,6 +466,23 @@ fn make_spawn_handle_kind_mismatch_diagnostic(name: string, array_kind: string, 
     };
 }
 
+// SFN-1006: `spawn` accepts only an inline `fn` literal or a call to a
+// zero-argument named function — anything else cannot be lowered (the `_ctx`
+// runtime family threads exactly one env pointer, not an argument vector; see
+// `check_spawn_target`, the sole caller). `detail` names the rejected form.
+fn make_spawn_unsupported_target_diagnostic(detail: string, span: SourceSpan?) -> Diagnostic {
+    let message = "cannot spawn " + detail
+        + ": `spawn` accepts an inline `fn` literal (`spawn fn() -> T { ... }`) or a call to a zero-argument named function (`spawn worker()`). Wrap anything else in a task lambda: `spawn fn() -> T { return <expr>; }`.";
+    return Diagnostic {
+        code: "E0842",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name("spawn", span),
+        suggestion: null
+    };
+}
+
 // The monomorphized element kind a `Task<T>[]` handle-array type annotation
 // carries (SFEP-0055), or null when `type_text` is not a `Task<...>[]` array.
 // Mirrors `channel_element_kind`: strip the trailing `[]`, match the `Task`

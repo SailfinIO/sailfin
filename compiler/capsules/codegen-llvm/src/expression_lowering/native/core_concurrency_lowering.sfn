@@ -6,9 +6,15 @@ import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { format_temp_name, is_simple_identifier } from "../../expressions_helpers";
+import { find_function_by_name_or_import } from "../../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { resolve_struct_info_for_literal } from "../../type_context_queries";
-import { ends_with_pointer_suffix, map_return_type } from "../../type_mapping";
+import {
+    ends_with_pointer_suffix,
+    future_pointer_type_for_return_type,
+    map_return_type,
+    spawn_symbol_for_return_type
+} from "../../type_mapping";
 import {
     ExpressionResult,
     LLVMOperand,
@@ -19,6 +25,7 @@ import {
     TypeContext
 } from "../../types";
 import {
+    ends_with,
     extend_diag_array,
     extend_string_array,
     lowering_error_diag,
@@ -668,8 +675,15 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
     };
 }
 
-// Untyped spawn: `spawn <operand>`. Uses the generic `spawn_task` adapter
-// (i8* → i8*). Extracted sibling of `lower_expression`.
+// Untyped spawn: `spawn <operand>`. After the `spawn:<kind> <operand>`
+// dispatch peels off every lambda/typed-return spawn (§2.1 design gate,
+// SFN-1006), this arm sees only a bare `spawn <call>` — a call to a
+// zero-argument named function whose kind was never stamped onto the AST.
+// Recognises exactly that shape from the function table (the same table
+// `emission_async.sfn:98` already resolves `async fn` spawns from) and emits
+// the three-instruction bitcast/call/bitcast sequence directly; everything
+// else fails closed with `E1010` rather than evaluating the callee
+// synchronously and casting its return value into a task pointer.
 fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
     let diags: LoweringDiagnostic[] = [];
@@ -679,46 +693,77 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
     let mut spawn2_diag: string[] = diagnostics;
     let mut spawn2_diags = diags;
     let empty_spawn2_constants: StringConstant[] = [];
-    if spawn_op_text.length > 0 {
-        let lowered2 = lower_expression(spawn_op_text, bindings, locals, spawn2_temp, spawn2_lines, functions, context, "");
-        spawn2_diag = extend_string_array(spawn2_diag, lowered2.diagnostics);
-        spawn2_lines = lowered2.lines;
-        spawn2_temp = lowered2.temp_index;
-        if lowered2.operand != null {
-            let op2 = lowered2.operand;
-            let mut task_ptr: string = op2.value;
-            if op2.llvm_type != "i8*" {
-                let cast2_t = format_temp_name(spawn2_temp);
-                spawn2_temp += 1;
-                spawn2_lines.push("  " + cast2_t + " = bitcast " + op2.llvm_type
-                    + " "
-                    + op2.value
-                    + " to i8*");
-                task_ptr = cast2_t;
+
+    let mut callee_name: string = "";
+    if ends_with(spawn_op_text, ")") {
+        let paren = index_of(spawn_op_text, "(");
+        if paren > 0 {
+            let inner = trim_text(substring(spawn_op_text, paren + 1, spawn_op_text.length - 1));
+            if inner.length == 0 {
+                let name_candidate = trim_text(substring(spawn_op_text, 0, paren));
+                if is_simple_identifier(name_candidate) {
+                    callee_name = name_candidate;
+                }
             }
-            let spawn2_result = format_temp_name(spawn2_temp);
-            spawn2_temp += 1;
-            spawn2_lines.push("  " + spawn2_result
-                + " = call i8* @sfn_spawn_task(i8* "
-                + task_ptr
-                + ")");
-            let spawn2_operand = LLVMOperand {
-                llvm_type: "i8*",
-                value: spawn2_result
-            };
-            return ExpressionResult {
-                lines: spawn2_lines,
-                temp_index: spawn2_temp,
-                operand: spawn2_operand,
-                diagnostics: spawn2_diag,
-                string_constants: empty_spawn2_constants,
-                diags: spawn2_diags
-            };
         }
     }
-    let message = "spawn: could not lower operand for `" + stripped + "`";
-    spawn2_diags.push(lowering_warning_diag("E1006", message, null));
-    spawn2_diag.push("llvm lowering: " + message);
+
+    if callee_name.length > 0 {
+        // Shadow guard: a same-named local/parameter means the source call
+        // was a closure call, not a direct named-function call. Taking the
+        // top-level function's address here would silently spawn the wrong
+        // code — fail closed instead.
+        if find_local_binding(locals, callee_name) == null {
+            if find_parameter_binding(bindings, callee_name) == null {
+                let callee = find_function_by_name_or_import(functions, callee_name);
+                if callee != null {
+                    let fn_ptr_type = map_return_type(context, callee.return_type)
+                        + " ()*";
+                    let spawn_symbol = spawn_symbol_for_return_type(callee.return_type);
+                    let future_type = future_pointer_type_for_return_type(callee.return_type);
+                    let fn_cast_t = format_temp_name(spawn2_temp);
+                    spawn2_temp += 1;
+                    spawn2_lines.push("  " + fn_cast_t + " = bitcast "
+                        + fn_ptr_type
+                        + " @"
+                        + callee.name
+                        + " to i8*");
+                    let spawn_raw_t = format_temp_name(spawn2_temp);
+                    spawn2_temp += 1;
+                    spawn2_lines.push("  " + spawn_raw_t + " = call i8* @"
+                        + spawn_symbol
+                        + "(i8* "
+                        + fn_cast_t
+                        + ")");
+                    let spawn_result_t = format_temp_name(spawn2_temp);
+                    spawn2_temp += 1;
+                    spawn2_lines.push("  " + spawn_result_t + " = bitcast i8* "
+                        + spawn_raw_t
+                        + " to "
+                        + future_type);
+                    let spawn2_operand = LLVMOperand {
+                        llvm_type: future_type,
+                        value: spawn_result_t
+                    };
+                    return ExpressionResult {
+                        lines: spawn2_lines,
+                        temp_index: spawn2_temp,
+                        operand: spawn2_operand,
+                        diagnostics: spawn2_diag,
+                        string_constants: empty_spawn2_constants,
+                        diags: spawn2_diags
+                    };
+                }
+            }
+        }
+    }
+
+    let message = "spawn: `" + spawn_op_text
+        + "` is not a spawnable target — only a call to a zero-argument "
+        + "named function or an inline `fn` literal can be spawned "
+        + "(see E0842)";
+    spawn2_diags.push(lowering_error_diag("E1010", message, null));
+    spawn2_diag.push("llvm lowering [fatal]: " + message);
     return ExpressionResult {
         lines: spawn2_lines,
         temp_index: spawn2_temp,
@@ -941,6 +986,28 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
                                     + " to i64");
                                 par_fn_addrs.push(fn_addr_t);
                                 par_ctx_addrs.push(env_addr_t);
+                            } else if starts_with(task_op.llvm_type, "%SailfinFuture") {
+                                // SFN-1006 §7.5: a `spawn` handle is a
+                                // future pointer, already enqueued — it is
+                                // not a `parallel` task. Without this guard
+                                // the fix below would let a `%SailfinFuture*`
+                                // reach the `ptrtoint` below and produce
+                                // type-legal but garbage IR (a silent
+                                // miscompile) instead of today's loud ICE.
+                                let par_message = "parallel: a `spawn` handle is not a "
+                                    + "`parallel` task — pass the task directly: "
+                                    + "`parallel [fn() -> T { ... }]`";
+                                par_diags.push(lowering_error_diag("E1010", par_message, null));
+                                par_diag.push("llvm lowering [fatal]: "
+                                    + par_message);
+                                return ExpressionResult {
+                                    lines: par_lines,
+                                    temp_index: par_temp,
+                                    operand: null,
+                                    diagnostics: par_diag,
+                                    string_constants: empty_par_constants,
+                                    diags: par_diags
+                                };
                             } else {
                                 // Bare reference: zero-argument worker.
                                 let mut fn_ptr_i8: string = task_op.value;

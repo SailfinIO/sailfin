@@ -54,7 +54,7 @@ import {
 } from "./call_signature";
 import {
     channel_send_diagnostics,
-    check_spawn_expression,
+    check_spawn_target,
     push_spawn_handle_diagnostics
 } from "./concurrency_rules";
 import {
@@ -423,17 +423,16 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         return walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
     }
     // Concurrency nodes (issue #1082). Recurse into operands so inner
-    // diagnostics still fire. The only statically-sound live rule is E0813:
-    // a `spawn` of a lambda literal with no declared return type cannot be
-    // assigned a future kind. Spawn of a named-fn call / arbitrary
-    // expression, await-on-non-future (E0814), and channel send-mismatch
-    // (E0815) all need expression-type inference (#829, out of scope) and
-    // ship as helpers exercised by `concurrency_typecheck_test.sfn`.
+    // diagnostics still fire. `check_spawn_target` (SFN-1006, E0842) needs
+    // only the callee's declared return type / known-ness, which the
+    // resolver already has, so it runs unconditionally rather than only on a
+    // `Lambda` operand. Await-on-non-future (E0814) and channel
+    // send-mismatch (E0815) still need expression-type inference (#829,
+    // out of scope) and ship as helpers exercised by
+    // `concurrency_typecheck_test.sfn`.
     if expression.variant == "Spawn" {
         let mut diagnostics = walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
-        if expression.operand.variant == "Lambda" {
-            diagnostics = diagnostics.concat(check_spawn_expression(expression));
-        }
+        diagnostics = diagnostics.concat(check_spawn_target(expression, ctx));
         return diagnostics;
     }
     if expression.variant == "Await" {

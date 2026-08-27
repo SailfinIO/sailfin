@@ -1,0 +1,125 @@
+// End-to-end coverage for SFN-1006: `spawn <named zero-arg fn>()` lowering.
+//
+// Before this fix, `lower_spawn_expression` lowered the untyped `spawn`
+// operand as a generic expression, which for a named call evaluated the
+// callee SYNCHRONOUSLY and cast its RETURN VALUE into a task pointer —
+// `sfn check` was green but `sfn build` ICE'd with an invalid `i64` to
+// `ptr` cast. The design gate: `docs/proposals/design-notes/sfn-1006-named-fn-spawn-lowering.md`.
+//
+// no-bash-e2e (`.claude/rules/no-bash-e2e.md`): fixtures are written to a
+// scratch dir and driven through `sfn build` / `sfn check` subprocesses,
+// modeled on `compiler/tests/e2e/task_join_all_test.sfn`.
+import { find } from "sfn/strings";
+import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
+
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key (SFN-1114).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = default_scratch_dir(); }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-spawn-named-fn-");
+}
+
+fn _write_fixture(tag: string, src: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/" + tag + ".sfn";
+    fs.writeFile(path, src);
+    return path;
+}
+
+struct BuildRun {
+    exit: int;
+    output: string;
+}
+
+// Build `src` to a binary and run it; return the run's exit code + stdout.
+fn _build_and_run(tag: string, src: string) -> BuildRun ![io] {
+    let path = _write_fixture(tag, src);
+    let dir = _scratch_dir();
+    let bin = dir + "/" + tag + ".bin";
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, path], _child_env());
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    if build_exit != 0 {
+        return BuildRun { exit: build_exit, output: build_out + build_err };
+    }
+    let run_exit = process.run_capture([bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    return BuildRun { exit: run_exit, output: run_out + run_err };
+}
+
+fn _check_output(tag: string, src: string) -> BuildRun ![io] {
+    let path = _write_fixture(tag, src);
+    let check_exit = process.run_capture([sfn_bin_path(), "check", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return BuildRun { exit: check_exit, output: out + err };
+}
+
+// ---- crux: the issue's own six-line repro must build and run.
+test "spawn named fn: array-literal handle runs and awaits" ![io] {
+    let src = "fn worker() -> int { return 7; }\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let hs: Task<int>[] = [spawn worker()];\n"
+        + "    let v: int = await hs[0];\n"
+        + "    print.info(\"v=\" + number_to_string(v));\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("array-literal", src);
+    assert result.exit == 0;
+    assert find(result.output, "v=7", 0) >= 0;
+}
+
+test "spawn named fn: pushed handle runs and awaits" ![io] {
+    let src = "fn worker() -> int { return 7; }\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let mut hs: Task<int>[] = [];\n"
+        + "    hs.push(spawn worker());\n"
+        + "    let v: int = await hs[0];\n"
+        + "    print.info(\"v=\" + number_to_string(v));\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("pushed", src);
+    assert result.exit == 0;
+    assert find(result.output, "v=7", 0) >= 0;
+}
+
+test "spawn named fn: void target spawns" ![io] {
+    let src = "fn tick() -> void { }\n" + "fn main() -> int ![io] {\n"
+        + "    let h: Task<void> = spawn tick();\n"
+        + "    print.info(\"TICK_OK\");\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("void-target", src);
+    assert result.exit == 0;
+    assert find(result.output, "TICK_OK", 0) >= 0;
+}
+
+// ---- E0842: argument-carrying and method-call targets are rejected at check.
+test "spawn named fn: arguments are rejected at check" ![io] {
+    let src = "fn worker(a: int) -> int { return a; }\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let hs: Task<int>[] = [spawn worker(1)];\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _check_output("with-args", src);
+    assert result.exit != 0;
+    assert find(result.output, "E0842", 0) >= 0;
+}
+
+test "spawn named fn: method-call target is rejected at check" ![io] {
+    let src = "struct Worker { }\n" + "fn main() -> int ![io] {\n"
+        + "    let obj = Worker { };\n"
+        + "    routine { spawn obj.work(); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _check_output("method-target", src);
+    assert result.exit != 0;
+    assert find(result.output, "E0842", 0) >= 0;
+}
