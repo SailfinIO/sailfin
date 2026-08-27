@@ -119,6 +119,14 @@ prelude-entry = "prelude.sfn"
 # order (and therefore compose with demand-driven source gates); additions
 # are deterministic manifest-order tails. These target tables are the sole
 # source of runtime target conditioning; a missing table fails the build.
+[targets.aarch64-unknown-linux-gnu]
+sfn-sources-replace = []
+sfn-sources-add = []
+sfn-sources-drop = []
+ll-sources-add = []
+link-libs-drop = []
+link-libs-add = []
+
 [targets.x86_64-apple-darwin]
 sfn-sources-replace = [
     "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_macos.sfn",

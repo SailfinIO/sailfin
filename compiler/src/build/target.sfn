@@ -14,15 +14,15 @@
 // with the target this resolves.
 // Values are uname-style: "Linux" | "Darwin" | "Windows".
 //
-// Zero-behaviour contract (#1112): every non-Windows target returns an
-// identity/empty result here, so the assembled clang argv and link inputs
-// on Linux and macOS are byte-identical to the pre-target-conditioning
-// driver. `-target` is only ever added when its triple is non-empty
-// (Windows only today), `-lm`/`-lpthread` are only ever dropped for a
-// Windows target, and the runtime module set is only ever rewritten for a
-// Windows target.
+// Zero-behaviour contract (#1112): every host-native non-Windows target
+// returns an identity/empty result here, so the assembled clang argv and
+// link inputs on Linux and macOS are byte-identical to the
+// pre-target-conditioning driver. `-target` is added for Windows and for a
+// non-Windows cross target, while a host-native triple remains empty;
+// `-lm`/`-lpthread` are only ever dropped for a Windows target, and the
+// runtime module set is only ever rewritten for a Windows target.
 import { _get_env_cmd } from "../build_flags";
-import { ends_with } from "../string_utils";
+import { ends_with, index_of } from "../string_utils";
 // SFN-774 / SFEP-0068 §3.2: the `--target` process cell. `build_target_triple`
 // below checks it FIRST, ahead of the env-var/host-probe fallbacks, so an
 // explicit flag always wins for the running invocation.
@@ -228,33 +228,52 @@ fn triple_artifact_tags() -> string[] {
     return ["linux-x86_64", "linux-aarch64", "darwin-x86_64", "darwin-arm64", "windows-msvc", "windows-gnu", "other"];
 }
 
-// Map a `build_host_os()`-shaped OS string to its default triple in the
-// closed set, assuming the x86_64 architecture — except on a Linux host,
-// which additionally probes for aarch64 the same non-shelling way
-// `build/llvm_provider_context.sfn:_resolve_llvm_target_arch` does, so a
-// build with no explicit target on an aarch64 Linux box still resolves its
-// own host triple rather than x86_64's. Shared by the `SAILFIN_TARGET_OS`
-// legacy alias and the final host-probe fallback in `build_target_triple`
-// below, so both spell a Linux/Darwin/Windows OS string the same triple.
-// The three `SAILFIN_TARGET_ARCH` probes (here, `_resolve_llvm_target_arch`
-// in `./llvm_provider_context.sfn`, and `resolve_direct_ld_lld` in
-// `./direct_link.sfn`) must agree on the override precedence and the
-// non-shelling aarch64 fallback probe (SFN-774) — a mismatch would let two
-// of the three resolve one arch while the third resolves another for the
-// identical process environment.
+// Resolve Linux's native host architecture from process evidence. `/proc/self/maps`
+// names the loader mapped into THIS process, unlike filesystem existence: an
+// x86_64 cross host legitimately installs `/lib/ld-linux-aarch64.so.1` as part
+// of its target sysroot (SFN-1117). The loader-existence fallback is used only
+// when maps is unavailable and chooses aarch64 only when the x86_64 loader is
+// absent, so a foreign sysroot cannot relabel the host.
+fn _linux_host_arch_from_evidence(maps: string, aarch64_loader: boolean, x86_64_loader: boolean) -> string {
+    if index_of(maps, "/ld-linux-aarch64.so.1") >= 0 { return "aarch64"; }
+    if index_of(maps, "/ld-linux-x86-64.so.2") >= 0 { return "x86_64"; }
+    if aarch64_loader && !x86_64_loader { return "aarch64"; }
+    return "x86_64";
+}
+
+fn _linux_host_arch() -> string ![io] {
+    let mut maps: string = "";
+    if fs.exists("/proc/self/maps") {
+        maps = fs.readFile("/proc/self/maps");
+    }
+    let x86_64_loader = fs.exists("/lib64/ld-linux-x86-64.so.2") || fs.exists("/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2");
+    return _linux_host_arch_from_evidence(maps, fs.exists("/lib/ld-linux-aarch64.so.1"), x86_64_loader);
+}
+
+// Map a `build_host_os()`-shaped OS string to the native host triple in the
+// closed set. This resolver deliberately ignores `SAILFIN_TARGET_ARCH`: target
+// emulation must never change the baseline used to decide whether clang needs
+// an explicit `-target`.
 fn _host_default_triple(os: string) -> string ![io] {
     if os == "Windows" { return "x86_64-pc-windows-msvc"; }
     // Known limitation: hardcodes the x86_64 Darwin triple, so an Apple
     // Silicon host mislabels its own tag. Not fixed here (SFN-774, Slice
     // A1) — Darwin arm64 host detection is out of scope for this slice.
     if os == "Darwin" { return "x86_64-apple-darwin"; }
-    let mut arch = _get_env_cmd("SAILFIN_TARGET_ARCH");
-    if arch.length == 0 {
-        arch = "x86_64";
-        if fs.exists("/lib/ld-linux-aarch64.so.1") { arch = "aarch64"; }
-    }
+    let arch = _linux_host_arch();
     if arch == "aarch64" { return "aarch64-unknown-linux-gnu"; }
     return "x86_64-unknown-linux-gnu";
+}
+
+// Legacy default-target resolver. `SAILFIN_TARGET_ARCH` remains a supported
+// target override for the qemu bootstrap script, but is kept out of the actual
+// host baseline above so an explicit `--target` cross build cannot collapse
+// into the native no-flag path.
+fn _target_default_triple(os: string) -> string ![io] {
+    let arch = _get_env_cmd("SAILFIN_TARGET_ARCH");
+    if os == "Linux" && arch == "aarch64" { return "aarch64-unknown-linux-gnu"; }
+    if os == "Linux" && arch == "x86_64" { return "x86_64-unknown-linux-gnu"; }
+    return _host_default_triple(os);
 }
 
 // The triple this host builds for absent a `--target` flag. Distinct from
@@ -265,15 +284,8 @@ fn _host_default_triple(os: string) -> string ![io] {
 // equivalent, because a Windows host cross-building the mingw ABI resolves
 // the same OS on both sides (SFN-1108).
 //
-// Two limitations inherited from `_host_default_triple` above, both of which
-// move this answer:
-//
-//   - `SAILFIN_TARGET_ARCH` is read here despite being a TARGET override, so
-//     it shifts the host baseline too. That keeps host and target in step for
-//     the aarch64 cross-emit leg (which passes no `--target`), but it means a
-//     genuine `--target` cross on a leg that sets it would read as a host
-//     build.
-//   - Darwin is hardcoded to `x86_64-apple-darwin` (SFN-774, Slice A1), so an
+// One limitation inherited from `_host_default_triple` above moves this
+// answer: Darwin is hardcoded to `x86_64-apple-darwin` (SFN-774, Slice A1), so an
 //     Apple Silicon host misreports itself: `--target=arm64-apple-darwin`
 //     there classifies as cross and `--target=x86_64-apple-darwin` as host —
 //     each the inverse of the truth. No in-tree invocation passes `--target`
@@ -298,8 +310,8 @@ fn build_target_triple() -> string ![io] {
     let triple_override = _get_env_cmd("SAILFIN_TARGET_TRIPLE");
     if triple_override.length > 0 { return triple_override; }
     let os_override = _get_env_cmd("SAILFIN_TARGET_OS");
-    if os_override.length > 0 { return _host_default_triple(os_override); }
-    return _host_default_triple(build_host_os());
+    if os_override.length > 0 { return _target_default_triple(os_override); }
+    return _target_default_triple(build_host_os());
 }
 
 // Appends `.exe` to a COMPILER-DERIVED executable name when `target_os` is
@@ -336,29 +348,22 @@ fn host_exe_name(name: string) -> string ![io] {
 }
 
 // The clang `-target` triple to pass for `triple`, or "" to use clang's
-// host default. Only the two Windows triples diverge: `x86_64-pc-windows-
-// msvc` and `x86_64-w64-mingw32` are each returned verbatim (linking
-// `lld-link`+UCRT and mingw-w64+MinGW CRT respectively); every other
-// target keeps the host default so no `-target` flag is added at all.
-//
-// Deliberate scope limit (SFN-774, Slice A1): a non-Windows CROSS triple
-// (e.g. an aarch64-linux-gnu build run on an x86_64-linux-gnu host) still
-// resolves "" here — `triple_target_os`/`triple_abi` decompose the triple,
-// but this function only branches on "is this triple Windows", so a
-// non-Windows cross build gets no `-target` flag and silently compiles for
-// the HOST arch/OS instead of the requested one. Wiring an actual
-// non-Windows `-target` is a follow-up (SFN-775 / a later SFEP-0068
-// slice), not part of promoting the axis itself.
-fn target_clang_triple(triple: string) -> string {
+// host default. Windows keeps its established explicit triple on every host;
+// a non-Windows target passes its triple only when it differs from the host.
+// The explicit host comparison preserves #1112's byte-identical native Linux
+// and Darwin argv while making an architecture-axis cross build fail closed
+// onto the requested clang backend instead of silently emitting host objects.
+fn target_clang_triple(triple: string, host_triple: string) -> string {
     if triple_target_os(triple) == "Windows" { return triple; }
+    if triple_is_supported(triple) && triple != host_triple { return triple; }
     return "";
 }
 
 // The `-target <triple>` clang flag pair for `triple`, or [] when the host
-// default is used (non-Windows). Pure — callers resolve `triple` via
-// `build_target_triple()` in an `![io]` context and pass it in.
-fn target_clang_flags(triple: string) -> string[] {
-    let clang_triple = target_clang_triple(triple);
+// default is used. Pure — callers resolve both target and host triples in an
+// `![io]` context and pass them in.
+fn target_clang_flags(triple: string, host_triple: string) -> string[] {
+    let clang_triple = target_clang_triple(triple, host_triple);
     if clang_triple.length == 0 { return []; }
     // MinGW's CRT requires emulated TLS for LLVM's thread-local globals;
     // this was previously buried in the Makefile cross recipe. Keeping it
@@ -385,9 +390,9 @@ fn target_linker_driver(triple: string) -> string {
 // them; Linux resolves the same symbols via the `-lgcc` tail in
 // `direct_link.sfn` and macOS via Apple clang's default, so neither needs
 // this flag.
-fn target_linker_driver_flags(triple: string) -> string[] {
+fn target_linker_driver_flags(triple: string, host_triple: string) -> string[] {
     if triple == "x86_64-w64-mingw32" { return ["-static"]; }
-    let mut flags = target_clang_flags(triple);
+    let mut flags = target_clang_flags(triple, host_triple);
     if triple_abi(triple) == "msvc" { flags.push("--rtlib=compiler-rt"); }
     return flags;
 }
@@ -528,6 +533,7 @@ export {
     build_target_os,
     build_target_triple,
     host_target_triple,
+    _linux_host_arch_from_evidence,
     target_os_is_windows,
     target_exe_name,
     host_exe_name,

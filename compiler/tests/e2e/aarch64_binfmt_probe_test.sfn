@@ -96,8 +96,10 @@ test "aarch64 bootstrap: self-host passes do not fetch a native seed" ![io] {
     assert contains(source, "SAILFIN_BOOTSTRAP=off SAILFIN_TARGET_ARCH=aarch64 \\\n\t\t\"$WORK_DIR/pass-1/sfn\" build");
 
     let workflow = fs.readFile(".github/workflows/ci.yml");
-    assert contains(workflow, "PATH=\"$PWD/build/aarch64-cross/bin:$PATH\" SAILFIN_BOOTSTRAP=off");
-    assert contains(workflow, "SAILFIN_BOOTSTRAP=off \\\n            SAILFIN_LINKER=lld");
+    assert contains(workflow, "build/bin/sfn build --target=aarch64-unknown-linux-gnu");
+    assert ! contains(workflow, "cat >build/aarch64-cross/bin/clang");
+    assert ! contains(workflow, "cat >build/aarch64-bootstrap/bin/clang");
+    assert ! contains(workflow, "readelf -h build/aarch64-cross/pass-1/sfn");
 }
 
 test "aarch64 binfmt: enabled x86_64 entry is detected alongside an unreadable register node" ![io] {

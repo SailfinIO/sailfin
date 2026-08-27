@@ -57,6 +57,7 @@ import { runtime_demanded_dep_specs } from "./runtime_selection";
 import {
     build_target_os,
     build_target_triple,
+    host_target_triple,
     target_artifact_tag,
     target_os_is_windows,
     triple_artifact_tags
@@ -299,7 +300,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             let src = cap.c_sources[ci];
             let base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
             let obj = _path_join(out_dir, base + ".o");
-            let key = _runtime_obj_key_with_target(runtime_object_cache_key(src, opt_flag), target_triple);
+            let key = _runtime_obj_key_for_build(runtime_object_cache_key(src, opt_flag), target_triple);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
@@ -346,7 +347,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             let src = cap.ll_sources[li];
             let base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
             let obj = _path_join(out_dir, base + ".o");
-            let key = _runtime_obj_key_with_target(runtime_object_cache_key(src, opt_flag), target_triple);
+            let key = _runtime_obj_key_for_build(runtime_object_cache_key(src, opt_flag), target_triple);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
@@ -569,7 +570,7 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
             // fast path compares against this hash, so any divergence
             // between the two compositions silently demotes every stamped
             // lookup to a full derivation.
-            let obj_key = _runtime_obj_key_with_target(_runtime_obj_key_with_slug(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), slug), target_triple);
+            let obj_key = _runtime_obj_key_for_build(_runtime_obj_key_with_slug(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), slug), target_triple);
             if obj_key.length > 0 {
                 text = text + "obj/" + obj_base + "=" + sha256_hex_of_string(obj_key)
                     + "\n";
@@ -713,41 +714,32 @@ fn _runtime_obj_key_with_slug(base_key: string, slug: string) -> string {
 // space-joined behind it, which made `"Windows"` and the literal `"Windows
 // -target x86_64-pc-windows-msvc"` produce the same key while compiling to
 // different objects — the very cross-target reuse this exists to stop.
-// Those flags never added anything beyond what the triple itself already
-// determines: `target_clang_flags` is a total function of the triple, so
-// appending `f(x)` after `x` cannot separate tuples that `x` does not.
-// Every caller composes this fold OUTERMOST, which is what keeps
-// `target_triple` last; keep it that way. Should a target-derived input
-// ever depend on something NOT derived from the triple, that input must
-// be folded in on its own.
-// SFN-923: this marker deliberately did NOT bump alongside
-// `build_cache.sfn:cache_key_for`'s `tgt2:` -> `tgt3:` move. That module
-// key needed the bump because a Windows-keyed entry could hold IR a
-// HOST-flavoured emit child actually produced (`emit_child_argv` did not
-// exist yet, so the per-module emit subprocess silently ignored the
-// parent's resolved target). This runtime-object key is not exposed to
-// that failure mode the same way: every runtime `.sfn` emit child already
-// received the target via `SAILFIN_TARGET_TRIPLE` injection
-// (`_runtime_emit_child_env`, `:818-836`), so a pre-SFN-923 runtime object
-// keyed under `tgt2:` was genuinely built for the triple its key records —
-// UNLIKE the module-emit poisoning this fix closes. Reachability of a
-// mismatch here is additionally low for a non-Windows-msvc target:
-// `target_clang_triple` (`./target.sfn`) returns `""` for every non-Windows
-// triple, so the pre-fix aarch64-cross-Linux arch defect (§2.2/§5 row 11)
-// baked the WRONG arch into a runtime object while still keying it under a
-// correct-LOOKING triple string — a real but narrower gap than the module
-// key's. A marker bump here WOULD close it: a bump orphans every pre-bump
-// entry by changing the hashed input, so the stale entries become
-// unreachable regardless of what their triple field reads (the same
-// orphan-never-mismatch property `build_cache.sfn:cache_key_for` relies
-// on). It is left unbumped on reachability grounds alone: because
-// `target_clang_triple` returns `""` for every non-Windows triple, the
-// aarch64 and Darwin cross paths were never wired, so the poisoned
-// entries are near-unreachable and a second orphan sweep would cost more
-// than the residual it clears.
+// SFN-1117 made `target_clang_flags` depend on the host triple as well as the
+// target so a host-native build stays flag-free while a cross build passes
+// `-target`. `_runtime_obj_key_for_build` therefore folds `host_target_triple`
+// immediately inside this outer target fold. The raw target remains last,
+// preserving the absorption guard above.
+// SFN-1117: marker bumped `tgt2:` -> `tgt3:` when non-Windows cross-target
+// clang flags became live. Before that change, an aarch64-targeted runtime
+// object assembled on x86_64 used clang's host default while its key still
+// recorded `aarch64-unknown-linux-gnu`. Orphaning those falsely labelled
+// entries is mandatory now that the cross path is reachable from the native
+// driver; otherwise the first corrected build could reuse an x86_64 object.
 fn _runtime_obj_key_with_target(base_key: string, target_triple: string) -> string {
     if base_key.length == 0 { return ""; }
-    return base_key + "\ntgt2:" + target_triple;
+    return base_key + "\ntgt3:" + target_triple;
+}
+
+// Fold the host baseline that selects whether non-Windows clang receives an
+// explicit `-target`. It sits inside the target fold so the raw, potentially
+// unvalidated target triple remains the final key component.
+fn _runtime_obj_key_with_host(base_key: string, host_triple: string) -> string {
+    if base_key.length == 0 { return ""; }
+    return base_key + "\nhost1:" + host_triple;
+}
+
+fn _runtime_obj_key_for_build(base_key: string, target_triple: string) -> string ![io] {
+    return _runtime_obj_key_with_target(_runtime_obj_key_with_host(base_key, host_target_triple()), target_triple);
 }
 
 // SFN-861 review follow-up: fold the module SLUG into the `sfn-asm`
@@ -891,7 +883,7 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     // ordering `write_runtime_identity_stamp` uses for its stamped entry.
     // SFN-870: the slug fold sits between them, in that same shared
     // ordering — the stamp writer must compose these identically.
-    let key = _runtime_obj_key_with_target(_runtime_obj_key_with_slug(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), slug), target_triple);
+    let key = _runtime_obj_key_for_build(_runtime_obj_key_with_slug(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), slug), target_triple);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
     let shared_suffix = stem;
     if _runtime_obj_cache_hit(obj_path, key) {
@@ -2047,7 +2039,9 @@ export {
     runtime_stamp_identity,
     write_runtime_identity_stamp,
     _runtime_bundle_exists,
+    _runtime_obj_key_for_build,
     _runtime_obj_stem,
+    _runtime_obj_key_with_host,
     _runtime_obj_key_with_target,
     _runtime_obj_key_with_slug,
     _prepare_runtime_sfn_object,

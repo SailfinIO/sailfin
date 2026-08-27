@@ -4,9 +4,9 @@ title: Native Cross-Target Builds (`sfn build --target=<triple>`)
 status: Accepted
 type: tooling
 created: 2026-08-08
-updated: 2026-08-22
+updated: 2026-08-26
 author: "agent:compiler-architect; human review"
-tracking: SFN-774, SFN-775, SFN-776, SFN-777, SFN-1039
+tracking: SFN-774, SFN-775, SFN-776, SFN-777, SFN-1039, SFN-1117
 supersedes:
 superseded-by:
 graduates-to:
@@ -130,10 +130,10 @@ The ABI component keys the link decisions that diverge:
 | link libs | drop POSIX-only libs; add native Windows libs | keep `-lm -lpthread`; add `-lbcrypt -lcrypt32 -lws2_32` |
 | TLS | native | `-femulated-tls` |
 
-**Zero-behaviour contract preserved (#1112).** Every non-Windows triple keeps
-returning an identity/empty result, so Linux and macOS argv and link inputs
-stay byte-identical. `target_clang_flags` still returns `[]` for host-default
-triples.
+**Zero-behaviour contract preserved (#1112).** A non-Windows triple equal to
+the native host triple keeps returning an identity/empty result, so host-native
+Linux and macOS argv and link inputs stay byte-identical. A non-Windows cross
+triple is returned verbatim and reaches clang as `-target <triple>`.
 
 ### 3.2 Where the resolved target lives: a set-once process cell
 
@@ -264,6 +264,10 @@ directly**. Required, in the same change as the triple axis:
 
 - `cache_key_for`'s last component becomes the **triple**, not the OS.
 - `_runtime_obj_key_with_target` (`build/runtime_objs.sfn`) likewise.
+- Runtime-object identity also folds the native host triple immediately before
+  the raw target triple. The target-vs-host comparison decides whether clang's
+  argv contains `-target`; two invocations with the same target but different
+  host baselines therefore cannot share an object-cache entry.
 - `target_artifact_tag` returns `windows-msvc` / `windows-gnu`, so the two
   ABIs get distinct on-disk artifact paths instead of overwriting each other.
 - Linked-test runtime identity hashes the same effective target-conditioned
@@ -339,6 +343,22 @@ through `llvm_provider_context.sfn`.
 introduced with identity behaviour for the host triple, so the host self-host
 path is byte-identical before the Makefile target is deleted.
 
+### 5.1 Implementation status after SFN-1117
+
+The non-Windows architecture-axis leg is now implemented for
+`aarch64-unknown-linux-gnu`: an x86_64 Linux host passes the target to clang,
+the runtime manifest declares the triple, and the Tier-2 CI path uses the
+driver directly instead of a PATH-shadow wrapper. The installed cross sysroot
+remains an explicit CI/toolchain prerequisite; the existing direct `ld.lld`
+resolver owns its CRT and library discovery, so neither the linker nor the
+sysroot becomes a target-table property.
+
+SFEP-0068 and its registry row remain **Accepted**, not `Implemented`.
+SFN-777 has since retired the seed-visible hardcoded Windows runtime fallback,
+so that gate is closed, but graduation is a separate owner-approved step: it
+needs the Stage1 readiness sweep run against the whole `--target` surface, not
+just the aarch64 slice this issue adds.
+
 ## 6. Alternatives considered
 
 **Wait for SFN-57 (native MSVC seed) and delete the cross path outright.** The
@@ -384,8 +404,9 @@ to survive in whatever replaces the Makefile.
 
 **Extend (unit):**
 - `compiler/tests/unit/target_conditioning_test.sfn` — triple → (OS, ABI)
-  decomposition; identity for every non-Windows triple; shared Windows
-  replacements plus ABI-specific pthread and link results.
+  decomposition; identity for host-native non-Windows triples; explicit clang
+  targets for non-Windows cross triples; shared Windows replacements plus
+  ABI-specific pthread and link results.
 - `compiler/tests/unit/runtime_obj_target_identity_test.sfn` — the two Windows
   triples must produce **different** runtime-object keys.
 
