@@ -1,0 +1,420 @@
+// compiler/src/toolchain/manifest.sfn
+//
+// Install-manifest schema, writer, and forward-compatible reader
+// (SFEP-0073 §3.8, SFN-1064). Pure parsing/rendering lives here so the
+// grammar is unit-testable with no filesystem; hashing and directory
+// walking are `integrity.sfn`.
+import { archive_check_member_path } from "sfn/archive";
+import { ascii_lowercase, int_to_string } from "sfn/strings";
+
+import { _toml_trim_cmd } from "../build/fs";
+import { is_valid_digest } from "../build_cache";
+import {
+    char_code_at_text,
+    contains_string,
+    index_of,
+    starts_with,
+    substring
+} from "../string_utils";
+
+let TOOLCHAIN_MANIFEST_MAGIC: string = "sailfin-install-manifest";
+let TOOLCHAIN_MANIFEST_SCHEMA: int = 1;  // what this build writes
+let TOOLCHAIN_MANIFEST_MAX_SCHEMA: int = 1;  // highest this build can read
+// SFEP-0073 §3.5's routing-compatibility integer (command/index/trust
+// implementation compatibility), deliberately separate from
+// `TOOLCHAIN_MANIFEST_SCHEMA` (this file's own grammar version). SFN-1064
+// only records the field; routing on it is SFN-1067.
+let TOOLCHAIN_MANAGEMENT_PROTOCOL: int = 1;
+
+// Reader outcome statuses.
+let TOOLCHAIN_MANIFEST_OK: int = 0;
+let TOOLCHAIN_MANIFEST_ABSENT: int = 1;  // no file — legacy/unverified boundary, NOT an error
+let TOOLCHAIN_MANIFEST_MALFORMED: int = 2;  // unreadable/invalid — fail closed
+let TOOLCHAIN_MANIFEST_TOO_NEW: int = 3;  // schema > MAX_SCHEMA — actionable, never a crash
+
+struct ToolchainManifestRecord {
+    digest: string;  // 64 lowercase hex
+    path: string;  // store-relative, forward slashes
+}
+
+struct ToolchainManifestMeta {
+    schema: int;
+    management_protocol: int;
+    version: string;
+    host: string;
+    archive_sha256: string;
+}
+
+// Reader outcome. `status` is one of TOOLCHAIN_MANIFEST_OK / _ABSENT /
+// _MALFORMED / _TOO_NEW.
+struct ToolchainManifest {
+    status: int;
+    meta: ToolchainManifestMeta;
+    records: ToolchainManifestRecord[];
+    // Populated for MALFORMED/TOO_NEW so callers print one actionable line.
+    detail: string;
+}
+
+fn toolchain_manifest_path(store_dir: string) -> string {
+    return store_dir + "/.install-manifest";
+}
+
+// Pure. `""` means acceptable; otherwise a short human-readable reason.
+// Delegates the eight SFEP-0071 §3.6 path-safety rules to
+// `archive_check_member_path` rather than reimplementing them — passing
+// `false` for `host_is_windows` so the manifest records one canonical
+// shape regardless of which host later reads it.
+fn toolchain_manifest_validate_path(rel: string) -> string {
+    if rel.length == 0 { return "path is empty"; }
+    let checked = archive_check_member_path(rel, false);
+    match checked {
+        Result.Ok { value }
+        : {
+            // `archive_check_member_path` returns the CLEANED path — `.` and
+            // empty components dropped. Accepting a spelling that differs
+            // from its own cleaned form would defeat everything keyed on the
+            // raw string: `runtime/./prelude.sfn` would evade both the
+            // case-collision key and the `runtime/` scope prefix while still
+            // naming a real file. Requiring the canonical spelling is what
+            // makes "one canonical shape" true rather than aspirational
+            // (SFN-1064).
+            if value != rel { return "path is not in canonical form"; }
+            return "";
+        },
+        Result.Err { error }
+        : {
+            return error.message;
+        }
+    }
+}
+
+// Pure. The collision key: two recorded paths differing only by ASCII
+// case would name the same file on APFS/NTFS, so they must be rejected as
+// a normalization collision.
+fn toolchain_manifest_normalize_key(rel: string) -> string {
+    return ascii_lowercase(rel);
+}
+
+fn _manifest_split_lines(text: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut start: int = 0;
+    let length = text.length;
+    let mut i: int = 0;
+    loop {
+        if i >= length { break; }
+        if char_code_at_text(text, i) == 10 {
+            lines.push(substring(text, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start <= length { lines.push(substring(text, start, length)); }
+    return lines;
+}
+
+// Strict, no partial parse: any non-digit byte, or an empty string, fails.
+// Bounded at 18 digits so a long run cannot silently wrap: overflow is
+// non-trapping here (SFN-35), and SFN-1067 will route on
+// `management_protocol`, so a wrapped value must never read as a small one.
+fn _manifest_parse_uint(s: string) -> int {
+    if s.length == 0 || s.length > 18 { return -1; }
+    let mut value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let code = char_code_at_text(s, i);
+        if code < 48 || code > 57 { return -1; }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    return value;
+}
+
+// Pure. Produces the exact `.install-manifest` text. Refuses (returns
+// `""`) on any invalid record so a bad manifest can never reach disk —
+// `toolchain_manifest_write` treats `""` as a hard failure.
+fn toolchain_manifest_render(meta: ToolchainManifestMeta, records: ToolchainManifestRecord[]) -> string {
+    // Mirrors the parser's "zero records is malformed" rule (a manifest
+    // must at minimum record the executable) so a manifest this function
+    // accepts always round-trips through `toolchain_manifest_parse`.
+    if records.length == 0 { return ""; }
+
+    let mut seen_keys: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let record = records[i];
+        if !is_valid_digest(record.digest) { return ""; }
+        if toolchain_manifest_validate_path(record.path).length > 0 {
+            return "";
+        }
+        let key = toolchain_manifest_normalize_key(record.path);
+        if contains_string(seen_keys, key) { return ""; }
+        seen_keys.push(key);
+        i += 1;
+    }
+
+    let mut out: string = TOOLCHAIN_MANIFEST_MAGIC + " " + int_to_string(TOOLCHAIN_MANIFEST_SCHEMA)
+        + "\n";
+    out = out + "management_protocol = " + int_to_string(meta.management_protocol)
+        + "\n";
+    out = out + "version = " + meta.version + "\n";
+    out = out + "host = " + meta.host + "\n";
+    out = out + "archive_sha256 = " + meta.archive_sha256 + "\n";
+    out = out + "\n";
+    let mut j: int = 0;
+    loop {
+        if j >= records.length { break; }
+        out = out + records[j].digest + "  " + records[j].path + "\n";
+        j += 1;
+    }
+    return out;
+}
+
+fn toolchain_manifest_write(store_dir: string, meta: ToolchainManifestMeta, records: ToolchainManifestRecord[]) -> boolean ![io] {
+    let text = toolchain_manifest_render(meta, records);
+    if text.length == 0 {
+        print("error: refusing to write an invalid install manifest for "
+            + store_dir);
+        return false;
+    }
+    let manifest_path = toolchain_manifest_path(store_dir);
+    fs.writeFile(manifest_path, text);
+    if !fs.exists(manifest_path) {
+        print("error: failed to write the install manifest " + manifest_path);
+        return false;
+    }
+    return true;
+}
+
+fn _manifest_empty_meta() -> ToolchainManifestMeta {
+    return ToolchainManifestMeta {
+        schema: 0,
+        management_protocol: 0,
+        version: "",
+        host: "",
+        archive_sha256: ""
+    };
+}
+
+// Pure — every parsing decision lives here so it is unit-testable with no
+// filesystem.
+fn toolchain_manifest_parse(text: string) -> ToolchainManifest {
+    let empty_meta = _manifest_empty_meta();
+    if _toml_trim_cmd(text).length == 0 {
+        return ToolchainManifest {
+            status: TOOLCHAIN_MANIFEST_MALFORMED,
+            meta: empty_meta,
+            records: [],
+            detail: "empty manifest"
+        };
+    }
+
+    let lines = _manifest_split_lines(text);
+    let magic_prefix = TOOLCHAIN_MANIFEST_MAGIC + " ";
+    if !starts_with(lines[0], magic_prefix) {
+        return ToolchainManifest {
+            status: TOOLCHAIN_MANIFEST_MALFORMED,
+            meta: empty_meta,
+            records: [],
+            detail: "bad magic"
+        };
+    }
+    let schema = _manifest_parse_uint(substring(lines[0], magic_prefix.length, lines[0].length));
+    if schema < 1 {
+        return ToolchainManifest {
+            status: TOOLCHAIN_MANIFEST_MALFORMED,
+            meta: empty_meta,
+            records: [],
+            detail: "invalid schema version"
+        };
+    }
+    if schema > TOOLCHAIN_MANIFEST_MAX_SCHEMA {
+        return ToolchainManifest {
+            status: TOOLCHAIN_MANIFEST_TOO_NEW,
+            meta: empty_meta,
+            records: [],
+            detail: "manifest schema " + int_to_string(schema)
+                + " is newer than this toolchain understands (max "
+                + int_to_string(TOOLCHAIN_MANIFEST_MAX_SCHEMA)
+                + ")"
+        };
+    }
+
+    // Unknown header keys are ignored, not errors — this is the
+    // forward-compatibility seam SFEP-0073 §3.5 requires: "the
+    // install-manifest reader is the durable compatibility seam."
+    let mut management_protocol: int = -1;
+    let mut version: string = "";
+    let mut host: string = "";
+    let mut archive_sha256: string = "";
+    let mut separator_index: int = -1;
+    let mut i: int = 1;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if line.length == 0 {
+            separator_index = i;
+            break;
+        }
+        let eq = index_of(line, " = ");
+        if eq < 0 {
+            return ToolchainManifest {
+                status: TOOLCHAIN_MANIFEST_MALFORMED,
+                meta: empty_meta,
+                records: [],
+                detail: "malformed header line: " + line
+            };
+        }
+        let key = substring(line, 0, eq);
+        let value = substring(line, eq + 3, line.length);
+        if key == "management_protocol" {
+            management_protocol = _manifest_parse_uint(value);
+        } else if key == "version" { version = value; } else if key == "host" {
+            host = value;
+        } else if key == "archive_sha256" { archive_sha256 = value; }
+        i += 1;
+    }
+    if separator_index < 0 {
+        return ToolchainManifest {
+            status: TOOLCHAIN_MANIFEST_MALFORMED,
+            meta: empty_meta,
+            records: [],
+            detail: "missing header/record separator"
+        };
+    }
+    if management_protocol < 0 {
+        return ToolchainManifest {
+            status: TOOLCHAIN_MANIFEST_MALFORMED,
+            meta: empty_meta,
+            records: [],
+            detail: "missing or invalid management_protocol"
+        };
+    }
+
+    let meta = ToolchainManifestMeta {
+        schema: schema,
+        management_protocol: management_protocol,
+        version: version,
+        host: host,
+        archive_sha256: archive_sha256
+    };
+
+    let mut records: ToolchainManifestRecord[] = [];
+    let mut seen_keys: string[] = [];
+    let mut j: int = separator_index + 1;
+    loop {
+        if j >= lines.length { break; }
+        let line = lines[j];
+        let is_last = j == lines.length - 1;
+        if line.length == 0 {
+            if is_last {
+                j += 1;
+                continue;
+            }
+            return ToolchainManifest {
+                status: TOOLCHAIN_MANIFEST_MALFORMED,
+                meta: meta,
+                records: [],
+                detail: "unexpected blank record line"
+            };
+        }
+        if line.length <= 66 || substring(line, 64, 66) != "  " {
+            return ToolchainManifest {
+                status: TOOLCHAIN_MANIFEST_MALFORMED,
+                meta: meta,
+                records: [],
+                detail: "malformed record line: " + line
+            };
+        }
+        let digest = substring(line, 0, 64);
+        if !is_valid_digest(digest) {
+            return ToolchainManifest {
+                status: TOOLCHAIN_MANIFEST_MALFORMED,
+                meta: meta,
+                records: [],
+                detail: "invalid digest: " + line
+            };
+        }
+        let path = substring(line, 66, line.length);
+        let reason = toolchain_manifest_validate_path(path);
+        if reason.length > 0 {
+            return ToolchainManifest {
+                status: TOOLCHAIN_MANIFEST_MALFORMED,
+                meta: meta,
+                records: [],
+                detail: "invalid record path " + path + ": " + reason
+            };
+        }
+        let key = toolchain_manifest_normalize_key(path);
+        if contains_string(seen_keys, key) {
+            return ToolchainManifest {
+                status: TOOLCHAIN_MANIFEST_MALFORMED,
+                meta: meta,
+                records: [],
+                detail: "duplicate record path: " + path
+            };
+        }
+        seen_keys.push(key);
+        records.push(ToolchainManifestRecord { digest: digest, path: path });
+        j += 1;
+    }
+
+    if records.length == 0 {
+        return ToolchainManifest {
+            status: TOOLCHAIN_MANIFEST_MALFORMED,
+            meta: meta,
+            records: [],
+            detail: "manifest records no files"
+        };
+    }
+    return ToolchainManifest {
+        status: TOOLCHAIN_MANIFEST_OK,
+        meta: meta,
+        records: records,
+        detail: ""
+    };
+}
+
+// ABSENT is the SFEP-0046 legacy/unverified compatibility boundary, not an
+// error: an entry installed before SFN-1064 has no manifest at all.
+fn toolchain_manifest_read(store_dir: string) -> ToolchainManifest ![io] {
+    let manifest_path = toolchain_manifest_path(store_dir);
+    if !fs.exists(manifest_path) {
+        return ToolchainManifest {
+            status: TOOLCHAIN_MANIFEST_ABSENT,
+            meta: _manifest_empty_meta(),
+            records: [],
+            detail: ""
+        };
+    }
+    return toolchain_manifest_parse(fs.readFile(manifest_path));
+}
+
+// Single source of truth for the reinstall command §3.8 requires callers
+// to print on an integrity failure.
+fn toolchain_manifest_reinstall_hint(version: string) -> string {
+    return "sfn toolchain install " + version;
+}
+
+export {
+    TOOLCHAIN_MANAGEMENT_PROTOCOL,
+    TOOLCHAIN_MANIFEST_ABSENT,
+    TOOLCHAIN_MANIFEST_MAGIC,
+    TOOLCHAIN_MANIFEST_MALFORMED,
+    TOOLCHAIN_MANIFEST_MAX_SCHEMA,
+    TOOLCHAIN_MANIFEST_OK,
+    TOOLCHAIN_MANIFEST_SCHEMA,
+    TOOLCHAIN_MANIFEST_TOO_NEW,
+    ToolchainManifest,
+    ToolchainManifestMeta,
+    ToolchainManifestRecord,
+    toolchain_manifest_normalize_key,
+    toolchain_manifest_parse,
+    toolchain_manifest_path,
+    toolchain_manifest_read,
+    toolchain_manifest_reinstall_hint,
+    toolchain_manifest_render,
+    toolchain_manifest_validate_path,
+    toolchain_manifest_write
+};

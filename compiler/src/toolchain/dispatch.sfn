@@ -4,6 +4,7 @@
 // the flat pre-SFEP-0073 store is a read-only compatibility fallback.
 import { diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 
+import { _path_basename } from "../build/paths";
 import { _env_flag } from "../build_flags";
 import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../capsule_resolver/toolchain";
 import { CliContext } from "../cli/context";
@@ -11,6 +12,11 @@ import { starts_with, strings_equal, substring } from "../string_utils";
 import { render_terminal_diagnostic } from "../terminal_output";
 import { toolchain_current_host } from "./host";
 import { toolchain_install_to_user_store, toolchain_is_valid_install_version } from "./install";
+import {
+    toolchain_print_integrity_failure,
+    toolchain_verify_bundled_inputs,
+    toolchain_verify_executable
+} from "./integrity";
 import {
     ToolchainStoreEntry,
     toolchain_resolve_compatible_store_entry,
@@ -51,9 +57,31 @@ fn _dispatch_entry(versions_base: string, version: string) -> ToolchainStoreEntr
     return toolchain_resolve_compatible_store_entry(versions_base, toolchain_current_host(), version);
 }
 
+// Every caller of `toolchain_gate_or_dispatch` is a build-like command
+// (`build`, `check`, `run`, `test`), so a `return 0` here is the last moment
+// before this process consumes its own bundled runtime and capsule sources.
+// SFEP-0073 §3.8 requires those inputs to be verified against the install
+// manifest first. A dev build or a pre-SFN-1064 entry carries no manifest and
+// reports `unverified`, which is the documented SFEP-0046 compatibility
+// boundary — it proceeds rather than failing.
+// Verifies the payload beside the running executable. In a normal launch
+// `ctx.runtime_root` derives from the same executable and so sits inside
+// `ctx.binary_dir`; an explicit `--runtime-root`/`SAILFIN_RUNTIME_ROOT`
+// can point elsewhere, in which case those sources are outside what the
+// manifest covers. That is not an escalation — setting either already
+// requires control of the invocation — but it does bound the guarantee.
+fn _proceed_in_process(ctx: CliContext) -> int ![io] {
+    let outcome = toolchain_verify_bundled_inputs(ctx.binary_dir);
+    if outcome.ok { return 0; }
+    toolchain_print_integrity_failure(ctx.binary_dir, _path_basename(ctx.binary_dir), outcome);
+    return 1;
+}
+
 fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![clock, io, net] {
     let decision: ToolchainDecision = toolchain_decide(entry_hint, ctx.binary_dir);
-    if !decision.pinned || decision.satisfied { return 0; }
+    if !decision.pinned || decision.satisfied {
+        return _proceed_in_process(ctx);
+    }
 
     let knob = env.get("SAILFIN_TOOLCHAIN");
     let knob_off = strings_equal(knob, "off") || strings_equal(knob, "0");
@@ -65,7 +93,10 @@ fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: bo
             + " [toolchain]) but the running toolchain is "
             + decision.running_str
             + "; proceeding (--skip-toolchain-check / SAILFIN_TOOLCHAIN=off)");
-        return 0;
+        // Opting out of the version pin is not opting out of payload
+        // integrity: this process still goes on to consume its own bundled
+        // sources, so §3.8's pre-consumption check still applies.
+        return _proceed_in_process(ctx);
     }
 
     let dispatched = env.get("SAILFIN_TOOLCHAIN_DISPATCHED");
@@ -125,6 +156,17 @@ fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: bo
         print.err("  " + entry.dir);
         print.err("  run 'sfn toolchain install " + target
             + "' online to install a verified host-qualified entry");
+    }
+
+    // SFEP-0073 §3.8: hash the selected executable against its install
+    // manifest before re-exec. `process.exec` replaces this image, so this is
+    // the last instruction that can refuse a modified stored binary. A legacy
+    // entry has no manifest and stays on the unverified path warned about
+    // above (SFN-1064).
+    let exe_ok = toolchain_verify_executable(entry.dir);
+    if !exe_ok.ok {
+        toolchain_print_integrity_failure(entry.dir, target, exe_ok);
+        return 1;
     }
 
     let mut exec_argv: string[] = [entry.binary];

@@ -1,0 +1,309 @@
+// Unit coverage for the install-manifest schema (`compiler/src/toolchain/manifest.sfn`,
+// SFEP-0073 §3.8, SFN-1064). `toolchain_manifest_parse` / `_render` /
+// `_validate_path` / `_normalize_key` are pure — no filesystem, no `![io]`.
+import { int_to_string } from "sfn/strings";
+
+import { index_of, substring } from "../../src/string_utils";
+import {
+    TOOLCHAIN_MANAGEMENT_PROTOCOL,
+    TOOLCHAIN_MANIFEST_MALFORMED,
+    TOOLCHAIN_MANIFEST_OK,
+    TOOLCHAIN_MANIFEST_SCHEMA,
+    TOOLCHAIN_MANIFEST_TOO_NEW,
+    ToolchainManifestMeta,
+    ToolchainManifestRecord,
+    toolchain_manifest_parse,
+    toolchain_manifest_reinstall_hint,
+    toolchain_manifest_render,
+    toolchain_manifest_validate_path
+} from "../../src/toolchain/manifest";
+
+// A 64-char lowercase-hex digest built from a repeated byte rather than
+// pasted, so a wrong-length literal fails loudly instead of silently
+// passing a shape check by coincidence.
+fn _digest(byte: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 64 { break; }
+        out = out + byte;
+        i += 1;
+    }
+    return out;
+}
+
+fn _good_magic() -> string { return "sailfin-install-manifest 1"; }
+
+fn _good_header() -> string[] {
+    let mut header: string[] = [];
+    header.push("management_protocol = " + int_to_string(TOOLCHAIN_MANAGEMENT_PROTOCOL));
+    header.push("version = 0.10.5");
+    header.push("host = aarch64-apple-darwin");
+    header.push("archive_sha256 = " + _digest("a"));
+    return header;
+}
+
+fn _good_record_lines() -> string[] {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  sailfin");
+    records.push(_digest("b") + "  runtime/prelude.sfn");
+    return records;
+}
+
+// Assembles a manifest document from its three pieces so each negative
+// case is a one-line mutation of the known-good shape.
+fn _manifest_text(magic_line: string, header_lines: string[], record_lines: string[]) -> string {
+    let mut out: string = magic_line + "\n";
+    let mut i: int = 0;
+    loop {
+        if i >= header_lines.length { break; }
+        out = out + header_lines[i] + "\n";
+        i += 1;
+    }
+    out = out + "\n";
+    let mut j: int = 0;
+    loop {
+        if j >= record_lines.length { break; }
+        out = out + record_lines[j] + "\n";
+        j += 1;
+    }
+    return out;
+}
+
+fn _good_meta() -> ToolchainManifestMeta {
+    return ToolchainManifestMeta {
+        schema: TOOLCHAIN_MANIFEST_SCHEMA,
+        management_protocol: TOOLCHAIN_MANAGEMENT_PROTOCOL,
+        version: "0.10.5",
+        host: "aarch64-apple-darwin",
+        archive_sha256: _digest("a")
+    };
+}
+
+fn _good_records() -> ToolchainManifestRecord[] {
+    let mut records: ToolchainManifestRecord[] = [];
+    records.push(ToolchainManifestRecord {
+        digest: _digest("a"), path: "sailfin"
+    });
+    records.push(ToolchainManifestRecord {
+        digest: _digest("b"), path: "runtime/prelude.sfn"
+    });
+    return records;
+}
+
+test "toolchain manifest: the digest fixture is exactly 64 chars" {
+    assert _digest("a").length == 64;
+}
+
+test "toolchain manifest: render then parse round-trips meta and records" {
+    let text = toolchain_manifest_render(_good_meta(), _good_records());
+    assert text.length > 0;
+
+    let parsed = toolchain_manifest_parse(text);
+    assert parsed.status == TOOLCHAIN_MANIFEST_OK;
+    assert parsed.meta.schema == TOOLCHAIN_MANIFEST_SCHEMA;
+    assert parsed.meta.management_protocol == TOOLCHAIN_MANAGEMENT_PROTOCOL;
+    assert parsed.meta.version == "0.10.5";
+    assert parsed.meta.host == "aarch64-apple-darwin";
+    assert parsed.meta.archive_sha256 == _digest("a");
+    assert parsed.records.length == 2;
+    assert parsed.records[0].digest == _digest("a");
+    assert parsed.records[0].path == "sailfin";
+    assert parsed.records[1].digest == _digest("b");
+    assert parsed.records[1].path == "runtime/prelude.sfn";
+}
+
+test "toolchain manifest: a bad magic line is malformed" {
+    let text = _manifest_text("not-the-magic 1", _good_header(), _good_record_lines());
+    let parsed = toolchain_manifest_parse(text);
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+// The §3.5 forward-compatibility seam: a schema above what this build
+// understands is reported and never crashes and never reads as OK.
+test "toolchain manifest: a schema above the max is TOO_NEW, not a crash" {
+    let text = _manifest_text("sailfin-install-manifest 2", _good_header(), _good_record_lines());
+    let parsed = toolchain_manifest_parse(text);
+    assert parsed.status == TOOLCHAIN_MANIFEST_TOO_NEW;
+    assert parsed.status != TOOLCHAIN_MANIFEST_OK;
+    assert parsed.detail.length > 0;
+    assert index_of(parsed.detail, "2") >= 0;
+}
+
+// The durable compatibility seam SFEP-0073 §3.5 requires: an unknown
+// header key is ignored, not an error, so an older reader survives a
+// newer writer's additive header field.
+test "toolchain manifest: an unknown header key is ignored, not an error" {
+    let mut header = _good_header();
+    header.push("future_key = whatever");
+    let text = _manifest_text(_good_magic(), header, _good_record_lines());
+    let parsed = toolchain_manifest_parse(text);
+    assert parsed.status == TOOLCHAIN_MANIFEST_OK;
+    assert parsed.records.length == 2;
+}
+
+test "toolchain manifest: a missing management_protocol is malformed" {
+    let mut header: string[] = [];
+    header.push("version = 0.10.5");
+    header.push("host = aarch64-apple-darwin");
+    header.push("archive_sha256 = " + _digest("a"));
+    let text = _manifest_text(_good_magic(), header, _good_record_lines());
+    let parsed = toolchain_manifest_parse(text);
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: a non-integer management_protocol is malformed" {
+    let mut header: string[] = [];
+    header.push("management_protocol = abc");
+    header.push("version = 0.10.5");
+    header.push("host = aarch64-apple-darwin");
+    header.push("archive_sha256 = " + _digest("a"));
+    let text = _manifest_text(_good_magic(), header, _good_record_lines());
+    let parsed = toolchain_manifest_parse(text);
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: zero records is malformed" {
+    let empty: string[] = [];
+    let text = _manifest_text(_good_magic(), _good_header(), empty);
+    let parsed = toolchain_manifest_parse(text);
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: a bad digest shape is malformed" {
+    // Too short (63 chars).
+    let mut short_records: string[] = [];
+    short_records.push(substring(_digest("a"), 0, 63) + "  sailfin");
+    let short_parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), short_records));
+    assert short_parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+
+    // Too long (65 chars).
+    let mut long_records: string[] = [];
+    long_records.push(_digest("a") + "a  sailfin");
+    let long_parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), long_records));
+    assert long_parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+
+    // Uppercase hex.
+    let mut upper_records: string[] = [];
+    upper_records.push(_digest("A") + "  sailfin");
+    let upper_parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), upper_records));
+    assert upper_parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: a duplicate exact path is malformed and named in detail" {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  runtime/dup.sfn");
+    records.push(_digest("b") + "  runtime/dup.sfn");
+    let parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), records));
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+    assert index_of(parsed.detail, "runtime/dup.sfn") >= 0;
+}
+
+// Two recorded paths differing only by ASCII case would name the same
+// file on APFS/NTFS — this is the same file on those filesystems, so it
+// must be rejected as a normalization collision.
+test "toolchain manifest: a case-only path collision is malformed and named in detail" {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  runtime/A.sfn");
+    records.push(_digest("b") + "  runtime/a.sfn");
+    let parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), records));
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+    assert index_of(parsed.detail, "runtime/a.sfn") >= 0;
+}
+
+test "toolchain manifest: an escaping path is malformed" {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  ../evil.sfn");
+    let parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), records));
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: an absolute path is malformed" {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  /etc/passwd");
+    let parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), records));
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: a backslash path is malformed" {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  runtime\\evil.sfn");
+    let parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), records));
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+// A bad manifest must never reach disk — `toolchain_manifest_write`
+// treats `""` as a hard refusal.
+test "toolchain manifest: render refuses invalid records and returns empty" {
+    let mut bad_digest: ToolchainManifestRecord[] = [];
+    bad_digest.push(ToolchainManifestRecord {
+        digest: "not-hex", path: "sailfin"
+    });
+    assert toolchain_manifest_render(_good_meta(), bad_digest) == "";
+
+    let mut escaping: ToolchainManifestRecord[] = [];
+    escaping.push(ToolchainManifestRecord {
+        digest: _digest("a"), path: "../evil.sfn"
+    });
+    assert toolchain_manifest_render(_good_meta(), escaping) == "";
+
+    let mut colliding: ToolchainManifestRecord[] = [];
+    colliding.push(ToolchainManifestRecord {
+        digest: _digest("a"), path: "runtime/A.sfn"
+    });
+    colliding.push(ToolchainManifestRecord {
+        digest: _digest("b"), path: "runtime/a.sfn"
+    });
+    assert toolchain_manifest_render(_good_meta(), colliding) == "";
+
+    let empty: ToolchainManifestRecord[] = [];
+    assert toolchain_manifest_render(_good_meta(), empty) == "";
+}
+
+// §3.8 requires the exact reinstall command be printable.
+test "toolchain manifest: the reinstall hint is the exact install command" {
+    assert toolchain_manifest_reinstall_hint("0.10.5") == "sfn toolchain install 0.10.5";
+}
+
+// `archive_check_member_path` returns the CLEANED path — `.` and empty
+// components dropped. A spelling that differs from its own cleaned form
+// must be rejected: accepting it would defeat the case-collision key and
+// the `runtime/` scope prefix while still naming a real file (SFN-1064).
+test "toolchain manifest: validate_path rejects non-canonical spellings" {
+    assert toolchain_manifest_validate_path("./sailfin").length > 0;
+    assert toolchain_manifest_validate_path("runtime/./prelude.sfn").length > 0;
+    assert toolchain_manifest_validate_path("runtime//prelude.sfn").length > 0;
+
+    // The rule cannot be satisfied by rejecting everything: the canonical
+    // spellings themselves must still be accepted.
+    assert toolchain_manifest_validate_path("sailfin") == "";
+    assert toolchain_manifest_validate_path("runtime/prelude.sfn") == "";
+}
+
+test "toolchain manifest: a non-canonical record path is malformed" {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  runtime/./prelude.sfn");
+    let parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), records));
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+    assert index_of(parsed.detail, "runtime/./prelude.sfn") >= 0;
+}
+
+test "toolchain manifest: render refuses a non-canonical record path" {
+    let mut records: ToolchainManifestRecord[] = [];
+    records.push(ToolchainManifestRecord {
+        digest: _digest("a"), path: "runtime/./prelude.sfn"
+    });
+    assert toolchain_manifest_render(_good_meta(), records) == "";
+}
+
+// Before the fix, `archive_check_member_path`'s cleaned result was
+// discarded, so `runtime/prelude.sfn` and `runtime/./prelude.sfn` hashed to
+// distinct normalization keys and both "validated" as naming one real file
+// under two spellings — the collision key never fired.
+test "toolchain manifest: a dotted spelling cannot smuggle a duplicate past the collision key" {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  runtime/prelude.sfn");
+    records.push(_digest("b") + "  runtime/./prelude.sfn");
+    let parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), records));
+    assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
