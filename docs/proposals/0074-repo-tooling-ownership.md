@@ -23,6 +23,9 @@ question: which repo logic belongs in the compiler binary, which belongs in a
 Sailfin capsule that is not the compiler, and which is structurally required to
 be shell because it runs before any `sfn` binary exists.
 
+All four questions this SFEP opened were investigated and resolved before
+grooming (§8); no design unknown blocks the gate.
+
 This SFEP establishes a three-tier ownership model, classifies all 21 scripts
 against it, and — critically — identifies the **friction gradient** that
 produced the directory in the first place. The gradient, not the inventory, is
@@ -300,7 +303,7 @@ binary shipped to users.
 | `install.sh` (repo root) | installer-smoke | Produces the first `sfn` on a bare runner. Can never be Sailfin without a separate bootstrapping mechanism. `install.ps1` is its Windows twin. |
 | `bootstrap-aarch64-linux.sh` | `SAILFIN_BINFMT_PROBE_ONLY` | Seed → qemu → compiler A → pass-1 → pass-2 fixed point. Vehicle that produces the first native aarch64 binary. |
 | `select-aarch64-seed-mode.sh` | `SAILFIN_SEED_ASSET_LIST`, `SAILFIN_SEED_PROBE_HTTP_CODE` | Decides which bootstrap path to take before a seed is fetched at all. |
-| `module_layout_fingerprint.sh` | — (**gap**) | 427 lines, 25+ call sites, computes the cache keys that gate whether a build happens. Genuinely pre-seed at `ci.yml:110-120`. **But** `ci.yml:406-407` and `capsule-release.yml:73-126` call it at points where a seed `sfn` is already on disk — those sites are safely absorbable into `sfn dev inventory`. Split the script's usage, not the script. |
+| `module_layout_fingerprint.sh` | — (**gap**) | 427 lines, 25+ call sites, computes the cache keys that gate whether a build happens. **Three** genuinely pre-seed jobs, not one: `ci.yml:110-120` (`ci-scope`), `release.yml`'s "Stage version bump" job, and `release-train.yml`'s Node-driven historical-SHA comparison — none fetches a seed anywhere in the job. Every other call site is post-seed. Split the script's **usage**, not the script — see §8.4. |
 
 ## 6. Migration sequencing
 
@@ -344,19 +347,136 @@ the one place with none of the reviewability properties `scripts/` at least has.
 surface. Success is measured by shell **eliminated**, never by `scripts/`
 emptied.
 
-## 8. Open questions
+## 8. Resolved questions
 
-1. Does the glob/regex gap (§2.5) block any Tier 1 port, or can each compose
-   `read_dir` + string matching? `corpus-run.sh` and `check-examples.sh` both
-   walk trees by pattern and should be checked first.
-2. Should `sfn dev examples` be a distinct verb or an `sfn test` mode, given
-   that xfail/xpass is a general test-runner feature the suite lacks?
-3. Where does the Tier 2 capsule live — `capsules/sfn/*` (auto-published, which
-   may be undesirable for repo-internal tooling) or a new non-published
-   workspace root?
-4. `module_layout_fingerprint.sh` (§5.5) is the largest Tier 3 entry and lacks a
-   seam. Does splitting its pre-seed and post-seed call sites reduce it enough
-   to be worth doing, or does it stay whole?
+All four opened questions were investigated before grooming. Answers below are
+binding for leaf authoring; the evidence is cited rather than restated.
+
+### 8.1 The glob/regex gap does not exist — RESOLVED, no predecessor needed
+
+The scripts do not glob. Every instance is `find <root> -name '*.sfn' | sort`:
+a recursive walk with a **suffix match**, no mid-pattern wildcards, no
+character classes (`check-examples.sh:126`, `corpus-run.sh:280,289,297`).
+Regex appears nowhere — `classify_rename_only_ir.sh`'s `sed` use is literal
+string replacement.
+
+The capability exists in the compiler twice already, as bounded BFS walks with
+a suffix predicate: `_collect_sfn_files_cmd`
+(`compiler/src/build/fs.sfn:712`) and `_collect_test_files_cmd`
+(`compiler/src/cli/commands/test/discovery.sfn:28`). Tier 1 verbs live in
+`compiler/src/cli/commands/`, so they import the existing helper — **zero new
+API surface**.
+
+The native walkers additionally carry correctness fixes the bash `find` lacks:
+the missing-file guard that stopped `sfn fmt --write absent.sfn` minting a
+0-byte stub which then shadowed the directory that replaced it
+(`fs.sfn:714-718`), and the SFN-648 typo case plus trailing-slash normalization
+in `discovery.sfn`. **Porting off `find` improves correctness; it is not a
+like-for-like move.**
+
+Do **not** speculatively add `fs.walk` to `stdlib/fs` — that is a public API
+commitment, and Tier 2's needs are manifest-driven rather than tree-walking.
+Revisit only if a Tier 2 leaf demonstrates the need.
+
+### 8.2 `sfn dev examples` is a distinct verb, with the ratchet as data — RESOLVED
+
+Examples are **programs with `main` that print**, not `test "..."` blocks.
+Folding the sweep into `sfn test` would require either teaching the runner to
+treat a `main` program as a test case or wrapping each example in a synthetic
+test; both are worse than a separate verb, and `EMPTY_OUT` detection is
+meaningless for tests. Placement follows the same logic: `sfn test` is
+user-facing, an examples sweep is a maintainer gate, so it belongs beside
+`shard` / `arena` / `determinism-sweep` under `dev`.
+
+Confirmed no expected-failure concept exists anywhere in
+`compiler/src/cli/commands/test/` or `compiler/src/test_runner_state.sfn` —
+nothing to reuse, nothing to conflict with.
+
+**One deliberate change from the script:** the ratchet state moves from a
+source array (`KNOWN_FAILING`, `check-examples.sh:55`) to a checked-in
+manifest file. Tightening then becomes a reviewable data change rather than an
+edit to the tool that enforces it — an agent loosening a data file is a visible
+one-line diff; an agent editing enforcement logic is not.
+
+### 8.3 The Tier 2 capsule lives at `tools/*` with `publish = false` — RESOLVED
+
+Auto-publish is already a solved problem: `[capsule] publish` is parsed at
+`module_layout_fingerprint.sh:219`, defaults to `true` when absent, and **fails
+closed** on an invalid value; `--public-members` lists only publishable members
+and is what drives `capsule-release.yml`. `compiler/capsule.toml:5` already
+sets `publish = false` — the precedent is the compiler itself.
+
+The deciding factor is therefore namespace, not mechanism. `capsules/sfn/*`
+would name repo-internal tooling `sfn/<something>`, placing it in the **public
+scope** where it reads as a shipped capsule. `tools/` already exists and
+already means "not the compiler" (`bluesky`, `mcp-server`).
+
+Adding `tools/*` to `workspace.toml:23` is a one-line edit and is seed-safe:
+the manifest's own comment records that the pinned seed already expands a
+trailing `/*` into every subdirectory carrying a `capsule.toml`
+(`capsule_resolver/workspace.sfn::_cr_expand_member_globs`). `capsule-release.yml`'s
+path filters are `capsules/**` / `stdlib/**`, so `tools/` is not even
+considered — belt and braces alongside `publish = false`.
+
+### 8.4 `module_layout_fingerprint.sh` — split the usage in three phases, not the file
+
+Per-**mode** splitting fails: `--compiler-manifests` and `--member-manifest`
+each straddle both tiers depending on the caller (`ci.yml:112` pre-seed vs.
+`release-tag.yml:352` post-seed). Individual **call sites** move; modes do not.
+
+**Phase A — free, no new native code.** At `ci.yml:1487,1520,1570` (build-linux)
+and `:2013,2040,2084` (build-macos), the step shells to bash for
+`--maintainer-sources` while `build/bin/sfn` — **built from this very tree** —
+is invoked two lines below (`ci.yml:1494,1575`, `:2020,2089`).
+`sfn dev inventory maintainer-sources` (`dev_inventory.sfn:25-27`) is already
+semantically identical. Repoint these; zero seed-lag risk because the binary in
+hand is built from the current source. This is live, measurable duplication
+today.
+
+`ci.yml:407` (`check-fast`) is deliberately **excluded** from Phase A: it calls
+the *seed* (`ci.yml:413`), not the fresh build, so bash remains defensible
+there until the view is known-present in the pinned seed.
+
+**Phase B — new native views required.** `--member-roots`, `--member-records`,
+`--public-members`, `--member-manifest <name>`, and `--compiler-manifests` have
+no `dev inventory` equivalent. `--compiler-manifests` is **not** a rename of the
+existing `manifests` view: it additionally enforces exactly 6 canonical
+compiler-role capsules all declaring `publish = false`
+(`module_layout_fingerprint.sh:380-392`), so the invariant ports with it. Once
+these views exist, `capsule-release.yml:126` and `corpus-run.sh:301` (both
+confirmed post-seed) are the next call sites to repoint.
+
+**Phase C — digest modes, sequenced last.** `dev_inventory` performs no hashing
+at all; that logic lives only in `compiler/src/build/source_fingerprint.sfn`.
+A `--paths-only` mode on `sfn dev bootstrap fingerprint` is structurally cheap —
+`inventory.all_source_inputs ∪ inventory.explicit_inputs`
+(`workspace_inventory.sfn:141-151,206-230`) is the same universe as the bash
+`$paths` — but five conventions must match byte-for-byte or CI cache keys
+change: path string form (no `./` prefix, forward slashes), `LC_ALL=C` sort
+order, dedup rule, hash-input framing (bare `path\n` join, **not** the
+`<hash>\t<path>` tuple the content mode uses), and lowercase hex encoding.
+
+Note the native content-mode digest already uses the `"v2-"` prefix
+(`source_fingerprint.sfn:206-245`) for a *different* meaning than the bash
+layout digest's `"v2-"`. A native path-only mode must not reuse that prefix
+shape or the two become indistinguishable to a reader.
+
+Mitigation: ship `--paths-only` **side-by-side** with the bash mode for one
+release cycle — both computed, only one wired to the cache key — and confirm
+identical output before cutting over. The failure mode is self-limiting (a
+one-time cold rebuild, per `module_layout_fingerprint.sh:27-30`) **except** if
+a restore/save pair mixes an old bash-computed key with a new native-computed
+one, which is a permanent-miss availability bug. Never split a pair across the
+cutover.
+
+**Permanent Tier 3 residue.** Three jobs fetch no seed anywhere and keep bash
+indefinitely: `ci.yml:110-120` (`ci-scope`), `release.yml`'s "Stage version
+bump", and `release-train.yml`'s Node-driven historical-SHA comparison.
+
+**Rejected: keep whole.** The enumeration modes total ~150 lines and are
+already a live second implementation of a native-inventory concept that drifts
+on every workspace-topology change — the exact failure SFN-661 records as this
+file's reason for existing.
 
 ## 9. References
 
