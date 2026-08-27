@@ -1,0 +1,151 @@
+// Regression coverage for SFN-1061: `Enum.Variant { field: <expr> }` in a match
+// pattern had its constraint discarded while the field name was bound anyway,
+// so `Result.Ok { value: 99 }` matched every `Result.Ok` — an arm written as a
+// special case silently swallowed the general one. Lowering now refuses the
+// form (`E1023`) rather than guessing at it.
+//
+// The union-struct sibling path rejected the same shape with an untagged
+// `llvm lowering:` string, which `lowering_core/diagnostics.sfn` discards
+// rather than surfaces, so it failed open too; both now raise `E1023`.
+import { lower_match_case_condition } from "sfn/codegen-llvm/lowering/instructions_match_condition";
+import {
+    EnumTypeInfo,
+    EnumVariantInfo,
+    LLVMOperand,
+    MatchCaseStructure,
+    StructFieldInfo,
+    TypeContext
+} from "sfn/codegen-llvm/types";
+import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
+
+import { index_of } from "../../src/string_utils";
+
+fn _contains(text: string, needle: string) -> boolean {
+    return index_of(text, needle) >= 0;
+}
+
+fn _result_context() -> TypeContext {
+    let ok_variant = EnumVariantInfo {
+        name: "Ok",
+        tag: 0,
+        offset: 8,
+        size: 8,
+        align: 8,
+        fields: [StructFieldInfo {
+            name: "value", llvm_type: "i64", type_annotation: "int", index: 0, offset: 8
+        }]
+    };
+    let err_variant = EnumVariantInfo {
+        name: "Err",
+        tag: 1,
+        offset: 8,
+        size: 8,
+        align: 8,
+        fields: [StructFieldInfo {
+            name: "error", llvm_type: "i8*", type_annotation: "string", index: 0, offset: 8
+        }]
+    };
+    return TypeContext {
+        structs: [],
+        enums: [EnumTypeInfo {
+            name: "Result", type_parameters: [], llvm_name: "%Result", tag_type: "i32", tag_size: 4, tag_align: 4, max_payload_size: 8, size: 16, align: 8, variants: [ok_variant, err_variant]
+        }],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+fn _case(pattern: string) -> MatchCaseStructure {
+    return MatchCaseStructure {
+        pattern: pattern,
+        guard: null,
+        body_start: 0,
+        body_end: 0,
+        is_default: false,
+        span: NativeSourceSpan {
+            start_line: 12,
+            start_column: 5,
+            end_line: 12,
+            end_column: 27
+        }
+    };
+}
+
+fn _find_constraint_diag(diags: LoweringDiagnostic[]) -> LoweringDiagnostic? {
+    let mut idx: int = 0;
+    loop {
+        if idx >= diags.length { break; }
+        if diags[idx].code == "E1023" { return diags[idx]; }
+        idx += 1;
+    }
+    return null;
+}
+
+fn _has_error_diag(diags: LoweringDiagnostic[]) -> boolean {
+    let mut idx: int = 0;
+    loop {
+        if idx >= diags.length { break; }
+        if diags[idx].severity == "error" { return true; }
+        idx += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// Fail-closed: the colon form is rejected, and binds nothing
+// -------------------------------------------------------------------
+test "match lowering: enum field constraint form is rejected with E1023" ![io] {
+    let subject = LLVMOperand { llvm_type: "%Result*", value: "%r" };
+    let mut lines: string[] = [];
+    let result = lower_match_case_condition("classify", subject, "Result<int, Error>", _case("Result.Ok { value: 99 }"), [], [], 0, lines, [], _result_context());
+
+    let diag = _find_constraint_diag(result.diags);
+    assert diag != null;
+    // `severity: "error"` is the whole build gate (`has_error_diag`); a
+    // `warning` here would restore the silent-wrong-branch behaviour.
+    assert diag.severity == "error";
+    assert _contains(diag.message, "`value`");
+    assert _contains(diag.message, "Result.Ok");
+    // The span rides in from `NativeInstruction.Case` through the
+    // `MatchCaseStructure` carrier SFN-1061 widened.
+    assert diag.span != null;
+    assert diag.span.start_line == 12;
+    // The legacy channel must carry the `[fatal]` twin, since an untagged
+    // string is discarded rather than surfaced.
+    assert result.diagnostics.length > 0;
+    assert _contains(result.diagnostics[0], "[fatal]");
+    assert _contains(result.diagnostics[0], "[E1023]");
+    // The wrong-branch mechanism itself: no binding may be produced for the
+    // field, or the arm would still match every `Result.Ok`.
+    assert result.field_bindings.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Shorthand `{ field }` binding is untouched
+// -------------------------------------------------------------------
+test "match lowering: enum shorthand binding still binds and raises nothing" ![io] {
+    let subject = LLVMOperand { llvm_type: "%Result*", value: "%r" };
+    let mut lines: string[] = [];
+    let result = lower_match_case_condition("classify", subject, "Result<int, Error>", _case("Result.Ok { value }"), [], [], 0, lines, [], _result_context());
+
+    assert _find_constraint_diag(result.diags) == null;
+    assert ! _has_error_diag(result.diags);
+    assert result.field_bindings.length == 1;
+    assert result.field_bindings[0].field_name == "value";
+}
+
+// -------------------------------------------------------------------
+// A unit variant cannot slip past the gate: the binding loop is skipped
+// when the variant declares no payload, so the rejection runs ahead of it.
+// -------------------------------------------------------------------
+test "match lowering: constraint form on a payload-free pattern still rejects" ![io] {
+    let subject = LLVMOperand { llvm_type: "%Result*", value: "%r" };
+    let mut lines: string[] = [];
+    let result = lower_match_case_condition("classify", subject, "Result<int, Error>", _case("Result.Err { error: \"boom\" }"), [], [], 0, lines, [], _result_context());
+
+    let diag = _find_constraint_diag(result.diags);
+    assert diag != null;
+    assert diag.severity == "error";
+    assert _contains(diag.message, "`error`");
+    assert result.field_bindings.length == 0;
+}

@@ -231,7 +231,8 @@ fn collect_match_structure(instructions: NativeInstruction[], start_index: int, 
                 guard: guard_text,
                 body_start: index + 1,
                 body_end: index + 1,
-                is_default: is_default_pattern(instruction.pattern)
+                is_default: is_default_pattern(instruction.pattern),
+                span: instruction.span
             };
             index += 1;
             continue;
@@ -259,7 +260,8 @@ fn finalize_match_case(case: MatchCaseStructure?, body_end: int) -> MatchCaseStr
         guard: value.guard,
         body_start: value.body_start,
         body_end: body_end,
-        is_default: value.is_default
+        is_default: value.is_default,
+        span: value.span
     };
 }
 
@@ -475,6 +477,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
             diagnostics.push(lowered_condition.diagnostics[_ci2]);
             _ci2 += 1;
         }
+        diags = extend_diag_array(diags, lowered_condition.diags);
         current_lines = lowered_condition.lines;
         current_temp = lowered_condition.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants);
