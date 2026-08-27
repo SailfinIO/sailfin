@@ -45,10 +45,21 @@ fn _result_context() -> TypeContext {
             name: "error", llvm_type: "i8*", type_annotation: "string", index: 0, offset: 8
         }]
     };
+    // A variant that declares no payload at all: the binding loop is skipped
+    // entirely for it, so only a rejection placed ahead of the
+    // `variant_info.fields.length > 0` guard can catch the colon form here.
+    let pending_variant = EnumVariantInfo {
+        name: "Pending",
+        tag: 2,
+        offset: 8,
+        size: 0,
+        align: 1,
+        fields: []
+    };
     return TypeContext {
         structs: [],
         enums: [EnumTypeInfo {
-            name: "Result", type_parameters: [], llvm_name: "%Result", tag_type: "i32", tag_size: 4, tag_align: 4, max_payload_size: 8, size: 16, align: 8, variants: [ok_variant, err_variant]
+            name: "Result", type_parameters: [], llvm_name: "%Result", tag_type: "i32", tag_size: 4, tag_align: 4, max_payload_size: 8, size: 16, align: 8, variants: [ok_variant, err_variant, pending_variant]
         }],
         interfaces: [],
         vtables: []
@@ -135,17 +146,19 @@ test "match lowering: enum shorthand binding still binds and raises nothing" ![i
 }
 
 // -------------------------------------------------------------------
-// A unit variant cannot slip past the gate: the binding loop is skipped
-// when the variant declares no payload, so the rejection runs ahead of it.
+// A payload-free variant cannot slip past the gate. `Pending` declares no
+// fields, so the binding loop never runs for it; the rejection fires only
+// because it sits ahead of the `variant_info.fields.length > 0` guard.
 // -------------------------------------------------------------------
-test "match lowering: constraint form on a payload-free pattern still rejects" ![io] {
+test "match lowering: constraint form on a payload-free variant still rejects" ![io] {
     let subject = LLVMOperand { llvm_type: "%Result*", value: "%r" };
     let mut lines: string[] = [];
-    let result = lower_match_case_condition("classify", subject, "Result<int, Error>", _case("Result.Err { error: \"boom\" }"), [], [], 0, lines, [], _result_context());
+    let result = lower_match_case_condition("classify", subject, "Result<int, Error>", _case("Result.Pending { ready: true }"), [], [], 0, lines, [], _result_context());
 
     let diag = _find_constraint_diag(result.diags);
     assert diag != null;
     assert diag.severity == "error";
-    assert _contains(diag.message, "`error`");
+    assert _contains(diag.message, "`ready`");
+    assert _contains(diag.message, "Result.Pending");
     assert result.field_bindings.length == 0;
 }

@@ -71,19 +71,23 @@ fn _match_null_variant_index(subject_type_annotation: string, subject_llvm_type:
 // so the arm swallowed every value of the variant and control flow silently
 // went the wrong way; the union-struct path pushed an untagged legacy string,
 // which `lowering_core/diagnostics.sfn` discards rather than surfaces, so it
-// failed open too. Reject the form at both sites until a pass implements it —
-// `guard` already expresses the intent.
+// failed open too. Reject the form at both sites until a pass implements it.
+//
+// The message deliberately points at an `if` in the arm body rather than at a
+// `guard` clause: a guard on an enum destructuring arm is itself dropped
+// today (verified against seed 0.10.6 and the current build alike), so
+// recommending one would trade this silent wrong branch for another.
 fn _field_constraint_unsupported_diag(field_name: string, owner: string, span_in: NativeSourceSpan?) -> LoweringDiagnostic {
     return lowering_error_diag("E1023", "match pattern field `" + field_name
         + "` in `"
         + owner
-        + "` uses the `field: value` constraint form, which lowering does not implement: the constraint would be discarded and the arm would match every value. Bind the field and test it in a guard instead — `"
+        + "` uses the `field: value` constraint form, which lowering does not implement: the constraint would be discarded and the arm would match every value. Bind the field and test it in the arm body instead — `"
         + owner
         + " { "
         + field_name
-        + " } if "
+        + " }: { if "
         + field_name
-        + " == ...`", span_in);
+        + " == ... { ... } }`", span_in);
 }
 
 fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
