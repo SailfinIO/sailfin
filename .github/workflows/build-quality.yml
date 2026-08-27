@@ -146,18 +146,11 @@ jobs:
           key: sailfin-seed-store-linux-x86_64-${{ steps.seed.outputs.seed_version }}
 
       - name: Fetch released seed compiler
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
-        run: |
-          set -euo pipefail
-          if [ -x build/toolchains/seed/bin/sfn ] && build/toolchains/seed/bin/sfn version >/dev/null 2>&1; then
-            echo "[ci] seed cache hit ($SEED_VERSION) — skipping fetch"
-          else
-            make fetch-seed SEED_VERSION="$SEED_VERSION"
-          fi
-          build/toolchains/seed/bin/sfn version
+        id: fetch_seed
+        uses: ./.github/actions/fetch-seed
+        with:
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       # Segments the build-cache key space by module layout so a restore
       # can never span a split/rename (SFN-661). Must match the shape in
@@ -178,7 +171,7 @@ jobs:
           echo "fp=$fp" >> "$GITHUB_OUTPUT"
           echo "freshness=$freshness" >> "$GITHUB_OUTPUT"
 
-      - name: Self-host the compiler (make compile)
+      - name: Self-host the compiler
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -187,9 +180,8 @@ jobs:
           # No step-level ulimit: since seed 0.7.0-alpha.33 the
           # compiler self-applies an 8 GiB RLIMIT_AS at startup
           # (#1291), so a runaway compile can't take down the runner.
-          make compile \
-            CLANG="${CLANG:-clang-18}" \
-            SEED_NATIVE="build/toolchains/seed/bin/sfn"
+          SAILFIN_BUILD_CACHE_DIR=build/cache \
+            build/toolchains/seed/bin/sfn dev bootstrap build
           build/bin/sfn version
 
       - name: First pass (warm the cache)
@@ -432,18 +424,11 @@ jobs:
           key: sailfin-seed-store-linux-x86_64-${{ steps.seed.outputs.seed_version }}
 
       - name: Fetch released seed compiler
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
-        run: |
-          set -euo pipefail
-          if [ -x build/toolchains/seed/bin/sfn ] && build/toolchains/seed/bin/sfn version >/dev/null 2>&1; then
-            echo "[ci] seed cache hit ($SEED_VERSION) — skipping fetch"
-          else
-            make fetch-seed SEED_VERSION="$SEED_VERSION"
-          fi
-          build/toolchains/seed/bin/sfn version
+        id: fetch_seed
+        uses: ./.github/actions/fetch-seed
+        with:
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       # Segments the build-cache key space by module layout so a restore
       # can never span a split/rename (SFN-661). Must match the shape in
@@ -509,15 +494,14 @@ jobs:
             sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-
             sailfin-testbin-linux-x86_64-
 
-      - name: Self-host the compiler (make compile)
+      - name: Self-host the compiler
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          make compile \
-            CLANG="${CLANG:-clang-18}" \
-            SEED_NATIVE="build/toolchains/seed/bin/sfn"
+          SAILFIN_BUILD_CACHE_DIR=build/cache \
+            build/toolchains/seed/bin/sfn dev bootstrap build
           build/bin/sfn version
 
       # Run the full `.sfn` suite in ONE parallel pool with the test-bin
@@ -540,7 +524,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          run_suite() { make test; }
+          run_suite() {
+            local roots=()
+            while IFS= read -r p; do roots+=("$p"); done < <(build/bin/sfn dev inventory tests)
+            if [ "${#roots[@]}" -eq 0 ]; then
+              echo "[test] empty workspace test inventory" >&2
+              exit 2
+            fi
+            build/bin/sfn test "${roots[@]}"
+          }
           if ! run_suite; then
             echo "::warning title=test flake (likely #892)::suite failed on attempt 1; retrying once."
             echo "[warm] retrying suite once (attempt 2/2) — see #892"

@@ -52,12 +52,16 @@ rendered by one shared module, `compiler/src/cli/verdict.sfn`, so the trailer
 on stdout and the report file on disk can never carry two different
 `schema_version` literals.
 
-`sfn dev verify` is a seed-run command, like `sfn dev bootstrap`/`sfn dev
-clean`: it is executed *by* the pinned seed, so it is only exercisable once a
-seed carrying it is pinned (`docs/status.md`). **`make check` is not
-re-plumbed onto `sfn dev verify`** — that rehost is `SFN-60` (Makefile
-retirement) — so `make check` keeps sequencing its own pipeline directly and
-emits no verdict of any kind; there is no fallback producer.
+`sfn dev verify` is the nightly triple-pass gate's driver. The seed builds
+the compiler (`sfn dev bootstrap build`) and that freshly built compiler runs
+`dev verify`, so a change to the verify orchestration takes effect on the next
+nightly rather than waiting for a seed cut — the reason the workflow spends a
+separate step on the build instead of letting the seed drive both.
+
+The retired `check` build target sequenced the same pipeline by hand and
+emitted no verdict of any kind. `sfn dev verify` writes
+`build/agent-report.verify.json` incrementally and emits a per-phase verdict,
+so the gate now has a durable ledger it never had before.
 
 **Not (yet) producers.** `sfn test`, `sfn build`, and `sfn dev bootstrap
 build` emit no verdict trailer when run directly — they never did, natively;

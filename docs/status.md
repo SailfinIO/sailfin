@@ -568,7 +568,7 @@ here.
   compiler as the internal `sfn selfhost` command (`compiler/src/cli_selfhost.sfn`,
   #1502, epic #513 Phase 1) — `make check`'s `check-impl` is now a one-line
   invocation of it rather than ~90 lines of shell. The verb is internal
-  (absent from `sfn --help`; CI / `make check` are its only callers, mirroring
+  (absent from `sfn --help`; CI / `sfn dev verify` are its only callers, mirroring
   Go's `cmd/dist` and Rust's `x.py`). A non-fixed-point result warns by default
   (parity with the former shell); `sfn selfhost --strict` makes it fatal.
 - **Unified resolver.** `sfn build` / `sfn run` / `sfn check` / `sfn test`

@@ -20,7 +20,7 @@ cd sailfin
 ```bash
 ./install.sh              # Install a released sfn (a clean tree has none)
 sfn dev bootstrap build    # Build the compiler from seed
-sfn test                   # Verify everything works
+build/bin/sfn test         # Verify everything works
 ```
 
 For host dependencies, OpenSSL/LLVM setup, and supported CLI build
@@ -39,7 +39,7 @@ git checkout -b feature/my-feature main
 
 1. Edit compiler source in `compiler/src/*.sfn`
 2. Rebuild: `sfn dev bootstrap build`
-3. Run tests: `sfn test`
+3. Run tests: `build/bin/sfn test`
 4. Validate self-hosting: `sfn dev verify`
 
 ### Adding a Language Feature
@@ -82,7 +82,7 @@ The compiler must always compile itself. Before submitting:
 ```bash
 sfn dev bootstrap build    # Build from seed
 sfn dev verify             # Validate seedcheck binary
-sfn test                   # Full test suite
+build/bin/sfn test         # Full test suite
 ```
 
 ## Branch Strategy
@@ -99,7 +99,7 @@ sfn test                   # Full test suite
 
 ## Submitting Changes
 
-1. Ensure `sfn dev verify` and `sfn test` pass
+1. Ensure `sfn dev verify` and `build/bin/sfn test` pass
 2. Open a PR against the `main` branch
 3. Include test coverage for new features or bug fixes
 4. Update documentation if the change affects language behavior

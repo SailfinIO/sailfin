@@ -676,9 +676,9 @@ guide, see
 |---|---|
 | Build the native compiler binary from a released seed, using the self-hosting pipeline. Skips rebuild if the binary is up to date. | `sfn dev bootstrap build` |
 | Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler`. | `sfn dev bootstrap build --force` |
-| Compile (if needed), build a `sailfin-seedcheck` binary, verify it can run `hello-world.sfn`, then run the full test suite against it. This is the authoritative CI gate. | `sfn dev verify` |
+| Compile (if needed), verify the first-pass binary can run `hello-world.sfn`, build a `build/bin/sfn-seedcheck` binary, then run the full test suite against it. This is the authoritative CI gate. | `sfn dev verify` |
 | Same as verify, but a seedcheck/fixed-point rebuild mismatch is fatal. | `sfn dev verify --strict` |
-| Run `sfn check` over `compiler/src/` and `runtime/` without codegen or clang. | `sfn dev verify --fast` |
+| Run `sfn check` over the workspace maintainer-source inventory without codegen or clang. | `sfn dev verify --fast` |
 | Run the full Sailfin-native test suite (unit + integration + e2e + capsule tests). | `sfn test` |
 | Run unit tests from `compiler/tests/unit/*_test.sfn`. | `sfn test compiler/tests/unit` |
 | Run integration tests from `compiler/tests/integration/*_test.sfn`. | `sfn test compiler/tests/integration` |
@@ -813,7 +813,8 @@ sfn run examples/basics/hello-world.sfn
 ```
 
 **Build the compiler from source** (clean checkout — no `sfn` installed yet, so
-the installer bootstraps the pinned seed first):
+the installer provides a released `sfn` to drive the build; that build then
+fetches the seed pinned in `bootstrap.toml` itself):
 
 ```bash
 git clone https://github.com/SailfinIO/sailfin.git && cd sailfin

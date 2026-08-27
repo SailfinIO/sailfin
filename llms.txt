@@ -418,9 +418,10 @@ The compiler is self-hosted (written in Sailfin, compiles itself):
                   -> LLVM IR -> native binary
 
 Build commands:
-    sfn dev bootstrap build  -- build compiler from released seed (self-hosting)
-    sfn test                 -- run unit + integration + e2e test suites
-    sfn dev verify           -- full validation including seedcheck
+    ./install.sh              -- install a released sfn (a clean tree has none)
+    sfn dev bootstrap build   -- build compiler from released seed (self-hosting)
+    build/bin/sfn test        -- run unit + integration + e2e test suites
+    sfn dev verify            -- full validation including seedcheck
     build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 
 ## Tooling

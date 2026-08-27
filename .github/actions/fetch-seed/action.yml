@@ -1,0 +1,164 @@
+name: "Fetch released seed compiler"
+description: >-
+  Acquire the pinned released Sailfin compiler (the seed) on a runner that has
+  no `sfn` yet, deriving both the version and the store layout from
+  bootstrap.toml.
+
+# Why this is not `sfn dev bootstrap fetch`
+# ----------------------------------------
+# It cannot be. `sfn dev bootstrap fetch` is itself an `sfn` binary, so it
+# needs a compiler to already exist; acquiring the first one is exactly what
+# this action is for. It also takes no repo/version/exclude-tag arguments,
+# reading bootstrap.toml only. `install.sh` is the only cold-start entry
+# point, and it is what performs the signed SHA256SUMS verification.
+#
+# This is the seed half of the retired `fetch-seed` build target, extracted so
+# the nine workflow jobs that acquired a seed without going through
+# `sailfin-build` stop depending on that target. The logic is a direct lift of
+# `sailfin-build/action.yml`'s own store-resolve + fetch pair, which remains
+# the reference implementation.
+
+inputs:
+  seed_version:
+    description: >-
+      Seed version to install. Empty (the default) reads `[seed].version` from
+      bootstrap.toml -- the pin, which is what every caller wants. Pass a value
+      only to deliberately install something other than the pin.
+    required: false
+    default: ""
+  seed_repo:
+    description: "GitHub repo to fetch the release from. Empty reads `[seed].repo`."
+    required: false
+    default: ""
+  seed_exclude_tag:
+    description: "Release tag to skip (used when validating a candidate release)."
+    required: false
+    default: ""
+  github_token:
+    description: >-
+      Token passed to install.sh as GITHUB_TOKEN. Optional -- it only raises the
+      GitHub API rate limit, so omitting it still works but can flake on a busy
+      runner. Declared as an explicit input rather than relying on the caller's
+      step-level `env:` reaching this composite action's steps.
+    required: false
+    default: ""
+
+outputs:
+  seed_bin:
+    description: "Path to the fetched seed binary."
+    value: ${{ steps.store.outputs.seed_bin }}
+  install_base:
+    description: "Resolved `[store].install_base`."
+    value: ${{ steps.store.outputs.install_base }}
+  bin_dir:
+    description: "Resolved `[store].bin_dir`."
+    value: ${{ steps.store.outputs.bin_dir }}
+  seed_version:
+    description: "The seed version actually installed."
+    value: ${{ steps.store.outputs.seed_version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve seed store layout and pinned version
+      id: store
+      shell: bash {0}
+      run: |
+        set -euo pipefail
+        if [ ! -f bootstrap.toml ]; then
+          echo "[fetch-seed] bootstrap.toml not found at the repo root" >&2
+          exit 1
+        fi
+        # Section-scoped scalar read. Same awk idiom the rest of the repo uses
+        # against this file, so a `[store]` move is picked up here for free
+        # rather than silently diverging from a second hardcoded copy.
+        read_key() {
+          awk -v section="$1" -v key="$2" '
+            /^\[[^]]+\]/ { current = $0 }
+            current == "[" section "]" && $0 ~ "^" key "[[:space:]]*=" {
+              sub("^" key "[[:space:]]*=[[:space:]]*", "")
+              gsub(/"/, "")
+              sub(/[[:space:]]+$/, "")
+              print
+              exit
+            }
+          ' bootstrap.toml
+        }
+
+        install_base="$(read_key store install_base)"
+        bin_dir="$(read_key store bin_dir)"
+
+        seed_version="${{ inputs.seed_version }}"
+        if [ -z "$seed_version" ]; then
+          seed_version="$(read_key seed version)"
+        fi
+        seed_repo="${{ inputs.seed_repo }}"
+        if [ -z "$seed_repo" ]; then
+          seed_repo="$(read_key seed repo)"
+        fi
+
+        for pair in "install_base:$install_base" "bin_dir:$bin_dir" \
+                    "seed.version:$seed_version" "seed.repo:$seed_repo"; do
+          if [ -z "${pair#*:}" ]; then
+            echo "[fetch-seed][error] bootstrap.toml ${pair%%:*} is empty or missing" >&2
+            exit 1
+          fi
+        done
+
+        # An unresolved version must never silently degrade to "latest": the
+        # whole point of the pin is that self-hosting is reproducible.
+        if [ "$seed_version" = "latest" ]; then
+          echo "[fetch-seed][error] refusing to resolve the seed to 'latest'." >&2
+          echo "[fetch-seed][error] The pin lives in bootstrap.toml [seed].version." >&2
+          exit 1
+        fi
+
+        echo "[fetch-seed] version=$seed_version repo=$seed_repo install_base=$install_base bin_dir=$bin_dir"
+        {
+          echo "install_base=$install_base"
+          echo "bin_dir=$bin_dir"
+          echo "seed_bin=$bin_dir/sfn"
+          echo "seed_version=$seed_version"
+          echo "seed_repo=$seed_repo"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Install the seed compiler
+      shell: bash {0}
+      env:
+        SEED_INSTALL_BASE: ${{ steps.store.outputs.install_base }}
+        SEED_BIN_DIR: ${{ steps.store.outputs.bin_dir }}
+        SEED_BIN: ${{ steps.store.outputs.seed_bin }}
+        SEED_VERSION: ${{ steps.store.outputs.seed_version }}
+        SEED_REPO: ${{ steps.store.outputs.seed_repo }}
+        SEED_EXCLUDE_TAG: ${{ inputs.seed_exclude_tag }}
+        # Prefer the explicit input; fall back to whatever GITHUB_TOKEN the
+        # caller already has in scope, so a job that sets it job-wide keeps
+        # working without passing it twice.
+        GITHUB_TOKEN: ${{ inputs.github_token != '' && inputs.github_token || env.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        # Skip the download on a cache hit. The restore key pins the exact
+        # version, so a present and invokable binary is the right one.
+        if [ -x "$SEED_BIN" ] && "$SEED_BIN" version >/dev/null 2>&1; then
+          echo "[fetch-seed] seed cache hit ($SEED_VERSION) — skipping download"
+        else
+          echo "[fetch-seed] installing seed $SEED_VERSION into $SEED_INSTALL_BASE"
+          # install.sh creates each directory itself; creating them here only
+          # preserves the "tree exists before the installer runs" property
+          # without assuming the two share a parent.
+          mkdir -p "$SEED_INSTALL_BASE" "$SEED_BIN_DIR"
+          REPO="$SEED_REPO" \
+          VERSION="$SEED_VERSION" \
+          EXCLUDE_TAG="$SEED_EXCLUDE_TAG" \
+          GLOBAL_BIN_DIR="$SEED_BIN_DIR" \
+          INSTALL_BASE="$SEED_INSTALL_BASE" \
+          SAILFIN_BOOTSTRAP_SEED_STORE=1 \
+          BINARY="sailfin" \
+            ./install.sh
+          if [ ! -x "$SEED_BIN" ]; then
+            echo "[fetch-seed][error] missing fetched seed compiler: $SEED_BIN" >&2
+            exit 1
+          fi
+        fi
+        echo "[fetch-seed] seed binary: $SEED_BIN"
+        "$SEED_BIN" version

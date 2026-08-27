@@ -92,11 +92,25 @@ let _DV_REPORT_PATH: string = "build/agent-report.verify.json";
 let _DV_HOST: string = "sfn dev verify";
 
 // Wall-clock bound for the pass1 hello-world smoke gate, in milliseconds.
-// Replaces `make check`'s `timeout 60` / `gtimeout 60` shell prefix, which
-// native Windows has neither of. Only this phase is deadline-bounded: the
-// test phases carry their own per-file deadline through
+// Replaces the `timeout` / `gtimeout` shell prefix the retired driver used,
+// which native Windows has neither of. Only this phase is deadline-bounded:
+// the test phases carry their own per-file deadline through
 // `SAILFIN_TEST_TIMEOUT`, and the build/selfhost phases were never bounded.
-let _DV_SMOKE_DEADLINE_MS: int = 60000;
+//
+// This is a hang guard, not a wall-time gate: it must fail a first-pass
+// binary that deadlocks, not one that is merely slow. 60s was sized when a
+// cold hello-world built in ~12s. Once the runtime took its `sfn/crypto`
+// dependency edge a cold hello-world measured ~59s on a 4-vCPU runner under
+// the seed-built `-O0` first-pass binary, and the nightly Linux leg died
+// here without ever reaching the self-host check it exists to run. The
+// retired driver restored ~3x headroom at 180s; this verb kept 60s and so
+// carried that same failure latent until it became the nightly's driver.
+// Drop back to 60s only once the first-pass cold hello-world is measured
+// well inside it — SFN-882 made the runtime closure demand-driven, but that
+// measurement was taken under a normally-built compiler, not the `-O0`
+// first-pass binary this gate runs.
+// docs/rca/2026-08-13-e2e-shard-time-doubling-runtime-crypto-retain-roots.md
+let _DV_SMOKE_DEADLINE_MS: int = 180000;
 
 // Per-test-file deadline for the two full-suite phases, in seconds. This is
 // `make check`'s `CHECK_TEST_TIMEOUT`, applied to both of its full-suite

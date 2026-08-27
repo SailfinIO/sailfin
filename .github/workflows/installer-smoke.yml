@@ -180,6 +180,13 @@ jobs:
           packages: binutils clang-18 lld llvm-18
           no-install-recommends: 'true'
 
+      - name: Fetch released seed compiler
+        if: ${{ matrix.verify_seed_selfhost }}
+        id: seed_fetch
+        uses: ./.github/actions/fetch-seed
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Verify pinned native ARM seed self-host
         if: ${{ matrix.verify_seed_selfhost }}
         shell: bash
@@ -187,10 +194,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          make fetch-seed
-          file -L build/toolchains/seed/bin/sfn \
+          file -L "${{ steps.seed_fetch.outputs.seed_bin }}" \
             | grep -E 'ELF 64-bit.*ARM aarch64'
-          make compile
+          "${{ steps.seed_fetch.outputs.seed_bin }}" dev bootstrap build
 
   windows-installer:
     name: install (windows-latest)

@@ -17,9 +17,10 @@ The test runner discovers files named `*_test.sfn` under `<path>` (recursively),
 
 Capsule-flavored tests (functions, types, and behaviors that belong to a
 capsule, not the compiler itself) live under
-`capsules/<scope>/<name>/tests/*_test.sfn` and are run by `make test-capsules`
-(also rolled into `make test`). Use the compiler test suites here only for
-tests that exercise compiler features (lexer/parser/typecheck/effects/emit/IR).
+`capsules/<scope>/<name>/tests/*_test.sfn` and are run by
+`build/bin/sfn test $(build/bin/sfn dev inventory member-tests)`. Use the
+compiler test suites here only for tests that exercise compiler features
+(lexer/parser/typecheck/effects/emit/IR).
 
 ## File naming
 

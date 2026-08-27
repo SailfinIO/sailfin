@@ -26,6 +26,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # already-installed hook from any earlier generation is still
 # identified as ours — replaced in place on install, and removable
 # with --remove — rather than being mistaken for a foreign hook.
+# MARKER is not used by the installer's own logic (recognition below goes
+# through MARKER_FAMILY); its one consumer is the generated hook's
+# staleness self-check, which greps this exact line to learn the current
+# generation. Keep the literal spelling in sync with the hook body.
 MARKER="# sailfin-precommit-v2"
 MARKER_FAMILY="# sailfin-precommit-v"
 
@@ -111,22 +115,6 @@ fi
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-# Staleness self-check (SFN-1083). A hook already on disk keeps running its
-# own generation's body forever, so a contributor whose hook predates the
-# native cutover would keep invoking a retired `make` target and read the
-# resulting failure as a fault in their own change. Compare the generation
-# baked into this file against the one the installer currently emits and
-# point at the re-install. Warn, never fail: a hook version skew is not a
-# defect in the diff being committed, and hard-failing the commit would be a
-# worse outcome than the drift it reports.
-hook_generation="sailfin-precommit-v2"
-installer_generation=$(sed -n 's/^MARKER="# \(sailfin-precommit-v[0-9][0-9]*\)"$/\1/p' \
-    scripts/install_precommit.sh 2>/dev/null | head -n 1)
-if [ -n "$installer_generation" ] && [ "$installer_generation" != "$hook_generation" ]; then
-    echo "[pre-commit] installed hook is $hook_generation but the repo ships $installer_generation" >&2
-    echo "[pre-commit] re-install it: bash scripts/install_precommit.sh" >&2
-fi
-
 changed=$(git diff --cached --name-only --diff-filter=ACMRD)
 if [ -z "$changed" ]; then
     exit 0
@@ -173,6 +161,29 @@ fi
 # it via $(NATIVE_BIN)/$(EXE_EXT). Bash on Windows resolves an `-x` test
 # on the extensionless path, but a bare `-f` fallback does not, so try
 # both spellings.
+# Staleness self-check (SFN-1083). A hook already on disk keeps running its
+# own generation's body forever, so a contributor whose hook predates the
+# native cutover would keep invoking a retired `make` target and read the
+# resulting failure as a fault in their own change. Compare the generation
+# baked into this file against the one the installer currently emits and
+# point at the re-install.
+#
+# Warn, never fail: a hook version skew is not a defect in the diff being
+# committed. Hence `|| true` — the hook runs under `set -euo pipefail`, so
+# without it a missing installer (bisecting into older history, a worktree of
+# an old tag, the hook copied into another repo) makes `sed` exit non-zero,
+# `pipefail` carries that past `head`, and `set -e` kills the commit with no
+# diagnostic at all, because stderr is discarded. This sits below the
+# early exits on purpose: a docs-only commit the gate skips should not
+# report hook drift either.
+hook_generation="sailfin-precommit-v2"
+installer_generation=$(sed -n 's/^MARKER="# \(sailfin-precommit-v[0-9][0-9]*\)"$/\1/p' \
+    scripts/install_precommit.sh 2>/dev/null | head -n 1 || true)
+if [ -n "$installer_generation" ] && [ "$installer_generation" != "$hook_generation" ]; then
+    echo "[pre-commit] installed hook is $hook_generation but the repo ships $installer_generation" >&2
+    echo "[pre-commit] re-install it: bash scripts/install_precommit.sh" >&2
+fi
+
 SFN_BIN=build/bin/sfn
 if [ ! -x "$SFN_BIN" ] && [ ! -f "$SFN_BIN" ]; then
     SFN_BIN=build/bin/sfn.exe

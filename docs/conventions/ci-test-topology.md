@@ -175,7 +175,7 @@ The design for the content-addressed key derivation lives in
 - `--no-test-cache` (`compiler/src/cli/commands/test/mod.sfn:232`) bypasses
   the per-test linked-binary cache; it threads to every pooled child
   (`compiler/src/cli/commands/test/pool.sfn:127`).
-- `build-quality.yml`'s `test-bin-baseline` job runs a full `make test` on
+- `build-quality.yml`'s `test-bin-baseline` job runs a full `sfn test` on
   every push to `main`. Its purpose is warming the shared test-bin cache for
   the next PR to read, not correctness gating
   (`.github/workflows/build-quality.yml:341-342`). It is easy to misread
@@ -183,13 +183,18 @@ The design for the content-addressed key derivation lives in
   cache PRs consume, because the cache save step only runs when the full
   suite passed.
 - Two paths run cold (`--no-test-cache`): the daily aarch64-Linux unsharded
-  soak, which gates its scheduled workflow, and the nightly `make check`.
+  soak, which gates its scheduled workflow, and the nightly `sfn dev verify`.
 - The correctness backstop for the whole toolchain is the nightly
-  `make check` triple-pass self-host
-  (`.github/workflows/nightly-selfhost.yml`, `make-check` job, cron
-  `0 7 * * *` UTC, `SELFHOST_STRICT=1`, run on both Linux and macOS). The
-  test-bin cache is read only by the `sfn test` runner; it is never consulted
-  by that gate.
+  `sfn dev verify --strict` triple-pass self-host
+  (`.github/workflows/nightly-selfhost.yml`, cron `0 7 * * *` UTC, run on both
+  Linux and macOS). The seed builds the compiler and the freshly built
+  compiler drives verification, so a fix to the verify orchestration takes
+  effect without waiting for a seed cut. The test-bin cache is read only by
+  the `sfn test` runner; it is never consulted by that gate.
+
+  That job's id is still literally `make-check`. It is a required status
+  check, so renaming it needs a branch-protection change and is deliberately
+  left for the commit that deletes the Makefile (SFN-60).
 
 ## Where each gate lives
 

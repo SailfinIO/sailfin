@@ -1,6 +1,6 @@
 name: Nightly self-host check
 
-# The triple-pass `make check` gate is the only thing that catches
+# The triple-pass `sfn dev verify` gate is the only thing that catches
 # compiler bugs baked into the first-pass binary (e.g. re-export
 # miscompilations — see docs/rca/2026-04-18-reexport-diagnostic-gep.md).
 # Per-PR CI is intentionally single-pass for speed; this job runs
@@ -38,7 +38,9 @@ concurrency:
 
 jobs:
   make-check:
-    name: make check (triple-pass fixed point) [${{ matrix.package_label }}]
+    # Job id `make-check` is a required status check; kept as-is (Rule 0)
+    # even though the step it runs is `sfn dev verify` now.
+    name: sfn dev verify (triple-pass fixed point) [${{ matrix.package_label }}]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     strategy:
@@ -116,28 +118,44 @@ jobs:
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - name: Fetch released seed compiler
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
-        run: |
-          set -euo pipefail
-          echo "[nightly] seed version: $SEED_VERSION"
-          make fetch-seed SEED_VERSION="$SEED_VERSION"
-          build/toolchains/seed/bin/sfn version
+        id: seed_fetch
+        uses: ./.github/actions/fetch-seed
+        with:
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: make check (first pass → seedcheck → stage3)
+      - name: sfn dev verify (first pass → seedcheck → stage3)
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CLANG: ${{ matrix.clang }}
+          # The retired `CLANG=` step env is deliberately NOT carried over as
+          # `SAILFIN_CC`. `CLANG` only ever fed the retired `.ll`-compile path
+          # (Makefile:85-87), so passing it here was already a no-op. Setting
+          # `SAILFIN_CC` instead would NOT be one: it is consulted only when
+          # host and target are both Darwin (backend.sfn:131-137), where it
+          # overrides the preferred `/usr/bin/clang`. That would quietly point
+          # the macOS leg at whatever `clang` leads PATH.
+          SEED_BIN: ${{ steps.seed_fetch.outputs.seed_bin }}
           # #1830: SELFHOST_STRICT=1 makes a stage2/stage3 fixed-point
           # mismatch fatal on the Linux leg; macOS passes "0" (warn-only).
           SELFHOST_STRICT: ${{ matrix.selfhost_strict }}
         run: |
           set -euo pipefail
-          export SEED_NATIVE="build/toolchains/seed/bin/sfn"
-          make check SELFHOST_STRICT="$SELFHOST_STRICT"
+          # Two steps, mirroring what the retired `check` target did
+          # (Makefile:587 then :591): the seed builds the compiler, and the
+          # freshly built compiler — not the seed — drives verification.
+          #
+          # Driving with the seed would run the SEED's copy of the verify
+          # orchestration, so any fix to that logic in this tree would be
+          # silently ignored until the next seed cut. `dev verify` re-runs the
+          # build as its own first phase, which the source fingerprint makes a
+          # no-op here.
+          SAILFIN_BUILD_CACHE_DIR=build/cache "$SEED_BIN" dev bootstrap build
+
+          # SELFHOST_STRICT has no native reader; it becomes the --strict flag.
+          args=(dev verify)
+          if [ "${SELFHOST_STRICT:-0}" = "1" ]; then args+=(--strict); fi
+          build/bin/sfn "${args[@]}"
 
       # `find`, not `**`: macOS runners ship bash 3.2, which has no
       # `globstar`, so `shopt -s globstar` errored out and the recursive

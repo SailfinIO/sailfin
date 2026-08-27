@@ -81,25 +81,26 @@ jobs:
           packages: clang-18 llvm-18 jq
 
       - name: Fetch released seed compiler (the oracle)
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
-        run: |
-          set -euo pipefail
-          echo "[corpus] seed version: $SEED_VERSION"
-          make fetch-seed SEED_VERSION="$SEED_VERSION"
-          build/toolchains/seed/bin/sfn version
+        id: seed_fetch
+        uses: ./.github/actions/fetch-seed
+        with:
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Self-host the candidate compiler
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CLANG: clang-18
+          # Makefile:453/sailfin-build/action.yml:453: the pinned seed
+          # resolves its build cache to $HOME/.cache/sailfin/<schema> without
+          # this, so every run cold-builds.
+          SAILFIN_BUILD_CACHE_DIR: build/cache
         run: |
           set -euo pipefail
-          export SEED_NATIVE="build/toolchains/seed/bin/sfn"
-          make compile
+          export SEED_NATIVE="${{ steps.seed_fetch.outputs.seed_bin }}"
+          # Makefile:556 `compile`: fingerprint-gated self-host. CLANG was
+          # never read by `sfn`; the runner's clang-18 on PATH resolves.
+          "$SEED_NATIVE" dev bootstrap build
           build/bin/sfn version
 
       - name: Corpus run (candidate vs seed)

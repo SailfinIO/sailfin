@@ -216,10 +216,10 @@ jobs:
           node-version: 24
 
       - name: Fetch released seed compiler
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: make fetch-seed
+        id: seed
+        uses: ./.github/actions/fetch-seed
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify guarded public claims
         working-directory: site
@@ -391,14 +391,14 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Fetch released seed compiler
+        uses: ./.github/actions/fetch-seed
+        with:
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report fetched seed version
         shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
-        run: |
-          set -euo pipefail
-          make fetch-seed SEED_VERSION="$SEED_VERSION"
-          build/toolchains/seed/bin/sfn version
+        run: build/toolchains/seed/bin/sfn version
 
       - name: sfn check compiler sources (parse + typecheck + effect-check)
         shell: bash
@@ -1191,12 +1191,18 @@ jobs:
       # 17.26 GiB tree RSS and an OOM kill.
       - name: Run cold unsharded Sailfin test suite
         shell: bash
+        env:
+          SAILFIN_CC: /usr/bin/clang-18
         run: |
           set -euo pipefail
-          make test \
-            NATIVE_BIN=build/bin/sfn \
-            SAILFIN_CC=/usr/bin/clang-18 \
-            TEST_BIN_CACHE_FLAGS=--no-test-cache
+          BIN=build/bin/sfn
+          roots=()
+          while IFS= read -r p; do roots+=("$p"); done < <("$BIN" dev inventory tests)
+          if [ "${#roots[@]}" -eq 0 ]; then
+            echo "[test] empty workspace test inventory" >&2
+            exit 2
+          fi
+          "$BIN" test "${roots[@]}" --no-test-cache
 
   # The PR test suite is ~90% of CI wall time and runs serially, so we
   # fan it across per-OS shard legs that run concurrently (Phase 1 of
@@ -1510,7 +1516,7 @@ jobs:
           done < <(find "${format_roots[@]}" -type f -name '*.sfn' -print | sort -u)
           if [ "$fail" -gt 0 ]; then
             echo ""
-            echo "[fmt] $fail file(s) need formatting. Run: make fmt"
+            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write"
             exit 1
           fi
           echo "[fmt] all files formatted"
@@ -2036,7 +2042,7 @@ jobs:
           done < <(find "${format_roots[@]}" -type f -name '*.sfn' -print | sort -u)
           if [ "$fail" -gt 0 ]; then
             echo ""
-            echo "[fmt] $fail file(s) need formatting. Run: make fmt"
+            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write"
             exit 1
           fi
           echo "[fmt] all files formatted"

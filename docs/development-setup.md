@@ -163,15 +163,15 @@ build and run programs outside this checkout.
 
 | Task | Command |
 |---|---|
-| Fast compiler/runtime sanity check | `sfn dev verify --fast` |
+| Fast sanity check over the workspace maintainer-source inventory | `sfn dev verify --fast` |
 | Rebuild after compiler/runtime edits | `sfn dev bootstrap build` |
 | Force rebuild from the seed | `sfn dev bootstrap build --force` |
 | Full validation before PR | `sfn dev verify` |
 | CI-strict self-host fixed point | `sfn dev verify --strict` |
-| Unit tests only | `sfn test compiler/tests/unit` |
-| Integration tests only | `sfn test compiler/tests/integration` |
-| End-to-end tests only | `sfn test compiler/tests/e2e` |
-| Capsule tests only | `sfn test $(sfn dev inventory member-tests)` |
+| Unit tests only | `build/bin/sfn test compiler/tests/unit` |
+| Integration tests only | `build/bin/sfn test compiler/tests/integration` |
+| End-to-end tests only | `build/bin/sfn test compiler/tests/e2e` |
+| Capsule tests only | `build/bin/sfn test $(build/bin/sfn dev inventory member-tests)` |
 | Format touched compiler/runtime files | `build/bin/sfn fmt --write <files>` then `build/bin/sfn fmt --check <files>` |
 | Package release artifacts | `sfn package --out dist --compiler-bin build/bin/sfn` |
 | Build MCP server | `(cd tools/mcp-server && npm ci --no-audit --no-fund && npm run build)` |
@@ -292,7 +292,7 @@ If you touched `compiler/src/` or `runtime/`, rebuild first:
 
 ```bash
 sfn dev bootstrap build
-sfn test
+build/bin/sfn test
 ```
 
 For structural changes such as file splits, renamed exports, or module graph
