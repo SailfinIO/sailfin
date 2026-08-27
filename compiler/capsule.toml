@@ -10,7 +10,7 @@ publish = false
 # of the version would fail `make check` (use SAILFIN_TOOLCHAIN=off only for a
 # deliberate seed transition — see the Makefile note).
 [toolchain]
-sfn = "0.10.5"
+sfn = "0.10.6"
 
 [dependencies]
 "sfn/syntax" = "*"
