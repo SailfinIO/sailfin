@@ -280,7 +280,8 @@ test "selfhost_remove_tree: removes a file root" ![io] {
 // reported that did not happen. Unlinking first removes it and the report
 // tells the truth.
 test "selfhost_remove_tree: removes a dangling symlink root" ![io] {
-    // `sailfin_intrinsic_fs_symlink` is a hard `false` stub on Windows, so
+    // `fs.symlink` requires Developer Mode or `SeCreateSymbolicLinkPrivilege`
+    // on Windows (SFN-1143) and there is no seam here to grant either, so
     // the fixture this rests on cannot be built there.
     if host_is_windows() { return; }
     let root = fs.mkdtemp("sfn-selfhost-rmdangle-");

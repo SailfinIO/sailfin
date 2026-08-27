@@ -221,10 +221,12 @@ extern fn stat(path: *u8, statbuf: *u8) -> i32;
 extern fn GetFileAttributesA(path: *u8) -> i32;
 
 // M3.1b additions. `memcpy` / `strlen` / `strchr` back the
-// recursive `sfn_fs_mkdir` component walk; `unlink` / `mkdir` are
-// the POSIX primitives for delete + create (declared in
-// `libc.sfn`, inlined here per the SFN-635 cross-module workaround in
-// the file header). `sfn_fs_mkdir` reports "directory exists
+// recursive `sfn_fs_mkdir` component walk; `mkdir` is the POSIX
+// primitive for create (declared in `libc.sfn`, inlined here per the
+// SFN-635 cross-module workaround in the file header). `unlink` no
+// longer backs `sfn_fs_delete` — that now calls `sfn_fs_link_delete`
+// (SFN-1143) — and survives only in `sfn_fs_write_lines`'s
+// failure/cleanup paths below. `sfn_fs_mkdir` reports "directory exists
 // afterward" via the module-local `sfn_fs_exists` (below) without
 // an `errno` read.
 extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;

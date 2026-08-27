@@ -107,11 +107,17 @@ fn _flw_target_probe_path(target: *u8, link: *u8) -> *u8 {
     return joined;
 }
 
-fn _flw_target_is_directory(target: *u8, link: *u8) -> bool {
+fn _flw_target_is_directory(target: *u8, link: *u8) -> bool ![io] {
     let probe: *u8 = _flw_target_probe_path(target, link);
     if probe as i64 == 0 { return false; }
     let attrs: i32 = GetFileAttributesA(probe);
-    if probe != target { free(probe); }
+    // Compare the addresses, not the bytes. `!=` on two `*u8` lowers to
+    // `@sfn_str_len` + `@sfn_str_eq_lv` — a strlen-scan and memcmp — because
+    // `i8*` reads as a string shape in the equality path, so the pointer
+    // `icmp` arm is never reached. Content equality would decide this
+    // `free()` and could double-free the caller's `target`; every other
+    // pointer compare in the runtime goes through `as i64` for this reason.
+    if (probe as i64) != (target as i64) { free(probe); }
     if attrs == INVALID_FILE_ATTRIBUTES { return false; }
     return (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }

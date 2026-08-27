@@ -3,10 +3,11 @@
 // the `ln -sfn` and `pwd` spawns `_bootstrap_link_bin` used to make.
 //
 // The copy fallback inside `_bootstrap_alias` is deliberately NOT asserted
-// here. It is reached only when `fs.symlink` returns false, which is the
-// Windows leg (`sailfin_intrinsic_fs_symlink` is a hard `false` stub there)
-// or a POSIX filesystem that refuses links — and there is no seam to force
-// a symlink refusal on this runner. What IS provable here is that the
+// here. It is reached only when `fs.symlink` returns false, which is an
+// unprivileged Windows host (SFN-1143: `fs.symlink` needs Developer Mode
+// or `SeCreateSymbolicLinkPrivilege` there) or a POSIX filesystem that
+// refuses links — and there is no seam to force a symlink refusal on this
+// runner. What IS provable here is that the
 // symlink leg is the one actually taken (asserted via `fs.read_link`, since
 // `fs.exists`/`fs.readFile` cannot tell a link from a copy) plus the
 // re-run behaviour both legs share, which is where the

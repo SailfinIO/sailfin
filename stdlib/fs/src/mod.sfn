@@ -173,5 +173,8 @@ fn read_link(path: string) -> string ![io] {
     // (`readlink(2)` / `FSCTL_GET_REPARSE_POINT`), e.g. `../../llms.txt` — the text exactly as
     // stored in the link, never canonicalized or resolved through
     // multiple hops. A non-symlink or missing path returns `""` (SFN-46).
+    // Not a round-trip of `symlink`'s argument on Windows: link creation
+    // rewrites `/` to `\` before storing, so a target passed in with POSIX
+    // separators reads back with native ones (SFN-1143).
     return fs.read_link(path);
 }

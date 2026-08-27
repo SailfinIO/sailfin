@@ -390,13 +390,16 @@ fn _tr_read_pax_body(buf: ByteBuf, start: int, size: int) -> Result<_PaxRecords,
 // than replacing it, so a parent validated here cannot be swapped for a
 // symlink before the deferred-link replay runs.
 //
-// `fs.read_link` returns the raw stored target on POSIX and Windows
-// (`runtime/sfn/adapters/filesystem.sfn`), so this check cannot
-// see a Windows junction and never fires there. The residual exposure is
-// bounded rather than closed: the extractor plants no links of its own on
-// Windows (`copy_instead_of_link` is forced on), so it takes an
-// attacker-influenced pre-existing `dest_dir` to matter, and the one
-// caller extracts into a freshly created private temp dir.
+// `fs.read_link` (SFN-1143) resolves a real Windows symlink through
+// `FSCTL_GET_REPARSE_POINT`, so this check now fires there too. What it
+// still cannot see is a true junction or any reparse tag other than
+// `IO_REPARSE_TAG_SYMLINK` — the Windows provider deliberately rejects
+// those, returning empty. The residual exposure is bounded rather than
+// closed: the extractor plants no links of its own on Windows
+// (`copy_instead_of_link` is forced on), so it takes an
+// attacker-influenced pre-existing `dest_dir` with a junction or other
+// non-symlink reparse point to matter, and the one caller extracts into a
+// freshly created private temp dir.
 fn _tr_ensure_parent_dirs(dest_dir: string, checked_relative: string, include_last: boolean) -> Result<int, ArchiveError> ![io] {
     let components: string[] = split(checked_relative, "/");
     let mut cur: string = dest_dir;
