@@ -1,7 +1,7 @@
 ---
 sfep: 74
 title: Repo Tooling Ownership — Retiring `scripts/` into Native Verbs
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-08-27
 updated: 2026-08-27
