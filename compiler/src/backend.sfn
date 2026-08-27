@@ -59,11 +59,13 @@ import { _shell_read_cmd } from "./build/fs";
 import { link_argv_or_response_file } from "./build/link_response";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A)): the final link resolves
 // the build target once and threads the `-target` triple + POSIX-lib
-// filtering through both link layouts. All identity/empty on Linux/macOS.
+// filtering through both link layouts. Host-native Linux/macOS stays empty;
+// non-Windows cross targets carry their explicit triple.
 import {
     build_host_os,
     build_target_os,
     build_target_triple,
+    host_target_triple,
     target_clang_flags,
     target_extra_link_libs,
     target_filter_link_libs,
@@ -394,15 +396,16 @@ fn _target_conditioned_plan(plan: LinkPlan, triple: string) -> LinkPlan {
 // free functions above (see the self-host note in the file header).
 struct LlvmTextBackend {
     fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
-        let target_flags = target_clang_flags(build_target_triple());
+        let target_flags = target_clang_flags(build_target_triple(), host_target_triple());
         return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags));
     }
 
     fn link(self, plan: LinkPlan) -> int ![io] {
         // Resolve the build target once (SFN-52, promoted to the triple
         // axis by SFN-774): prefix the `-target` triple ahead of the
-        // macOS SDK flags and filter POSIX libs. All no-ops off Windows,
-        // so Linux/macOS argv is byte-identical. `resolve_direct_ld_lld`
+        // macOS SDK flags and filter POSIX libs. Host-native Linux/macOS
+        // stays byte-identical; cross targets carry their triple.
+        // `resolve_direct_ld_lld`
         // below stays OS-keyed (Linux-only path selection), so both
         // resolutions are threaded independently.
         let target_os = build_target_os();
@@ -411,7 +414,7 @@ struct LlvmTextBackend {
         if link_driver == "clang" {
             link_driver = _clang_link_driver(target_os);
         }
-        let driver_flags = _concat_driver_flags(target_linker_driver_flags(triple), _macos_sdk_link_flags());
+        let driver_flags = _concat_driver_flags(target_linker_driver_flags(triple, host_target_triple()), _macos_sdk_link_flags());
         let eff_plan = _target_conditioned_plan(plan, triple);
         // Sailfin owns Link on Linux x86-64 (SFEP-0066 §3.1 role table):
         // take the direct `ld.lld` path when the link contract resolves,

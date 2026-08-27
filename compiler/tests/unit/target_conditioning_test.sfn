@@ -41,6 +41,7 @@ import { emit_child_argv } from "../../src/build/emit_child_argv";
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { condition_runtime_capsules_for_target } from "../../src/build/runtime_objs";
 import {
+    _linux_host_arch_from_evidence,
     build_host_os,
     build_target_triple,
     host_exe_name,
@@ -216,25 +217,40 @@ test "target: triple_abi distinguishes the two Windows ABIs" ![pure] {
 }
 
 // ---- clang -target triple ----
-test "target: host targets add no -target triple" ![pure] {
-    // Every non-Windows triple keeps clang's host default → empty triple,
-    // empty flags, so no `-target` flag is ever added (byte-identical argv).
-    assert expect_eq_str(target_clang_triple("x86_64-unknown-linux-gnu"), "").ok;
-    assert expect_eq_str(target_clang_triple("aarch64-unknown-linux-gnu"), "").ok;
-    assert expect_eq_str(target_clang_triple("x86_64-apple-darwin"), "").ok;
-    assert expect_eq_str(target_clang_triple("arm64-apple-darwin"), "").ok;
+test "target: native non-Windows targets add no -target triple" ![pure] {
+    // A target equal to the host keeps clang's default and therefore the
+    // byte-identical native argv promised by #1112.
+    assert expect_eq_str(target_clang_triple("x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"), "").ok;
+    assert expect_eq_str(target_clang_triple("aarch64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"), "").ok;
+    assert expect_eq_str(target_clang_triple("x86_64-apple-darwin", "x86_64-apple-darwin"), "").ok;
+    assert expect_eq_str(target_clang_triple("arm64-apple-darwin", "arm64-apple-darwin"), "").ok;
     let empty: string[] = [];
-    assert expect_eq_str_array(target_clang_flags("x86_64-unknown-linux-gnu"), empty).ok;
-    assert expect_eq_str_array(target_clang_flags("x86_64-apple-darwin"), empty).ok;
+    assert expect_eq_str_array(target_clang_flags("x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"), empty).ok;
+    assert expect_eq_str_array(target_clang_flags("x86_64-apple-darwin", "x86_64-apple-darwin"), empty).ok;
+}
+
+test "target: non-Windows cross targets pass their own triple to clang" ![pure] {
+    assert expect_eq_str(target_clang_triple("aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"), "aarch64-unknown-linux-gnu").ok;
+    assert expect_eq_str_array(target_clang_flags("aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"), ["-target", "aarch64-unknown-linux-gnu"]).ok;
+    assert expect_eq_str(target_clang_triple("arm64-apple-darwin", "x86_64-apple-darwin"), "arm64-apple-darwin").ok;
+}
+
+test "target: a foreign aarch64 loader does not relabel an x86_64 host" ![pure] {
+    let x86_maps = "7f000000-7f010000 r-xp 00000000 00:00 0 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n";
+    assert expect_eq_str(_linux_host_arch_from_evidence(x86_maps, true, true), "x86_64").ok;
+    let arm_maps = "7f000000-7f010000 r-xp 00000000 00:00 0 /usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1\n";
+    assert expect_eq_str(_linux_host_arch_from_evidence(arm_maps, true, true), "aarch64").ok;
+    assert expect_eq_str(_linux_host_arch_from_evidence("", true, true), "x86_64").ok;
+    assert expect_eq_str(_linux_host_arch_from_evidence("", true, false), "aarch64").ok;
 }
 
 test "target: both Windows triples pass their own triple to clang" ![pure] {
-    assert expect_eq_str(target_clang_triple("x86_64-pc-windows-msvc"), "x86_64-pc-windows-msvc").ok;
+    assert expect_eq_str(target_clang_triple("x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc"), "x86_64-pc-windows-msvc").ok;
     let expected_msvc: string[] = ["-target", "x86_64-pc-windows-msvc"];
-    assert expect_eq_str_array(target_clang_flags("x86_64-pc-windows-msvc"), expected_msvc).ok;
-    assert expect_eq_str(target_clang_triple("x86_64-w64-mingw32"), "x86_64-w64-mingw32").ok;
+    assert expect_eq_str_array(target_clang_flags("x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc"), expected_msvc).ok;
+    assert expect_eq_str(target_clang_triple("x86_64-w64-mingw32", "x86_64-unknown-linux-gnu"), "x86_64-w64-mingw32").ok;
     let expected_gnu: string[] = ["-target", "x86_64-w64-mingw32", "-femulated-tls"];
-    assert expect_eq_str_array(target_clang_flags("x86_64-w64-mingw32"), expected_gnu).ok;
+    assert expect_eq_str_array(target_clang_flags("x86_64-w64-mingw32", "x86_64-unknown-linux-gnu"), expected_gnu).ok;
 }
 
 // ---- Linker selection ----
@@ -249,7 +265,7 @@ test "target: msvc forces lld, host targets and windows-gnu do not" ![pure] {
 
 test "target: windows-gnu links through the static MinGW driver" ![pure] {
     assert expect_eq_str(target_linker_driver("x86_64-w64-mingw32"), "x86_64-w64-mingw32-gcc").ok;
-    assert expect_eq_str_array(target_linker_driver_flags("x86_64-w64-mingw32"), ["-static"]).ok;
+    assert expect_eq_str_array(target_linker_driver_flags("x86_64-w64-mingw32", "x86_64-unknown-linux-gnu"), ["-static"]).ok;
     assert expect_eq_str(target_linker_driver("x86_64-unknown-linux-gnu"), "clang").ok;
     let argv = _llvm_text_link_program_argv_with_driver(_driver_plan(false), ["-static"], target_linker_driver("x86_64-w64-mingw32"));
     assert expect_eq_str(argv[0], "x86_64-w64-mingw32-gcc").ok;
@@ -332,6 +348,18 @@ fn _declares_target(caps: RuntimeCapsuleArtifacts[], triple: string) -> boolean 
         i += 1;
     }
     return false;
+}
+
+test "target: the aarch64 Linux manifest table is declared and identity" ![io] {
+    let caps = runtime_capsule_from_root("runtime");
+    assert caps.length == 1;
+    assert _declares_target(caps, "aarch64-unknown-linux-gnu");
+
+    let conditioned = condition_runtime_capsules_for_target(caps, "Linux", "aarch64-unknown-linux-gnu");
+    assert conditioned.length == 1;
+    assert expect_eq_str_array(conditioned[0].sfn_sources, caps[0].sfn_sources).ok;
+    assert expect_eq_str_array(conditioned[0].ll_sources, caps[0].ll_sources).ok;
+    assert expect_eq_str_array(conditioned[0].link_libs, caps[0].link_libs).ok;
 }
 
 test "target: the MSVC manifest table selects native providers" ![io] {

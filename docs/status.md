@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-26 (SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
+Updated: 2026-08-26 (SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
 SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726). Seed pinned to `0.10.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
@@ -288,6 +288,44 @@ here.
   (SFN-167–172); with pin/verify,
   install, and dispatch now shipped, the proposal stays `Accepted` pending the
   remaining tracked issues.
+- **Toolchain install-manifest recording + verification** (SFEP-0073 §3.8,
+  SFN-1064). New `compiler/src/toolchain/manifest.sfn` defines the
+  `.install-manifest` schema — a magic + integer schema-version line,
+  `key = value` headers (`management_protocol` [recording SFEP-0073 §3.5's
+  routing-compatibility field; SFN-1067 owns routing on it], `version`,
+  `host`, `archive_sha256`), a blank line, then `<64-hex sha256>
+  <store-relative path>` records, line-oriented like `SHA256SUMS` — plus a
+  forward-compatible reader; new `compiler/src/toolchain/integrity.sfn` walks
+  the staged payload, hashes it, and implements the verification primitives.
+  `toolchain_lay_out_store_entry` (`compiler/src/toolchain/store.sfn`) writes
+  `.install-manifest` recording the executable, the `sfn` alias, and every
+  bundled `runtime/`, `capsules/`, and `workspace.toml` file, immediately
+  before `.sha256` so the completeness marker used by `toolchain_store_ready`
+  remains the last write even against a half-written staging directory.
+  `sfn toolchain install` (`compiler/src/toolchain/install.sfn`) runs a
+  forced-uncached full verification (`toolchain_verify_entry(staged_dir,
+  true)`) of the staging directory before the atomic commit, so an entry
+  commits only once every recorded payload is present and matches. Dispatch
+  (`compiler/src/toolchain/dispatch.sfn`) hashes the selected executable
+  against its manifest before `process.exec`, and verifies bundled
+  runtime/capsule inputs before any build-like command (`build`/`check`/
+  `run`/`test`) proceeds; a mismatch refuses execution and prints the exact
+  `sfn toolchain install <version>` command, taking the target version from
+  the manifest itself, and verification never repairs or deletes anything.
+  Records are rejected for missing, modified, duplicate, path-escaping, or
+  case-normalization-colliding entries, reusing `archive_check_member_path`
+  (the SFEP-0071 §3.6 path-safety guard) rather than reimplementing it.
+  Successful whole-entry verifications are memoized for the process lifetime
+  only: SFEP-0073 §3.8 forbids a size-and-mtime cache key, and the manifest
+  records neither field, so the memo cannot degrade into one. An entry with
+  no `.install-manifest` — a legacy flat `versions/<version>` entry, a
+  host-qualified entry installed before this change, or a dev build —
+  reports `unverified` and still runs; that is the documented SFEP-0046
+  compatibility boundary, not a gap. This is SFEP-0073 **slice 1** only: no
+  `sfn toolchain verify`/`list`/`active` CLI surface ships (SFN-1066), no
+  management-protocol routing ships (SFN-1067), and no signed index,
+  channels, update policy, per-user default, or yank/revocation enforcement
+  ships here — SFEP-0073 stays `Accepted`, not `Implemented`.
 - **Compiler bootstrap manifest — `bootstrap.toml` + `sfn dev bootstrap`**
   (SFEP-0047, SFN-197). A root `bootstrap.toml` is the compiler checkout's
   exact bootstrap-seed policy — `[seed].version/source/repo/asset_prefix/policy`,
@@ -386,6 +424,15 @@ here.
   `ci-cross-windows` target, duplicated `RUNTIME_MODS`, `llvm-link` bridge,
   `build/native/raw` staging, and `runtime/ir/windows_stubs.ll` are deleted;
   PR, release, and nightly workflows call the native commands directly.
+- **Native aarch64 Linux cross build** (SFN-1117, SFEP-0068).
+  `sfn build --target=aarch64-unknown-linux-gnu` on an x86_64 Linux host now
+  passes the target triple to clang for assembly and fallback linking while a
+  host-native Linux build keeps its byte-identical no-`-target` argv. The Tier-2
+  ARM job supplies its glibc/GCC cross sysroot explicitly, and Sailfin's direct
+  `ld.lld` contract discovers those paths; no target-owned linker or sysroot
+  override is needed. The runtime manifest declares the aarch64 target, the
+  e2e suite asserts both the aarch64 `st_mode` layout and ELF `e_machine`, and
+  CI no longer shadows `clang` with a target-injecting shell wrapper.
 - **Native clean command** (SFN-680). `sfn dev clean build|dist|all
   [--include-seed] [--dry-run]` (`compiler/src/cli/commands/dev_clean.sfn`)
   replaces the `make clean-build` / `make clean` / `make clean-all` shell
@@ -1334,6 +1381,7 @@ here.
 | Package registry (`sfn init/add/publish`) | Shipped | Default registry `pkg.sfn.dev`; `SFN_REGISTRY` / `sfn config set registry` override. **De-shelled onto `sfn/http` (SFN-496):** `publish`/`add` no longer spawn `curl`; the publish JSON body is assembled in-process (`base64_encode` from `sfn/crypto`) and POSTed through `sfn/http`'s typed `fetch`, reading status from `Response.status`; the registry-index GET goes through `fetch` and the `.sfnpkg` download uses `http.download` (redirect-following, preserving `curl -L`); temp cleanup moved to `fs.deleteFile`. Both entrypoints widened `![io]` → `![io, net]`, so registry reach is now effect-checked. `sfn/http` is imported from `cmd_shared.sfn` rather than the two command modules to avoid an LLVM bare-name signature collision with `sfn/cli`'s `get` (SFN-893). `https://` terminates through the native TLS 1.3 stack, not OpenSSL — SFN-341 deleted the OpenSSL-linked TLS stack entirely, and the toolchain links no `-lssl`/`-lcrypto` (`compiler/src/build/target.sfn:479-487`). The Windows system `ROOT` certificate store is bound (SFN-808); SFN-1026 — `getaddrinfo` running before `WSAStartup`, which blocked hostname resolution on native Windows before a connection was attempted — is fixed and shipped in v0.10.4 (merged as `d8c858b8`, #3061). |
 | Toolchain pinning (`[toolchain]` manifest + version/channel gate) | **Shipped (Phase 1)** | SFEP-0046 §3.1–3.4, SFN-167: floor-semver + channel gate on `sfn build`/`run`/`check`/`test`; `sfn init` scaffolds the pin; `--skip-toolchain-check` / `SAILFIN_SKIP_TOOLCHAIN_CHECK` / `SAILFIN_TOOLCHAIN=off` escape hatches. Root `workspace.toml` `[toolchain]` floor adopted repo-wide (SFEP-0051 Phase 2, SFN-414): default floor for every member, member `capsule.toml` overrides per field. |
 | Native toolchain install (`sfn toolchain install`) | **Shipped (Phase 2 acquire)** | SFEP-0046 §3.5, SFN-168/SFN-660: native fetch + fail-closed Ed25519-signature + binary-safe in-process SHA-256 verification into the version store, including native Windows; `SAILFIN_TOOLCHAIN_RELEASE_BASE` mirror override. Extraction is in-process via `sfn/archive`'s `targz_extract` (SFEP-0071, SFN-898) — no `tar` subprocess remains on this path; a rejected/malformed archive is `E0615`. On Windows, asset resolution now prefers the `-msvc` asset over the legacy mingw one, falling back to the latter only when the former is absent (`compiler/src/cli/commands/toolchain.sfn`, SFN-1033; see Installer below) — matched by `install.ps1`/`install.sh`. |
+| Toolchain install-manifest recording + verification (`.install-manifest`) | **Shipped (slice 1)** | SFEP-0073 §3.8 (records §3.5's `management_protocol` field, not yet routed — SFN-1067), SFN-1064: `compiler/src/toolchain/manifest.sfn` (schema/writer/reader) + `integrity.sfn` (payload hashing/verification). `toolchain_lay_out_store_entry` writes `.install-manifest` before `.sha256` for every store entry; `sfn toolchain install` forces an uncached full verification before the atomic commit; dispatch verifies the selected executable and bundled runtime/capsule inputs before `process.exec`/any build-like command, fail-closed with the exact reinstall command. Legacy/pre-manifest entries report `unverified` and still run (SFEP-0046 boundary). No `sfn toolchain verify`/`list`/`active` command yet (SFN-1066); SFEP-0073 stays `Accepted`. |
 | Toolchain re-exec dispatch (`SAILFIN_TOOLCHAIN=auto`/`local`/`<version>`/`off`) | **Shipped** | SFEP-0046 §3.5, SFN-172: on a `[toolchain]` floor-check failure, `sfn build`/`run`/`check`/`test` fetch (if needed, `auto`, default) + verify + re-exec the pinned toolchain with the original argv; re-entrancy guard `SAILFIN_TOOLCHAIN_DISPATCHED`; offline falls back to the install hint. SFEP-0046 tracks six issues (SFN-167–172); it stays `Accepted` pending the remainder. |
 | `workspace.lock` (`sfn lock` write + resolver consume) | **Shipped** | Explicit `sfn lock` writes the root lockfile (#1070); `sfn lock --work-dir DIR` sets the workspace-discovery start dir so the command can run against a workspace without `cd`. Resolver prefers `workspace → workspace.lock → capsule.lock → cache → registry` for external deps, sibling-first untouched (#1071). Roots own lockfiles; library capsules don't commit them. Committing the root `workspace.lock` is #1050, gated on a seed embedding #1071 (satisfied at `v0.7.0-alpha.31`) |
 | Workspace capability envelope (`[workspace.capabilities]` allow/deny/grants + enforce/warn gate) | **Shipped (declared surface, enforced)** | SFEP-0051 Phase 4. Declared-surface audit (SFN-416, 4a): each member's `capsule.toml [capabilities] required` is checked against the workspace envelope `effective(M) = (allow ∪ grants[M]) \ deny` (reuses SFEP-0017 subsumption, so an `io` entry covers `io.*`); a drifting effect emits `E0405`, a malformed envelope entry `E0406`. Enforcement gate (SFN-419, 4c): `sfn check` and `sfn build` at workspace scope run the audit and **fail on drift** by default (`enforce`); `[workspace.capabilities] mode = "warn"` reports without failing (migration aid only, not the marketed state). The envelope is **opt-in** — the gate activates only when the workspace declares a non-empty `allow` ceiling, so envelope-free workspaces (including this repo) are never retroactively broken. `sfn capabilities audit` prints the per-member required-vs-effective table and exits non-zero on drift (CI-dashboard surface). Inferred-`![...]`-surface audit (Phase 4b, SFN-418) is still open, so the SFEP stays `Accepted`; the declared-surface gate is enforced end-to-end. |
