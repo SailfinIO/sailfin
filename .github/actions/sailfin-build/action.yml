@@ -100,6 +100,14 @@ runs:
     # that clang does not own the Darwin SDK/linker contract and the link
     # fails with `ld: library 'm' not found`. macOS only, exactly as the
     # Makefile scoped it; a no-op when the target does not exist.
+    #
+    # One deliberate delta: the Makefile's prefix reached only make-spawned
+    # processes, whereas $GITHUB_PATH reaches every later step in the job.
+    # Only the name `clang` is shadowed, and it resolves to the platform
+    # clang the Makefile would also have picked. Callers that prepend
+    # Homebrew LLVM do so before this action, and $GITHUB_PATH prepends, so
+    # Apple's clang still lands ahead of it — the same precedence
+    # `export PATH := $(CLANG_SHIM_DIR):$(PATH)` gave.
     - name: Install Darwin clang shim
       if: ${{ runner.os == 'macOS' }}
       shell: bash {0}
@@ -359,6 +367,18 @@ runs:
         # leg's SAILFIN_NATIVE_CC below. Clang selection for the build itself
         # is SAILFIN_CC plus the Darwin shim step above.
         seed="build/toolchains/seed/bin/sfn"
+        # Pin the cache root explicitly, as the retired recipe did
+        # (Makefile:950). This is load-bearing, not defensive: the pinned seed
+        # predates the `sfn/compiler` self-host predicate, so left to itself it
+        # resolves $HOME/.cache/sailfin/<schema> rather than the in-tree
+        # build/cache the `Restore build cache` step above populates. Verified
+        # against seed 0.10.6 with `sfn cache info`: unset => /root/.cache/
+        # sailfin/v2, pinned => build/cache/v2. Dropping it would leave every
+        # leg green while silently cold-building the whole compiler, and would
+        # strand the module-IR cache out of the shard artifact too. A caller
+        # override still wins; this is a no-op once a seed carries the
+        # predicate.
+        export SAILFIN_BUILD_CACHE_DIR="${SAILFIN_BUILD_CACHE_DIR:-build/cache}"
         build_rc=0
         if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
           # Gate inlined from the retired Makefile recipe: `sfn` itself does
