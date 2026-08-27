@@ -124,6 +124,68 @@ runs:
         fi
         echo "$shim" >> "$GITHUB_PATH"
 
+    # The seed store layout is declared once, in `bootstrap.toml [store]`,
+    # and read here rather than restated. The native side already derives it
+    # — `compiler/src/bootstrap_manifest.sfn` parses both keys and
+    # `_bootstrap_seed_bin` (`compiler/src/cli/commands/dev.sfn`) composes
+    # `<install_base>/<version>/sailfin` from them — so a hardcoded copy in
+    # this file is a third answer to one question, and it disagrees silently
+    # the moment `[store]` moves: `install.sh` writes to the new location,
+    # the steps below look in the old one, and the run dies at the fetch gate
+    # blaming a missing seed rather than the layout disagreement that caused
+    # it (SFN-1163).
+    #
+    # The awk read mirrors ci.yml's `seed` step, which resolves
+    # `[seed].version` out of the same file the same way. Fail-closed on an
+    # absent key, as that step is and as SFEP-0047 §5 requires of the pin: a
+    # build must never guess where the seed lives. The schema defaults in
+    # `bootstrap_manifest.sfn` are deliberately NOT mirrored as fallbacks —
+    # a fallback literal would reintroduce exactly the restatement this step
+    # exists to remove.
+    #
+    # Placed before `Restore seed cache` because `actions/cache`'s `path:`
+    # and `key:` are evaluated at step level, so these outputs have to exist
+    # by then — earlier than the first hardcoded use it replaces. Ungated for
+    # the same reason: a skipped step yields empty outputs, and an empty
+    # `path:` fails the cache action outright.
+    - name: Resolve seed store layout
+      id: store
+      shell: bash {0}
+      run: |
+        set -euo pipefail
+        if [ ! -f bootstrap.toml ]; then
+          echo "[seed-store] bootstrap.toml not found at the repo root" >&2
+          exit 1
+        fi
+        read_store_key() {
+          awk -v key="$1" '
+            /^\[[^]]+\]/ { section = $0 }
+            section == "[store]" && $0 ~ "^" key "[[:space:]]*=" {
+              sub("^" key "[[:space:]]*=[[:space:]]*", "")
+              gsub(/"/, "")
+              sub(/[[:space:]]+$/, "")
+              print
+              exit
+            }
+          ' bootstrap.toml
+        }
+        install_base="$(read_store_key install_base)"
+        bin_dir="$(read_store_key bin_dir)"
+        if [ -z "$install_base" ]; then
+          echo "[seed-store] bootstrap.toml [store].install_base is empty or missing" >&2
+          exit 1
+        fi
+        if [ -z "$bin_dir" ]; then
+          echo "[seed-store] bootstrap.toml [store].bin_dir is empty or missing" >&2
+          exit 1
+        fi
+        echo "[seed-store] install_base=$install_base bin_dir=$bin_dir"
+        {
+          echo "install_base=$install_base"
+          echo "bin_dir=$bin_dir"
+          echo "seed_bin=$bin_dir/sfn"
+        } >> "$GITHUB_OUTPUT"
+
     # Restore the fetched seed binary keyed on target + pinned version.
     # The key is exact (no restore-keys): a hit guarantees the binary
     # matches `bootstrap.toml [seed].version`, so the fetch step below can
@@ -142,12 +204,25 @@ runs:
       if: ${{ inputs.mode != 'skip-build' && (inputs.target != 'linux-arm64' || inputs.arm_seed_mode == 'native') && inputs.seed_version != '' && inputs.seed_version != 'latest' }}
       uses: actions/cache@v4
       with:
-        path: build/toolchains/seed
+        # The two declared store dirs, not their common parent: `[store]`
+        # declares `install_base` and `bin_dir` independently and does not
+        # declare a root, and `install.sh` writes nothing else that survives
+        # the run (its only other writes are under a `mktemp -d` it traps
+        # away, install.sh:472-476). Listing both is therefore exactly the
+        # tree the parent path used to cover, and stays correct if the two
+        # keys are ever pointed at unrelated locations.
+        path: |
+          ${{ steps.store.outputs.install_base }}
+          ${{ steps.store.outputs.bin_dir }}
         key: sailfin-seed-store-${{ inputs.target }}-${{ inputs.seed_version }}
 
     - name: Fetch released seed compiler
       if: ${{ inputs.mode != 'skip-build' && (inputs.target != 'linux-arm64' || inputs.arm_seed_mode == 'native') }}
       shell: bash {0}
+      env:
+        SEED_INSTALL_BASE: ${{ steps.store.outputs.install_base }}
+        SEED_BIN_DIR: ${{ steps.store.outputs.bin_dir }}
+        SEED_BIN: ${{ steps.store.outputs.seed_bin }}
       run: |
         set -euo pipefail
         seed_version="${{ inputs.seed_version }}"
@@ -157,7 +232,7 @@ runs:
         fi
         # Skip the download on a seed-cache hit. The cache key pins the
         # exact version, so a present + invokable binary is the right one.
-        if [ -x build/toolchains/seed/bin/sfn ] && build/toolchains/seed/bin/sfn version >/dev/null 2>&1; then
+        if [ -x "$SEED_BIN" ] && "$SEED_BIN" version >/dev/null 2>&1; then
           echo "[ci] seed cache hit ($seed_version) — skipping fetch"
         else
           # Direct port of the retired `fetch-seed` target, which was a thin
@@ -171,23 +246,27 @@ runs:
             echo "[fetch-seed][error] The pin lives in bootstrap.toml [seed].version at the repo root." >&2
             exit 1
           fi
-          echo "[fetch-seed] installing seed $seed_version into build/toolchains/seed/versions"
-          mkdir -p build/toolchains/seed
+          echo "[fetch-seed] installing seed $seed_version into $SEED_INSTALL_BASE"
+          # Both declared dirs, replacing a `mkdir -p` of their former common
+          # parent. install.sh creates each itself (install.sh:814-816, 924),
+          # so this only preserves the pre-existing "the tree is there before
+          # the installer runs" property without assuming a shared parent.
+          mkdir -p "$SEED_INSTALL_BASE" "$SEED_BIN_DIR"
           REPO="${{ inputs.seed_repo }}" \
           VERSION="$seed_version" \
           EXCLUDE_TAG="$seed_exclude_tag" \
-          GLOBAL_BIN_DIR="build/toolchains/seed/bin" \
-          INSTALL_BASE="build/toolchains/seed/versions" \
+          GLOBAL_BIN_DIR="$SEED_BIN_DIR" \
+          INSTALL_BASE="$SEED_INSTALL_BASE" \
           SAILFIN_BOOTSTRAP_SEED_STORE=1 \
           BINARY="sailfin" \
             ./install.sh
-          if [ ! -x build/toolchains/seed/bin/sfn ]; then
-            echo "[fetch-seed][error] missing fetched seed compiler: build/toolchains/seed/bin/sfn" >&2
+          if [ ! -x "$SEED_BIN" ]; then
+            echo "[fetch-seed][error] missing fetched seed compiler: $SEED_BIN" >&2
             exit 1
           fi
         fi
-        echo "[ci] seed binary: build/toolchains/seed/bin/sfn"
-        build/toolchains/seed/bin/sfn version
+        echo "[ci] seed binary: $SEED_BIN"
+        "$SEED_BIN" version
 
     # Fail closed on the native aarch64 fast path (SFN-580). install.sh
     # verifies the signed SHA256SUMS manifest and the archive digest before
@@ -202,9 +281,10 @@ runs:
       shell: bash {0}
       env:
         SEED_VERSION: ${{ inputs.seed_version }}
+        SEED_BIN: ${{ steps.store.outputs.seed_bin }}
       run: |
         set -euo pipefail
-        seed="build/toolchains/seed/bin/sfn"
+        seed="$SEED_BIN"
         if [ -z "${SEED_VERSION}" ] || [ "${SEED_VERSION}" = "latest" ]; then
           echo "[arm-seed][error] the native path requires a concrete seed_version, got '${SEED_VERSION}'" >&2
           exit 1
@@ -331,6 +411,7 @@ runs:
       shell: bash {0}
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+        SEED_BIN: ${{ steps.store.outputs.seed_bin }}
       run: |
         set -euo pipefail
         # #1235 measurement (macOS only — the issue scopes Linux OUT).
@@ -366,7 +447,7 @@ runs:
         # `inputs.clang` remains live where it always was — the aarch64 qemu
         # leg's SAILFIN_NATIVE_CC below. Clang selection for the build itself
         # is SAILFIN_CC plus the Darwin shim step above.
-        seed="build/toolchains/seed/bin/sfn"
+        seed="$SEED_BIN"
         # Pin the cache root explicitly, as the retired recipe did
         # (Makefile:950). This is load-bearing, not defensive: the pinned seed
         # predates the `sfn/compiler` self-host predicate, so left to itself it
