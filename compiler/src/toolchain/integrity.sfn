@@ -1,0 +1,328 @@
+// compiler/src/toolchain/integrity.sfn
+//
+// Payload walking, hashing, and manifest verification (SFEP-0073 §3.8,
+// SFN-1064). Builds on the pure schema in `manifest.sfn`.
+import { _sha256_of_file } from "../build/fs";
+import { walk_dirs } from "../build/fs_tree";
+import { host_exe_name } from "../build/target";
+import { _sort_strings_cmd } from "../string_cmd_utils";
+import { contains_string, starts_with, strip_prefix } from "../string_utils";
+import {
+    TOOLCHAIN_MANIFEST_ABSENT,
+    TOOLCHAIN_MANIFEST_OK,
+    ToolchainManifest,
+    ToolchainManifestRecord,
+    toolchain_manifest_read,
+    toolchain_manifest_reinstall_hint
+} from "./manifest";
+
+// A payload scan. `complete` is false when the directory walk was truncated,
+// which must fail closed rather than silently shorten the manifest.
+struct ToolchainPayloadScan {
+    complete: boolean;
+    files: string[];
+}
+
+// Files under a store-relative subtree, expressed as store-relative paths.
+// There is no existing generic `walk_files` helper: built from `walk_dirs`
+// (returns directories, root included) + `fs.listDirectory` +
+// `fs.is_directory` on each entry.
+//
+// `walk_dirs` clamps to `FS_TREE_MAX_DEPTH` and stops at
+// `FS_TREE_MAX_NODES` (`fs_tree.sfn:110-112`), returning a SHORTER list with
+// no error signal. Clamping only means it will not crash — it does not mean
+// the walk was complete, and a file the walk never reached would be neither
+// recorded at install nor reported as unrecorded later: invisible in both
+// directions, which SFEP-0073 §3.8's "every runtime/workspace payload file"
+// does not allow. So the truncation is detected here: any subdirectory that
+// was listed but never itself walked means the bound was hit (SFN-1064).
+fn _walk_payload_subtree(store_dir: string, subdir_rel: string) -> ToolchainPayloadScan ![io] {
+    let mut files: string[] = [];
+    let root = store_dir + "/" + subdir_rel;
+    if !fs.exists(root) {
+        return ToolchainPayloadScan { complete: true, files: files };
+    }
+    let dirs = walk_dirs(root, 0, 1000000);
+    let mut di: int = 0;
+    loop {
+        if di >= dirs.length { break; }
+        let dir = dirs[di];
+        let entries = fs.listDirectory(dir);
+        let mut ei: int = 0;
+        loop {
+            if ei >= entries.length { break; }
+            let full = dir + "/" + entries[ei];
+            if fs.is_directory(full) {
+                if !contains_string(dirs, full) {
+                    return ToolchainPayloadScan {
+                        complete: false,
+                        files: []
+                    };
+                }
+            } else { files.push(strip_prefix(full, store_dir + "/")); }
+            ei += 1;
+        }
+        di += 1;
+    }
+    return ToolchainPayloadScan { complete: true, files: files };
+}
+
+// Every compilation-input file under `store_dir`, store-relative, in
+// deterministic (sorted) order. Excludes `.sha256` and `.install-manifest`
+// themselves — neither is a compilation input.
+fn toolchain_scan_payload(store_dir: string) -> ToolchainPayloadScan ![io] {
+    let mut files: string[] = [];
+    let bin_rel = host_exe_name("sailfin");
+    if fs.exists(store_dir + "/" + bin_rel) { files.push(bin_rel); }
+    let alias_rel = host_exe_name("sfn");
+    if fs.exists(store_dir + "/" + alias_rel) { files.push(alias_rel); }
+    let runtime = _walk_payload_subtree(store_dir, "runtime");
+    if !runtime.complete { return runtime; }
+    let capsules = _walk_payload_subtree(store_dir, "capsules");
+    if !capsules.complete { return capsules; }
+    files = files.concat(runtime.files);
+    files = files.concat(capsules.files);
+    if fs.exists(store_dir + "/workspace.toml") {
+        files.push("workspace.toml");
+    }
+    return ToolchainPayloadScan {
+        complete: true,
+        files: _sort_strings_cmd(files)
+    };
+}
+
+// Hashes every payload file. An unreadable payload aborts generation
+// (returns `[]`) rather than recording a partial set — `_sha256_of_file`
+// already fails closed with `""` on a read failure.
+fn toolchain_build_records(store_dir: string) -> ToolchainManifestRecord[] ![io] {
+    let scan = toolchain_scan_payload(store_dir);
+    if !scan.complete { return []; }
+    let paths = scan.files;
+    let mut records: ToolchainManifestRecord[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        let digest = _sha256_of_file(store_dir + "/" + paths[i]);
+        if digest.length == 0 { return []; }
+        records.push(ToolchainManifestRecord {
+            digest: digest, path: paths[i]
+        });
+        i += 1;
+    }
+    return records;
+}
+
+struct ToolchainVerifyOutcome {
+    ok: boolean;
+    unverified: boolean;  // true when the manifest is ABSENT (legacy boundary)
+    detail: string;  // first offending path + what was wrong; "" when ok
+}
+
+fn _toolchain_manifest_status_outcome(manifest: ToolchainManifest) -> ToolchainVerifyOutcome {
+    if manifest.status == TOOLCHAIN_MANIFEST_ABSENT {
+        // SFEP-0046 legacy/unverified boundary: an entry whose manifest was
+        // never written (or was deleted) still runs. Reporting `unverified`
+        // rather than failing is the documented compatibility tradeoff
+        // SFN-1064's acceptance criteria require. This is the ONLY permissive
+        // status — a manifest that merely failed to parse falls through to
+        // the fail-closed branch below.
+        return ToolchainVerifyOutcome {
+            ok: true,
+            unverified: true,
+            detail: ""
+        };
+    }
+    return ToolchainVerifyOutcome {
+        ok: false,
+        unverified: false,
+        detail: manifest.detail
+    };
+}
+
+fn _record_digest(manifest: ToolchainManifest, path: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= manifest.records.length { break; }
+        if manifest.records[i].path == path {
+            return manifest.records[i].digest;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// Which slice of the payload a check covers. `BUNDLED` is the compilation
+// inputs a build-like command is about to read; `ALL` is the whole entry.
+let TOOLCHAIN_SCOPE_ALL: int = 0;
+let TOOLCHAIN_SCOPE_BUNDLED: int = 1;
+
+fn _in_scope(path: string, scope: int) -> boolean {
+    if scope == TOOLCHAIN_SCOPE_ALL { return true; }
+    return starts_with(path, "runtime/") || starts_with(path, "capsules/")
+        || path == "workspace.toml";
+}
+
+fn _record_paths_in_scope(manifest: ToolchainManifest, scope: int) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= manifest.records.length { break; }
+        let path = manifest.records[i].path;
+        if _in_scope(path, scope) { out.push(path); }
+        i += 1;
+    }
+    return out;
+}
+
+// Union of two path lists, sorted so a failure names the same file whatever
+// order the disk walk happened to yield.
+fn _union_paths(a: string[], b: string[]) -> string[] {
+    let mut out: string[] = a;
+    let mut i: int = 0;
+    loop {
+        if i >= b.length { break; }
+        if !contains_string(out, b[i]) { out.push(b[i]); }
+        i += 1;
+    }
+    return _sort_strings_cmd(out);
+}
+
+// Verify an explicit set of store-relative paths against the manifest.
+//
+// Every path in the set MUST carry a manifest record: a path with no record
+// is `unrecorded`, never a silent pass. That is what makes a *stripped*
+// record fail closed. An earlier revision filtered the manifest's own
+// records by an `only` list, so a manifest with the executable's record
+// deleted matched nothing and returned ok without hashing anything —
+// exactly the "before re-exec, the selected executable is hashed against
+// that manifest" guarantee SFEP-0073 §3.8 requires (SFN-1064).
+fn _verify_set(store_dir: string, manifest: ToolchainManifest, paths: string[]) -> ToolchainVerifyOutcome ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        let path = paths[i];
+        let digest = _record_digest(manifest, path);
+        if digest.length == 0 {
+            return ToolchainVerifyOutcome {
+                ok: false,
+                unverified: false,
+                detail: "unrecorded: " + path
+            };
+        }
+        let full_path = store_dir + "/" + path;
+        if !fs.exists(full_path) {
+            return ToolchainVerifyOutcome {
+                ok: false,
+                unverified: false,
+                detail: "missing: " + path
+            };
+        }
+        if _sha256_of_file(full_path) != digest {
+            return ToolchainVerifyOutcome {
+                ok: false,
+                unverified: false,
+                detail: "modified: " + path
+            };
+        }
+        i += 1;
+    }
+    return ToolchainVerifyOutcome {
+        ok: true,
+        unverified: false,
+        detail: ""
+    };
+}
+
+// Verify every file in `scope`, taking the required set as the union of what
+// is on disk and what the manifest records. Checking the union (rather than
+// either side alone) is what makes all three tamper shapes fail closed: a
+// deleted file is `missing`, an added file is `unrecorded`, and a deleted
+// *record* is `unrecorded` too.
+fn _verify_scope(store_dir: string, scope: int) -> ToolchainVerifyOutcome ![io] {
+    let manifest = toolchain_manifest_read(store_dir);
+    if manifest.status != TOOLCHAIN_MANIFEST_OK {
+        return _toolchain_manifest_status_outcome(manifest);
+    }
+    let scan = toolchain_scan_payload(store_dir);
+    if !scan.complete {
+        return ToolchainVerifyOutcome {
+            ok: false,
+            unverified: false,
+            detail: "payload too deep or too large to enumerate completely"
+        };
+    }
+    let mut on_disk: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= scan.files.length { break; }
+        if _in_scope(scan.files[i], scope) {
+            on_disk.push(scan.files[i]);
+        }
+        i += 1;
+    }
+    let required = _union_paths(on_disk, _record_paths_in_scope(manifest, scope));
+    return _verify_set(store_dir, manifest, required);
+}
+
+// Hash the executable dispatch is about to `process.exec`. The binary is
+// required unconditionally — its record cannot be absent — while the `sfn`
+// alias joins the set only when it exists on disk.
+fn toolchain_verify_executable(store_dir: string) -> ToolchainVerifyOutcome ![io] {
+    let manifest = toolchain_manifest_read(store_dir);
+    if manifest.status != TOOLCHAIN_MANIFEST_OK {
+        return _toolchain_manifest_status_outcome(manifest);
+    }
+    let mut paths: string[] = [host_exe_name("sailfin")];
+    let alias = host_exe_name("sfn");
+    if fs.exists(store_dir + "/" + alias) { paths.push(alias); }
+    return _verify_set(store_dir, manifest, paths);
+}
+
+fn toolchain_verify_bundled_inputs(store_dir: string) -> ToolchainVerifyOutcome ![io] {
+    return _verify_scope(store_dir, TOOLCHAIN_SCOPE_BUNDLED);
+}
+
+// The primitive the future `sfn toolchain verify` leaf calls (SFN-1066
+// owns that CLI surface).
+// Every check is a full, uncached hash of the files in scope: nothing is
+// cached anywhere, so SFEP-0073 §3.8's "can be forced uncached" holds by
+// construction. A memo was tried and removed — every caller runs exactly one
+// check per process, so it could never hit, and it bought a module-level
+// mutable global for nothing (SFN-1064).
+fn toolchain_verify_entry(store_dir: string) -> ToolchainVerifyOutcome ![io] {
+    return _verify_scope(store_dir, TOOLCHAIN_SCOPE_ALL);
+}
+
+// The fail-closed diagnostic §3.8 requires: what failed, which store
+// entry, and the exact reinstall command. Never deletes or repairs the
+// entry — a corrupted store may be evidence, and silent repair would hide
+// the underlying cause.
+// SFEP-0073 §3.8 requires the failure to name the *exact* reinstall command,
+// so the version is taken from the manifest the entry actually carries rather
+// than inferred from its path. `fallback_version` covers the cases where the
+// manifest cannot supply one (unreadable, or a caller that already knows the
+// pinned target). Re-reading here costs nothing: this is a terminal error
+// path, not the hot check.
+fn toolchain_print_integrity_failure(store_dir: string, fallback_version: string, outcome: ToolchainVerifyOutcome) -> void ![io] {
+    let mut version = fallback_version;
+    let manifest = toolchain_manifest_read(store_dir);
+    if manifest.meta.version.length > 0 { version = manifest.meta.version; }
+    // stderr, matching every other diagnostic on the dispatch gate this is
+    // called from: the refusal must not contaminate a command's stdout
+    // contract.
+    print.err("error: toolchain integrity check failed for " + version);
+    print.err("  " + outcome.detail);
+    print.err("  store entry: " + store_dir);
+    print.err("  reinstall with: " + toolchain_manifest_reinstall_hint(version));
+}
+
+export {
+    ToolchainPayloadScan,
+    ToolchainVerifyOutcome,
+    toolchain_build_records,
+    toolchain_scan_payload,
+    toolchain_print_integrity_failure,
+    toolchain_verify_bundled_inputs,
+    toolchain_verify_entry,
+    toolchain_verify_executable
+};

@@ -26,7 +26,7 @@ fn _assert_under_budget(path: string) -> void ![io] {
 
 test "toolchain: every command module stays under 750 lines" ![io] {
     _assert_under_budget("compiler/src/cli/commands/toolchain.sfn");
-    let modules: string[] = ["dispatch", "host", "install", "store"];
+    let modules: string[] = ["dispatch", "host", "install", "integrity", "manifest", "store"];
     let mut i: int = 0;
     loop {
         if i >= modules.length { break; }

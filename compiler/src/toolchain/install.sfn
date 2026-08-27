@@ -23,6 +23,7 @@ import {
     toolchain_asset_host_triple,
     toolchain_current_host
 } from "./host";
+import { toolchain_verify_entry } from "./integrity";
 import {
     toolchain_binary_path,
     toolchain_commit_staged_entry,
@@ -239,7 +240,19 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     let sha_path = store_dir + "/.sha256";
     if toolchain_store_ready(store_dir) {
         let recorded = _toml_trim_cmd(fs.readFile(sha_path));
-        if strings_equal(recorded, expected) {
+        // `toolchain_store_ready` only proves the binary exists and `.sha256`
+        // is non-empty; it never looks at the payload. Short-circuiting on
+        // that alone made reinstall a no-op over a corrupt entry — dispatch
+        // would refuse and print "reinstall with: sfn toolchain install
+        // <version>", that command would report "already installed" and exit
+        // 0, and the next command would fail identically, with no way out
+        // short of deleting the entry by hand. Verifying here is also what
+        // lets a pre-SFN-1064 entry acquire a manifest by reinstalling.
+        // §3.8 forbids repair without an explicit user command; an explicit
+        // `sfn toolchain install` IS that command, so falling through to a
+        // fresh download and atomic re-commit is the sanctioned repair.
+        let installed = toolchain_verify_entry(store_dir);
+        if strings_equal(recorded, expected) && installed.ok && !installed.unverified {
             print("sfn toolchain: " + version
                 + " already installed; release signature re-verified");
             print("  " + store_dir);
@@ -302,11 +315,30 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         return 1;
     }
     let staged_bin = host_exe_name(staged_dir + "/sailfin");
-    if !toolchain_lay_out_store_entry(root, staged_dir, staged_bin, expected) {
+    if !toolchain_lay_out_store_entry(root, staged_dir, staged_bin, expected, version, host.triple) {
         toolchain_discard_staged_entry(staged_dir);
         remove_tree(temp);
         return 1;
     }
+    // SFEP-0073 §3.8 requires the entry to commit only once every recorded
+    // payload is present and matches. Verifying staging before the atomic
+    // rename means a manifest that disagrees with the bytes beside it can
+    // never become a published entry — the failure lands on a discarded
+    // staging directory instead of a half-trusted store entry (SFN-1064).
+    // Forced uncached: this payload was written moments ago, so a memoized
+    // verdict from earlier in the process must not stand in for it.
+    let staged_ok = toolchain_verify_entry(staged_dir);
+    if !staged_ok.ok {
+        print("error: the staged toolchain payload failed install-manifest verification");
+        print("  " + staged_ok.detail);
+        toolchain_discard_staged_entry(staged_dir);
+        remove_tree(temp);
+        return 1;
+    }
+    // No `toolchain_discard_staged_entry` here: every `false` path inside
+    // `toolchain_commit_staged_entry` already removes staging (store.sfn).
+    // Adding a second discard would be a double-remove; dropping the
+    // helper's own cleanup would leak staging dirs.
     if !toolchain_commit_staged_entry(staged_dir, store_dir) {
         print("error: failed to atomically commit the verified toolchain to "
             + store_dir);
