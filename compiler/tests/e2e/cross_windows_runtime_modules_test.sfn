@@ -1,8 +1,9 @@
 // SFN-775 / SFEP-0068 native cross-target source-of-truth guard.
 //
-// The former test compared `runtime/capsule.toml` with Makefile's duplicated
-// `RUNTIME_MODS` shell list. That list no longer exists: the runtime provider
-// declares its MinGW differences once and the native driver consumes them.
+// The former test compared `runtime/capsule.toml` with the root Makefile's
+// duplicated `RUNTIME_MODS` shell list. Neither that list nor the Makefile
+// still exists (SFN-60): the runtime provider declares its MinGW differences
+// once and the native driver consumes them.
 // These static contracts keep production manifest ownership explicit without
 // recreating a second target table in test code.
 import { contains } from "sfn/strings";
@@ -10,7 +11,6 @@ import { expect_contains_str, expect_eq_bool } from "sfn/test";
 
 test "cross-windows runtime policy is manifest-owned" ![io] {
     let manifest = fs.readFile("runtime/capsule.toml");
-    let makefile = fs.readFile("Makefile");
     let conditioner = fs.readFile("compiler/src/build/runtime_objs.sfn");
     let target = fs.readFile("compiler/src/build/target.sfn");
 
@@ -22,9 +22,6 @@ test "cross-windows runtime policy is manifest-owned" ![io] {
     assert expect_eq_bool(contains(conditioner, "target_condition_runtime_sfn_sources"), false).ok;
     assert expect_eq_bool(contains(target, "process_windows"), false).ok;
     assert expect_eq_bool(contains(target, "rlimit_windows"), false).ok;
-    assert expect_eq_bool(contains(makefile, "ci-cross-windows:"), false).ok;
-    assert expect_eq_bool(contains(makefile, "RUNTIME_MODS="), false).ok;
-    assert expect_eq_bool(contains(makefile, "build/native/raw"), false).ok;
 }
 
 test "cross-windows manifest selects every Win32 runtime sibling" ![io] {

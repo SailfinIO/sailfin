@@ -124,8 +124,8 @@ here.
   `compiler/capsule.toml` declares the private binary capsule as
   `sfn/compiler`. A manifest-driven build emits the scoped artifact at
   `build/capsules/sfn/compiler/bin/compiler` and its module IR plus sidecar
-  under `build/capsules/sfn/compiler/`, while `make compile` and
-  `sfn dev bootstrap install` continue to publish the user-facing executable
+  under `build/capsules/sfn/compiler/`, while
+  `sfn dev bootstrap install` continues to publish the user-facing executable
   as `build/bin/sfn` (and the installed command remains `sfn`). Bootstrap,
   build-stamp, and hermetic-cache predicates use the scoped identity; version
   resolution still reads `compiler/capsule.toml`. Warm self-host rebuilds keep
@@ -230,9 +230,10 @@ here.
   `channel = "alpha"`) as the default for every member (SFEP-0051 Phase 2,
   SFN-414), making the self-host toolchain contract explicit; the compiler
   member's `capsule.toml` raises `sfn` per field for its own seedcheck gate,
-  and the floor stays `<=` the released compiler version so `make compile`
-  self-hosts. A mismatch is a hard error (non-zero exit, actionable
-  diagnostic); `--skip-toolchain-check`, `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`, or
+  and the floor stays `<=` the released compiler version so
+  `sfn dev bootstrap build` self-hosts. A mismatch is a hard error (non-zero
+  exit, actionable diagnostic); `--skip-toolchain-check`,
+  `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`, or
   `SAILFIN_TOOLCHAIN=off`/`=0` downgrade it to a warning and proceed. `sfn
   init` scaffolds `[toolchain] sfn = "<running version>"` (`toml_generate`).
   **Phase 2 acquire — `sfn toolchain install <version>`** (SFEP-0046 §3.5,
@@ -337,7 +338,7 @@ here.
   an unsupported `policy`, an unknown `source`, or `required = false` for a
   github-release seed. `sfn build -p compiler` enters **bootstrap mode**
   (`bootstrap_gate_or_dispatch`, `build.sfn`): when the running toolchain's core
-  version already equals the pinned seed — every `make compile` self-host pass —
+  version already equals the pinned seed — every self-host pass —
   it is a no-op and builds in-process; a *different* toolchain acquires the
   exact seed into the repo-local store (reusing the SFN-168 fail-closed
   fetch/verify installer against `build/toolchains/seed`) and re-execs it with a
@@ -345,8 +346,8 @@ here.
   skips the gate). Maintainer commands live under a dev namespace kept out of
   the primary `sfn --help`: `sfn dev bootstrap fetch|build|check|pin`.
   `bootstrap.toml` `[seed].version` is the sole source of truth for the pinned
-  self-host seed. The Makefile bootstrap recipes stay as transitional
-  compatibility shims.
+  self-host seed. The Makefile bootstrap recipes stayed as transitional
+  compatibility shims until SFN-60 deleted the Makefile.
 - **Native bootstrap install + fingerprint gate** (SFN-679). `sfn dev
   bootstrap build` no longer stops at the scoped
   `build/capsules/sfn/compiler/bin/compiler` artifact — it now owns
@@ -390,28 +391,27 @@ here.
   `sfn dev bootstrap build -- <build-arg>...` forwards the trailing arguments
   verbatim to the pinned seed's `build -p compiler` invocation (SFN-1076), so
   native self-host diagnostics can use `--no-cache`, `--cache-trace`, and
-  future build flags without a Makefile passthrough.
+  future build flags without needing a Makefile passthrough to keep in sync
+  (moot now that SFN-60 deleted the Makefile).
   Overrides: `--force` on `build`, `SAILFIN_BOOTSTRAP_FORCE=1` (also accepts
-  `true`/`yes`); `make compile` additionally honours `FORCE=1`.
-  `scripts/compiler_source_fingerprint.sh` is retired — `make compile` /
-  `make rebuild` and the two CI sites delegate to the native command instead;
-  the native digest deliberately does not byte-match the retired script's
-  git-blob-SHA1-based output. **Two caveats.** (1) The install/fingerprint
-  policy is executed *by* the pinned seed (`sfn dev bootstrap build` is a
+  `true`/`yes`); the retired `make compile` additionally honoured `FORCE=1`.
+  `scripts/compiler_source_fingerprint.sh` is retired — the CI sites delegate
+  to the native command instead (`make compile`/`make rebuild` did the same
+  before SFN-60 deleted the Makefile); the native digest deliberately does
+  not byte-match the retired script's git-blob-SHA1-based output. **Two
+  caveats.** (1) The install/fingerprint policy is executed *by* the pinned seed (`sfn dev bootstrap build` is a
   seed-run command), so it is only exercisable once a seed carrying it is
   pinned — true of the pinned seed today, so `sfn dev bootstrap build` is the
-  practical path; `make compile` still delegates the same install +
-  fingerprint logic to the freshly built compiler, landing at the same path
-  with the same recorded digest.
+  practical (and now only) path.
   (2) The digest scope covers both compiler source populations plus `runtime`;
   it does not cover top-level dependency capsules under `capsules/*/src/` or
   `compiler/capsule.toml` itself, so a capsule-dependency edit or a manifest
-  version bump does not invalidate the gate (`make compile` reports
+  version bump does not invalidate the gate (`sfn dev bootstrap build` reports
   up-to-date regardless); workaround is `sfn dev bootstrap build --force`.
   Prerequisite for the final Makefile sweep in the
   Makefile Retirement epic (`docs/proposals/0006-build-architecture.md`
-  Stage D): `compile-impl`/`rebuild-impl` no longer own install/fingerprint
-  policy, though the Makefile itself still exists.
+  Stage D): `compile-impl`/`rebuild-impl` no longer owned install/fingerprint
+  policy before SFN-60 deleted the Makefile outright.
 - **Native MinGW cross build and packaging** (SFN-775/SFN-776,
   SFEP-0068). `sfn build --target=x86_64-w64-mingw32 -p compiler -o
   build/windows/sailfin.exe` re-emits the complete compiler/runtime graph for
@@ -439,18 +439,18 @@ here.
   replaces the `make clean-build` / `make clean` / `make clean-all` shell
   recipes: `build` removes every top-level `build/` entry except the fetched
   seed toolchain store (derived from `bootstrap.toml [store]`), `--include-seed`
-  (or `SAILFIN_CLEAN_KEEP_SEED=0`; `make clean-build KEEP_SEED=0` translates
+  (or `SAILFIN_CLEAN_KEEP_SEED=0`; `make clean-build KEEP_SEED=0` translated
   into it) additionally removes that store, and `dist` removes the
   packaged-release output directory. It refuses
   to run outside a compiler checkout and never touches the global
   content-addressed cache root that `sfn cache clean` owns. Like SFN-679, this
-  is a seed-run command, so it is only exercisable once a seed carrying it is
-  pinned — until then the Makefile recipes probe for support and fall back to
-  their transitional shell path.
+  is a seed-run command, so it was only exercisable once a seed carrying it
+  was pinned; the Makefile recipes probed for support and fell back to their
+  transitional shell path until SFN-60 deleted the Makefile.
 - **Native pipeline verify command** (SFN-725). `sfn dev verify [--fast]
   [--full-pass1] [--json] [--strict] [--jobs N] [--test-timeout SECS]`
   (`compiler/src/cli/commands/dev_verify.sfn`, hidden `dev` namespace like
-  `dev bootstrap`/`dev clean`) sequences the `make check` pipeline as a
+  `dev bootstrap`/`dev clean`) sequences the retired `make check` pipeline as a
   five-phase ledger — `compile` → `smoke-pass1` → `tests-pass1` (skipped
   unless `--full-pass1`) → `selfhost` → `tests-seedcheck` — and emits the
   agent verdict block itself, replacing the retired bash banner-scraping
@@ -480,11 +480,11 @@ here.
   renamed from its `make`-hosted predecessor and given the new `host` field
   by SFEP-0014 Phase 7 (SFN-726), which also deleted the bash wrapper and
   the `Makefile`'s `<target>-impl` wrapping outright. Like SFN-679 and
-  SFN-680, `sfn dev verify` is a seed-run command, so it is only
-  exercisable once a seed carrying it is pinned. `make check` is **not**
-  re-plumbed onto it — that rehost is `SFN-60` — so it keeps its own
-  pipeline directly and, since Phase 7, emits no verdict of any kind; there
-  is no fallback producer while the seed pin is pending.
+  SFN-680, `sfn dev verify` is a seed-run command, so it was only
+  exercisable once a seed carrying it was pinned. `make check` was **not**
+  re-plumbed onto it before `SFN-60` deleted the Makefile outright — it kept
+  its own pipeline directly and, since Phase 7, emitted no verdict of any
+  kind.
 - **Release signing (producer side).** Every release publishes a `SHA256SUMS`
   manifest over its assets plus a detached Ed25519 signature (`SHA256SUMS.sig`,
   128 hex chars) — generated by `scripts/sign-release-manifest.sh`, wired into
@@ -561,13 +561,14 @@ here.
   captured output remains plain by default.
 - **Deterministic self-hosting.** The compiler is a verified fixed point — the
   seedcheck generation and the generation it rebuilds produce byte-identical
-  LLVM IR across all modules; `make check` enforces this. The triple-pass
+  LLVM IR across all modules; `sfn dev verify` enforces this. The triple-pass
   validation (seedcheck + fixed-point rebuild with per-generation `.ll`
   scratch isolation, hello-world smoke gate,
   fixed-point IR diff, and seedcheck→canonical promotion) is owned by the
   compiler as the internal `sfn selfhost` command (`compiler/src/cli_selfhost.sfn`,
-  #1502, epic #513 Phase 1) — `make check`'s `check-impl` is now a one-line
-  invocation of it rather than ~90 lines of shell. The verb is internal
+  #1502, epic #513 Phase 1) — the retired `make check`'s `check-impl` had
+  shrunk to a one-line invocation of it before SFN-60 deleted the Makefile,
+  down from ~90 lines of shell. The verb is internal
   (absent from `sfn --help`; CI / `sfn dev verify` are its only callers, mirroring
   Go's `cmd/dist` and Rust's `x.py`). A non-fixed-point result warns by default
   (parity with the former shell); `sfn selfhost --strict` makes it fatal.
@@ -650,7 +651,7 @@ here.
   linked test binary by the compiler binary's SHA-256 as well as its source,
   dependency, runtime, and flag inputs; byte-identical compilers share entries
   across commits, while different compiler binaries always miss (SFN-545,
-  #1230, #1233). `make check` passes
+  #1230, #1233). The nightly `sfn dev verify` gate passes
   `--no-test-cache` so the full gate always cold-builds. **Runtime object
   invalidation (#1197):** with the C runtime retired (#822/#823) the entire
   runtime is now `sfn-sources` (`runtime/capsule.toml`) emitted by the Sailfin
@@ -661,9 +662,9 @@ here.
   binary SHA-256 for `.dirty` stamps) into its key, so a recompiled compiler
   busts the cache automatically — no manual `secsplit*` tag bump or
   `rm build/sailfin/*.o`. Which binary emits the runtime: during a cold
-  `make compile` the *seed* emits the first-pass binary's runtime, so a
+  `sfn dev bootstrap build` the *seed* emits the first-pass binary's runtime, so a
   runtime codegen fix only reaches the linked runtime after the *next* pass
-  emits it (the first-pass binary re-emits for `seedcheck`, and `make check`'s
+  emits it (the first-pass binary re-emits for `seedcheck`, and `sfn dev verify`'s
   test binaries link those first-pass-emitted objects); a codegen fix that must
   change the runtime shipped in `build/native` therefore still requires a fresh
   seed pin (same seed dependency as #1193's E0808 class).
@@ -919,7 +920,7 @@ here.
 
 ## Compiler Pipeline (Current)
 
-- `compiler/src/` is the primary toolchain; `make compile` produces
+- `compiler/src/` is the primary toolchain; `sfn dev bootstrap build` produces
   `build/bin/sfn`. Pipeline: Lexer → Parser → Type Checker →
   Effect Checker → Native Emitter (`.sfn-asm`) → LLVM Lowering.
 - **Shape-typed tensor IR foundation** (SFEP-0053, SFN-427): the compiler has
@@ -1372,8 +1373,8 @@ here.
 | Capsule-defined decorators | Works (Tier-1 entry hook) | SFEP-0023 §4.4–4.5 (SFN-72): a decorator imported from a capsule lowers to a normal call into the imported (mangled) symbol at function entry, marshalling `(args, fn_name)` — Tier-1, no literal-argument forwarding yet. `sfn/log` ships `@logExecution` (`[INFO] <fn>`) and `@trace` (`[TRACE] → entered <fn>`). The un-imported built-in `@logExecution`/`@trace` still lowers to the `runtime_log_execution_fn` fallback and `sfn check` emits the `W0211` `deprecated-api` lint pointing at `import { logExecution } from "log"`; deleting the built-in string-match + runtime body is seed-gated (SFEP-0023 steps E/F) |
 | `sfn fmt` | **Shipped** | Zero-config token-stream formatter, `--check`/`--write`, CI-enforced; generic type arguments containing function types (for example, `Channel<fn() -> void>`) keep tight angle brackets without fusing the close with a following assignment, and lowering consumes the formatter-canonical `fn (` spelling through the shared balanced function-type parser so formatting cannot change typed-channel behavior (SFN-434); architecture + limitations in `docs/proposals/0007-fmt-architecture.md` |
 | `sfn check` | **Shipped** | Parse + typecheck + effect-check, no codegen; `--json` envelope; cross-module conformance; directory mode completes the full 156-file tree (~295 s — perf, not stability, is the open item); relative-import resolution (`E0430`/`E0431`, #1953) |
-| `sfn test` | **Shipped** | Discovery, `-k`/`--tag` filtering (#849), lifecycle hooks (#975, ordering only), snapshots + `--update-snapshots` (#977), `--jobs N` parallel runner (#1236), per-test binary cache (#1230/#1233). **Recoverable test harness (SFN-17):** the synthesized `@main` harness (`compiler/capsules/codegen-llvm/src/lowering/lowering_core/test_harness.sfn`) wraps each hook/test call in an inline setjmp/longjmp frame and recovers — a failing test no longer aborts later tests in the same file; a failing `before_each` marks each affected test `fail` naming the hook, and `after_each`/`after_all` failures attribute to the hook rather than a test. `sfn test --json` gains a `hook` event kind; `schema_version` 1→2. Design: `docs/proposals/design-notes/sfn-17-recoverable-test-harness.md`. **Test-runner perf (SFEP-0044, 2026-07-08):** per warm test-file child (macOS 8-core): ~4 s → 2.9 s (in-process SHA-256 for text artifacts, #1995, PR #2000) → 1.75 s (invocation-scoped runtime-identity stamp, #1996, PR #2007); clang link window 2.9 s → 1.13 s. Direct `sfn test` and `sfn dev shard run` parallelism defaults natively to `min(cores, ((RAM * 80%) - 5 GiB) / 3 GiB)`, floor 1, cap 16, with a macOS cap of 2 — 3 GiB/job matches a measured pooled test child, and the explicit 5 GiB term reserves the parent runner, which compiles the whole dependency closure in-process before fanning out (SFN-547, re-sized SFN-626, re-sized SFN-781); `SAILFIN_TEST_JOBS` and explicit `--jobs N` override it in that order (SFN-91). Pooled children spawn with `SAILFIN_BUILD_JOBS=1` so a nested build's own emit fan-out cannot multiply the peak (SFN-547). The Makefile no longer computes a job default of its own: SFN-1158 / SFEP-0074 §5.2 retired the pre-binary bash duplicate that backed `TEST_JOBS` (#1998, PR #2001), so `make test`/`make check` omit `--jobs` and let the native probe size the pool, and `SAILFIN_TEST_JOBS=N` is the sole override; `make check` runs ONE cold full suite (seedcheck leg, `--no-test-cache` backstop) + a pass1 smoke gate, `CHECK_FULL_PASS1=1` restores the old shape. CI shard legs restore a per-OS+shard test-binary cache across runs (#2008, PR #2009); safety is in the self-validating entry keys (#1233). Known residual: unit-tier cold cost dominated by per-child dep-closure compilation (~15 s CPU/file measured) — tracked as #2010; resolver sharing is #1997. Binary and text artifact hashing now share one binary-safe in-process path (`_read_file_bytes` + streaming `sha256_hex_of_bytes`, SFN-659/SFN-660); the former 64 KiB subprocess threshold and whole-message `int[]` materialization are retired. **Harness↔runner IPC (SFEP-0050, SFN-393):** the harness now writes framed `SFTR` records to fd 2 and the runner demuxes them off the child's captured stderr pipe inline (via `io.poll_any` + the SFN-402 process-handle primitives), retiring the `results.log`/`fail.bin`/`_subframe_summary.json` file side-channel (SFN-17). Per-process pipe ownership makes the nesting/pool collision structurally impossible, so the IPC-key scrubbing (`_pool_child_env`, the nested-runner `clean_runner_env`) is no longer load-bearing for harness IPC — it now only isolates the `SAILFIN_TEST_SCRATCH` build-cache root, which survives. The `--json` v2 schema is unchanged. **Per-file durations (SFN-862):** the default human output appends each file's wall time to its `PASS`/`FAIL` line, and a multi-file run with at least two timed files ends with a `--slowest N` summary (default `5`, `0` disables, range `[0, 1000]`); human-output only, `--json` and its schema are unchanged; files with no captured timing (compile/link-stage failures) are excluded from the summary. **Non-vacuous selectors (SFN-820):** an explicit `-k`/`--tag` that matches no test, when discovery *did* find `*_test.sfn` files, now exits non-zero with a diagnostic naming the unmatched selector and the discovered file count, instead of exiting 0 with the misleading "no `*_test.sfn` files found" line — a typo'd selector can no longer masquerade as a green run (matching `sfn bench --filter`). The benign exit-0 contract (#848) is preserved for a genuinely empty suite and for an empty `--shard` partition, and `-k ""` is not treated as an active filter. **Shared runtime object cache (SFN-1086):** the link path now assembles runtime `.o`/`.ll` and `rt-import-context` staging artifacts against the same shared content-addressed root `sfn build`/`sfn run` already use (`runtime_obj_cache_root()`, `compiler/src/build_cache.sfn`, resolving `$SAILFIN_BUILD_CACHE_DIR` else in-tree `build/cache`) instead of a work-dir-local `""` root, so a warm cache survives a fresh scratch dir. Measured (Linux x86_64, 14.7 GiB, jobs=2): cold shared cache 48.0 s / 40 runtime modules emitted; warm shared cache with a fresh scratch dir 2.6 s / 0 modules emitted (18.5x); `--no-test-cache` still passes `""` and stays cold (41.5 s / 40 modules, unchanged). The win is concentrated in the single-file dev loop and nested single-file `sfn test` invocations inside e2e tests, which previously rebuilt the whole runtime each time; amortized over a full pooled unit-tier run (330 files, 595.3 s) it is roughly 7.5%, not a blanket suite speedup, and `make check`'s `--no-test-cache` leg is unaffected. |
-| `sfn bench` | **Shipped** | Native benchmarking command (epic #1503). Three modes: `--compiler` (per-module compiler emit time + peak RSS across `compiler/src/**/*.sfn` and `compiler/capsules/**/*.sfn`, SFN-61), `[<path>...]` runtime-workload runner (build once, warm up, time K iterations, aggregate min/median inner-ms + peak RSS, SFN-63; default path `benchmarks/runtime`), and `--consumer` (consumer-build benchmark: builds each fixture under `--fixtures DIR`, default `benchmarks/consumer`, twice — cold, then warm against the cache the cold run populated — and records per fixture cold/warm wall time, stripped binary bytes, `.init_array` ctor-slot count, modules staged, and cold/warm cache hit/miss counts; builds only, never executes fixtures, so no `![net]` is needed; `--json` is rejected (exit 2, points at `--csv`); `--top`/`--budget-time`/`--budget-mem` are accepted but ignored, SFN-830). Shared `--top`/`--csv`/`--budget-time`/`--budget-mem`/`--work-dir` flags with exit 2 on budget violation (compiler/runtime modes only); `--json` emits the versioned `sailfin.bench/v1` envelope (SFN-64, `docs/reference/bench-json-schema.md`), also exposed as the `sailfin_bench` MCP passthrough. `make bench` / `make bench-runtime` / `make bench-consumer` are thin wrappers; the former bench shell scripts are retired. Reference: `site/src/content/docs/docs/reference/bench.md` |
+| `sfn test` | **Shipped** | Discovery, `-k`/`--tag` filtering (#849), lifecycle hooks (#975, ordering only), snapshots + `--update-snapshots` (#977), `--jobs N` parallel runner (#1236), per-test binary cache (#1230/#1233). **Recoverable test harness (SFN-17):** the synthesized `@main` harness (`compiler/capsules/codegen-llvm/src/lowering/lowering_core/test_harness.sfn`) wraps each hook/test call in an inline setjmp/longjmp frame and recovers — a failing test no longer aborts later tests in the same file; a failing `before_each` marks each affected test `fail` naming the hook, and `after_each`/`after_all` failures attribute to the hook rather than a test. `sfn test --json` gains a `hook` event kind; `schema_version` 1→2. Design: `docs/proposals/design-notes/sfn-17-recoverable-test-harness.md`. **Test-runner perf (SFEP-0044, 2026-07-08):** per warm test-file child (macOS 8-core): ~4 s → 2.9 s (in-process SHA-256 for text artifacts, #1995, PR #2000) → 1.75 s (invocation-scoped runtime-identity stamp, #1996, PR #2007); clang link window 2.9 s → 1.13 s. Direct `sfn test` and `sfn dev shard run` parallelism defaults natively to `min(cores, ((RAM * 80%) - 5 GiB) / 3 GiB)`, floor 1, cap 16, with a macOS cap of 2 — 3 GiB/job matches a measured pooled test child, and the explicit 5 GiB term reserves the parent runner, which compiles the whole dependency closure in-process before fanning out (SFN-547, re-sized SFN-626, re-sized SFN-781); `SAILFIN_TEST_JOBS` and explicit `--jobs N` override it in that order (SFN-91). Pooled children spawn with `SAILFIN_BUILD_JOBS=1` so a nested build's own emit fan-out cannot multiply the peak (SFN-547). The Makefile stopped computing a job default of its own before SFN-60 deleted it: SFN-1158 / SFEP-0074 §5.2 retired the pre-binary bash duplicate that backed `TEST_JOBS` (#1998, PR #2001), so `make test`/`make check` omitted `--jobs` and let the native probe size the pool, and `SAILFIN_TEST_JOBS=N` was the sole override; `make check` ran ONE cold full suite (seedcheck leg, `--no-test-cache` backstop) + a pass1 smoke gate, `CHECK_FULL_PASS1=1` restored the old shape — the nightly `sfn dev verify` gate is the native successor. CI shard legs restore a per-OS+shard test-binary cache across runs (#2008, PR #2009); safety is in the self-validating entry keys (#1233). Known residual: unit-tier cold cost dominated by per-child dep-closure compilation (~15 s CPU/file measured) — tracked as #2010; resolver sharing is #1997. Binary and text artifact hashing now share one binary-safe in-process path (`_read_file_bytes` + streaming `sha256_hex_of_bytes`, SFN-659/SFN-660); the former 64 KiB subprocess threshold and whole-message `int[]` materialization are retired. **Harness↔runner IPC (SFEP-0050, SFN-393):** the harness now writes framed `SFTR` records to fd 2 and the runner demuxes them off the child's captured stderr pipe inline (via `io.poll_any` + the SFN-402 process-handle primitives), retiring the `results.log`/`fail.bin`/`_subframe_summary.json` file side-channel (SFN-17). Per-process pipe ownership makes the nesting/pool collision structurally impossible, so the IPC-key scrubbing (`_pool_child_env`, the nested-runner `clean_runner_env`) is no longer load-bearing for harness IPC — it now only isolates the `SAILFIN_TEST_SCRATCH` build-cache root, which survives. The `--json` v2 schema is unchanged. **Per-file durations (SFN-862):** the default human output appends each file's wall time to its `PASS`/`FAIL` line, and a multi-file run with at least two timed files ends with a `--slowest N` summary (default `5`, `0` disables, range `[0, 1000]`); human-output only, `--json` and its schema are unchanged; files with no captured timing (compile/link-stage failures) are excluded from the summary. **Non-vacuous selectors (SFN-820):** an explicit `-k`/`--tag` that matches no test, when discovery *did* find `*_test.sfn` files, now exits non-zero with a diagnostic naming the unmatched selector and the discovered file count, instead of exiting 0 with the misleading "no `*_test.sfn` files found" line — a typo'd selector can no longer masquerade as a green run (matching `sfn bench --filter`). The benign exit-0 contract (#848) is preserved for a genuinely empty suite and for an empty `--shard` partition, and `-k ""` is not treated as an active filter. **Shared runtime object cache (SFN-1086):** the link path now assembles runtime `.o`/`.ll` and `rt-import-context` staging artifacts against the same shared content-addressed root `sfn build`/`sfn run` already use (`runtime_obj_cache_root()`, `compiler/src/build_cache.sfn`, resolving `$SAILFIN_BUILD_CACHE_DIR` else in-tree `build/cache`) instead of a work-dir-local `""` root, so a warm cache survives a fresh scratch dir. Measured (Linux x86_64, 14.7 GiB, jobs=2): cold shared cache 48.0 s / 40 runtime modules emitted; warm shared cache with a fresh scratch dir 2.6 s / 0 modules emitted (18.5x); `--no-test-cache` still passes `""` and stays cold (41.5 s / 40 modules, unchanged). The win is concentrated in the single-file dev loop and nested single-file `sfn test` invocations inside e2e tests, which previously rebuilt the whole runtime each time; amortized over a full pooled unit-tier run (330 files, 595.3 s) it is roughly 7.5%, not a blanket suite speedup, and the nightly `sfn dev verify` gate's `--no-test-cache` leg is unaffected. |
+| `sfn bench` | **Shipped** | Native benchmarking command (epic #1503). Three modes: `--compiler` (per-module compiler emit time + peak RSS across `compiler/src/**/*.sfn` and `compiler/capsules/**/*.sfn`, SFN-61), `[<path>...]` runtime-workload runner (build once, warm up, time K iterations, aggregate min/median inner-ms + peak RSS, SFN-63; default path `benchmarks/runtime`), and `--consumer` (consumer-build benchmark: builds each fixture under `--fixtures DIR`, default `benchmarks/consumer`, twice — cold, then warm against the cache the cold run populated — and records per fixture cold/warm wall time, stripped binary bytes, `.init_array` ctor-slot count, modules staged, and cold/warm cache hit/miss counts; builds only, never executes fixtures, so no `![net]` is needed; `--json` is rejected (exit 2, points at `--csv`); `--top`/`--budget-time`/`--budget-mem` are accepted but ignored, SFN-830). Shared `--top`/`--csv`/`--budget-time`/`--budget-mem`/`--work-dir` flags with exit 2 on budget violation (compiler/runtime modes only); `--json` emits the versioned `sailfin.bench/v1` envelope (SFN-64, `docs/reference/bench-json-schema.md`), also exposed as the `sailfin_bench` MCP passthrough. The former `make bench` / `make bench-runtime` / `make bench-consumer` wrappers and the bench shell scripts before them are retired. Reference: `site/src/content/docs/docs/reference/bench.md` |
 | Agent-language benchmark harness | **Shipped (v2.8 bounded pilot stopped; confirmation rejected)** | `benchmarks/llm/sfn350.sfn` records the SFN-364 machine-readable failure taxonomy per failed iteration, excludes provider/setup invalidations from language denominators, retains implementation defects as Track A adoption failures while excluding their paired instances from Track B learnability estimates, and exports blinded manual-classification templates plus a separate audit key. Seeded, paired Track B `examples`, `diagnostics`, and `primitive` ablation schedules are secondary-only and cannot authorize the primary decision. SFN-365 corrected current OpenAI models to use the Responses API, passed all setup and unscored gates, and completed the OpenAI Track A schedule. That family showed Sailfin one-shot success at 72.2% versus Scala at 77.7% and Python at 88.8%, but Python had no varying template. The Anthropic Track A batch was invalidated by thinking-only `max_tokens` responses, so Track B was not run and confirmatory spend was rejected under v2.1.0. SFN-368 replaces the aliased four-way task clones with independently allocated frozen prompts and hidden fixtures, records their SHA-256 identities, and rejects cumulative markers or duplicate fixture sets. SFN-369 teaches the shipped Sailfin `routine` / `spawn fn() -> T { ... }` / `await` surface, freezes equivalent Scala and Python guidance, and makes the Track A concurrency grader reject output-equivalent sequential programs with a distinct `missing_concurrency` diagnostic. SFN-376 applies the same frozen structural requirement to Sailfin-B and translated Rill-17 sources before semantic execution. Every v2.1.0 structured-concurrency observation is ineligible for selection, rerun, or pooling with v2.5.0; v2.4.0 produced no scored output. SFN-437 rejected v2.7 before packet exposure or scoring when `claude-sonnet-5` rejected manual `thinking.type=enabled`; SFN-438 froze v2.8 with adaptive thinking, explicit medium effort, truthful non-enforceable answer-headroom recording, and fail-closed probes. The fresh v2.8 setup and ten authorization smokes passed. OpenAI completed all 120 Track A attempts: Sailfin/Scala/Python one-shot rates were 66.6%/72.2%/91.6%, all solved by iteration 5, and Python exceeded the 90% useful-variance ceiling. Anthropic stopped on its fifth Track A observation after three `overloaded_error` responses exhausted the symmetric retry policy; Track B was not purchased. Both tracks therefore remain non-decision-grade, confirmation and external-adoption spend are NO-GO, and no v2.7 or v2.8 observation may be selectively rerun or pooled. SFN-439 tracks the required new-corpus/task-difficulty design. Protocol: `benchmarks/llm/PROTOCOL-V2.md`; readout and failure corpus: `benchmarks/llm/PILOT-V2.md` |
 | `sfn vet` | **Retracted** | Not planned as a command. Lint ships *inside* `sfn check` as the `W02xx` warning range (`W0210` bare assert, `W0211` deprecated decorator), home `tools/check.sfn` per `docs/style-guide.md`. A new advisory check is a new `W02xx` code, not a new verb; a check that should fail a build is an `Exxxx` code in the range owning its domain. Rationale + the rule-by-rule reassignment audit: SFEP-0003 §2.1 |
 | `sfn fix` | Planned — no gate | The `FixSuggestion`/`TextEdit` machinery ships (see Diagnostics above) and `E04xx` + `W0210` already populate it; what is missing is an edit applier (reverse-order splicing), producer coverage, and an overlap rule. Agents can already apply edits from the `sailfin-check/1` envelope without the command. SFEP-0003 §3.7 |

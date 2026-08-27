@@ -1,13 +1,12 @@
-// Regression coverage for SFN-564. `make compile` used the output binary's
-// mtime as its freshness predicate, which can miss an edit when timestamps are
-// preserved or have coarse resolution. The Makefile now delegates freshness to
-// this content fingerprint.
+// Regression coverage for SFN-564. The retired `make compile` recipe used the
+// output binary's mtime as its freshness predicate, which can miss an edit when
+// timestamps are preserved or have coarse resolution. `sfn dev bootstrap build`
+// delegates freshness to this content fingerprint instead.
 //
 // SFN-679 retired the shell implementation
 // (`scripts/compiler_source_fingerprint.sh`) in favour of the native
 // `sfn dev bootstrap fingerprint` subcommand; this file now drives that
 // subcommand directly instead of shelling out to the script.
-import { contains } from "sfn/strings";
 import { sfn_bin_abs_path, sfn_bin_path } from "sfn/test";
 
 // `sfn dev bootstrap fingerprint <root>` prints ONLY the hex digest on
@@ -156,15 +155,4 @@ test "compiler source fingerprint v2 covers workspace explicit inputs" ![io] {
     fs.writeFile(scratch + "/compiler/src/main.sfn", "fn main() -> int { return 1; }\n");
     assert _workspace_fingerprint(scratch) != baseline;
     process.run(["rm", "-rf", scratch]);
-}
-
-test "make compile delegates freshness to the content fingerprint" ![io] {
-    let mut repo = env.get("SAILFIN_REPO_ROOT");
-    if repo.length == 0 { repo = "."; }
-    let makefile = fs.readFile(repo + "/Makefile");
-
-    assert contains(makefile, "COMPILER_SOURCE_FINGERPRINT_CMD := $(NATIVE_BIN) dev bootstrap fingerprint");
-    assert contains(makefile, "current_fingerprint=\"$$($(COMPILER_SOURCE_FINGERPRINT_CMD)");
-    assert ! contains(makefile, "-newer \"$(NATIVE_BIN)\"");
-    assert ! contains(makefile, "bash scripts/compiler_source_fingerprint.sh");
 }

@@ -7,8 +7,8 @@ name: Installer and install docs
 # release, and `[seed].policy = "exact"` with `source = "github-release"`
 # guarantees the version names a real published release — so the asset this
 # workflow requests always exists. Kept in sync with ci.yml,
-# release-branches.yml, release-tag.yml, nightly-selfhost.yml, and the
-# Makefile, which all read the same key.
+# release-branches.yml, release-tag.yml, and nightly-selfhost.yml, which
+# all read the same key.
 #
 # Resolving from the same key also keeps the two halves of the ARM leg
 # consistent: the installed compiler and the `fetch-seed` action's seed, verified

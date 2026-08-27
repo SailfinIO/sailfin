@@ -18,7 +18,7 @@ name: Nightly corpus run
 #
 # The pinned seed version lives in bootstrap.toml's [seed].version. The resolve
 # step reads it (or the seed_version dispatch input) exactly as
-# nightly-selfhost.yml does — kept in sync with that job and the Makefile.
+# nightly-selfhost.yml does — kept in sync with that job.
 
 on:
   schedule:

@@ -2,8 +2,8 @@
 
 `scripts/bootstrap-aarch64-linux.sh` is the one bash script the toolchain keeps
 that has **no native `sfn` path and no plan to get one**. This note records why,
-so its survival past Makefile retirement (SFN-60) is a decision on the record
-rather than an oversight found later.
+so its survival past Makefile retirement (SFN-60, done) is a decision on the
+record rather than an oversight found later.
 
 It is a **legacy-tag-rebuild fallback**, not a permanent exemption. The
 retirement condition is named in "When it retires" below.
@@ -17,8 +17,9 @@ Two project rules that would otherwise forbid it:
   (`compiler/tests/e2e/aarch64_binfmt_probe_test.sfn`) driving it through the
   `SAILFIN_BINFMT_PROBE_ONLY=1` seam.
 - **Makefile retirement (SFN-60)** — the capability survives the Makefile. As of
-  SFN-1078 there is no `make bootstrap-aarch64-linux` target; CI and humans
-  invoke the script directly, so deleting the Makefile costs nothing here.
+  SFN-1078 there was no `make bootstrap-aarch64-linux` target; CI and humans
+  invoked the script directly, so deleting the Makefile (now done) cost
+  nothing here.
 
 ## Why it cannot go native
 

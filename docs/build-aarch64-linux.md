@@ -112,7 +112,7 @@ pinned x86_64 seed. This is the executable procedure for SFEP-0056 §3.4 and
 SFN-472. Run by hand it is not itself a CI or release-publishing workflow,
 but `.github/actions/sailfin-build/action.yml` invokes the same script
 directly for the `qemu` mode selected above. There is no `make` target for it:
-SFN-1078 removed the wrapper so SFN-60 can delete the Makefile without
+SFN-1078 removed the wrapper so SFN-60 could delete the Makefile without
 deleting this capability.
 
 ## Host prerequisites
