@@ -224,7 +224,7 @@ jobs:
             # the same host class and count that SFN-781 measured OOM-killing
             # a runner at 17.26 GiB tree RSS. Re-pin only with measured tree
             # RSS for that runner attached (SFN-795).
-            - name: Build + test + package (via Makefile)
+            - name: Build + test + package
               uses: ./.github/actions/sailfin-build
               env:
                   GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
