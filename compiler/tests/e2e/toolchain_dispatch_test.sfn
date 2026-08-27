@@ -22,17 +22,20 @@
 //      `auto` falls through to a fail-closed install that names the hint.
 //   5. `off` (and `--skip-toolchain-check`) skips the gate and proceeds.
 //   6. an explicit `<version>` knob forces that version as the target.
-import { copy } from "sfn/fs";
+import { copy, free_bytes, read_bytes } from "sfn/fs";
 import { contains } from "sfn/strings";
 import {
+    clean_runner_env,
     default_scratch_dir,
     host_is_windows,
+    nested_runner_scratch,
     report_child_failure,
     sfn_bin_abs_path,
     sfn_bin_path,
     skip
 } from "sfn/test";
 
+import { sha256_hex_of_bytes } from "../../src/build/hash";
 import { toolchain_current_host } from "../../src/toolchain/host";
 import { toolchain_build_records } from "../../src/toolchain/integrity";
 import {
@@ -88,19 +91,42 @@ fn _stub_bin(dir: string) -> string ![io] {
 // actual executable path because explicit `-o` names are honored verbatim,
 // including the `.exe` suffix the helper selects on Windows.
 fn _write_marker_stub(dir: string, marker: string) -> string ![io] {
-    let src = dir + "/dispatch-stub.sfn";
+    // The source lives OUTSIDE the store entry: `toolchain_build_records`
+    // hashes every file it finds under the entry, so a stray `.sfn` would
+    // enter the install manifest as part of the "installed toolchain".
+    // The marker is unique per stub, so it also names the source.
+    let src_dir = _scratch_root() + "/stub-src";
+    fs.createDirectory(src_dir, true);
+    let src = src_dir + "/" + marker + ".sfn";
     fs.writeFile(src, "fn main() -> int ![io] {\n" + "    print(\"" + marker
         + "\");\n"
         + "    return 0;\n"
         + "}\n");
     let bin = _stub_bin(dir);
-    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", bin, src], _env_with([]));
+    // A nested `sfn build` gets a curated env, never the raw parent one: the
+    // pool's orchestration keys would bind this child to the parent runner's
+    // private state, and the minted scratch keeps the child's `program.ll`
+    // out of the shared cache the sibling jobs write (SFN-401).
+    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch("toolchain-dispatch-stub")));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("toolchain-dispatch stub build", exit, out, err);
     assert exit == 0;
     assert fs.exists(bin);
     return bin;
+}
+
+// Digest a seeded stub for the read-only assertions. The stub is a compiled
+// native image, so `fs.readFile` cannot snapshot it: a string read aborts on
+// the interior NUL bytes every executable carries (SFN-1008). Length alone
+// would pass on a same-size replacement, so the hash is the load-bearing
+// half.
+fn _binary_digest(path: string) -> string ![io] {
+    let bytes = read_bytes(path);
+    assert bytes.status == 0;
+    let hex = sha256_hex_of_bytes(bytes.addr, bytes.length);
+    free_bytes(bytes);
+    return hex;
 }
 
 // Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a stub that
@@ -331,7 +357,7 @@ test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
     let legacy_marker = "DISPATCH_LEGACY_READ_ONLY_54da";
     _seed_legacy_stub(store, "999.0.0", legacy_marker);
     let legacy_dir = store + "/999.0.0";
-    let before_bin = fs.readFile(_stub_bin(legacy_dir));
+    let before_bin = _binary_digest(_stub_bin(legacy_dir));
     let before_sha = fs.readFile(legacy_dir + "/.sha256");
     let src = _seed_project(proj, "999.0.0");
 
@@ -343,7 +369,7 @@ test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
     assert exit == 0;
     assert contains(out + err, legacy_marker);
     assert contains(err, "warning: dispatching unverified legacy toolchain 999.0.0");
-    assert fs.readFile(_stub_bin(legacy_dir)) == before_bin;
+    assert _binary_digest(_stub_bin(legacy_dir)) == before_bin;
     assert fs.readFile(legacy_dir + "/.sha256") == before_sha;
     let qualified = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), "999.0.0");
     assert ! fs.exists(qualified);
