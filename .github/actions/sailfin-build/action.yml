@@ -41,7 +41,7 @@ inputs:
     required: false
     default: ""
   test_jobs:
-    description: "Parallel test children for the full-suite path, forwarded as `sfn test --jobs N`. Empty = use the CPU+RAM budget from scripts/detect_test_jobs.sh. Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N only after measuring the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap."
+    description: "Parallel test children for the full-suite path, forwarded as `sfn test --jobs N`. Empty = the native runner sizes its own pool from its CPU+RAM auto-budget (`_test_jobs_budget`). Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N only after measuring the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap."
     required: false
     default: ""
   shard_test_jobs:
@@ -633,9 +633,6 @@ runs:
         # ~6x unit throughput, peak RSS a fraction of the runner budget).
         # Forwarded via SAILFIN_TEST_JOBS, which `sfn dev shard run` reads.
         # Empty/unset lets the native runner apply its CPU+RAM auto-budget.
-        if [ -n "${{ inputs.shard_test_jobs }}" ]; then
-          export SAILFIN_TEST_JOBS="${{ inputs.shard_test_jobs }}"
-        fi
         # Direct port of the retired `test-shard` / `test` targets. Both
         # already delegated to the native runner; what the recipes contributed was
         # the argv assembly reproduced here — the workspace test inventory,
@@ -657,6 +654,15 @@ runs:
         run_tests() {
           rc=0
           if [ -n "${{ inputs.shard }}" ]; then
+            # Scoped to this arm (SFN-1158): the full-suite path below no
+            # longer passes an explicit `--jobs`, so an exported
+            # SAILFIN_TEST_JOBS would otherwise size that pool too --
+            # contradicting this input's "only consulted when `shard` is
+            # set" contract. The flag used to mask that leak; it no longer
+            # does.
+            if [ -n "${{ inputs.shard_test_jobs }}" ]; then
+              export SAILFIN_TEST_JOBS="${{ inputs.shard_test_jobs }}"
+            fi
             if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
               mkdir -p build
               build/bin/sfn dev shard run "${{ inputs.shard }}" --json \
@@ -677,19 +683,25 @@ runs:
             echo "[test] empty workspace test inventory" >&2
             return 2
           fi
-          # `--jobs` was always passed: TEST_JOBS defaulted to the
-          # scripts/detect_test_jobs.sh CPU+RAM budget when no caller set it
-          # (see .claude/rules/compiler-safety.md for why that budget binds).
-          jobs="${{ inputs.test_jobs }}"
-          if [ -z "$jobs" ]; then
-            jobs="$(bash scripts/detect_test_jobs.sh 2>/dev/null || echo 1)"
+          # SFN-1158 / SFEP-0074 §5.2: `--jobs` is omitted unless a caller
+          # pins it, so the native `_test_jobs_budget` sizes the pool
+          # (compiler/src/cli/commands/test/arg_and_jobs.sfn) -- the same
+          # budget the retired bash duplicate mirrored, and the reason
+          # .claude/rules/compiler-safety.md calls those constants binding.
+          # The duplicate existed only for pre-binary callers; build/bin/sfn
+          # is guaranteed present above, so the native probe is available.
+          # The `[@]+` guard is load-bearing: this step runs under `set -u`,
+          # where bash 3.2 (macOS) treats a bare `"${empty[@]}"` as unbound.
+          jobs_args=()
+          if [ -n "${{ inputs.test_jobs }}" ]; then
+            jobs_args=(--jobs "${{ inputs.test_jobs }}")
           fi
           if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
             mkdir -p build
-            build/bin/sfn test "${test_roots[@]}" --jobs "$jobs" --json \
+            build/bin/sfn test "${test_roots[@]}" ${jobs_args[@]+"${jobs_args[@]}"} --json \
               | tee build/agent-test.test.jsonl || rc=$?
           else
-            build/bin/sfn test "${test_roots[@]}" --jobs "$jobs" || rc=$?
+            build/bin/sfn test "${test_roots[@]}" ${jobs_args[@]+"${jobs_args[@]}"} || rc=$?
           fi
           return $rc
         }
