@@ -4,9 +4,9 @@ name: CI (PR + merge queue)
 # A setup step in each job reads that file and exports the resolved
 # value as a step output (`steps.seed.outputs.seed_version`) so
 # downstream `uses: ./.github/actions/sailfin-build` sees the correct
-# pin. Kept in sync with release-branches.yml, release-tag.yml,
-# nightly-selfhost.yml, and the Makefile — all four read the same
-# `bootstrap.toml`. Bumping the seed is a one-line edit.
+# pin. Kept in sync with release-branches.yml, release-tag.yml, and
+# nightly-selfhost.yml — all three read the same `bootstrap.toml`.
+# Bumping the seed is a one-line edit.
 
 env:
   # Phase 0 / M0.5: pin arena allocator on for CI. Belt-and-suspenders
@@ -144,7 +144,7 @@ jobs:
               # change to it. Scoped to `hooks` deliberately: agent and skill
               # prompts elsewhere under `.claude/` do not warrant the matrix.
               case "$path" in
-                compiler/tests/*|scripts/*|Makefile|.claude/hooks/*|.github/release-signing/toolchain-index-state.json|.github/workflows/ci.yml|.github/workflows/release-tag.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
+                compiler/tests/*|scripts/*|.claude/hooks/*|.github/release-signing/toolchain-index-state.json|.github/workflows/ci.yml|.github/workflows/release-tag.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
                   source=true
                   reason="compiler/runtime/build-system path changed: $path"
                   ;;
@@ -175,7 +175,7 @@ jobs:
                   windows=true
                   windows_reason="Windows-relevant compiler driver path changed: $path"
                   ;;
-                Makefile|bootstrap.toml|workspace.toml|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
+                bootstrap.toml|workspace.toml|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
                   windows=true
                   windows_reason="Windows-relevant path changed: $path"
                   ;;

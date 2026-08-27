@@ -21,8 +21,8 @@ name: CI (branch push)
 # at the repo root. A setup step below reads that file and exports the
 # resolved value as a step output (`steps.seed.outputs.seed_version`) so
 # the downstream composite action sees the correct pin. Kept in sync with
-# ci.yml, release-tag.yml, nightly-selfhost.yml, and the Makefile — all
-# four read the same `bootstrap.toml`. Bumping the seed is a one-line
+# ci.yml, release-tag.yml, and nightly-selfhost.yml — all three read the
+# same `bootstrap.toml`. Bumping the seed is a one-line
 # edit.
 
 on:

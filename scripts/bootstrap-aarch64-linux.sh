@@ -138,9 +138,9 @@ elf_machine() {
 # The seed resolves its C compiler by looking up the bare name `clang` on PATH
 # (`process.run(["clang", …])`) and emits target-neutral IR carrying no target
 # triple, so whichever `clang` PATH finds decides the output architecture.
-# `SAILFIN_CC` cannot steer it — nothing under compiler/src reads that
-# variable; only the macOS branch of the Makefile does, and it works precisely
-# by shadowing `clang` on PATH (see CLANG_SHIM_DIR). Stage 1 previously set
+# `SAILFIN_CC` cannot steer the seed here — the macOS clang shim, which moved
+# from the retired Makefile into `.github/actions/sailfin-build/action.yml`
+# (SFN-60), works precisely by shadowing `clang` on PATH instead. Stage 1 previously set
 # `SAILFIN_CC` to a wrapper named `clang-x86_64`, which nothing ever invoked,
 # so the emulated x86_64 seed built compiler A with the host's native aarch64
 # clang and the readelf gate correctly rejected the result.

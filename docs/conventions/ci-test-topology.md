@@ -193,8 +193,8 @@ The design for the content-addressed key derivation lives in
   the `sfn test` runner; it is never consulted by that gate.
 
   That job's id is still literally `make-check`. It is a required status
-  check, so renaming it needs a branch-protection change and is deliberately
-  left for the commit that deletes the Makefile (SFN-60).
+  check, so renaming it needs a branch-protection change and was left as a
+  follow-up beyond the Makefile-deletion commit (SFN-60).
 
 ## Where each gate lives
 

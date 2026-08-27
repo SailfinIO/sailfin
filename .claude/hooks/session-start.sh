@@ -103,7 +103,8 @@ _install_via_installer() {
   # aliases would still resolve, so the version probe below would report the
   # pin and this hook would print "installed seed X" over a store the native
   # bootstrap still considers empty — the exact false-green this file exists
-  # to stop. Makefile's install target sets the same flag for the same reason.
+  # to stop. The retired Makefile's install target set the same flag for the
+  # same reason.
   SAILFIN_BOOTSTRAP_SEED_STORE=1 \
     REPO="$(_manifest seed repo)" VERSION="$SEED_VERSION" \
     BINARY="$(_manifest seed asset_prefix)" \

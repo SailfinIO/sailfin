@@ -12,11 +12,11 @@ description: >-
 # reading bootstrap.toml only. `install.sh` is the only cold-start entry
 # point, and it is what performs the signed SHA256SUMS verification.
 #
-# This is the seed half of the `fetch-seed` build target -- still defined in
-# the Makefile until that file is deleted -- extracted so the nine workflow
-# jobs that acquired a seed without going through `sailfin-build` stop
-# depending on it. The logic is a direct lift of `sailfin-build/action.yml`'s
-# own store-resolve + fetch pair, which remains the reference implementation.
+# This is the seed half of the `fetch-seed` target the root Makefile used to
+# carry (deleted by SFN-60), extracted so the nine workflow jobs that acquired
+# a seed without going through `sailfin-build` stop depending on it. The logic
+# is a direct lift of `sailfin-build/action.yml`'s own store-resolve + fetch
+# pair, which remains the reference implementation.
 
 inputs:
   seed_version:

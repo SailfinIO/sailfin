@@ -258,12 +258,11 @@ runs:
         # (B1, SFN-55 review) — bound the build with `timeout` instead,
         # consistent with the rungs above. 1800s = 30 minutes.
         #
-        # Call the seed directly rather than `make rebuild` — host `make` on
-        # Windows runners is too old (SFEP-0021 §4.4), and `build -p
-        # compiler` is exactly what `make rebuild` shells (Makefile
-        # rebuild-impl). SAILFIN_TARGET_OS=Windows drives the SFN-52 target
-        # seam (MSVC triple, lld-link, POSIX-lib drop, process_windows.sfn
-        # swap).
+        # Call the seed directly: `build -p compiler` is exactly what the
+        # retired `make rebuild` recipe shelled (SFN-60 deleted it; host `make`
+        # on Windows runners was too old to use anyway, SFEP-0021 §4.4).
+        # SAILFIN_TARGET_OS=Windows drives the SFN-52 target seam (MSVC triple,
+        # lld-link, POSIX-lib drop, process_windows.sfn swap).
         #
         # The build driver emits no progress output: a full self-host prints
         # under 1 KB, all of it at exit. A working build and a hung one are

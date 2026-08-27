@@ -15,8 +15,8 @@ name: Nightly self-host check
 # at the repo root. A setup step below reads that file (or uses the
 # `seed_version` workflow_dispatch input when set) and exports the
 # resolved value as `steps.seed.outputs.seed_version`. Kept in sync with
-# ci.yml, release-branches.yml, release-tag.yml, and the Makefile — all
-# four read the same `bootstrap.toml`. Bumping the seed is a one-line
+# ci.yml, release-branches.yml, and release-tag.yml — all three read the
+# same `bootstrap.toml`. Bumping the seed is a one-line
 # edit.
 
 on:

@@ -65,7 +65,7 @@ legs' aggregate result.
 - **Path filtering lives inside the workflow.** `ci.yml` runs on every
   pull request so `Required CI gate` always exists. The `CI scope` job
   skips the heavy compiler surface for PRs that do not touch compiler,
-  runtime, capsule, build-script, Makefile, seed-pin, CI-workflow, or
+  runtime, capsule, build-script, seed-pin, CI-workflow, or
   composite-action paths. `merge_group` supports no `paths:` filter, so
   queue runs are always marked in-scope and run full CI. Deliberate: the
   merge result is tested before landing.

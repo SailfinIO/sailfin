@@ -802,8 +802,9 @@ log "Detected host triple: $HOST_TRIPLE"
 INSTALL_BASE="${INSTALL_BASE:-$HOME/.local/share/sailfin/versions}"
 GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR:-$HOME/.local/bin}"
 if [ "${SAILFIN_BOOTSTRAP_SEED_STORE:-0}" = "1" ]; then
-  # Internal Makefile compatibility seam: bootstrap.toml remains the sole
-  # authority for the repo-local flat seed store.
+  # Internal seam for the repo-local seed store, set by
+  # `.github/actions/fetch-seed`, `sailfin-build` and the session-start hook.
+  # bootstrap.toml remains the sole authority for that store.
   TARGET_DIR="${INSTALL_BASE}/${VERSION}"
   log "Using flat bootstrap seed-store layout"
 else
