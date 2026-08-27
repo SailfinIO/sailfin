@@ -14,7 +14,8 @@ import {
     Matches,
     command,
     subcommand,
-    with_subcommand
+    with_subcommand,
+    with_usage
 } from "sfn/cli";
 
 import { _path_join_cmd } from "../../build/fs";
@@ -62,7 +63,8 @@ fn _cap_pad(s: string, width: int) -> string {
 // `with_subcommand`. One nested leaf today: `audit`.
 fn command_def() -> Command {
     let audit_cmd: Command = command("audit", "Audit workspace members against the [workspace.capabilities] envelope");
-    return with_subcommand(command("capabilities", "Inspect the workspace capability envelope"), audit_cmd);
+    let cmd: Command = with_subcommand(command("capabilities", "Inspect the workspace capability envelope"), audit_cmd);
+    return with_usage(cmd, "project", "sfn capabilities audit", "audit capability usage");
 }
 
 // Dispatch `sfn capabilities audit`. Discovers the workspace root from the

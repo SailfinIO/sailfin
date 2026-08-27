@@ -96,36 +96,74 @@ fn _cmd_row(sig: string, desc: string) -> string {
     return out + desc + "\n";
 }
 
-fn _usage() -> string {
+// Render the grouped top-level listing for one category: every direct
+// subcommand of `root` that filed itself under `category` via `with_usage`,
+// in registration order. Registration order is display order — that is the
+// point, and it is why `sailfin_cli_main_v2` registers commands grouped
+// rather than ad hoc (SFN-1159).
+fn _usage_group(root: Command, heading: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= root.subcmds.length { break; }
+        let sub: Command = root.subcmds[i];
+        if strings_equal(sub.category, heading) {
+            let mut sig: string = sub.usage_sig;
+            if sig.length == 0 { sig = "sfn " + sub.name; }
+            let mut desc: string = sub.summary;
+            if desc.length == 0 { desc = sub.description; }
+            out = out + _cmd_row(sig, desc);
+        }
+        i += 1;
+    }
+    if out.length == 0 { return ""; }
+    return heading + ":\n" + out + "\n";
+}
+
+// Top-level `sfn --help`. Every command row is derived from the registered
+// `Command` tree rather than hand-maintained here, so the listing cannot
+// drift from what is actually registered — the same bug class SFN-1074
+// fixed for `sfn <cmd> --help` (SFN-1159). A command opts in by calling
+// `with_usage` in its own `command_def()`; one that does not (`dev`,
+// `guillermo`) stays registered and dispatchable but unlisted.
+// The category headings to render, in the order their first member is
+// registered. Derived rather than declared: a hand-kept heading list would be
+// a second place for the listing to drift from the tree — a command whose
+// `category` matched no entry would vanish from `sfn --help` silently, which
+// is the failure mode SFN-1159 exists to remove.
+fn _usage_headings(root: Command) -> string[] {
+    let mut headings: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= root.subcmds.length { break; }
+        let category: string = root.subcmds[i].category;
+        if category.length > 0 {
+            let mut seen: boolean = false;
+            let mut j: int = 0;
+            loop {
+                if j >= headings.length { break; }
+                if strings_equal(headings[j], category) {
+                    seen = true;
+                    break;
+                }
+                j += 1;
+            }
+            if !seen { headings.push(category); }
+        }
+        i += 1;
+    }
+    return headings;
+}
+
+fn _usage(root: Command) -> string {
     let mut out: string = "usage: sfn <command> [options]\n\n";
-    out = out + "build & run:\n";
-    out = out + _cmd_row("sfn build <file|-p path>", "compile a file or capsule");
-    out = out + _cmd_row("sfn run <file|exe>", "build and run");
-    out = out + _cmd_row("sfn emit <fmt> <file>", "emit LLVM / sailfin / native IR");
-    out = out + _cmd_row("sfn cache <info|prune|clean>", "manage the build cache");
-    out = out + _cmd_row("sfn bench [path...]", "benchmark runtime (or --compiler/--consumer)");
-    out = out + "\n";
-    out = out + "project:\n";
-    out = out + _cmd_row("sfn init", "scaffold a project");
-    out = out + _cmd_row("sfn check [path...]", "fast static analysis");
-    out = out + _cmd_row("sfn fmt [path...]", "format sources (--check / --write)");
-    out = out + _cmd_row("sfn test [path...]", "run tests");
-    out = out + _cmd_row("sfn capabilities audit", "audit capability usage");
-    out = out + "\n";
-    out = out + "packages:\n";
-    out = out + _cmd_row("sfn add <capsule>", "add a dependency");
-    out = out + _cmd_row("sfn lock", "refresh the lockfile");
-    out = out + _cmd_row("sfn publish [path]", "publish a capsule");
-    out = out + _cmd_row("sfn package", "build a distributable");
-    out = out + _cmd_row("sfn login [token]", "authenticate to a registry");
-    out = out + _cmd_row("sfn config <action>", "get / set / unset / list config");
-    out = out + _cmd_row("sfn toolchain install <ver>", "install a toolchain version");
-    out = out + "\n";
-    out = out + "meta:\n";
-    out = out + _cmd_row("sfn version", "show version (also --version)");
-    out = out + _cmd_row("sfn completion <shell>", "generate shell completions");
-    out = out + _cmd_row("sfn symbols", "dump the symbol table (--json)");
-    out = out + "\n";
+    let headings: string[] = _usage_headings(root);
+    let mut h: int = 0;
+    loop {
+        if h >= headings.length { break; }
+        out = out + _usage_group(root, headings[h]);
+        h += 1;
+    }
     out = out + "global options:\n";
     out = out + _cmd_row("sfn --color <mode> ...", "color: auto, always, or never");
     out = out + "\n";
@@ -289,28 +327,32 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // "sfn" head is prepended before parsing.
     let color_modes: string[] = ["auto", "always", "never"];
     let mut root: Command = with_flag(command("sfn", "Sailfin compiler"), flag_choice("color", "Color output: auto, always, or never", color_modes));
-    root = with_subcommand(root, version_command_def());
-    root = with_subcommand(root, guillermo_command_def());
-    root = with_subcommand(root, init_command_def());
-    root = with_subcommand(root, login_command_def());
-    root = with_subcommand(root, add_command_def());
-    root = with_subcommand(root, publish_command_def());
-    root = with_subcommand(root, fmt_command_def());
-    root = with_subcommand(root, test_command_def());
-    root = with_subcommand(root, config_command_def());
-    root = with_subcommand(root, toolchain_command_def());
-    root = with_subcommand(root, dev_command_def());
-    root = with_subcommand(root, cache_command_def());
-    root = with_subcommand(root, capabilities_command_def());
-    root = with_subcommand(root, lock_command_def());
-    root = with_subcommand(root, package_command_def());
-    root = with_subcommand(root, emit_command_def());
-    root = with_subcommand(root, check_command_def());
+    // Registration order is the order `_usage()` lists these in, grouped by
+    // the `with_usage` category each command declares. Keep a command beside
+    // its group when adding one; an unlisted command (`guillermo`, `dev`)
+    // goes at the end.
     root = with_subcommand(root, build_command_def());
     root = with_subcommand(root, run_command_def());
+    root = with_subcommand(root, emit_command_def());
+    root = with_subcommand(root, cache_command_def());
     root = with_subcommand(root, bench_command_def());
+    root = with_subcommand(root, init_command_def());
+    root = with_subcommand(root, check_command_def());
+    root = with_subcommand(root, fmt_command_def());
+    root = with_subcommand(root, test_command_def());
+    root = with_subcommand(root, capabilities_command_def());
+    root = with_subcommand(root, add_command_def());
+    root = with_subcommand(root, lock_command_def());
+    root = with_subcommand(root, publish_command_def());
+    root = with_subcommand(root, package_command_def());
+    root = with_subcommand(root, login_command_def());
+    root = with_subcommand(root, config_command_def());
+    root = with_subcommand(root, toolchain_command_def());
+    root = with_subcommand(root, version_command_def());
     root = with_subcommand(root, completion_command_def());
     root = with_subcommand(root, symbols_command_def());
+    root = with_subcommand(root, guillermo_command_def());
+    root = with_subcommand(root, dev_command_def());
 
     // Machine-readable top-level help for tools and agents. This bypasses
     // `parse()` intentionally: `--json` is a modifier for root help, not a
@@ -691,7 +733,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // argv): print usage, exit 2 — matching the legacy `args.length == 0`
     // guard.
     if args.length == 0 {
-        print(_usage());
+        print(_usage(root));
         return 2;
     }
 
@@ -702,7 +744,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     if strings_equal(cmd, "-h") { is_help = true; }
     if strings_equal(cmd, "--help") { is_help = true; }
     if is_help {
-        print(_usage());
+        print(_usage(root));
         return 0;
     }
 
@@ -730,6 +772,6 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     }
 
     print("unknown command: " + cmd);
-    print(_usage());
+    print(_usage(root));
     return 2;
 }

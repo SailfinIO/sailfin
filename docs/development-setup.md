@@ -207,10 +207,11 @@ the serial path.
 | `ARENA_ARGS` | `make test-arena` | empty | Args forwarded to the native arena IR gate (`sfn dev arena`), e.g. `--all` or a module path. |
 | `KEEP_SEED=0` | `make clean-build` | keep seed | Also removes `build/toolchains/` during cleanup. |
 
-`BUILD_JOBS`, `NATIVE_OPT`, and `SELFHOST1_OPT` still exist in the Makefile for
-legacy/CI compatibility, but the normal self-host build now routes through
+`NATIVE_OPT` and `SELFHOST1_OPT` still exist in the Makefile for legacy/CI
+compatibility, but the normal self-host build now routes through
 `sfn build -p compiler`; do not rely on those as user-facing tuning knobs for a
-local source build unless you are changing the build driver itself.
+local source build unless you are changing the build driver itself. Build
+parallelism is owned natively by the driver — see `SAILFIN_BUILD_JOBS` below.
 
 ## Supported `sfn build` flags
 

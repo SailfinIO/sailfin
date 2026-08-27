@@ -111,7 +111,17 @@ fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int 
     if by_mem < 1 { by_mem = 1; }
     let mut jobs = cores;
     if by_mem < jobs { jobs = by_mem; }
+    // macOS caps at 2 regardless of what the memory arithmetic allows. On the
+    // ~7 GiB macOS runner the budget alone let enough heavy children coincide
+    // to tip the pool into OOM: the macOS-arm64 nightly self-host check kept
+    // aborting with exit 134 / SIGABRT in the e2e phase, the victim test
+    // roaming run to run (SFN-87). A flat 2-job cap bounds the
+    // concurrent-heavy-compile peak. Linux is unaffected, and an explicit
+    // `--jobs N` or `SAILFIN_TEST_JOBS=N` still wins.
     if is_darwin && jobs > 2 { jobs = 2; }
+    // `--jobs` accepts [1, 256], but the sliding-window pool has diminishing
+    // returns past core count; 16 matches the workflow cap used elsewhere in
+    // CI.
     if jobs > 16 { jobs = 16; }
     if jobs < 1 { jobs = 1; }
     return jobs;

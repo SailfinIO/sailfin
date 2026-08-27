@@ -24,7 +24,8 @@ import {
     get,
     subcommand,
     with_arg,
-    with_subcommand
+    with_subcommand,
+    with_usage
 } from "sfn/cli";
 
 import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
@@ -159,7 +160,8 @@ fn command_def() -> Command {
     let set_cmd: Command = with_arg(with_arg(command("set", "Set a config value"), arg("key", "Config key")), arg("value", "Config value"));
     let unset_cmd: Command = with_arg(command("unset", "Remove a config value"), arg("key", "Config key"));
     let list_cmd: Command = command("list", "List resolved config values");
-    return with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("config", "Manage sfn configuration"), get_cmd), set_cmd), unset_cmd), list_cmd);
+    let cmd: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("config", "Manage sfn configuration"), get_cmd), set_cmd), unset_cmd), list_cmd);
+    return with_usage(cmd, "packages", "sfn config <action>", "get / set / unset / list config");
 }
 
 // Reconstruct the legacy positional args slice from the typed matches and

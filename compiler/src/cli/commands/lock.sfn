@@ -28,7 +28,8 @@ import {
     command,
     flag_value,
     get_or,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
@@ -79,7 +80,7 @@ fn handle_lock_command(args: string[]) -> int ![io] {
 // `with_subcommand`. One optional `--work-dir DIR` value flag; no
 // positionals.
 fn command_def() -> Command {
-    return with_flag(command("lock", "Write the workspace lockfile (workspace.lock)"), flag_value("work-dir", "Directory to discover the workspace root from (defaults to $PWD)"));
+    return with_usage(with_flag(command("lock", "Write the workspace lockfile (workspace.lock)"), flag_value("work-dir", "Directory to discover the workspace root from (defaults to $PWD)")), "packages", "sfn lock", "refresh the lockfile");
 }
 
 // Reconstruct the legacy positional args slice from the typed matches and

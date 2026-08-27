@@ -2373,7 +2373,12 @@ jobs:
     needs: [ci-scope, build-compiler-linux]
     if: ${{ needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    # 55 clears the sum of this job's own step budgets: ~3 setup + the 35-min
+    # seam + the 10-min anti-vacuity probe. At the previous 40 the seam's
+    # budget was not reachable — a slow seam died at the JOB cap partway
+    # through the anti-vacuity step, reporting a confusing whole-job timeout
+    # instead of the step that actually overran.
+    timeout-minutes: 55
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -2432,9 +2437,26 @@ jobs:
       # is back in the list below because that is fixed: it was the one file
       # whose assertion happened to fail rather than pass wrongly, which is
       # how the whole class was found.
+      #
+      # 35, not 25: `SAILFIN_HOST_OS=Windows` changes target conditioning,
+      # which changes the build-cache key, so this leg gets no hits from the
+      # `ci-build-tree-linux-x86_64` artifact's `build/cache` (warmed for the
+      # native Linux configuration) and pays a cold closure compile. Measured
+      # cold on one file: 12m32s with the override vs 7m14s without — the
+      # delta is compile, not execution. The 13-file list normally lands in
+      # 6.7-11.5 min on cache hits, but a miss on the heaviest closure
+      # (`dev_bootstrap_alias_test.sfn`, which pulls in the ~743-line-larger
+      # `cli/commands/dev.sfn` from #3111) took ~15 min alone and breached 25.
+      #
+      # This is headroom, not a fix, and it required raising the job cap above
+      # (35 plus the 10-min anti-vacuity step did not fit in 40). Restore 25 —
+      # and the job cap to 40 — once `build-compiler-linux` warms the
+      # Windows-host-conditioned closure into `build/cache` before its
+      # `Bundle compiler tree for shard legs` step, so this leg gets cache
+      # hits like every other consumer of that artifact.
       - name: Windows-host seam (SAILFIN_HOST_OS=Windows)
         shell: bash
-        timeout-minutes: 25
+        timeout-minutes: 35
         env:
           SAILFIN_HOST_OS: Windows
           SAILFIN_TARGET_OS: Linux

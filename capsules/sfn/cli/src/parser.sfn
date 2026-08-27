@@ -667,7 +667,10 @@ fn _find_subcmd(cmd: Command, name: string) -> Command {
         args: empty_args,
         flags: empty_flags,
         subcmds: empty_subs,
-        flag_groups: empty_groups
+        flag_groups: empty_groups,
+        category: "",
+        usage_sig: "",
+        summary: ""
     };
 }
 

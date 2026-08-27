@@ -71,24 +71,6 @@ else
 TIMEOUT_CMD ?= timeout
 endif
 
-# Parallelism for the compiler build orchestrator's per-module emit + clang
-# compile.
-#
-# Default: auto-detected from CPU count and total RAM via
-# scripts/detect_build_jobs.sh, with a per-job budget of 5 GB (heaviest module
-# ~4.7 GB peak RSS under the arena allocator, plus headroom). macOS additionally
-# caps at 2 because the M1 GitHub runner has only 7 GB total RAM. Windows / hosts
-# we cannot probe fall back to 1.
-#
-# Override explicitly with `BUILD_JOBS=N`; empty / unset uses auto-detect. The
-# driver (`sfn build -p compiler`) parallelises subprocess emits internally —
-# `BUILD_JOBS` only affects callers that still spawn module compiles directly.
-# See docs/proposals/0006-build-architecture.md → Phase 6 for the rollout history and the
-# per-job budget rationale.
-ifeq ($(strip $(BUILD_JOBS)),)
-BUILD_JOBS := $(shell bash scripts/detect_build_jobs.sh 2>/dev/null || echo 1)
-endif
-
 # Portable SHA-256 hasher. `shasum -a 256` ships with Perl on both macOS and
 # every Linux distro we run on; `sha256sum` is GNU coreutils and not on macOS
 # by default. Using `shasum` keeps the fixed-point comparison in `check`
@@ -831,8 +813,6 @@ ci-package:
 # Notes:
 # - Pass extra flags via BUILD_ARGS (driver-level, e.g.
 #   BUILD_ARGS="--no-cache --cache-trace").
-# - The driver parallelises subprocess emits internally; BUILD_JOBS
-#   no longer plumbs through.
 # - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
 #   driver hardcodes `-O2` for the link step.
 # - During a seed transition where compiler/capsule.toml's [toolchain] pin is

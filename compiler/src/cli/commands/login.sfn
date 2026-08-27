@@ -54,7 +54,8 @@ import {
     arg_optional,
     command,
     get,
-    with_arg
+    with_arg,
+    with_usage
 } from "sfn/cli";
 
 import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
@@ -93,7 +94,7 @@ fn _token_absent_sentinel() -> string {
 // The `sfn/cli` definition for `login`, registered on the v2 root via
 // `with_subcommand`. A single optional `[token]` positional; no flags.
 fn command_def() -> Command {
-    return with_arg(command("login", "Save a registry token to ~/.sfn/credentials"), arg_optional("token", "Registry token (read from stdin when omitted)", _token_absent_sentinel()));
+    return with_usage(with_arg(command("login", "Save a registry token to ~/.sfn/credentials"), arg_optional("token", "Registry token (read from stdin when omitted)", _token_absent_sentinel())), "packages", "sfn login [token]", "authenticate to a registry");
 }
 
 // Save a registry token to `~/.sfn/credentials`. With a `token` positional

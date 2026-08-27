@@ -43,7 +43,8 @@ import {
     has_flag,
     positionals,
     with_arg,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 
 import { _collect_sfn_files_cmd } from "../../build/fs";
@@ -55,7 +56,7 @@ import { CliContext } from "../context";
 // `with_subcommand`. Two boolean flags and a variadic `[path...]`
 // positional.
 fn command_def() -> Command {
-    return with_arg(with_flag(with_flag(command("fmt", "Format Sailfin source files"), flag("check", "Exit non-zero if any file would change; print the paths")), flag("write", "Rewrite files in place")), arg_variadic("path", "Files or directories to format"));
+    return with_usage(with_arg(with_flag(with_flag(command("fmt", "Format Sailfin source files"), flag("check", "Exit non-zero if any file would change; print the paths")), flag("write", "Rewrite files in place")), arg_variadic("path", "Files or directories to format")), "project", "sfn fmt [path...]", "format sources (--check / --write)");
 }
 
 // Format the `.sfn` files collected from `[path...]`. Mirrors the legacy
