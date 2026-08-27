@@ -9,7 +9,7 @@
 // The dispatch trigger is a `[toolchain]` pin the running toolchain
 // cannot satisfy — `sfn = "999.0.0"` (no such release will exist), so the
 // floor check fails and `auto` proceeds to fetch-and-re-exec. Instead of a
-// real fetch, the store is pre-seeded with a stub `sailfin` that echoes a
+// real fetch, the store is pre-seeded with a stub `sailfin` that prints a
 // unique marker; observing the marker in the child's stdout proves the
 // re-exec (`process.exec`) replaced the image with the stored toolchain.
 //
@@ -22,17 +22,20 @@
 //      `auto` falls through to a fail-closed install that names the hint.
 //   5. `off` (and `--skip-toolchain-check`) skips the gate and proceeds.
 //   6. an explicit `<version>` knob forces that version as the target.
+import { copy, free_bytes, read_bytes } from "sfn/fs";
 import { contains } from "sfn/strings";
 import {
+    clean_runner_env,
     default_scratch_dir,
     host_is_windows,
+    nested_runner_scratch,
     report_child_failure,
-    run_external_c_oracle,
     sfn_bin_abs_path,
     sfn_bin_path,
     skip
 } from "sfn/test";
 
+import { sha256_hex_of_bytes } from "../../src/build/hash";
 import { toolchain_current_host } from "../../src/toolchain/host";
 import { toolchain_build_records } from "../../src/toolchain/integrity";
 import {
@@ -58,7 +61,7 @@ fn _marker() -> string { return "DISPATCH_STUB_EXEC_OK_7f3a"; }
 
 // Full parent environment plus the caller's extra `KEY=VALUE` entries
 // (`run_capture`'s empty env is EMPTY, not "inherit", so the child needs
-// PATH etc. to resolve `chmod`/`uname` and, on dispatch, the stub's `sh`).
+// PATH etc. to resolve compiler and toolchain subprocesses on the host).
 fn _env_with(extra: string[]) -> string[] ![io] {
     let mut e = process.environ();
     let mut i: int = 0;
@@ -82,32 +85,55 @@ fn _stub_bin(dir: string) -> string ![io] {
     return dir + "/sailfin";
 }
 
-// Write a stub at `_stub_bin(dir)` that prints `marker` and exits 0.
-//
-// On POSIX that is a `#!/bin/sh` script, which costs nothing. Windows has
-// no shebang: `CreateProcessA` cannot launch a script at all, so the stub
-// has to be a real PE image. The external C oracle already exists for
-// exactly this (`sfn/test`, SFN-1107) and compiles a `<stdio.h>` harness
-// cleanly here — the `<stdlib.h>` SDK conflict its header documents does
-// not reach this stub. A host without a usable C compiler SKIPS rather
-// than fails, which is the honest outcome: nothing about toolchain
-// dispatch can be proven there.
-fn _write_marker_stub(dir: string, marker: string) -> void ![io] {
+// Build a native Sailfin stub that prints `marker` and exits 0. Compiling
+// the fixture makes the executable portable across Windows and POSIX and
+// exercises the same compiler-under-test that launches it. Return the
+// actual executable path because explicit `-o` names are honored verbatim,
+// including the `.exe` suffix the helper selects on Windows.
+fn _write_marker_stub(dir: string, marker: string) -> string ![io] {
+    // The source lives OUTSIDE the store entry, so the entry holds only
+    // what a real install would. `toolchain_scan_payload` enumerates a
+    // fixed set (`sailfin`, `sfn`, `runtime/`, `capsules/`,
+    // `workspace.toml`), so a stray `.sfn` at the entry root would not
+    // reach the manifest — this is fixture hygiene, not a gate on the
+    // integrity path. The marker is unique per stub, so it also names
+    // the source.
+    let src_dir = _scratch_root() + "/stub-src";
+    fs.createDirectory(src_dir, true);
+    let src = src_dir + "/" + marker + ".sfn";
+    fs.writeFile(src, "fn main() -> int ![io] {\n" + "    print(\"" + marker
+        + "\");\n"
+        + "    return 0;\n"
+        + "}\n");
     let bin = _stub_bin(dir);
-    if !host_is_windows() {
-        fs.writeFile(bin, "#!/bin/sh\necho \"" + marker + "\"\nexit 0\n");
-        process.run(["chmod", "+x", bin]);
-        return;
-    }
-    let csrc = dir + "/stub.c";
-    fs.writeFile(csrc, "#include <stdio.h>\nint main(void){ puts(\"" + marker
-        + "\"); return 0; }\n");
-    let rc = run_external_c_oracle([csrc, "-o", bin]);
-    assert rc == 0;
+    // A nested `sfn build` gets a curated env, never the raw parent one: the
+    // pool's orchestration keys would bind this child to the parent runner's
+    // private state, and the minted scratch keeps the child's `program.ll`
+    // out of the shared cache the sibling jobs write (SFN-401).
+    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch("toolchain-dispatch-stub")));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch stub build", exit, out, err);
+    assert exit == 0;
+    assert fs.exists(bin);
+    return bin;
+}
+
+// Digest a seeded stub for the read-only assertions. The stub is a compiled
+// native image, so `fs.readFile` cannot snapshot it: a string read aborts on
+// the interior NUL bytes every executable carries (SFN-1008). Length alone
+// would pass on a same-size replacement, so the hash is the load-bearing
+// half.
+fn _binary_digest(path: string) -> string ![io] {
+    let bytes = read_bytes(path);
+    assert bytes.status == 0;
+    let hex = sha256_hex_of_bytes(bytes.addr, bytes.length);
+    free_bytes(bytes);
+    return hex;
 }
 
 // Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a stub that
-// echoes `marker` and exits 0, regardless of the argv it is re-exec'd
+// prints `marker` and exits 0, regardless of the argv it is re-exec'd
 // with. When `complete` is true the `.sha256` completeness marker is
 // written last (the installer's commit-point contract), so the entry
 // reads as dispatch-ready; when false the entry is left partial.
@@ -115,7 +141,7 @@ fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> 
     let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
     process.run(["rm", "-rf", dir]);
     fs.createDirectory(dir, true);
-    _write_marker_stub(dir, marker);
+    let _ = _write_marker_stub(dir, marker);
     if complete {
         fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
     }
@@ -125,7 +151,7 @@ fn _seed_legacy_stub(store: string, ver: string, marker: string) -> void ![io] {
     let dir = store + "/" + ver;
     process.run(["rm", "-rf", dir]);
     fs.createDirectory(dir, true);
-    _write_marker_stub(dir, marker);
+    let _ = _write_marker_stub(dir, marker);
     fs.writeFile(dir + "/.sha256", "legacy-archive-marker\n");
 }
 
@@ -334,7 +360,7 @@ test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
     let legacy_marker = "DISPATCH_LEGACY_READ_ONLY_54da";
     _seed_legacy_stub(store, "999.0.0", legacy_marker);
     let legacy_dir = store + "/999.0.0";
-    let before_bin = fs.readFile(_stub_bin(legacy_dir));
+    let before_bin = _binary_digest(_stub_bin(legacy_dir));
     let before_sha = fs.readFile(legacy_dir + "/.sha256");
     let src = _seed_project(proj, "999.0.0");
 
@@ -346,7 +372,7 @@ test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
     assert exit == 0;
     assert contains(out + err, legacy_marker);
     assert contains(err, "warning: dispatching unverified legacy toolchain 999.0.0");
-    assert fs.readFile(_stub_bin(legacy_dir)) == before_bin;
+    assert _binary_digest(_stub_bin(legacy_dir)) == before_bin;
     assert fs.readFile(legacy_dir + "/.sha256") == before_sha;
     let qualified = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), "999.0.0");
     assert ! fs.exists(qualified);
@@ -417,11 +443,8 @@ test "toolchain dispatch: a modified bundled runtime input refuses a build-like 
     fs.createDirectory(scratch, true);
 
     let copied_bin = _stub_bin(scratch);
-    let cp_exit = process.run_capture(["cp", sfn_bin_abs_path(), copied_bin], _env_with([]));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_exit == 0;
-    process.run(["chmod", "+x", copied_bin]);
+    assert copy(sfn_bin_abs_path(), copied_bin);
+    fs.set_perms(copied_bin, 493);
 
     fs.createDirectory(scratch + "/runtime", true);
     let payload_path = scratch + "/runtime/bundled-probe.sfn";
