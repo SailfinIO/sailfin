@@ -18,7 +18,18 @@ import {
     targz_create
 } from "sfn/archive";
 import { contains, int_to_string } from "sfn/strings";
-import { clean_runner_env, default_scratch_dir, with_tmp_dir } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    skip,
+    with_tmp_dir
+} from "sfn/test";
+
+fn _require_posix_shell() -> bool ![io] {
+    if env.get("COMSPEC").length == 0 { return true; }
+    skip("SFN-1156: payload closure validates a POSIX release script; remove this skip when native Windows has a bounded POSIX-shell provider instead of the WSL bash launcher");
+    return false;
+}
 
 // Marker files live under `SAILFIN_TEST_SCRATCH` (or the platform default),
 // not inside the `with_tmp_dir` fixture's own directory, so captured stdout
@@ -40,6 +51,7 @@ fn _child_env() -> string[] ![io] { return clean_runner_env(""); }
 fn _fixed_opts() -> CreateOptions {
     return CreateOptions {
         exec_paths: [],
+        host_is_windows: false,
         link_policy: LinkPolicy.Preserve,
         deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
     };
@@ -110,6 +122,7 @@ fn _lf_manifest(name: string, dep: string) -> string {
 }
 
 test "payload closure: a CRLF-staged manifest still resolves its dependencies" ![io] {
+    if !_require_posix_shell() { return; }
     let marker = _scratch_marker("crlf-ok");
     let runtime_manifest = _crlf_manifest("sfn/runtime-native", "sfn/crypto");
     let crypto_manifest = _crlf_manifest("sfn/crypto", "");
@@ -130,6 +143,7 @@ test "payload closure: a CRLF-staged manifest still resolves its dependencies" !
 }
 
 test "payload closure: a CRLF manifest with a missing dependency fails closed" ![io] {
+    if !_require_posix_shell() { return; }
     let marker = _scratch_marker("crlf-missing");
     let runtime_manifest = _crlf_manifest("sfn/runtime-native", "sfn/crypto");
     let exit = with_tmp_dir(fn (dir: string) -> int {
@@ -160,6 +174,7 @@ test "payload closure: a CRLF manifest with a missing dependency fails closed" !
 }
 
 test "payload closure: an LF-staged manifest still resolves its dependencies" ![io] {
+    if !_require_posix_shell() { return; }
     let marker = _scratch_marker("lf-ok");
     let runtime_manifest = _lf_manifest("sfn/runtime-native", "sfn/crypto");
     let crypto_manifest = _lf_manifest("sfn/crypto", "");
@@ -181,6 +196,7 @@ test "payload closure: an LF-staged manifest still resolves its dependencies" ![
 // manifests are CRLF here, since the nested walk reads the dependency's
 // own `capsule.toml` through the same `_capsule_deps` helper.
 test "payload closure: a CRLF-staged manifest resolves a transitive dependency chain" ![io] {
+    if !_require_posix_shell() { return; }
     let marker = _scratch_marker("crlf-transitive");
     let runtime_manifest = _crlf_manifest("sfn/runtime-native", "sfn/crypto");
     let crypto_manifest = _crlf_manifest("sfn/crypto", "sfn/strings");

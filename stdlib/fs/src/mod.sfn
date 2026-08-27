@@ -96,12 +96,14 @@ fn remove_all(path: string) -> boolean ![io] {
 }
 
 // ---------------------------------------------------------------------
-// P5 (#366): Phase 0 precondition — five POSIX primitives the test
-// infrastructure epic (#362) relies on. Until the canonical
+// P5 (#366): Phase 0 precondition — filesystem primitives the test
+// infrastructure epic (#362) relies on. Permission and executable-mode
+// operations remain POSIX-shaped; directory and link operations have native
+// Windows providers. Until the canonical
 // `Result<(), IoError>` type ships (runtime-enablement Phase 1), the
 // state-changing helpers follow the existing capsule convention:
 // `boolean` for "did the call succeed", numeric for "what value was
-// observed". POSIX-only; Windows builds return a benign failure.
+// observed". Unsupported permission/mode operations return a benign failure.
 // ---------------------------------------------------------------------
 fn set_perms(path: string, mode: int) -> boolean ![io] {
     // chmod(2) wrapper. `mode` is masked to the lower 12 bits before
@@ -158,18 +160,18 @@ fn is_directory(path: string) -> boolean ![io] {
 }
 
 fn symlink(target: string, link: string) -> boolean ![io] {
-    // Creates `link` pointing at `target`. Per POSIX, the target
-    // need not exist; dangling symlinks are intentionally allowed.
-    // Returns true on success.
+    // Creates `link` pointing at `target`. The target need not exist;
+    // dangling symlinks are intentionally allowed. On Windows this may
+    // return false when neither Developer Mode nor
+    // SeCreateSymbolicLinkPrivilege permits link creation.
     // TODO: switch to Result<(), IoError> once shipped.
     return fs.symlink(target, link);
 }
 
 fn read_link(path: string) -> string ![io] {
     // Reads the raw single-hop target of the symlink at `path`
-    // (`readlink(2)`), e.g. `../../llms.txt` — the text exactly as
+    // (`readlink(2)` / `FSCTL_GET_REPARSE_POINT`), e.g. `../../llms.txt` — the text exactly as
     // stored in the link, never canonicalized or resolved through
-    // multiple hops. A non-symlink, missing path, or unsupported
-    // platform returns `""` (SFN-46).
+    // multiple hops. A non-symlink or missing path returns `""` (SFN-46).
     return fs.read_link(path);
 }

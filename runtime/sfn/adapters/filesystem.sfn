@@ -32,7 +32,10 @@
 // in pure Sailfin; bodies that need a platform-specific struct
 // layout or a proven C hot path trampoline through the legacy C
 // adapter behind the new `sfn_fs_*` symbol name:
-//   - **`sfn_fs_delete`**: pure Sailfin — `unlink(path)`.
+//   - **`sfn_fs_delete`**: delegates to the target-selected
+//     `platform/fs_link_ops.sfn`; POSIX uses `unlink`, while Windows tries
+//     `DeleteFileA` then `RemoveDirectoryA` so file and directory links are
+//     removed without following them (SFN-1143).
 //   - **`sfn_fs_mkdir`** (recursive): pure Sailfin — a forward
 //     component walk that NUL-terminates each `/`-bounded prefix
 //     of a writable scratch copy and `mkdir`s it, then probes the
@@ -116,16 +119,16 @@
 //     Sailfin over the portable libc `chmod` / `access` externs —
 //     both link and behave identically on Linux / macOS / Windows.
 //
-//   - **`sfn_fs_get_perms` / `sfn_fs_symlink` / `sfn_fs_exists`**
-//     (epic #1308, fs-runtime flip): route through the per-target
+//   - **`sfn_fs_get_perms` / `sfn_fs_exists`** (epic #1308,
+//     fs-runtime flip): route through the per-target
 //     `sailfin_intrinsic_fs_*` sentinels the compiler lowers in
 //     `runtime_helpers.sfn` — a POSIX libc `call` on Linux/macOS
-//     (`stat` / `symlink`), a bare stub on Windows — so the single
+//     (`stat`), a bare stub where appropriate on Windows — so the single
 //     `filesystem.ll` links on every target without a C trampoline.
 //     The sentinel calls carry no `extern` (the registry-by-name
 //     match attaches the descriptor, exactly like `exec.sfn`'s
 //     `sailfin_intrinsic_exe_path`); the libc symbols the dispatcher
-//     emits `call`s against (`symlink` / `stat` /
+//     emits `call`s against (`stat` /
 //     `GetFileAttributesA`) are `declare`d via the inlined
 //     `extern fn`s below. `get_perms`'s per-platform `st_mode` offset
 //     lives inside the sentinel lowering, not a fixed-offset Sailfin
@@ -176,7 +179,7 @@ extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
 extern fn ferror(f: *File) -> i32;
 
-// Extended POSIX filesystem primitives (#1311, epic #1308 C7). Two
+// Extended filesystem primitives (#1311, epic #1308 C7). Two
 // portable libc symbols are bound directly (no C trampoline):
 // `chmod` backs `set_perms` and `access` backs `is_executable`
 // (`fwrite`, above, backs write_file / append_file / write_lines).
@@ -196,7 +199,7 @@ extern fn chmod(path: *u8, mode: i32) -> i32;
 
 extern fn access(path: *u8, mode: i32) -> i32;
 
-// libc symbols the per-target `sailfin_intrinsic_fs_*` sentinel
+// libc symbols the remaining per-target `sailfin_intrinsic_fs_*` sentinel
 // dispatcher emits `call`s against (epic #1308 fs-runtime flip).
 // The sentinels themselves are registry-by-name intrinsics — called
 // WITHOUT an `extern` (like `exec.sfn`'s `sailfin_intrinsic_exe_path`)
@@ -211,15 +214,11 @@ extern fn access(path: *u8, mode: i32) -> i32;
 // sentinel target (SFN-993): it backs `sfn_fs_mkdtemp`'s direct call,
 // resolved by libc on POSIX and by `platform/mkdtemp_windows.sfn` on
 // Windows.
-extern fn symlink(target: *u8, link: *u8) -> i32;
-
 extern fn mkdtemp(template: *u8) -> *u8;
 
 extern fn stat(path: *u8, statbuf: *u8) -> i32;
 
 extern fn GetFileAttributesA(path: *u8) -> i32;
-
-extern fn readlink(path: *u8, buf: *u8, bufsize: usize) -> i64;
 
 // M3.1b additions. `memcpy` / `strlen` / `strchr` back the
 // recursive `sfn_fs_mkdir` component walk; `unlink` / `mkdir` are
@@ -249,6 +248,12 @@ extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 extern fn abort() -> void;
 
 extern fn unlink(path: *u8) -> i32;
+
+extern fn sfn_fs_link_delete(path: *u8) -> bool;
+
+extern fn sfn_fs_link_create(target: *u8, link: *u8) -> bool;
+
+extern fn sfn_fs_link_read(path: *u8, buf: *u8, cap: i64) -> i64;
 
 extern fn mkdir(path: *u8, mode: i32) -> i32;
 
@@ -684,16 +689,14 @@ fn sfn_fs_append_file_lv(path: *u8, data: *u8, len: i64) -> bool ![io] {
     return written == len && close_rc == 0;
 }
 
-// `sfn_fs_delete(path)` — remove the file named by `path`. Pure
-// Sailfin: `unlink(2)` returns 0 on success, -1 on error. Files
-// only — `unlink` cannot remove directories (it fails with
-// `EISDIR` / `EPERM`); directory removal would need `rmdir`, which
-// the `fs.deleteFile` surface does not expose. Mirrors the C
-// `sailfin_adapter_fs_delete_file` null-guard + `unlink == 0`
-// contract exactly.
+// `sfn_fs_delete(path)` — remove the file or link named by `path` without
+// following a link target. The target-selected provider uses `unlink(2)` on
+// POSIX and DeleteFileA/RemoveDirectoryA on Windows, where the second call is
+// required for a directory symlink (SFN-1143). Real directories remain the
+// responsibility of `sfn_fs_rmdir` below.
 fn sfn_fs_delete(path: *u8) -> bool ![io] {
     if path as i64 == 0 { return false; }
-    return unlink(path) == 0;
+    return sfn_fs_link_delete(path);
 }
 
 // `sfn_fs_rmdir(path)` — remove the *empty* directory named by
@@ -1163,29 +1166,23 @@ fn sfn_fs_is_executable(path: *u8) -> bool ![io] {
     return access(path, _sfn_fs_access_exec_mode()) == 0;
 }
 
-// `sfn_fs_symlink(target, link)` — create `link` pointing at
-// `target` (`symlink(2)`; per POSIX the target need not exist, so
-// dangling symlinks are allowed). Routes through the per-target
-// `sailfin_intrinsic_fs_symlink` sentinel (epic #1308 fs-runtime
-// flip): `symlink(target, link) == 0` on POSIX, `false` stub on
-// Windows (no MinGW `symlink` symbol). The `symlink` libc `declare`
-// the sentinel lowers to comes from the inlined `extern fn` above.
-// POSIX-only (#366).
+// `sfn_fs_symlink(target, link)` — create `link` pointing at `target`.
+// The target-selected provider uses `symlink(2)` on POSIX and
+// CreateSymbolicLinkA on Windows. Targets need not exist; a Windows host that
+// lacks Developer Mode / SeCreateSymbolicLinkPrivilege reports false.
 fn sfn_fs_symlink(target: *u8, link: *u8) -> bool ![io] {
-    return sailfin_intrinsic_fs_symlink(target, link);
+    return sfn_fs_link_create(target, link);
 }
 
 // `sfn_fs_read_link(path)` — read the raw single-hop target of the
 // symlink at `path` (`readlink(2)`) as a fresh malloc'd string. Routes
-// through the per-target `sailfin_intrinsic_fs_read_link` sentinel
-// (epic #1308 fs-runtime flip): POSIX emits `readlink(path, buf, size)`
-// returning the byte count; the Windows leg stubs to `-1` (no MinGW
-// `readlink` symbol). The `readlink` libc `declare` the sentinel lowers
-// to comes from the inlined `extern fn` above. Single-hop only — the
+// through the target-selected link provider: POSIX calls
+// `readlink(path, buf, size)`; Windows reads the reparse buffer and converts
+// its print-name field from UTF-16. Single-hop only — the
 // raw target text exactly as stored in the link (e.g. `../../llms.txt`),
 // never canonicalized (SFN-46). A null path, non-symlink, missing path,
-// OOM, or the Windows stub all collapse to a malloc'd `""` via
-// `_fs_empty_string()`. POSIX-only (#366).
+// OOM, or an unsupported reparse tag all collapse to a malloc'd `""` via
+// `_fs_empty_string()`.
 fn sfn_fs_read_link(path: *u8) -> *u8 ![io] {
     if path as i64 == 0 { return _fs_empty_string(); }
 
@@ -1196,7 +1193,7 @@ fn sfn_fs_read_link(path: *u8) -> *u8 ![io] {
     // `readlink(2)` never NUL-terminates and returns the byte count
     // (`<= 0` on error). The `+1` capacity slack reserves the NUL slot
     // written at offset `n`, exactly as `sfn_fs_read_bytes` does.
-    let n: i64 = sailfin_intrinsic_fs_read_link(path, buf, cap);
+    let n: i64 = sfn_fs_link_read(path, buf, cap);
     if n <= 0 {
         free(buf);
         return _fs_empty_string();

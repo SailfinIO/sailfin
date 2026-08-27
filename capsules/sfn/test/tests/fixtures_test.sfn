@@ -51,6 +51,43 @@ fn _cleanup(path: string) ![io] {
     if fs.exists(path) { fs.deleteFile(path); }
 }
 
+fn _is_windows() -> bool ![io] { return env.get("COMSPEC").length > 0; }
+
+// Windows must name cmd.exe by its absolute COMSPEC path because the child
+// environment is intentionally empty in several cases below. CreateProcess
+// resolves that application path before installing the child's environment.
+fn _env_probe_args(name: string) -> string[] ![io] {
+    if _is_windows() {
+        return [env.get("COMSPEC"), "/d", "/c", "set " + name];
+    }
+    return ["printenv", name];
+}
+
+fn _exit_args(code: int) -> string[] ![io] {
+    if _is_windows() {
+        if code == 7 {
+            return [env.get("COMSPEC"), "/d", "/c", "exit /b 7"];
+        }
+        return [env.get("COMSPEC"), "/d", "/c", "exit /b 5"];
+    }
+    if code == 7 { return ["sh", "-c", "exit 7"]; }
+    return ["sh", "-c", "exit 5"];
+}
+
+fn _list_cwd_args() -> string[] ![io] {
+    if _is_windows() {
+        return [env.get("COMSPEC"), "/d", "/c", "dir /b"];
+    }
+    return ["ls"];
+}
+
+fn _print_cwd_args() -> string[] ![io] {
+    if _is_windows() {
+        return [env.get("COMSPEC"), "/d", "/c", "cd"];
+    }
+    return ["pwd"];
+}
+
 // The body observes a directory that exists and is named `sfn-test-*`,
 // and its return value threads back out through the fixture. The body
 // captures nothing (`find` is an imported symbol, not a local).
@@ -142,15 +179,14 @@ test "with_tmp_dir: body captures an enclosing local" ![io] {
 // the child sees the override, the parent is unchanged, and an empty `Env`
 // yields a child with no environment.
 //
-// Subprocesses use `printenv` / `env` (coreutils). `posix_spawnp` resolves
-// the bare binary name via the *parent's* PATH even when the *child's*
-// environment is empty, so these run without threading PATH into the scoped
-// `Env` — mirroring `sfn/os`'s own `run_capture_test.sfn`. Each body lambda
-// captures nothing (literals + the imported `find`), staying within the
-// single-capture lowering constraint documented above.
+// POSIX subprocesses use coreutils; Windows uses cmd.exe named by the
+// parent's absolute COMSPEC path. A bare POSIX name is resolved through the
+// parent's PATH before the explicit child environment is installed, while
+// the absolute Win32 application path needs no child PATH. Each body lambda
+// captures nothing, staying within the single-capture constraint above.
 // The child process sees a variable set only in the scoped `Env`.
 test "with_env: child sees the scoped override" ![io] {
-    let r = with_env(["printenv", "SFN_WITH_ENV_CHILD"], env_set(env_empty(), "SFN_WITH_ENV_CHILD", "scoped-value"), fn (out: ProcessOutput) -> int {
+    let r = with_env(_env_probe_args("SFN_WITH_ENV_CHILD"), env_set(env_empty(), "SFN_WITH_ENV_CHILD", "scoped-value"), fn (out: ProcessOutput) -> int {
         if out.exit != 0 { return -1; }
         if find(out.stdout, "scoped-value", 0) >= 0 { return 1; }
         return 0;
@@ -166,7 +202,7 @@ test "with_env: child sees the scoped override" ![io] {
 // shadowing the builtin `env` namespace with a same-named import.
 test "with_env: parent environment is unchanged by a scoped child env" ![io] {
     let before = env.get("SFN_WITH_ENV_PARENT");
-    let r = with_env(["printenv", "SFN_WITH_ENV_PARENT"], env_set(env_empty(), "SFN_WITH_ENV_PARENT", "child-only"), fn (out: ProcessOutput) -> int {
+    let r = with_env(_env_probe_args("SFN_WITH_ENV_PARENT"), env_set(env_empty(), "SFN_WITH_ENV_PARENT", "child-only"), fn (out: ProcessOutput) -> int {
         // Sanity: the scoping worked at all — the child did see it.
         if find(out.stdout, "child-only", 0) >= 0 { return 1; }
         return 0;
@@ -183,7 +219,7 @@ test "with_env: parent environment is unchanged by a scoped child env" ![io] {
 // the process an empty environment block; those values were not inherited.
 test "with_env: empty Env yields a child with no environment" ![io] {
     assert env.get("SAILFIN_TEST_SCRATCH").length > 0;
-    let r = with_env(["printenv", "SAILFIN_TEST_SCRATCH"], env_empty(), fn (out: ProcessOutput) -> int {
+    let r = with_env(_env_probe_args("SAILFIN_TEST_SCRATCH"), env_empty(), fn (out: ProcessOutput) -> int {
         if out.exit != 1 { return -1; }
         return out.stdout.length;
     });
@@ -194,7 +230,7 @@ test "with_env: empty Env yields a child with no environment" ![io] {
 // returning an extracted value is the helper's return value (mirrors
 // `with_tmp_dir`'s result-threading contract).
 test "with_env: body return value threads back out" ![io] {
-    let r = with_env(["sh", "-c", "exit 7"], env_empty(), fn (out: ProcessOutput) -> int {
+    let r = with_env(_exit_args(7), env_empty(), fn (out: ProcessOutput) -> int {
         return out.exit;
     });
     assert r == 7;
@@ -207,17 +243,17 @@ test "with_env: body return value threads back out" ![io] {
 // via `os::run_capture(args, env, cwd)` (#1167 per-child cwd, no global
 // `chdir`), threading the captured `ProcessOutput` to `body`. These tests
 // prove: the child runs in the scoped cwd, it composes with `with_tmp_dir`,
-// and the parent's cwd is untouched. `env_empty()` is fine — `posix_spawnp`
-// resolves bare binary names (`ls`/`pwd`/`sh`) via the parent's PATH even
-// when the child env is empty (same as the with_env tests above). Each body
-// lambda captures at most one local, honoring the single-capture constraint.
+// and the parent's cwd is untouched. `env_empty()` is fine because the POSIX
+// utilities resolve before the child environment is installed and Windows
+// names cmd.exe by absolute COMSPEC path. Each body lambda captures at most
+// one local, honoring the single-capture constraint.
 // The child runs in the temp dir handed down by `with_tmp_dir`: a marker
 // file written into that dir shows up in a bare `ls` (which lists the cwd),
 // proving the child's cwd is the scoped dir. Also exercises nesting.
 test "with_cwd: child runs in the scoped cwd (nested under with_tmp_dir)" ![io] {
     let r = with_tmp_dir(fn (dir: string) -> int {
         fs.writeFile(dir + "/sfn-cwd-marker.txt", "x");
-        return with_cwd(["ls"], env_empty(), dir, fn (out: ProcessOutput) -> int {
+        return with_cwd(_list_cwd_args(), env_empty(), dir, fn (out: ProcessOutput) -> int {
             if out.exit != 0 { return -1; }
             if find(out.stdout, "sfn-cwd-marker.txt", 0) >= 0 { return 1; }
             return 0;
@@ -234,16 +270,16 @@ test "with_cwd: child runs in the scoped cwd (nested under with_tmp_dir)" ![io] 
 test "with_cwd: parent process cwd is unchanged by a scoped child cwd" ![io] {
     let m_before = _marker("cwd-before");
     let m_after = _marker("cwd-after");
-    let _a = with_cwd(["pwd"], env_empty(), "", fn (out: ProcessOutput) -> int {
+    let _a = with_cwd(_print_cwd_args(), env_empty(), "", fn (out: ProcessOutput) -> int {
         fs.writeFile(m_before, out.stdout);
         return 0;
     });
     let _mid = with_tmp_dir(fn (dir: string) -> int {
-        return with_cwd(["pwd"], env_empty(), dir, fn (out: ProcessOutput) -> int {
+        return with_cwd(_print_cwd_args(), env_empty(), dir, fn (out: ProcessOutput) -> int {
             return out.exit;
         });
     });
-    let _b = with_cwd(["pwd"], env_empty(), "", fn (out: ProcessOutput) -> int {
+    let _b = with_cwd(_print_cwd_args(), env_empty(), "", fn (out: ProcessOutput) -> int {
         fs.writeFile(m_after, out.stdout);
         return 0;
     });
@@ -259,7 +295,7 @@ test "with_cwd: parent process cwd is unchanged by a scoped child cwd" ![io] {
 // returning the child's exit code is the helper's return value (mirrors
 // the with_env result-threading contract).
 test "with_cwd: body return value threads back out" ![io] {
-    let r = with_cwd(["sh", "-c", "exit 5"], env_empty(), "", fn (out: ProcessOutput) -> int {
+    let r = with_cwd(_exit_args(5), env_empty(), "", fn (out: ProcessOutput) -> int {
         return out.exit;
     });
     assert r == 5;

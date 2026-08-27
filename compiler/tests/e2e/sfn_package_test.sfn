@@ -6,8 +6,9 @@
 //
 // Native replacement for the former `test_sfn_package.sh` (test-infra
 // Phase 3, epic #842). It inspected tarballs with `tar -tzf` and manifest
-// JSON with `jq`; here we shell out to `tar` / `jq` / `sha256sum` via
-// `process.run_capture` and parse the single-line stdout. Tests that need
+// JSON with `jq`; here we shell out to `tar` / `jq` via
+// `process.run_capture` and use the compiler's binary-safe SHA-256 helper.
+// Tests that need
 // `tar` or `jq` skip (assert true) when `tool_present` reports them absent
 // — the shared shell-free presence probe (SFN-840).
 //
@@ -31,7 +32,7 @@ import {
     tool_present
 } from "sfn/test";
 
-import { _cwd_cmd } from "../../src/build/fs";
+import { _cwd_cmd, _sha256_of_file } from "../../src/build/fs";
 import { copy_tree } from "../../src/build/fs_tree";
 import { _dirname, _path_basename } from "../../src/build/paths";
 import { compiler_manifest_from_workspace } from "../../src/installer_staging";
@@ -215,33 +216,10 @@ fn _listing_suffix_count(listing: string, suffix: string) -> int {
     return count;
 }
 
-// `sha256sum <file>` -> the 64-char hex (first whitespace-delimited field).
-// Run with `sha256sum`'s cwd set to the file's own directory and a bare
-// basename argument: GNU coreutils escapes its whole output line with a
-// leading `\` whenever the filename argument carries a backslash or
-// newline (every path in this file does, on a native Windows host), which
-// corrupted the hash this function returns.
-fn _sha256_hex(file: string) -> string ![io] {
-    let dir = _dirname(file);
-    let base = _path_basename(file);
-    let exit = process.run_capture_cwd(["sha256sum", base], _child_env(), dir);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    report_child_failure("sfn-package sha256sum", exit, out, err);
-    if exit != 0 { return ""; }
-    let mut line = _first_line(out);
-    // Defence in depth, not the fix: the cwd + bare-basename call above is
-    // what keeps a backslash out of the argument in the first place, so
-    // this should never fire. Kept so a future caller that reintroduces a
-    // path argument gets a wrong-looking hash rejected by `_is_hex64`
-    // rather than silently accepted.
-    if line.length > 0 && substring(line, 0, 1) == "\\" {
-        line = substring(line, 1, line.length);
-    }
-    let parts = split(line, " ");
-    if parts.length == 0 { return ""; }
-    return parts[0];
-}
+// Binary-safe, in-process digest on every host. This is the same oracle the
+// package command uses for its sidecar and avoids a POSIX `sha256sum`
+// dependency in native Windows verification (SFN-1156).
+fn _sha256_hex(file: string) -> string ![io] { return _sha256_of_file(file); }
 
 // First line of the `.sha256` sidecar file (the bare hex digest + newline).
 fn _sidecar_hex(sha_file: string) -> string ![io] {

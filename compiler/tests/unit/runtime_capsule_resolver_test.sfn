@@ -44,12 +44,14 @@ test "empty_runtime_capsule_artifacts: every list is empty" {
 // can walk. The repo's actual workspace.toml + runtime/native/
 // would also work, but we want hermetic asserts on the exact
 // path resolution rules — not "happens to match what's in main."
+import { remove_all } from "sfn/fs";
+
 fn _setup_scratch_workspace(scratch: string) ![io] {
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch + "/runtime/native/src"]);
-    process.run(["mkdir", "-p", scratch + "/runtime/native/include"]);
-    process.run(["mkdir", "-p", scratch + "/runtime/native/ir"]);
-    process.run(["mkdir", "-p", scratch + "/capsules/sfn/library-cap"]);
+    remove_all(scratch);
+    fs.createDirectory(scratch + "/runtime/native/src", true);
+    fs.createDirectory(scratch + "/runtime/native/include", true);
+    fs.createDirectory(scratch + "/runtime/native/ir", true);
+    fs.createDirectory(scratch + "/capsules/sfn/library-cap", true);
 
     fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"runtime/native\", \"capsules/sfn/library-cap\"]\n");
 
@@ -98,7 +100,7 @@ test "enumerate: returns runtime capsule from workspace" ![io] {
     let result = enumerate_runtime_capsule_artifacts(scratch, empty);
     assert result.length == 1;
     assert result[0].capsule_name == "sfn/runtime-native";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: skips kind != runtime members" ![io] {
@@ -114,7 +116,7 @@ test "enumerate: skips kind != runtime members" ![io] {
         assert result[i].capsule_name != "sfn/library-cap";
         i += 1;
     }
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: c_sources resolved to workspace-rooted paths" ![io] {
@@ -132,7 +134,7 @@ test "enumerate: c_sources resolved to workspace-rooted paths" ![io] {
     // `<scratch>/runtime/native/src/sailfin_arena.c`.
     assert a.c_sources[0] == scratch + "/runtime/native/src/sailfin_arena.c";
     assert a.c_sources[1] == scratch + "/runtime/native/src/sailfin_runtime.c";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: sfn_sources resolved relative to manifest dir" ![io] {
@@ -155,7 +157,7 @@ test "enumerate: sfn_sources resolved relative to manifest dir" ![io] {
     assert a.sfn_sources.length == 2;
     assert a.sfn_sources[0] == scratch + "/runtime/sfn/io.sfn";
     assert a.sfn_sources[1] == scratch + "/runtime/sfn/clock.sfn";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: rejects sfn source outside declared source root" ![io] {
@@ -168,7 +170,7 @@ test "enumerate: rejects sfn source outside declared source root" ![io] {
         + "sfn-sources = [\"../../escape.sfn\"]\n");
     let result = enumerate_runtime_capsule_artifacts(scratch, []);
     assert result.length == 0;
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: rejects runtime module prefix with dot segments" ![io] {
@@ -181,7 +183,7 @@ test "enumerate: rejects runtime module prefix with dot segments" ![io] {
         + "sfn-sources = [\"../sfn/io.sfn\"]\n");
     let result = enumerate_runtime_capsule_artifacts(scratch, []);
     assert result.length == 0;
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: rejects gated source outside declared source root" ![io] {
@@ -193,7 +195,7 @@ test "enumerate: rejects gated source outside declared source root" ![io] {
     fs.writeFile(manifest_path, manifest);
     let result = enumerate_runtime_capsule_artifacts(scratch, []);
     assert result.length == 0;
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: ll_sources resolved with same join rule as c_sources" ![io] {
@@ -205,7 +207,7 @@ test "enumerate: ll_sources resolved with same join rule as c_sources" ![io] {
     let a = result[0];
     assert a.ll_sources.length == 1;
     assert a.ll_sources[0] == scratch + "/runtime/native/ir/runtime_globals.ll";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: include_dirs resolved to manifest-relative dirs" ![io] {
@@ -216,7 +218,7 @@ test "enumerate: include_dirs resolved to manifest-relative dirs" ![io] {
     assert result.length == 1;
     assert result[0].include_dirs.length == 1;
     assert result[0].include_dirs[0] == scratch + "/runtime/native/include";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: link_libs flow through verbatim (not path-resolved)" ![io] {
@@ -230,7 +232,7 @@ test "enumerate: link_libs flow through verbatim (not path-resolved)" ![io] {
     // must NOT be prepended with the manifest dir.
     assert result[0].link_libs[0] == "-lm";
     assert result[0].link_libs[1] == "-lpthread";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: target runtime tables are resolved once at the manifest boundary" ![io] {
@@ -251,7 +253,7 @@ test "enumerate: target runtime tables are resolved once at the manifest boundar
     assert target.ll_sources_add[0] == scratch + "/runtime/native/ir/target.ll";
     assert target.link_libs_drop[0] == "-lpthread";
     assert target.link_libs_add[0] == "-lws2_32";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: malformed target replacement fails closed" ![io] {
@@ -263,7 +265,7 @@ test "enumerate: malformed target replacement fails closed" ![io] {
         + "\n[targets.bad-target]\nsfn-sources-replace = [\"missing-equals\"]\n");
     let result = enumerate_runtime_capsule_artifacts(scratch, []);
     assert result.length == 0;
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: duplicate target replacement sources fail closed" ![io] {
@@ -277,7 +279,7 @@ test "enumerate: duplicate target replacement sources fail closed" ![io] {
         + "\"../sfn/io.sfn=../sfn/platform/clock_windows.sfn\"]\n");
     let result = enumerate_runtime_capsule_artifacts(scratch, []);
     assert result.length == 0;
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: target IR additions cannot escape the runtime capsule" ![io] {
@@ -289,7 +291,7 @@ test "enumerate: target IR additions cannot escape the runtime capsule" ![io] {
         + "\n[targets.bad-ir-target]\nll-sources-add = [\"../../outside.ll\"]\n");
     let result = enumerate_runtime_capsule_artifacts(scratch, []);
     assert result.length == 0;
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: replacement source must exist in the base runtime set" ![io] {
@@ -301,7 +303,7 @@ test "enumerate: replacement source must exist in the base runtime set" ![io] {
         + "\n[targets.bad-target]\nsfn-sources-replace = [\"../sfn/missing.sfn=../sfn/platform/io_windows.sfn\"]\n");
     let result = enumerate_runtime_capsule_artifacts(scratch, []);
     assert result.length == 0;
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: prelude_entry resolved relative to manifest dir" ![io] {
@@ -317,7 +319,7 @@ test "enumerate: prelude_entry resolved relative to manifest dir" ![io] {
     // any downstream consumer that feeds the path back into the
     // compiler's import resolver.
     assert result[0].prelude_entry == scratch + "/runtime/prelude.sfn";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: dep_specs filter narrows the result set" ![io] {
@@ -331,7 +333,7 @@ test "enumerate: dep_specs filter narrows the result set" ![io] {
     let result = enumerate_runtime_capsule_artifacts(scratch, specs);
     assert result.length == 1;
     assert result[0].capsule_name == "sfn/runtime-native";
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: dep_specs with unknown name returns empty" ![io] {
@@ -340,7 +342,7 @@ test "enumerate: dep_specs with unknown name returns empty" ![io] {
     let specs = ["sfn/does-not-exist"];
     let result = enumerate_runtime_capsule_artifacts(scratch, specs);
     assert result.length == 0;
-    process.run(["rm", "-rf", scratch]);
+    remove_all(scratch);
 }
 
 test "enumerate: missing workspace.toml returns empty" ![io] {

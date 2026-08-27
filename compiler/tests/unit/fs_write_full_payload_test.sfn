@@ -9,10 +9,19 @@
 // so this asserts the round-trip completeness invariant the fix guarantees:
 // a multi-KiB payload survives write→read byte-for-byte, tail included.
 //
-// Structure mirrors the proven `runtime_capsule_resolver_test.sfn` shape:
-// a fixed relative scratch dir set up via `process.run` (no `with_tmp_dir`),
-// small deterministic payloads.
+// Scratch lives under the runner-provided isolated root and is created via
+// the filesystem API under test. Shelling out to POSIX `rm -rf` / `mkdir -p`
+// made every assertion read an empty missing file on native Windows
+// (SFN-1156), obscuring the writer contract this file exists to prove.
 import { find } from "sfn/strings";
+
+fn _scratch(name: string) -> string ![io] {
+    let mut root = env.get("SAILFIN_TEST_SCRATCH");
+    if root.length == 0 { root = "build/sailfin"; }
+    let path = root + "/fs-writer-" + name;
+    fs.createDirectory(path, true);
+    return path;
+}
 
 // A multi-KiB payload (6 doublings ≈ 3 KiB) plus a distinctive terminal
 // marker that stands in for the `define @main` tail. The completeness
@@ -31,9 +40,7 @@ fn _payload() -> string {
 }
 
 test "fs writer: writeFile round-trips a multi-KiB payload without tail loss" ![io] {
-    let scratch = "build/sailfin/.fs-writer-test-1";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _scratch("write");
     let path = scratch + "/payload.bin";
     let payload = _payload();
     fs.writeFile(path, payload);
@@ -42,20 +49,16 @@ test "fs writer: writeFile round-trips a multi-KiB payload without tail loss" ![
     // (written last) proves the tail specifically survived.
     assert readback.length == payload.length;
     assert find(readback, ";; TAIL-MARKER-END", 0) >= 0;
-    process.run(["rm", "-rf", scratch]);
 }
 
 test "fs writer: appendFile accumulates the full payload" ![io] {
-    let scratch = "build/sailfin/.fs-writer-test-2";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _scratch("append");
     let path = scratch + "/payload.bin";
     let payload = _payload();
     fs.writeFile(path, payload);
     fs.appendFile(path, payload);
     let readback = fs.readFile(path);
     assert readback.length == payload.length * 2;
-    process.run(["rm", "-rf", scratch]);
 }
 
 // `fs.writeLines` is the primary self-host IR emit path
@@ -63,9 +66,7 @@ test "fs writer: appendFile accumulates the full payload" ![io] {
 // survive intact, since the module's trailing `define @main` is emitted as
 // the last line.
 test "fs writer: writeLines preserves a long final line" ![io] {
-    let scratch = "build/sailfin/.fs-writer-test-3";
-    process.run(["rm", "-rf", scratch]);
-    process.run(["mkdir", "-p", scratch]);
+    let scratch = _scratch("lines");
     let path = scratch + "/payload.ll";
     let mut lines: string[] = [];
     lines.push("define i32 @main(i32 %argc, i8** %argv) {");
@@ -87,5 +88,4 @@ test "fs writer: writeLines preserves a long final line" ![io] {
     }
     assert readback.length == expected;
     assert find(readback, ";; TAIL-MARKER-END", 0) >= 0;
-    process.run(["rm", "-rf", scratch]);
 }

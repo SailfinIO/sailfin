@@ -390,8 +390,8 @@ fn _tr_read_pax_body(buf: ByteBuf, start: int, size: int) -> Result<_PaxRecords,
 // than replacing it, so a parent validated here cannot be swapped for a
 // symlink before the deferred-link replay runs.
 //
-// **POSIX only.** `fs.read_link`'s Windows leg is a stub returning ""
-// (`runtime/sfn/adapters/filesystem.sfn:985-991`), so this check cannot
+// `fs.read_link` returns the raw stored target on POSIX and Windows
+// (`runtime/sfn/adapters/filesystem.sfn`), so this check cannot
 // see a Windows junction and never fires there. The residual exposure is
 // bounded rather than closed: the extractor plants no links of its own on
 // Windows (`copy_instead_of_link` is forced on), so it takes an

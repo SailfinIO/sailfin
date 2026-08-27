@@ -6,6 +6,7 @@
 import {
     contains,
     ends_with,
+    replace,
     split,
     starts_with,
     substring
@@ -79,8 +80,9 @@ fn _path_parent(path: string) -> string {
 // Collapse dot segments before containment comparisons. Repository manifests
 // use forward slashes on every host; backslashes are rejected separately.
 fn _normalize_path(path: string) -> string {
-    let is_absolute = starts_with(path, "/");
-    let parts = split(path, "/");
+    let portable_path = replace(path, "\\", "/");
+    let is_absolute = starts_with(portable_path, "/");
+    let parts = split(portable_path, "/");
     let mut out = "";
     if is_absolute { out = "/"; }
     let mut i: int = 0;
@@ -121,8 +123,9 @@ fn _remaining_path(parts: string[], start: int) -> string {
 // path that could pass containment.
 fn _resolve_links(path: string, depth: int) -> ResolvedPath ![io] {
     if depth >= 16 { return _resolved_path_error(); }
-    let is_absolute = starts_with(path, "/");
-    let parts = split(path, "/");
+    let portable_path = replace(path, "\\", "/");
+    let is_absolute = starts_with(portable_path, "/");
+    let parts = split(portable_path, "/");
     let mut current = "";
     if is_absolute { current = "/"; }
     let mut i: int = 0;

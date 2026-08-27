@@ -5,14 +5,22 @@ import {
     clean_runner_env,
     nested_runner_scratch,
     report_child_failure,
-    sfn_bin_path
+    sfn_bin_path,
+    skip
 } from "sfn/test";
+
+fn _require_posix_file_limit() -> bool ![io] {
+    if env.get("COMSPEC").length == 0 { return true; }
+    skip("SFN-1156: append short-write injection requires POSIX ulimit and SIGXFSZ; remove this skip when Windows has a native bounded-write fault injector");
+    return false;
+}
 
 fn _child_env() -> string[] ![io] {
     return clean_runner_env(nested_runner_scratch("append-short-write"));
 }
 
 test "fs.appendFile reports a short write without deleting existing content" ![io] {
+    if !_require_posix_file_limit() { return; }
     let scratch = env.get("SAILFIN_TEST_SCRATCH") + "/append-short-write";
     let probe = scratch + "/probe.sfn";
     let bin = scratch + "/probe";

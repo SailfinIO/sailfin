@@ -34,10 +34,12 @@ sfn-module-prefix = "runtime/sfn"
 # historical single-line-only constraint is lifted.
 c-sources = []
 ll-sources = []
-# `sfn-sources` lists the Sailfin runtime modules compiled and linked
-# into every Sailfin binary. With the C runtime gone these are the sole
-# runtime definitions (arena, strings, arrays, io, exceptions, the
-# type-meta surface, the platform shims, and the concurrency runtime).
+# `sfn-sources` lists the Sailfin runtime modules compiled and linked into
+# every Sailfin binary. With the C runtime gone these provide the runtime
+# behavior (arena, strings, arrays, io, exceptions, type metadata, platform
+# shims, and concurrency). The only target-added IR is
+# `ir/fs_link_ops_windows.ll`: a narrow 8-bit Win32 BOOLEAN ABI bridge, not a
+# behavior implementation or a revival of the deleted broad Windows stubs.
 #
 # One consumer honors this list:
 #   `_compile_runtime_sfn_sources` in
@@ -70,6 +72,7 @@ sfn-sources = [
     "sfn/platform/pthread.sfn",
     "sfn/platform/rand.sfn",
     "sfn/platform/fs_exec_mode.sfn",
+    "sfn/platform/fs_link_ops.sfn",
     "sfn/platform/fd_io.sfn",
     "sfn/platform/socket_ops.sfn",
     "sfn/platform/rename_ops.sfn",
@@ -136,6 +139,7 @@ sfn-sources-replace = [
     "sfn/platform/terminal.sfn=sfn/platform/terminal_windows.sfn",
     "sfn/platform/rand.sfn=sfn/platform/rand_windows.sfn",
     "sfn/platform/fs_exec_mode.sfn=sfn/platform/fs_exec_mode_windows.sfn",
+    "sfn/platform/fs_link_ops.sfn=sfn/platform/fs_link_ops_windows.sfn",
     "sfn/platform/fd_io.sfn=sfn/platform/fd_io_windows.sfn",
     "sfn/platform/socket_ops.sfn=sfn/platform/socket_ops_windows.sfn",
     "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_windows.sfn",
@@ -163,7 +167,7 @@ sfn-sources-add = [
     "sfn/platform/mkdtemp_windows.sfn",
 ]
 sfn-sources-drop = []
-ll-sources-add = []
+ll-sources-add = ["ir/fs_link_ops_windows.ll"]
 link-libs-drop = []
 link-libs-add = ["-lbcrypt", "-lcrypt32", "-lws2_32"]
 
@@ -184,6 +188,7 @@ sfn-sources-replace = [
     "sfn/platform/terminal.sfn=sfn/platform/terminal_windows.sfn",
     "sfn/platform/rand.sfn=sfn/platform/rand_windows.sfn",
     "sfn/platform/fs_exec_mode.sfn=sfn/platform/fs_exec_mode_windows.sfn",
+    "sfn/platform/fs_link_ops.sfn=sfn/platform/fs_link_ops_windows.sfn",
     "sfn/platform/fd_io.sfn=sfn/platform/fd_io_windows.sfn",
     "sfn/platform/socket_ops.sfn=sfn/platform/socket_ops_windows.sfn",
     "sfn/platform/rename_ops.sfn=sfn/platform/rename_ops_windows.sfn",
@@ -205,7 +210,7 @@ sfn-sources-add = [
     "sfn/platform/mkdtemp_windows.sfn",
 ]
 sfn-sources-drop = []
-ll-sources-add = []
+ll-sources-add = ["ir/fs_link_ops_windows.ll"]
 link-libs-drop = []
 link-libs-add = []
 
