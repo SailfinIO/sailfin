@@ -25,15 +25,28 @@ fn _contains(haystack: string, needle: string) -> boolean {
 // in #1091) — and `spawn:int <fn>` lowers to `sfn_spawn_int` (M4 Wave 2
 // flip, #1090/#1091), which replaced the former
 // `sailfin_{runtime,adapter}_*` C-archive symbols.
-// Both are verified from a single LLVM emission to avoid arena OOM.
-test "lowering: channel and spawn emit correct runtime helper symbols (#1085)" ![io] {
-    let source = "fn main() ![io] {\n" + "    let ch = channel(4);\n"
+//
+// The same source also spawns a zero-argument NAMED function (`worker`,
+// SFN-1006): `lower_spawn_expression` resolves it from the native function
+// table and emits the direct bitcast/call/bitcast sequence, so it lowers
+// to `@sfn_spawn_int` too — with no illegal register-to-pointer bitcast
+// (the pre-fix ICE lowered the named call as a generic expression, then
+// bitcast its i64 RETURN VALUE into a task pointer: `bitcast i64 %tN to
+// i8*`) and no emitter left for the retired `@sfn_spawn_task` adapter.
+//
+// All three are verified from a single LLVM emission to avoid arena OOM.
+test "lowering: channel and spawn emit correct runtime helper symbols (#1085, SFN-1006)" ![io] {
+    let source = "fn worker() -> int { return 7; }\n" + "fn main() ![io] {\n"
+        + "    let ch = channel(4);\n"
         + "    let f = spawn fn() -> int { return 1; };\n"
+        + "    let g = spawn worker();\n"
         + "}";
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "concurrency_lowering_test");
     let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "concurrency_lowering_test", empty_llvm_import_context(), resolve_llvm_provider_context());
     assert _contains(ir, "@sfn_channel_create");
     assert _contains(ir, "sfn_channel_create(i64 4, i64 8");
-    assert _contains(ir, "sfn_spawn_int");
+    assert _contains(ir, "@sfn_spawn_int");
+    assert ! _contains(ir, "bitcast i64 %");
+    assert ! _contains(ir, "@sfn_spawn_task");
 }

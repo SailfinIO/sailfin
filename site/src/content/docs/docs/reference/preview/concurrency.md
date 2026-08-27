@@ -44,6 +44,31 @@ an alias to a longer-lived scalar, aggregate field, indexed collection, or
 module global raises `E0838`. Channels created outside a nursery—including the
 module-global sharing pattern—remain ambient and are not flagged (SFN-694).
 
+### Spawning a named function (SFN-1006)
+
+`spawn <fn>()` — a call to a **zero-argument** declared or imported function
+— is a second spawn shape alongside the inline `fn` literal:
+
+```sfn
+fn worker() -> int { return 7; }
+fn main() -> int ![io] {
+    let hs: Task<int>[] = [spawn worker()];
+    let v: int = await hs[0];
+    print("v = {{v}}");
+    return 0;
+}
+```
+
+The lowering resolves `worker`'s declared return type from the compiled
+function table and dispatches through the same typed `sfn_spawn_<kind>`
+family as the inline lambda form — no lifted lambda, no environment
+allocation. Every other spawn operand is rejected at `sfn check` with
+**E0842**: a call with arguments (`spawn worker(1)`), a method or computed
+callee (`spawn obj.work()`), a call to a name that is not a declared
+function, or any other expression that is not a call or an inline `fn`
+literal. Argument marshalling needs a thunk the frontend does not synthesize
+yet, so wrap it: `spawn fn() -> int { return worker(1, 2); }`.
+
 ### Capture-env ownership for `spawn` / `parallel` (#1475, epic #1466)
 
 A task lambda that captures variables from the enclosing scope owns its heap environment across the thread boundary and frees it exactly once after the task body completes. The mechanics:

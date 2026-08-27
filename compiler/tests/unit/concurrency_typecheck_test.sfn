@@ -256,6 +256,50 @@ test "task array kind: non-handle-array annotations do not resolve" {
     assert strings_equal(_task_array_kind("Task"), "<not-task-array>");
 }
 
+// --- spawn target: unsupported target -> E0842 (SFN-1006) ------------------
+test "spawn target: an argument-carrying call to a declared fn emits E0842" ![io] {
+    let source = "fn worker(a: int) -> int { return a; }\n"
+        + "let f = spawn worker(1);";
+    assert _produces_diagnostic(source, "E0842");
+}
+
+test "spawn target: a method-call target emits E0842" ![io] {
+    let source = "struct Worker { }\n" + "let w = Worker { };\n"
+        + "let f = spawn w.work();";
+    assert _produces_diagnostic(source, "E0842");
+}
+
+test "spawn target: a call to an undeclared function emits E0842" ![io] {
+    let source = "let f = spawn undeclared_worker();";
+    assert _produces_diagnostic(source, "E0842");
+}
+
+test "spawn target: a non-call, non-lambda operand emits E0842" ![io] {
+    let source = "let x = 5;\nlet f = spawn x;";
+    assert _produces_diagnostic(source, "E0842");
+}
+
+// --- spawn target: a zero-arg call to a declared function is accepted -------
+test "spawn target: a zero-arg call to a declared function emits no E0842" ![io] {
+    let source = "fn worker() -> int { return 7; }\n"
+        + "let f = spawn worker();";
+    assert ! _produces_diagnostic(source, "E0842");
+}
+
+// #7.3: `check_spawn_target` must resolve the callee from the hoisted
+// top-level binding table, not textual declaration order — a `spawn`
+// preceding its callee's `fn` still resolves. Function-body scopes seed
+// `ctx.bindings` from the fully hoisted `ctx.top_level`
+// (`function_scopes.sfn:60`), so this is the realistic shape (a bare
+// top-level `let` statement, unlike a function body, is walked in textual
+// order and does not hoist a later `fn` — a pre-existing E0420 limitation
+// unrelated to this rule).
+test "spawn target: a spawn preceding its callee's declaration emits no E0842" ![io] {
+    let source = "fn main() ![io] { let f = spawn worker(); }\n"
+        + "fn worker() -> int { return 7; }";
+    assert ! _produces_diagnostic(source, "E0842");
+}
+
 test "task array marker: round-trips the element kind under the taskarr tag" {
     // The marker is distinct from a bare channel element kind and the
     // `empty_array` E0831 sentinel, so E0815/E0831 are unaffected.
