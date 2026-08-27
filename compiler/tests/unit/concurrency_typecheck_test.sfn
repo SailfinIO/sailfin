@@ -286,7 +286,7 @@ test "spawn target: a zero-arg call to a declared function emits no E0842" ![io]
     assert ! _produces_diagnostic(source, "E0842");
 }
 
-// #7.3: `check_spawn_target` must resolve the callee from the hoisted
+// SFN-1006 design note section 7.3: `check_spawn_target` must resolve the callee from the hoisted
 // top-level binding table, not textual declaration order — a `spawn`
 // preceding its callee's `fn` still resolves. Function-body scopes seed
 // `ctx.bindings` from the fully hoisted `ctx.top_level`

@@ -24,7 +24,13 @@
 // check_build_agree_module_global_test.sfn — see `.claude/rules/no-bash-e2e.md`
 // for the why. `check` emits no IR, so it needs no build-cache isolation and
 // runs outside `with_tmp_dir`.
-import { default_scratch_dir, sfn_bin_path, with_tmp_dir } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
 
 // The green-agreement repro: the issue's own zero-arg named-fn spawn.
 // Before the fix this checked green but ICE'd at build.
@@ -48,11 +54,16 @@ fn _red_src() -> string {
         + "}\n";
 }
 
-// Inherit the full parent environment so the nested clang/ld the build
-// spawns find their toolchain (a minimal PATH-only set links on Linux but
-// fails on macOS, #1410), and SAILFIN_TEST_SCRATCH routes the build cache
-// per-invocation (#1333). Mirrors check_build_agree_module_global_test.sfn.
-fn _child_env() -> string[] ![io] { return process.environ(); }
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key: `clean_runner_env` filters `process.environ()` rather
+// than allowlisting it, so the nested clang/ld still find their toolchain
+// while the parent pool's orchestration keys are stripped. Threading raw
+// `process.environ()` here would bind these two nested builds to the parent
+// runner's scratch and shared runtime object cache — pool-only breakage that
+// passes a serial run and fails under `--jobs N` (SFN-401).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("sfn-1006-check-build-agree"));
+}
 
 // A fresh out-of-tree source path for the shared check/build input.
 // (Survives `with_tmp_dir` teardown; this test owns the filename, so no

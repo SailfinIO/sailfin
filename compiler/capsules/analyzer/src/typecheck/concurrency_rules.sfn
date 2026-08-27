@@ -110,6 +110,18 @@ fn check_spawn_target(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
             return [make_spawn_unsupported_target_diagnostic("`" + callee.name
                 + "`, which is not a declared function", expression.span)];
         }
+        // Agreement with the lowering guard: a callee that declares any
+        // parameter cannot be spawned even when the call site passes none,
+        // because defaults are filled at the call site and the trampoline
+        // invokes the callee with zero arguments (SFN-1006).
+        if !signature.arity_known {
+            return [make_spawn_unsupported_target_diagnostic("`" + callee.name
+                + "`, whose parameter list is not statically known", expression.span)];
+        }
+        if signature.maximum > 0 {
+            return [make_spawn_unsupported_target_diagnostic("`" + callee.name
+                + "`, which declares parameters", expression.span)];
+        }
         return [];
     }
     return [make_spawn_unsupported_target_diagnostic("an expression that is not a function call or `fn` literal", expression.span)];

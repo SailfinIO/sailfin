@@ -715,7 +715,17 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
         // code — fail closed instead.
         if find_local_binding(locals, callee_name) == null {
             if find_parameter_binding(bindings, callee_name) == null {
-                let callee = find_function_by_name_or_import(functions, callee_name);
+                let mut callee = find_function_by_name_or_import(functions, callee_name);
+                // A zero-argument *call* is not a zero-parameter *function*.
+                // Default arguments are materialised at the call site, so a
+                // callee with defaulted parameters is still defined with them
+                // in its signature. The spawn trampoline casts the pointer to
+                // `*fn () -> T` and calls it with no arguments, so the callee
+                // would read an uninitialised argument register. Fail closed
+                // (SFN-1006).
+                if callee != null {
+                    if callee.parameters.length > 0 { callee = null; }
+                }
                 if callee != null {
                     let fn_ptr_type = map_return_type(context, callee.return_type)
                         + " ()*";

@@ -113,6 +113,22 @@ test "spawn named fn: arguments are rejected at check" ![io] {
     assert find(result.output, "E0842", 0) >= 0;
 }
 
+// A zero-argument *call site* is not a zero-parameter *function*: defaults
+// are materialised at the call site, so `worker` is still defined taking its
+// parameter while the spawn trampoline would invoke it with none, reading an
+// uninitialised argument register. This must be rejected, not miscompiled
+// (SFN-1006).
+test "spawn named fn: a defaulted-parameter target is rejected at check" ![io] {
+    let src = "fn worker(a: int = 5) -> int { return a; }\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let hs: Task<int>[] = [spawn worker()];\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _check_output("defaulted-param", src);
+    assert result.exit != 0;
+    assert find(result.output, "E0842", 0) >= 0;
+}
+
 test "spawn named fn: method-call target is rejected at check" ![io] {
     let src = "struct Worker { }\n" + "fn main() -> int ![io] {\n"
         + "    let obj = Worker { };\n"

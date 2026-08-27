@@ -239,7 +239,9 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     }
 
     // ── spawn <operand> ─────────────────────────────────────────────────
-    // Untyped spawn: use the generic `spawn_task` adapter (i8* → i8*).
+    // Untyped spawn: a call to a zero-parameter named function, lowered
+    // to the typed `sfn_spawn_<kind>` family; anything else fails closed
+    // (SFN-1006).
     if starts_with(stripped, "spawn ") {
         return lower_spawn_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
