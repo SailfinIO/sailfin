@@ -337,11 +337,23 @@ jobs:
   # same front-end `make compile` self-hosts with), so this cannot drift
   # from what the build accepts for parse/typecheck.
   #
-  # Intentionally NOT a `needs:` dependency of the build/test jobs — it
-  # runs in parallel so a green PR pays zero added latency, while a red
-  # result still shows up early. It is included in `Required CI gate` for
-  # source-touching PRs, so branch protection sees this as part of the
-  # aggregate required check rather than as a standalone required job.
+  # Gating is asymmetric, on purpose. The Linux and Windows lanes do NOT
+  # depend on this job: they run in parallel so a green PR pays zero added
+  # latency, and their runner pools are not contended. `build-compiler-macos`
+  # DOES depend on it. macOS runners are the scarce resource in the PR queue
+  # (see the `macos-26` note on that job), and it was the only scarce-runner
+  # job whose sole dependency was `ci-scope` — the Windows lanes already sit
+  # behind `build-compiler-linux`. Holding a `macos-26` runner for up to
+  # 120 min on a tree that already failed parse/typecheck on Linux costs more
+  # queue throughput than the ~5 min this adds to a green PR. While runners
+  # are contended, optimize the scarce pool for throughput rather than every
+  # PR for latency.
+  #
+  # It is included in `Required CI gate` for source-touching PRs, so branch
+  # protection sees this as part of the aggregate required check rather than
+  # as a standalone required job. When it fails, `build-compiler-macos` and
+  # `build-macos` report `skipped`; the gate requires `success`, so it still
+  # fails closed, and the `check-fast` row names the real cause.
   check-fast:
     name: Fast static check (compiler driver + capsules)
     needs: ci-scope
@@ -605,7 +617,7 @@ jobs:
 
   build-compiler-macos:
     name: Build compiler [macos-arm64]
-    needs: ci-scope
+    needs: [ci-scope, check-fast]
     if: ${{ needs.ci-scope.outputs.source == 'true' }}
     # macos-26: the `macos-latest` label migrated to macOS 26 on
     # 2026-06-15, so macos-15 runners are now scarce (PR queue stalls
