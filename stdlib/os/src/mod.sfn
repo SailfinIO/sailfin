@@ -375,21 +375,25 @@ fn handle_read_line_stdout(h: ProcessHandle) -> string? ![io] {
 // next call. A short read returns fewer than `n`. Bounded incremental
 // read for a live child that never closes its pipe.
 //
-// A zero-length buffer means "no bytes available right now", NOT
-// necessarily EOF — `handle_stdout_at_eof` is the sole EOF oracle. On
-// POSIX an empty return still only occurs at EOF (or `n <= 0`); on
-// Windows it also occurs for a live-but-silent child, because the read
-// is bounded so a caller's wall-clock deadline stays observable
-// (SFN-1092, `runtime/sfn/platform/process_windows.sfn`). A loop that
-// treats empty as EOF terminates early against a slow child on Windows.
+// An empty buffer means EOF (or `n <= 0`) on every host. The raw Windows
+// builtin can return an empty string while a child is still live but silent
+// so deadline-aware drain loops regain control (SFN-1092); this owned-buffer
+// wrapper retries that no-progress result until bytes arrive or the stream's
+// EOF predicate becomes true (SFN-1142).
 //
 // The underlying builtin already returns a string, so this `OwnedBuf`
 // form provides no additional byte-fidelity over
 // `handle_read_chunk_stdout` — it exists for callers who want a
 // libc-backed buffer to hand to C.
 fn handle_read_bytes_stdout(h: ProcessHandle, n: int) -> OwnedBuf ![io] {
-    let chunk = process.handle_read_bytes_stdout(h.handle_id, n);
-    return _owned_from_str(chunk);
+    if n <= 0 { return _owned_from_str(""); }
+    loop {
+        let chunk = process.handle_read_bytes_stdout(h.handle_id, n);
+        if chunk.length > 0 { return _owned_from_str(chunk); }
+        if process.handle_stdout_at_eof(h.handle_id) {
+            return _owned_from_str("");
+        }
+    }
 }
 
 // Release the libc allocation backing an `OwnedBuf` returned by
@@ -454,9 +458,9 @@ fn handle_stderr_fd(h: ProcessHandle) -> int ![io] {
 // the next call. A short read returns fewer than `n`.
 //
 // An empty string means "no bytes available right now", NOT necessarily
-// EOF — `handle_stdout_at_eof` is the sole EOF oracle. See
-// `handle_read_bytes_stdout` above for the platform detail; the same
-// contract applies here.
+// EOF — `handle_stdout_at_eof` is the sole EOF oracle. Unlike the blocking
+// owned-buffer wrapper above, this chunk form preserves the raw Windows
+// deadline-observation behavior for drain loops.
 //
 // This is the recommended chunked read; `handle_read_bytes_stdout` is
 // the owned-buffer form for callers that need a libc-backed allocation
