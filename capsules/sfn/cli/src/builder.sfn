@@ -4,7 +4,7 @@
 // argument constructors (`arg`, `arg_optional`), flag constructors (`flag`,
 // `flag_value`, `flag_short`, `flag_value_short`), and command/composition
 // helpers (`command`, `with_version`, `with_arg`, `with_flag`,
-// `with_subcommand`).
+// `with_subcommand`, `with_flag_group`, `with_usage`).
 import {
     Arg,
     Flag,
@@ -316,7 +316,10 @@ fn command(name: string, description: string) -> Command {
         args: empty_args,
         flags: empty_flags,
         subcmds: empty_cmds,
-        flag_groups: empty_groups
+        flag_groups: empty_groups,
+        category: "",
+        usage_sig: "",
+        summary: ""
     };
 }
 
@@ -329,7 +332,10 @@ fn with_version(cmd: Command, version: string) -> Command {
         args: cmd.args,
         flags: cmd.flags,
         subcmds: cmd.subcmds,
-        flag_groups: cmd.flag_groups
+        flag_groups: cmd.flag_groups,
+        category: cmd.category,
+        usage_sig: cmd.usage_sig,
+        summary: cmd.summary
     };
 }
 
@@ -361,7 +367,10 @@ fn with_arg(cmd: Command, a: Arg) -> Command {
         args: new_args,
         flags: cmd.flags,
         subcmds: cmd.subcmds,
-        flag_groups: cmd.flag_groups
+        flag_groups: cmd.flag_groups,
+        category: cmd.category,
+        usage_sig: cmd.usage_sig,
+        summary: cmd.summary
     };
 }
 
@@ -382,7 +391,10 @@ fn with_flag(cmd: Command, f: Flag) -> Command {
         args: cmd.args,
         flags: new_flags,
         subcmds: cmd.subcmds,
-        flag_groups: cmd.flag_groups
+        flag_groups: cmd.flag_groups,
+        category: cmd.category,
+        usage_sig: cmd.usage_sig,
+        summary: cmd.summary
     };
 }
 
@@ -405,7 +417,30 @@ fn with_flag_group(cmd: Command, group: FlagGroup) -> Command {
         args: cmd.args,
         flags: cmd.flags,
         subcmds: cmd.subcmds,
-        flag_groups: new_groups
+        flag_groups: new_groups,
+        category: cmd.category,
+        usage_sig: cmd.usage_sig,
+        summary: cmd.summary
+    };
+}
+
+fn with_usage(cmd: Command, category: string, usage_sig: string, summary: string) -> Command {
+    // Set how this command is presented in its parent's grouped top-level
+    // listing: the `category` heading it is filed under, the terse
+    // `usage_sig` shown for it, and the one-line `summary` beside it. A
+    // command that never calls this stays out of the grouped listing while
+    // remaining fully registered and dispatchable (SFN-1159).
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: cmd.args,
+        flags: cmd.flags,
+        subcmds: cmd.subcmds,
+        flag_groups: cmd.flag_groups,
+        category: category,
+        usage_sig: usage_sig,
+        summary: summary
     };
 }
 
@@ -426,6 +461,9 @@ fn with_subcommand(cmd: Command, sub: Command) -> Command {
         args: cmd.args,
         flags: cmd.flags,
         subcmds: new_subs,
-        flag_groups: cmd.flag_groups
+        flag_groups: cmd.flag_groups,
+        category: cmd.category,
+        usage_sig: cmd.usage_sig,
+        summary: cmd.summary
     };
 }

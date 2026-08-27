@@ -25,7 +25,12 @@
 // `fn main`). `version`/`guillermo` only ever return `EXIT_OK`, so the
 // zero coincidentally matched; `init` is the first command needing 1/2, so
 // it must use literals to return them correctly.
-import { Command, Matches, command } from "sfn/cli";
+import {
+    Command,
+    Matches,
+    command,
+    with_usage
+} from "sfn/cli";
 
 import { _get_env_cmd } from "../../build_flags";
 import { substring } from "../../string_utils";
@@ -36,7 +41,7 @@ import { CliContext } from "../context";
 // The `sfn/cli` definition for `init`, registered on the v2 root via
 // `with_subcommand`. No args or flags — `init` is a bare subcommand.
 fn command_def() -> Command {
-    return command("init", "Scaffold a new capsule in the current directory");
+    return with_usage(command("init", "Scaffold a new capsule in the current directory"), "project", "sfn init", "scaffold a project");
 }
 
 // Scaffold a new capsule: write `capsule.toml` (name derived from the

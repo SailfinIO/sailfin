@@ -24,7 +24,8 @@ import {
     positionals,
     repeated,
     with_arg,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
@@ -69,7 +70,7 @@ fn command_def() -> Command {
     cmd = with_flag(cmd, flag_value("work-dir", "Directory for staged sources + built binaries / emitted .ll (default build/bench-exec, or build/bench for --compiler)"));
     cmd = with_flag(cmd, flag("json", "Emit results as a sailfin.bench/v1 JSON envelope on stdout, suppressing the human table (redirect to a file; pairs with --csv)"));
     cmd = with_arg(cmd, arg_variadic("path", "Runtime mode: one or more workload files or directories of *_bench.sfn (default: benchmarks/runtime)"));
-    return cmd;
+    return with_usage(cmd, "build & run", "sfn bench [path...]", "benchmark runtime (or --compiler/--consumer)");
 }
 
 // Format an integer millisecond duration as fixed-point seconds with two

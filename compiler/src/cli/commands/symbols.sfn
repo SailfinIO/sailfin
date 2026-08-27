@@ -37,7 +37,8 @@ import {
     flag,
     flag_value,
     get,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 import { parse_program } from "sfn/syntax";
 
@@ -58,7 +59,7 @@ fn _sym_exit_error() -> int { return 1; }
 // `with_subcommand`. `--json` is a boolean (always-on in v1); `--capsule`
 // takes a slug value to restrict the index to one capsule.
 fn command_def() -> Command {
-    return with_flag(with_flag(command("symbols", "Emit a versioned JSON index of builtin/prelude and capsule symbols"), flag("json", "Emit machine-readable JSON (default)")), flag_value("capsule", "Restrict the index to a single capsule slug (e.g. sfn/strings)"));
+    return with_usage(with_flag(with_flag(command("symbols", "Emit a versioned JSON index of builtin/prelude and capsule symbols"), flag("json", "Emit machine-readable JSON (default)")), flag_value("capsule", "Restrict the index to a single capsule slug (e.g. sfn/strings)")), "meta", "sfn symbols", "dump the symbol table (--json)");
 }
 
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {

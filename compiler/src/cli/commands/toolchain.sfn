@@ -11,7 +11,8 @@ import {
     get,
     subcommand,
     with_arg,
-    with_subcommand
+    with_subcommand,
+    with_usage
 } from "sfn/cli";
 
 import { render_terminal_diagnostic } from "../../terminal_output";
@@ -31,7 +32,8 @@ fn _toolchain_install(version: string, work_root: string) -> int ![io, net] {
 
 fn command_def() -> Command {
     let install_cmd = with_arg(command("install", "Download, verify, and store a pinned toolchain"), arg("version", "Toolchain version to install (e.g. 0.8.0-alpha.3)"));
-    return with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
+    let cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
+    return with_usage(cmd, "packages", "sfn toolchain install <ver>", "install a toolchain version");
 }
 
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
