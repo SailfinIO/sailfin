@@ -65,7 +65,10 @@ test "handle_read_line_stdout: reads a frame from a live child" ![io] {
 }
 
 test "handle_read_bytes_stdout: bounded read into an owned buffer, empty at EOF" ![io] {
-    let h = spawn_with_env(["sh", "-c", "printf 'abcdefgh'"], env_empty(), "");
+    // Delay beyond Windows' raw 25 ms framed-poll budget. The typed owned
+    // wrapper must retry a live-but-silent empty chunk rather than expose it
+    // as EOF (SFN-1142).
+    let h = spawn_with_env(["sh", "-c", "sleep 0.1; printf 'abcdefgh'"], env_empty(), "");
     assert h.handle_id != 0;
     // First call caps at 3 bytes; the remaining 5 stay buffered.
     let p1 = handle_read_bytes_stdout(h, 3);
