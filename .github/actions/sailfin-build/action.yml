@@ -37,15 +37,20 @@ inputs:
     required: false
     default: ""
   build_jobs:
-    description: "Parallel module builds (BUILD_JOBS). Empty = let the Makefile auto-detect via scripts/detect_build_jobs.sh (CPU + RAM heuristic; macOS capped at 2). Set to a specific N to pin (e.g. for a regression bisect)."
+    description: >-
+      Retained for caller compatibility; currently inert. The native build
+      driver parallelises its subprocess emits internally and does not honour
+      a caller-supplied job count on the self-host path, so no value here
+      reaches the seed. Kept as a declared input so existing callers do not
+      break; remove it once no caller passes it.
     required: false
     default: ""
   shard:
-    description: "Test shard to run (unit-a|unit-b|unit-c|int-caps|e2e-a|e2e-b|e2e-c|e2e-d). Empty = run the full `make test` suite. See `sfn dev shard names` (compiler/src/cli/commands/dev_shard.sfn)."
+    description: "Test shard to run (unit-a|unit-b|unit-c|int-caps|e2e-a|e2e-b|e2e-c|e2e-d). Empty = run the full workspace suite (`sfn test` over `sfn dev inventory tests`). See `sfn dev shard names` (compiler/src/cli/commands/dev_shard.sfn)."
     required: false
     default: ""
   test_jobs:
-    description: "Parallel test children for the full-suite path (TEST_JOBS, forwarded to `make test` — see Makefile). Empty = use the Makefile's native CPU+RAM budget. Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N only after measuring the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap."
+    description: "Parallel test children for the full-suite path, forwarded as `sfn test --jobs N`. Empty = use the CPU+RAM budget from scripts/detect_test_jobs.sh. Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N only after measuring the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap."
     required: false
     default: ""
   shard_test_jobs:
@@ -64,7 +69,7 @@ inputs:
       used by the shared per-OS build-compiler job in ci.yml. 'skip-build' =
       trust an already-present build/native + build/cache tree (downloaded
       from the build-compiler artifact) and run tests/packaging only; no
-      seed fetch, no `make rebuild`. 'build-package' = fetch seed + build +
+      seed fetch, no compiler build. 'build-package' = fetch seed + build +
       package, skip the test suite — the slim release gate (#843): a release
       commit is a mechanical version bump on a main SHA that already passed
       full PR CI + push:main validation, so the release legs verify the
@@ -77,13 +82,39 @@ runs:
   steps:
     # Every seed-acquisition and build step below is gated on this being
     # exactly 'native' or 'qemu'; an off-value would skip all of them and
-    # fail much later in `make ci-package` against an absent binary.
+    # fail much later in the packaging step against an absent binary.
     - name: Reject unknown aarch64 seed mode
       if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' && inputs.arm_seed_mode != 'native' && inputs.arm_seed_mode != 'qemu' }}
       shell: bash {0}
       run: |
         echo "[arm-seed][error] arm_seed_mode must be 'native' or 'qemu', got '${{ inputs.arm_seed_mode }}'" >&2
         exit 1
+
+    # Recreate the Darwin `clang` PATH shim the retired Makefile installed at
+    # parse time (Makefile:64-67 before its removal). This is NOT redundant
+    # with SFN-1077: that change made the compiler resolve its own driver for
+    # the final *link* (`SAILFIN_CC`, compiler/src/backend.sfn:145), but the
+    # released seed's own bootstrap and the compiler's Assemble role still
+    # invoke a bare `clang` off PATH. Losing the shim with the Makefile would
+    # hand those whichever clang leads PATH — on a Homebrew-LLVM macOS runner
+    # that clang does not own the Darwin SDK/linker contract and the link
+    # fails with `ld: library 'm' not found`. macOS only, exactly as the
+    # Makefile scoped it; a no-op when the target does not exist.
+    - name: Install Darwin clang shim
+      if: ${{ runner.os == 'macOS' }}
+      shell: bash {0}
+      run: |
+        set -euo pipefail
+        cc="${SAILFIN_CC:-/usr/bin/clang}"
+        shim="$PWD/build/.toolchain-shim"
+        mkdir -p "$shim"
+        if [ -x "$cc" ]; then
+          ln -sf "$cc" "$shim/clang"
+          echo "[clang-shim] $shim/clang -> $cc"
+        else
+          echo "[clang-shim] $cc absent — empty shim dir, harmless PATH prefix"
+        fi
+        echo "$shim" >> "$GITHUB_PATH"
 
     # Restore the fetched seed binary keyed on target + pinned version.
     # The key is exact (no restore-keys): a hit guarantees the binary
@@ -121,15 +152,36 @@ runs:
         if [ -x build/toolchains/seed/bin/sfn ] && build/toolchains/seed/bin/sfn version >/dev/null 2>&1; then
           echo "[ci] seed cache hit ($seed_version) — skipping fetch"
         else
-          make fetch-seed \
-              SEED_REPO="${{ inputs.seed_repo }}" \
-              SEED_VERSION="$seed_version" \
-              SEED_EXCLUDE_TAG="$seed_exclude_tag"
+          # Direct port of the retired `fetch-seed` target, which was a thin
+          # wrapper over ./install.sh with these exact five variables. The
+          # native `sfn dev bootstrap fetch` is deliberately NOT used here:
+          # it takes no repo/version/exclude-tag arguments (it reads
+          # bootstrap.toml only), and more fundamentally a cold runner has no
+          # `sfn` on it yet — acquiring the seed is what this step is for.
+          if [ -z "$seed_version" ]; then
+            echo "[fetch-seed][error] SEED_VERSION is empty." >&2
+            echo "[fetch-seed][error] The pin lives in bootstrap.toml [seed].version at the repo root." >&2
+            exit 1
+          fi
+          echo "[fetch-seed] installing seed $seed_version into build/toolchains/seed/versions"
+          mkdir -p build/toolchains/seed
+          REPO="${{ inputs.seed_repo }}" \
+          VERSION="$seed_version" \
+          EXCLUDE_TAG="$seed_exclude_tag" \
+          GLOBAL_BIN_DIR="build/toolchains/seed/bin" \
+          INSTALL_BASE="build/toolchains/seed/versions" \
+          SAILFIN_BOOTSTRAP_SEED_STORE=1 \
+          BINARY="sailfin" \
+            ./install.sh
+          if [ ! -x build/toolchains/seed/bin/sfn ]; then
+            echo "[fetch-seed][error] missing fetched seed compiler: build/toolchains/seed/bin/sfn" >&2
+            exit 1
+          fi
         fi
         echo "[ci] seed binary: build/toolchains/seed/bin/sfn"
         build/toolchains/seed/bin/sfn version
 
-    # Fail closed on the native aarch64 fast path (SFN-580). `make fetch-seed`
+    # Fail closed on the native aarch64 fast path (SFN-580). install.sh
     # verifies the signed SHA256SUMS manifest and the archive digest before
     # extraction, and since SFN-1034 aborts rather than continuing when it
     # cannot (install.sh), but nothing downstream
@@ -207,7 +259,7 @@ runs:
     # longer existed. The link failed on undefined references.
     #
     # `cache_key_for` now mixes the dep slug in, which fixes this at the
-    # source. But CI's `make compile` is driven by the PINNED SEED, so
+    # source. But CI's compiler build is driven by the PINNED SEED, so
     # that fix is inert here until a seed carrying it is pinned — which
     # is why the layout fingerprint above is part of the key AND the
     # restore-keys prefix. That segmentation is seed-independent: a
@@ -275,7 +327,8 @@ runs:
         set -euo pipefail
         # #1235 measurement (macOS only — the issue scopes Linux OUT).
         # Time the build phase and flip on the existing SAILFIN_AGENT_REPORT
-        # gate (Makefile rebuild-impl, #1120) so the seed emits its module-IR
+        # gate (originally the `rebuild-impl` recipe, #1120; now inlined
+        # below) so the seed emits its module-IR
         # BuildReport to build/native/.build-report.json — that is where
         # `cache.hit_rate` lives. Purely additive + macOS-scoped: the two
         # `date` calls are no-ops and every write is behind `_measure`, so
@@ -286,20 +339,61 @@ runs:
           export SAILFIN_AGENT_REPORT=1
         fi
         _t0=$(date +%s)
-        # Forward build_jobs only when explicitly set; an empty value means
-        # "let the Makefile auto-detect" (scripts/detect_build_jobs.sh).
-        # The if/else split avoids bash 3.2's "${arr[@]}" empty-array
-        # unbound-variable error under set -u (macOS still ships /bin/bash
-        # 3.2 by default).
-        if [ -n "${{ inputs.build_jobs }}" ]; then
-          make rebuild \
-            CLANG="${{ inputs.clang }}" \
-            SEED_NATIVE="build/toolchains/seed/bin/sfn" \
-            BUILD_JOBS="${{ inputs.build_jobs }}"
+        # `sfn dev bootstrap build` is the native replacement for the retired
+        # `rebuild` target, and is a superset of it: it resolves the pinned
+        # seed, snapshots the source fingerprint before the build and
+        # re-checks it after, smoke-verifies the built artifact, and only
+        # then publishes it via `dev bootstrap install`
+        # (compiler/src/cli/commands/dev.sfn::_dev_bootstrap_build).
+        #
+        # `--force` reproduces the old target's semantics exactly: `rebuild`
+        # was unconditional, whereas bare `dev bootstrap build` skips when the
+        # stored fingerprint still matches. No cached CI path restores
+        # build/bin/sfn or the fingerprint file, so the two agree today —
+        # `--force` keeps them agreeing if a future cache path changes that.
+        #
+        # `CLANG=` is deliberately not carried over: the `rebuild` recipe
+        # never referenced it (it fed only the legacy .ll compile path), so
+        # forwarding it here would be inventing behaviour, not porting it.
+        # `inputs.clang` remains live where it always was — the aarch64 qemu
+        # leg's SAILFIN_NATIVE_CC below. Clang selection for the build itself
+        # is SAILFIN_CC plus the Darwin shim step above.
+        seed="build/toolchains/seed/bin/sfn"
+        build_rc=0
+        if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
+          # Gate inlined from the retired Makefile recipe: `sfn` itself does
+          # not read SAILFIN_AGENT_REPORT — the `--json | tee` composition was
+          # always the driver's job, and is now this action's.
+          #
+          # The tee cannot be the report verbatim the way it was under make.
+          # There the seed was invoked directly, so stdout carried only its
+          # single-line BuildReport. `dev bootstrap build` wraps that call and
+          # prints its own progress on stdout too, so the raw capture is
+          # interleaved. Extract the report line and keep the consumer
+          # contract that has always held: file exists => valid BuildReport.
+          mkdir -p build/native
+          bash -c 'set -o pipefail; "$0" dev bootstrap build --force -- --json | tee build/native/.build-report.raw' \
+            "$seed" || build_rc=$?
+          report_line=""
+          if [ -s build/native/.build-report.raw ]; then
+            report_line="$(grep -E '^\{' build/native/.build-report.raw | tail -n 1 || true)"
+          fi
+          if [ "$build_rc" -eq 0 ] && [ -n "$report_line" ]; then
+            printf '%s\n' "$report_line" > build/native/.build-report.json
+          else
+            rm -f build/native/.build-report.json
+          fi
+          rm -f build/native/.build-report.raw
         else
-          make rebuild \
-            CLANG="${{ inputs.clang }}" \
-            SEED_NATIVE="build/toolchains/seed/bin/sfn"
+          bash -c 'set -o pipefail; "$0" dev bootstrap build --force 2>&1 | cat' \
+            "$seed" || build_rc=$?
+        fi
+        if [ "$build_rc" -ne 0 ] || [ ! -x build/bin/sfn ]; then
+          echo "[build][error] sfn dev bootstrap build failed (exit=$build_rc) or did not publish build/bin/sfn" >&2
+          echo "[build][error] expected the seed's subprocess-stage path to keep the cold build under the 8 GiB memory budget" >&2
+          echo "[build][error] if this is a regression, rerun with: $seed dev bootstrap build --force -- --cache-trace" >&2
+          echo "[build][error] or fall back to the prior seed via bootstrap.toml [seed].version" >&2
+          exit 1
         fi
         _t1=$(date +%s)
         if [ "$_measure" = "1" ]; then
@@ -319,7 +413,7 @@ runs:
         fi
 
     # Fallback path (SFN-580): the pinned release predates the linux-arm64
-    # assets (or is being rebuilt from such a tag), so `make fetch-seed` has
+    # assets (or is being rebuilt from such a tag), so the seed fetch has
     # no native seed to select. Fetch and verify the pinned x86_64 native
     # package explicitly, then run the SFN-472 bootstrap under qemu.
     # scripts/select-aarch64-seed-mode.sh is what picks this path; SFN-580
@@ -403,7 +497,14 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        make ci-prepare-test-artifacts
+        # Inlined from the retired `ci-prepare-test-artifacts` target, which
+        # was only ever this guard — no CLI verb is warranted for it.
+        if [ ! -d build/compiler/import-context ] ||
+           [ -z "$(find build/compiler/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then
+          echo "[prepare-test-artifacts][error] missing build/compiler/import-context — the compiler build must run first" >&2
+          exit 1
+        fi
+        echo "[prepare-test-artifacts] build/compiler/import-context present"
 
     - name: Run tests (first-pass binary)
       if: ${{ inputs.mode != 'build-only' && inputs.mode != 'build-package' }}
@@ -412,8 +513,8 @@ runs:
         set -euo pipefail
         # #1235 / SFN-826 measurement. Time the macOS and aarch64-Linux shard
         # phases and flip on
-        # the SAILFIN_AGENT_REPORT gate so `make test-shard` forwards `--json`
-        # to `sfn dev shard run` and tees build/agent-test.shard-<shard>.jsonl,
+        # the SAILFIN_AGENT_REPORT gate so the shard run below forwards
+        # `--json` and tees build/agent-test.shard-<shard>.jsonl,
         # whose `summary` event carries cache.test_bin_hit_rate (#1230).
         # Additive + target-scoped; Linux x86_64 shard legs keep the
         # byte-identical human run.
@@ -435,7 +536,7 @@ runs:
         # OOM-killing the hosted runner.
         # Empty shard = full suite (release workflows + back-compat).
         # A shard name runs only that disjoint slice; the union across
-        # legs equals `make test` (asserted by the shard-cover lint).
+        # legs equals the full suite (asserted by the shard-cover lint).
         # Per-file parallelism within a shard leg (benchmarked: ~2x e2e /
         # ~6x unit throughput, peak RSS a fraction of the runner budget).
         # Forwarded via SAILFIN_TEST_JOBS, which `sfn dev shard run` reads.
@@ -443,17 +544,62 @@ runs:
         if [ -n "${{ inputs.shard_test_jobs }}" ]; then
           export SAILFIN_TEST_JOBS="${{ inputs.shard_test_jobs }}"
         fi
+        # Direct port of the retired `test-shard` / `test` targets. Both
+        # already delegated to the native runner; what the recipes contributed was
+        # the argv assembly reproduced here — the workspace test inventory,
+        # the `--jobs` budget, and the `--json | tee` sidecar composition.
+        # `sfn` does not read SAILFIN_AGENT_REPORT itself, so that gate is
+        # inlined here exactly as the recipes expressed it. `pipefail` is
+        # already set for this step, so the runner's real exit code survives
+        # each tee.
+        #
+        # The retired recipes also carried an "if the binary is missing, run
+        # the compiler" fallback. That is unreachable from this action — every
+        # mode that reaches this step has either just built the compiler or
+        # verified the downloaded one — so it becomes an explicit error rather
+        # than a silent re-entry into a build.
+        if [ ! -x build/bin/sfn ]; then
+          echo "[test][error] missing build/bin/sfn; the compiler build must run first" >&2
+          exit 1
+        fi
         run_tests() {
+          rc=0
           if [ -n "${{ inputs.shard }}" ]; then
-            make test-shard SHARD="${{ inputs.shard }}"
-          elif [ -n "${{ inputs.test_jobs }}" ]; then
-            # Full-suite path with parallel test children (#843 Track A).
-            # Forwarded only when explicitly set so the default invocation
-            # stays byte-identical to the historical `make test`.
-            make test TEST_JOBS="${{ inputs.test_jobs }}"
-          else
-            make test
+            if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
+              mkdir -p build
+              build/bin/sfn dev shard run "${{ inputs.shard }}" --json \
+                | tee "build/agent-test.shard-${{ inputs.shard }}.jsonl" || rc=$?
+            else
+              build/bin/sfn dev shard run "${{ inputs.shard }}" || rc=$?
+            fi
+            return $rc
           fi
+          # Full-suite path. The roots come from the workspace inventory, as
+          # `test` sourced them; the read loop (rather than mapfile) keeps
+          # macOS's bash 3.2 working.
+          test_roots=()
+          while IFS= read -r path; do
+            test_roots+=("$path")
+          done < <(build/bin/sfn dev inventory tests)
+          if [ "${#test_roots[@]}" -eq 0 ]; then
+            echo "[test] empty workspace test inventory" >&2
+            return 2
+          fi
+          # `--jobs` was always passed: TEST_JOBS defaulted to the
+          # scripts/detect_test_jobs.sh CPU+RAM budget when no caller set it
+          # (see .claude/rules/compiler-safety.md for why that budget binds).
+          jobs="${{ inputs.test_jobs }}"
+          if [ -z "$jobs" ]; then
+            jobs="$(bash scripts/detect_test_jobs.sh 2>/dev/null || echo 1)"
+          fi
+          if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
+            mkdir -p build
+            build/bin/sfn test "${test_roots[@]}" --jobs "$jobs" --json \
+              | tee build/agent-test.test.jsonl || rc=$?
+          else
+            build/bin/sfn test "${test_roots[@]}" --jobs "$jobs" || rc=$?
+          fi
+          return $rc
         }
         # Retry-once: #892 is a live non-deterministic codegen heap bug
         # that intermittently corrupts an *unrelated* test's compile
@@ -491,4 +637,16 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        make ci-package TARGET="${{ inputs.target }}"
+        # Direct port of the retired `ci-package` target: it already delegated
+        # to `sfn package`, so this drops the wrapper without changing the
+        # two invocations, their flags, or the dist/ paths they produce.
+        if [ -z "${{ inputs.target }}" ]; then
+          echo "[package][error] missing target (e.g. linux-x86_64, macos-arm64)" >&2
+          exit 1
+        fi
+        if [ ! -x build/bin/sfn ]; then
+          echo "[package][error] missing native compiler 'build/bin/sfn'; the compiler build must run first" >&2
+          exit 1
+        fi
+        build/bin/sfn package --target "${{ inputs.target }}" --out dist --compiler-bin build/bin/sfn
+        build/bin/sfn package --installer --target "${{ inputs.target }}" --out dist --compiler-bin build/bin/sfn

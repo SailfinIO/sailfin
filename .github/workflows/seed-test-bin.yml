@@ -99,7 +99,7 @@ jobs:
         shell: bash
         run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
-      - name: Build native compiler (via Makefile)
+      - name: Build native compiler
         uses: ./.github/actions/sailfin-build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -169,7 +169,7 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      - name: Build native compiler (via Makefile)
+      - name: Build native compiler
         uses: ./.github/actions/sailfin-build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
