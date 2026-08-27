@@ -96,6 +96,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0071](./0071-archive-targz.md) | In-Process `.tar.gz` Reader and Writer (`sfn/archive`) | Accepted | tooling |
 | [0072](./0072-domain-oriented-repository-topology.md) | Domain-Oriented Repository Topology | Accepted | tooling |
 | [0073](./0073-toolchain-lifecycle.md) | Installed Toolchain Lifecycle, Exact Selection, and Update Policy | Accepted | tooling |
+| [0074](./0074-repo-tooling-ownership.md) | Repo Tooling Ownership — Retiring `scripts/` into Native Verbs | Draft | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
