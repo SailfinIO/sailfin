@@ -749,8 +749,8 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     }
 
     // `selfhost` — internal self-host fixed-point validator (#1502).
-    // Intentionally absent from `_usage()`: driven by `make check` / CI,
-    // not end users.
+    // Intentionally absent from `_usage()`: driven by `sfn dev verify` /
+    // CI, not end users.
     if strings_equal(cmd, "selfhost") {
         return handle_selfhost_command(args, ctx.binary_dir);
     }

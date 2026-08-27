@@ -420,7 +420,7 @@ fn shard_command_def() -> Command {
     run_cmd = with_flag(run_cmd, flag("json", "Emit a JSONL event stream"));
     run_cmd = with_flag(run_cmd, flag_int("jobs", "Run up to N per-file children concurrently"));
     shard = with_subcommand(shard, run_cmd);
-    shard = with_subcommand(shard, command("cover", "Assert the shards cover make test's surface"));
+    shard = with_subcommand(shard, command("cover", "Assert the shards cover the full sfn test surface"));
     return shard;
 }
 

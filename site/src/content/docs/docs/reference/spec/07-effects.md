@@ -28,7 +28,7 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 
 **Enforcement rules**:
 1. Any function calling an effectful operation directly must declare that effect — violations produce diagnostics with fix-it hints and are errors by default
-2. Enforcement runs on every build path (`make compile`, `sfn build`, `sfn run`, `sfn test`, `sfn check`); the `SAILFIN_EFFECT_ENFORCE` env var lets capsule authors opt into `=warning` (telemetry-only) or `=off` (build-path bypass; `sfn check` still validates)
+2. Enforcement runs on every build path (`sfn dev bootstrap build`, `sfn build`, `sfn run`, `sfn test`, `sfn check`); the `SAILFIN_EFFECT_ENFORCE` env var lets capsule authors opt into `=warning` (telemetry-only) or `=off` (build-path bypass; `sfn check` still validates)
 3. Tests follow the same rules as functions
 4. **Cross-module call-graph propagation** (Phase E, shipped): if A imports B and calls it, A must declare every effect B declares. Diagnostic code `E0402`. Aliased imports (`import { foo as bar }`) resolve under the local name. `Member`-callee resolution (`mod.fn()`) is a Phase E2 follow-up
 5. **Capsule capability cross-check** (Phase F, shipped): every function's declared effects must be a subset of the capsule manifest's `[capabilities] required = [...]` surface. Diagnostic code `E0403`. Empty surface (no `[capabilities]` section, or standalone .sfn outside any capsule) skips the cross-check so pre-Phase-F projects keep building

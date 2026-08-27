@@ -24,10 +24,9 @@ sidebar:
 
 Compiler and runtime mode share a table renderer, a CSV writer, budget gates,
 and a `--json` envelope ([`sailfin.bench/v1`](#json-output)). The command
-replaces the retired compile-time and runtime bench shell scripts; `make
-bench` and `make bench-runtime` are thin wrappers over it. Consumer mode
-reuses the CSV writer but does not support `--json` or budget gates; `make
-bench-consumer` wraps it.
+replaces the retired compile-time and runtime bench shell scripts, and the
+`make bench`/`make bench-runtime`/`make bench-consumer` wrappers that later
+stood in front of it.
 
 Mode selection is by flag: `--compiler` → compiler mode; `--consumer` →
 consumer mode; neither → runtime mode.
@@ -54,8 +53,8 @@ sfn bench --compiler [options]
 
 Re-emits each `compiler/src/**.sfn` module's LLVM IR against a staged
 import-context, timing the emit and sampling peak resident set size (RSS) via a
-metered subprocess. The import-context tree is produced by `make compile`, so
-run that first.
+metered subprocess. The import-context tree is produced by
+`sfn dev bootstrap build`, so run that first.
 
 **Options:**
 
@@ -78,7 +77,7 @@ peak memory, failure/budget counts).
 **Example:**
 
 ```bash
-make compile                                   # stage the import-context first
+sfn dev bootstrap build                        # stage the import-context first
 sfn bench --compiler --top 10                  # 10 slowest modules
 sfn bench --compiler --module parser --csv build/compile.csv
 sfn bench --compiler --budget-time 5 --budget-mem 2097152
@@ -300,15 +299,13 @@ compiler and runtime mode; consumer mode has no JSON envelope):
 
 ---
 
-## Makefile targets
-
-All three targets are thin wrappers over the native command:
+## Direct invocation
 
 ```bash
-make bench BENCH_ARGS="--top 10"                          # → sfn bench --compiler …
-make bench-runtime BENCH_RUNTIME_ARGS="--iterations 10"    # → sfn bench benchmarks/runtime …
-make bench-consumer BENCH_CONSUMER_ARGS="--csv out.csv"    # → sfn bench --consumer …
+sfn bench --compiler --top 10
+sfn bench benchmarks/runtime --iterations 10
+sfn bench --consumer --csv out.csv
 ```
 
-`make bench` requires a prior `make compile` (it needs the staged
+Compiler mode requires a prior `sfn dev bootstrap build` (it needs the staged
 import-context).

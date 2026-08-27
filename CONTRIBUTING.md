@@ -25,30 +25,39 @@ repository.
 1. **Branch & scope** — Keep work focused; reference open issues or roadmap
    items when possible.
 2. **Development commands**
-   - Run tests: `make test`
-   - Compile Sailfin sources: `make compile` (self-hosted native compiler).
+   - On a clean checkout, install a released compiler first: `./install.sh` (a
+     clean tree has no `sfn`, and `sfn dev bootstrap build` needs one to run).
+   - Compile Sailfin sources: `sfn dev bootstrap build` (self-hosted native compiler).
+   - Run tests: `build/bin/sfn test` (names the compiler you just built, not the seed)
    - Install the built compiler: `build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"`.
-   - Fast PR gate: `make check-fast` runs `sfn check compiler/src/ runtime/`
-     in ~2 min. Surfaces parser, typecheck, and effect-system breakage
-     without a full selfhost rebuild.
+   - Fast PR gate: `sfn check compiler/src/ runtime/` in ~2 min. Surfaces
+     parser, typecheck, and effect-system breakage without a full selfhost
+     rebuild.
 3. **Testing expectations**
    - Add or update unit tests under `compiler/tests/` for compiler changes.
    - Reflect behaviour updates in `docs/status.md` and the relevant module docs.
-   - Run `make test` before submitting.
+   - Run `build/bin/sfn test` before submitting.
 
 ### Optional Pre-Commit Hook
 
 Contributors actively touching `compiler/src/` or `runtime/` can opt into a
-pre-commit hook that runs `make check-fast` automatically:
+pre-commit hook that runs `sfn check` over the workspace maintainer-source
+inventory automatically:
 
 ```bash
 bash scripts/install_precommit.sh           # install
 bash scripts/install_precommit.sh --remove  # uninstall
 ```
 
-The hook only runs when staged changes touch `compiler/src/` or `runtime/`,
-and is silently skipped when `build/bin/sfn` is missing. Bypass with
-`SAILFIN_SKIP_PRECOMMIT=1 git commit ...` or the standard `--no-verify`.
+The hook only runs when staged changes touch the workspace maintainer-source
+inventory, and fails with a `run: sfn dev bootstrap build` hint when
+`build/bin/sfn` is missing. Bypass with `SAILFIN_SKIP_PRECOMMIT=1 git commit ...`
+or the standard `--no-verify`.
+
+If you installed the hook before the native-compiler cutover (SFN-1083), its
+old body keeps invoking a retired `make` target on every commit. Re-run
+`bash scripts/install_precommit.sh` to pick up the current hook — the
+installed hook now also warns you when it detects this drift.
 
 ### Notes on Release Automation
 
@@ -134,7 +143,7 @@ not subject to `sfn fmt` or the self-host gate.
 Each PR should include:
 
 - Summary of the change and impacted areas.
-- Verification commands (`make test`, targeted runs, etc.).
+- Verification commands (`sfn test`, targeted runs, etc.).
 - Notes on documentation updates (status/spec/roadmap).
 
 Reviewers will check for:

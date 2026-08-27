@@ -56,7 +56,7 @@ seed pinned in `bootstrap.toml`:
 
 1. The pinned **seed binary** compiles current source into a **first-pass binary**.
 2. The first-pass binary compiles the same source into a **seedcheck binary**.
-3. The seedcheck binary rebuilds the compiler once more; `make check` compares
+3. The seedcheck binary rebuilds the compiler once more; `sfn dev verify` compares
    the two generated LLVM IR sets to prove a fixed point.
 4. The gate runs a program smoke test and the Sailfin-native test suites against
    the validated seedcheck binary.

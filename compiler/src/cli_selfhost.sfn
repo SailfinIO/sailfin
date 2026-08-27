@@ -9,8 +9,8 @@ import { int_to_string } from "sfn/strings";
 // `sfn selfhost` is an INTERNAL toolchain command: it is intentionally
 // NOT advertised in `_usage()` (the user-facing `sfn --help`). End
 // users compiling their own capsules never run it — it validates that
-// the compiler is a fixed point and is driven only by `make check` and
-// CI. This mirrors how Go (`cmd/dist`, reachable only as
+// the compiler is a fixed point and is driven only by `sfn dev verify`
+// and CI. This mirrors how Go (`cmd/dist`, reachable only as
 // `go tool dist`) and Rust (`x.py` / `src/bootstrap`) keep self-host
 // validation out of the public compiler CLI, while still honoring epic
 // #513's mandate that `sfn` (not bash) owns the logic. The verb is
@@ -538,8 +538,8 @@ fn _selfhost_relative_ll_slug(root: string, path: string) -> string {
 // sailfin cache dir, and its linked binary. The `.ll` digests carry the
 // fixed-point check (the Makefile compared only these); the binary sha
 // is folded in as a strictly-stronger signal (a benign binary-only
-// divergence is a non-fatal warning in the default mode, so `make check`
-// stays green). On macOS the binary sha is NOT a reliable divergence
+// divergence is a non-fatal warning in the default mode, so
+// `sfn dev verify` stays green). On macOS the binary sha is NOT a reliable divergence
 // signal — ld64's ad-hoc code signature embeds the linked output's
 // basename, so even byte-identical inputs linked to different basenames
 // hash differently (SFN-87 / #1726); the `.ll` module digests are the
@@ -722,8 +722,8 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     // unsatisfiable (SFN-87 / #1726). Linking both to `sfn` and copying
     // the result out afterward keeps the two stages' signatures aligned
     // while preserving `cfg.seedcheck_out` / `cfg.stage3_out` for every
-    // existing external consumer (`make test NATIVE_BIN=...`,
-    // `--promote-to`).
+    // existing external consumer (a `sfn test` run pointed at the
+    // promoted binary, `--promote-to`).
     //
     // The link lands under a `bin/` subdirectory, not directly in
     // `<stage_work>`: `<stage_work>/sailfin` is the runtime/driver cache
@@ -742,7 +742,7 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
 
     if !fs.exists(cfg.first_pass) {
         print.err("[selfhost] first-pass binary missing: " + cfg.first_pass
-            + " (run: make compile)");
+            + " (run: sfn dev bootstrap build)");
         led.phases.push(SelfhostPhase {
             name: "preflight", status: "fail", exit_code: 1
         });

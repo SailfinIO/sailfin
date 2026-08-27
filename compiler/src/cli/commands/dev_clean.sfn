@@ -327,7 +327,7 @@ fn clean_run(matches: Matches, ctx: CliContext) -> int ![io] {
 
 // The `sfn/cli` definition for the `clean` group nested under `dev`.
 fn clean_command_def() -> Command {
-    let mut clean: Command = command("clean", "Remove repo-local build artifacts (retires make clean-build / clean)");
+    let mut clean: Command = command("clean", "Remove repo-local build and packaged artifacts");
     let mut build_leaf: Command = command("build", "Remove build/* (keeps the fetched seed toolchain store)");
     build_leaf = with_flag(build_leaf, flag("include-seed", "Also remove the fetched seed toolchain store"));
     build_leaf = with_flag(build_leaf, flag("dry-run", "List what would be removed without removing anything"));

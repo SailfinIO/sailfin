@@ -261,7 +261,7 @@ test "string length" {
 }
 ```
 
-Run tests with `sfn test` or `make test`.
+Run tests with `sfn test`.
 
 ---
 

@@ -317,7 +317,7 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
         return 2;
     }
     if !fs.exists("build/compiler/import-context") {
-        print.err("missing import-context (run make compile first)");
+        print.err("missing import-context (run sfn dev bootstrap build first)");
         return 2;
     }
 

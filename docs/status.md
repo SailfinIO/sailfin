@@ -399,15 +399,16 @@ here.
   git-blob-SHA1-based output. **Two caveats.** (1) The install/fingerprint
   policy is executed *by* the pinned seed (`sfn dev bootstrap build` is a
   seed-run command), so it is only exercisable once a seed carrying it is
-  pinned — until then `make compile` remains the practical path, and it
-  already delegates the same install + fingerprint logic to the freshly
-  built compiler, landing at the same path with the same recorded digest.
+  pinned — true of the pinned seed today, so `sfn dev bootstrap build` is the
+  practical path; `make compile` still delegates the same install +
+  fingerprint logic to the freshly built compiler, landing at the same path
+  with the same recorded digest.
   (2) The digest scope covers both compiler source populations plus `runtime`;
   it does not cover top-level dependency capsules under `capsules/*/src/` or
   `compiler/capsule.toml` itself, so a capsule-dependency edit or a manifest
   version bump does not invalidate the gate (`make compile` reports
-  up-to-date regardless); workaround is `FORCE=1 make compile` or `sfn dev
-  bootstrap build --force`. Prerequisite for the final Makefile sweep in the
+  up-to-date regardless); workaround is `sfn dev bootstrap build --force`.
+  Prerequisite for the final Makefile sweep in the
   Makefile Retirement epic (`docs/proposals/0006-build-architecture.md`
   Stage D): `compile-impl`/`rebuild-impl` no longer own install/fingerprint
   policy, though the Makefile itself still exists.

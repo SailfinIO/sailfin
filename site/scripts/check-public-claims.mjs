@@ -55,7 +55,7 @@ const retiredClaims = [
     id: "legacy-build-driver",
     scope: "current-facing",
     pattern: /\b(?:run|use|invoke) (?:the )?(?:prior )?`?scripts\/build\.sh`?/giu,
-    guidance: "The legacy build script was deleted; direct users to make compile or sfn build.",
+    guidance: "The legacy build script was deleted; direct users to sfn dev bootstrap build or sfn build.",
   },
   {
     id: "obsolete-installer-trust",

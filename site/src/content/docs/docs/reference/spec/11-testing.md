@@ -323,7 +323,7 @@ plus the include-dir paths and the declared link libraries (folded by
 value). A runtime edit — including a header-only change or an
 include-root change — therefore busts the key directly, no longer relying
 on a compiler rebuild changing the stamp. `--no-test-cache` (which
-`make check` and the nightly full suite pass) remains the cold-build
+`sfn dev verify` and the nightly full suite pass) remains the cold-build
 backstop at the merge gate.
 
 Cached binaries live under `build/cache/test-bin/<schema>/` (alongside
@@ -334,7 +334,7 @@ reports the per-run `test_bin_hit_rate`.
 
 `--no-test-cache` bypasses both the read and the write, forcing a cold
 lower+link for every test (`test_bin_hit_rate` is then `0.0000`). The
-`make check` full-suite gate passes it so a test-compile regression can
+`sfn dev verify` full-suite gate passes it so a test-compile regression can
 never be masked by a stale hit.
 
 ---

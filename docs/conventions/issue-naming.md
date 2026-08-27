@@ -110,7 +110,7 @@ workflow state.
 | Field      | Allowed values |
 |------------|----------------|
 | `<type>`   | `feat`, `fix`, `perf`, `refactor`, `chore`, `docs` (must match the `type:*` label below) |
-| `<scope>`  | The primary subsystem touched. Use one of: `compiler`, `parser`, `typecheck`, `effects`, `lowering`, `emit`, `runtime`, `runtime-c`, `prelude`, `build`, `ci`, `cli`, `agents`, `docs`, `site`, `make`. Multiple scopes? Pick the most specific or split the issue. |
+| `<scope>`  | The primary subsystem touched. Use one of: `compiler`, `parser`, `typecheck`, `effects`, `lowering`, `emit`, `runtime`, `runtime-c`, `prelude`, `build`, `ci`, `cli`, `agents`, `docs`, `site`, `make` (retires with the Makefile itself, SFN-60). Multiple scopes? Pick the most specific or split the issue. |
 | `<verb>`   | Lowercase imperative. `add`, `remove`, `rename`, `flip`, `register`, `port`, `inline`, `dedupe`, `delete`, … |
 
 **Examples:**
@@ -612,7 +612,7 @@ The contract:
 
 - `## Blocked by` means "must be closed/merged before pickup starts."
 - `## Required in pinned seed` means "the merged code must be present
-  in the binary that `make compile` uses."
+  in the binary that `sfn dev bootstrap build` uses."
 
 When grooming, populate `## Required in pinned seed` for any sub-task
 that touches `compiler/src/` or `runtime/prelude.sfn` and depends on
@@ -694,7 +694,7 @@ When a current-seed bug breaks downstream work:
    containing the fix.
 3. Wait for `release-tag.yml` to upload the binary (a few minutes).
 4. `/pin-seed` to open the one-line bump PR.
-5. Merge the pin PR → CI/nightly/`make fetch-seed` start using it.
+5. Merge the pin PR → CI/nightly/`sfn dev bootstrap fetch` start using it.
 6. Rebase the blocked branch onto `main`.
 
 The pin PR lives off `main` (never `claude/*`), is reviewed even though

@@ -11,8 +11,8 @@ runtime library exception.
 ## Core Differentiator: Effect Types
 
 Every function declares what capabilities it uses. Effect annotations are
-enforced at compile time: undeclared effect usage fails `make compile`,
-`sfn build`, `sfn run`, `sfn test`, and `sfn check` by default. The
+enforced at compile time: undeclared effect usage fails `sfn build`,
+`sfn run`, `sfn test`, and `sfn check` by default. The
 `SAILFIN_EFFECT_ENFORCE` env var lets capsule authors opt into
 `=warning` (telemetry-only mode) while migrating, or `=off` (build-path
 bypass; `sfn check` still validates per proposal §4.7).
@@ -418,9 +418,9 @@ The compiler is self-hosted (written in Sailfin, compiles itself):
                   -> LLVM IR -> native binary
 
 Build commands:
-    make compile    -- build compiler from released seed (self-hosting)
-    make test       -- run unit + integration + e2e test suites
-    make check      -- full validation including seedcheck
+    sfn dev bootstrap build  -- build compiler from released seed (self-hosting)
+    sfn test                 -- run unit + integration + e2e test suites
+    sfn dev verify           -- full validation including seedcheck
     build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 
 ## Tooling

@@ -6,7 +6,7 @@ topology migration leaf:
 
 ```sh
 rg -n 'compiler/capsules|capsules/sfn|runtime/prelude' \
-  workspace.toml Makefile compiler runtime capsules .github scripts docs .codex
+  workspace.toml compiler runtime capsules .github scripts docs .codex
 ```
 
 Every hit belongs to exactly one semantic class. Classification is based on
@@ -30,7 +30,7 @@ what the path controls, not on the filename containing it.
 | `compiler/src/module_paths.sfn` and import ownership/reachability checks | `hybrid` | Resolve physical ownership through the workspace, then derive manifest identity and capsule-relative module paths. |
 | `compiler/src/build/source_fingerprint.sfn`, `scripts/module_layout_fingerprint.sh`, CI cache inputs | `hybrid` | Discover physical inputs from the workspace, then hash stable logical identity plus content. |
 | Build cache and `build/capsules/<scope>/<name>` artifact routing | `hybrid` | Keep manifest-derived artifact namespaces; exclude absolute checkout location from cache identity. |
-| `Makefile`, formatting, benchmarks, package/install inputs, and test discovery | `physical` | Consume discovered roots while preserving existing target names and exact-once coverage. |
+| Native CLI target definitions (`sfn fmt`, `sfn bench`, `sfn package`), and test discovery | `physical` | Consume discovered roots while preserving existing target names and exact-once coverage. |
 | Seed/bootstrap fixtures | `physical` | Prove the pinned seed accepts every committed transitional workspace and dependency closure. |
 | Release and release-train workflows | `logical` | Discover manifests physically, then select and lockstep compiler roles by canonical identity. |
 | Living docs, `.codex`, `.github/agents`, and repository instructions | `physical` | Update navigation and commands with the slice that changes the path. |

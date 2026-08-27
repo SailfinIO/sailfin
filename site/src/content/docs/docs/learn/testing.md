@@ -244,15 +244,15 @@ sfn test tests/ --jobs 4
 sfn test tests/ --update-snapshots
 ```
 
-### With Make targets
+### Suite paths
 
-Projects built with the standard Sailfin Makefile have these targets:
+Point `sfn test` at a suite directory to scope the run:
 
 ```bash
-make test              # Full suite: unit + integration + e2e
-make test-unit         # Unit tests only
-make test-integration  # Integration tests only
-make test-e2e          # End-to-end tests only
+sfn test                     # Full suite: unit + integration + e2e
+sfn test tests/unit          # Unit tests only
+sfn test tests/integration   # Integration tests only
+sfn test tests/e2e           # End-to-end tests only
 ```
 
 ### Reading the output

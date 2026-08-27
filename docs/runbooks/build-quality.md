@@ -188,7 +188,7 @@ started, normally because it hit its `timeout-minutes` cap. There is no
   follow-up); do **not** just re-run and hope.
 - **`failure` conclusion → suite failure.** The suite failed twice (the
   retry-once #892 flake mitigation did not clear it). Treat it as a real
-  test regression: reproduce with `make test` locally, bisect the offending
+  test regression: reproduce with `sfn test` locally, bisect the offending
   commit, and file a `type:bug` fix issue that `Closes` the
   `build-quality regression: test-bin-warmer` dedup anchor.
 

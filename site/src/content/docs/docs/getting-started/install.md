@@ -64,7 +64,7 @@ manifest; it probes `$SAILFIN_OPENSSL`, `openssl` on `PATH`, and the Homebrew
 `openssl@3` keg paths before giving up. `install.ps1` needs no external
 verification tooling — its Ed25519 verifier is embedded pure PowerShell.
 
-If you are building Sailfin itself from source, you also need `bash`, `make`,
+If you are building Sailfin itself from source, you also need `bash`,
 OpenSSL development libraries, and the source-build dependencies listed in
 [Building from source](#building-from-source).
 
@@ -345,7 +345,7 @@ Building from source is useful when:
 
 ### Prerequisites
 
-- `git`, `bash`, `make`
+- `git`, `bash`
 - `curl`, `tar`, `mktemp`, `uname`, `jq`
 - LLVM tools 17+ or 18+ (`llvm-link`, `llvm-as`)
 - `clang` and the platform linker
@@ -362,8 +362,11 @@ for per-platform package commands and the complete supported build flag table.
 git clone https://github.com/SailfinIO/sailfin.git
 cd sailfin
 
+# Install a released sfn (a clean checkout has none, and the next step needs one)
+./install.sh
+
 # Build the native compiler by self-hosting from the released seed pinned in bootstrap.toml
-make compile
+sfn dev bootstrap build
 
 # Install the local self-build to ~/.local/bin
 build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
@@ -389,9 +392,9 @@ owned by a package manager. It also installs the runtime and compiler capsule
 closure beside the executable so the PATH command works outside the source
 checkout.
 
-> **Note:** `make compile` routes through `<seed> build -p compiler` — the
-> Sailfin-native driver — and requires `bash`, `clang`, LLVM tools, and `jq`.
-> The prior `scripts/build.sh` orchestrator is no longer in-tree.
+> **Note:** `sfn dev bootstrap build` routes through `<seed> build -p compiler` —
+> the Sailfin-native driver — and requires `bash`, `clang`, LLVM tools, and
+> `jq`. The prior `scripts/build.sh` orchestrator is no longer in-tree.
 
 ---
 

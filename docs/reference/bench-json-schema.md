@@ -25,9 +25,9 @@ value is echoed as the `exit_code` field in the envelope.
 before any benchmark runs and are reported as a plain-text message on stderr
 with exit `1` and **empty stdout** — not as a JSON envelope: compiler mode when
 the import-context is missing (`build/compiler/import-context` absent — run
-`make compile` first), and runtime mode when no workloads resolve from the
-given paths. A `--json` consumer must therefore treat empty/non-JSON stdout
-with a non-zero exit as a setup error rather than assuming every invocation
+`sfn dev bootstrap build` first), and runtime mode when no workloads resolve
+from the given paths. A `--json` consumer must therefore treat empty/non-JSON
+stdout with a non-zero exit as a setup error rather than assuming every invocation
 yields an envelope. Every failure that occurs *after* benchmarking starts
 (build/emit/run failure, budget violation) is reported inside the envelope via
 `exit_code` and per-result `status`.

@@ -248,7 +248,7 @@ fn arena_run(matches: Matches, ctx: CliContext) -> int ![io] {
     let self_bin = _resolve_self_path(ctx.binary_dir);
     if self_bin.length == 0 {
         print.err("[arena] error: could not resolve the running compiler binary");
-        print.err("[arena] hint: run 'sfn dev bootstrap build' (or 'make compile') first");
+        print.err("[arena] hint: run 'sfn dev bootstrap build' first");
         return 1;
     }
 

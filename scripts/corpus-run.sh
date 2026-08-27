@@ -74,11 +74,11 @@ done
 [ "$CORPUS_CAPSULES" = "-" ] && CORPUS_CAPSULES=""
 
 if [ ! -x "$SAILFIN_BIN" ]; then
-    echo "corpus-run: candidate compiler not found at $SAILFIN_BIN (run 'make compile')" >&2
+    echo "corpus-run: candidate compiler not found at $SAILFIN_BIN (run 'sfn dev bootstrap build')" >&2
     exit 2
 fi
 if [ "$USE_SEED" -eq 1 ] && [ ! -x "$SAILFIN_SEED_BIN" ]; then
-    echo "corpus-run: seed compiler not found at $SAILFIN_SEED_BIN (run 'make fetch-seed'); pass --no-seed to skip the regression leg" >&2
+    echo "corpus-run: seed compiler not found at $SAILFIN_SEED_BIN (run 'sfn dev bootstrap fetch'); pass --no-seed to skip the regression leg" >&2
     exit 2
 fi
 
