@@ -24,7 +24,8 @@ import {
     has_flag,
     subcommand,
     with_flag,
-    with_subcommand
+    with_subcommand,
+    with_usage
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
@@ -99,7 +100,8 @@ fn command_def() -> Command {
     let info_cmd: Command = command("info", "Show the resolved cache root, entry count, and total on-disk size");
     let prune_cmd: Command = with_flag(with_flag(command("prune", "Evict cache entries by size and/or age (LRU)"), flag_int("max-size", "Evict oldest-first until total on-disk size is <= N bytes")), flag_int("max-age", "Remove entries whose last use is older than N days"));
     let clean_cmd: Command = with_flag(command("clean", "Remove the current cache schema tree"), flag("all-schemas", "Also sweep stale sibling cache schema versions"));
-    return with_subcommand(with_subcommand(with_subcommand(command("cache", "Inspect and garbage-collect the build artifact cache"), info_cmd), prune_cmd), clean_cmd);
+    let cmd: Command = with_subcommand(with_subcommand(with_subcommand(command("cache", "Inspect and garbage-collect the build artifact cache"), info_cmd), prune_cmd), clean_cmd);
+    return with_usage(cmd, "build & run", "sfn cache <info|prune|clean>", "manage the build cache");
 }
 
 // `cache` is not tied to a build capsule, so the root resolves with an

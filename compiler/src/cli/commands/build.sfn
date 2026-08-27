@@ -35,7 +35,8 @@ import {
     has_flag,
     positionals,
     with_arg,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 
 import { LlvmTextBackend } from "../../backend";
@@ -106,7 +107,7 @@ fn command_def() -> Command {
     // the two are deliberately not unified.
     cmd = with_flag(cmd, flag_value("target", "Cross-compile for this triple (e.g. x86_64-w64-mingw32)"));
     cmd = with_arg(cmd, arg_variadic("path", "Source file to build (omit in a capsule, or at a workspace root to build [workspace].default-members)"));
-    return cmd;
+    return with_usage(cmd, "build & run", "sfn build <file|-p path>", "compile a file or capsule");
 }
 
 fn _print_build_usage() ![io] {

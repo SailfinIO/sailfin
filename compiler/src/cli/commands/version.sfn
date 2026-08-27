@@ -38,7 +38,8 @@ import {
     command,
     flag,
     has_flag,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 
 import { release_signing_public_key_hex } from "../../release_trust";
@@ -49,7 +50,7 @@ import { CliContext } from "../context";
 // `with_subcommand`. `--signing-key` prints the embedded release-signing
 // public key instead of the version.
 fn command_def() -> Command {
-    return with_flag(command("version", "Print the compiler version"), flag("signing-key", "Print the embedded release-signing public key (hex) instead of the version"));
+    return with_usage(with_flag(command("version", "Print the compiler version"), flag("signing-key", "Print the embedded release-signing public key (hex) instead of the version")), "meta", "sfn version", "show version (also --version)");
 }
 
 // Print the resolved compiler version, or the embedded release-signing public

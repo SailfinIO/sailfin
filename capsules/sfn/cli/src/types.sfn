@@ -76,6 +76,25 @@ struct Command {
     // command declares no groups. Validated by `parse()` after the
     // per-level required-flag check.
     flag_groups: FlagGroup[];
+    // Top-level listing presentation, all set together by `with_usage`.
+    // A parent renders its grouped one-line-per-child listing from these
+    // rather than from a hand-maintained string, so the listing cannot
+    // drift from the registered tree (SFN-1159).
+    //
+    // `category` is the heading a child is listed under, in the order the
+    // parent declares. Empty means the command is registered and
+    // dispatchable but omitted from the grouped listing — the opt-out for
+    // maintainer-only surfaces.
+    category: string;
+    // `usage_sig` is the terse invocation shape shown in that listing
+    // (`sfn build <file|-p path>`). Empty falls back to the command name.
+    // Deliberately distinct from the full per-command help, which derives
+    // its signature from `args`/`flags`.
+    usage_sig: string;
+    // `summary` is the one-line gloss shown beside `usage_sig`. Empty falls
+    // back to `description`. The two differ because the listing is column
+    // aligned and `description` is free to be a full sentence.
+    summary: string;
 }
 
 struct Matches {

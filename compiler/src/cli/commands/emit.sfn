@@ -41,7 +41,8 @@ import {
     get_or,
     has_flag,
     with_arg,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 
 import { _write_llvm_text } from "../../build/cache";
@@ -78,7 +79,7 @@ fn command_def() -> Command {
     // for the requested target instead of silently falling back to the
     // host. Same closed set as `sfn build --target` (`triple_is_supported`).
     cmd = with_flag(cmd, flag_value("target", "Cross-compile for this triple (e.g. x86_64-w64-mingw32)"));
-    return cmd;
+    return with_usage(cmd, "build & run", "sfn emit <fmt> <file>", "emit LLVM / sailfin / native IR");
 }
 
 // E0617: `--target` was supplied but `build_target_triple()` resolved a

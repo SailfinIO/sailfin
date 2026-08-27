@@ -20,7 +20,8 @@ import {
     completion_shells,
     get,
     render_completion,
-    with_arg
+    with_arg,
+    with_usage
 } from "sfn/cli";
 
 import { CliContext } from "../context";
@@ -28,7 +29,7 @@ import { CliContext } from "../context";
 // The `sfn/cli` definition for `completion`, registered on the v2 root via
 // `with_subcommand`. One required positional selects the target shell.
 fn command_def() -> Command {
-    return with_arg(command("completion", "Print a shell-completion script for the sfn command tree"), arg("shell", "Target shell: bash"));
+    return with_usage(with_arg(command("completion", "Print a shell-completion script for the sfn command tree"), arg("shell", "Target shell: bash")), "meta", "sfn completion <shell>", "generate shell completions");
 }
 
 fn _shell_list() -> string {

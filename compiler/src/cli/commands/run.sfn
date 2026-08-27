@@ -36,7 +36,8 @@ import {
     has_flag,
     positionals,
     with_arg,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
@@ -79,7 +80,7 @@ fn command_def() -> Command {
     cmd = with_flag(cmd, flag("cache-trace", "Print per-artifact cache hit/miss trace"));
     cmd = with_flag(cmd, flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation"));
     cmd = with_arg(cmd, arg_variadic("file", "Sailfin source file (or prebuilt executable); omit to run the current capsule"));
-    return cmd;
+    return with_usage(cmd, "build & run", "sfn run <file|exe>", "build and run");
 }
 
 // SFN-719 / SFN-974: claim a per-invocation exe path so a nested or

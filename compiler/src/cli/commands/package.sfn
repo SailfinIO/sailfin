@@ -35,7 +35,8 @@ import {
     flag_value_short,
     get_or,
     has_flag,
-    with_flag
+    with_flag,
+    with_usage
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
@@ -945,7 +946,7 @@ fn _package_find_substring(haystack: string, needle: string, start: int) -> int 
 // `with_subcommand`. Four optional value flags, one boolean flag, and one
 // short value flag `-p`.
 fn command_def() -> Command {
-    return with_flag(with_flag(with_flag(with_flag(with_flag(command("package", "Package a capsule or the compiler for distribution"), flag_value("target", "Platform target (e.g. linux-x86_64); auto-detected if absent")), flag_value("out", "Output directory (default: dist)")), flag_value("compiler-bin", "Path to the compiler binary (default: build/bin/sfn)")), flag("installer", "Package the compiler installer bundle")), flag_value_short("p", "p", "Capsule path to package (user-capsule mode)"));
+    return with_usage(with_flag(with_flag(with_flag(with_flag(with_flag(command("package", "Package a capsule or the compiler for distribution"), flag_value("target", "Platform target (e.g. linux-x86_64); auto-detected if absent")), flag_value("out", "Output directory (default: dist)")), flag_value("compiler-bin", "Path to the compiler binary (default: build/bin/sfn)")), flag("installer", "Package the compiler installer bundle")), flag_value_short("p", "p", "Capsule path to package (user-capsule mode)")), "packages", "sfn package", "build a distributable");
 }
 
 // Reconstruct the legacy positional args slice from the typed matches and
