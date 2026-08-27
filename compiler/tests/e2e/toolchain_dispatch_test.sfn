@@ -9,7 +9,7 @@
 // The dispatch trigger is a `[toolchain]` pin the running toolchain
 // cannot satisfy — `sfn = "999.0.0"` (no such release will exist), so the
 // floor check fails and `auto` proceeds to fetch-and-re-exec. Instead of a
-// real fetch, the store is pre-seeded with a stub `sailfin` that echoes a
+// real fetch, the store is pre-seeded with a stub `sailfin` that prints a
 // unique marker; observing the marker in the child's stdout proves the
 // re-exec (`process.exec`) replaced the image with the stored toolchain.
 //
@@ -91,10 +91,13 @@ fn _stub_bin(dir: string) -> string ![io] {
 // actual executable path because explicit `-o` names are honored verbatim,
 // including the `.exe` suffix the helper selects on Windows.
 fn _write_marker_stub(dir: string, marker: string) -> string ![io] {
-    // The source lives OUTSIDE the store entry: `toolchain_build_records`
-    // hashes every file it finds under the entry, so a stray `.sfn` would
-    // enter the install manifest as part of the "installed toolchain".
-    // The marker is unique per stub, so it also names the source.
+    // The source lives OUTSIDE the store entry, so the entry holds only
+    // what a real install would. `toolchain_scan_payload` enumerates a
+    // fixed set (`sailfin`, `sfn`, `runtime/`, `capsules/`,
+    // `workspace.toml`), so a stray `.sfn` at the entry root would not
+    // reach the manifest — this is fixture hygiene, not a gate on the
+    // integrity path. The marker is unique per stub, so it also names
+    // the source.
     let src_dir = _scratch_root() + "/stub-src";
     fs.createDirectory(src_dir, true);
     let src = src_dir + "/" + marker + ".sfn";
@@ -130,7 +133,7 @@ fn _binary_digest(path: string) -> string ![io] {
 }
 
 // Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a stub that
-// echoes `marker` and exits 0, regardless of the argv it is re-exec'd
+// prints `marker` and exits 0, regardless of the argv it is re-exec'd
 // with. When `complete` is true the `.sha256` completeness marker is
 // written last (the installer's commit-point contract), so the entry
 // reads as dispatch-ready; when false the entry is left partial.
