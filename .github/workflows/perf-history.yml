@@ -128,7 +128,7 @@ jobs:
           packages: clang-18 llvm-18 jq time
 
       - name: Fetch released seed compiler
-        id: fetch-seed
+        id: fetch_seed
         uses: ./.github/actions/fetch-seed
         with:
           seed_version: ${{ steps.seed.outputs.seed_version }}

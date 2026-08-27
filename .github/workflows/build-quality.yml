@@ -7,7 +7,7 @@
 #      sibling work-dir must produce byte-identical artifacts and an
 #      identical per-module `cache_key` set (via `--check-determinism`
 #      from #779). The first-pass binary is the self-hosted compiler
-#      produced by `make compile` earlier in the job, so any cache
+#      produced by `sfn dev bootstrap build` earlier in the job, so any cache
 #      regression that lands the same day surfaces here even before a
 #      seed bump.
 #   2. Cache effectiveness. The second pass runs WITH cache. A clean
@@ -86,7 +86,7 @@ jobs:
     # dedup regression issues. The `Identify failed gate` step always
     # writes one of `determinism`, `cache-hit-rate`, or `build-setup`
     # (the catch-all for failures upstream of the gates — seed setup,
-    # `make compile`, first pass) so main-branch breakage of the gate
+    # `sfn dev bootstrap build`, first pass) so main-branch breakage of the gate
     # workflow itself still surfaces as a tracked regression rather
     # than passing without one.
     outputs:
@@ -259,7 +259,7 @@ jobs:
       # Save the validated, fully-warm build cache for PR CI to restore.
       # Save-only (no `if:`) so it runs only when every prior step —
       # including both gates — succeeded; a failed gate leaves the
-      # previous (good) cache in place. `make compile` + both
+      # previous (good) cache in place. `sfn dev bootstrap build` + both
       # determinism passes have populated `build/cache/` by now. The key
       # matches `.github/actions/sailfin-build`'s exact key; if it
       # already exists (no source change since the last main run) the
@@ -275,7 +275,7 @@ jobs:
       # `conclusion`), and the result is exported as a job output so the
       # downstream `notify-failure` job can open or append the right
       # dedup'd regression issue. When neither gate step ran (the
-      # failure happened upstream — seed fetch, `make compile`, first
+      # failure happened upstream — seed fetch, `sfn dev bootstrap build`, first
       # pass) the catch-all `build-setup` suffix is emitted so
       # main-branch breakage of the workflow itself still surfaces as
       # a tracked regression.
@@ -313,7 +313,7 @@ jobs:
   # (.github/actions/sailfin-build) restores `build/cache/test-bin` under
   # the `sailfin-testbin-...` key, but until this job nothing populated
   # it: the `build-quality` gate above runs no tests, and the nightly
-  # `make check` runs with `--no-test-cache`. This job runs the full
+  # `sfn dev verify` runs with `--no-test-cache`. This job runs the full
   # `.sfn` suite with the test-bin cache ENABLED and saves
   # `build/cache/test-bin` into the default-branch cache scope, so a PR's
   # first run hits for every unchanged test. Cross-commit hits work when
@@ -331,7 +331,7 @@ jobs:
   # cache stays in place.
   #
   # Linux x86_64 only for now (mirrors the gate job); macOS cache tuning
-  # is deferred (#1233 Out:). The full-suite `make check` / determinism
+  # is deferred (#1233 Out:). The full-suite `sfn dev verify` / determinism
   # gates remain the cold-build correctness backstop — this cache is read
   # only by the `sfn test` runner, never by those gates.
   test-bin-baseline:
@@ -352,12 +352,12 @@ jobs:
       cancel-in-progress: false
     # The warm step runs the whole `.sfn` suite INCREMENTALLY: the
     # `Restore test-bin cache` step above restores this job's own prior
-    # test-bin cache, so `make test` recompiles only the test binaries whose
+    # test-bin cache, so `sfn test` recompiles only the test binaries whose
     # source changed and hits the rest, then saves a fresh, complete cache
     # (SFN-431 — this reverses the earlier cold-producer choice; the cold
     # build was producer hygiene, never a soundness requirement, which
     # belongs only to the `build-quality` determinism gate). The suite runs
-    # in ONE parallel pool (`make test` omits `--jobs` and lets the native
+    # in ONE parallel pool (`sfn test` omits `--jobs` and lets the native
     # auto-budget size the pool to the runner), not the old serial-shard `for`
     # loop whose ~53-min cold floor (shards run one-at-a-time, files serial
     # within each) kept tipping past the cap and leaving the cache unsaved,
@@ -506,7 +506,7 @@ jobs:
 
       # Run the full `.sfn` suite in ONE parallel pool with the test-bin
       # cache ENABLED (no `--no-test-cache`), populating
-      # `build/cache/test-bin/v<schema>`. `make test` walks the same
+      # `build/cache/test-bin/v<schema>`. `sfn test` walks the same
       # unit+integration+e2e+capsules union the old serial-shard `for` loop
       # covered (shard-cover parity, `sfn dev shard cover`), so no coverage
       # is lost, and it omits `--jobs`, letting the native auto-budget size
@@ -769,7 +769,7 @@ jobs:
               ;;
             *)
               echo "<!-- gate:build-setup -->" >> "$excerpt_file"
-              echo "_No gate-level diff captured: the failure occurred before either gate ran (seed fetch, \`make compile\`, or first-pass build)._" >> "$excerpt_file"
+              echo "_No gate-level diff captured: the failure occurred before either gate ran (seed fetch, \`sfn dev bootstrap build\`, or first-pass build)._" >> "$excerpt_file"
               ;;
           esac
           echo "file=$excerpt_file" >> "$GITHUB_OUTPUT"

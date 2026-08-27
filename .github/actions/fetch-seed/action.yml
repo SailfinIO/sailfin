@@ -12,11 +12,11 @@ description: >-
 # reading bootstrap.toml only. `install.sh` is the only cold-start entry
 # point, and it is what performs the signed SHA256SUMS verification.
 #
-# This is the seed half of the retired `fetch-seed` build target, extracted so
-# the nine workflow jobs that acquired a seed without going through
-# `sailfin-build` stop depending on that target. The logic is a direct lift of
-# `sailfin-build/action.yml`'s own store-resolve + fetch pair, which remains
-# the reference implementation.
+# This is the seed half of the `fetch-seed` build target -- still defined in
+# the Makefile until that file is deleted -- extracted so the nine workflow
+# jobs that acquired a seed without going through `sailfin-build` stop
+# depending on it. The logic is a direct lift of `sailfin-build/action.yml`'s
+# own store-resolve + fetch pair, which remains the reference implementation.
 
 inputs:
   seed_version:
@@ -137,8 +137,10 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token != '' && inputs.github_token || env.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
-        # Skip the download on a cache hit. The restore key pins the exact
-        # version, so a present and invokable binary is the right one.
+        # Skip the download on a cache hit. Some callers restore a seed cache
+        # before this action runs; their restore key pins the exact version,
+        # so a present and invokable binary is the right one. Callers without
+        # such a cache simply re-download, as the build target did.
         if [ -x "$SEED_BIN" ] && "$SEED_BIN" version >/dev/null 2>&1; then
           echo "[fetch-seed] seed cache hit ($SEED_VERSION) — skipping download"
         else

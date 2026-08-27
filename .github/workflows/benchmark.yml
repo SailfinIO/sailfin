@@ -113,8 +113,39 @@ jobs:
           brew install jq llvm gnu-time
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
+      # Recreate the Darwin `clang` PATH shim the retired build driver
+      # installed at parse time. This job does not go through
+      # `.github/actions/sailfin-build`, which carries its own copy, so
+      # dropping `make` here dropped the shim with it.
+      #
+      # NOT redundant with SFN-1077: that made the compiler resolve its own
+      # driver for the final *link* (`SAILFIN_CC`, backend.sfn:145), but the
+      # released seed's own bootstrap and the compiler's Assemble role
+      # (`build/clang_argv.sfn`) still invoke a bare `clang` off PATH. On a
+      # Homebrew-LLVM runner that clang does not own the Darwin SDK/linker
+      # contract and the link fails with `ld: library 'm' not found`.
+      #
+      # Placed after the Homebrew PATH prepend on purpose: `$GITHUB_PATH`
+      # prepends, so Apple's clang lands ahead of Homebrew's -- the same
+      # precedence the driver's `PATH := $(CLANG_SHIM_DIR):$(PATH)` gave.
+      - name: Install Darwin clang shim
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cc="${SAILFIN_CC:-/usr/bin/clang}"
+          shim="$PWD/build/.toolchain-shim"
+          mkdir -p "$shim"
+          if [ -x "$cc" ]; then
+            ln -sf "$cc" "$shim/clang"
+            echo "[clang-shim] $shim/clang -> $cc"
+          else
+            echo "[clang-shim] $cc absent — empty shim dir, harmless PATH prefix"
+          fi
+          echo "$shim" >> "$GITHUB_PATH"
+
       - name: Fetch released seed compiler
-        id: fetch-seed
+        id: fetch_seed
         uses: ./.github/actions/fetch-seed
         with:
           seed_version: ${{ steps.seed.outputs.seed_version }}

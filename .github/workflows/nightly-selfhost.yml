@@ -117,6 +117,37 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
+      # Recreate the Darwin `clang` PATH shim the retired build driver
+      # installed at parse time. This job does not go through
+      # `.github/actions/sailfin-build`, which carries its own copy, so
+      # dropping `make` here dropped the shim with it.
+      #
+      # NOT redundant with SFN-1077: that made the compiler resolve its own
+      # driver for the final *link* (`SAILFIN_CC`, backend.sfn:145), but the
+      # released seed's own bootstrap and the compiler's Assemble role
+      # (`build/clang_argv.sfn`) still invoke a bare `clang` off PATH. On a
+      # Homebrew-LLVM runner that clang does not own the Darwin SDK/linker
+      # contract and the link fails with `ld: library 'm' not found`.
+      #
+      # Placed after the Homebrew PATH prepend on purpose: `$GITHUB_PATH`
+      # prepends, so Apple's clang lands ahead of Homebrew's -- the same
+      # precedence the driver's `PATH := $(CLANG_SHIM_DIR):$(PATH)` gave.
+      - name: Install Darwin clang shim
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cc="${SAILFIN_CC:-/usr/bin/clang}"
+          shim="$PWD/build/.toolchain-shim"
+          mkdir -p "$shim"
+          if [ -x "$cc" ]; then
+            ln -sf "$cc" "$shim/clang"
+            echo "[clang-shim] $shim/clang -> $cc"
+          else
+            echo "[clang-shim] $cc absent — empty shim dir, harmless PATH prefix"
+          fi
+          echo "$shim" >> "$GITHUB_PATH"
+
       - name: Fetch released seed compiler
         id: seed_fetch
         uses: ./.github/actions/fetch-seed
@@ -137,8 +168,16 @@ jobs:
           # the macOS leg at whatever `clang` leads PATH.
           SEED_BIN: ${{ steps.seed_fetch.outputs.seed_bin }}
           # #1830: SELFHOST_STRICT=1 makes a stage2/stage3 fixed-point
-          # mismatch fatal on the Linux leg; macOS passes "0" (warn-only).
+          # mismatch fatal. Both legs pass "1" -- macOS became strict too
+          # (SFN-87 / #1726); see the matrix entry's own comment. Kept as a
+          # matrix value rather than hardcoded so a leg can be relaxed
+          # without touching this step.
           SELFHOST_STRICT: ${{ matrix.selfhost_strict }}
+          # Pinned at step level, not inline on the build: `dev verify`'s
+          # phase 1 re-runs the build itself, and `_dv_child_env` copies the
+          # process environment -- an inline prefix would not reach it, so a
+          # fingerprint miss would cold-rebuild against a different cache root.
+          SAILFIN_BUILD_CACHE_DIR: build/cache
         run: |
           set -euo pipefail
           # Two steps, mirroring what the retired `check` target did
@@ -150,7 +189,7 @@ jobs:
           # silently ignored until the next seed cut. `dev verify` re-runs the
           # build as its own first phase, which the source fingerprint makes a
           # no-op here.
-          SAILFIN_BUILD_CACHE_DIR=build/cache "$SEED_BIN" dev bootstrap build
+          "$SEED_BIN" dev bootstrap build
 
           # SELFHOST_STRICT has no native reader; it becomes the --strict flag.
           args=(dev verify)

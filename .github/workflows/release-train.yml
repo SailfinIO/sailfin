@@ -193,7 +193,7 @@ jobs:
             // --- 2. Cut gate: HEAD's compiler is triple-pass verified ---------
             // The train is time-boxed: open scope rolls forward and never gates
             // the cut. The gate is that the EXACT compiler we would tag has
-            // passed a GREEN Nightly self-host (triple-pass `make check`).
+            // passed a GREEN Nightly self-host (triple-pass `sfn dev verify`).
             //
             // We do NOT require a nightly whose head_sha == live HEAD. On an
             // actively-merged trunk HEAD advances several times an hour while the

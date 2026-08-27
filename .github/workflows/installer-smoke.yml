@@ -11,7 +11,7 @@ name: Installer and install docs
 # Makefile, which all read the same key.
 #
 # Resolving from the same key also keeps the two halves of the ARM leg
-# consistent: the installed compiler and the `make fetch-seed` seed verified
+# consistent: the installed compiler and the `fetch-seed` action's seed, verified
 # against it now come from one source, where a hardcoded version could silently
 # diverge from the pin after a cadence bump.
 

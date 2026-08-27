@@ -146,7 +146,7 @@ first_error, report`.
 | `nondeterminism` | stage2 ≠ stage3 fixed-point mismatch, read off `sfn selfhost --json`'s `fixed_point`/`fixed_point_checked` scalars rather than a banner. | Pairs with `status:"warn"`, exit `0`. Re-run once; if it persists, escalate to `seed-stabilizer`. |
 | `setup-error` | A child exited `2` (the SFEP-0003 §3.3 point 6 "the tool never ran" convention), or never produced a process at all. | Fix the invocation/env, not the source. |
 | `oom` | A child hit the compiler's self-applied 8 GiB memory budget (`RLIMIT_AS`) — exit `137` and not a supervisor-issued deadline. | Escalate (memory regression) — do **not** blind-retry. |
-| `timeout` | A supervisor-owned deadline (the pass1 smoke gate's 60s bound, or a per-test-file deadline) tripped, remapped from the child's `137` to `124` before classification so a timeout is never reported as `oom`. | Re-run or escalate per phase. |
+| `timeout` | A supervisor-owned deadline (the pass1 smoke gate's 180s bound, or a per-test-file deadline) tripped, remapped from the child's `137` to `124` before classification so a timeout is never reported as `oom`. | Re-run or escalate per phase. |
 
 `nondeterminism` is the only class that pairs with `status:"warn"`; every other
 class pairs with `status:"fail"`.
@@ -160,7 +160,7 @@ output cannot desynchronize the ledger. The five phases, in pipeline order:
 `compile`, `smoke-pass1`, `tests-pass1`, `selfhost`, `tests-seedcheck`.
 
 - `compile` runs `sfn dev bootstrap build`.
-- `smoke-pass1` runs the hello-world example (under a supervisor-owned 60s
+- `smoke-pass1` runs the hello-world example (under a supervisor-owned 180s
   deadline) plus the `sfn/test` capsule gate against the first-pass binary.
 - `tests-pass1` is `skipped` unless `--full-pass1` is passed, in which case it
   runs the full suite against the first-pass binary.
