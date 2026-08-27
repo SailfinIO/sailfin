@@ -1,6 +1,6 @@
 # CI test topology
 
-How `make test`'s surface is partitioned across CI legs, budgeted for
+How `sfn test`'s surface is partitioned across CI legs, budgeted for
 parallelism, and cached — as it stands today. The design behind the
 content-addressed test-binary cache and the deterministic shard partition
 lives in `docs/proposals/0011-ci-test-speed.md`; this page is the
@@ -101,20 +101,19 @@ automated refresh job yet — a stale table only costs balance, per the
 fail-open guarantee above, so refreshing is a manual maintenance task rather
 than a release gate.
 
-`make test-shard SHARD=<name>` (`Makefile:442-470`) dispatches to
-`sfn dev shard run`; it builds the compiler first if the binary is missing,
-and honors `SAILFIN_AGENT_REPORT=1` to tee JSONL to
+`sfn dev shard run <name>` builds the compiler first if the binary is
+missing, and honors `SAILFIN_AGENT_REPORT=1` to tee JSONL to
 `build/agent-test.shard-<name>.jsonl`.
 
 ## The cover invariant
 
 `sfn dev shard cover` (`_shard_cover()`, `dev_shard.sfn:272`) asserts that
 the eight shards' file sets are disjoint, exhaustive, and contain nothing
-outside the surface `make test` discovers
+outside the surface `sfn test` discovers
 (`compiler/tests/unit`, `compiler/tests/integration`, `compiler/tests/e2e`,
 `capsules` — `_make_test_roots()`, `dev_shard.sfn:94-96`). CI runs this as
-the `shard-cover` job in `.github/workflows/ci.yml`; the Makefile
-target is `test-shard-cover` (`Makefile:475-480`).
+the `shard-cover` job in `.github/workflows/ci.yml`, via `sfn dev shard
+cover`.
 
 This lint is mandatory, not advisory: it is the only thing standing between
 rebalancing the shard map and silently ceasing to run a group of tests. A
@@ -135,11 +134,11 @@ together:
    same name the code gives the pre-subtraction slice) and the 5 GiB
    subtrahend reserves the parent runner (SFN-781). Resolution precedence in
    `_resolve_test_jobs` (`:189-198`): an explicit `--jobs` flag beats
-   `SAILFIN_TEST_JOBS`, which beats the native host probe. The Makefile no
-   longer computes its own default (SFN-1158 / SFEP-0074 §5.2 retired the
-   pre-binary bash duplicate and the parity test that cross-checked it) —
-   `make test`/`make check` omit `--jobs` and let the native probe size the
-   pool; `SAILFIN_TEST_JOBS=N` is the sole override.
+   `SAILFIN_TEST_JOBS`, which beats the native host probe. The pre-binary
+   bash duplicate that once computed its own default is retired (SFN-1158 /
+   SFEP-0074 §5.2), along with the parity test that cross-checked it —
+   `sfn test`/`sfn dev verify` omit `--jobs` and let the native probe size
+   the pool; `SAILFIN_TEST_JOBS=N` is the sole override.
 
 Pooled test children are pinned to `SAILFIN_BUILD_JOBS=1`
 (`compiler/src/cli/commands/test/pool.sfn:219-221`) so a pooled child that
@@ -176,7 +175,7 @@ The design for the content-addressed key derivation lives in
 - `--no-test-cache` (`compiler/src/cli/commands/test/mod.sfn:232`) bypasses
   the per-test linked-binary cache; it threads to every pooled child
   (`compiler/src/cli/commands/test/pool.sfn:127`).
-- `build-quality.yml`'s `test-bin-baseline` job runs a full `make test` on
+- `build-quality.yml`'s `test-bin-baseline` job runs a full `sfn test` on
   every push to `main`. Its purpose is warming the shared test-bin cache for
   the next PR to read, not correctness gating
   (`.github/workflows/build-quality.yml:341-342`). It is easy to misread
@@ -184,13 +183,18 @@ The design for the content-addressed key derivation lives in
   cache PRs consume, because the cache save step only runs when the full
   suite passed.
 - Two paths run cold (`--no-test-cache`): the daily aarch64-Linux unsharded
-  soak, which gates its scheduled workflow, and the nightly `make check`.
+  soak, which gates its scheduled workflow, and the nightly `sfn dev verify`.
 - The correctness backstop for the whole toolchain is the nightly
-  `make check` triple-pass self-host
-  (`.github/workflows/nightly-selfhost.yml`, `make-check` job, cron
-  `0 7 * * *` UTC, `SELFHOST_STRICT=1`, run on both Linux and macOS). The
-  test-bin cache is read only by the `sfn test` runner; it is never consulted
-  by that gate.
+  `sfn dev verify --strict` triple-pass self-host
+  (`.github/workflows/nightly-selfhost.yml`, cron `0 7 * * *` UTC, run on both
+  Linux and macOS). The seed builds the compiler and the freshly built
+  compiler drives verification, so a fix to the verify orchestration takes
+  effect without waiting for a seed cut. The test-bin cache is read only by
+  the `sfn test` runner; it is never consulted by that gate.
+
+  That job's id is still literally `make-check`. It is a required status
+  check, so renaming it needs a branch-protection change and is deliberately
+  left for the commit that deletes the Makefile (SFN-60).
 
 ## Where each gate lives
 

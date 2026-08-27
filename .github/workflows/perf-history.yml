@@ -128,27 +128,29 @@ jobs:
           packages: clang-18 llvm-18 jq time
 
       - name: Fetch released seed compiler
+        id: fetch_seed
+        uses: ./.github/actions/fetch-seed
+        with:
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print seed version
         shell: bash
-        env:
-          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
-        run: |
-          set -euo pipefail
-          make fetch-seed SEED_VERSION="$SEED_VERSION"
-          build/toolchains/seed/bin/sfn version
+        run: build/toolchains/seed/bin/sfn version
 
       - name: Build native compiler (timed clean self-host)
         id: build
         shell: bash
-        env:
-          CLANG: clang-18
         run: |
           set -euo pipefail
-          # `make rebuild` forces a clean self-host so the timing reflects a
-          # real parallel clean build (the SFEP-0006 <5 min target), not a
-          # cached one. This wall time is the whole-build budget metric — it is
-          # NOT the compile bench's serial sum of isolated per-module emits.
+          # `sfn dev bootstrap build --force` forces a clean self-host so the
+          # timing reflects a real parallel clean build (the SFEP-0006 <5 min
+          # target), not a cached one. This wall time is the whole-build budget
+          # metric — it is NOT the compile bench's serial sum of isolated
+          # per-module emits.
           start=$(date +%s)
-          make rebuild CLANG="clang-18" SEED_NATIVE="build/toolchains/seed/bin/sfn"
+          SAILFIN_BUILD_CACHE_DIR=build/cache \
+            build/toolchains/seed/bin/sfn dev bootstrap build --force
           end=$(date +%s)
           build/bin/sfn version
           echo "wall_s=$((end - start))" >> "$GITHUB_OUTPUT"
@@ -158,7 +160,7 @@ jobs:
         shell: bash
         run: mkdir -p bench-out
 
-      - name: Compile-perf benchmark (make bench)
+      - name: Compile-perf benchmark (sfn bench --compiler)
         shell: bash
         run: |
           set -euo pipefail
@@ -166,17 +168,18 @@ jobs:
           # but it writes the CSV before exiting. This job's gate is the
           # median comparison (later step), not the harness's per-run budgets,
           # so tolerate a non-zero exit and record the CSV regardless.
-          make bench BENCH_ARGS="--csv bench-out/compile.csv --top 20" \
-            || echo "[perf-history] make bench exited $? (budget/FAIL flag) — recording CSV anyway"
+          build/bin/sfn bench --compiler --import-context build/compiler/import-context \
+            --csv bench-out/compile.csv --top 20 \
+            || echo "[perf-history] sfn bench --compiler exited $? (budget/FAIL flag) — recording CSV anyway"
 
-      - name: Runtime-execution benchmark (make bench-runtime)
+      - name: Runtime-execution benchmark (sfn bench benchmarks/runtime)
         shell: bash
         run: |
           set -euo pipefail
-          make bench-runtime BENCH_RUNTIME_ARGS="--csv bench-out/runtime.csv --top 20 --iterations 5" \
-            || echo "[perf-history] make bench-runtime exited $? (budget/FAIL flag) — recording CSV anyway"
+          build/bin/sfn bench benchmarks/runtime --csv bench-out/runtime.csv --top 20 --iterations 5 \
+            || echo "[perf-history] sfn bench benchmarks/runtime exited $? (budget/FAIL flag) — recording CSV anyway"
 
-      - name: Consumer-build benchmark (make bench-consumer)
+      - name: Consumer-build benchmark (sfn bench --consumer)
         shell: bash
         run: |
           set -euo pipefail
@@ -185,8 +188,8 @@ jobs:
           # job's signal is the median comparison rather than the harness's own
           # per-run flags. A FAIL row is recorded and then excluded from the
           # comparison by perf_history.sh (a build that failed has no timing).
-          make bench-consumer BENCH_CONSUMER_ARGS="--csv bench-out/consumer.csv" \
-            || echo "[perf-history] make bench-consumer exited $? (FAIL flag) — recording CSV anyway"
+          build/bin/sfn bench --consumer --csv bench-out/consumer.csv \
+            || echo "[perf-history] sfn bench --consumer exited $? (FAIL flag) — recording CSV anyway"
 
       - name: Check out bench-data branch (create orphan if absent)
         shell: bash
@@ -353,7 +356,7 @@ jobs:
             {
               echo "# ${syn_title}"
               echo ""
-              echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). **${module_count}** modules regressed beyond +${PERF_THRESHOLD_PCT}% vs the rolling median in a single nightly run. A broad simultaneous shift is almost always a shared environmental cause (seed bump, runner class, toolchain change) rather than ${module_count} independent code regressions, so this is filed as **one** aggregated issue instead of ${module_count} per-module issues (SFN-330). Investigate the shared cause first; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\`)."
+              echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). **${module_count}** modules regressed beyond +${PERF_THRESHOLD_PCT}% vs the rolling median in a single nightly run. A broad simultaneous shift is almost always a shared environmental cause (seed bump, runner class, toolchain change) rather than ${module_count} independent code regressions, so this is filed as **one** aggregated issue instead of ${module_count} per-module issues (SFN-330). Investigate the shared cause first; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`sfn bench --compiler\`)."
               echo ""
               echo "**Run:** ${RUN_URL}"
               echo "**Commit:** \`${SHA}\`"
@@ -443,11 +446,11 @@ jobs:
                 echo "# perf regression: ${name}"
                 echo ""
                 if [ "$row_kind" = "budget" ]; then
-                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). The whole-build wall time crossed the SFEP-0006 budget. Further budget breaches aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\`)."
+                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). The whole-build wall time crossed the SFEP-0006 budget. Further budget breaches aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`sfn bench --compiler\`)."
                 elif [ "$row_kind" = "consumer-median" ]; then
-                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0070). This consumer-build fixture regressed against the rolling median of the last ${PERF_MIN_RUNS} nightly runs. \`ctors\` and \`modules_staged\` are derived counts that are deterministic for a given tree and seed, so any sustained rise in them means the capsule source closure grew — a cost every consumer of the language pays. This is a **warning series**: it never fails the nightly. Further regressions for this fixture aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench-consumer\`)."
+                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0070). This consumer-build fixture regressed against the rolling median of the last ${PERF_MIN_RUNS} nightly runs. \`ctors\` and \`modules_staged\` are derived counts that are deterministic for a given tree and seed, so any sustained rise in them means the capsule source closure grew — a cost every consumer of the language pays. This is a **warning series**: it never fails the nightly. Further regressions for this fixture aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`sfn bench --consumer\`)."
                 else
-                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). \`${name}\` regressed beyond the +${PERF_THRESHOLD_PCT}% threshold vs the rolling median of the last ${PERF_MIN_RUNS} nightly runs. Further regressions for this module aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\` / \`make bench-runtime\`)."
+                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). \`${name}\` regressed beyond the +${PERF_THRESHOLD_PCT}% threshold vs the rolling median of the last ${PERF_MIN_RUNS} nightly runs. Further regressions for this module aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`sfn bench --compiler\` / \`sfn bench benchmarks/runtime\`)."
                 fi
                 echo ""
                 echo "## Latest measurement"

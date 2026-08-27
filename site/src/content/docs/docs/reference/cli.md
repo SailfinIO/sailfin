@@ -1,6 +1,6 @@
 ---
 title: CLI Reference
-description: Complete reference for the sfn command-line interface and Makefile build system.
+description: Complete reference for the sfn command-line interface.
 section: reference
 sidebar:
   order: 6
@@ -76,7 +76,7 @@ sfn run src/main.sfn
 
 Discover and run Sailfin test files. Test files follow the `*_test.sfn` naming convention. Without a path argument, `sfn test` discovers all `*_test.sfn` files under the current directory.
 
-Multiple path arguments group tests into named **suites** for reporting: each path becomes a suite labelled by its basename, and the runner emits a per-suite `═══ <name>: N/M passed, K failed ═══` banner at end-of-run. The repository `make test` target uses this to run unit / integration / e2e / capsule tests in one invocation.
+Multiple path arguments group tests into named **suites** for reporting: each path becomes a suite labelled by its basename, and the runner emits a per-suite `═══ <name>: N/M passed, K failed ═══` banner at end-of-run. `sfn test` uses this to run unit / integration / e2e / capsule tests in one invocation.
 
 Every explicitly named path must exist. If any does not, `sfn test` prints `error: path not found: <path>` for each missing one and exits 2 **without compiling or running anything**. Exit 2 marks a malformed invocation, distinct from exit 1 for a failing suite — so a typo'd path in CI is never mistaken for a red test run. A path that exists but contains no `*_test.sfn` files is not an error: it reports `no *_test.sfn files found under <path>` and exits 0.
 
@@ -262,9 +262,9 @@ Typecheck codes (`E0001`, `E0014`, `E0015`, `E0301`, `E0302`, `E0309`) are share
 | `1` | One or more diagnostics were produced (or no `.sfn` files were found) |
 | `2` | Usage error (bad flag or path not found) |
 
-**Why:** A full `make compile` takes many minutes; `sfn check` gives you the parse/typecheck/effect verdict in seconds. Use it during editing, wire it into pre-commit hooks, or run it from CI as an early-gate before the full build.
+**Why:** A full `sfn dev bootstrap build` takes many minutes; `sfn check` gives you the parse/typecheck/effect verdict in seconds. Use it during editing, wire it into pre-commit hooks, or run it from CI as an early-gate before the full build.
 
-**Limitations — `check` is not a build oracle:** `sfn check` runs *parse + typecheck + effect-check only*. It never emits `.sfn-asm`/LLVM IR or invokes `clang`/the linker, so by construction it cannot catch failures that surface only during codegen or linking. A `check` green therefore does **not** guarantee `sfn build` succeeds — run `sfn build` (or `make compile`) for that. The historical instance of this gap (runtime-evaluated module globals such as `let mut xs: int[] = [];` checking green but failing at link with `use of undefined value '@sailfin_module_init__'`) was fixed in the emitter, so `check` and `build` now agree on that class; the agreement is locked by `compiler/tests/e2e/check_build_agree_module_global_test.sfn`.
+**Limitations — `check` is not a build oracle:** `sfn check` runs *parse + typecheck + effect-check only*. It never emits `.sfn-asm`/LLVM IR or invokes `clang`/the linker, so by construction it cannot catch failures that surface only during codegen or linking. A `check` green therefore does **not** guarantee `sfn build` succeeds — run `sfn build` (or `sfn dev bootstrap build`) for that. The historical instance of this gap (runtime-evaluated module globals such as `let mut xs: int[] = [];` checking green but failing at link with `use of undefined value '@sailfin_module_init__'`) was fixed in the emitter, so `check` and `build` now agree on that class; the agreement is locked by `compiler/tests/e2e/check_build_agree_module_global_test.sfn`.
 
 ---
 
@@ -401,8 +401,8 @@ sfn dev bootstrap build -- --no-cache --cache-trace
 short-circuit. Supplying seed-build arguments also bypasses that short-circuit.
 A bare `--` ends bootstrap option parsing; every later token is appended
 unchanged to the pinned seed's `build -p compiler` invocation. This provides
-the native cache-diagnostic and future build-flag passthrough without the
-Makefile's `BUILD_ARGS` variable.
+the native cache-diagnostic and future build-flag passthrough directly on the
+command line.
 
 ---
 
@@ -413,7 +413,7 @@ command preserves the self-host build contract and writes `build/bin/sfn`
 (`build/bin/sfn.exe` on Windows). `--prefix` instead writes the host-named
 executable under `<dir>/bin`; `--destdir` prepends a packaging staging root.
 When `--destdir` is supplied without `--prefix`, the prefix defaults to
-`~/.local`, matching the retired Makefile install default.
+`~/.local`, matching the historical `make install` default.
 
 ```bash
 sfn dev bootstrap install
@@ -446,9 +446,8 @@ never updates the repo-local source-fingerprint record for `build/bin/sfn`.
 
 ### `sfn dev clean <build|dist|all>`
 
-Remove the **repo-local** build artifacts of a compiler checkout — the native
-replacement for the `make clean-build` / `make clean` / `make clean-all`
-recipes. This is a different tree from `sfn cache clean`, which owns the
+Remove the **repo-local** build artifacts of a compiler checkout — covering
+`build/`, `dist/`, or both in one command. This is a different tree from `sfn cache clean`, which owns the
 global content-addressed cache above: `sfn dev clean` never touches that root,
 and `sfn cache clean` never touches `build/`.
 
@@ -471,7 +470,7 @@ sfn dev clean all                        # build/ and dist/ together
 
 **Behavior:**
 
-- The preserved store is **derived** from `bootstrap.toml [store].install_base` / `bin_dir` (default `build/toolchains`), not hard-coded, and is preserved unless `--include-seed` or `SAILFIN_CLEAN_KEEP_SEED=0` is set. `make clean-build KEEP_SEED=0` translates into that variable; the command does not read the bare `KEEP_SEED`.
+- The preserved store is **derived** from `bootstrap.toml [store].install_base` / `bin_dir` (default `build/toolchains`), not hard-coded, and is preserved unless `--include-seed` or `SAILFIN_CLEAN_KEEP_SEED=0` is set.
 - It refuses to run unless the current directory is a compiler checkout — `bootstrap.toml` must be present *and* parse with a `[seed].version`.
 - It takes no path argument. Every target is a literal repo-relative `build/`/`dist/` path, checked against traversal and absolute-path escape before anything is unlinked, and symlinked entries are unlinked rather than followed.
 - An absent tree is a clean no-op (exit 0), not an error, and the tree is not recreated.
@@ -665,42 +664,42 @@ A project with no `[toolchain]` section is unaffected — the gate is a no-op.
 
 ## Build System
 
-The repository Makefile provides higher-level build orchestration for the self-hosting workflow. These targets are for working on the Sailfin compiler itself; end users generally only need `sfn run` and `sfn test`.
+`sfn dev` provides higher-level build orchestration for the self-hosting workflow. These commands are for working on the Sailfin compiler itself; end users generally only need `sfn run` and `sfn test`.
 
 For host dependencies, OpenSSL setup, and the full source-build environment
 guide, see
 [`docs/development-setup.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/development-setup.md).
 
-### Complete target reference
+### Complete command reference
 
-| Target | Description |
+| Task | Native command |
 |---|---|
-| `make compile` | Build the native compiler binary from a released seed, using the self-hosting pipeline. Skips rebuild if the binary is up to date. |
-| `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler`. |
-| `make check` | Compile (if needed), build a `sailfin-seedcheck` binary, verify it can run `hello-world.sfn`, then run the full test suite against it. This is the authoritative CI gate. |
-| `make check-strict` | Same as `make check`, but a seedcheck/fixed-point rebuild mismatch is fatal. |
-| `make check-fast` | Run `sfn check` over `compiler/src/` and `runtime/` without codegen or clang. |
-| `make test` | Run the full Sailfin-native test suite (unit + integration + e2e + capsule tests). Builds first if `build/bin/sfn` is missing. |
-| `make test-unit` | Run unit tests from `compiler/tests/unit/*_test.sfn`. |
-| `make test-integration` | Run integration tests from `compiler/tests/integration/*_test.sfn`. |
-| `make test-e2e` | Run end-to-end tests from `compiler/tests/e2e/*_test.sfn`. |
-| `make test-capsules` | Run per-capsule tests under `capsules/`. |
-| `make package` | Build and package native artifacts into `dist/`. |
-| `make fetch-seed` | Download the pinned seed compiler (`bootstrap.toml [seed].version`, override with `SEED_VERSION`) from GitHub Releases into `build/toolchains/seed/`. Set `GITHUB_TOKEN` to raise GitHub API rate limits. |
-| `make bench` | Benchmark compiler per-module compile time and memory. |
-| `make bench-runtime` | Benchmark compiled-program runtime execution. |
-| `make bench-consumer` | Benchmark consumer-build cold/warm compile time and output-artifact size for fixtures under `benchmarks/consumer`. |
-| `make mcp-server` | Build the Sailfin MCP server under `tools/mcp-server/`. |
-| `make clean` | Remove `dist/` packaged artifacts. Does not remove build intermediates. |
-| `make clean-build` | Remove `build/` artifacts (keeps the seed toolchain under `build/toolchains/` by default). Pass `KEEP_SEED=0` to also remove `build/toolchains/`. |
-| `make clean-all` | Remove both `dist/` and `build/` artifacts completely. |
-| `make help` | Print a summary of available targets. |
+| Build the native compiler binary from a released seed, using the self-hosting pipeline. Skips rebuild if the binary is up to date. | `sfn dev bootstrap build` |
+| Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler`. | `sfn dev bootstrap build --force` |
+| Compile (if needed), verify the first-pass binary can run `hello-world.sfn`, build a `build/bin/sfn-seedcheck` binary, then run the full test suite against it. This is the authoritative CI gate. | `sfn dev verify` |
+| Same as verify, but a seedcheck/fixed-point rebuild mismatch is fatal. | `sfn dev verify --strict` |
+| Run `sfn check` over the workspace maintainer-source inventory without codegen or clang. | `sfn dev verify --fast` |
+| Run the full Sailfin-native test suite (unit + integration + e2e + capsule tests). | `sfn test` |
+| Run unit tests from `compiler/tests/unit/*_test.sfn`. | `sfn test compiler/tests/unit` |
+| Run integration tests from `compiler/tests/integration/*_test.sfn`. | `sfn test compiler/tests/integration` |
+| Run end-to-end tests from `compiler/tests/e2e/*_test.sfn`. | `sfn test compiler/tests/e2e` |
+| Run per-capsule tests under `capsules/`. | `sfn test $(sfn dev inventory member-tests)` |
+| Build and package native artifacts into `dist/`. | `sfn package --out dist --compiler-bin build/bin/sfn` (add `--installer` for the installer bundle) |
+| Download the pinned seed compiler (`bootstrap.toml [seed].version`) from GitHub Releases into `build/toolchains/seed/`. Set `GITHUB_TOKEN` to raise GitHub API rate limits. | `sfn dev bootstrap fetch` |
+| Benchmark compiler per-module compile time and memory. | `sfn bench --compiler --import-context build/compiler/import-context` |
+| Benchmark compiled-program runtime execution. | `sfn bench benchmarks/runtime` |
+| Benchmark consumer-build cold/warm compile time and output-artifact size for fixtures under `benchmarks/consumer`. | `sfn bench --consumer` |
+| Build the Sailfin MCP server under `tools/mcp-server/`. | `cd tools/mcp-server && npm ci && npm run build` (no native equivalent) |
+| Remove `dist/` packaged artifacts. Does not remove build intermediates. | `sfn dev clean dist` |
+| Remove `build/` artifacts (keeps the seed toolchain under `build/toolchains/` by default). Pass `--include-seed` to also remove it. | `sfn dev clean build` (`sfn dev clean build --include-seed` to also remove the seed) |
+| Remove both `dist/` and `build/` artifacts completely. | `sfn dev clean all` |
+| Print a summary of available commands. | `sfn --help`, `sfn dev --help` |
 
 ---
 
 ### Parallelism and validation shape
 
-`make rebuild` routes through `<seed> build -p compiler`; the Sailfin-native
+`sfn dev bootstrap build --force` routes through `<seed> build -p compiler`; the Sailfin-native
 driver owns compiler module scheduling. The driver reads
 `SAILFIN_BUILD_JOBS`; set it to a positive integer for build-parallelism
 bisects or memory-constrained hosts.
@@ -712,21 +711,20 @@ of 2) — the 3 GiB per-job reserve matches a measured pooled test child, and th
 dependency closure in-process before fanning out (SFN-547, re-sized SFN-626,
 re-sized SFN-781). An explicit `--jobs N` wins over `SAILFIN_TEST_JOBS=N`; use
 `--jobs 1` for the serial path.
-The Makefile omits `--jobs` from every `sfn test` invocation, so `make test`
-and `make check`'s cold seedcheck suite both size their pool from the same
-native auto-budget; `SAILFIN_TEST_JOBS=N` overrides both. `make check` still
-takes `CHECK_TEST_TIMEOUT` for the per-test timeout. Use
-`SELFHOST_STRICT=1` or `make check-strict` when a seedcheck/fixed-point rebuild
-mismatch must fail the run. Pooled test children (`--jobs N` with `N > 1`) spawn
-with `SAILFIN_BUILD_JOBS=1` so a child's own per-module emit fan-out cannot nest
-inside the test pool and multiply the peak; an explicitly inherited
-`SAILFIN_BUILD_JOBS` still wins, and the serial path is unaffected.
+When neither is passed, `sfn test` and `sfn dev verify`'s cold seedcheck suite
+both size their pool from the same native auto-budget; `SAILFIN_TEST_JOBS=N`
+overrides both. `sfn dev verify` also takes `--test-timeout N` for the
+per-test timeout. Use `sfn dev verify --strict` when a seedcheck/fixed-point
+rebuild mismatch must fail the run. Pooled test children (`--jobs N` with
+`N > 1`) spawn with `SAILFIN_BUILD_JOBS=1` so a child's own per-module emit
+fan-out cannot nest inside the test pool and multiply the peak; an explicitly
+inherited `SAILFIN_BUILD_JOBS` still wins, and the serial path is unaffected.
 
 ---
 
 ## Environment Variables
 
-These environment variables influence the behavior of `sfn` and the Makefile build system.
+These environment variables influence the behavior of `sfn`.
 
 | Variable | Scope | Description |
 |---|---|---|
@@ -739,22 +737,27 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `sfn build`/`run`/`check`/`test` | Set to `1` to downgrade a `[toolchain]` pin mismatch from a hard error to a warning for every invocation in the shell/CI job. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | Controls the toolchain-pin mismatch response: `auto` (default) fetches + verifies + re-execs the pinned toolchain; `local` verifies only and errors on mismatch; `<version>` forces that dispatch target; `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN_DISPATCHED` | `sfn build`/`run`/`check`/`test` | Set automatically by `sfn` before re-exec'ing a dispatched toolchain (`=<version>`) as a re-entrancy guard; not intended to be set by hand. |
+| `SAILFIN_CLEAN_KEEP_SEED` | `sfn dev clean build`/`all` | Set to `0` (equivalent to `--include-seed`) to also delete the seed toolchain store. Defaults to `1` (the seed toolchain is preserved). |
+| `SAILFIN_TEST_SCRATCH` | `sfn test` | Override the scratch directory a test's subprocess builds are isolated into. |
+| `SAILFIN_EFFECT_ENFORCE` | `sfn` binary | Control runtime effect-enforcement (the seal, SFEP-0016); partial on macOS arm64 (#613). |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
-| `GITHUB_TOKEN` | installer / `make fetch-seed` | GitHub token used to raise API rate limits and access release assets. |
-| `BUILD_ARGS` | Makefile | Extra arguments passed through to `sfn build -p compiler`, for example `--no-cache --cache-trace`. |
-| `SEED` | Makefile | Path to (or name of) the seed compiler used as the bootstrap. Defaults to the fetched repo-local seed alias, `build/toolchains/seed/bin/sfn` (`sfn.exe` on Windows). |
-| `SEED_VERSION` | Makefile | Version tag of the seed to fetch. Defaults to `bootstrap.toml [seed].version`. |
-| `SEED_NATIVE` | Makefile | One-off path to the seed used by `make rebuild`, taking precedence over `SEED`. |
-| `NATIVE_BIN` | Makefile | Compiler binary used by test, check, and bench targets. Defaults to `build/bin/sfn`. |
-| `NATIVE_OUT` | Makefile | Output path for `make rebuild`. Defaults to `build/bin/sfn`. |
-| `CLANG` | Makefile | `clang` executable to use. Defaults to `clang`. |
-| `SAILFIN_CC` | Native macOS final links and transitional Makefile recipes | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. |
-| `CLANG_LL_FLAGS` | Makefile | Extra flags when compiling `.ll` files with clang. |
-| `CHECK_TEST_TIMEOUT` | Makefile | Per-test timeout for `make check`'s cold full-suite leg. Defaults to `1800`. |
-| `CHECK_FULL_PASS1` | Makefile | Set to `1` to restore the older full first-pass suite before seedcheck. |
-| `SELFHOST_STRICT` | Makefile | Set to `1` to make a seedcheck/fixed-point rebuild mismatch fatal. |
-| `JSON=1` | Makefile | Enable structured agent reports for agent-facing targets. |
-| `KEEP_SEED` | `make clean-build` | Set to `0` to also delete `build/toolchains/` during `make clean-build`. Defaults to `1` (the seed toolchain is preserved). |
+| `GITHUB_TOKEN` | installer / `sfn dev bootstrap fetch` | GitHub token used to raise API rate limits and access release assets. |
+| `SAILFIN_CC` | `sfn` binary (native macOS final links) | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. |
+
+`sfn dev bootstrap build -- <arg>...` replaces the retired `BUILD_ARGS` Makefile
+variable — arguments after a bare `--` are appended unchanged to the pinned
+seed's `build -p compiler` invocation, e.g.
+`sfn dev bootstrap build -- --no-cache --cache-trace`. The retired `SEED`,
+`SEED_NATIVE`, `NATIVE_BIN`, `NATIVE_OUT`, `CLANG`, and `CLANG_LL_FLAGS`
+variables have no native replacement — the seed path, output path, and clang
+executable used for final links are no longer independently overridable. The
+retired `SEED_VERSION` variable is still controllable, just not via an env
+var: edit the `[seed].version` pin in `bootstrap.toml` directly, or use
+`sfn dev bootstrap pin <version>`. The
+retired `CHECK_TEST_TIMEOUT`, `CHECK_FULL_PASS1`, `SELFHOST_STRICT`, and
+`JSON=1` variables are now flags: `sfn dev verify --test-timeout N`,
+`sfn dev verify --full-pass1`, `sfn dev verify --strict`, and `--json` on
+`sfn test` / `sfn check` / `sfn dev verify` respectively.
 
 ### Debug and trace variables
 
@@ -791,7 +794,7 @@ When `sfn test` is used, a non-zero exit code means at least one test failed. Al
 | Convention | Description |
 |---|---|
 | `*.sfn` | Sailfin source files |
-| `*_test.sfn` | Test files — discovered automatically by `sfn test` and `make test-*` |
+| `*_test.sfn` | Test files — discovered automatically by `sfn test` |
 | `capsule.toml` | Capsule manifest — declares name, version, dependencies, and required capabilities |
 | `workspace.toml` | Workspace manifest — shared policies for multi-capsule projects |
 | `*.sfn-asm` | Native IR intermediate representation produced by `sfn emit native` |
@@ -809,22 +812,26 @@ When `sfn test` is used, a non-zero exit code means at least one test failed. Al
 sfn run examples/basics/hello-world.sfn
 ```
 
-**Build the compiler from source:**
+**Build the compiler from source** (clean checkout — no `sfn` installed yet, so
+the installer provides a released `sfn` to drive the build; that build then
+fetches the seed pinned in `bootstrap.toml` itself):
 
 ```bash
-make compile
+git clone https://github.com/SailfinIO/sailfin.git && cd sailfin
+./install.sh                 # installs a released sfn to drive the build
+sfn dev bootstrap build      # self-hosts -> build/bin/sfn
 ```
 
 **Run the full test suite:**
 
 ```bash
-make test
+sfn test
 ```
 
 **Install the compiler locally:**
 
 ```bash
-make compile
+sfn dev bootstrap build
 build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 # compiler is now at ~/.local/bin/sfn
 ```
@@ -832,7 +839,7 @@ build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 **Force a fresh rebuild:**
 
 ```bash
-make rebuild
+sfn dev bootstrap build --force
 ```
 
 **Run only unit tests in a specific directory:**
@@ -844,13 +851,13 @@ build/bin/sfn test compiler/tests/unit/
 **Run the CI validation gate locally:**
 
 ```bash
-make check
+sfn dev verify
 ```
 
 **Fetch a fresh seed compiler:**
 
 ```bash
-GITHUB_TOKEN=<your-token> make fetch-seed
+GITHUB_TOKEN=<your-token> sfn dev bootstrap fetch
 ```
 
 ---

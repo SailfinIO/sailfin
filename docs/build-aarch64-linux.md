@@ -11,9 +11,12 @@ per pinned seed (SFN-580):
 - **Native-seed self-host — the steady state.** Once a release publishes both
   `sailfin-native-linux-arm64-<version>.tar.gz` and
   `sailfin_<version>_linux_arm64.tar.gz`, an aarch64 leg fetches the seed
-  with the ordinary `make fetch-seed` and self-hosts with `make rebuild`,
-  exactly like every other target — nothing aarch64-specific to run by hand.
-  (`make fetch-seed` installs the `sailfin_<version>_linux_arm64.tar.gz`
+  with the shared seed-fetch step in
+  `.github/actions/sailfin-build/action.yml` (`./install.sh`, driven by the
+  `SEED_VERSION`/`INSTALL_BASE`/`GLOBAL_BIN_DIR` overrides) and self-hosts
+  with `sfn dev bootstrap build --force`, exactly like every other target —
+  nothing aarch64-specific to run by hand.
+  (That step installs the `sailfin_<version>_linux_arm64.tar.gz`
   installer asset; the probe below requires the `sailfin-native-…` tarball to
   be present too because a release publishes the pair both-or-neither, so a
   half set means a corrupted release rather than a buildable one.) This is
@@ -91,11 +94,11 @@ nothing reaches the action's `Reject unknown aarch64 seed mode` guard and
 fails loudly, rather than silently spending ~30 minutes under emulation
 (SFN-1078).
 
-- On `native`, the arm64 leg takes the ordinary `make fetch-seed` + `make
-  rebuild` path, then runs a `Verify native aarch64 seed` step asserting the
-  fetched binary is an AArch64 ELF that reports the pinned version —
-  `make fetch-seed`'s SHA256SUMS check proves the download is authentic, not
-  that it is the right architecture.
+- On `native`, the arm64 leg takes the ordinary `./install.sh` fetch +
+  `sfn dev bootstrap build --force` path, then runs a `Verify native aarch64
+  seed` step asserting the fetched binary is an AArch64 ELF that reports the
+  pinned version — `install.sh`'s SHA256SUMS check proves the
+  download is authentic, not that it is the right architecture.
 - On `qemu`, the leg fetches the pinned x86_64 seed and runs
   `scripts/bootstrap-aarch64-linux.sh` (below). The `qemu-user`/multiarch apt install
   (the emulated amd64 sysroot) is gated on the same mode output, so the
@@ -148,8 +151,8 @@ for a native aarch64 asset of the older x86_64 bring-up seed.
 
 Download the **x86_64 Linux** asset for the exact version in
 `bootstrap.toml [seed].version`; do not use the host-architecture selection in
-`make fetch-seed`, because a manual bring-up on a host with no native seed
-available has no aarch64 asset to select.
+`sfn dev bootstrap fetch`, because a manual bring-up on a host with no native
+seed available has no aarch64 asset to select.
 
 ## Run the bootstrap
 

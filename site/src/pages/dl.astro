@@ -256,11 +256,14 @@ const featured = allAssets;
   <section class="dl-source">
     <div class="container">
       <h2>Build from Source</h2>
-      <p class="section-desc">Clone the repository and build the self-hosted compiler via LLVM. Requires bash, make, jq, LLVM tools, clang, and OpenSSL development libraries.</p>
+      <p class="section-desc">Clone the repository and build the self-hosted compiler via LLVM. Requires bash, jq, LLVM tools, clang, and OpenSSL development libraries.</p>
       <div class="code-block source-block">
-        <code>git clone https://github.com/SailfinIO/sailfin.git && cd sailfin && make compile && build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"</code>
+        <code>git clone https://github.com/SailfinIO/sailfin.git && cd sailfin</code><br />
+        <code>./install.sh</code><br />
+        <code>sfn dev bootstrap build</code><br />
+        <code>build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"</code>
       </div>
-      <p class="source-detail">See the <a href="/docs/getting-started/install#building-from-source">full build instructions</a> for prerequisites and troubleshooting.</p>
+      <p class="source-detail">The second command installs a released compiler (same as the Quick Install step above) so the third can self-host; that build then fetches the seed pinned in <code>bootstrap.toml</code> on its own. See the <a href="/docs/getting-started/install#building-from-source">full build instructions</a> for prerequisites and troubleshooting.</p>
     </div>
   </section>
 

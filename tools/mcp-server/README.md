@@ -1,6 +1,6 @@
 # `@sailfin/mcp-server`
 
-Model Context Protocol server that exposes the self-hosted Sailfin compiler as tool calls, so agentic clients (Claude Code, Claude Desktop, Inspector) can compile, check, and iterate on `.sfn` files without shelling out through `make`.
+Model Context Protocol server that exposes the self-hosted Sailfin compiler as tool calls, so agentic clients (Claude Code, Claude Desktop, Inspector) can compile, check, and iterate on `.sfn` files without shelling out to the build driver.
 
 Part of the "AI agents are users" strategy described in [`CLAUDE.md`](../../CLAUDE.md) — checks off item #4 (MCP server) in the LLM & Agent Adoption Strategy track.
 

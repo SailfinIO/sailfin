@@ -18,11 +18,12 @@ cd sailfin
 2. Set up the development environment:
 
 ```bash
-make compile   # Build the compiler from seed
-make test      # Verify everything works
+./install.sh              # Install a released sfn (a clean tree has none)
+sfn dev bootstrap build    # Build the compiler from seed
+build/bin/sfn test         # Verify everything works
 ```
 
-For host dependencies, OpenSSL/LLVM setup, and supported Makefile/CLI build
+For host dependencies, OpenSSL/LLVM setup, and supported CLI build
 flags, see the
 [compiler and runtime development setup](https://github.com/SailfinIO/sailfin/blob/main/docs/development-setup.md).
 
@@ -37,9 +38,9 @@ git checkout -b feature/my-feature main
 ### Making Changes
 
 1. Edit compiler source in `compiler/src/*.sfn`
-2. Rebuild: `make compile`
-3. Run tests: `make test`
-4. Validate self-hosting: `make check`
+2. Rebuild: `sfn dev bootstrap build`
+3. Run tests: `build/bin/sfn test`
+4. Validate self-hosting: `sfn dev verify`
 
 ### Adding a Language Feature
 
@@ -60,7 +61,7 @@ submitting changes to the homepage, onboarding docs, README, installer copy, or
 release templates, run:
 
 ```bash
-make fetch-seed
+sfn dev bootstrap fetch
 cd site
 npm run check:public-claims
 npm run build
@@ -79,9 +80,9 @@ category. Failures identify the category, source file, and expected contract.
 The compiler must always compile itself. Before submitting:
 
 ```bash
-make compile   # Build from seed
-make check     # Validate seedcheck binary
-make test      # Full test suite
+sfn dev bootstrap build    # Build from seed
+sfn dev verify             # Validate seedcheck binary
+build/bin/sfn test         # Full test suite
 ```
 
 ## Branch Strategy
@@ -98,7 +99,7 @@ make test      # Full test suite
 
 ## Submitting Changes
 
-1. Ensure `make check` and `make test` pass
+1. Ensure `sfn dev verify` and `build/bin/sfn test` pass
 2. Open a PR against the `main` branch
 3. Include test coverage for new features or bug fixes
 4. Update documentation if the change affects language behavior

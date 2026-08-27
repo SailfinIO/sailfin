@@ -193,19 +193,26 @@ never bypasses a failed signature or digest check. See the
 ## Building From Source
 
 The compiler self-hosts from the released seed pinned in
-[`bootstrap.toml`](bootstrap.toml). Source builds require `bash`, `make`, `jq`,
+[`bootstrap.toml`](bootstrap.toml). Source builds require `bash`, `jq`,
 LLVM tools 17+ or 18+, and `clang`. See
 [`docs/development-setup.md`](docs/development-setup.md) for per-platform
 dependency installation and the supported build flags.
 
 ```sh
-make compile          # Build the self-hosted native compiler
-make test             # Run the test suite with an existing build
-make check            # Build as needed, build seedcheck, and run the full gate
+./install.sh                       # Install a released sfn (any recent one drives the build)
+sfn dev bootstrap build            # Self-host the native compiler -> build/bin/sfn
+build/bin/sfn test                 # Run the test suite against the compiler you just built
+build/bin/sfn dev verify           # Build as needed, build seedcheck, run the full gate
 build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
-make clean            # Remove packaged artifacts under dist/
-sfn dev clean dist    # Native equivalent (also: `dev clean build`, `dev clean all`)
+build/bin/sfn dev clean dist       # Remove packaged artifacts under dist/ (also: `dev clean build`, `dev clean all`)
 ```
+
+`./install.sh` installs a released compiler to `~/.local/bin`; add it to `PATH`
+(or invoke `~/.local/bin/sfn` directly) if `sfn` is not already resolvable. It
+only needs to be recent enough to drive the build — `sfn dev bootstrap build`
+then fetches the seed pinned in `bootstrap.toml` itself and self-hosts from that. Every step after
+the self-host build names `build/bin/sfn` explicitly so it exercises the compiler
+you just built rather than the seed.
 
 After compiling:
 

@@ -89,10 +89,11 @@ The **reconciliation guard** is retained and retargeted: on any build where a
 mirror symbol *is* imported, `render_runtime_helper_declarations` reconciles the
 derived signature against the imported function's actual lowered signature and
 **throws a `prelude-mirror signature drift` fatal on mismatch** — so drift fails
-`make compile` at the moment it is introduced rather than silently mis-declaring
-the helper for a non-importing caller. This is the anti-drift net that keeps the
-source-typed signature set trustworthy; the unit shape test pins the derived
-LLVM shapes for all six independently of whether a symbol happens to be imported.
+`sfn dev bootstrap build` at the moment it is introduced rather than silently
+mis-declaring the helper for a non-importing caller. This is the anti-drift net
+that keeps the source-typed signature set trustworthy; the unit shape test pins
+the derived LLVM shapes for all six independently of whether a symbol happens
+to be imported.
 
 The libc-fallback rows `nanosleep` / `clock_gettime` still match the structural
 `target == symbol && native_signature == null` shape but are **not** prelude

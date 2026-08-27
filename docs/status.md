@@ -399,15 +399,16 @@ here.
   git-blob-SHA1-based output. **Two caveats.** (1) The install/fingerprint
   policy is executed *by* the pinned seed (`sfn dev bootstrap build` is a
   seed-run command), so it is only exercisable once a seed carrying it is
-  pinned — until then `make compile` remains the practical path, and it
-  already delegates the same install + fingerprint logic to the freshly
-  built compiler, landing at the same path with the same recorded digest.
+  pinned — true of the pinned seed today, so `sfn dev bootstrap build` is the
+  practical path; `make compile` still delegates the same install +
+  fingerprint logic to the freshly built compiler, landing at the same path
+  with the same recorded digest.
   (2) The digest scope covers both compiler source populations plus `runtime`;
   it does not cover top-level dependency capsules under `capsules/*/src/` or
   `compiler/capsule.toml` itself, so a capsule-dependency edit or a manifest
   version bump does not invalidate the gate (`make compile` reports
-  up-to-date regardless); workaround is `FORCE=1 make compile` or `sfn dev
-  bootstrap build --force`. Prerequisite for the final Makefile sweep in the
+  up-to-date regardless); workaround is `sfn dev bootstrap build --force`.
+  Prerequisite for the final Makefile sweep in the
   Makefile Retirement epic (`docs/proposals/0006-build-architecture.md`
   Stage D): `compile-impl`/`rebuild-impl` no longer own install/fingerprint
   policy, though the Makefile itself still exists.
@@ -567,7 +568,7 @@ here.
   compiler as the internal `sfn selfhost` command (`compiler/src/cli_selfhost.sfn`,
   #1502, epic #513 Phase 1) — `make check`'s `check-impl` is now a one-line
   invocation of it rather than ~90 lines of shell. The verb is internal
-  (absent from `sfn --help`; CI / `make check` are its only callers, mirroring
+  (absent from `sfn --help`; CI / `sfn dev verify` are its only callers, mirroring
   Go's `cmd/dist` and Rust's `x.py`). A non-fixed-point result warns by default
   (parity with the former shell); `sfn selfhost --strict` makes it fatal.
 - **Unified resolver.** `sfn build` / `sfn run` / `sfn check` / `sfn test`

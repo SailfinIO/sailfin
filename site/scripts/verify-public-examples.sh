@@ -23,7 +23,7 @@ fi
 
 if [[ ! -x "$compiler" ]]; then
   echo "public example verification requires the released compiler at $compiler" >&2
-  echo "run 'make fetch-seed' or set SFN_BIN" >&2
+  echo "run 'sfn dev bootstrap fetch' or set SFN_BIN" >&2
   exit 1
 fi
 

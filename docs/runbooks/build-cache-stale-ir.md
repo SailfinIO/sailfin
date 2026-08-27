@@ -340,10 +340,10 @@ rm -rf build/compiler/import-context          # local staged artifacts + .srchas
 rm -rf <work_dir>/compiler/import-context     # when built with --work-dir
 ```
 
-`make clean-build` also removes it — it wipes `build/*` except the fetched seed
-toolchain store (`KEEP_SEED`) — which additionally takes out the self-host shared
-root at `build/cache/v2`, but **not** a shared root under `~/.cache/sailfin/v2`,
-where non-self-host capsules land.
+`sfn dev clean build` also removes it — it wipes `build/*` except the fetched
+seed toolchain store (`SAILFIN_CLEAN_KEEP_SEED`) — which additionally takes out
+the self-host shared root at `build/cache/v2`, but **not** a shared root under
+`~/.cache/sailfin/v2`, where non-self-host capsules land.
 
 **Confirming it worked.** `SAILFIN_CACHE_TRACE=1` (or `--cache-trace`) prints
 per-module `[cache hit]` / `[cache miss]` lines and the `[stage cache]` summary;

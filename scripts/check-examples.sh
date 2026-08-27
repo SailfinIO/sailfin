@@ -36,7 +36,7 @@ TSV=0
 [ "${1:-}" = "--tsv" ] && TSV=1
 
 if [ ! -x "$SAILFIN_BIN" ]; then
-    echo "error: compiler not found at $SAILFIN_BIN (run 'make compile')" >&2
+    echo "error: compiler not found at $SAILFIN_BIN (run 'sfn dev bootstrap build')" >&2
     exit 2
 fi
 

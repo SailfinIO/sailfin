@@ -39,15 +39,15 @@ blockers, assignee, cycle, or Project membership.
 Ready issues should use the smallest sufficient verification ladder. Acceptance
 criteria describe observable behavior; verification lists runnable commands.
 
-- Include `make compile` for `compiler/src/*.sfn` changes, self-hosting changes,
-  runtime ABI changes, or work that must prove the compiler still rebuilds from
-  the pinned seed.
-- Prefer targeted `build/bin/sfn test <path>` commands over `make test`, where
+- Include `sfn dev bootstrap build` for `compiler/src/*.sfn` changes, self-hosting
+  changes, runtime ABI changes, or work that must prove the compiler still
+  rebuilds from the pinned seed.
+- Prefer targeted `build/bin/sfn test <path>` commands over `sfn test`, where
   `<path>` is a suite directory, capsule test directory, or single
   `*_test.sfn` file. Use `-k <name>` or `--tag <tag>` when the issue only needs
   specific tests inside a file.
-- Use `make test`, `make check`, or `make check-strict` only when the issue is
-  explicitly a full-suite, release, determinism, self-host fixed-point,
+- Use `sfn test`, `sfn dev verify`, or `sfn dev verify --strict` only when the
+  issue is explicitly a full-suite, release, determinism, self-host fixed-point,
   structural compiler, or high-risk regression gate.
 - When listing a full gate, state the qualifying reason beside it. Do not add a
   full gate defensively merely because an issue touches compiler/runtime source;
@@ -83,7 +83,7 @@ Out:
 
 ## Verification
 
-- `make compile` (when the change touches compiler self-hosting surface)
+- `sfn dev bootstrap build` (when the change touches compiler self-hosting surface)
 - `build/bin/sfn test <targeted-dir-or-file> [-k <test-name>]`
 
 ## Links

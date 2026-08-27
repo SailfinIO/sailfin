@@ -98,12 +98,12 @@ import { _is_safe_capsule_version_cmd, _package_basename } from "./cmd_shared";
 // next run. That is deliberate: sweeping stale siblings on entry would
 // reintroduce the exact deletion hazard this removes, because nothing
 // distinguishes a stale directory from a live concurrent one.
-// `build/sailfin` is build output; `make clean-build` reclaims it.
+// `build/sailfin` is build output; `sfn dev clean build` reclaims it.
 //
-// Does NOT auto-rebuild — run `make compile` (or `sfn build -p
-// <path>`) first. Auto-rebuilding from inside a Sailfin-native
-// command shelling out to `make` is a bootstrapping smell (the
-// compiler would be rebuilding itself before packaging itself).
+// Does NOT auto-rebuild — run `sfn dev bootstrap build` (or `sfn build
+// -p <path>`) first. Auto-rebuilding from inside the packaging command
+// is a bootstrapping smell (the compiler would be rebuilding itself
+// before packaging itself).
 // SFN-973: the manifest `build_date` used to shell out to `date -u`
 // (`_shell_read_cmd`), which does not exist on native Windows. The
 // wall-clock epoch (`runtime_unix_millis_fn` — SFN-623) and ISO-8601
@@ -386,7 +386,7 @@ fn _package_mint_staging_dir(label: string) -> string ![io] {
 fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> int ![clock, io] {
     if !fs.exists(compiler_bin) {
         print("sfn package: compiler binary not found: " + compiler_bin);
-        print("hint: run `make compile` first");
+        print("hint: run `sfn dev bootstrap build` first");
         return 1;
     }
     let manifest_path = compiler_manifest_from_workspace(".");
@@ -536,7 +536,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> int ![clock, io] {
     if !fs.exists(compiler_bin) {
         print("sfn package: compiler binary not found: " + compiler_bin);
-        print("hint: run `make compile` first");
+        print("hint: run `sfn dev bootstrap build` first");
         return 1;
     }
     let manifest_path = compiler_manifest_from_workspace(".");

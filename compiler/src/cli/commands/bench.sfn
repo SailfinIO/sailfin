@@ -200,7 +200,7 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
 
     if !fs.exists(import_ctx) {
         print.err("[bench] error: import-context not found at " + import_ctx);
-        print.err("[bench] hint: run 'make compile' first");
+        print.err("[bench] hint: run 'sfn dev bootstrap build' first");
         return 1;
     }
 

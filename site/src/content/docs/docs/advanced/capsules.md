@@ -127,7 +127,7 @@ net = [
 ]
 ```
 
-A gated source compiles only when the build's demand set — the union of the project manifest's `[capabilities] required` and every effect token appearing in an `![...]` annotation across the unfiltered source set, each normalized through `effect_root()` — contains the gating effect. A source named in no gate always compiles. `[sfn-source-gates]` must be the last table in `runtime/capsule.toml`: the TOML reader scans from a section header to the next header to collect an array, so a section inserted before it would truncate `sfn-sources` under the pinned seed and break `make compile`.
+A gated source compiles only when the build's demand set — the union of the project manifest's `[capabilities] required` and every effect token appearing in an `![...]` annotation across the unfiltered source set, each normalized through `effect_root()` — contains the gating effect. A source named in no gate always compiles. `[sfn-source-gates]` must be the last table in `runtime/capsule.toml`: the TOML reader scans from a section header to the next header to collect an array, so a section inserted before it would truncate `sfn-sources` under the pinned seed and break `sfn dev bootstrap build`.
 
 Two environment overrides:
 
