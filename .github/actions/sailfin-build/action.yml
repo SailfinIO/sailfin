@@ -36,15 +36,6 @@ inputs:
       docs/conventions/aarch64-qemu-bootstrap.md).
     required: false
     default: ""
-  build_jobs:
-    description: >-
-      Retained for caller compatibility; currently inert. The native build
-      driver parallelises its subprocess emits internally and does not honour
-      a caller-supplied job count on the self-host path, so no value here
-      reaches the seed. Kept as a declared input so existing callers do not
-      break; remove it once no caller passes it.
-    required: false
-    default: ""
   shard:
     description: "Test shard to run (unit-a|unit-b|unit-c|int-caps|e2e-a|e2e-b|e2e-c|e2e-d). Empty = run the full workspace suite (`sfn test` over `sfn dev inventory tests`). See `sfn dev shard names` (compiler/src/cli/commands/dev_shard.sfn)."
     required: false

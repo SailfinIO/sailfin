@@ -56,13 +56,12 @@
 # forms over one shared table and fails on a one-sided edit, and pins the
 # exact-MiB step points that make this script's truncation lossless.
 #
-# macOS additionally caps at 2 jobs, mirroring detect_build_jobs.sh. On the
-# memory-constrained macOS runner (~7 GB) the memory budget alone let enough
-# heavy children coincide to tip the pool into OOM: the macOS-arm64 nightly
-# self-host check kept aborting with exit 134 / SIGABRT in the e2e phase,
-# the victim test roaming run to run (SFN-87). A flat 2-job cap bounds the
-# concurrent-heavy-compile peak the same way BUILD_JOBS=2 does; Linux is
-# unaffected and an explicit TEST_JOBS=N still wins.
+# macOS additionally caps at 2 jobs. On the memory-constrained macOS runner
+# (~7 GB) the memory budget alone let enough heavy children coincide to tip
+# the pool into OOM: the macOS-arm64 nightly self-host check kept aborting
+# with exit 134 / SIGABRT in the e2e phase, the victim test roaming run to
+# run (SFN-87). A flat 2-job cap bounds the concurrent-heavy-compile peak;
+# Linux is unaffected and an explicit TEST_JOBS=N still wins.
 #
 # Cap 16: the runner's --jobs parameter accepts [1, 256] but the
 # sliding-window pool has diminishing returns past core count; 16 matches
