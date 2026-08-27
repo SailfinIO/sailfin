@@ -1,0 +1,231 @@
+// runtime/sfn/platform/fs_link_ops_windows.sfn
+//
+// Win32 implementation of the public filesystem symlink contract (SFN-1143).
+// Selected in place of fs_link_ops.sfn for both Windows target triples.
+// CreateSymbolicLinkA receives Win32-native separators so relative targets
+// remain traversable by the NT object manager. DeviceIoControl
+// (FSCTL_GET_REPARSE_POINT) reads that stored text without resolving the link.
+// DeleteFileA removes file links and
+// RemoveDirectoryA removes directory links, including dangling ones.
+extern fn sfn_CreateSymbolicLinkA(link: *u8, target: *u8, flags: i32) -> i32;
+
+extern fn GetLastError() -> i32;
+
+extern fn GetFileAttributesA(path: *u8) -> i32;
+
+extern fn DeleteFileA(path: *u8) -> i32;
+
+extern fn RemoveDirectoryA(path: *u8) -> i32;
+
+extern fn CreateFileA(path: *u8, access: i32, share: i32, security: *u8, creation: i32, flags: i32, template_file: i64) -> i64;
+
+extern fn DeviceIoControl(handle: i64, code: i32, in_buf: *u8, in_size: i32, out_buf: *u8, out_size: i32, bytes_returned: *u8, overlapped: *u8) -> i32;
+
+extern fn WideCharToMultiByte(code_page: i32, flags: i32, wide: *u8, wide_len: i32, out: *u8, out_len: i32, default_char: *u8, used_default: *u8) -> i32;
+
+extern fn CloseHandle(handle: i64) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+
+extern fn strlen(s: *u8) -> usize;
+
+let FILE_ATTRIBUTE_DIRECTORY: i32 = 16;
+
+let FILE_ATTRIBUTE_REPARSE_POINT: i32 = 1024;
+
+let INVALID_FILE_ATTRIBUTES: i32 = -1;
+
+let SYMBOLIC_LINK_FLAG_DIRECTORY: i32 = 1;
+
+let SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE: i32 = 2;
+
+let ERROR_INVALID_PARAMETER: i32 = 87;
+
+let FILE_SHARE_READ_WRITE_DELETE: i32 = 7;
+
+let OPEN_EXISTING: i32 = 3;
+
+let FILE_FLAG_OPEN_REPARSE_POINT_AND_BACKUP_SEMANTICS: i32 = 35651584;
+
+let INVALID_HANDLE_VALUE: i64 = -1;
+
+let FSCTL_GET_REPARSE_POINT: i32 = 589992;
+
+let IO_REPARSE_TAG_SYMLINK: i64 = 2684354572;
+
+let REPARSE_BUFFER_SIZE: i64 = 16384;
+
+let CP_UTF8: i32 = 65001;
+
+fn _flw_u16(buf: *u8, offset: i64) -> i64 {
+    let base: i64 = buf as i64;
+    return load_byte(base + offset) | (load_byte(base + offset + 1) << 8);
+}
+
+fn _flw_u32(buf: *u8, offset: i64) -> i64 {
+    let base: i64 = buf as i64;
+    return load_byte(base + offset) | (load_byte(base + offset + 1) << 8) | (load_byte(base
+        + offset
+        + 2) << 16) | (load_byte(base
+        + offset
+        + 3) << 24);
+}
+
+fn _flw_target_probe_path(target: *u8, link: *u8) -> *u8 {
+    let target_len: i64 = strlen(target) as i64;
+    let link_len: i64 = strlen(link) as i64;
+    if target_len <= 0 { return null; }
+
+    let first: i64 = load_byte(target as i64);
+    if first == 47 || first == 92 { return target; }
+    if target_len > 1 {
+        if load_byte((target as i64) + 1) == 58 { return target; }
+    }
+
+    let mut separator: i64 = -1;
+    let mut i: i64 = 0;
+    loop {
+        if i >= link_len { break; }
+        let ch: i64 = load_byte((link as i64) + i);
+        if ch == 47 || ch == 92 { separator = i; }
+        i += 1;
+    }
+    if separator < 0 { return target; }
+
+    let prefix_len: i64 = separator + 1;
+    let joined: *u8 = malloc((prefix_len + target_len + 1) as usize);
+    if joined as i64 == 0 { return null; }
+    memcpy(joined, link, prefix_len as usize);
+    memcpy(((joined as i64) + prefix_len) as *u8, target, target_len as usize);
+    memset(((joined as i64) + prefix_len + target_len) as *u8, 0, 1 as usize);
+    return joined;
+}
+
+fn _flw_target_is_directory(target: *u8, link: *u8) -> bool ![io] {
+    let probe: *u8 = _flw_target_probe_path(target, link);
+    if probe as i64 == 0 { return false; }
+    let attrs: i32 = GetFileAttributesA(probe);
+    // Compare the addresses, not the bytes. `!=` on two `*u8` lowers to
+    // `@sfn_str_len` + `@sfn_str_eq_lv` — a strlen-scan and memcmp — because
+    // `i8*` reads as a string shape in the equality path, so the pointer
+    // `icmp` arm is never reached. Content equality would decide this
+    // `free()` and could double-free the caller's `target`; every other
+    // pointer compare in the runtime goes through `as i64` for this reason.
+    if (probe as i64) != (target as i64) { free(probe); }
+    if attrs == INVALID_FILE_ATTRIBUTES { return false; }
+    return (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+fn _flw_native_target(target: *u8) -> *u8 {
+    let target_len: i64 = strlen(target) as i64;
+    let native: *u8 = malloc((target_len + 1) as usize);
+    if native as i64 == 0 { return null; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= target_len { break; }
+        let src: *u8 = ((target as i64) + i) as *u8;
+        let dst: *u8 = ((native as i64) + i) as *u8;
+        if load_byte(src as i64) == 47 { memset(dst, 92, 1 as usize); } else {
+            memcpy(dst, src, 1 as usize);
+        }
+        i += 1;
+    }
+    memset(((native as i64) + target_len) as *u8, 0, 1 as usize);
+    return native;
+}
+
+fn sfn_fs_link_delete(path: *u8) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+    if DeleteFileA(path) != 0 { return true; }
+    let attrs: i32 = GetFileAttributesA(path);
+    if attrs == INVALID_FILE_ATTRIBUTES { return false; }
+    if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) == 0 { return false; }
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0 { return false; }
+    return RemoveDirectoryA(path) != 0;
+}
+
+fn sfn_fs_link_create(target: *u8, link: *u8) -> bool ![io] {
+    if target as i64 == 0 { return false; }
+    if link as i64 == 0 { return false; }
+    let mut flags: i32 = SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+    if _flw_target_is_directory(target, link) {
+        flags = flags | SYMBOLIC_LINK_FLAG_DIRECTORY;
+    }
+    let native_target: *u8 = _flw_native_target(target);
+    if native_target as i64 == 0 { return false; }
+    if sfn_CreateSymbolicLinkA(link, native_target, flags) != 0 {
+        free(native_target);
+        return true;
+    }
+    if GetLastError() != ERROR_INVALID_PARAMETER {
+        free(native_target);
+        return false;
+    }
+    let created = sfn_CreateSymbolicLinkA(link, native_target, flags & SYMBOLIC_LINK_FLAG_DIRECTORY) != 0;
+    free(native_target);
+    return created;
+}
+
+fn sfn_fs_link_read(path: *u8, out: *u8, cap: i64) -> i64 ![io] {
+    if path as i64 == 0 { return -1; }
+    if out as i64 == 0 { return -1; }
+    if cap <= 0 { return -1; }
+
+    let handle: i64 = CreateFileA(path, 0, FILE_SHARE_READ_WRITE_DELETE, null, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT_AND_BACKUP_SEMANTICS, 0);
+    if handle == INVALID_HANDLE_VALUE { return -1; }
+    let reparse: *u8 = malloc(REPARSE_BUFFER_SIZE as usize);
+    let returned: *u8 = malloc(4 as usize);
+    if reparse as i64 == 0 || returned as i64 == 0 {
+        if reparse as i64 != 0 { free(reparse); }
+        if returned as i64 != 0 { free(returned); }
+        CloseHandle(handle);
+        return -1;
+    }
+    let ok: i32 = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, null, 0, reparse, REPARSE_BUFFER_SIZE as i32, returned, null);
+    CloseHandle(handle);
+    if ok == 0 {
+        free(returned);
+        free(reparse);
+        return -1;
+    }
+    let returned_len: i64 = _flw_u32(returned, 0);
+    free(returned);
+    if returned_len < 20 || returned_len > REPARSE_BUFFER_SIZE {
+        free(reparse);
+        return -1;
+    }
+    let data_len: i64 = _flw_u16(reparse, 4);
+    if data_len < 12 || 8 + data_len > returned_len {
+        free(reparse);
+        return -1;
+    }
+    if _flw_u32(reparse, 0) != IO_REPARSE_TAG_SYMLINK {
+        free(reparse);
+        return -1;
+    }
+
+    let print_offset: i64 = _flw_u16(reparse, 12);
+    let print_bytes: i64 = _flw_u16(reparse, 14);
+    if print_bytes <= 0 || (print_offset & 1) != 0 || (print_bytes & 1) != 0 {
+        free(reparse);
+        return -1;
+    }
+    let print_end: i64 = 20 + print_offset + print_bytes;
+    if print_end > returned_len || print_end > 8 + data_len {
+        free(reparse);
+        return -1;
+    }
+    let wide: *u8 = ((reparse as i64) + 20 + print_offset) as *u8;
+    let written: i32 = WideCharToMultiByte(CP_UTF8, 0, wide, (print_bytes / 2) as i32, out, cap as i32, null, null);
+    free(reparse);
+    if written <= 0 { return -1; }
+    return written as i64;
+}
+
+export { sfn_fs_link_create, sfn_fs_link_delete, sfn_fs_link_read };

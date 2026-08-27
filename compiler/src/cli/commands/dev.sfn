@@ -747,14 +747,16 @@ fn _bootstrap_link_bin(install_base: string, bin_dir: string, ver: string) -> vo
 // alias into the store entry it points at.
 //
 // The fallback branches on the RETURN VALUE, not on `host_is_windows()`.
-// `sailfin_intrinsic_fs_symlink` is a hard `false` stub on Windows, so the
-// Developer Mode / `SeCreateSymbolicLinkPrivilege` question never arises;
-// branching on the capability also covers a POSIX filesystem that refuses
-// links, and leaves nothing to delete when the Windows stub is replaced.
-// A copy is not a concession there: the alias must be executable, and the
-// store entry is immutable and version-keyed, so it costs one binary of
-// disk and nothing in correctness. Best-effort throughout, matching this
-// leaf's `-> void` contract.
+// `fs.symlink` now calls `sfn_fs_link_create` (SFN-1143), which on Windows
+// is a real `CreateSymbolicLinkA` attempt, so on a host with Developer Mode
+// or `SeCreateSymbolicLinkPrivilege` the alias is a genuine symlink into
+// the version store, not a copy; branching on the capability rather than
+// the host means both that path and an unprivileged Windows host (or a
+// POSIX filesystem that refuses links) already fall out of the same
+// return-value check. A copy is not a concession there: the alias must be
+// executable, and the store entry is immutable and version-keyed, so it
+// costs one binary of disk and nothing in correctness. Best-effort
+// throughout, matching this leaf's `-> void` contract.
 fn _bootstrap_alias(abs_bin: string, alias: string) -> void ![io] {
     fs.deleteFile(alias);
     if fs.symlink(abs_bin, alias) { return; }

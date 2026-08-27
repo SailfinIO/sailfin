@@ -382,7 +382,12 @@ test "target: the MSVC manifest table selects native providers" ![io] {
     assert expect_eq_str_array(via_manifest[0].link_libs, caps[0].link_libs).ok;
     assert expect_eq_str_array(target_extra_link_libs("x86_64-pc-windows-msvc"), ["-lbcrypt", "-lcrypt32", "-lws2_32"]).ok;
 
-    assert expect_eq_str_array(via_manifest[0].ll_sources, caps[0].ll_sources).ok;
+    // The two Windows tables are the only ones that add IR: the 8-bit Win32
+    // BOOLEAN ABI bridge behind the link providers (SFN-1143). Pinning the
+    // exact list keeps the base runtime at zero `.ll` inputs and stops a
+    // second `ll-sources-add` entry arriving unreviewed.
+    assert expect_eq_str_array(caps[0].ll_sources, []).ok;
+    assert expect_eq_str_array(via_manifest[0].ll_sources, ["runtime/ir/fs_link_ops_windows.ll"]).ok;
 }
 
 test "target: the MinGW manifest table selects native providers" ![io] {
@@ -403,7 +408,12 @@ test "target: the MinGW manifest table selects native providers" ![io] {
     assert _argv_contains(via_manifest[0].link_libs, "-lbcrypt");
     assert _argv_contains(via_manifest[0].link_libs, "-lcrypt32");
 
-    assert expect_eq_str_array(via_manifest[0].ll_sources, caps[0].ll_sources).ok;
+    // The two Windows tables are the only ones that add IR: the 8-bit Win32
+    // BOOLEAN ABI bridge behind the link providers (SFN-1143). Pinning the
+    // exact list keeps the base runtime at zero `.ll` inputs and stops a
+    // second `ll-sources-add` entry arriving unreviewed.
+    assert expect_eq_str_array(caps[0].ll_sources, []).ok;
+    assert expect_eq_str_array(via_manifest[0].ll_sources, ["runtime/ir/fs_link_ops_windows.ll"]).ok;
 }
 
 test "target: a missing Windows manifest table fails closed" ![io] {

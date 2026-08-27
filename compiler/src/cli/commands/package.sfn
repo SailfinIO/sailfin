@@ -49,6 +49,7 @@ import { copy_tree, ensure_dir_p, remove_tree } from "../../build/fs_tree";
 import {
     build_host_os,
     host_exe_name,
+    host_is_windows,
     target_exe_name,
     triple_target_os
 } from "../../build/target";
@@ -441,6 +442,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
             + target
             + "/bin/"
             + sfn_name],
+        host_is_windows: host_is_windows(),
         link_policy: LinkPolicy.Preserve,
         deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
     };
@@ -601,6 +603,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let tarball = out_dir + "/" + stem + ".tar.gz";
     let create_opts = CreateOptions {
         exec_paths: ["bin/" + sailfin_name, "bin/" + sfn_name],
+        host_is_windows: host_is_windows(),
         link_policy: LinkPolicy.Preserve,
         // The complete manifest closure contains enough source text that
         // fixed-Huffman LZ77's arena-owned token graph exceeds the compiler's
@@ -802,6 +805,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     let tarball = out_dir + "/" + stem + ".tar.gz";
     let create_opts = CreateOptions {
         exec_paths: exec_rel_paths,
+        host_is_windows: host_is_windows(),
         link_policy: LinkPolicy.Preserve,
         deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
     };

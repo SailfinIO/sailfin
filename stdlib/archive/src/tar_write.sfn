@@ -13,7 +13,7 @@
 // byte-identical on any host — including Windows, which has no executable
 // bit. `CreateOptions.exec_paths` is how a caller supplies the answer
 // `fs.is_executable` cannot give on that host.
-import { char_code_at } from "sfn/strings";
+import { char_code_at, replace } from "sfn/strings";
 
 import {
     ByteBuf,
@@ -77,6 +77,10 @@ struct CreateOptions {
     // are binaries, so the Windows answer is supplied, not guessed
     // (SFEP-0071 §3.7).
     exec_paths: string[];
+    // True only when the source tree lives on a native Windows filesystem.
+    // Explicit host identity keeps path-guard semantics independent of the
+    // mutable process environment (SFN-1143).
+    host_is_windows: boolean;
     link_policy: LinkPolicy;
     deflate: DeflateOptions;
 }
@@ -230,6 +234,15 @@ fn _tw_check_symlink_target(target: string, rel_path: string) -> Result<int, Arc
             };
         }
     }
+}
+
+// Win32 reparse points need native `\` separators to remain traversable, but
+// tar linknames are portable archive paths and the path guard correctly
+// rejects literal backslashes from POSIX trees. Normalize only on a native
+// Windows host, at the serialization boundary (SFN-1143).
+fn _tw_portable_link_target(target: string, host_is_windows: boolean) -> string {
+    if host_is_windows { return replace(target, "\\", "/"); }
+    return target;
 }
 
 // "Executable" per SFEP-0071 §3.7: membership in `exec_paths`, else
@@ -390,7 +403,8 @@ fn _tw_write_member(buf: ByteBuf, root_dir: string, rel_path: string, opts: Crea
     let deref: boolean = opts.link_policy == LinkPolicy.Dereference;
 
     if is_symlink && !deref {
-        let checked = _tw_check_symlink_target(link_target, rel_path);
+        let portable_link_target = _tw_portable_link_target(link_target, opts.host_is_windows);
+        let checked = _tw_check_symlink_target(portable_link_target, rel_path);
         match checked {
             Result.Ok { value }
             : { },
@@ -402,7 +416,7 @@ fn _tw_write_member(buf: ByteBuf, root_dir: string, rel_path: string, opts: Crea
         }
         let h: UstarHeader = UstarHeader {
             name: rel_path,
-            linkname: link_target,
+            linkname: portable_link_target,
             typeflag: tf.symlink,
             size: 0,
             mode: modes.symlink,

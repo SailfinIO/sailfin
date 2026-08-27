@@ -55,8 +55,11 @@ test "workspace inventory: current checkout preserves local automation scopes" !
     assert inventory.member_test_roots.length == 20;
     assert inventory.test_roots.length == 23;
     assert inventory.manifest_inputs.length == 30;
-    assert inventory.runtime_ir_inputs.length == 0;
-    assert inventory.explicit_inputs.length == 32;
+    // The runtime member's `ir/` holds exactly one `.ll`: the Win32 BOOLEAN
+    // ABI bridge behind the link providers (SFN-1143). Every runtime IR file
+    // lands in `explicit_inputs` too, so the two counts move together.
+    assert inventory.runtime_ir_inputs.length == 1;
+    assert inventory.explicit_inputs.length == 33;
     assert _contains(inventory.compiler_source_inputs, "compiler/src");
     assert _contains(inventory.maintainer_source_inputs, "runtime/prelude.sfn");
     assert _contains(inventory.maintainer_source_inputs, "runtime/sfn");

@@ -46,6 +46,7 @@
 import { find, repeat } from "sfn/strings";
 import {
     clean_runner_env,
+    host_is_windows,
     nested_runner_scratch,
     scratch_root,
     sfn_bin_path
@@ -92,6 +93,7 @@ test "archive inflate: decompressing a real tarball through targz_extract stays 
     let tarball: string = root + "/payload.tar.gz";
     let create_opts = CreateOptions {
         exec_paths: [],
+        host_is_windows: host_is_windows(),
         link_policy: LinkPolicy.Preserve,
         deflate: _fixed_deflate_opts()
     };

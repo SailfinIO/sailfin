@@ -5,7 +5,13 @@
 // SFN-935: staged deletions of explicit repository inputs must still trigger
 // the opt-in fast-check hook even though the deleted path is absent from the
 // live workspace inventory emitted by the compiler.
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+import { clean_runner_env, nested_runner_scratch, skip } from "sfn/test";
+
+fn _require_posix_shell() -> bool ![io] {
+    if env.get("COMSPEC").length == 0 { return true; }
+    skip("SFN-1156: pre-commit inventory validates a POSIX hook installer; remove this skip when native Windows has a bounded POSIX-shell provider instead of the WSL bash launcher");
+    return false;
+}
 
 fn _repo_root() -> string ![io] {
     let mut root = env.get("SAILFIN_REPO_ROOT");
@@ -55,9 +61,11 @@ fn _deletion_triggers(label: string, deleted_path: string) -> void ![io] {
 }
 
 test "precommit inventory: staged bootstrap deletion triggers the check" ![io] {
+    if !_require_posix_shell() { return; }
     _deletion_triggers("bootstrap", "bootstrap.toml");
 }
 
 test "precommit inventory: staged runtime IR deletion triggers the check" ![io] {
+    if !_require_posix_shell() { return; }
     _deletion_triggers("runtime-ir", "runtime/ir/stub.ll");
 }

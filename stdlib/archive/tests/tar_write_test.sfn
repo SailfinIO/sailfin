@@ -6,8 +6,8 @@
 // modes, and the byte-reproducibility claim that is the entire point of
 // this phase (SFEP-0071 §2.2): two `targz_create` runs over the same tree
 // produce byte-identical archives.
-import { char_code_at } from "sfn/strings";
-import { default_scratch_dir } from "sfn/test";
+import { char_code_at, find } from "sfn/strings";
+import { default_scratch_dir, skip } from "sfn/test";
 
 import {
     ByteBuf,
@@ -52,9 +52,26 @@ fn _test_root(subdir: string) -> string ![io] {
     return root;
 }
 
-fn _fixed_opts() -> CreateOptions {
+fn _is_windows() -> bool ![io] {
+    if find(env.get("OS"), "Windows", 0) >= 0 { return true; }
+    if env.get("SYSTEMROOT").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    return false;
+}
+
+fn _require_symlink(target: string, link: string) -> void ![io] {
+    if fs.symlink(target, link) { return; }
+    if _is_windows() {
+        skip("SFN-1143: Windows symlink creation unavailable; remove this skip when runners guarantee Developer Mode or SeCreateSymbolicLinkPrivilege");
+        return;
+    }
+    assert false;
+}
+
+fn _fixed_opts() -> CreateOptions ![io] {
     return CreateOptions {
         exec_paths: [],
+        host_is_windows: _is_windows(),
         link_policy: LinkPolicy.Preserve,
         deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
     };
@@ -333,17 +350,17 @@ test "archive tar_write: create then extract round-trips a small tree" ![io] {
     let root: string = _test_root("tar-write-roundtrip");
     let src: string = root + "/src";
     fs.createDirectory(src, true);
-    fs.createDirectory(src + "/sub", true);
+    fs.createDirectory(src + "/sub/nested", true);
     fs.writeFile(src + "/top.txt", "top-level content\n");
-    fs.writeFile(src + "/sub/nested.txt", "nested content\n");
-    fs.symlink("nested.txt", src + "/sub/link.txt");
+    fs.writeFile(src + "/sub/nested/target.txt", "nested content\n");
+    _require_symlink("nested/target.txt", src + "/sub/link.txt");
 
     let archive: string = root + "/out.tar.gz";
     let created = targz_create(archive, src, [], _fixed_opts());
     match created {
         Result.Ok { value }
         : {
-            assert value.member_count >= 4;  // top.txt, sub/, sub/nested.txt, sub/link.txt
+            assert value.member_count >= 5;  // top.txt, sub/, nested/, target.txt, link.txt
         },
         Result.Err { error }
         : {
@@ -377,8 +394,37 @@ test "archive tar_write: create then extract round-trips a small tree" ![io] {
     }
 
     assert fs.readFile(dest + "/top.txt") == "top-level content\n";
-    assert fs.readFile(dest + "/sub/nested.txt") == "nested content\n";
-    assert fs.read_link(dest + "/sub/link.txt") == "nested.txt";
+    assert fs.readFile(dest + "/sub/nested/target.txt") == "nested content\n";
+    assert fs.readFile(dest + "/sub/link.txt") == "nested content\n";
+    if _is_windows() {
+        assert fs.read_link(dest + "/sub/link.txt") == "nested\\target.txt";
+    } else {
+        assert fs.read_link(dest + "/sub/link.txt") == "nested/target.txt";
+    }
+}
+
+test "archive tar_write: POSIX policy rejects a literal backslash target independent of environment" ![io] {
+    let root: string = _test_root("tar-write-backslash-guard");
+    let src: string = root + "/src";
+    fs.createDirectory(src, true);
+    _require_symlink("safe\\name", src + "/link.txt");
+    let opts = CreateOptions {
+        exec_paths: [],
+        host_is_windows: false,
+        link_policy: LinkPolicy.Preserve,
+        deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
+    };
+    let created = targz_create(root + "/out.tar.gz", src, [], opts);
+    match created {
+        Result.Ok { value }
+        : {
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.LinkRejected;
+        }
+    }
 }
 
 // The canonical-mode claim (SFEP-0071 §3.7): a path named in `exec_paths`
@@ -393,6 +439,7 @@ test "archive tar_write: exec_paths controls the stored mode independent of the 
 
     let opts = CreateOptions {
         exec_paths: ["should-be-exec.sh"],
+        host_is_windows: _is_windows(),
         link_policy: LinkPolicy.Preserve,
         deflate: DeflateOptions { strategy: DeflateStrategy.Fixed }
     };
@@ -410,12 +457,13 @@ test "archive tar_write: exec_paths controls the stored mode independent of the 
 
     let dest: string = root + "/dest";
     fs.createDirectory(dest, true);
+    let windows = _is_windows();
     let extract_opts = ExtractOptions {
         copy_instead_of_link: false,
         apply_modes: true,
         max_total_bytes: 1048576,
         max_members: 1024,
-        host_is_windows: false
+        host_is_windows: windows
     };
     let extracted = targz_extract(archive, dest, extract_opts);
     match extracted {
@@ -428,8 +476,17 @@ test "archive tar_write: exec_paths controls the stored mode independent of the 
         }
     }
 
-    assert fs.is_executable(dest + "/should-be-exec.sh");
-    assert ! fs.is_executable(dest + "/plain.txt");
+    if windows {
+        // SFN-1141: Windows extraction deliberately does not apply POSIX
+        // modes, so both files are validated through portable content. Keep
+        // this exclusion until archive metadata has a target-neutral
+        // executable observable rather than an emulated mode bit.
+        assert fs.readFile(dest + "/should-be-exec.sh") == "#!/bin/sh\necho hi\n";
+        assert fs.readFile(dest + "/plain.txt") == "plain\n";
+    } else {
+        assert fs.is_executable(dest + "/should-be-exec.sh");
+        assert ! fs.is_executable(dest + "/plain.txt");
+    }
 }
 
 // The reproducibility claim (SFEP-0071 §2.2, §3.7): two `targz_create` runs

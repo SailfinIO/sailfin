@@ -1,15 +1,11 @@
-// Tests for sfn/fs — P5 (#366) gap-fill primitives. The five
-// POSIX wrappers (`set_perms`, `get_perms`, `mkdtemp`,
-// `is_executable`, `symlink`) are what Phase 2 fixtures and the
-// Phase 3 bash collapse depend on; without these the rest of the
-// test-infra epic (#362) can't land.
+// Tests for sfn/fs — P5 (#366) gap-fill primitives. Permission and executable
+// assertions follow the host contract; temp directories, directory probes,
+// symlinks, and raw link reads have native Windows behavior.
 //
 // Tests use `mkdtemp` itself to mint a per-test scratch dir so the
-// suite is hermetic — no fixed `/tmp/sfn-fs-test-…` paths, no
-// races between parallel test invocations. Cleanup uses
-// `process.run(["rm", "-rf", …])` since the capsule doesn't ship a
-// recursive remove yet (Out-of-scope per the issue).
-import { find } from "sfn/strings";
+// suite is hermetic — no fixed scratch paths and no races between parallel
+// test invocations.
+import { find, replace } from "sfn/strings";
 import { skip } from "sfn/test";
 
 import {
@@ -39,6 +35,20 @@ fn _is_windows() -> bool ![io] {
     return false;
 }
 
+fn _require_symlink(target: string, link: string) -> void ![io] {
+    if symlink(target, link) { return; }
+    if _is_windows() {
+        skip("SFN-1143: Windows symlink creation unavailable; remove this skip when runners guarantee Developer Mode or SeCreateSymbolicLinkPrivilege");
+        return;
+    }
+    assert false;
+}
+
+fn _stored_link_target(target: string) -> string ![io] {
+    if _is_windows() { return replace(target, "/", "\\"); }
+    return target;
+}
+
 // ---------------------------------------------------------------------
 // Permission constants. The seed parser doesn't yet accept octal
 // literals (`0o644`); decimal is the canonical form per the issue's
@@ -56,6 +66,17 @@ test "fs: set_perms + get_perms round-trip on a regular file" ![io] {
     assert scratch.length > 0;
     let target = scratch + "/file.txt";
     write(target, "round-trip");
+
+    if _is_windows() {
+        // SFN-1141: UCRT accepts the chmod-shaped write, but Windows has no
+        // POSIX mode bits for get_perms to return. Keep both public calls
+        // covered; replace this branch only if a target-neutral permission
+        // model supersedes the documented -1 sentinel.
+        assert set_perms(target, 420);
+        assert get_perms(target) == -1;
+        process.run(["rm", "-rf", scratch]);
+        return;
+    }
 
     // 420 = 0o644
     assert set_perms(target, 420);
@@ -126,6 +147,13 @@ test "fs: mkdtemp returns distinct, existing directories across calls" ![io] {
 
 // ── is_executable ──────────────────────────────────────────────────
 test "fs: is_executable returns true for /bin/sh" ![io] {
+    if _is_windows() {
+        // SFN-1141: Windows defines this probe as accessible-path existence,
+        // not an execute bit. COMSPEC is a native executable known to exist;
+        // remove this branch only if Windows gains executable-mode metadata.
+        assert is_executable(env.get("COMSPEC"));
+        return;
+    }
     // `/bin/sh` is POSIX-mandated. If a host doesn't have it, the
     // rest of the runtime's `process.run`-based tests would already
     // be broken — so this is a safe sentinel.
@@ -133,6 +161,16 @@ test "fs: is_executable returns true for /bin/sh" ![io] {
 }
 
 test "fs: is_executable returns false for /etc/passwd" ![io] {
+    if _is_windows() {
+        // The Windows contract is existence, so an ordinary existing file is
+        // true rather than POSIX non-executable. SFN-1141 owns this exclusion.
+        let scratch = mkdtemp("sfn-fs-test-existing-");
+        let target = scratch + "/plain.txt";
+        write(target, "plain");
+        assert is_executable(target);
+        process.run(["rm", "-rf", scratch]);
+        return;
+    }
     // /etc/passwd exists on every POSIX system but is never `+x`.
     assert is_executable("/etc/passwd") == false;
 }
@@ -147,6 +185,18 @@ test "fs: is_executable tracks set_perms flips" ![io] {
     let scratch = mkdtemp("sfn-fs-test-exec-");
     let script = scratch + "/probe.sh";
     write(script, "#!/bin/sh\nexit 0\n");
+
+    if _is_windows() {
+        // SFN-1141: chmod cannot create or clear a POSIX execute bit on
+        // Windows; is_executable remains the documented existence probe.
+        // Remove this branch only if that public contract changes.
+        assert set_perms(script, 420);
+        assert is_executable(script);
+        assert set_perms(script, 493);
+        assert is_executable(script);
+        process.run(["rm", "-rf", scratch]);
+        return;
+    }
 
     // 420 = 0o644 — readable but not executable.
     assert set_perms(script, 420);
@@ -195,7 +245,7 @@ test "fs: is_directory follows a symlink to a directory" ![io] {
     let link = scratch + "/alias";
     mkdir(dir);
 
-    assert symlink(dir, link);
+    _require_symlink(dir, link);
     assert is_directory(link);
 
     process.run(["rm", "-rf", scratch]);
@@ -208,7 +258,7 @@ test "fs: symlink creates a link readable through the target" ![io] {
     let link = scratch + "/alias";
     write(target, "linked-content");
 
-    assert symlink(target, link);
+    _require_symlink(target, link);
     // Read through the symlink — exercises both `symlink(2)`
     // creating the link and the kernel resolving it on open.
     assert strings_equal(read(link), "linked-content");
@@ -223,12 +273,11 @@ test "fs: symlink accepts a dangling target" ![io] {
     let link = scratch + "/dangling";
     let nonexistent = scratch + "/never-created";
 
-    assert symlink(nonexistent, link);
-    // `fs.exists` follows symlinks, so a dangling link reads as
-    // non-existent through that surface. We use `test -L` (true
-    // for symlinks regardless of target) to confirm the link
-    // file itself was created.
-    assert process.run(["test", "-L", link]) == 0;
+    _require_symlink(nonexistent, link);
+    // `read_link` observes the link node itself on both platforms. Do not
+    // assert through `exists`: POSIX `stat` follows the dangling target,
+    // while Windows GetFileAttributesA reports the reparse point itself.
+    assert strings_equal(read_link(link), _stored_link_target(nonexistent));
 
     process.run(["rm", "-rf", scratch]);
 }
@@ -255,24 +304,24 @@ test "fs: read_link returns the raw target of a symlink" ![io] {
     let link = scratch + "/alias";
     write(target, "linked-content");
 
-    assert symlink(target, link);
-    // The raw target is the absolute path we passed to `symlink`,
-    // returned verbatim — no resolution of the target's own contents.
-    assert strings_equal(read_link(link), target);
+    _require_symlink(target, link);
+    // The raw target is the stored absolute path, with Win32-native
+    // separators on Windows and no resolution of the target's contents.
+    assert strings_equal(read_link(link), _stored_link_target(target));
 
     process.run(["rm", "-rf", scratch]);
 }
 
 test "fs: read_link returns a relative target uncanonicalized" ![io] {
     // Single-hop semantics: a relative target is returned exactly as
-    // stored (`../sibling`), NOT resolved to an absolute path the way
+    // stored, with Win32-native separators on Windows, NOT resolved to an absolute path the way
     // `readlink -f` would. This is the invariant the llms.txt drift
     // guard relies on.
     let scratch = mkdtemp("sfn-fs-test-readlink-rel-");
     let link = scratch + "/rel-alias";
 
-    assert symlink("../sibling", link);
-    assert strings_equal(read_link(link), "../sibling");
+    _require_symlink("../sibling", link);
+    assert strings_equal(read_link(link), _stored_link_target("../sibling"));
 
     process.run(["rm", "-rf", scratch]);
 }

@@ -90,7 +90,9 @@ fn _has_define_named(ir: string, sym: string) -> boolean {
 // functions under test, so the linker demands a resolution for every extern
 // any of them reference — including the non-libc runtime helpers
 // (`sfn_fd_write`, `sailfin_runtime_concat_v2`, `sailfin_runtime_append_string_v2`,
-// `sfn_str_from_codepoint`, `_sfn_fs_access_exec_mode`) and the Windows-only
+// `sfn_str_from_codepoint`, `_sfn_fs_access_exec_mode`, and the
+// `sfn_fs_link_*` trio that `platform/fs_link_ops.sfn` provides in a real
+// build, SFN-1143) and the Windows-only
 // APIs (`GetFileAttributesA`, `FindFirstFileA`, `FindNextFileA`, `FindClose`)
 // that have no Linux provider. `main` never calls these; they exist only to
 // satisfy the linker, mirroring `string_cstr_boundary_test.sfn`'s stub set.
@@ -127,6 +129,9 @@ fn _harness_c(win32_provided: boolean) -> string {
         + "void* sailfin_runtime_append_string_v2(void* a,void* t){(void)a;(void)t;return 0;}\n"
         + "char* sfn_str_from_codepoint(long long cp){(void)cp;return 0;}\n"
         + "int _sfn_fs_access_exec_mode(void){return 1;}\n"
+        + "_Bool sfn_fs_link_delete(const char* p){(void)p;return 0;}\n"
+        + "_Bool sfn_fs_link_create(const char* t,const char* l){(void)t;(void)l;return 0;}\n"
+        + "long long sfn_fs_link_read(const char* p,char* b,long long c){(void)p;(void)b;(void)c;return -1;}\n"
         + win32_shims
         + posix_shims
         + "void  sailfin_runtime_mark_persistent(void* p){(void)p;}\n"

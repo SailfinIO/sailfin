@@ -1,0 +1,31 @@
+// runtime/sfn/platform/fs_link_ops.sfn
+//
+// Filesystem link operations whose primitive differs by target. The Windows
+// sibling is selected by runtime/capsule.toml. Keeping the platform boundary
+// behind ordinary linker symbols lets the pinned seed compile the runtime;
+// no new compiler intrinsic (and therefore no seed cut) is required.
+extern fn unlink(path: *u8) -> i32;
+
+extern fn symlink(target: *u8, link: *u8) -> i32;
+
+extern fn readlink(path: *u8, buf: *u8, bufsize: usize) -> i64;
+
+fn sfn_fs_link_delete(path: *u8) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+    return unlink(path) == 0;
+}
+
+fn sfn_fs_link_create(target: *u8, link: *u8) -> bool ![io] {
+    if target as i64 == 0 { return false; }
+    if link as i64 == 0 { return false; }
+    return symlink(target, link) == 0;
+}
+
+fn sfn_fs_link_read(path: *u8, buf: *u8, cap: i64) -> i64 ![io] {
+    if path as i64 == 0 { return -1; }
+    if buf as i64 == 0 { return -1; }
+    if cap <= 0 { return -1; }
+    return readlink(path, buf, cap as usize);
+}
+
+export { sfn_fs_link_create, sfn_fs_link_delete, sfn_fs_link_read };
