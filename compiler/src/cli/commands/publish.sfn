@@ -44,7 +44,8 @@ import {
     arg_optional,
     command,
     get,
-    with_arg
+    with_arg,
+    with_usage
 } from "sfn/cli";
 import { base64_encode } from "sfn/crypto";
 import { int_to_string } from "sfn/strings";
@@ -64,7 +65,7 @@ import { _registry_post_json_cmd, _resolve_registry_url_cmd } from "./cmd_shared
 // The `sfn/cli` definition for `publish`, registered on the v2 root via
 // `with_subcommand`. A single optional `[path]` positional; no flags.
 fn command_def() -> Command {
-    return with_arg(command("publish", "Publish a capsule to the registry"), arg_optional("path", "Capsule directory to publish (defaults to .)", ""));
+    return with_usage(with_arg(command("publish", "Publish a capsule to the registry"), arg_optional("path", "Capsule directory to publish (defaults to .)", "")), "packages", "sfn publish [path]", "publish a capsule");
 }
 
 // Package the capsule at `[path]` (or the current directory) and upload it

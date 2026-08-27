@@ -103,7 +103,8 @@ export {
     with_arg,
     with_flag,
     with_flag_group,
-    with_subcommand
+    with_subcommand,
+    with_usage
 } from "./builder";
 
 // ---- Parsing ----

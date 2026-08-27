@@ -77,8 +77,9 @@ jobs:
                       # children, and dropping that pin (SFN-795) hands the
                       # ~7 GiB runner the auto-budget of 1 — halving pool
                       # parallelism on the leg with the least headroom. The
-                      # pin is not the thing to restore: detect_test_jobs.sh
-                      # records 2 tipping this pool into OOM/SIGABRT (SFN-87)
+                      # pin is not the thing to restore: the native auto-budget
+                      # (`_test_jobs_budget`) records 2 tipping this pool into
+                      # OOM/SIGABRT (SFN-87)
                       # and Darwin has no RLIMIT_AS backstop, so the timeout
                       # absorbs the wall-clock instead. Re-measure once a cut
                       # runs on macos-26 at 1 job.
@@ -215,16 +216,16 @@ jobs:
             # Unlike release-tag.yml this leg runs the full suite (no
             # `mode:`, so the action's default `full` path), which makes
             # `test_jobs` load-bearing here. It is deliberately not pinned:
-            # leaving it empty falls through to a bare `make test`, whose
-            # `TEST_JOBS ?=` default is scripts/detect_test_jobs.sh — the
-            # bash half of the SFN-781 budget — so each host measures itself
+            # leaving it empty falls through to a bare `make test`, which
+            # omits `--jobs` and lets the native `_test_jobs_budget` auto-budget
+            # (SFN-781) size the pool, so each host measures itself
             # at runtime (2 on a 4-vCPU/16 GB Linux runner, 1 on the ~7 GiB
             # macos-26 arm64 runner, which has no RLIMIT_AS backstop). The
             # pins removed here — 4 on both ubuntu legs, 2 on macOS — were
             # the same host class and count that SFN-781 measured OOM-killing
             # a runner at 17.26 GiB tree RSS. Re-pin only with measured tree
             # RSS for that runner attached (SFN-795).
-            - name: Build + test + package (via Makefile)
+            - name: Build + test + package
               uses: ./.github/actions/sailfin-build
               env:
                   GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}

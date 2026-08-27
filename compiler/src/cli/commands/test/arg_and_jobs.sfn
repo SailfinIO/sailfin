@@ -72,21 +72,16 @@ fn _parse_jobs_value(text: string) -> int {
 // `_cr_ram_budget_jobs` explicitly out, so the emit fan-out keeps 2.5 GiB out
 // of 66%.
 //
-// `scripts/detect_test_jobs.sh` reimplements this policy in bash for the
-// Makefile's `TEST_JOBS ?=` default (which passes an explicit `--jobs N`, so
-// it reaches the pool ahead of this function). The two must stay in lockstep.
-//
-// That lockstep is exact only because of how these particular constants land.
-// This function divides bytes; the bash twin divides whole MiB, so the two
-// agree at every input only while both reserves are whole MiB *and* the slice
-// maps them onto whole-MiB thresholds — at 80%, the job-`n` threshold is
-// `(6400 + 3840n)` MiB exactly, so the bash truncation loses nothing. Change
-// the slice to 75%, or a reserve to 4.5 GiB, and the byte-form and MiB-form
-// thresholds separate, silently disagreeing by one job in narrow RAM windows.
-// Re-derive that boundary before editing either constant — SFN-794's
-// `compiler/tests/integration/test_jobs_budget_parity_test.sfn` drives both
-// forms over one shared table and fails on a one-sided edit, and pins the
-// exact-MiB step points that make the bash truncation lossless.
+// This function is the sole implementation of the policy. A bash
+// reimplementation shadowed it for the Makefile's pre-binary `TEST_JOBS ?=`
+// default, which had to size the pool before any `sfn` binary existed to
+// ask; SFEP-0074 §5.2 retired both. Job sizing now resolves here for every
+// caller — `_resolve_test_jobs` applies `--jobs` > `SAILFIN_TEST_JOBS` >
+// this budget — so a constant edited below takes effect everywhere at once.
+// Do not reintroduce a second form: the previous one agreed with this
+// arithmetic only by the accident of these constants landing on whole-MiB
+// thresholds, and a slice or reserve change would have separated them
+// silently, by one job, in narrow RAM windows.
 fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int {
     if memsize_bytes <= 0 { return 1; }
     let mut cores = nproc;
@@ -116,7 +111,17 @@ fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int 
     if by_mem < 1 { by_mem = 1; }
     let mut jobs = cores;
     if by_mem < jobs { jobs = by_mem; }
+    // macOS caps at 2 regardless of what the memory arithmetic allows. On the
+    // ~7 GiB macOS runner the budget alone let enough heavy children coincide
+    // to tip the pool into OOM: the macOS-arm64 nightly self-host check kept
+    // aborting with exit 134 / SIGABRT in the e2e phase, the victim test
+    // roaming run to run (SFN-87). A flat 2-job cap bounds the
+    // concurrent-heavy-compile peak. Linux is unaffected, and an explicit
+    // `--jobs N` or `SAILFIN_TEST_JOBS=N` still wins.
     if is_darwin && jobs > 2 { jobs = 2; }
+    // `--jobs` accepts [1, 256], but the sliding-window pool has diminishing
+    // returns past core count; 16 matches the workflow cap used elsewhere in
+    // CI.
     if jobs > 16 { jobs = 16; }
     if jobs < 1 { jobs = 1; }
     return jobs;

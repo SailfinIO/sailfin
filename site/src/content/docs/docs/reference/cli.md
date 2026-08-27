@@ -712,9 +712,10 @@ of 2) — the 3 GiB per-job reserve matches a measured pooled test child, and th
 dependency closure in-process before fanning out (SFN-547, re-sized SFN-626,
 re-sized SFN-781). An explicit `--jobs N` wins over `SAILFIN_TEST_JOBS=N`; use
 `--jobs 1` for the serial path.
-The Makefile compatibility layer forwards its `TEST_JOBS` budget, while
-`make check` uses `CHECK_TEST_JOBS` for its cold seedcheck suite and
-`CHECK_TEST_TIMEOUT` for the per-test timeout. Use
+The Makefile omits `--jobs` from every `sfn test` invocation, so `make test`
+and `make check`'s cold seedcheck suite both size their pool from the same
+native auto-budget; `SAILFIN_TEST_JOBS=N` overrides both. `make check` still
+takes `CHECK_TEST_TIMEOUT` for the per-test timeout. Use
 `SELFHOST_STRICT=1` or `make check-strict` when a seedcheck/fixed-point rebuild
 mismatch must fail the run. Pooled test children (`--jobs N` with `N > 1`) spawn
 with `SAILFIN_BUILD_JOBS=1` so a child's own per-module emit fan-out cannot nest
@@ -749,8 +750,6 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `CLANG` | Makefile | `clang` executable to use. Defaults to `clang`. |
 | `SAILFIN_CC` | Native macOS final links and transitional Makefile recipes | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. |
 | `CLANG_LL_FLAGS` | Makefile | Extra flags when compiling `.ll` files with clang. |
-| `TEST_JOBS` | Makefile | Parallel `sfn test --jobs N` children for `make test*`. Defaults to auto-detected CPU/memory budget. |
-| `CHECK_TEST_JOBS` | Makefile | Parallelism for `make check` test legs. Defaults to `TEST_JOBS`. |
 | `CHECK_TEST_TIMEOUT` | Makefile | Per-test timeout for `make check`'s cold full-suite leg. Defaults to `1800`. |
 | `CHECK_FULL_PASS1` | Makefile | Set to `1` to restore the older full first-pass suite before seedcheck. |
 | `SELFHOST_STRICT` | Makefile | Set to `1` to make a seedcheck/fixed-point rebuild mismatch fatal. |

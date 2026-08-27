@@ -71,24 +71,6 @@ else
 TIMEOUT_CMD ?= timeout
 endif
 
-# Parallelism for the compiler build orchestrator's per-module emit + clang
-# compile.
-#
-# Default: auto-detected from CPU count and total RAM via
-# scripts/detect_build_jobs.sh, with a per-job budget of 5 GB (heaviest module
-# ~4.7 GB peak RSS under the arena allocator, plus headroom). macOS additionally
-# caps at 2 because the M1 GitHub runner has only 7 GB total RAM. Windows / hosts
-# we cannot probe fall back to 1.
-#
-# Override explicitly with `BUILD_JOBS=N`; empty / unset uses auto-detect. The
-# driver (`sfn build -p compiler`) parallelises subprocess emits internally —
-# `BUILD_JOBS` only affects callers that still spawn module compiles directly.
-# See docs/proposals/0006-build-architecture.md → Phase 6 for the rollout history and the
-# per-job budget rationale.
-ifeq ($(strip $(BUILD_JOBS)),)
-BUILD_JOBS := $(shell bash scripts/detect_build_jobs.sh 2>/dev/null || echo 1)
-endif
-
 # Portable SHA-256 hasher. `shasum -a 256` ships with Perl on both macOS and
 # every Linux distro we run on; `sha256sum` is GNU coreutils and not on macOS
 # by default. Using `shasum` keeps the fixed-point comparison in `check`
@@ -149,29 +131,26 @@ export SAILFIN_AGENT_REPORT
 TEST_BIN_CACHE_FLAGS ?=
 
 # Parallel test execution (#843 / #1236 / #1998). The unified runner accepts
-# `--jobs N` (per-file child processes run N at a time); every
-# `$(NATIVE_BIN) test ...` invocation below threads this knob.
-#
-# Default: auto-detected from CPU count and total RAM via
-# scripts/detect_test_jobs.sh, which reserves the parent runner off the top of
-# an 80% slice of RAM and then budgets 3 GB per pooled child (SFN-781). That
-# reserve is deliberately NOT the emit fan-out's: SFN-781 measured a pooled
-# test child at 2.63-3.08 GB against the 1.55 GB emit worker the shared 2.5 GB
-# figure was sized from, and the parent runner — the largest process in the
-# tree — was not budgeted at all (SFN-547; the older 384 MB budget was sized
-# for the light unit-test majority and OOMed a 14 GB host).
-# Override with `TEST_JOBS=N` on the command line or in the environment;
-# an explicit value always wins. CI sharding (`make test-shard`) is
+# `--jobs N` (per-file child processes run N at a time), but the Makefile no
+# longer passes it: when `--jobs` is omitted the runner sizes its own pool
+# natively (`_test_jobs_budget`, compiler/src/cli/commands/test/arg_and_jobs.sfn),
+# reserving the parent runner off the top of an 80% slice of RAM and then
+# budgeting 3 GB per pooled child (SFN-781). Override with
+# `SAILFIN_TEST_JOBS=N` in the environment. CI sharding (`make test-shard`) is
 # unaffected — `sfn dev shard run` reads SAILFIN_TEST_JOBS directly (SFN-200).
 # See docs/proposals/0044-test-runner-invocation-cache.md and #1998.
-TEST_JOBS ?= $(shell bash scripts/detect_test_jobs.sh 2>/dev/null || echo 1)
-TEST_JOBS_FLAG = --jobs $(TEST_JOBS)
 
-# Test parallelism for `make check` specifically. CHECK_TEST_JOBS defaults
-# to the same auto-detected TEST_JOBS. An explicit `TEST_JOBS=N` on the
-# command line or in the environment always wins (the `?=` auto-detect
-# above already captures it, so no origin-check branch is needed here).
-CHECK_TEST_JOBS ?= $(TEST_JOBS)
+# Tombstone the retired knobs (SFN-1158 / SFEP-0074 §5.2). Make accepts an
+# undefined command-line override without complaint, so a stale
+# `make test TEST_JOBS=1` would otherwise run at the auto-budget instead --
+# silently ignoring a request to pin parallelism *down*, which per
+# .claude/rules/compiler-safety.md fails as a host kill rather than an error.
+ifdef TEST_JOBS
+$(error TEST_JOBS was retired (SFN-1158); use `SAILFIN_TEST_JOBS=N` instead)
+endif
+ifdef CHECK_TEST_JOBS
+$(error CHECK_TEST_JOBS was retired (SFN-1158); use `SAILFIN_TEST_JOBS=N` instead)
+endif
 
 # Per-test wall-clock cap for the `make check` cold full-suite run.
 # `make check` runs the whole suite in ONE parallel pool with
@@ -223,7 +202,7 @@ help:
 	@echo "  make fmt            # Format workspace compiler/runtime maintainer sources"
 	@echo "  make fmt-check      # Check formatting for workspace maintainer sources"
 	@echo "  make test           # Run Sailfin-native unit + integration + e2e tests"
-	@echo "  make test TEST_JOBS=4 # Same, with 4 parallel test children (pick N for your RAM budget)"
+	@echo "  SAILFIN_TEST_JOBS=4 make test # Same, with 4 parallel test children (pick N for your RAM budget)"
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e       # Run Sailfin-native end-to-end tests"
@@ -267,9 +246,9 @@ test:
 	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test "$${test_roots[@]}" $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) --json | tee build/agent-test.test.jsonl || rc=$$?; \
+		$(NATIVE_BIN) test "$${test_roots[@]}" $(TEST_BIN_CACHE_FLAGS) --json | tee build/agent-test.test.jsonl || rc=$$?; \
 	else \
-		$(NATIVE_BIN) test "$${test_roots[@]}" $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) || rc=$$?; \
+		$(NATIVE_BIN) test "$${test_roots[@]}" $(TEST_BIN_CACHE_FLAGS) || rc=$$?; \
 	fi; \
 	exit $$rc
 
@@ -348,9 +327,9 @@ test-unit:
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/unit $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-unit.jsonl; \
+		$(NATIVE_BIN) test compiler/tests/unit --json | tee build/agent-test.test-unit.jsonl; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/unit $(TEST_JOBS_FLAG); \
+		$(NATIVE_BIN) test compiler/tests/unit; \
 	fi
 
 test-integration:
@@ -362,9 +341,9 @@ test-integration:
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/integration $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-integration.jsonl; \
+		$(NATIVE_BIN) test compiler/tests/integration --json | tee build/agent-test.test-integration.jsonl; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/integration $(TEST_JOBS_FLAG); \
+		$(NATIVE_BIN) test compiler/tests/integration; \
 	fi
 
 # The e2e suite is now entirely `*_test.sfn` (the legacy `test_*.sh`
@@ -380,9 +359,9 @@ test-e2e:
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-e2e.jsonl; \
+		$(NATIVE_BIN) test compiler/tests/e2e --json | tee build/agent-test.test-e2e.jsonl; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG); \
+		$(NATIVE_BIN) test compiler/tests/e2e; \
 	fi
 
 # Member-local tests live under each expanded workspace member's `tests/`
@@ -400,9 +379,9 @@ test-capsules:
 	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test "$${member_tests[@]}" $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-capsules.jsonl; \
+		$(NATIVE_BIN) test "$${member_tests[@]}" --json | tee build/agent-test.test-capsules.jsonl; \
 	else \
-		$(NATIVE_BIN) test "$${member_tests[@]}" $(TEST_JOBS_FLAG); \
+		$(NATIVE_BIN) test "$${member_tests[@]}"; \
 	fi
 
 # Sharded test execution for parallel CI legs. Phase 1 of
@@ -623,10 +602,10 @@ check:
 	@# Set CHECK_FULL_PASS1=1 to restore the old two-full-suite behaviour
 	@# (escape hatch for bisect / pre-release double-check).
 ifeq ($(CHECK_FULL_PASS1),1)
-	@echo "[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary (jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
-	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn$(EXE_EXT) TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@echo "[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary (test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn$(EXE_EXT) TEST_BIN_CACHE_FLAGS=--no-test-cache
 else
-	@echo "[check] pass1 smoke gate: hello-world + sfn/test capsule tests (jobs=$(CHECK_TEST_JOBS))..."
+	@echo "[check] pass1 smoke gate: hello-world + sfn/test capsule tests..."
 	@# The budget is a hang guard, not a wall-time gate: it must fail a
 	@# first-pass binary that deadlocks, not one that is merely slow. 60s was
 	@# sized when a cold hello-world built in ~12s. Since the runtime took its
@@ -644,9 +623,9 @@ else
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		build/bin/sfn$(EXE_EXT) test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) --json | tee build/agent-test.check-pass1.jsonl || exit $$?; \
+		build/bin/sfn$(EXE_EXT) test capsules/sfn/test/tests --json | tee build/agent-test.check-pass1.jsonl || exit $$?; \
 	else \
-		build/bin/sfn$(EXE_EXT) test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) || exit $$?; \
+		build/bin/sfn$(EXE_EXT) test capsules/sfn/test/tests || exit $$?; \
 	fi
 endif
 	@echo "[check] pass1 smoke passed — validating self-host (stage2/stage3 fixed point)..."
@@ -681,8 +660,8 @@ endif
 		--promote-to $(NATIVE_BIN) \
 		--smoke-timeout 10 \
 		$(SELFHOST_STRICT_FLAG)
-	@echo "[check] running full test suite with seedcheck binary (cold backstop, jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
-	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn-seedcheck$(EXE_EXT) TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@echo "[check] running full test suite with seedcheck binary (cold backstop, test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn-seedcheck$(EXE_EXT) TEST_BIN_CACHE_FLAGS=--no-test-cache
 
 # Strict variant of `make check` (#1830): a stage2/stage3 fixed-point
 # mismatch is fatal (non-zero exit, no promotion) instead of
@@ -834,8 +813,6 @@ ci-package:
 # Notes:
 # - Pass extra flags via BUILD_ARGS (driver-level, e.g.
 #   BUILD_ARGS="--no-cache --cache-trace").
-# - The driver parallelises subprocess emits internally; BUILD_JOBS
-#   no longer plumbs through.
 # - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
 #   driver hardcodes `-O2` for the link step.
 # - During a seed transition where compiler/capsule.toml's [toolchain] pin is

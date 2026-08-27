@@ -6,11 +6,13 @@
 // altogether — a pooled test child is a different workload — and made the
 // parent runner an explicit term, so every expectation below moved.
 //
-// This file covers the native budget alone. Its agreement with the bash twin
-// `scripts/detect_test_jobs.sh` — the Makefile's `TEST_JOBS ?=` default — is a
-// separate contract, enforced over a shared boundary table by SFN-794's
-// `compiler/tests/integration/test_jobs_budget_parity_test.sfn`. A constant
-// moved here has to move there too, and both files then go red.
+// This file covers the two pure units behind that default: `_parse_jobs_value`
+// (the explicit `--jobs` parser) and `_test_jobs_budget` (the RAM+CPU
+// arithmetic). The `![io]` precedence chain that chooses between them --
+// `--jobs` > `SAILFIN_TEST_JOBS` > `_test_jobs_budget()`, in
+// `_resolve_test_jobs` -- is not exercised by any test in the tree.
+// SFN-1158 / SFEP-0074 §5.2 retired the pre-binary bash duplicate this
+// file used to cross-check the arithmetic.
 import { _parse_jobs_value, _test_jobs_budget } from "../../src/cli/commands/test/arg_and_jobs";
 import { _pool_child_env } from "../../src/cli/commands/test/pool";
 

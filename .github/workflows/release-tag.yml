@@ -316,7 +316,7 @@ jobs:
       # mode conditions in actions/sailfin-build), so no `test_jobs` is
       # passed: a value here would be dead config that reads as a
       # deliberate override of the SFN-781 auto-budget (SFN-795).
-      - name: Build + package (via Makefile)
+      - name: Build + package
         uses: ./.github/actions/sailfin-build
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}

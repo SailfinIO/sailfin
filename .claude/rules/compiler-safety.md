@@ -20,8 +20,8 @@ programs are not capped — only the toolchain self-caps. The historical
 safe.** `N` concurrent `sfn` children each self-apply their own 8 GiB cap, so
 the aggregate ceiling is `N x 8 GiB`, and nothing enforces it. Any fan-out must
 budget host RAM itself: `_test_jobs_budget`
-(`compiler/src/cli/commands/test/arg_and_jobs.sfn`) and its bash twin
-`scripts/detect_test_jobs.sh` reserve **3 GiB/job out of (80% of RAM - 5 GiB)**
+(`compiler/src/cli/commands/test/arg_and_jobs.sfn`) reserves
+**3 GiB/job out of (80% of RAM - 5 GiB)**
 for the test pool — 3 GiB matches a measured pooled test child, and the 5 GiB
 term reserves the parent runner itself (SFN-781). `_cr_ram_budget_jobs`
 (`compiler/src/capsule_emit_parallel.sfn`) sizes the per-module emit fan-out
