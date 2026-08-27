@@ -40,10 +40,6 @@ on:
         description: "Timed runs per runtime workload (--iterations)"
         required: false
         default: "5"
-      build_jobs:
-        description: "Parallel module builds (BUILD_JOBS). Empty = Makefile auto-detect."
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -139,11 +135,7 @@ jobs:
           # commit's compiler, not a cached one. It produces both
           # build/bin/sfn and build/compiler/import-context (both required
           # by the bench scripts).
-          if [ -n "${{ inputs.build_jobs }}" ]; then
-            make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/toolchains/seed/bin/sfn" BUILD_JOBS="${{ inputs.build_jobs }}"
-          else
-            make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/toolchains/seed/bin/sfn"
-          fi
+          make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/toolchains/seed/bin/sfn"
           build/bin/sfn version
 
       - name: Prepare output dir
