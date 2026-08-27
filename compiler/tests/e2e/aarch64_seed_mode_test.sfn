@@ -407,7 +407,11 @@ test "seed pin workflow: bootstrap changes run the native ARM installer self-hos
     assert contains(workflow, "- \"bootstrap.toml\"");
     assert contains(workflow, "slug: linux_arm64");
     assert contains(workflow, "Verify pinned native ARM seed self-host");
-    assert contains(workflow, "make fetch-seed");
+    // Seed acquisition and self-host are native (SFN-1165). The seed step is
+    // a separate `uses:` because a composite action cannot be nested inside a
+    // `run:` block; both halves stay gated on the same matrix flag, so the
+    // split cannot leave the self-host running without a seed.
+    assert contains(workflow, "uses: ./.github/actions/fetch-seed");
     assert contains(workflow, "ELF 64-bit.*ARM aarch64");
-    assert contains(workflow, "make compile");
+    assert contains(workflow, "dev bootstrap build");
 }
