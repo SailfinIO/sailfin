@@ -51,6 +51,7 @@ import { _ends_with } from "../build/paths";
 import { _runtime_bundle_exists } from "../build/runtime_objs";
 import { handle_selfhost_command } from "../cli_selfhost";
 import { ice_set_binary_dir } from "../ice";
+import { starts_with, substring } from "../string_utils";
 import { configure_terminal_output } from "../terminal_output";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
 import { command_def as bench_command_def, run as bench_run } from "./commands/bench";
@@ -72,7 +73,12 @@ import { command_def as publish_command_def, run as publish_run } from "./comman
 import { command_def as run_command_def, run as run_run } from "./commands/run";
 import { command_def as symbols_command_def, run as symbols_run } from "./commands/symbols";
 import { command_def as test_command_def, run as test_run } from "./commands/test/mod";
-import { command_def as toolchain_command_def, run as toolchain_run } from "./commands/toolchain";
+import {
+    command_def as toolchain_command_def,
+    run as toolchain_run,
+    toolchain_env_exact_selector,
+    toolchain_select_exact
+} from "./commands/toolchain";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
 
@@ -285,6 +291,90 @@ fn _requests_json(args: string[]) -> boolean {
     return false;
 }
 
+// One-shot exact selector peeled off the front of the user-visible argv
+// (SFEP-0073 §3.3 rank 1). `form` doubles as the diagnostic source label and
+// is empty when no selector was present, in which case `rest` is the argv
+// unchanged.
+struct CliSelector {
+    form: string;
+    selector: string;
+    rest: string[];
+}
+
+fn _v2_slice_from(args: string[], start: int) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = start;
+    loop {
+        if i >= args.length { break; }
+        out.push(args[i]);
+        i += 1;
+    }
+    return out;
+}
+
+// Recognize `sfn +<version> <command> ...` and its long form
+// `sfn toolchain run <version> [--] <command> ...`. Deliberately a prefix scan
+// over raw strings rather than a parse: it must accept a `<command>` this
+// toolchain has never heard of, so that an older entry can forward it to a
+// newer payload (SFEP-0073 §3.3). Anything it declines to peel falls through
+// to the normal command tree, which owns the usage error.
+fn _v2_peel_selector(args: string[]) -> CliSelector {
+    let none = CliSelector { form: "", selector: "", rest: args };
+    if args.length == 0 { return none; }
+
+    if starts_with(args[0], "+") {
+        // A bare "+" selects nothing; leave it to the parser to reject.
+        if args[0].length == 1 { return none; }
+        return CliSelector {
+            form: "+<version>",
+            selector: substring(args[0], 1, args[0].length),
+            rest: _v2_slice_from(args, 1)
+        };
+    }
+
+    if args.length >= 3 {
+        if strings_equal(args[0], "toolchain") {
+            if strings_equal(args[1], "run") {
+                // The `--` separator is conventional but optional; everything
+                // after the selector is the forwarded command either way.
+                let mut start: int = 2 + 1;
+                if args.length > 3 {
+                    if strings_equal(args[3], "--") { start = 4; }
+                }
+                return CliSelector {
+                    form: "sfn toolchain run",
+                    selector: args[2],
+                    rest: _v2_slice_from(args, start)
+                };
+            }
+        }
+    }
+    return none;
+}
+
+// `--skip-toolchain-check` is read straight off the argv here because the
+// selector is resolved before the command tree parses, so the typed flag is
+// not available yet. It is matched exactly, never as a prefix, so it cannot
+// be confused with a longer flag or with a value that merely contains it.
+fn _v2_argv_has_skip_flag(args: string[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= args.length { break; }
+        if strings_equal(args[i], "--skip-toolchain-check") { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// A version query must stay network-silent (SFEP-0073 §3.3), so the selection
+// path needs to know it is answering one before it considers fetching.
+fn _v2_is_version_query(args: string[]) -> boolean {
+    if args.length == 0 { return false; }
+    if strings_equal(args[0], "version") { return true; }
+    if strings_equal(args[0], "--version") { return true; }
+    return strings_equal(args[0], "-V");
+}
+
 fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // Parse the driver-injected `--runtime-root` / `--binary-dir` prefix
     // (Issue 2.2) so `binary_dir` is available for version resolution
@@ -307,10 +397,34 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         args.push(argv[i]);
         i += 1;
     }
+    // SFEP-0073 §3.3 rank 1: peel a one-shot exact selector before the command
+    // tree is built, let alone parsed. Two things depend on it happening here.
+    // The forwarded argv must not carry the selector token — `orig_args` is
+    // what the re-exec replays, and a selector left in it would make the
+    // selected toolchain re-select and loop. And the command after the
+    // selector must never be validated against *this* toolchain's tree, so an
+    // older entry can hand an unfamiliar command to a newer payload.
+    let selection = _v2_peel_selector(args);
+    args = selection.rest;
+
     // The user-visible argv the toolchain dispatcher (SFN-172) replays onto the
     // pinned toolchain on a re-exec. Captured here (not in `parse_driver_prefix`)
     // because the prefix slice is computed at this level.
     ctx.orig_args = args;
+
+    if selection.form.length > 0 {
+        // The entry hint is empty, so the project floor this selection is
+        // checked against is discovered from the working directory rather than
+        // from the entry file. The entry file is not knowable here by
+        // construction — resolving it would require the parse this scan exists
+        // to run ahead of — and cwd is the same root in every case but a
+        // command naming a source file in a *different* project.
+        //
+        // Returns only when the selection resolved to this very toolchain; a
+        // successful dispatch replaces this image and never comes back.
+        let sel_rc = toolchain_select_exact(selection.selector, selection.form, "", ctx, _v2_argv_has_skip_flag(args), _v2_is_version_query(args));
+        if sel_rc != 0 { return sel_rc; }
+    }
 
     // Root command, composed from each subcommand's `command_def()`. Built
     // incrementally (one `with_subcommand` reassignment per command) rather
@@ -656,6 +770,18 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         // owns; legacy never runs for these, so without this the
         // `SAILFIN_TRACE_ARGV` toggle would go silent on `version`.
         if ctx.trace_argv { _v2_trace_argv(argv); }
+        // SFEP-0073 §3.3 names `version` among the commands selection applies
+        // to, so an exact `SAILFIN_TOOLCHAIN` reports the selected compiler
+        // rather than the entry. (A `+<version>` query already resolved in the
+        // early scan above.) The query stays network-silent: a missing payload
+        // prints an install hint and falls through to the entry version.
+        // `skip_flag` is true because reporting a version is not running a
+        // build — a floor mismatch warns rather than refusing to answer.
+        let env_selector = toolchain_env_exact_selector();
+        if env_selector.length > 0 {
+            let version_rc = toolchain_select_exact(env_selector, "SAILFIN_TOOLCHAIN", "", ctx, true, true);
+            if version_rc != 0 { return version_rc; }
+        }
         // Dispatch to the `version` command's `run`. On the `--version` /
         // `-V` flag path `parse_ok` is false, but `result.matches` still
         // reflects the accumulated parse state; `version.run` ignores it,
