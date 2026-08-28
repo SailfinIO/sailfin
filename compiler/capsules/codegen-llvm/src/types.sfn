@@ -675,6 +675,10 @@ struct MatchCaseStructure {
     body_start: int;
     body_end: int;
     is_default: boolean;
+    // SFN-1061: `NativeInstruction.Case` carries the arm's span, but nothing
+    // held it once `collect_match_structure` built this record, so every
+    // diagnostic raised while lowering a match arm was spanless.
+    span: NativeSourceSpan?;
 }
 
 struct MatchStructure {
@@ -708,6 +712,12 @@ struct MatchCaseCondition {
     union_struct_info: StructTypeInfo?;
     union_struct_bindings: MatchStructFieldBinding[];
     string_constants: StringConstant[];
+    // SFN-1061: `lower_match_case_condition` already collected structured
+    // diagnostics but had no field to return them in, so an `error` diag
+    // raised there never reached `has_error_diag` and the compile exited 0 —
+    // the dropped-forward regression rule 5 in
+    // `lowering_core/diagnostics.sfn` names.
+    diags: LoweringDiagnostic[];
 }
 
 // =============================================================================

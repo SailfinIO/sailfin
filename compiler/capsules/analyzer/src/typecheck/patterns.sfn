@@ -36,14 +36,19 @@ import { is_identifier_char } from "../typecheck_types/text_utils";
 // `Expression.Raw`, not `Expression.Struct`, because `parse_object_literal`
 // requires `field: value` and bails on the colon-less form, leaving the
 // brace block unconsumed. The names then live only in the raw text, so the
-// `Raw` branch recovers them. The structured `field: value` form is a
-// constraint and deliberately introduces no binding.
+// `Raw` branch recovers them. The structured `field: value` form binds
+// nothing because lowering rejects it outright (`E1023`, SFN-1061); it was
+// never an implemented constraint, and the backend used to bind the field
+// name while discarding the constraint, taking the wrong branch silently.
 fn register_match_pattern_bindings(pattern: Expression?, bindings: SymbolEntry[]) -> SymbolEntry[] {
     if pattern == null { return bindings; }
     if pattern.variant == "Struct" {
-        // A structurally parsed field has an explicit value (`Box { value:
-        // 1 }`) and is a match constraint, not a binding. Shorthand binding
-        // fields (`Box { value }`) remain Raw and are recovered below.
+        // A structurally parsed field carries an explicit value (`Box {
+        // value: 1 }`). Nothing compares it against the payload, so lowering
+        // refuses the form (`E1023`); binding the name here would let an arm
+        // body resolve against a symbol the backend never produces.
+        // Shorthand binding fields (`Box { value }`) remain Raw and are
+        // recovered below.
         return bindings;
     }
     if pattern.variant == "Raw" {

@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/lowering/instructions_match_condition.sfn
 //
 // Match case condition lowering (split from instructions_match.sfn).
-import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction, NativeSourceSpan } from "sfn/ir";
 
 import { lower_expression } from "../expression_lowering/native/core";
 import { emit_boolean_and, emit_comparison_instruction } from "../expression_lowering/native/core_operands/comparisons";
@@ -39,7 +39,13 @@ import {
     StructTypeInfo,
     TypeContext
 } from "../types";
-import { extend_diag_array, number_to_string, trim_text } from "../utils";
+import {
+    diag_to_legacy_string,
+    extend_diag_array,
+    lowering_error_diag,
+    number_to_string,
+    trim_text
+} from "../utils";
 import { lower_condition_to_i1 } from "./instructions_condition";
 
 // SFN-347: locate the union payload slot that carries the `null` arm so a
@@ -57,6 +63,31 @@ fn _match_null_variant_index(subject_type_annotation: string, subject_llvm_type:
         index += 1;
     }
     return single_i8_union_variant_index(subject_llvm_type);
+}
+
+// SFN-1061: `Enum.Variant { field: <expr> }` and `Struct { field: <expr> }`
+// parse in a match pattern, but no pass ever compares the payload against the
+// colon RHS. The enum path discarded the constraint and bound `field` instead,
+// so the arm swallowed every value of the variant and control flow silently
+// went the wrong way; the union-struct path pushed an untagged legacy string,
+// which `lowering_core/diagnostics.sfn` discards rather than surfaces, so it
+// failed open too. Reject the form at both sites until a pass implements it.
+//
+// The message deliberately points at an `if` in the arm body rather than at a
+// `guard` clause: a guard on an enum destructuring arm is itself dropped
+// today (verified against seed 0.10.6 and the current build alike), so
+// recommending one would trade this silent wrong branch for another.
+fn _field_constraint_unsupported_diag(field_name: string, owner: string, span_in: NativeSourceSpan?) -> LoweringDiagnostic {
+    return lowering_error_diag("E1023", "match pattern field `" + field_name
+        + "` in `"
+        + owner
+        + "` uses the `field: value` constraint form, which lowering does not implement: the constraint would be discarded and the arm would match every value. Bind the field and test it in the arm body instead — `"
+        + owner
+        + " { "
+        + field_name
+        + " }: { if "
+        + field_name
+        + " == ... { ... } }`", span_in);
 }
 
 fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
@@ -173,12 +204,32 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                     matched_enum_info = enum_info;
                     matched_variant_info = variant_info;
 
+                    let mut constraint_idx: int = 0;
+                    loop {
+                        if constraint_idx >= enum_parse.fields.length { break; }
+                        let constraint_field = enum_parse.fields[constraint_idx];
+                        if constraint_field.value.length > 0 {
+                            let constraint_diag = _field_constraint_unsupported_diag(constraint_field.name, enum_parse.enum_name
+                                + "."
+                                + enum_parse.variant_name, case.span);
+                            diags.push(constraint_diag);
+                            diagnostics.push(diag_to_legacy_string(constraint_diag));
+                        }
+                        constraint_idx += 1;
+                    }
+
                     // For variants with payload fields, collect binding information
                     if variant_info.fields.length > 0 {
                         let mut field_idx: int = 0;
                         loop {
                             if field_idx >= enum_parse.fields.length { break; }
                             let pattern_field = enum_parse.fields[field_idx];
+                            if pattern_field.value.length > 0 {
+                                // Already diagnosed above; binding it would
+                                // reintroduce the wrong-branch behaviour.
+                                field_idx += 1;
+                                continue;
+                            }
                             let mut variant_field_idx: int = 0;
                             let mut found_field: StructFieldInfo? = null;
                             loop {
@@ -394,9 +445,9 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                                     + "`");
                                             }
                                         } else {
-                                            diagnostics.push("llvm lowering: match struct field literal patterns are not supported for `"
-                                                + pattern_field.name
-                                                + "`");
+                                            let constraint_diag = _field_constraint_unsupported_diag(pattern_field.name, struct_parse.type_name, case.span);
+                                            diags.push(constraint_diag);
+                                            diagnostics.push(diag_to_legacy_string(constraint_diag));
                                         }
                                         fidx += 1;
                                     }
@@ -527,6 +578,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
         union_variant_index: union_variant_index,
         union_struct_info: union_struct_info,
         union_struct_bindings: union_struct_bindings,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: diags
     };
 }
