@@ -21,7 +21,12 @@ import {
     StringConstant,
     TypeContext
 } from "../../types";
-import { ends_with, lowering_error_diag, lowering_warning_diag } from "../../utils";
+import {
+    ends_with,
+    extend_diag_array,
+    lowering_error_diag,
+    lowering_warning_diag
+} from "../../utils";
 import { lower_expression } from "./core";
 import { find_parameter_binding } from "./core_bindings";
 import { find_local_binding } from "./core_scopes";
@@ -85,6 +90,7 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
         let lowered_op = lower_expression(spawn_operand_text, bindings, locals, spawn_temp, spawn_lines, functions, context, "");
         spawn_lines = lowered_op.lines;
         spawn_temp = lowered_op.temp_index;
+        spawn_diags = extend_diag_array(spawn_diags, lowered_op.diags);
         if lowered_op.operand != null {
             let raw_op = lowered_op.operand;
             op_llvm_type = raw_op.llvm_type;
