@@ -36,7 +36,6 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
         if left_is_string {
             if right_is_string { both_string_shapes = true; }
         }
-        if !both_string_shapes { }
     }
     let left_is_null = left_operand.value == "null";
     let right_is_null = right_operand.value == "null";
@@ -297,8 +296,6 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
 fn emit_boolean_and(left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[]) -> ComparisonEmission {
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
-    if left_operand.llvm_type != "i1" { }
-    if right_operand.llvm_type != "i1" { }
     let temp_name = format_temp_name(temp_index);
     current_lines.push("  " + temp_name + " = and i1 " + left_operand.value
         + ", "

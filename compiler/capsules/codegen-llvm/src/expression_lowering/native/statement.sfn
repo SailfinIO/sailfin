@@ -822,9 +822,6 @@ fn prepare_parameters(function: NativeFunction, context: TypeContext) -> Paramet
         }
         // Default empty types to i8* so LLVM IR is parseable.
         if llvm_type.length == 0 { llvm_type = "i8*"; }
-        if parameter.type_annotation.length == 0 {
-            if !inferred_self_type { }
-        }
         let sanitized = sanitize_symbol(parameter.name);
         // Deduplicate parameter names: if this name was already used,
         // append a numeric suffix to make it unique (LLVM requires unique param names).

@@ -381,7 +381,6 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     let mut llvm_type: string = "";
     if trimmed_annotation.length > 0 {
         llvm_type = map_local_type(context, effective_annotation);
-        if llvm_type.length == 0 { }
     }
 
     let mut operand: LLVMOperand? = null;
@@ -606,7 +605,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                         value: with_vtable_temp
                     };
                     llvm_type = interface_info.llvm_name;
-                } else { }
+                }
             }
         }
     }

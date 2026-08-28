@@ -296,7 +296,7 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                     }
                 };
                 structs.push(struct_def);
-            }
+            } else { index += 1; }
             continue;
         }
 

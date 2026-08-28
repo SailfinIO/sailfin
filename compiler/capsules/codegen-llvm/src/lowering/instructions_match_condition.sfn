@@ -327,7 +327,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                     field_name: pattern_field.name, field_type: llvm_field_type, field_offset: found_field.offset
                                 });
                                 field_bindings = updated_fields;
-                            } else { }
+                            }
 
                             field_idx += 1;
                         }
@@ -444,7 +444,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                                     field_name: pattern_field.name, field_type: field_info.llvm_type, field_index: field_info.index
                                                 });
                                                 union_struct_bindings = updated_structs;
-                                            } else { }
+                                            }
                                         } else {
                                             let constraint_diag = _field_constraint_unsupported_diag(pattern_field.name, struct_parse.type_name, case.span);
                                             diags.push(constraint_diag);
@@ -454,8 +454,8 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
 
                                     union_variant_index = found_index;
                                     union_struct_info = info;
-                                } else { }
-                            } else { }
+                                }
+                            }
                         }
                     }
                 }
@@ -485,7 +485,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                         current_lines = harmonised.lines;
                         current_temp = harmonised.temp_index;
                     }
-                } else { }
+                }
             }
         }
     }

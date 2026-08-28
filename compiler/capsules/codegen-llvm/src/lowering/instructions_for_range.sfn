@@ -526,7 +526,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         current_temp += 1;
         current_lines.push("  store double " + next_value_name + ", double* "
             + iteration_pointer);
-    } else { }
+    }
 
     current_lines.push("  br label %" + loop_header_label);
     current_lines.push(loop_exit_label + ":");

@@ -90,6 +90,7 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
     let mut name_value: string = "";
     let mut size_value: int = 0;
     let mut align_value: int = 0;
+    let mut invalid: boolean = false;
     let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
@@ -103,22 +104,22 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
             if parsed.success {
                 size_found = true;
                 size_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 align_found = true;
                 align_value = parsed.value;
-            } else { }
-        } else { }
+            } else { invalid = true; }
+        } else { invalid = true; }
         index += 1;
     }
-    if !size_found { }
-    if !align_found { }
     let mut _let374: boolean = false;
     if size_found {
-        if align_found { _let374 = true; }
+        if align_found {
+            if !invalid { _let374 = true; }
+        }
     }
     let success = _let374;
     return StructLayoutHeaderParse {
@@ -156,6 +157,7 @@ fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutF
     let mut offset_value: int = 0;
     let mut size_value: int = 0;
     let mut align_value: int = 0;
+    let mut invalid: boolean = false;
     let mut index: int = 1;
     loop {
         if index >= tokens.length { break; }
@@ -168,37 +170,35 @@ fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutF
             if parsed.success {
                 offset_found = true;
                 offset_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 size_found = true;
                 size_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 align_found = true;
                 align_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if _nir_layout_type_may_continue(type_text, offset_found, size_found, align_found) {
             // SFN-532: type annotations may contain whitespace. The first
             // keyed layout attribute ends the type value.
             type_text = type_text + " " + token;
-        } else if type_text.length > 0 { } else { }
+        } else { invalid = true; }
         index += 1;
     }
-    if type_text.length == 0 { }
-    if !offset_found { }
-    if !size_found { }
-    if !align_found { }
     let mut _let375: boolean = false;
     if type_text.length > 0 {
         if offset_found {
             if size_found {
-                if align_found { _let375 = true; }
+                if align_found {
+                    if !invalid { _let375 = true; }
+                }
             }
         }
     }
@@ -237,6 +237,7 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
     let mut align_value: int = 0;
     let mut tag_size_value: int = 0;
     let mut tag_align_value: int = 0;
+    let mut invalid: boolean = false;
     let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
@@ -250,14 +251,14 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
             if parsed.success {
                 size_found = true;
                 size_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 align_found = true;
                 align_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "tag_type=") {
             tag_type = substring(token, 9, token.length);
         } else if starts_with(token, "tag_size=") {
@@ -266,28 +267,25 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
             if parsed.success {
                 tag_size_found = true;
                 tag_size_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "tag_align=") {
             let value_text = substring(token, 10, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 tag_align_found = true;
                 tag_align_value = parsed.value;
-            } else { }
-        } else { }
+            } else { invalid = true; }
+        } else { invalid = true; }
         index += 1;
     }
-    if !size_found { }
-    if !align_found { }
-    if tag_type.length == 0 { }
-    if !tag_size_found { }
-    if !tag_align_found { }
     let mut _let376: boolean = false;
     if size_found {
         if align_found {
             if tag_type.length > 0 {
                 if tag_size_found {
-                    if tag_align_found { _let376 = true; }
+                    if tag_align_found {
+                        if !invalid { _let376 = true; }
+                    }
                 }
             }
         }
@@ -342,6 +340,7 @@ fn parse_enum_variant_layout(text: string, enum_name: string) -> EnumLayoutVaria
     let mut offset_value: int = 0;
     let mut size_value: int = 0;
     let mut align_value: int = 0;
+    let mut invalid: boolean = false;
     let mut index: int = 1;
     loop {
         if index >= tokens.length { break; }
@@ -352,40 +351,38 @@ fn parse_enum_variant_layout(text: string, enum_name: string) -> EnumLayoutVaria
             if parsed.success {
                 tag_found = true;
                 tag_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "offset=") {
             let value_text = substring(token, 7, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 offset_found = true;
                 offset_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 size_found = true;
                 size_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 align_found = true;
                 align_value = parsed.value;
-            } else { }
-        } else { }
+            } else { invalid = true; }
+        } else { invalid = true; }
         index += 1;
     }
-    if !tag_found { }
-    if !offset_found { }
-    if !size_found { }
-    if !align_found { }
     let mut _let377: boolean = false;
     if tag_found {
         if offset_found {
             if size_found {
-                if align_found { _let377 = true; }
+                if align_found {
+                    if !invalid { _let377 = true; }
+                }
             }
         }
     }
@@ -447,6 +444,7 @@ fn parse_enum_payload_layout(text: string, enum_name: string) -> EnumLayoutPaylo
     let mut offset_value: int = 0;
     let mut size_value: int = 0;
     let mut align_value: int = 0;
+    let mut invalid: boolean = false;
     let mut index: int = 1;
     loop {
         if index >= tokens.length { break; }
@@ -459,37 +457,35 @@ fn parse_enum_payload_layout(text: string, enum_name: string) -> EnumLayoutPaylo
             if parsed.success {
                 offset_found = true;
                 offset_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 size_found = true;
                 size_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
             let parsed = parse_decimal_number(value_text);
             if parsed.success {
                 align_found = true;
                 align_value = parsed.value;
-            } else { }
+            } else { invalid = true; }
         } else if _nir_layout_type_may_continue(type_text, offset_found, size_found, align_found) {
             // Payload types use the same keyed boundary as struct fields so
             // generic annotations retain spaces.
             type_text = type_text + " " + token;
-        } else if type_text.length > 0 { } else { }
+        } else { invalid = true; }
         index += 1;
     }
-    if type_text.length == 0 { }
-    if !offset_found { }
-    if !size_found { }
-    if !align_found { }
     let mut _let379: boolean = false;
     if type_text.length > 0 {
         if offset_found {
             if size_found {
-                if align_found { _let379 = true; }
+                if align_found {
+                    if !invalid { _let379 = true; }
+                }
             }
         }
     }

@@ -300,6 +300,11 @@ struct HeaderNameParse {
     name: string;
     type_parameters: string[];
     remainder: string;
+    // True when the header could not be parsed structurally (an unterminated
+    // generic argument list). Callers that gate a `success` flag must treat a
+    // malformed header as a parse failure; SFN-916 replaced the string
+    // diagnostic array this used to be inferred from.
+    malformed: boolean;
 }
 
 struct StructLayoutHeaderParse {
