@@ -4,7 +4,6 @@ emit-llvm: dbg-A parse_in assigned
 emit-llvm: dbg-B structured parse is authoritative (no override reparse) path_len=141
 emit-llvm: dbg-D after manifests sanitize
 emit-llvm: dbg-E after native_texts sanitize
-emit-llvm: dbg-F after diagnostics sanitize
 emit-llvm: dbg-G after entry_points sanitize
 emit-llvm: safe_imports.length=0
 emit-llvm: dbg-H after structs/enums/interfaces sanitize
