@@ -60,7 +60,14 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     if path == LOWERING_ROOT + "/instructions_match.sfn" { return 908; }
     if path == LOWERING_ROOT + "/instructions.sfn" { return 779; }
     if path == LOWERING_ROOT + "/instructions_helpers.sfn" { return 849; }
-    if path == LOWERING_ROOT + "/instructions_if.sfn" { return 784; }
+    // SFN-916 raises `instructions_if.sfn` 784 -> 785. Retiring the legacy
+    // `diagnostics: string[]` channel exposed call sites that forwarded the
+    // legacy array but never the structured `diags`, so an `error` diag
+    // raised below them could not reach `has_error_diag`. The single added
+    // line forwards `lower_condition_to_i1`'s diags. A raise against the
+    // shrink-only rule, called out rather than absorbed: the alternative is
+    // an if-condition whose sub-expression failure is silently discarded.
+    if path == LOWERING_ROOT + "/instructions_if.sfn" { return 785; }
     if path == LOWERING_ROOT + "/emission.sfn" { return 776; }
     return 0;
 }

@@ -71,7 +71,14 @@ fn _grandfathered_ceiling(name: string) -> int {
     // its exact new length so the ratchet keeps holding. Splitting these
     // modules remains SFN-639's job.
     if name == "core_concurrency_lowering.sfn" { return 1415; }
-    if name == "core_ops_lowering.sfn" { return 1536; }
+    // 1536 -> 1568: SFN-916. Nineteen call sites in this module forwarded the
+    // legacy `diagnostics` array from a callee result but never its structured
+    // `diags`, so every `error` diag raised inside operand, coercion and
+    // comparison lowering was dropped once the legacy channel was deleted.
+    // Each forward costs a line. A raise against the shrink-only rule, called
+    // out for review: the alternative is a build that accepts code whose
+    // operand lowering already failed.
+    if name == "core_ops_lowering.sfn" { return 1568; }
     // 1447 -> 1460: SFN-770, a miscompile that stored a struct-typed local
     // into a pointer-width enum payload slot by value. 1460 -> 1536: SFN-915,
     // per the note above.
