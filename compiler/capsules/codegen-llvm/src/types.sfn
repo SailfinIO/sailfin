@@ -699,6 +699,16 @@ struct MatchStructFieldBinding {
     field_index: int;
 }
 
+// SFN-1168: what `emit_match_guard_branch` produced while lowering one arm's
+// guard into its own block.
+struct MatchGuardEmission {
+    lines: string[];
+    temp_index: int;
+    diagnostics: string[];
+    diags: LoweringDiagnostic[];
+    string_constants: StringConstant[];
+}
+
 struct MatchCaseCondition {
     lines: string[];
     temp_index: int;

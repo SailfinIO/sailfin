@@ -56,18 +56,16 @@ import {
 } from "../types";
 import {
     copy_string_array,
-    diag_to_legacy_string,
     extend_diag_array,
     extend_string_array,
     is_identifier_part_char,
     is_identifier_start_char,
-    lowering_error_diag,
     merge_parameter_bindings,
     number_to_string,
     trim_text
 } from "../utils";
 import { lower_instruction_range } from "./instructions";
-import { allocate_block_label, lower_condition_to_i1 } from "./instructions_condition";
+import { allocate_block_label } from "./instructions_condition";
 import {
     _parse_int_from_string,
     clone_local_bindings,
@@ -75,7 +73,7 @@ import {
     extend_lifetime_regions,
     extend_mutations
 } from "./instructions_helpers";
-import { lower_match_case_condition } from "./instructions_match_condition";
+import { emit_match_guard_branch, lower_match_case_condition } from "./instructions_match_condition";
 import { emit_phi_merges_for_match, materialize_mutation_values_at_label } from "./phi";
 
 // Build a LocalBinding separately so loops never have inline struct literals
@@ -823,49 +821,21 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
             }
         }
 
-        // SFN-1168: evaluate the guard here, in the guard block, now that the
-        // pattern's payload binders exist in `base_locals`. Lowering it earlier
-        // (against the pre-match locals) could not resolve them, and the null
-        // operand that produced was reported only on the discarded legacy
-        // string channel, so the guard vanished and the arm matched on its tag
-        // alone.
+        // SFN-1168: the guard is lowered here, in the guard block, now that
+        // the pattern's payload binders exist in `base_locals`. Lowering it
+        // earlier, against the pre-match locals, could not resolve them.
         if guard_has_text {
-            let guard_condition = lower_condition_to_i1(function.name, guard_text, bindings, base_locals, current_temp, current_lines, functions, context);
+            let guard_emit = emit_match_guard_branch(function.name, guard_text, case.span, bindings, base_locals, body_labels[index], failure_target, current_temp, current_lines, functions, context);
             let mut _cg1: int = 0;
             loop {
-                if _cg1 >= guard_condition.diagnostics.length { break; }
-                diagnostics.push(guard_condition.diagnostics[_cg1]);
+                if _cg1 >= guard_emit.diagnostics.length { break; }
+                diagnostics.push(guard_emit.diagnostics[_cg1]);
                 _cg1 += 1;
             }
-            current_lines = guard_condition.lines;
-            current_temp = guard_condition.temp_index;
-            collected_string_constants = merge_string_constants(collected_string_constants, guard_condition.string_constants);
-            if guard_condition.operand != null {
-                current_lines.push("  br i1 " + guard_condition.operand.value
-                    + ", label %"
-                    + body_labels[index]
-                    + ", label %"
-                    + failure_target);
-            } else {
-                // Fail closed. A guard that will not lower used to be dropped
-                // silently, turning the arm into an unconditional match on the
-                // variant tag; that is a wrong-control-flow bug, not a warning.
-                //
-                // This catches a null operand only. `ConditionConversion`
-                // carries no structured `diags` channel, and a guard whose
-                // sub-expression fails inside `lower_logical_and` comes back as
-                // a constant `false` rather than null, so `a && <unlowerable>`
-                // still degrades silently to an arm that is never taken.
-                // SFN-1171 tracks giving that path a diagnostic channel.
-                let guard_diag = lowering_error_diag("E1024", "match arm guard `"
-                    + guard_text
-                    + "` in `"
-                    + function.name
-                    + "` could not be lowered to a condition; the arm would match every value of its pattern", case.span);
-                diags.push(guard_diag);
-                diagnostics.push(diag_to_legacy_string(guard_diag));
-                current_lines.push("  br label %" + failure_target);
-            }
+            diags = extend_diag_array(diags, guard_emit.diags);
+            current_lines = guard_emit.lines;
+            current_temp = guard_emit.temp_index;
+            collected_string_constants = merge_string_constants(collected_string_constants, guard_emit.string_constants);
             current_lines.push(body_labels[index] + ":");
         }
 

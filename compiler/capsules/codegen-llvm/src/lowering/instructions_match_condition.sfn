@@ -32,6 +32,7 @@ import {
     MatchCaseCondition,
     MatchCaseStructure,
     MatchFieldBinding,
+    MatchGuardEmission,
     MatchStructFieldBinding,
     ParameterBinding,
     StringConstant,
@@ -46,6 +47,7 @@ import {
     number_to_string,
     trim_text
 } from "../utils";
+import { lower_condition_to_i1 } from "./instructions_condition";
 
 // SFN-347: locate the union payload slot that carries the `null` arm so a
 // bare `null:` match case can tag-compare against it. Prefer the declared
@@ -89,6 +91,58 @@ fn _field_constraint_unsupported_diag(field_name: string, owner: string, span_in
         + " } if "
         + field_name
         + " == ...: ...`", span_in);
+}
+
+// SFN-1168: emit a guarded arm's guard, and the branch it decides, into the
+// arm's guard block. `lower_match_case_condition` above deliberately returns
+// the pattern condition alone: a guard routinely reads a binder the pattern
+// introduces, and those binders are materialized by the caller only after the
+// pattern test has branched. So the guard is lowered here instead, against the
+// locals the caller has by then extended with the arm's payload bindings.
+//
+// Emits `br i1 <guard>, label %<body_label>, label %<failure_target>`, so an
+// arm whose guard fails falls through to the next arm rather than being taken.
+fn emit_match_guard_branch(function_name: string, guard_text: string, case_span: NativeSourceSpan?, bindings: ParameterBinding[], locals: LocalBinding[], body_label: string, failure_target: string, temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchGuardEmission {
+    let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
+    let lowered = lower_condition_to_i1(function_name, guard_text, bindings, locals, temp_index, lines, functions, context);
+    let mut idx: int = 0;
+    loop {
+        if idx >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[idx]);
+        idx += 1;
+    }
+    let mut current_lines = lowered.lines;
+    if lowered.operand != null {
+        current_lines.push("  br i1 " + lowered.operand.value + ", label %"
+            + body_label
+            + ", label %"
+            + failure_target);
+    } else {
+        // Fail closed: a guard that will not lower used to be dropped silently,
+        // leaving the arm an unconditional match on the variant tag. That is a
+        // wrong-control-flow bug, not a warning.
+        //
+        // Null operand only. `ConditionConversion` has no structured `diags`
+        // channel, and a guard whose sub-expression fails inside
+        // `lower_logical_and` returns a constant `false` rather than null, so
+        // `a && <unlowerable>` still degrades silently into an arm that is
+        // never taken. SFN-1171 tracks giving that path a channel.
+        let diag = lowering_error_diag("E1024", "match arm guard `" + guard_text
+            + "` in `"
+            + function_name
+            + "` could not be lowered to a condition; the arm would match every value of its pattern", case_span);
+        diags.push(diag);
+        diagnostics.push(diag_to_legacy_string(diag));
+        current_lines.push("  br label %" + failure_target);
+    }
+    return MatchGuardEmission {
+        lines: current_lines,
+        temp_index: lowered.temp_index,
+        diagnostics: diagnostics,
+        diags: diags,
+        string_constants: lowered.string_constants
+    };
 }
 
 fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
