@@ -47,6 +47,7 @@ import {
 import { contains, split, trim } from "sfn/strings";
 import {
     clean_runner_env,
+    clean_runner_env_without,
     default_scratch_dir,
     host_is_windows,
     nested_runner_scratch,
@@ -57,6 +58,7 @@ import {
 } from "sfn/test";
 
 import { sha256_hex_of_bytes } from "../../src/build/hash";
+import { host_exe_name } from "../../src/build/target";
 import { toolchain_current_host } from "../../src/toolchain/host";
 import { toolchain_build_records } from "../../src/toolchain/integrity";
 import {
@@ -80,17 +82,24 @@ fn _scratch_root() -> string ![io] {
 // dispatch signal (the image was replaced by the stored stub).
 fn _marker() -> string { return "DISPATCH_STUB_EXEC_OK_7f3a"; }
 
-// Full parent environment plus the caller's extra `KEY=VALUE` entries
-// (`run_capture`'s empty env is EMPTY, not "inherit", so the child needs
-// PATH etc. to resolve compiler and toolchain subprocesses on the host).
+// Clean child environment plus the caller's extra `KEY=VALUE` entries.
+// Every key this fixture controls is stripped before the extras are pushed:
+// libc `getenv` returns the first duplicate, so an ambient value otherwise
+// defeats the test's later override. Preserve the explicit host/target seams
+// after the extras so Windows-host CI still exercises the same resolver as
+// the child compiler, while a future caller-provided seam remains first.
 fn _env_with(extra: string[]) -> string[] ![io] {
-    let mut e = process.environ();
+    let host_os = env.get("SAILFIN_HOST_OS");
+    let target_os = env.get("SAILFIN_TARGET_OS");
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-dispatch-child"), ["INSTALL_BASE", "SAILFIN_RUNTIME_ROOT", "SAILFIN_TOOLCHAIN", "SAILFIN_TOOLCHAIN_DISPATCHED"]);
     let mut i: int = 0;
     loop {
         if i >= extra.length { break; }
         e.push(extra[i]);
         i += 1;
     }
+    if host_os.length > 0 { e.push("SAILFIN_HOST_OS=" + host_os); }
+    if target_os.length > 0 { e.push("SAILFIN_TARGET_OS=" + target_os); }
     return e;
 }
 
@@ -102,8 +111,7 @@ fn _env_with(extra: string[]) -> string[] ![io] {
 // public internet for a deliberately nonexistent `v999.0.0` instead of
 // exercising the local store (SFN-1115).
 fn _stub_bin(dir: string) -> string ![io] {
-    if host_is_windows() { return dir + "/sailfin.exe"; }
-    return dir + "/sailfin";
+    return host_exe_name(dir + "/sailfin");
 }
 
 // Build a native Sailfin stub that prints `marker` and exits 0. Compiling
@@ -380,8 +388,9 @@ test "toolchain dispatch: an incomplete store entry is not dispatched" ![io] {
     assert exit != 0;
     // Never re-exec'd the partial binary.
     assert ! contains(out + err, _marker());
-    // The failure names the recovery command.
-    assert contains(out + err, "toolchain install");
+    // This is the fetch-failed fall-through, not any of the other install
+    // hints emitted when the entry is missing or rejected for another reason.
+    assert contains(out + err, "could not obtain the pinned toolchain 999.0.0");
 }
 
 test "toolchain dispatch: off skips the gate and proceeds" ![io] {
