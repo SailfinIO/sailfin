@@ -128,13 +128,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
                     let alloc_operands_a: LLVMOperand[] = [alloc_size_op_a];
                     let alloc_result_a = emit_runtime_call("alloc_struct", alloc_operands_a, alloc_overrides_a, temp_index
                         + 2, current_lines);
-                    let mut _alloc_di_a: int = 0;
-                    loop {
-                        if _alloc_di_a >= alloc_result_a.diagnostics.length {
-                            break;
-                        }
-                        _alloc_di_a += 1;
-                    }
                     diags = extend_diag_array(diags, alloc_result_a.diags);
                     current_lines = alloc_result_a.lines;
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "

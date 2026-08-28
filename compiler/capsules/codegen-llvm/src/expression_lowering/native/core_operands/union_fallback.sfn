@@ -86,13 +86,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                         let alloc_operands_d: LLVMOperand[] = [alloc_size_op_d];
                         let alloc_result_d = emit_runtime_call("alloc_struct", alloc_operands_d, alloc_overrides_d, local_temp
                             + 2, local_lines);
-                        let mut _alloc_di_d: int = 0;
-                        loop {
-                            if _alloc_di_d >= alloc_result_d.diagnostics.length {
-                                break;
-                            }
-                            _alloc_di_d += 1;
-                        }
                         diags = extend_diag_array(diags, alloc_result_d.diags);
                         local_lines = alloc_result_d.lines;
                         local_lines.push("  " + typed_ptr_temp
@@ -114,13 +107,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                         let mp_operands_d: LLVMOperand[] = [mp_op_d];
                         let mp_result_d = emit_runtime_call("mark_persistent", mp_operands_d, empty_runtime_call_overrides(), local_temp
                             + 4, local_lines);
-                        let mut _mp_di_d: int = 0;
-                        loop {
-                            if _mp_di_d >= mp_result_d.diagnostics.length {
-                                break;
-                            }
-                            _mp_di_d += 1;
-                        }
                         diags = extend_diag_array(diags, mp_result_d.diags);
                         local_lines = mp_result_d.lines;
                         has_value = true;
@@ -171,13 +157,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                             let alloc_operands_e: LLVMOperand[] = [alloc_size_op_e];
                             let alloc_result_e = emit_runtime_call("alloc_struct", alloc_operands_e, alloc_overrides_e, local_temp
                                 + 2, local_lines);
-                            let mut _alloc_di_e: int = 0;
-                            loop {
-                                if _alloc_di_e >= alloc_result_e.diagnostics.length {
-                                    break;
-                                }
-                                _alloc_di_e += 1;
-                            }
                             diags = extend_diag_array(diags, alloc_result_e.diags);
                             local_lines = alloc_result_e.lines;
                             local_lines.push("  " + typed_ptr_temp
@@ -199,13 +178,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                             let mp_operands_e: LLVMOperand[] = [mp_op_e];
                             let mp_result_e = emit_runtime_call("mark_persistent", mp_operands_e, empty_runtime_call_overrides(), local_temp
                                 + 4, local_lines);
-                            let mut _mp_di_e: int = 0;
-                            loop {
-                                if _mp_di_e >= mp_result_e.diagnostics.length {
-                                    break;
-                                }
-                                _mp_di_e += 1;
-                            }
                             diags = extend_diag_array(diags, mp_result_e.diags);
                             local_lines = mp_result_e.lines;
                             has_value = true;

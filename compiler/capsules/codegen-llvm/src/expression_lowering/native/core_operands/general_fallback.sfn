@@ -60,13 +60,6 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     let alloc_operands_c: LLVMOperand[] = [alloc_size_op_c];
                     let alloc_result_c = emit_runtime_call("alloc_struct", alloc_operands_c, alloc_overrides_c, temp_index
                         + 2, current_lines);
-                    let mut _alloc_di_c: int = 0;
-                    loop {
-                        if _alloc_di_c >= alloc_result_c.diagnostics.length {
-                            break;
-                        }
-                        _alloc_di_c += 1;
-                    }
                     diags = extend_diag_array(diags, alloc_result_c.diags);
                     current_lines = alloc_result_c.lines;
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
@@ -229,13 +222,6 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 let alloc_operands_f: LLVMOperand[] = [alloc_size_op_f];
                 let alloc_result_f = emit_runtime_call("alloc_struct", alloc_operands_f, alloc_overrides_f, temp_index
                     + 2, current_lines);
-                let mut _alloc_di_f: int = 0;
-                loop {
-                    if _alloc_di_f >= alloc_result_f.diagnostics.length {
-                        break;
-                    }
-                    _alloc_di_f += 1;
-                }
                 diags = extend_diag_array(diags, alloc_result_f.diags);
                 current_lines = alloc_result_f.lines;
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
@@ -319,13 +305,6 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 let alloc_operands_g: LLVMOperand[] = [alloc_size_op_g];
                 let alloc_result_g = emit_runtime_call("alloc_struct", alloc_operands_g, alloc_overrides_g, temp_index
                     + 2, current_lines);
-                let mut _alloc_di_g: int = 0;
-                loop {
-                    if _alloc_di_g >= alloc_result_g.diagnostics.length {
-                        break;
-                    }
-                    _alloc_di_g += 1;
-                }
                 diags = extend_diag_array(diags, alloc_result_g.diags);
                 current_lines = alloc_result_g.lines;
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "

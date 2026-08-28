@@ -331,13 +331,6 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                             continue;
                         }
                         let variant_result = parse_enum_variant_layout(variant_text, enum_name);
-                        let mut _ci: int = 0;
-                        loop {
-                            if _ci >= variant_result.diagnostics.length {
-                                break;
-                            }
-                            _ci += 1;
-                        }
 
                         if variant_result.success {
                             variants.push(variant_result.variant);
@@ -346,13 +339,6 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                         let body = strip_prefix(variant_line, ".layout ");
                         let payload_text = strip_prefix(body, "payload ");
                         let payload_result = parse_enum_payload_layout(payload_text, enum_name);
-                        let mut _ci: int = 0;
-                        loop {
-                            if _ci >= payload_result.diagnostics.length {
-                                break;
-                            }
-                            _ci += 1;
-                        }
 
                         if payload_result.success {
                             if variants.length > 0 {

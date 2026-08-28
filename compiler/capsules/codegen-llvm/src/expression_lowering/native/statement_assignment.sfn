@@ -274,13 +274,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                     let subscript_parse = parse_index_expression(base_name);
                     if subscript_parse.success {
                         let array_result = lower_expression(subscript_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-                        let mut _sci0: int = 0;
-                        loop {
-                            if _sci0 >= array_result.diagnostics.length {
-                                break;
-                            }
-                            _sci0 += 1;
-                        }
                         diags = extend_diag_array(diags, array_result.diags);
                         current_lines = array_result.lines;
                         current_temp = array_result.temp_index;
@@ -290,13 +283,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             let element_type = array_pointer_element_type(array_operand.llvm_type);
                             if element_type.length > 0 {
                                 let index_result = lower_expression(subscript_parse.index, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-                                let mut _sci1: int = 0;
-                                loop {
-                                    if _sci1 >= index_result.diagnostics.length {
-                                        break;
-                                    }
-                                    _sci1 += 1;
-                                }
                                 diags = extend_diag_array(diags, index_result.diags);
                                 current_lines = index_result.lines;
                                 current_temp = index_result.temp_index;
@@ -308,13 +294,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                     // still typed as `number` is common).
                                     // Exempt from the ABI primitive kind diagnostic.
                                     let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true, null);
-                                    let mut _sci2: int = 0;
-                                    loop {
-                                        if _sci2 >= coerced_index.diagnostics.length {
-                                            break;
-                                        }
-                                        _sci2 += 1;
-                                    }
                                     diags = extend_diag_array(diags, coerced_index.diags);
                                     current_lines = coerced_index.lines;
                                     current_temp = coerced_index.temp_index;
@@ -371,13 +350,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                         };
                                         let bc_assign_operands: LLVMOperand[] = [bc_assign_index_op, bc_assign_length_op];
                                         let bc_assign_result = emit_runtime_call("runtime.bounds_check", bc_assign_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-                                        let mut _bc_assign_di: int = 0;
-                                        loop {
-                                            if _bc_assign_di >= bc_assign_result.diagnostics.length {
-                                                break;
-                                            }
-                                            _bc_assign_di += 1;
-                                        }
                                         diags = extend_diag_array(diags, bc_assign_result.diags);
                                         current_lines = bc_assign_result.lines;
                                         current_temp = bc_assign_result.temp_index;
@@ -539,13 +511,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             // (see comment at the subscripted-lvalue site
                             // above).
                             let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true, null);
-                            let mut _ci10: int = 0;
-                            loop {
-                                if _ci10 >= coerced_index.diagnostics.length {
-                                    break;
-                                }
-                                _ci10 += 1;
-                            }
                             diags = extend_diag_array(diags, coerced_index.diags);
                             current_lines = coerced_index.lines;
                             current_temp = coerced_index.temp_index;

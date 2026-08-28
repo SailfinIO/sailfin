@@ -105,11 +105,6 @@ fn _field_constraint_unsupported_diag(field_name: string, owner: string, span_in
 fn emit_match_guard_branch(function_name: string, guard_text: string, case_span: NativeSourceSpan?, bindings: ParameterBinding[], locals: LocalBinding[], body_label: string, failure_target: string, temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchGuardEmission {
     let mut diags: LoweringDiagnostic[] = [];
     let lowered = lower_condition_to_i1(function_name, guard_text, bindings, locals, temp_index, lines, functions, context);
-    let mut idx: int = 0;
-    loop {
-        if idx >= lowered.diagnostics.length { break; }
-        idx += 1;
-    }
     let mut current_lines = lowered.lines;
     if lowered.operand != null {
         current_lines.push("  br i1 " + lowered.operand.value + ", label %"
@@ -419,13 +414,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                         value: expected_tag_value
                                     };
                                     let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines, false);
-                                    let mut _ci5: int = 0;
-                                    loop {
-                                        if _ci5 >= comparison.diagnostics.length {
-                                            break;
-                                        }
-                                        _ci5 += 1;
-                                    }
                                     current_lines = comparison.lines;
                                     current_temp = comparison.temp_index;
                                     condition_operand = comparison.operand;
