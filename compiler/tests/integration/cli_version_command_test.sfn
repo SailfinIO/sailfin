@@ -37,7 +37,8 @@ fn _empty_ctx() -> CliContext {
         compiler_path: "",
         registry_url: "",
         trace_argv: false,
-        orig_args: []
+        orig_args: [],
+        selector_resolved: false
     };
 }
 
