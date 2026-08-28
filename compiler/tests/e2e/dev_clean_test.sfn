@@ -4,6 +4,7 @@
 // it builds a fully synthetic repo in a scratch dir and drives the
 // compiler-under-test against it as cwd — no real build tree is ever
 // touched.
+import { remove_all } from "sfn/fs";
 import { find } from "sfn/strings";
 import {
     clean_runner_env,
@@ -37,7 +38,7 @@ fn _write_bootstrap_toml(repo: string) -> void ![io] {
 // the marker files each test asserts on: `build/native`, `build/sailfin`,
 // the seed store stand-in `build/toolchains/seed/bin`, and `dist`.
 fn _seed_repo(repo: string) -> void ![io] {
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     _write_bootstrap_toml(repo);
     fs.createDirectory(repo + "/build/native", true);
@@ -116,7 +117,7 @@ test "dev clean: dry-run removes nothing" ![io] {
     assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
     assert fs.exists(repo + "/dist/marker.txt");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "dev clean: preserves the seed store" ![io] {
@@ -134,7 +135,7 @@ test "dev clean: preserves the seed store" ![io] {
     assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
     assert fs.exists(repo + "/dist/marker.txt");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "dev clean: --include-seed removes the seed store" ![io] {
@@ -149,7 +150,7 @@ test "dev clean: --include-seed removes the seed store" ![io] {
     assert exit == 0;
     assert ! fs.exists(repo + "/build/toolchains");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "dev clean: env opt-out removes the seed store" ![io] {
@@ -165,7 +166,7 @@ test "dev clean: env opt-out removes the seed store" ![io] {
     assert exit == 0;
     assert ! fs.exists(repo + "/build/toolchains");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "dev clean: dist clean removes dist" ![io] {
@@ -181,13 +182,13 @@ test "dev clean: dist clean removes dist" ![io] {
     assert ! fs.exists(repo + "/dist");
     assert fs.exists(repo + "/build/native/marker.txt");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "dev clean: absent build tree is a no-op" ![io] {
     let repo = _scratch_repo("dev-clean-absent-tree");
     _seed_repo(repo);
-    process.run(["rm", "-rf", repo + "/build"]);
+    assert remove_all(repo + "/build");
     let sfn = sfn_bin_abs_path();
     let child_env = clean_runner_env(nested_runner_scratch("dev_clean_absent_tree"));
 
@@ -199,12 +200,12 @@ test "dev clean: absent build tree is a no-op" ![io] {
     assert find(out, "nothing to remove (build tree absent)", 0) >= 0;
     assert ! fs.exists(repo + "/build");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "dev clean: preserved store name comes from the bootstrap manifest" ![io] {
     let repo = _scratch_repo("dev-clean-custom-store");
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     fs.writeFile(repo + "/bootstrap.toml", "[seed]\n" + "version = \"0.0.0\"\n"
         + "source = \"github-release\"\n"
@@ -234,14 +235,14 @@ test "dev clean: preserved store name comes from the bootstrap manifest" ![io] {
     assert ! fs.exists(repo + "/build/toolchains");
     assert ! fs.exists(repo + "/build/native/marker.txt");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "dev clean: a symlinked build child is unlinked, not followed" ![io] {
     let repo = _scratch_repo("dev-clean-symlink-repo");
     _seed_repo(repo);
     let outside = _scratch_repo("dev-clean-symlink-outside");
-    process.run(["rm", "-rf", outside]);
+    assert remove_all(outside);
     fs.createDirectory(outside, true);
     fs.writeFile(outside + "/treasure.txt", "treasure\n");
     process.run(["ln", "-s", outside, repo + "/build/link"]);
@@ -262,8 +263,8 @@ test "dev clean: a symlinked build child is unlinked, not followed" ![io] {
     let _link_err = process.capture_take_stderr();
     assert link_exit != 0;
 
-    process.run(["rm", "-rf", repo]);
-    process.run(["rm", "-rf", outside]);
+    assert remove_all(repo);
+    assert remove_all(outside);
 }
 
 test "dev clean: all removes both trees" ![io] {
@@ -280,12 +281,12 @@ test "dev clean: all removes both trees" ![io] {
     assert ! fs.exists(repo + "/dist");
     assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "dev clean: refuses to run outside a compiler checkout" ![io] {
     let repo = _scratch_repo("dev-clean-outside-checkout");
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     fs.createDirectory(repo + "/build", true);
     fs.writeFile(repo + "/build/marker.txt", "marker\n");
@@ -299,5 +300,5 @@ test "dev clean: refuses to run outside a compiler checkout" ![io] {
     assert find(out + err, "bootstrap.toml", 0) >= 0;
     assert fs.exists(repo + "/build/marker.txt");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }

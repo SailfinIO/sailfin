@@ -50,6 +50,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
+import { remove_all } from "sfn/fs";
 import {
     Env,
     env_from_current,
@@ -380,7 +381,7 @@ test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clo
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }
 
 test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (control)" ![clock, io, net] {
@@ -419,7 +420,7 @@ test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }
 
 test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only server" ![clock, io, net] {
@@ -455,5 +456,5 @@ test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only serve
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }

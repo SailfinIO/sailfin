@@ -20,6 +20,7 @@
 //
 // Each test uses its own scratch namespace so parallel runs don't
 // collide, and cleans up on exit.
+import { remove_all } from "sfn/fs";
 import { default_scratch_dir, sfn_bin_path } from "sfn/test";
 
 import { _stage_one_runtime_sfn_import_context, runtime_asm_cache_key } from "../../src/build/runtime_objs";
@@ -50,14 +51,12 @@ fn _rsc_tmp_root(label: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
     if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn_runtime_stage_shared_cache_test_" + label;
-    process.run(["rm", "-rf", dir]);
-    process.run(["mkdir", "-p", dir]);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
     return dir;
 }
 
-fn _rsc_cleanup(path: string) ![io] {
-    process.run(["rm", "-rf", path]);
-}
+fn _rsc_cleanup(path: string) ![io] { assert remove_all(path); }
 
 // --------------------------------------------------------------
 // 1. store -> fresh work dir -> restore

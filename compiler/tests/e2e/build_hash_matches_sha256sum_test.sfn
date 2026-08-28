@@ -5,6 +5,7 @@
 // every representative artifact class the build hashes in production: the
 // compiler binary, a compressed tar archive, and generated LLVM IR larger than
 // the retired 64 KiB threshold.
+import { remove_all } from "sfn/fs";
 import { default_scratch_dir, sfn_bin_path, tool_present } from "sfn/test";
 
 import { _sha256_of_file } from "../../src/build/fs";
@@ -54,7 +55,7 @@ test "build_hash: string entry point matches the system digest" ![io] {
     let path = _tmp_path("text.txt");
     fs.writeFile(path, content);
     let expected = _system_sha256(path);
-    process.run(["rm", "-f", path]);
+    assert remove_all(path);
     if expected.length == 0 {
         assert true;
         return;
@@ -85,7 +86,7 @@ test "build_hash: tar.gz archive matches the system digest" ![io] {
     }
     let expected = _system_sha256(path);
     let got = _sha256_of_file(path);
-    process.run(["rm", "-f", path]);
+    assert remove_all(path);
     if expected.length == 0 {
         assert true;
         return;
@@ -106,7 +107,7 @@ test "build_hash: generated LLVM IR above 64 KiB matches the system digest" ![io
     assert contents.length > 65536;
     let expected = _system_sha256(path);
     let got = _sha256_of_file(path);
-    process.run(["rm", "-f", path]);
+    assert remove_all(path);
     if expected.length == 0 {
         assert true;
         return;
@@ -116,12 +117,12 @@ test "build_hash: generated LLVM IR above 64 KiB matches the system digest" ![io
 
 test "build_hash: missing file fails closed while an empty file hashes" ![io] {
     let missing = _tmp_path("missing.bin");
-    process.run(["rm", "-f", missing]);
+    assert remove_all(missing);
     assert _sha256_of_file(missing) == "";
 
     let empty = _tmp_path("empty.bin");
     fs.writeFile(empty, "");
     let got = _sha256_of_file(empty);
-    process.run(["rm", "-f", empty]);
+    assert remove_all(empty);
     assert got == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 }

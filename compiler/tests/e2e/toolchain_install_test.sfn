@@ -22,6 +22,7 @@
 //      via the `SAILFIN_TOOLCHAIN_RELEASE_BASE` mirror override; skipped
 //      when `python3`/`timeout` are unavailable (the tool-probe SKIP
 //      pattern the e2e rules establish).
+import { remove_all } from "sfn/fs";
 import { contains } from "sfn/strings";
 import {
     default_scratch_dir,
@@ -86,7 +87,7 @@ test "toolchain install: missing version is a usage error" ![io] {
 
 test "toolchain install: a non-version string is rejected with no store entry" ![io] {
     let store = _scratch_root() + "/reject-store";
-    process.run(["rm", "-rf", store]);
+    assert remove_all(store);
     let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", "not-a-version"], _env_with(["INSTALL_BASE="
         + store]));
     let out = process.capture_take_stdout();
@@ -100,9 +101,9 @@ test "toolchain install: a non-version string is rejected with no store entry" !
 
 test "toolchain install: a path-traversal version cannot escape the store" ![io] {
     let store = _scratch_root() + "/traversal-store";
-    process.run(["rm", "-rf", store]);
+    assert remove_all(store);
     let sentinel = _scratch_root() + "/traversal-sentinel";
-    process.run(["rm", "-rf", sentinel]);
+    assert remove_all(sentinel);
     // `../` components would let a naive `<base>/<ver>` join write outside
     // the store; the semver validity gate must reject the version first.
     let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", "../traversal-sentinel/pwned"], _env_with(["INSTALL_BASE="
@@ -116,7 +117,7 @@ test "toolchain install: a path-traversal version cannot escape the store" ![io]
 
 test "toolchain install: an unfetchable version fails closed with nothing stored" ![io] {
     let store = _scratch_root() + "/unfetchable-store";
-    process.run(["rm", "-rf", store]);
+    assert remove_all(store);
     // A version that will never be a real release: the signed manifest
     // 404s (online) or the connection fails (offline). Either way the
     // command must abort non-zero and write nothing — no network guard
@@ -149,8 +150,8 @@ test "toolchain install: a bad signature is refused before extraction" ![io] {
     let tag = "v" + ver;
     let srv = _scratch_root() + "/badsig-srv";
     let store = _scratch_root() + "/badsig-store";
-    process.run(["rm", "-rf", srv]);
-    process.run(["rm", "-rf", store]);
+    assert remove_all(srv);
+    assert remove_all(store);
     fs.createDirectory(srv + "/" + tag, true);
     // A well-formed-but-unsigned manifest: any manifest text plus a
     // syntactically valid (128-hex) signature that does not verify against
@@ -223,8 +224,8 @@ test "toolchain install: a signed manifest refuses an asset digest mismatch" ![i
     let tag = "v" + ver;
     let srv = _scratch_root() + "/digest-mismatch-srv";
     let store = _scratch_root() + "/digest-mismatch-store";
-    process.run(["rm", "-rf", srv]);
-    process.run(["rm", "-rf", store]);
+    assert remove_all(srv);
+    assert remove_all(store);
     // A legacy entry must never short-circuit or seed a qualified install.
     // The command still downloads and verifies the fresh host asset below.
     let legacy = store + "/" + ver;
@@ -308,8 +309,8 @@ test "toolchain install: a windows host with no msvc entry falls back to the pla
     let tag = "v" + ver;
     let srv = _scratch_root() + "/win-fallback-srv";
     let store = _scratch_root() + "/win-fallback-store";
-    process.run(["rm", "-rf", srv]);
-    process.run(["rm", "-rf", store]);
+    assert remove_all(srv);
+    assert remove_all(store);
     let release_dir = srv + "/" + tag;
     fs.createDirectory(release_dir, true);
     let fixture = "compiler/tests/e2e/fixtures/toolchain_v0.9.5_SHA256SUMS";
@@ -375,8 +376,8 @@ test "toolchain install: a windows host prefers the msvc entry when the manifest
     let tag = "v" + ver;
     let srv = _scratch_root() + "/win-preference-srv";
     let store = _scratch_root() + "/win-preference-store";
-    process.run(["rm", "-rf", srv]);
-    process.run(["rm", "-rf", store]);
+    assert remove_all(srv);
+    assert remove_all(store);
     let release_dir = srv + "/" + tag;
     fs.createDirectory(release_dir, true);
     let fixture = "compiler/tests/e2e/fixtures/toolchain_v0.10.3_SHA256SUMS";

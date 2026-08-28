@@ -7,6 +7,7 @@
 // (`scripts/compiler_source_fingerprint.sh`) in favour of the native
 // `sfn dev bootstrap fingerprint` subcommand; this file now drives that
 // subcommand directly instead of shelling out to the script.
+import { copy, remove_all } from "sfn/fs";
 import { sfn_bin_abs_path, sfn_bin_path } from "sfn/test";
 
 // `sfn dev bootstrap fingerprint <root>` prints ONLY the hex digest on
@@ -28,7 +29,7 @@ fn _workspace_fingerprint(root: string) -> string ![io] {
 test "compiler source fingerprint changes with bytes despite restored mtime" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/source-fingerprint-content";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     let source = scratch + "/main.sfn";
     fs.writeFile(source, "fn value() -> int { return 1; }\n");
@@ -44,12 +45,12 @@ test "compiler source fingerprint changes with bytes despite restored mtime" ![i
     assert first.length > 0;
     assert second.length > 0;
     assert first != second;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "compiler source fingerprint is stable across repeated runs" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH") + "/source-fingerprint-stable";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
     let first = _fingerprint(scratch);
@@ -57,27 +58,28 @@ test "compiler source fingerprint is stable across repeated runs" ![io] {
 
     assert first.length > 0;
     assert first == second;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "compiler source fingerprint includes source paths" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH") + "/source-fingerprint-path";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     fs.writeFile(scratch + "/first.sfn", "fn value() -> int { return 1; }\n");
     let first = _fingerprint(scratch);
 
-    process.run(["mv", scratch + "/first.sfn", scratch + "/renamed.sfn"]);
+    assert copy(scratch + "/first.sfn", scratch + "/renamed.sfn");
+    assert remove_all(scratch + "/first.sfn");
     let renamed = _fingerprint(scratch);
 
     assert first != renamed;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "compiler source fingerprint changes when a source file is added or removed" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/source-fingerprint-add-remove";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     fs.writeFile(scratch + "/first.sfn", "fn value() -> int { return 1; }\n");
     let before_add = _fingerprint(scratch);
@@ -86,17 +88,17 @@ test "compiler source fingerprint changes when a source file is added or removed
     let after_add = _fingerprint(scratch);
     assert after_add != before_add;
 
-    process.run(["rm", scratch + "/second.sfn"]);
+    assert remove_all(scratch + "/second.sfn");
     let after_remove = _fingerprint(scratch);
     assert after_remove == before_add;
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "compiler source fingerprint ignores non-sfn files under the root" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/source-fingerprint-non-sfn";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     fs.writeFile(scratch + "/first.sfn", "fn value() -> int { return 1; }\n");
     let before = _fingerprint(scratch);
@@ -106,13 +108,13 @@ test "compiler source fingerprint ignores non-sfn files under the root" ![io] {
 
     assert before.length > 0;
     assert after == before;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "compiler source fingerprint v2 covers workspace explicit inputs" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/source-fingerprint-workspace-v2";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch + "/compiler/src", true);
     fs.createDirectory(scratch + "/runtime/sfn", true);
     fs.createDirectory(scratch + "/runtime/ir", true);
@@ -154,5 +156,5 @@ test "compiler source fingerprint v2 covers workspace explicit inputs" ![io] {
 
     fs.writeFile(scratch + "/compiler/src/main.sfn", "fn main() -> int { return 1; }\n");
     assert _workspace_fingerprint(scratch) != baseline;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }

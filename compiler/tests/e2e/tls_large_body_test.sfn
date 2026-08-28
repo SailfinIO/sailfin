@@ -53,6 +53,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { contains, find } from "sfn/strings";
 import {
@@ -585,9 +586,9 @@ test "tls: a payload larger than one TLS record round-trips in both directions" 
         throw err;
     }
 
-    // Best-effort cleanup. The server itself was already killed and reaped
+    // Cleanup after the server was already killed and reaped
     // above.
-    let _rm = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }
 
 test "tls: the same oversize payload round-trips over plaintext (control)" ![clock, io, net] {
@@ -637,5 +638,5 @@ test "tls: the same oversize payload round-trips over plaintext (control)" ![clo
         throw err;
     }
 
-    let _rm = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }

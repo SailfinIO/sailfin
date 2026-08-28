@@ -2,6 +2,7 @@
 //
 // Runs the SFN-472 native bring-up probe on every supported host so its
 // aggregate-return, try/throw, and permission checks cannot silently rot.
+import { copy, remove_all, set_perms } from "sfn/fs";
 import { contains } from "sfn/strings";
 import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
 
@@ -9,10 +10,10 @@ test "aarch64 bootstrap: self path skips sibling sailfin directory (SFN-579)" ![
     let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length == 0 { scratch = default_scratch_dir(); }
     let root = scratch + "/sfn579-self-path";
-    process.run(["rm", "-rf", root]);
+    assert remove_all(root);
     fs.createDirectory(root + "/sailfin", true);
-    let copy_exit = process.run(["cp", sfn_bin_path(), root + "/sfn"]);
-    assert copy_exit == 0;
+    assert copy(sfn_bin_path(), root + "/sfn");
+    assert set_perms(root + "/sfn", 493);
     let exit = process.run_capture([root + "/sfn", "run", "compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn"], process.environ());
     let stdout = process.capture_take_stdout();
     let stderr = process.capture_take_stderr();

@@ -32,6 +32,7 @@
 // pattern. The client fixture is compiled via a nested `sfn build`, isolated
 // with `clean_runner_env(nested_runner_scratch(...))` (SFN-401) so the pool's
 // per-file scratch/orchestration keys never leak into the nested build.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { int_to_string } from "sfn/strings";
 import {
@@ -396,5 +397,5 @@ test "runtime tls: a CAFILE bundle over the old 16-block chain cap still verifie
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }

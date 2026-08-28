@@ -7,6 +7,8 @@
 // (fail-closed fetch/verify) or is skipped without a local server. Driving
 // this helper directly needs no network, no release signature, and no
 // binary fixture — it operates on a hand-built fake extract root.
+import { remove_all } from "sfn/fs";
+
 import { host_exe_name } from "../../src/build/target";
 import {
     contains_string,
@@ -168,7 +170,7 @@ test "toolchain layout: a workspace manifest without capsules fails before the m
 
 test "toolchain layout: two hosts atomically hold the same exact version" ![io] {
     let base = _scratch_dir() + "/two-hosts";
-    process.run(["rm", "-rf", base]);
+    assert remove_all(base);
     fs.createDirectory(base, true);
     let root = _fake_extract_root(base);
     let version = "0.10.4";
@@ -193,7 +195,7 @@ test "toolchain layout: two hosts atomically hold the same exact version" ![io] 
 
 test "toolchain layout: failed qualified staging leaves legacy untouched" ![io] {
     let base = _scratch_dir() + "/legacy-preserved";
-    process.run(["rm", "-rf", base]);
+    assert remove_all(base);
     let version = "0.10.4";
     let legacy = base + "/" + version;
     fs.createDirectory(legacy, true);
@@ -217,7 +219,7 @@ test "toolchain layout: failed qualified staging leaves legacy untouched" ![io] 
 
 test "toolchain layout: commit failure preserves an existing qualified entry" ![io] {
     let base = _scratch_dir() + "/qualified-preserved";
-    process.run(["rm", "-rf", base]);
+    assert remove_all(base);
     let store_dir = toolchain_version_dir(toolchain_host_store_base(base, "x86_64-unknown-linux-gnu"), "0.10.4");
     fs.createDirectory(store_dir, true);
     fs.writeFile(host_exe_name(store_dir + "/sailfin"), "existing-bytes");
@@ -225,7 +227,7 @@ test "toolchain layout: commit failure preserves an existing qualified entry" ![
 
     let staged = toolchain_staging_dir(store_dir);
     assert staged.length > 0;
-    process.run(["rm", "-rf", staged]);
+    assert remove_all(staged);
     assert ! toolchain_commit_staged_entry(staged, store_dir);
 
     assert ! fs.exists(staged);

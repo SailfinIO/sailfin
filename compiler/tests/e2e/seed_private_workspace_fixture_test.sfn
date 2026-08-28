@@ -13,6 +13,7 @@
 // understand. This fixture proves all four against the real seed binary
 // pinned by `bootstrap.toml`, so a regression here would block the
 // `publish = false` rollout before it starts.
+import { remove_all } from "sfn/fs";
 import { find } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
 
@@ -128,5 +129,5 @@ test "seed fixture: pinned seed builds private workspace members transitively" !
     assert run_exit == 0;
     assert find(run_out, "answer=42", 0) >= 0;
 
-    process.run(["rm", "-rf", root]);
+    assert remove_all(root);
 }

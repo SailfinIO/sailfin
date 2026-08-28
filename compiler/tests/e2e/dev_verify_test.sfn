@@ -31,6 +31,7 @@
 // would bind the child to the parent pool's orchestration keys and to the
 // parent's private build cache, which passes a serial local run and fails
 // under CI's parallel `--jobs N`.
+import { copy, remove_all, set_perms } from "sfn/fs";
 import { contains, find, split } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
@@ -40,7 +41,7 @@ fn _child_env(label: string) -> string[] ![io] {
 
 fn _scratch(label: string) -> string ![io] {
     let dir = nested_runner_scratch(label);
-    process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
     fs.createDirectory(dir, true);
     return dir;
 }
@@ -164,8 +165,8 @@ test "dev verify: a failing compile phase names itself in the verdict block" ![i
     // injected phase-1 failure that costs milliseconds.
     let dir = _scratch("dv-compile-fail");
     let bin = dir + "/sfn";
-    let copied = process.run(["cp", sfn_bin_path(), bin]);
-    assert copied == 0;
+    assert copy(sfn_bin_path(), bin);
+    assert set_perms(bin, 493);
 
     let rc = process.run_capture_cwd([bin, "dev", "verify"], _child_env("dv-compile-fail"), dir);
     let out = process.capture_take_stdout() + process.capture_take_stderr();
@@ -192,8 +193,8 @@ test "dev verify: the report file is written and names the phase ledger" ![io] {
     // the mid-run shape differs only in `complete`/`in_flight`.
     let dir = _scratch("dv-report");
     let bin = dir + "/sfn";
-    let copied = process.run(["cp", sfn_bin_path(), bin]);
-    assert copied == 0;
+    assert copy(sfn_bin_path(), bin);
+    assert set_perms(bin, 493);
 
     let _rc = process.run_capture_cwd([bin, "dev", "verify"], _child_env("dv-report"), dir);
     let _out = process.capture_take_stdout();
