@@ -1482,6 +1482,15 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if path.length >= 2 && strings_equal(path[1], "inventory") {
         return inventory_run(matches, ctx);
     }
+    // Everything past this point is a `bootstrap` leaf, matched on the leaf
+    // name alone — so the `path[1]` guards above are load-bearing, not
+    // stylistic. A new `dev <group>` whose leaf collides with a `bootstrap`
+    // leaf (`build`, `check`, `fetch`, `pin`, `fingerprint`, `install`) is
+    // claimed by the wrong handler unless it adds its own `path[1]` guard
+    // here. That is the same defect SFN-1085 removed from the root dispatch
+    // (`_v2_is_command` in `cli/main.sfn`, which gates on `subcommand_path[0]`
+    // so ordering carries no meaning); at this level the ordering is still
+    // what keeps the groups apart.
     let sub: string = subcommand(matches);
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }
     if strings_equal(sub, "build") {

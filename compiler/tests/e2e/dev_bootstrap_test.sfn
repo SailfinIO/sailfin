@@ -9,12 +9,15 @@
 import { find } from "sfn/strings";
 import { scratch_root, sfn_bin_abs_path, sfn_bin_path } from "sfn/test";
 
-// A fresh, empty directory to use as a CHILD process cwd. Deliberately NOT a
-// compiler checkout: with no `bootstrap.toml` in it, every `dev` leaf that
-// resolves the bootstrap manifest fails fast with its own diagnostic and
-// never fetches a seed or starts a build. That diagnostic is what the
-// dispatch-routing tests below assert on — it is a string only the `dev`
-// command family emits, so seeing it proves which block claimed the argv.
+// A directory with no `bootstrap.toml`, to use as a CHILD process cwd. That
+// absence is the whole property relied on (the directory survives between
+// runs under a shared `SAILFIN_TEST_SCRATCH`, and nothing here needs it
+// empty): every `dev` leaf below resolves the bootstrap manifest as its first
+// act, so outside a compiler checkout each fails with its own diagnostic
+// before fetching a seed, starting a build, or removing anything. That
+// diagnostic is what the dispatch-routing tests assert on — a string only the
+// `dev` command family emits, so seeing it proves which block claimed the
+// argv.
 fn _empty_cwd(label: string) -> string ![io] {
     let dir = scratch_root() + "/sfn-dev-dispatch-" + label;
     fs.createDirectory(dir, true);
