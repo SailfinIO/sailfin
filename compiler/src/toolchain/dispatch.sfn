@@ -6,10 +6,16 @@ import { diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 
 import { _path_basename } from "../build/paths";
 import { _env_flag } from "../build_flags";
-import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../capsule_resolver/toolchain";
+import {
+    ToolchainDecision,
+    toolchain_decide,
+    toolchain_print_mismatch,
+    toolchain_selection_satisfies
+} from "../capsule_resolver/toolchain";
 import { CliContext } from "../cli/context";
 import { starts_with, strings_equal, substring } from "../string_utils";
 import { render_terminal_diagnostic } from "../terminal_output";
+import { resolve_compiler_version } from "../version";
 import { toolchain_current_host } from "./host";
 import { toolchain_install_to_user_store, toolchain_is_valid_install_version } from "./install";
 import {
@@ -77,13 +83,168 @@ fn _proceed_in_process(ctx: CliContext) -> int ![io] {
     return 1;
 }
 
+// Build the dispatched child's environment. Two keys are rewritten rather than
+// inherited verbatim (SFN-1065).
+//
+// An exact `SAILFIN_TOOLCHAIN` is dropped, because the selection has already
+// been made here. Leaving it would hand the child a selection input that
+// disagrees with the toolchain it *is*, so `SAILFIN_TOOLCHAIN=A sfn +B <cmd>`
+// would die in the child's own dispatch-loop guard, telling the user to
+// reinstall a perfectly good toolchain. The mode words
+// (`auto`/`local`/`off`/`0`) are kept: they constrain fetching and floor
+// behavior in the child and are not selections. Dropping the exact knob also
+// puts the child on the mode path, whose floor-before-marker ordering
+// re-adjudicates the pin against what the child actually turned out to be.
+//
+// Any inherited `SAILFIN_TOOLCHAIN_DISPATCHED` is dropped so the marker
+// appended below is the only one in the child's environment, rather than
+// relying on every caller to have returned early on a set marker.
+fn _dispatch_child_env(target: string) -> string[] ![io] {
+    let source = process.environ();
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= source.length { break; }
+        let entry = source[i];
+        let mut keep: boolean = true;
+        if starts_with(entry, "SAILFIN_TOOLCHAIN_DISPATCHED=") { keep = false; }
+        if starts_with(entry, "SAILFIN_TOOLCHAIN=") {
+            // 18 is the length of "SAILFIN_TOOLCHAIN=".
+            keep = _dispatch_knob_is_mode(substring(entry, 18, entry.length));
+        }
+        if keep { out.push(entry); }
+        i += 1;
+    }
+    out.push("SAILFIN_TOOLCHAIN_DISPATCHED=" + target);
+    return out;
+}
+
+// The exact version named by `SAILFIN_TOOLCHAIN`, or "" when the variable is
+// unset or holds one of the mode words. Exported so callers outside this
+// module can ask "is there an explicit environment selection?" without
+// duplicating the mode vocabulary.
+fn toolchain_env_exact_selector() -> string ![io] {
+    let knob = env.get("SAILFIN_TOOLCHAIN");
+    if _dispatch_knob_is_mode(knob) { return ""; }
+    return knob;
+}
+
+// Explicit exact selection — SFEP-0073 §3.3 ranks 1 and 2: a `+<version>`
+// one-shot selector, `sfn toolchain run <version>`, or an exact
+// `SAILFIN_TOOLCHAIN`. Unlike the floor gate below, this applies
+// unconditionally: an explicit selector is a selection input, not mismatch
+// recovery, so it takes effect even when the running toolchain already
+// satisfies the project pin.
+//
+// Returns 0 when the caller should keep running in-process (the selection
+// resolved to this very toolchain, or a version query found no payload), and
+// non-zero on a refused selection. A successful dispatch never returns.
+fn toolchain_select_exact(selector: string, source_label: string, entry_hint: string, ctx: CliContext, skip_flag: boolean, version_query: boolean) -> int ![clock, io, net] {
+    let target = _dispatch_normalize_ver(selector);
+    if !toolchain_is_valid_install_version(target) {
+        print.err("error: " + source_label
+            + " is not an exact toolchain version: "
+            + selector);
+        // Channel names resolve to a release through the signed index, which
+        // is a later slice (SFEP-0073 §3.9 slice 4). Naming that limit beats a
+        // bare parse error for whoever just typed `+stable`.
+        print.err("  channel selectors (stable|rc|beta|alpha|latest) are not available yet");
+        print.err("  name an exact release, e.g. sfn +0.10.6 build");
+        return 2;
+    }
+
+    // Discovered before the marker check below, because a marker match is only
+    // safe to trust once the running toolchain has been measured against the
+    // pin.
+    let decision: ToolchainDecision = toolchain_decide(entry_hint, ctx.binary_dir);
+    let knob_now = env.get("SAILFIN_TOOLCHAIN");
+    let hatched = skip_flag || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK")
+        || strings_equal(knob_now, "off")
+        || strings_equal(knob_now, "0");
+
+    // A repeated selector re-enters this path, so the marker is compared
+    // against the target rather than merely tested for presence: a match means
+    // this process *is* the selection and must run the command, not dispatch
+    // again. That match is trusted only when the floor actually holds for what
+    // this process turned out to be. A store entry whose payload does not match
+    // its directory name would otherwise use the marker to walk straight past
+    // the pin it fails, which is the one thing this guard exists to catch.
+    let dispatched = env.get("SAILFIN_TOOLCHAIN_DISPATCHED");
+    if dispatched.length > 0 {
+        if strings_equal(dispatched, target) {
+            if !decision.pinned || decision.satisfied || hatched { return 0; }
+        }
+        print.err("error: toolchain dispatch loop — the dispatched toolchain "
+            + dispatched
+            + " does not satisfy the pin ("
+            + decision.pin_desc
+            + ")");
+        print.err("  the stored toolchain for " + dispatched
+            + " is the wrong version or corrupt");
+        print.err("  reinstall it: sfn toolchain install " + dispatched);
+        return 1;
+    }
+
+    // SFEP-0073 §3.3: the minimum and stability checks still run *after*
+    // selection. An explicitly selected compiler below the project floor is an
+    // error rather than a silent downgrade, and the three pre-existing escape
+    // hatches stay the only way through.
+    if decision.pinned {
+        if !toolchain_selection_satisfies(decision, target) {
+            if hatched {
+                print.err("warning: " + source_label + " selects " + target
+                    + ", which does not satisfy the project pin "
+                    + decision.pin_desc
+                    + " ("
+                    + decision.pin_source
+                    + " [toolchain]); proceeding (--skip-toolchain-check / SAILFIN_TOOLCHAIN=off)");
+            } else {
+                print.err("error: " + source_label + " selects " + target
+                    + ", which does not satisfy the project pin");
+                print.err("  this project pins " + decision.pin_desc + " ("
+                    + decision.pin_source
+                    + " [toolchain])");
+                print.err("  select a satisfying version, or re-run with --skip-toolchain-check to override");
+                return 1;
+            }
+        }
+    }
+
+    // Selecting the running toolchain is a no-op, not a re-exec. This keeps
+    // `sfn +<running-version> ...` free of a pointless image replacement, and
+    // free of a store lookup that could otherwise fetch a released build which
+    // only shares a version number with a local dev binary.
+    let running = _dispatch_normalize_ver(resolve_compiler_version(ctx.binary_dir));
+    if strings_equal(target, running) { return 0; }
+
+    // `local` selects but never downloads (SFEP-0073 §3.3 mode table). It
+    // constrains fetching, not selection, so it applies to a CLI selector as
+    // much as to its own knob.
+    let allow_fetch = !strings_equal(knob_now, "local");
+    return _dispatch_exec_target(target, ctx, allow_fetch, version_query);
+}
+
 fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![clock, io, net] {
+    // SFEP-0073 §3.3 rank 2. An exact `SAILFIN_TOOLCHAIN` is consulted before
+    // the floor decision below, so it selects whether or not the running
+    // toolchain already satisfies the project pin. It used to be reachable
+    // only after a mismatch, which made it recovery rather than selection.
+    // `selector_resolved` means a `+<version>` selector already chose this
+    // toolchain in-process. The environment knob ranks below the CLI selector,
+    // so it must not re-open a decision the selector already made — otherwise
+    // `SAILFIN_TOOLCHAIN=A sfn +<running> <cmd>` dispatches to A.
+    let knob = env.get("SAILFIN_TOOLCHAIN");
+    if !_dispatch_knob_is_mode(knob) && !ctx.selector_resolved {
+        let rc = toolchain_select_exact(knob, "SAILFIN_TOOLCHAIN", entry_hint, ctx, skip_flag, false);
+        if rc != 0 { return rc; }
+        return _proceed_in_process(ctx);
+    }
+
     let decision: ToolchainDecision = toolchain_decide(entry_hint, ctx.binary_dir);
     if !decision.pinned || decision.satisfied {
         return _proceed_in_process(ctx);
     }
 
-    let knob = env.get("SAILFIN_TOOLCHAIN");
     let knob_off = strings_equal(knob, "off") || strings_equal(knob, "0");
     if skip_flag || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK") || knob_off {
         print.err("warning: toolchain mismatch — this project pins "
@@ -116,9 +277,9 @@ fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: bo
         return 1;
     }
 
-    let mut target = decision.pin_sfn;
-    if !_dispatch_knob_is_mode(knob) { target = knob; }
-    target = _dispatch_normalize_ver(target);
+    // Only a mode knob reaches here — an exact one dispatched above — so the
+    // pin is the sole fetch target on this path.
+    let target = _dispatch_normalize_ver(decision.pin_sfn);
     if !toolchain_is_valid_install_version(target) {
         print.err("error: toolchain mismatch and no concrete version to fetch");
         print.err("  this project pins " + decision.pin_desc + " (" + decision.pin_source
@@ -127,6 +288,20 @@ fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: bo
         return 1;
     }
 
+    return _dispatch_exec_target(target, ctx, true, false);
+}
+
+// Resolve `target` in the store, fetch it when permitted, verify it, and
+// replace this image with it. Returns 1 on any failure and 0 only when the
+// caller should keep running in-process; a successful `process.exec` never
+// returns, which is what preserves the selected toolchain's exit code and
+// terminating signal exactly (SFEP-0073 §3.4 `run`).
+//
+// `allow_fetch` is false for `SAILFIN_TOOLCHAIN=local`, which selects but
+// never downloads. `version_query` is true for a bare version request, which
+// SFEP-0073 §3.3 requires stay network-silent: a missing payload prints an
+// install hint and hands back to the entry toolchain rather than fetching.
+fn _dispatch_exec_target(target: string, ctx: CliContext, allow_fetch: boolean, version_query: boolean) -> int ![clock, io, net] {
     let versions_base = toolchain_versions_base();
     if versions_base.length == 0 {
         _print_store_error();
@@ -137,6 +312,23 @@ fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: bo
     // marked verified. An explicit install performs the authenticated online
     // migration into the qualified store.
     if !entry.ready {
+        // A version query answers from what is already on disk. Reporting the
+        // entry toolchain plus the install command is the actionable answer;
+        // downloading a compiler to print its own version number is not.
+        if version_query {
+            print.err("note: the selected toolchain " + target
+                + " is not installed");
+            print.err("  reporting the entry toolchain instead");
+            print.err("  install it: sfn toolchain install " + target);
+            return 0;
+        }
+        if !allow_fetch {
+            print.err("error: the selected toolchain " + target
+                + " is not installed");
+            print.err("  SAILFIN_TOOLCHAIN=local forbids fetching it");
+            print.err("  install it: sfn toolchain install " + target);
+            return 1;
+        }
         let rc = toolchain_install_to_user_store(target, versions_base, _dispatch_work_root());
         if rc != 0 {
             print.err("error: could not obtain the pinned toolchain " + target);
@@ -176,12 +368,14 @@ fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: bo
         exec_argv.push(ctx.orig_args[i]);
         i += 1;
     }
-    let mut exec_env: string[] = process.environ();
-    exec_env.push("SAILFIN_TOOLCHAIN_DISPATCHED=" + target);
-    let _rc = process.exec(exec_argv, exec_env);
+    let _rc = process.exec(exec_argv, _dispatch_child_env(target));
     print.err("error: failed to re-exec the pinned toolchain at " + entry.binary);
     print.err("  run: sfn toolchain install " + target);
     return 1;
 }
 
-export { toolchain_gate_or_dispatch };
+export {
+    toolchain_env_exact_selector,
+    toolchain_gate_or_dispatch,
+    toolchain_select_exact
+};

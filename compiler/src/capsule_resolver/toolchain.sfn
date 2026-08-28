@@ -67,17 +67,48 @@ fn _toolchain_running_channel_rank(running: SemVer) -> int {
     return rank;
 }
 
+// Floor + channel evaluation for one candidate version, with no diagnostics.
+// A malformed pin does not constrain (matching the warn-and-ignore behavior
+// the gate has always had), so an unparseable `pin_sfn` or an unrecognized
+// `pin_channel` is skipped rather than treated as unsatisfiable.
+fn _toolchain_evaluate(pin_sfn: string, pin_channel: string, candidate: SemVer) -> boolean {
+    let mut ok: boolean = true;
+    if pin_sfn.length > 0 {
+        let pin = semver_parse(pin_sfn);
+        if semver_is_valid(pin) {
+            if semver_satisfies_floor(candidate, pin) == false { ok = false; }
+        }
+    }
+    if pin_channel.length > 0 {
+        let pin_rank = _toolchain_channel_rank(pin_channel);
+        if pin_rank >= 0 {
+            if _toolchain_running_channel_rank(candidate) < pin_rank {
+                ok = false;
+            }
+        }
+    }
+    return ok;
+}
+
 // The pin decision, split out of the gate (SFN-172) so the re-exec
 // dispatcher (`cli/commands/toolchain.sfn`) reuses the same discovery +
 // floor/channel evaluation before deciding to fetch-and-re-exec. `pinned` is
 // false for an unpinned project (the additive no-op); `satisfied` is the
-// floor+channel result. `pin_sfn` carries the version pin verbatim (the
-// dispatcher's default fetch target); `pin_desc`/`pin_source`/`running_str`
-// back the diagnostics.
+// floor+channel result for the *running* toolchain. `pin_sfn` carries the
+// version pin verbatim (the dispatcher's default fetch target);
+// `pin_desc`/`pin_source`/`running_str` back the diagnostics.
+//
+// `pin_channel` carries the channel pin verbatim so an explicitly *selected*
+// version can be re-evaluated against the same requirement without
+// rediscovering the manifest (SFEP-0073 §3.3: a one-shot or
+// environment-selected compiler below the project minimum still errors).
+// `satisfied` answers that question for the running toolchain only; use
+// `toolchain_selection_satisfies` for any other candidate.
 struct ToolchainDecision {
     pinned: boolean;
     satisfied: boolean;
     pin_sfn: string;
+    pin_channel: string;
     pin_desc: string;
     pin_source: string;
     running_str: string;
@@ -132,6 +163,7 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
         pinned: false,
         satisfied: true,
         pin_sfn: "",
+        pin_channel: "",
         pin_desc: "",
         pin_source: "",
         running_str: ""
@@ -139,33 +171,28 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
     if pin_sfn.length == 0 && pin_channel.length == 0 { return d; }
     d.pinned = true;
     d.pin_sfn = pin_sfn;
+    d.pin_channel = pin_channel;
 
     let running_str = resolve_compiler_version(binary_dir);
     let running = semver_parse(running_str);
     d.running_str = running_str;
 
-    let mut ok: boolean = true;
+    // Warnings stay here rather than in `_toolchain_evaluate` because a
+    // malformed pin should be reported once per discovery, not once per
+    // candidate evaluated against it.
     if pin_sfn.length > 0 {
-        let pin = semver_parse(pin_sfn);
-        if semver_is_valid(pin) {
-            if semver_satisfies_floor(running, pin) == false { ok = false; }
-        } else {
+        if !semver_is_valid(semver_parse(pin_sfn)) {
             print.err("warning: [toolchain] sfn = \"" + pin_sfn
                 + "\" is not a valid version; ignoring the pin");
         }
     }
     if pin_channel.length > 0 {
-        let pin_rank = _toolchain_channel_rank(pin_channel);
-        if pin_rank < 0 {
+        if _toolchain_channel_rank(pin_channel) < 0 {
             print.err("warning: [toolchain] channel = \"" + pin_channel
                 + "\" is not a recognized channel (stable|rc|beta|alpha); ignoring the channel pin");
-        } else {
-            if _toolchain_running_channel_rank(running) < pin_rank {
-                ok = false;
-            }
         }
     }
-    d.satisfied = ok;
+    d.satisfied = _toolchain_evaluate(pin_sfn, pin_channel, running);
 
     let mut pin_desc: string = "";
     if pin_sfn.length > 0 { pin_desc = "sfn >= " + pin_sfn; }
@@ -195,6 +222,24 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
     d.pin_source = pin_source;
 
     return d;
+}
+
+// Evaluate an explicitly *selected* version against the same pin the running
+// toolchain was measured against (SFEP-0073 §3.3). `toolchain_decide` answers
+// the floor question for the running compiler; a one-shot `+<version>` or an
+// exact `SAILFIN_TOOLCHAIN` selects a different compiler, and that choice must
+// clear the project's minimum too rather than inheriting the running
+// toolchain's verdict.
+//
+// Fail-closed on an unparseable candidate: callers validate the selector with
+// `toolchain_is_valid_install_version` first, so reaching this with a
+// non-version string means the selector was never a version and cannot be
+// shown to satisfy a floor.
+fn toolchain_selection_satisfies(d: ToolchainDecision, candidate: string) -> boolean {
+    if !d.pinned { return true; }
+    let parsed = semver_parse(candidate);
+    if !semver_is_valid(parsed) { return false; }
+    return _toolchain_evaluate(d.pin_sfn, d.pin_channel, parsed);
 }
 
 // The 4-line fail-closed mismatch diagnostic — the enforced-error output of
