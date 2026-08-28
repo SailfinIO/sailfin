@@ -61,7 +61,7 @@ test "external C oracle: preserves the complete parent environment" ![io] {
 
 test "Darwin external C oracle: uses Apple discovery and carries SDKROOT" ![io] {
     if !fs.exists("/System/Library/CoreServices") {
-        skip("Darwin-only Apple toolchain contract");
+        skip("SFN-1152: Apple toolchain discovery requires a Darwin host; remove when the oracle exposes a host-neutral Darwin SDK fixture");
     }
     if env.get("SAILFIN_TEST_C_COMPILER").length > 0 {
         skip("explicit SAILFIN_TEST_C_COMPILER overrides Apple discovery");

@@ -11,7 +11,7 @@ import { build_host_os } from "../../src/build/target";
 
 test "toolchain index producer: signed offline fixture matrix" ![io] {
     if build_host_os() != "Linux" {
-        skip("toolchain-index publication runs on Linux release workers");
+        skip("SFN-1190: toolchain-index publication uses the Linux-only producer; remove when the native Sailfin producer fixture is host-portable");
     }
     let path = env.get("PATH");
     let mut child_env: string[] = [];

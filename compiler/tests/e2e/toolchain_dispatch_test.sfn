@@ -298,7 +298,7 @@ fn _seed_stub_verified(store: string, ver: string, marker: string) -> string ![i
 // still run here and still carry their weight (SFN-1115).
 fn _require_reexec() -> void ![io] {
     if host_is_windows() {
-        skip("process.exec is a Windows stub (-1); toolchain re-exec cannot succeed");
+        skip("SFN-1193: process.exec is a Windows stub (-1); remove when native Windows can hand off to the selected toolchain without returning");
     }
 }
 
