@@ -293,7 +293,7 @@ test "fs is_directory sentinel: a missing path operand is a diagnostic, not a fa
         let no_constants: StringConstant[] = [];
         let result = emit_filesystem_intrinsic(descriptor, no_operands, 0, no_lines, no_structured_diags, no_constants);
 
-        assert result.diagnostics.length > 0;
+        assert result.diags.length > 0;
         assert result.operand == null;
     }
 }

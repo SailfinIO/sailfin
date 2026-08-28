@@ -102,7 +102,7 @@ test "range for: missing start surfaces the range parse diagnostic" ![io] {
     let parsed = parse_range_iterable("..10");
     let parse_result = expect_eq_bool(parsed.success, false);
     if !parse_result.ok { throw parse_result.message; }
-    let diagnostic_result = expect_contains_str(parsed.diagnostics[0], "`.for` range missing start expression");
+    let diagnostic_result = expect_contains_str(parsed.diags[0].message, "`.for` range missing start expression");
     if !diagnostic_result.ok { throw diagnostic_result.message; }
 
     let native = "; Sailfin Native Prototype\n"
@@ -124,7 +124,7 @@ test "range for: missing end surfaces the range parse diagnostic" ![io] {
     let parsed = parse_range_iterable("0..");
     let parse_result = expect_eq_bool(parsed.success, false);
     if !parse_result.ok { throw parse_result.message; }
-    let diagnostic_result = expect_contains_str(parsed.diagnostics[0], "`.for` range missing end expression");
+    let diagnostic_result = expect_contains_str(parsed.diags[0].message, "`.for` range missing end expression");
     if !diagnostic_result.ok { throw diagnostic_result.message; }
 
     let native = "; Sailfin Native Prototype\n"

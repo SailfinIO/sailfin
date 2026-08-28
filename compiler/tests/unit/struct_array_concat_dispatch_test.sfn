@@ -24,7 +24,7 @@ test "struct-array concat: successful dispatch preserves canonical IR" ![io] {
     assert result.temp_index == 28;
     assert result.operand != null;
     assert result.operand.value == "%t24";
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }
 
 test "struct-array concat: null allocation dispatch fails closed" ![io] {
@@ -32,6 +32,8 @@ test "struct-array concat: null allocation dispatch fails closed" ![io] {
     assert result.operand == null;
     assert result.temp_index == 12;
     assert result.lines.length == 12;
-    assert result.diagnostics.length == 2;
-    assert result.diagnostics[1] == "llvm lowering [fatal]: struct-array concat buffer allocation produced no operand";
+    assert result.diags.length == 2;
+    assert result.diags[1].code == "E1008";
+    assert result.diags[1].message == "struct-array concat buffer allocation produced no operand";
+    assert result.diags[1].severity == "error";
 }
