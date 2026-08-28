@@ -79,6 +79,7 @@ sfn-sources = [
     "sfn/platform/exclusive_create.sfn",
     "sfn/platform/cert_roots.sfn",
     "sfn/platform/file_stat.sfn",
+    "sfn/platform/mkdtemp_acl.sfn",
     "sfn/adapters/filesystem.sfn",
     "sfn/adapters/http.sfn",
     "sfn/adapters/websocket.sfn",
@@ -154,6 +155,7 @@ sfn-sources-replace = [
     "sfn/platform/exclusive_create.sfn=sfn/platform/exclusive_create_windows.sfn",
     "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn",
     "sfn/platform/file_stat.sfn=sfn/platform/file_stat_windows.sfn",
+    "sfn/platform/mkdtemp_acl.sfn=sfn/platform/mkdtemp_acl_windows.sfn",
 ]
 # `sysconf` has no standalone provider: it is defined in
 # `pthread_windows.sfn`, which is therefore listed here even though MinGW
@@ -177,18 +179,19 @@ sfn-sources-add = [
 sfn-sources-drop = []
 ll-sources-add = ["ir/fs_link_ops_windows.ll"]
 link-libs-drop = []
-link-libs-add = ["-lbcrypt", "-lcrypt32", "-lws2_32"]
+link-libs-add = ["-ladvapi32", "-lbcrypt", "-lcrypt32", "-lws2_32"]
 
 # SFN-1084 / SFEP-0068 §3.3. The native MSVC ABI is declared explicitly so
 # both Windows triples receive the same runtime providers from manifest data.
 # Keeping the tables complete is required: the compiler fails closed when a
 # selected Windows triple has no matching target section.
 #
-# `link-libs-add` is the one real difference, and it must stay empty:
-# `target_extra_link_libs` (`compiler/src/build/target.sfn`) already returns
-# `-lbcrypt`/`-lcrypt32`/`-lws2_32` for the msvc ABI. Mingw adds them in its
-# table precisely because it does not get them from there — duplicating them
-# here would be the mirror-image mistake.
+# The three legacy Windows libraries stay compiler-global for MSVC because
+# released seeds already carry that policy. `advapi32` is runtime-provider
+# policy introduced with the working-tree ACL module (SFN-1195), so it must
+# be visible here: the pinned seed compiles runtime source before the freshly
+# built compiler exists and therefore cannot learn this dependency from a
+# compiler-source edit.
 [targets.x86_64-pc-windows-msvc]
 sfn-sources-replace = [
     "sfn/process.sfn=sfn/platform/process_windows.sfn",
@@ -203,6 +206,7 @@ sfn-sources-replace = [
     "sfn/platform/exclusive_create.sfn=sfn/platform/exclusive_create_windows.sfn",
     "sfn/platform/cert_roots.sfn=sfn/platform/cert_roots_windows.sfn",
     "sfn/platform/file_stat.sfn=sfn/platform/file_stat_windows.sfn",
+    "sfn/platform/mkdtemp_acl.sfn=sfn/platform/mkdtemp_acl_windows.sfn",
 ]
 # Order is load-bearing because the manifest appends sources in declaration
 # order. `pthread_windows.sfn` carries `sysconf` as well as the `pthread_*`
@@ -220,7 +224,7 @@ sfn-sources-add = [
 sfn-sources-drop = []
 ll-sources-add = ["ir/fs_link_ops_windows.ll"]
 link-libs-drop = []
-link-libs-add = []
+link-libs-add = ["-ladvapi32"]
 
 # Demand-driven `sfn-sources` selection (SFN-882). A source listed under an
 # effect name is compiled only when the build's declared effect surface demands
