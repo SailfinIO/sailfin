@@ -1,0 +1,537 @@
+// compiler/src/toolchain/inspect.sfn
+//
+// Read-only inspection model behind `sfn toolchain list|active|verify`
+// (SFEP-0073 §3.4, SFN-1066). Enumerates the host-qualified store, classifies
+// every entry against the SFN-1064 install manifest, and resolves which
+// toolchain the current directory selects — all without a fetch. Nothing here
+// mutates the store: repair and removal are separate explicit commands
+// (SFEP-0073 §3.8).
+import { toolchain_decide } from "../capsule_resolver/toolchain";
+import { _sort_strings_cmd } from "../string_cmd_utils";
+import { strings_equal } from "../string_utils";
+import { resolve_compiler_version } from "../version";
+import { toolchain_env_exact_selector } from "./dispatch";
+import { ToolchainHostIdentity, toolchain_current_host } from "./host";
+import { toolchain_verify_entry } from "./integrity";
+import {
+    TOOLCHAIN_MANIFEST_ABSENT,
+    TOOLCHAIN_MANIFEST_MALFORMED,
+    TOOLCHAIN_MANIFEST_TOO_NEW,
+    toolchain_manifest_read
+} from "./manifest";
+import {
+    ToolchainStoreEntry,
+    toolchain_binary_path,
+    toolchain_host_store_base,
+    toolchain_resolve_compatible_store_entry,
+    toolchain_store_ready,
+    toolchain_version_dir,
+    toolchain_versions_base
+} from "./store";
+
+// Entry lifecycle state, as reported by the `state` envelope field.
+// `partial` is an install that never committed: `toolchain_lay_out_store_entry`
+// writes `.sha256` last, so a missing or empty marker means the payload was
+// never published, not that it decayed. `corrupt` is a committed entry whose
+// recorded payload no longer verifies.
+let TOOLCHAIN_STATE_COMPLETE: int = 0;
+let TOOLCHAIN_STATE_PARTIAL: int = 1;
+let TOOLCHAIN_STATE_CORRUPT: int = 2;
+
+// Integrity outcome, as reported by the `integrity` envelope field.
+// `unverified` is the documented legacy boundary from SFN-1064: an entry
+// installed before install manifests existed carries no records to check
+// against, and is neither trusted nor condemned.
+let TOOLCHAIN_INTEGRITY_VERIFIED: int = 0;
+let TOOLCHAIN_INTEGRITY_UNVERIFIED: int = 1;
+let TOOLCHAIN_INTEGRITY_FAILED: int = 2;
+
+// One store entry as `list` and `verify` report it. `roles` holds zero or more
+// of `entry|selected|project|default|management` in that fixed order, so two
+// runs over the same store always serialize identically.
+struct ToolchainInspectEntry {
+    version: string;
+    host: string;
+    path: string;
+    state: int;
+    integrity: int;
+    roles: string[];
+    detail: string;
+}
+
+// The resolved selection `active` explains. Every field is derived locally:
+// no field here may be populated by a network lookup (SFEP-0073 §3.4,
+// "performs no fetch by default").
+struct ToolchainSelection {
+    version: string;
+    path: string;
+    source: string;
+    installed: boolean;
+    integrity: int;
+}
+
+// The project's `[toolchain]` requirement. `version` is the exact-pin field
+// from SFEP-0073 §3.2 and stays "" until Slice 2 ships it; `minimum` is
+// today's floor semantics. Reporting an unshipped field as `null` rather than
+// omitting it is what keeps the envelope's shape constant across slices.
+struct ToolchainRequirement {
+    minimum: string;
+    version: string;
+    channel: string;
+    source: string;
+}
+
+// One actionable condition found by an inspection. Both the human rendering
+// and the JSON envelope consume this single list: deriving the exit code from
+// one source and the `diagnostics` array from another let the two disagree,
+// which SFEP-0003 forbids ("a --json invocation and its human rendering agree
+// on findings").
+struct ToolchainFinding {
+    code: string;
+    severity: string;
+    message: string;
+}
+
+// The whole inspection, shared by all three leaves so one envelope encoder
+// serves `list`, `active`, and `verify`.
+struct ToolchainInspectReport {
+    operation: string;
+    host: string;
+    entry_version: string;
+    entry_path: string;
+    selection: ToolchainSelection;
+    requirement: ToolchainRequirement;
+    fetch_policy: string;
+    entries: ToolchainInspectEntry[];
+    findings: ToolchainFinding[];
+}
+
+fn toolchain_state_name(state: int) -> string {
+    if state == TOOLCHAIN_STATE_PARTIAL { return "partial"; }
+    if state == TOOLCHAIN_STATE_CORRUPT { return "corrupt"; }
+    return "complete";
+}
+
+fn toolchain_integrity_name(integrity: int) -> string {
+    if integrity == TOOLCHAIN_INTEGRITY_UNVERIFIED { return "unverified"; }
+    if integrity == TOOLCHAIN_INTEGRITY_FAILED { return "failed"; }
+    return "verified";
+}
+
+// Immediate subdirectory names of `dir`, sorted. Non-directories are skipped:
+// the store root also holds the `bin/` alias tree and stray files must never
+// be reported as installed versions.
+fn _inspect_subdirs(dir: string) -> string[] ![io] {
+    let mut names: string[] = [];
+    if !fs.exists(dir) { return names; }
+    if !fs.is_directory(dir) { return names; }
+    let entries = fs.listDirectory(dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        if fs.is_directory(dir + "/" + name) { names.push(name); }
+        i += 1;
+    }
+    return _sort_strings_cmd(names);
+}
+
+// Classify one committed-or-not store directory.
+//
+// `list` verifies in full rather than checking only that recorded paths
+// exist. The acceptance contract requires `list` to distinguish a corrupt
+// entry, and `integrity: "verified"` is only a truthful claim if the payload
+// was actually hashed — a presence-only check would report a silently
+// modified binary as healthy. `toolchain_verify_entry` is uncached by
+// construction (SFN-1064), so the cost is one full hash per committed entry
+// per invocation; `list` is an interactive diagnostic, not a hot path.
+fn toolchain_inspect_classify(store_dir: string) -> ToolchainInspectEntry ![io] {
+    let mut out = ToolchainInspectEntry {
+        version: "",
+        host: "",
+        path: store_dir,
+        state: TOOLCHAIN_STATE_COMPLETE,
+        integrity: TOOLCHAIN_INTEGRITY_VERIFIED,
+        roles: [],
+        detail: ""
+    };
+
+    // An uncommitted entry is reported as `partial` and never hashed: there
+    // is no published payload to make a claim about, and hashing a staging
+    // directory would race the installer that is still writing it.
+    if !toolchain_store_ready(store_dir) {
+        out.state = TOOLCHAIN_STATE_PARTIAL;
+        out.integrity = TOOLCHAIN_INTEGRITY_UNVERIFIED;
+        out.detail = "install never completed (no committed .sha256 marker)";
+        return out;
+    }
+
+    let manifest = toolchain_manifest_read(store_dir);
+    if manifest.status == TOOLCHAIN_MANIFEST_ABSENT {
+        // The documented legacy boundary: a valid SFEP-0046 install predating
+        // install manifests. Complete and runnable, but unattested.
+        out.integrity = TOOLCHAIN_INTEGRITY_UNVERIFIED;
+        out.detail = "installed before install manifests; no recorded payload to verify";
+        return out;
+    }
+    if manifest.status == TOOLCHAIN_MANIFEST_TOO_NEW {
+        // A manifest written by a newer compiler. Nothing was verified and
+        // nothing failed, so calling this corrupt would be a false accusation
+        // against a healthy entry — and against exactly the multi-version
+        // store this command exists to explain. `manifest.sfn` classifies
+        // TOO_NEW as actionable-not-fatal and SFEP-0073 §3.5 makes the
+        // manifest reader the durable compatibility seam; `unverified` is the
+        // honest reading on both counts.
+        out.integrity = TOOLCHAIN_INTEGRITY_UNVERIFIED;
+        out.detail = manifest.detail;
+        return out;
+    }
+    if manifest.status == TOOLCHAIN_MANIFEST_MALFORMED {
+        out.state = TOOLCHAIN_STATE_CORRUPT;
+        out.integrity = TOOLCHAIN_INTEGRITY_FAILED;
+        out.detail = manifest.detail;
+        return out;
+    }
+
+    let outcome = toolchain_verify_entry(store_dir);
+    if !outcome.ok {
+        out.state = TOOLCHAIN_STATE_CORRUPT;
+        out.integrity = TOOLCHAIN_INTEGRITY_FAILED;
+        out.detail = outcome.detail;
+        return out;
+    }
+    if outcome.unverified {
+        out.integrity = TOOLCHAIN_INTEGRITY_UNVERIFIED;
+        out.detail = outcome.detail;
+        return out;
+    }
+    return out;
+}
+
+// Every store entry for `host`, host-qualified entries first and the
+// read-only flat legacy tree second. A version present in both is reported
+// once, from the host-qualified tree, matching the resolution order
+// `toolchain_resolve_compatible_store_entry` already uses for dispatch.
+//
+// Both walks apply the same admission guard, because the store root holds
+// more than version directories. `toolchain_staging_dir` mints its scratch
+// directory as a *sibling* of the version directory, and a failed restore
+// deliberately preserves a backup alongside it (`store.sfn`), so an
+// interrupted `sfn toolchain install` leaves a `.sfn_stage.XXXXXX` entry
+// behind forever. Admitting one would report it as an installed toolchain and
+// pin `list` at exit 1 on every later invocation. A directory earns a row only
+// by actually holding a compiler binary — `toolchain_binary_path` merely
+// *builds* a path and never probes, so the `fs.exists` is what does the work.
+fn _inspect_admit(dir: string) -> boolean ![io] {
+    return fs.exists(toolchain_binary_path(dir));
+}
+
+fn toolchain_inspect_entries(versions_base: string, host: ToolchainHostIdentity) -> ToolchainInspectEntry[] ![io] {
+    let mut out: ToolchainInspectEntry[] = [];
+    if versions_base.length == 0 { return out; }
+
+    // An unresolvable host (an OS/arch pair `host.sfn` does not map) yields an
+    // empty triple, and `toolchain_host_store_base` would then resolve the
+    // qualified base onto the flat tree itself — enumerating the real triple
+    // directory as though it were a version. Degrade to legacy-only
+    // enumeration instead, which is the honest answer when we cannot say which
+    // host we are.
+    if host.triple.length > 0 {
+        let qualified_base = toolchain_host_store_base(versions_base, host.triple);
+        let qualified = _inspect_subdirs(qualified_base);
+        let mut i: int = 0;
+        loop {
+            if i >= qualified.length { break; }
+            let version = qualified[i];
+            let dir = toolchain_version_dir(qualified_base, version);
+            if _inspect_admit(dir) {
+                let mut entry = toolchain_inspect_classify(dir);
+                entry.version = version;
+                entry.host = host.triple;
+                out.push(entry);
+            }
+            i += 1;
+        }
+    }
+
+    // The legacy tree is flat, and the host-qualified tree is rooted inside
+    // it, so `<versions_base>/<triple>` sits alongside the real version
+    // directories and must never be reported as a version of its own.
+    let legacy = _inspect_subdirs(versions_base);
+    let mut j: int = 0;
+    loop {
+        if j >= legacy.length { break; }
+        let version = legacy[j];
+        if !strings_equal(version, host.triple) {
+            if !_inspect_version_seen(out, version) {
+                let dir = versions_base + "/" + version;
+                if _inspect_admit(dir) {
+                    let mut entry = toolchain_inspect_classify(dir);
+                    entry.version = version;
+                    entry.host = "";
+                    out.push(entry);
+                }
+            }
+        }
+        j += 1;
+    }
+    return out;
+}
+
+fn _inspect_version_seen(entries: ToolchainInspectEntry[], version: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if strings_equal(entries[i].version, version) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// `SAILFIN_TOOLCHAIN`'s mode word, normalized. An exact version in that
+// variable is a *selection* input, not a policy one, and leaves the policy at
+// its default.
+fn toolchain_fetch_policy() -> string ![io] {
+    let knob = env.get("SAILFIN_TOOLCHAIN");
+    if knob.length == 0 { return "auto"; }
+    if strings_equal(knob, "auto") { return "auto"; }
+    if strings_equal(knob, "local") { return "local"; }
+    if strings_equal(knob, "off") { return "off"; }
+    if strings_equal(knob, "0") { return "off"; }
+    return "auto";
+}
+
+// Resolve what the current directory selects, without a fetch.
+//
+// SFEP-0073 §3.3 ranks selection inputs; ranks 1 (a one-shot `+<selector>`)
+// and 4 (the per-user default) are not observable here. A one-shot selector is
+// peeled and dispatched before this command's tree is even built, so a
+// `+<version> toolchain active` is already running *as* the selected
+// toolchain; the per-user default is SFN-1068 and unshipped. What remains is
+// rank 2 (an exact `SAILFIN_TOOLCHAIN`), rank 3 (the project pin), and rank 5
+// (the entry toolchain itself).
+//
+// The project pin is a floor in this slice, not an exact version, so it only
+// names a different toolchain when the running one fails to satisfy it — a
+// satisfied floor selects the entry, and reporting `source: "workspace.toml"`
+// there would claim the project chose a version it merely permitted.
+fn toolchain_resolve_selection(versions_base: string, host: ToolchainHostIdentity, entry_version: string, entry_path: string, env_selector: string, decision_pinned: boolean, decision_satisfied: boolean, pin_sfn: string, pin_source: string) -> ToolchainSelection ![io] {
+    let mut sel = ToolchainSelection {
+        version: entry_version,
+        path: entry_path,
+        source: "entry",
+        installed: true,
+        integrity: TOOLCHAIN_INTEGRITY_UNVERIFIED
+    };
+
+    let mut wanted: string = "";
+    if env_selector.length > 0 {
+        wanted = env_selector;
+        sel.source = "environment";
+    } else {
+        if decision_pinned {
+            if !decision_satisfied {
+                if pin_sfn.length > 0 {
+                    wanted = pin_sfn;
+                    sel.source = pin_source;
+                }
+            }
+        }
+    }
+
+    if wanted.length == 0 { return sel; }
+    if strings_equal(wanted, entry_version) { return sel; }
+
+    sel.version = wanted;
+    let store: ToolchainStoreEntry = toolchain_resolve_compatible_store_entry(versions_base, host, wanted);
+    sel.installed = store.ready;
+    sel.path = store.binary;
+    if !store.ready {
+        // A selected-but-missing version is reported, never fetched: `active`
+        // is an explanation surface, and installing from it would make an
+        // inspection command mutate the store.
+        sel.path = "";
+        sel.integrity = TOOLCHAIN_INTEGRITY_UNVERIFIED;
+        return sel;
+    }
+    let classified = toolchain_inspect_classify(store.dir);
+    sel.integrity = classified.integrity;
+    return sel;
+}
+
+// Attach `entry|selected|project` role markers. `default` and `management`
+// are SFN-1068 and SFEP-0073 §3.5 respectively and are never assigned in this
+// slice — the role vocabulary is locked here, but only the shipped roles are
+// ever emitted.
+fn toolchain_assign_roles(entries: ToolchainInspectEntry[], entry_version: string, selected_version: string, pin_sfn: string) -> ToolchainInspectEntry[] {
+    let mut out: ToolchainInspectEntry[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let mut entry = entries[i];
+        let mut roles: string[] = [];
+        if strings_equal(entry.version, entry_version) {
+            roles.push("entry");
+        }
+        if strings_equal(entry.version, selected_version) {
+            roles.push("selected");
+        }
+        // Only an exact pin names a version. A floor that this entry merely
+        // happens to satisfy is not the project's choice of toolchain.
+        if pin_sfn.length > 0 {
+            if strings_equal(entry.version, pin_sfn) {
+                roles.push("project");
+            }
+        }
+        entry.roles = roles;
+        out.push(entry);
+        i += 1;
+    }
+    return out;
+}
+
+// Concatenate two finding lists, preserving order.
+fn toolchain_merge_findings(a: ToolchainFinding[], b: ToolchainFinding[]) -> ToolchainFinding[] {
+    let mut out: ToolchainFinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= b.length { break; }
+        out.push(b[j]);
+        j += 1;
+    }
+    return out;
+}
+
+// The selection half of an inspection, without walking (and hashing) the
+// store. `verify <version>` reports on one entry and would otherwise pay a
+// full hash of every installed toolchain to throw the result away.
+fn toolchain_inspect_report_shallow(operation: string, binary_dir: string, compiler_path: string, entry_hint: string) -> ToolchainInspectReport ![io] {
+    return _assemble_report(operation, binary_dir, compiler_path, entry_hint, false);
+}
+
+// Assemble the full inspection. `operation` is the leaf name and rides into
+// the envelope unchanged.
+fn toolchain_inspect_report(operation: string, binary_dir: string, compiler_path: string, entry_hint: string) -> ToolchainInspectReport ![io] {
+    return _assemble_report(operation, binary_dir, compiler_path, entry_hint, true);
+}
+
+fn _assemble_report(operation: string, binary_dir: string, compiler_path: string, entry_hint: string, walk_store: boolean) -> ToolchainInspectReport ![io] {
+    let host = toolchain_current_host();
+    let versions_base = toolchain_versions_base();
+    let entry_version = resolve_compiler_version(binary_dir);
+    let decision = toolchain_decide(entry_hint, binary_dir);
+    let env_selector = toolchain_env_exact_selector();
+
+    let mut raw: ToolchainInspectEntry[] = [];
+    if walk_store { raw = toolchain_inspect_entries(versions_base, host); }
+    let selection = toolchain_resolve_selection(versions_base, host, entry_version, compiler_path, env_selector, decision.pinned, decision.satisfied, decision.pin_sfn, decision.pin_source);
+    let entries = toolchain_assign_roles(raw, entry_version, selection.version, decision.pin_sfn);
+
+    let requirement = ToolchainRequirement {
+        minimum: decision.pin_sfn,
+        // Exact project pins are SFEP-0073 Slice 2; the field is locked in the
+        // envelope now and stays null until that slice lands.
+        version: "",
+        channel: decision.pin_channel,
+        source: decision.pin_source
+    };
+
+    return ToolchainInspectReport {
+        operation: operation,
+        host: host.triple,
+        entry_version: entry_version,
+        entry_path: compiler_path,
+        selection: selection,
+        requirement: requirement,
+        fetch_policy: toolchain_fetch_policy(),
+        entries: entries,
+        findings: _report_findings(entries, selection)
+    };
+}
+
+// A selected toolchain that is not installed is an actionable finding, not a
+// setup failure: the inspection completed and correctly explained a store
+// that cannot satisfy the current selection. Folding it in here — rather than
+// special-casing it in the human renderer — is what keeps the `--json` exit
+// code identical to the human one.
+fn _report_findings(entries: ToolchainInspectEntry[], selection: ToolchainSelection) -> ToolchainFinding[] {
+    let mut out = toolchain_entry_findings(entries);
+    if !selection.installed {
+        out.push(ToolchainFinding {
+            code: "E0620", severity: "error", message: "selected toolchain "
+                + selection.version
+                + " is not installed; install it with: sfn toolchain install "
+                + selection.version
+        });
+    }
+    return out;
+}
+
+// One coded finding per actionable entry. These are what turn exit 0 into
+// exit 1: an inspection that completed and found something.
+fn toolchain_entry_findings(entries: ToolchainInspectEntry[]) -> ToolchainFinding[] {
+    let mut out: ToolchainFinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let entry = entries[i];
+        if entry.state == TOOLCHAIN_STATE_PARTIAL {
+            out.push(ToolchainFinding {
+                code: "E0619", severity: "error", message: entry.version
+                    + ": partial install - "
+                    + entry.detail
+            });
+        }
+        if entry.state == TOOLCHAIN_STATE_CORRUPT {
+            out.push(ToolchainFinding {
+                code: "E0618", severity: "error", message: entry.version
+                    + ": corrupt - "
+                    + entry.detail
+            });
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// The SFEP-0003 exit matrix: 0 when the inspection found nothing actionable,
+// 1 when it completed and found something. A setup, selection, or usage
+// failure is 2 and is decided by the caller before a report exists — an
+// unresolvable store emits no envelope at all, matching `sfn bench`'s
+// documented pre-flight behaviour.
+fn toolchain_inspect_exit_code(report: ToolchainInspectReport) -> int {
+    if report.findings.length > 0 { return 1; }
+    return 0;
+}
+
+export {
+    TOOLCHAIN_INTEGRITY_FAILED,
+    TOOLCHAIN_INTEGRITY_UNVERIFIED,
+    TOOLCHAIN_INTEGRITY_VERIFIED,
+    TOOLCHAIN_STATE_COMPLETE,
+    TOOLCHAIN_STATE_CORRUPT,
+    TOOLCHAIN_STATE_PARTIAL,
+    ToolchainFinding,
+    ToolchainInspectEntry,
+    ToolchainInspectReport,
+    ToolchainRequirement,
+    ToolchainSelection,
+    toolchain_assign_roles,
+    toolchain_entry_findings,
+    toolchain_fetch_policy,
+    toolchain_inspect_classify,
+    toolchain_inspect_entries,
+    toolchain_inspect_exit_code,
+    toolchain_inspect_report,
+    toolchain_inspect_report_shallow,
+    toolchain_merge_findings,
+    toolchain_integrity_name,
+    toolchain_resolve_selection,
+    toolchain_state_name
+};

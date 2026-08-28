@@ -1,0 +1,295 @@
+// Unit coverage for the classification module behind `sfn toolchain
+// list|active|verify` (`compiler/src/toolchain/inspect.sfn`, SFEP-0073 §3.4,
+// SFN-1066). The sibling e2e test
+// (`compiler/tests/e2e/toolchain_inspect_json_test.sfn`) drives the compiler
+// as a subprocess and only reaches two of this module's branches; these
+// tests call the exported functions directly, no subprocess.
+import { remove_all } from "sfn/fs";
+
+import { ToolchainHostIdentity } from "../../src/toolchain/host";
+import {
+    TOOLCHAIN_INTEGRITY_FAILED,
+    TOOLCHAIN_INTEGRITY_UNVERIFIED,
+    TOOLCHAIN_INTEGRITY_VERIFIED,
+    TOOLCHAIN_STATE_COMPLETE,
+    TOOLCHAIN_STATE_CORRUPT,
+    TOOLCHAIN_STATE_PARTIAL,
+    ToolchainFinding,
+    ToolchainInspectEntry,
+    ToolchainInspectReport,
+    ToolchainRequirement,
+    ToolchainSelection,
+    toolchain_assign_roles,
+    toolchain_entry_findings,
+    toolchain_inspect_exit_code,
+    toolchain_integrity_name,
+    toolchain_merge_findings,
+    toolchain_resolve_selection,
+    toolchain_state_name
+} from "../../src/toolchain/inspect";
+
+// Same scratch shape as the sibling `toolchain_layout_test.sfn`.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    dir = dir + "/toolchain-inspect-unit";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _entry(version: string) -> ToolchainInspectEntry {
+    return ToolchainInspectEntry {
+        version: version,
+        host: "x86_64-unknown-linux-gnu",
+        path: "/store/" + version,
+        state: TOOLCHAIN_STATE_COMPLETE,
+        integrity: TOOLCHAIN_INTEGRITY_VERIFIED,
+        roles: [],
+        detail: ""
+    };
+}
+
+fn _host() -> ToolchainHostIdentity {
+    return ToolchainHostIdentity {
+        triple: "x86_64-unknown-linux-gnu",
+        release_os: "linux",
+        release_arch: "x86_64"
+    };
+}
+
+// -------------------------------------------------------------------
+// toolchain_assign_roles
+// -------------------------------------------------------------------
+test "toolchain: assign_roles gives the entry version the entry role" {
+    let entries = [_entry("1.0.0")];
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "");
+    assert out.length == 1;
+    assert out[0].roles.length == 1;
+    assert out[0].roles[0] == "entry";
+}
+
+test "toolchain: assign_roles gives the selected version the selected role" {
+    let entries = [_entry("2.0.0")];
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "");
+    assert out.length == 1;
+    assert out[0].roles.length == 1;
+    assert out[0].roles[0] == "selected";
+}
+
+test "toolchain: assign_roles gives an exact pin match the project role" {
+    let entries = [_entry("3.0.0")];
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "3.0.0");
+    assert out.length == 1;
+    assert out[0].roles.length == 1;
+    assert out[0].roles[0] == "project";
+}
+
+test "toolchain: assign_roles orders entry, selected, project when all three match" {
+    let entries = [_entry("4.0.0")];
+    let out = toolchain_assign_roles(entries, "4.0.0", "4.0.0", "4.0.0");
+    assert out.length == 1;
+    assert out[0].roles.length == 3;
+    assert out[0].roles[0] == "entry";
+    assert out[0].roles[1] == "selected";
+    assert out[0].roles[2] == "project";
+}
+
+test "toolchain: assign_roles gives an unmatched entry no roles" {
+    let entries = [_entry("5.0.0")];
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "3.0.0");
+    assert out.length == 1;
+    assert out[0].roles.length == 0;
+}
+
+test "toolchain: assign_roles never assigns default or management" {
+    let entries = [_entry("6.0.0")];
+    let out = toolchain_assign_roles(entries, "6.0.0", "6.0.0", "6.0.0");
+    assert out.length == 1;
+    let mut i: int = 0;
+    loop {
+        if i >= out[0].roles.length { break; }
+        assert out[0].roles[i] != "default";
+        assert out[0].roles[i] != "management";
+        i += 1;
+    }
+}
+
+// -------------------------------------------------------------------
+// toolchain_state_name / toolchain_integrity_name
+// -------------------------------------------------------------------
+test "toolchain: state_name maps every constant to its exact wire string" {
+    assert toolchain_state_name(TOOLCHAIN_STATE_COMPLETE) == "complete";
+    assert toolchain_state_name(TOOLCHAIN_STATE_PARTIAL) == "partial";
+    assert toolchain_state_name(TOOLCHAIN_STATE_CORRUPT) == "corrupt";
+}
+
+test "toolchain: integrity_name maps every constant to its exact wire string" {
+    assert toolchain_integrity_name(TOOLCHAIN_INTEGRITY_VERIFIED) == "verified";
+    assert toolchain_integrity_name(TOOLCHAIN_INTEGRITY_UNVERIFIED) == "unverified";
+    assert toolchain_integrity_name(TOOLCHAIN_INTEGRITY_FAILED) == "failed";
+}
+
+// -------------------------------------------------------------------
+// toolchain_entry_findings
+// -------------------------------------------------------------------
+test "toolchain: entry_findings yields nothing for a complete entry" {
+    let entries = [_entry("1.0.0")];
+    let findings = toolchain_entry_findings(entries);
+    assert findings.length == 0;
+}
+
+test "toolchain: entry_findings codes a partial entry E0619 error" {
+    let mut e = _entry("1.0.0");
+    e.state = TOOLCHAIN_STATE_PARTIAL;
+    e.detail = "install never completed";
+    let findings = toolchain_entry_findings([e]);
+    assert findings.length == 1;
+    assert findings[0].code == "E0619";
+    assert findings[0].severity == "error";
+}
+
+test "toolchain: entry_findings codes a corrupt entry E0618" {
+    let mut e = _entry("1.0.0");
+    e.state = TOOLCHAIN_STATE_CORRUPT;
+    e.detail = "hash mismatch";
+    let findings = toolchain_entry_findings([e]);
+    assert findings.length == 1;
+    assert findings[0].code == "E0618";
+}
+
+test "toolchain: entry_findings preserves entry order across a mixed list" {
+    let mut complete = _entry("1.0.0");
+    let mut partial = _entry("2.0.0");
+    partial.state = TOOLCHAIN_STATE_PARTIAL;
+    let mut corrupt = _entry("3.0.0");
+    corrupt.state = TOOLCHAIN_STATE_CORRUPT;
+    let findings = toolchain_entry_findings([complete, partial, corrupt]);
+    assert findings.length == 2;
+    assert findings[0].code == "E0619";
+    assert findings[1].code == "E0618";
+}
+
+// -------------------------------------------------------------------
+// toolchain_merge_findings
+// -------------------------------------------------------------------
+test "toolchain: merge_findings concatenates preserving order" {
+    let a: ToolchainFinding[] = [ToolchainFinding {
+        code: "E0618", severity: "error", message: "a"
+    }];
+    let b: ToolchainFinding[] = [ToolchainFinding {
+        code: "E0619", severity: "error", message: "b"
+    }];
+    let out = toolchain_merge_findings(a, b);
+    assert out.length == 2;
+    assert out[0].message == "a";
+    assert out[1].message == "b";
+}
+
+test "toolchain: merge_findings works with either side empty" {
+    let a: ToolchainFinding[] = [ToolchainFinding {
+        code: "E0618", severity: "error", message: "a"
+    }];
+    let empty: ToolchainFinding[] = [];
+    let left = toolchain_merge_findings(a, empty);
+    assert left.length == 1;
+    assert left[0].message == "a";
+
+    let right = toolchain_merge_findings(empty, a);
+    assert right.length == 1;
+    assert right[0].message == "a";
+
+    let both = toolchain_merge_findings(empty, empty);
+    assert both.length == 0;
+}
+
+// -------------------------------------------------------------------
+// toolchain_inspect_exit_code
+// -------------------------------------------------------------------
+test "toolchain: inspect_exit_code is 0 with no findings" {
+    let report = _report_with_findings([]);
+    assert toolchain_inspect_exit_code(report) == 0;
+}
+
+test "toolchain: inspect_exit_code is 1 with one or more findings" {
+    let one: ToolchainFinding[] = [ToolchainFinding {
+        code: "E0618", severity: "error", message: "x"
+    }];
+    let report_one = _report_with_findings(one);
+    assert toolchain_inspect_exit_code(report_one) == 1;
+
+    let two: ToolchainFinding[] = [ToolchainFinding {
+        code: "E0618", severity: "error", message: "x"
+    }, ToolchainFinding { code: "E0619", severity: "error", message: "y" }];
+    let report_two = _report_with_findings(two);
+    assert toolchain_inspect_exit_code(report_two) == 1;
+}
+
+fn _report_with_findings(findings: ToolchainFinding[]) -> ToolchainInspectReport {
+    let selection = ToolchainSelection {
+        version: "1.0.0",
+        path: "/entry/path",
+        source: "entry",
+        installed: true,
+        integrity: TOOLCHAIN_INTEGRITY_VERIFIED
+    };
+    let requirement = ToolchainRequirement {
+        minimum: "",
+        version: "",
+        channel: "",
+        source: ""
+    };
+    return ToolchainInspectReport {
+        operation: "list",
+        host: "x86_64-unknown-linux-gnu",
+        entry_version: "1.0.0",
+        entry_path: "/entry/path",
+        selection: selection,
+        requirement: requirement,
+        fetch_policy: "auto",
+        entries: [],
+        findings: findings
+    };
+}
+
+// -------------------------------------------------------------------
+// toolchain_resolve_selection
+// -------------------------------------------------------------------
+test "toolchain: resolve_selection an exact env selector wins with source environment" ![io] {
+    let base = _scratch_dir() + "/env-selector";
+    assert remove_all(base);
+    fs.createDirectory(base, true);
+    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "9.9.9", false, false, "", "");
+    assert sel.version == "9.9.9";
+    assert sel.source == "environment";
+    assert sel.installed == false;
+}
+
+test "toolchain: resolve_selection an unpinned project falls through to source entry" ![io] {
+    let base = _scratch_dir() + "/unpinned";
+    assert remove_all(base);
+    fs.createDirectory(base, true);
+    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "", false, false, "", "");
+    assert sel.version == "1.0.0";
+    assert sel.source == "entry";
+    assert sel.path == "/entry/path";
+    assert sel.installed == true;
+}
+
+test "toolchain: resolve_selection a satisfied floor also yields source entry" ![io] {
+    let base = _scratch_dir() + "/satisfied-floor";
+    assert remove_all(base);
+    fs.createDirectory(base, true);
+    let sel = toolchain_resolve_selection(base, _host(), "1.5.0", "/entry/path", "", true, true, "1.0.0", "workspace.toml");
+    assert sel.version == "1.5.0";
+    assert sel.source == "entry";
+}
+
+test "toolchain: resolve_selection an unsatisfied floor yields the pin version and pin source" ![io] {
+    let base = _scratch_dir() + "/unsatisfied-floor";
+    assert remove_all(base);
+    fs.createDirectory(base, true);
+    let sel = toolchain_resolve_selection(base, _host(), "0.5.0", "/entry/path", "", true, false, "1.0.0", "workspace.toml");
+    assert sel.version == "1.0.0";
+    assert sel.source == "workspace.toml";
+    assert sel.installed == false;
+}

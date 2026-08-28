@@ -1,0 +1,201 @@
+// compiler/src/toolchain/inspect_json.sfn
+//
+// JSON envelope encoder for `sfn toolchain list|active|verify --json`
+// (SFEP-0073 §3.4, SFN-1066). Pure module: no I/O, no global state. Takes an
+// already-assembled `ToolchainInspectReport` and returns one stable
+// schema-versioned JSON string.
+//
+// The compiler proper does not import `sfn/json` (seed import-cycle
+// constraint), so this module hand-rolls the same local-helper pattern as
+// `diagnostics_json.sfn`: `_ij_escape_string`/`_ij_quote`/`_ij_field`/
+// `_ij_string_field`/`_ij_join`.
+// Field order is guaranteed purely by push-order into a `string[] parts`
+// joined with `,` — there is no keyed map to reorder underneath us.
+//
+// The schema is documented and locked in
+// `docs/reference/toolchains-json-schema.md` and gated by
+// `compiler/tests/e2e/toolchain_inspect_json_test.sfn`.
+import { substring } from "../string_utils";
+import {
+    ToolchainFinding,
+    ToolchainInspectEntry,
+    ToolchainInspectReport,
+    ToolchainRequirement,
+    ToolchainSelection,
+    toolchain_integrity_name,
+    toolchain_state_name
+} from "./inspect";
+
+// -------------------------------------------------------------------
+// Primitive encoders
+// -------------------------------------------------------------------
+fn _ij_escape_string(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _ij_quote(s: string) -> string {
+    return "\"" + _ij_escape_string(s) + "\"";
+}
+
+fn _ij_field(name: string, value: string) -> string {
+    return _ij_quote(name) + ":" + value;
+}
+
+fn _ij_string_field(name: string, value: string) -> string {
+    return _ij_field(name, _ij_quote(value));
+}
+
+fn _ij_join(parts: string[], sep: string) -> string {
+    if parts.length == 0 { return ""; }
+    let mut out = parts[0];
+    let mut i: int = 1;
+    loop {
+        if i >= parts.length { break; }
+        out = out + sep + parts[i];
+        i += 1;
+    }
+    return out;
+}
+
+// A `string|null` scalar: an empty string serializes as the JSON literal
+// `null`, never as `""` (SFEP-0003 / SFEP-0073 §3.4 null contract).
+fn _ij_nullable_string_field(name: string, value: string) -> string {
+    if value.length == 0 { return _ij_field(name, "null"); }
+    return _ij_string_field(name, value);
+}
+
+// -------------------------------------------------------------------
+// Domain encoders
+// -------------------------------------------------------------------
+fn _ij_render_strings(values: string[]) -> string {
+    if values.length == 0 { return "[]"; }
+    let mut parts: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        parts.push(_ij_quote(values[i]));
+        i += 1;
+    }
+    return "[" + _ij_join(parts, ",") + "]";
+}
+
+fn _ij_render_entry(entry: ToolchainInspectEntry) -> string {
+    let mut parts: string[] = [];
+    parts.push(_ij_string_field("version", entry.version));
+    parts.push(_ij_nullable_string_field("host", entry.host));
+    parts.push(_ij_nullable_string_field("path", entry.path));
+    parts.push(_ij_string_field("state", toolchain_state_name(entry.state)));
+    parts.push(_ij_string_field("integrity", toolchain_integrity_name(entry.integrity)));
+    parts.push(_ij_field("roles", _ij_render_strings(entry.roles)));
+    return "{" + _ij_join(parts, ",") + "}";
+}
+
+fn _ij_render_toolchains(entries: ToolchainInspectEntry[]) -> string {
+    if entries.length == 0 { return "[]"; }
+    let mut parts: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        parts.push(_ij_render_entry(entries[i]));
+        i += 1;
+    }
+    return "[" + _ij_join(parts, ",") + "]";
+}
+
+fn _ij_render_entry_object(version: string, path: string) -> string {
+    let mut parts: string[] = [];
+    parts.push(_ij_string_field("version", version));
+    parts.push(_ij_nullable_string_field("path", path));
+    return "{" + _ij_join(parts, ",") + "}";
+}
+
+fn _ij_render_selection(selection: ToolchainSelection) -> string {
+    let mut parts: string[] = [];
+    parts.push(_ij_nullable_string_field("version", selection.version));
+    parts.push(_ij_nullable_string_field("path", selection.path));
+    parts.push(_ij_string_field("source", selection.source));
+    parts.push(_ij_field("installed", _ij_boolean(selection.installed)));
+    parts.push(_ij_string_field("integrity", toolchain_integrity_name(selection.integrity)));
+    return "{" + _ij_join(parts, ",") + "}";
+}
+
+fn _ij_render_requirement(requirement: ToolchainRequirement) -> string {
+    let mut parts: string[] = [];
+    parts.push(_ij_nullable_string_field("minimum", requirement.minimum));
+    parts.push(_ij_nullable_string_field("version", requirement.version));
+    parts.push(_ij_nullable_string_field("channel", requirement.channel));
+    parts.push(_ij_nullable_string_field("source", requirement.source));
+    return "{" + _ij_join(parts, ",") + "}";
+}
+
+fn _ij_boolean(value: boolean) -> string {
+    if value { return "true"; }
+    return "false";
+}
+
+// SFEP-0061's coded severity/message shape, rendered from the report's single
+// finding list — the same list the exit code and the human rendering read, so
+// the three can never disagree (SFEP-0003 requires a --json invocation and its
+// human rendering to agree on findings).
+fn _ij_render_diagnostic(finding: ToolchainFinding) -> string {
+    let mut parts: string[] = [];
+    parts.push(_ij_string_field("code", finding.code));
+    parts.push(_ij_string_field("severity", finding.severity));
+    parts.push(_ij_string_field("message", finding.message));
+    return "{" + _ij_join(parts, ",") + "}";
+}
+
+fn _ij_render_diagnostics(findings: ToolchainFinding[]) -> string {
+    if findings.length == 0 { return "[]"; }
+    let mut parts: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= findings.length { break; }
+        parts.push(_ij_render_diagnostic(findings[i]));
+        i += 1;
+    }
+    return "[" + _ij_join(parts, ",") + "]";
+}
+
+// -------------------------------------------------------------------
+// Top-level envelope
+// -------------------------------------------------------------------
+// Emit the `sailfin-toolchains/1` envelope for `sfn toolchain
+// list|active|verify --json`. Field order is normative and locked by
+// `compiler/tests/e2e/toolchain_inspect_json_test.sfn` — do not reorder the
+// pushes below without updating that test and
+// `docs/reference/toolchains-json-schema.md`.
+fn render_toolchains_json(report: ToolchainInspectReport) -> string {
+    let mut parts: string[] = [];
+    parts.push(_ij_string_field("schema_version", "sailfin-toolchains/1"));
+    parts.push(_ij_string_field("operation", report.operation));
+    parts.push(_ij_nullable_string_field("host", report.host));
+    parts.push(_ij_field("entry", _ij_render_entry_object(report.entry_version, report.entry_path)));
+    parts.push(_ij_field("selected", _ij_render_selection(report.selection)));
+    parts.push(_ij_field("requirement", _ij_render_requirement(report.requirement)));
+    parts.push(_ij_string_field("fetch_policy", report.fetch_policy));
+    // Unshipped in this slice: the per-user default is SFN-1068 and update
+    // checks are SFEP-0073 Slice 4. Both are locked into the envelope now so
+    // the field set never needs a bump once they land.
+    parts.push(_ij_field("default", "null"));
+    parts.push(_ij_field("update", "null"));
+    parts.push(_ij_field("toolchains", _ij_render_toolchains(report.entries)));
+    parts.push(_ij_field("diagnostics", _ij_render_diagnostics(report.findings)));
+    // No trailing newline: the caller emits this through `print`, which adds
+    // one. Both would put a blank line after the document.
+    return "{" + _ij_join(parts, ",") + "}";
+}
+
+export { render_toolchains_json };
