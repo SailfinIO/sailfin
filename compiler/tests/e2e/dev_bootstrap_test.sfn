@@ -4,9 +4,46 @@
 // (SFEP-0047, SFN-197). Drives the built compiler via `process.*`. The
 // network-dependent fetch/dispatch paths are exercised manually; these tests
 // stay offline and deterministic: help discoverability, usage on a bare
-// invocation, and a `pin` round-trip against a fixture manifest.
+// invocation, a `pin` round-trip against a fixture manifest, and the
+// dispatch-routing guards at the end of the file (SFN-1085).
 import { find } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+import { scratch_root, sfn_bin_abs_path, sfn_bin_path } from "sfn/test";
+
+// A fresh, empty directory to use as a CHILD process cwd. Deliberately NOT a
+// compiler checkout: with no `bootstrap.toml` in it, every `dev` leaf that
+// resolves the bootstrap manifest fails fast with its own diagnostic and
+// never fetches a seed or starts a build. That diagnostic is what the
+// dispatch-routing tests below assert on — it is a string only the `dev`
+// command family emits, so seeing it proves which block claimed the argv.
+fn _empty_cwd(label: string) -> string ![io] {
+    let dir = scratch_root() + "/sfn-dev-dispatch-" + label;
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+struct DevRun {
+    exit: int,
+    log: string
+}
+
+// Run `argv` (prefixed with the absolute compiler path) in `cwd`. Absolute
+// because the child's cwd is not the repo root, so a relative `build/bin/sfn`
+// would not resolve. The empty child env is deliberate: every command driven
+// here fails at its own manifest guard before spawning anything, so none of
+// them needs an inherited PATH.
+fn _dev_run_in(cwd: string, argv: string[]) -> DevRun ![io] {
+    let mut full: string[] = [sfn_bin_abs_path()];
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        full.push(argv[i]);
+        i += 1;
+    }
+    let exit = process.run_capture_cwd(full, [], cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return DevRun { exit: exit, log: out + err };
+}
 
 test "dev bootstrap: sfn --help advertises the developer commands" ![io] {
     let _exit = process.run_capture([sfn_bin_path(), "--help"], []);
@@ -46,4 +83,53 @@ test "dev bootstrap: the pin leaf is reached three levels deep" ![io] {
     let err = process.capture_take_stderr();
     assert exit != 0;
     assert find(out + err, "dev bootstrap pin", 0) >= 0;
+}
+
+// ---- Dispatch routing: nested leaves must not be claimed by their
+// same-named top-level command (SFN-1085) ----
+//
+// `subcommand()` returns the *leaf* of the parsed command tree, so a
+// dispatch block gated on it claims any tree whose deepest element shares
+// its name. `dev bootstrap check` was therefore claimed by the top-level
+// `check` block and silently ran static analysis instead of the bootstrap
+// build + smoke-verify gate. `dev bootstrap build`, `dev clean build` and
+// `dev shard run` collide the same way and were correct only because their
+// blocks happened to sit below the `dev` block — ordering, not identity.
+// Every block now gates on `subcommand_path[0]` (`_v2_is_command` in
+// `compiler/src/cli/main.sfn`), so these four assert the routing directly
+// and fail if the leaf gate ever returns.
+test "dev bootstrap: dev bootstrap check runs the gate, not sfn check" ![io] {
+    // The regression: this used to reach `check.run` and emit working-tree
+    // diagnostics. `bootstrap.toml: not found` can only come from the
+    // bootstrap gate, so it is a positive proof of which block ran.
+    let run = _dev_run_in(_empty_cwd("bootstrap-check"), ["dev", "bootstrap", "check"]);
+    assert run.exit != 0;
+    assert find(run.log, "bootstrap.toml: not found", 0) >= 0;
+}
+
+test "dev bootstrap: dev bootstrap build routes to the bootstrap leaf" ![io] {
+    // Near miss — collides with the top-level `build` command.
+    let run = _dev_run_in(_empty_cwd("bootstrap-build"), ["dev", "bootstrap", "build"]);
+    assert run.exit != 0;
+    assert find(run.log, "bootstrap.toml: not found", 0) >= 0;
+}
+
+test "dev clean: dev clean build routes to the cleaner, not sfn build" ![io] {
+    // Near miss — collides with the top-level `build` command. The cleaner
+    // refuses to touch a directory that is not a compiler checkout, so this
+    // stops at its own guard and removes nothing.
+    let run = _dev_run_in(_empty_cwd("clean-build"), ["dev", "clean", "build"]);
+    assert run.exit != 0;
+    assert find(run.log, "[clean] error: no bootstrap.toml", 0) >= 0;
+}
+
+test "dev shard: dev shard run routes to the shard runner, not sfn run" ![io] {
+    // Near miss — collides with the top-level `run` command. An unknown
+    // shard name stops inside the shard runner before any test executes;
+    // `sfn run` would instead have tried to build a file by that name.
+    let exit = process.run_capture([sfn_bin_path(), "dev", "shard", "run", "sfn-1085-no-such-shard"], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "unknown shard", 0) >= 0;
 }

@@ -40,7 +40,6 @@ import {
     parse_matches,
     render_help_json,
     render_help_tree,
-    subcommand,
     subcommand_path,
     with_flag,
     with_subcommand
@@ -387,6 +386,31 @@ fn _v2_is_version_query(args: string[]) -> boolean {
     return strings_equal(args[0], "-V");
 }
 
+// Whether the parsed command tree is rooted at `name` — the single gate every
+// dispatch block below uses.
+//
+// The identity of a command is the *root* of its descent path, never
+// `subcommand()`'s leaf: `subcommand()` returns the deepest matched name
+// (`matches.sfn`), so a leaf-gated block claims any tree whose deepest element
+// happens to share its name. `dev.sfn`'s `command_def()` registers a leaf
+// literally named `check` under `dev bootstrap`, so `sfn dev bootstrap check`
+// was claimed by the top-level `check` block and silently ran static analysis
+// instead of the bootstrap build + smoke-verify gate (SFN-1085). The sibling
+// collisions — `dev bootstrap build`, `dev clean build`, `dev shard run` —
+// resolved correctly only because their blocks happened to sit below the `dev`
+// block. Gating on `subcommand_path[0]` makes every match exact, so a nested
+// leaf named after a top-level command cannot be claimed by it and block order
+// carries no meaning. Registering a new nested leaf is therefore safe by
+// construction, not by ordering.
+//
+// An empty path (no subcommand descended, e.g. bare `sfn` or `sfn --version`)
+// matches nothing and falls through to the root handling below.
+fn _v2_is_command(matches: Matches, name: string) -> boolean {
+    let path: string[] = subcommand_path(matches);
+    if path.length == 0 { return false; }
+    return strings_equal(path[0], name);
+}
+
 fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // Parse the driver-injected `--runtime-root` / `--binary-dir` prefix
     // (Issue 2.2) so `binary_dir` is available for version resolution
@@ -534,7 +558,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // stays listed in `sfn --help --json` and shell completion, which walk
     // the whole `root` tree.
     if parse_ok {
-        if strings_equal(subcommand(matches), "guillermo") {
+        if _v2_is_command(matches, "guillermo") {
             if ctx.trace_argv { _v2_trace_argv(argv); }
             return guillermo_run(matches, ctx);
         }
@@ -547,7 +571,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // subcommand as descended; that is a usage error (exit 2), matching the
     // legacy handler's `args.length != 1` guard — the parser owns argument
     // validation, so the misuse never reaches `init.run`.
-    if strings_equal(subcommand(matches), "init") {
+    if _v2_is_command(matches, "init") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return init_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -560,7 +584,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // (exit 2), matching the legacy handler's `args.length > 2` guard — the
     // parser owns argument validation, so the misuse never reaches
     // `login.run`.
-    if strings_equal(subcommand(matches), "login") {
+    if _v2_is_command(matches, "login") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return login_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -572,7 +596,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // positional) is a usage error (exit 2), matching the legacy handler's
     // `capsule_arg.length == 0` / "unexpected argument" guards — the parser
     // owns argument validation, so the misuse never reaches `add.run`.
-    if strings_equal(subcommand(matches), "add") {
+    if _v2_is_command(matches, "add") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return add_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -585,7 +609,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // usage error (exit 2), matching the legacy handler's `args.length > 2`
     // guard — the parser owns argument validation, so the misuse never
     // reaches `publish.run`.
-    if strings_equal(subcommand(matches), "publish") {
+    if _v2_is_command(matches, "publish") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return publish_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -599,7 +623,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // flag) is a usage error (exit 2), matching the legacy handler's
     // "requires a directory argument" / unknown-flag guards — the parser owns
     // argument validation, so the misuse never reaches `lock.run`.
-    if strings_equal(subcommand(matches), "lock") {
+    if _v2_is_command(matches, "lock") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return lock_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -612,7 +636,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // that still descended into `package` (a value flag with no value, an
     // unrecognized flag) is a usage error (exit 2) — the parser owns argument
     // validation.
-    if strings_equal(subcommand(matches), "package") {
+    if _v2_is_command(matches, "package") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return package_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -626,7 +650,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // unrecognized flag, a missing/surplus positional) is a usage error (exit
     // 2) — the parser owns argument validation, replacing the legacy
     // `_usage()` branches.
-    if strings_equal(subcommand(matches), "emit") {
+    if _v2_is_command(matches, "emit") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return emit_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -639,7 +663,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // mutual-exclusion error (exit 1), preserving the legacy handler's exit
     // codes. A non-ok parse that still descended into `fmt` (an unrecognized
     // flag) is a usage error (exit 2) — the parser owns flag validation.
-    if strings_equal(subcommand(matches), "fmt") {
+    if _v2_is_command(matches, "fmt") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return fmt_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -653,7 +677,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // that still descended into `test` (an unrecognized flag, or a `--jobs`
     // non-integer rejected as `type_error`) is a usage error (exit 2) — the
     // parser owns flag validation.
-    if strings_equal(subcommand(matches), "test") {
+    if _v2_is_command(matches, "test") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return test_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -667,7 +691,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // verbatim — SFEP-0027 §3.4 command #5). A non-ok parse that still
     // descended into `check` (an unrecognized flag) is a usage error (exit 2)
     // — the parser owns flag validation.
-    if strings_equal(subcommand(matches), "check") {
+    if _v2_is_command(matches, "check") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return check_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -677,7 +701,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // parse dispatches to `symbols.run` (always JSON in v1); a non-ok parse
     // that still descended into `symbols` (e.g. an unrecognized flag) is a
     // usage error (exit 2), matching the other migrated commands.
-    if strings_equal(subcommand(matches), "symbols") {
+    if _v2_is_command(matches, "symbols") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return symbols_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -696,13 +720,10 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // `_v2_help_or_usage` prints ahead of the derived help; the
     // `help_requested` kind carries an empty message and is answered with the
     // help alone on exit 0.
-    let config_path: string[] = subcommand_path(matches);
-    if config_path.length > 0 {
-        if strings_equal(config_path[0], "config") {
-            if ctx.trace_argv { _v2_trace_argv(argv); }
-            if parse_ok { return config_run(matches, ctx); }
-            return _v2_help_or_usage(root, matches, parse_err);
-        }
+    if _v2_is_command(matches, "config") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if parse_ok { return config_run(matches, ctx); }
+        return _v2_help_or_usage(root, matches, parse_err);
     }
 
     // `sfn cache <command>` — the registered subcommand matched. Like
@@ -714,13 +735,10 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // usage error (exit 2) — the parser owns flag validation. A carried
     // diagnostic (unknown subcommand/flag) is printed ahead of the derived
     // help.
-    let cache_path: string[] = subcommand_path(matches);
-    if cache_path.length > 0 {
-        if strings_equal(cache_path[0], "cache") {
-            if ctx.trace_argv { _v2_trace_argv(argv); }
-            if parse_ok { return cache_run(matches, ctx); }
-            return _v2_help_or_usage(root, matches, parse_err);
-        }
+    if _v2_is_command(matches, "cache") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if parse_ok { return cache_run(matches, ctx); }
+        return _v2_help_or_usage(root, matches, parse_err);
     }
 
     // `sfn toolchain <command>` — nested subcommand, so the dispatch gates on
@@ -728,13 +746,10 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // `config`/`cache`. A clean parse dispatches to `toolchain.run`; a non-ok
     // parse that descended into `toolchain` (missing `<version>`, unknown
     // leaf) is a usage error (exit 2) — the parser owns argument validation.
-    let toolchain_path: string[] = subcommand_path(matches);
-    if toolchain_path.length > 0 {
-        if strings_equal(toolchain_path[0], "toolchain") {
-            if ctx.trace_argv { _v2_trace_argv(argv); }
-            if parse_ok { return toolchain_run(matches, ctx); }
-            return _v2_help_or_usage(root, matches, parse_err);
-        }
+    if _v2_is_command(matches, "toolchain") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if parse_ok { return toolchain_run(matches, ctx); }
+        return _v2_help_or_usage(root, matches, parse_err);
     }
 
     // `sfn capabilities <command>` — SFEP-0051 Phase 4c workspace capability
@@ -742,41 +757,33 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // path's root exactly like `toolchain`/`cache`. A clean parse dispatches
     // to `capabilities.run`; a non-ok parse that descended into
     // `capabilities` (unknown leaf) is a usage error (exit 2).
-    let capabilities_path: string[] = subcommand_path(matches);
-    if capabilities_path.length > 0 {
-        if strings_equal(capabilities_path[0], "capabilities") {
-            if ctx.trace_argv { _v2_trace_argv(argv); }
-            if parse_ok { return capabilities_run(matches, ctx); }
-            return _v2_help_or_usage(root, matches, parse_err);
-        }
+    if _v2_is_command(matches, "capabilities") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if parse_ok { return capabilities_run(matches, ctx); }
+        return _v2_help_or_usage(root, matches, parse_err);
     }
 
     // `sfn dev <group>` — maintainer-only nested
     // subcommands (SFEP-0047), gated on the descent path's root exactly like
     // `toolchain`/`config`. A clean parse dispatches to `dev.run`; a non-ok
     // parse that descended into `dev` is a usage error (exit 2).
-    let dev_path: string[] = subcommand_path(matches);
-    if dev_path.length > 0 {
-        if strings_equal(dev_path[0], "dev") {
-            if ctx.trace_argv { _v2_trace_argv(argv); }
-            if parse_ok { return dev_run(matches, ctx); }
-            return _v2_help_or_usage(root, matches, parse_err);
-        }
+    if _v2_is_command(matches, "dev") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if parse_ok { return dev_run(matches, ctx); }
+        return _v2_help_or_usage(root, matches, parse_err);
     }
 
     let mut handled_version: boolean = false;
     if parse_ok {
         // `sfn version` — the registered subcommand matched.
-        if strings_equal(subcommand(matches), "version") {
-            handled_version = true;
-        }
+        if _v2_is_command(matches, "version") { handled_version = true; }
     } else {
         // `sfn version --help` descended into `version` but asks for help,
         // not the version string, so it routes to the shared help handler
         // like every other subcommand rather than printing a version and
         // exiting 0 (SFN-1074).
         if strings_equal(parse_err.kind, "help_requested") {
-            if strings_equal(subcommand(matches), "version") {
+            if _v2_is_command(matches, "version") {
                 if ctx.trace_argv { _v2_trace_argv(argv); }
                 return _v2_help_or_usage(root, matches, parse_err);
             }
@@ -816,7 +823,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // that still descended into `build` (a value flag with no value, an
     // unrecognized flag) is a usage error (exit 2) — the parser owns argument
     // validation.
-    if strings_equal(subcommand(matches), "build") {
+    if _v2_is_command(matches, "build") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return build_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -829,7 +836,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // a usage error (exit 2) — the parser owns argument validation. Bare-file
     // dispatch (`sfn foo.sfn`) re-enters here as `["run", foo.sfn]` from the
     // legacy fallthrough.
-    if strings_equal(subcommand(matches), "run") {
+    if _v2_is_command(matches, "run") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return run_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -845,7 +852,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // unrecognized flag, a non-integer `--top`/`--budget-time`/
     // `--budget-mem`) is a usage error (exit 2) — the parser owns argument
     // validation.
-    if strings_equal(subcommand(matches), "bench") {
+    if _v2_is_command(matches, "bench") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return bench_run(matches, ctx); }
         return _v2_help_or_usage(root, matches, parse_err);
@@ -859,7 +866,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // (exit 0 / exit 2 on an unsupported shell); a non-ok parse that still
     // descended into `completion` (a missing/surplus positional) is a usage
     // error (exit 2) — the parser owns argument validation.
-    if strings_equal(subcommand(matches), "completion") {
+    if _v2_is_command(matches, "completion") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok {
             return completion_run(matches, ctx, render_help_tree(root));
