@@ -38,15 +38,7 @@ import {
     number_to_string,
     trim_text
 } from "./core_text";
-import {
-    await_symbol_for_future_pointer_type,
-    future_type_for_spawn_kind,
-    llvm_return_type_for_spawn_kind,
-    spawn_ctx_symbol_for_kind,
-    spawn_owned_buf_ctx_symbol_for_kind,
-    spawn_owned_ctx_symbol_for_kind,
-    spawn_symbol_for_kind
-} from "./core_type_mapping";
+import { await_symbol_for_future_pointer_type } from "./core_type_mapping";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 // SFN-398: whether a `channel:<kind>` element kind names an integer type.
@@ -520,215 +512,6 @@ fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries:
     };
 }
 
-// Typed spawn: `spawn:<kind> <operand>`. Extracted sibling of
-// `lower_expression` (peak-RSS scope split, issue context in CLAUDE.md) —
-// behaviour is identical; each `let` here lives in its own function scope
-// instead of accumulating into `lower_expression`'s 240+-local frame.
-fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let diagnostics: string[] = [];
-    let diags: LoweringDiagnostic[] = [];
-    let colon_pos = index_of(stripped, ":");
-    let space_pos = index_of(stripped, " ");
-    let mut spawn_kind: string = "";
-    let mut spawn_operand_text: string = "";
-    if colon_pos >= 0 {
-        if space_pos > colon_pos {
-            spawn_kind = substring(stripped, colon_pos + 1, space_pos);
-            spawn_operand_text = trim_text(substring(stripped, space_pos + 1, stripped.length));
-        } else {
-            spawn_kind = substring(stripped, colon_pos + 1, stripped.length);
-        }
-    }
-    let spawn_sym = spawn_symbol_for_kind(spawn_kind);
-    // #1475: a capturing task lambda's env is `@sfn_env_alloc`'d and only
-    // the worker frees it — route through the `_owned_ctx` family whose
-    // trampoline `sfn_env_free`s it. The `owned_env` tag rides on the
-    // closure-pair operand text (set by the lift pass for spawn targets);
-    // non-capturing (null env) and async ctx paths keep the plain `_ctx`.
-    let mut spawn_ctx_sym = spawn_ctx_symbol_for_kind(spawn_kind);
-    // #1476: a capturing task lambda whose first capture is a moved
-    // `OwnedBuf` carries the `owned_buf` tag — route through the
-    // `_owned_buf_ctx` family whose trampoline reclaims the libc-backed
-    // buffer at env offset 0. Check `owned_buf` BEFORE `owned_env`: both
-    // markers contain `env_alloc`, and `owned_buf` is the more specific
-    // (env-free + buffer reclaim) selection.
-    if index_of(spawn_operand_text, "env_alloc owned_buf ") >= 0 {
-        spawn_ctx_sym = spawn_owned_buf_ctx_symbol_for_kind(spawn_kind);
-    } else if index_of(spawn_operand_text, "env_alloc owned_env ") >= 0 {
-        spawn_ctx_sym = spawn_owned_ctx_symbol_for_kind(spawn_kind);
-    }
-    let future_type = future_type_for_spawn_kind(spawn_kind);
-    let fn_ret_llvm = llvm_return_type_for_spawn_kind(spawn_kind);
-    let fn_ptr_type = fn_ret_llvm + " ()*";
-    let mut spawn_lines: string[] = lines;
-    let mut spawn_temp: int = temp_index;
-    let mut spawn_diag: string[] = diagnostics;
-    let mut spawn_diags = diags;
-    let empty_spawn_constants: StringConstant[] = [];
-    let mut have_operand: boolean = false;
-    let mut op_llvm_type: string = "";
-    let mut op_value: string = "";
-    if spawn_operand_text.length > 0 {
-        let lowered_op = lower_expression(spawn_operand_text, bindings, locals, spawn_temp, spawn_lines, functions, context, "");
-        spawn_diag = extend_string_array(spawn_diag, lowered_op.diagnostics);
-        spawn_lines = lowered_op.lines;
-        spawn_temp = lowered_op.temp_index;
-        if lowered_op.operand != null {
-            let raw_op = lowered_op.operand;
-            op_llvm_type = raw_op.llvm_type;
-            op_value = raw_op.value;
-            have_operand = true;
-        }
-    }
-    if !have_operand {
-        let message = "spawn:<kind>: could not lower operand for `" + stripped
-            + "`";
-        spawn_diags.push(lowering_warning_diag("E1006", message, null));
-        spawn_diag.push("llvm lowering: " + message);
-        return ExpressionResult {
-            lines: spawn_lines,
-            temp_index: spawn_temp,
-            operand: null,
-            diagnostics: spawn_diag,
-            string_constants: empty_spawn_constants,
-            diags: spawn_diags
-        };
-    }
-    // The spawned task lowers to one of two operand shapes:
-    //   1. A lifted-lambda closure pair `{i8*, i8*}` = {fn_ptr, env}
-    //      (issue #686). The lifted worker is `fn(i8* env) -> <ret>` —
-    //      exactly the shape the runtime's `_ctx` trampoline calls — so
-    //      extract the fn_ptr + env and route through
-    //      `sfn_spawn_<kind>_ctx(fn_ptr, env)`. Non-capturing lambdas
-    //      carry a null env; capturing lambdas (follow-up) carry a heap
-    //      env. This is the path the surface `spawn fn() -> T { ... }`
-    //      takes, and it makes the task actually run on the pool (the
-    //      former `bitcast {i8*,i8*} to <ret> ()*` was invalid IR — an
-    //      aggregate cannot be bitcast to a function pointer — so the
-    //      task was never spawned).
-    //   2. A bare function reference (`i8*` or a typed `<ret> ()*`),
-    //      i.e. a zero-argument worker. Coerce to i8* and use the no-ctx
-    //      `sfn_spawn_<kind>(fn_ptr)` variant.
-    let mut spawn_raw_t: string = "";
-    if op_llvm_type == "{i8*, i8*}" {
-        let cp_fn_t = format_temp_name(spawn_temp);
-        spawn_temp += 1;
-        spawn_lines.push("  " + cp_fn_t + " = extractvalue {i8*, i8*} "
-            + op_value
-            + ", 0");
-        let cp_env_t = format_temp_name(spawn_temp);
-        spawn_temp += 1;
-        spawn_lines.push("  " + cp_env_t + " = extractvalue {i8*, i8*} "
-            + op_value
-            + ", 1");
-        spawn_raw_t = format_temp_name(spawn_temp);
-        spawn_temp += 1;
-        spawn_lines.push("  " + spawn_raw_t + " = call i8* @" + spawn_ctx_sym
-            + "(i8* "
-            + cp_fn_t
-            + ", i8* "
-            + cp_env_t
-            + ")");
-    } else {
-        let mut fn_ptr_i8: string = op_value;
-        if op_llvm_type != "i8*" {
-            let fn_ptr_cast_t = format_temp_name(spawn_temp);
-            spawn_temp += 1;
-            spawn_lines.push("  " + fn_ptr_cast_t + " = bitcast " + op_llvm_type
-                + " "
-                + op_value
-                + " to i8*");
-            fn_ptr_i8 = fn_ptr_cast_t;
-        }
-        spawn_raw_t = format_temp_name(spawn_temp);
-        spawn_temp += 1;
-        spawn_lines.push("  " + spawn_raw_t + " = call i8* @" + spawn_sym
-            + "(i8* "
-            + fn_ptr_i8
-            + ")");
-    }
-    // Bitcast raw i8* result back to typed future pointer for
-    // downstream IR type tracking (e.g. the await dispatch).
-    let spawn_result_t = format_temp_name(spawn_temp);
-    spawn_temp += 1;
-    spawn_lines.push("  " + spawn_result_t + " = bitcast i8* " + spawn_raw_t
-        + " to "
-        + future_type);
-    let spawn_operand = LLVMOperand {
-        llvm_type: future_type,
-        value: spawn_result_t
-    };
-    return ExpressionResult {
-        lines: spawn_lines,
-        temp_index: spawn_temp,
-        operand: spawn_operand,
-        diagnostics: spawn_diag,
-        string_constants: empty_spawn_constants,
-        diags: spawn_diags
-    };
-}
-
-// Untyped spawn: `spawn <operand>`. Uses the generic `spawn_task` adapter
-// (i8* → i8*). Extracted sibling of `lower_expression`.
-fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let diagnostics: string[] = [];
-    let diags: LoweringDiagnostic[] = [];
-    let spawn_op_text = trim_text(substring(stripped, 6, stripped.length));
-    let mut spawn2_lines: string[] = lines;
-    let mut spawn2_temp: int = temp_index;
-    let mut spawn2_diag: string[] = diagnostics;
-    let mut spawn2_diags = diags;
-    let empty_spawn2_constants: StringConstant[] = [];
-    if spawn_op_text.length > 0 {
-        let lowered2 = lower_expression(spawn_op_text, bindings, locals, spawn2_temp, spawn2_lines, functions, context, "");
-        spawn2_diag = extend_string_array(spawn2_diag, lowered2.diagnostics);
-        spawn2_lines = lowered2.lines;
-        spawn2_temp = lowered2.temp_index;
-        if lowered2.operand != null {
-            let op2 = lowered2.operand;
-            let mut task_ptr: string = op2.value;
-            if op2.llvm_type != "i8*" {
-                let cast2_t = format_temp_name(spawn2_temp);
-                spawn2_temp += 1;
-                spawn2_lines.push("  " + cast2_t + " = bitcast " + op2.llvm_type
-                    + " "
-                    + op2.value
-                    + " to i8*");
-                task_ptr = cast2_t;
-            }
-            let spawn2_result = format_temp_name(spawn2_temp);
-            spawn2_temp += 1;
-            spawn2_lines.push("  " + spawn2_result
-                + " = call i8* @sfn_spawn_task(i8* "
-                + task_ptr
-                + ")");
-            let spawn2_operand = LLVMOperand {
-                llvm_type: "i8*",
-                value: spawn2_result
-            };
-            return ExpressionResult {
-                lines: spawn2_lines,
-                temp_index: spawn2_temp,
-                operand: spawn2_operand,
-                diagnostics: spawn2_diag,
-                string_constants: empty_spawn2_constants,
-                diags: spawn2_diags
-            };
-        }
-    }
-    let message = "spawn: could not lower operand for `" + stripped + "`";
-    spawn2_diags.push(lowering_warning_diag("E1006", message, null));
-    spawn2_diag.push("llvm lowering: " + message);
-    return ExpressionResult {
-        lines: spawn2_lines,
-        temp_index: spawn2_temp,
-        operand: null,
-        diagnostics: spawn2_diag,
-        string_constants: empty_spawn2_constants,
-        diags: spawn2_diags
-    };
-}
-
 // Bare channel: `channel(<capacity>)`. Lowers to `sfn_channel_create` with
 // pointer-sized (8-byte) monomorphized elements and `owned` = 0. Extracted
 // sibling of `lower_expression`.
@@ -941,6 +724,28 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
                                     + " to i64");
                                 par_fn_addrs.push(fn_addr_t);
                                 par_ctx_addrs.push(env_addr_t);
+                            } else if starts_with(task_op.llvm_type, "%SailfinFuture") {
+                                // SFN-1006 §7.5: a `spawn` handle is a
+                                // future pointer, already enqueued — it is
+                                // not a `parallel` task. Without this guard
+                                // the fix below would let a `%SailfinFuture*`
+                                // reach the `ptrtoint` below and produce
+                                // type-legal but garbage IR (a silent
+                                // miscompile) instead of today's loud ICE.
+                                let par_message = "parallel: a `spawn` handle is not a "
+                                    + "`parallel` task — pass the task directly: "
+                                    + "`parallel [fn() -> T { ... }]`";
+                                par_diags.push(lowering_error_diag("E1010", par_message, null));
+                                par_diag.push("llvm lowering [fatal]: "
+                                    + par_message);
+                                return ExpressionResult {
+                                    lines: par_lines,
+                                    temp_index: par_temp,
+                                    operand: null,
+                                    diagnostics: par_diag,
+                                    string_constants: empty_par_constants,
+                                    diags: par_diags
+                                };
                             } else {
                                 // Bare reference: zero-argument worker.
                                 let mut fn_ptr_i8: string = task_op.value;

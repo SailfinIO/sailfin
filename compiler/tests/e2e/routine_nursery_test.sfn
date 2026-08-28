@@ -19,7 +19,12 @@
 //                    plus a `thread_local` `_sfn_g_current_nursery` global.
 //   4. routine lowering — `routine { spawn ... }` brackets its body with
 //                    `@sfn_nursery_enter()` / `@sfn_nursery_exit(i64 ` and a
-//                    `@sfn_spawn_task(` inside, ordered enter < spawn < exit.
+//                    `@sfn_spawn_int(` inside (SFN-1006: a `spawn <named
+//                    zero-arg fn>()` call now lowers through the typed
+//                    `sfn_spawn_<kind>` family instead of the retired
+//                    `sfn_spawn_task` adapter, which allocated a Task but
+//                    never enqueued or nursery-registered it), ordered
+//                    enter < spawn < exit.
 //   5. fail-closed — a non-local exit (`return`) out of a `routine` is
 //                    rejected at lowering with the #1181 diagnostic.
 //
@@ -156,10 +161,10 @@ test "nursery: routine lowers to a nursery scope bracketing its spawns (#1181)" 
     // The nursery surface is called and the routine brackets its body.
     assert contains(ir, "call i64 @sfn_nursery_enter()");
     assert contains(ir, "call i64 @sfn_nursery_exit(i64 ");
-    assert contains(ir, "call i8* @sfn_spawn_task(");
+    assert contains(ir, "call i8* @sfn_spawn_int(");
     // Structured ordering: enter < spawn < exit (the spawn is bracketed).
     let enter_ln = _first_line_with(ir, "call i64 @sfn_nursery_enter()");
-    let spawn_ln = _first_line_with(ir, "call i8* @sfn_spawn_task(");
+    let spawn_ln = _first_line_with(ir, "call i8* @sfn_spawn_int(");
     let exit_ln = _first_line_with(ir, "call i64 @sfn_nursery_exit(i64 ");
     assert enter_ln >= 0;
     assert spawn_ln >= 0;

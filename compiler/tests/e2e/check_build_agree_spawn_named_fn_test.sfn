@@ -1,0 +1,127 @@
+// End-to-end regression for SFN-1006: `sfn check` must not report a false
+// green on `spawn <named zero-arg fn>()`, and must not report a false red
+// on the argument-carrying form that IS rejected.
+//
+// The original symptom: `spawn worker()` (a call to a zero-argument named
+// function) checked green but ICE'd at `sfn build` with an invalid `i64` to
+// `ptr` cast — `lower_spawn_expression` lowered the untyped operand as a
+// generic expression, evaluating the callee SYNCHRONOUSLY and casting its
+// RETURN VALUE into a task pointer. The fix rewrites that lowering to
+// recognise the named zero-arg-call shape directly, and adds `E0842` at
+// check so `spawn worker(1, 2)` (which the lowering still cannot handle —
+// the `_ctx` runtime family threads exactly one env pointer, not an
+// argument vector) fails at BOTH stages instead of only at build. Design
+// gate: `docs/proposals/design-notes/sfn-1006-named-fn-spawn-lowering.md`.
+//
+// Contract note (the residual, documented gap): `sfn check` is parse +
+// typecheck + effect-check ONLY — it never emits IR or links — so it
+// cannot, by construction, catch every codegen/link-only failure. This
+// test asserts agreement on the once-broken class, not that check is a
+// build oracle (see site .../reference/cli.md and CLAUDE.md's validation
+// ladder for the full contract).
+//
+// Build/parallel-runner hygiene mirrors
+// check_build_agree_module_global_test.sfn — see `.claude/rules/no-bash-e2e.md`
+// for the why. `check` emits no IR, so it needs no build-cache isolation and
+// runs outside `with_tmp_dir`.
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
+
+// The green-agreement repro: the issue's own zero-arg named-fn spawn.
+// Before the fix this checked green but ICE'd at build.
+fn _green_src() -> string {
+    return "fn worker() -> int { return 7; }\n" + "fn main() -> int ![io] {\n"
+        + "    let hs: Task<int>[] = [spawn worker()];\n"
+        + "    let v: int = await hs[0];\n"
+        + "    print.info(\"v=\" + number_to_string(v));\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// The red-agreement repro: an argument-carrying spawn target. This must
+// fail BOTH check (E0842) and build — asserting both directions is what
+// makes this a divergence guard rather than a happy-path test.
+fn _red_src() -> string {
+    return "fn worker(a: int) -> int { return a; }\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let hs: Task<int>[] = [spawn worker(1)];\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// The child env is derived by subtraction from the real environment, not
+// assembled key by key: `clean_runner_env` filters `process.environ()` rather
+// than allowlisting it, so the nested clang/ld still find their toolchain
+// while the parent pool's orchestration keys are stripped. Threading raw
+// `process.environ()` here would bind these two nested builds to the parent
+// runner's scratch and shared runtime object cache — pool-only breakage that
+// passes a serial run and fails under `--jobs N` (SFN-401).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("sfn-1006-check-build-agree"));
+}
+
+// A fresh out-of-tree source path for the shared check/build input.
+// (Survives `with_tmp_dir` teardown; this test owns the filename, so no
+// cross-test collision under the parallel pool.)
+fn _scratch_src(tag: string, src: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-1006-check-build-agree-" + tag + ".sfn";
+    fs.writeFile(path, src);
+    return path;
+}
+
+struct CheckBuildAgreement {
+    check_exit: int;
+    build_exit: int;
+}
+
+fn _check_build_agreement(srcpath: string) -> CheckBuildAgreement ![io] {
+    let check_exit = process.run_capture([sfn_bin_path(), "check", srcpath], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+
+    let build_exit = with_tmp_dir(fn (dir: string) -> int {
+        let binpath = dir + "/repro";
+        let be = process.run_capture([sfn_bin_path(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        return be;
+    });
+
+    return CheckBuildAgreement {
+        check_exit: check_exit,
+        build_exit: build_exit
+    };
+}
+
+test "check/build agree: spawn of a zero-arg named fn is not a false green (SFN-1006)" ![io] {
+    let srcpath = _scratch_src("green", _green_src());
+    let agreement = _check_build_agreement(srcpath);
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // check reports the program clean...
+    assert agreement.check_exit == 0;
+    // ...and build agrees by succeeding (pre-fix this was the ICE that
+    // made check a false green).
+    assert agreement.build_exit == 0;
+    // The agreement itself: check's verdict matches build's outcome.
+    assert agreement.check_exit == agreement.build_exit;
+}
+
+test "check/build agree: spawn with arguments is not a false red-vs-green split (SFN-1006)" ![io] {
+    let srcpath = _scratch_src("red", _red_src());
+    let agreement = _check_build_agreement(srcpath);
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // check rejects the program (E0842)...
+    assert agreement.check_exit != 0;
+    // ...and build agrees by also failing.
+    assert agreement.build_exit != 0;
+}

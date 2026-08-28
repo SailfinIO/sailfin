@@ -5,19 +5,26 @@
 // contract but not exclusivity under real concurrency. This fans 16
 // `spawn`s at the SAME path and asserts exactly one wins.
 //
-// Shape note (design feasibility probe, not assumed): the module-global +
-// NAMED-FUNCTION `spawn _fn()` form the design proposed does not lower —
-// `spawn _claim_once()` (a bare call to a top-level function, no lambda)
-// reproducibly ICEs at the LLVM backend with "invalid cast opcode for cast
-// from 'i64' to 'ptr'" when its handle feeds `Task<int>[]`/`join_all`,
-// independent of the function's body. The INLINE non-capturing lambda form
-// `spawn fn() -> int ![io] { ... }` is the one `docs/status.md` documents
-// as shipped (#1474) and is what `task_join_all_test.sfn` /
-// `spawn_await_concurrent_execution_test.sfn` exercise throughout — used
-// here instead. It still proves real concurrency: nurseries are backed by
-// real pthreads (`runtime/sfn/concurrency/nursery.sfn`), and every spawned
-// lambda body reads the same module-global `_race_path` (not a captured
-// local), so this is not a sequential loop dressed up as a race test.
+// Shape note (design feasibility probe, not assumed): at the time this test
+// was written, the module-global + NAMED-FUNCTION `spawn _fn()` form the
+// design proposed did not lower — `spawn _claim_once()` (a bare call to a
+// top-level function, no lambda) reproducibly ICEd at the LLVM backend with
+// "invalid cast opcode for cast from 'i64' to 'ptr'" when its handle fed
+// `Task<int>[]`/`join_all`, independent of the function's body. SFN-1006
+// fixed that lowering (`spawn <zero-arg named fn>()` now resolves the
+// callee from the native function table and emits a typed
+// `sfn_spawn_<kind>` call), so the named-function form is available again —
+// but this test deliberately keeps the INLINE non-capturing lambda form
+// `spawn fn() -> int ![io] { ... }` rather than rewriting to the named form:
+// the test still needs a body reading the shared module-global, not a bare
+// call, so switching forms here would be a behavior-neutral rewrite with no
+// coverage gain. The lambda form is the one `docs/status.md` documents as
+// shipped (#1474) and is what `task_join_all_test.sfn` /
+// `spawn_await_concurrent_execution_test.sfn` exercise throughout. It still
+// proves real concurrency: nurseries are backed by real pthreads
+// (`runtime/sfn/concurrency/nursery.sfn`), and every spawned lambda body
+// reads the same module-global `_race_path` (not a captured local), so this
+// is not a sequential loop dressed up as a race test.
 import { scratch_root } from "sfn/test";
 
 import {

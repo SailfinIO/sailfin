@@ -12,20 +12,25 @@ import {
     make_spawn_handle_into_empty_array_diagnostic,
     make_spawn_handle_kind_mismatch_diagnostic,
     make_spawn_unresolvable_kind_diagnostic,
+    make_spawn_unsupported_target_diagnostic,
     spawn_future_kind,
     task_array_marker_kind,
     type_is_future
 } from "../typecheck_types/expr_type_rules";
 import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { resolve_call_signature } from "./call_signature";
+import { TypeckCtx } from "./context";
 
 // Concurrency type rules — issue #1082, epic #965 (M4, decision B). Like the
 // `?`-operator rules above, these are driven against explicit type-annotation
-// strings: the checker has no expression-type inferencer (#829), so the only
-// statically-sound LIVE rule is `check_spawn_kind` for a lambda-literal operand
-// (wired in `walk_expression`). `check_await_operand`/`check_channel_send`
-// ship as helpers — live wiring waits on operand-type inference, exactly as
-// `check_try_operator`'s rule 3 does. Kind resolution mirrors
-// `llvm/type_mapping.sfn:831-905` so emit-native (#1084) agrees.
+// strings: the checker has no expression-type inferencer (#829). Two LIVE
+// rules are wired in `walk_expression`: `check_spawn_kind` for a
+// lambda-literal operand, and `check_spawn_target` (SFN-1006), which needs
+// only the callee's declared return type / known-ness — not full expression
+// inference — to reject an unsupported spawn target. `check_await_operand`/
+// `check_channel_send` ship as helpers — live wiring waits on operand-type
+// inference, exactly as `check_try_operator`'s rule 3 does. Kind resolution
+// mirrors `llvm/type_mapping.sfn:831-905` so emit-native (#1084) agrees.
 // Assign the semantic future kind to a parsed spawn expression while
 // preserving its source return annotation. Syntax leaves `kind` empty and
 // records only `return_type`; this analyzer-owned step is the sole bridge
@@ -75,6 +80,60 @@ fn check_spawn_expression(expression: Expression) -> Diagnostic[] {
         return [make_spawn_unresolvable_kind_diagnostic(expression.span)];
     }
     return [];
+}
+
+// `spawn` target rule (SFN-1006 / E0842): `spawn` accepts an inline `fn`
+// literal or a call to a zero-argument named function — the lowering-side
+// `sfn_spawn_<kind>(fn_ptr)` family. Everything else is rejected here so a
+// `check`-green program cannot ICE at build (the divergence class this issue
+// is filed under). A `Lambda` operand delegates to `check_spawn_expression`
+// so E0813 is unchanged; a `Call` operand is classified into the four
+// `detail` cases; any other variant is the generic catch-all.
+fn check_spawn_target(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let operand = expression.operand;
+    if operand == null { return []; }
+    if strings_equal(operand.variant, "Lambda") {
+        return check_spawn_expression(expression);
+    }
+    if strings_equal(operand.variant, "Call") {
+        if operand.arguments.length > 0 {
+            let name = _spawn_call_display_name(operand.callee);
+            return [make_spawn_unsupported_target_diagnostic("`" + name
+                + "` with arguments", expression.span)];
+        }
+        let callee = operand.callee;
+        if !strings_equal(callee.variant, "Identifier") {
+            return [make_spawn_unsupported_target_diagnostic("a method or computed callee", expression.span)];
+        }
+        let signature = resolve_call_signature(callee.name, ctx);
+        if !signature.known {
+            return [make_spawn_unsupported_target_diagnostic("`" + callee.name
+                + "`, which is not a declared function", expression.span)];
+        }
+        // Agreement with the lowering guard: a callee that declares any
+        // parameter cannot be spawned even when the call site passes none,
+        // because defaults are filled at the call site and the trampoline
+        // invokes the callee with zero arguments (SFN-1006).
+        if !signature.arity_known {
+            return [make_spawn_unsupported_target_diagnostic("`" + callee.name
+                + "`, whose parameter list is not statically known", expression.span)];
+        }
+        if signature.maximum > 0 {
+            return [make_spawn_unsupported_target_diagnostic("`" + callee.name
+                + "`, which declares parameters", expression.span)];
+        }
+        return [];
+    }
+    return [make_spawn_unsupported_target_diagnostic("an expression that is not a function call or `fn` literal", expression.span)];
+}
+
+// Best-effort display name for the `arguments.length > 0` E0842 case: the
+// callee is usually an `Identifier`, but `check_spawn_target` must still
+// produce a readable diagnostic for a method/computed callee carrying
+// arguments (`spawn obj.work(1)`).
+fn _spawn_call_display_name(callee: Expression) -> string {
+    if strings_equal(callee.variant, "Identifier") { return callee.name; }
+    return "call";
 }
 
 // `await` rule (1): the operand must be a future type -> E0814. The
