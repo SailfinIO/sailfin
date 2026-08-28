@@ -44,9 +44,7 @@ import {
     lower_channel_typed_expression,
     lower_join_all_expression,
     lower_parallel_expression,
-    lower_serve_expression,
-    lower_spawn_expression,
-    lower_spawn_typed_expression
+    lower_serve_expression
 } from "./core_concurrency_lowering";
 import { lower_postfix_expression } from "./core_expression_tail";
 import { number_literal_operand } from "./core_number_literal";
@@ -76,6 +74,7 @@ import {
     parse_raw_address_expression,
     parse_ternary_expression
 } from "./core_parsing";
+import { lower_spawn_expression, lower_spawn_typed_expression } from "./core_spawn_lowering";
 import { lower_string_literal } from "./core_strings";
 import {
     append_string,

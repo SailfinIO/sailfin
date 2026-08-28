@@ -70,7 +70,7 @@ fn _grandfathered_ceiling(name: string) -> int {
     // the same situation SFN-770 recorded below. Each ceiling is pinned to
     // its exact new length so the ratchet keeps holding. Splitting these
     // modules remains SFN-639's job.
-    if name == "core_concurrency_lowering.sfn" { return 1678; }
+    if name == "core_concurrency_lowering.sfn" { return 1483; }
     if name == "core_ops_lowering.sfn" { return 1671; }
     // 1447 -> 1460: SFN-770, a miscompile that stored a struct-typed local
     // into a pointer-width enum payload slot by value. 1460 -> 1536: SFN-915,
