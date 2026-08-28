@@ -341,7 +341,11 @@ here.
   early prefix scan), so an older entry toolchain can hand a command it does
   not recognize to a newer selected payload; the project `[toolchain]` floor
   for a one-shot selection is discovered from the working directory rather
-  than the entry file, which the scan runs ahead of resolving. Precedence:
+  than the entry file, which the scan runs ahead of resolving; that floor is
+  enforced, so `cd pinned-project && sfn +<ver> check /elsewhere/main.sfn`
+  is rejected against the *current directory's* pin, not the target file's.
+  The selector must also be the first argument — `sfn --color always +<ver>`
+  is not recognized as a selection. Precedence:
   `+<version>`/`toolchain run` outranks an exact `SAILFIN_TOOLCHAIN`, which
   outranks the project `[toolchain]` floor, which outranks the entry
   toolchain (per-user defaults and exact `[toolchain] version`

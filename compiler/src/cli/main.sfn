@@ -325,6 +325,10 @@ fn _v2_peel_selector(args: string[]) -> CliSelector {
     if starts_with(args[0], "+") {
         // A bare "+" selects nothing; leave it to the parser to reject.
         if args[0].length == 1 { return none; }
+        // With no command after it there is nothing to forward, and dispatching
+        // would install a toolchain just to print its own usage. Declining
+        // leaves the parser to report the unknown command locally.
+        if args.length < 2 { return none; }
         return CliSelector {
             form: "+<version>",
             selector: substring(args[0], 1, args[0].length),
@@ -335,12 +339,20 @@ fn _v2_peel_selector(args: string[]) -> CliSelector {
     if args.length >= 3 {
         if strings_equal(args[0], "toolchain") {
             if strings_equal(args[1], "run") {
+                // A version never starts with `-`, so a flag here is `--help`
+                // or a usage error. Declining routes it to the registered leaf,
+                // which owns both — peeling would answer `toolchain run --help`
+                // with a "not an exact version" error and hide the command.
+                if starts_with(args[2], "-") { return none; }
                 // The `--` separator is conventional but optional; everything
                 // after the selector is the forwarded command either way.
                 let mut start: int = 2 + 1;
                 if args.length > 3 {
                     if strings_equal(args[3], "--") { start = 4; }
                 }
+                // No command left to forward: a local usage error, not a
+                // dispatch that would fetch a toolchain to print its usage.
+                if start >= args.length { return none; }
                 return CliSelector {
                     form: "sfn toolchain run",
                     selector: args[2],
@@ -422,8 +434,17 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         //
         // Returns only when the selection resolved to this very toolchain; a
         // successful dispatch replaces this image and never comes back.
-        let sel_rc = toolchain_select_exact(selection.selector, selection.form, "", ctx, _v2_argv_has_skip_flag(args), _v2_is_version_query(args));
+        // A version query is answered, never refused: a floor mismatch warns and
+        // reports rather than withholding the version, matching what the
+        // `SAILFIN_TOOLCHAIN` path does for the same query below.
+        let version_query = _v2_is_version_query(args);
+        let sel_rc = toolchain_select_exact(selection.selector, selection.form, "", ctx, _v2_argv_has_skip_flag(args)
+            || version_query, version_query);
         if sel_rc != 0 { return sel_rc; }
+        // Resolved in-process rather than dispatched. Recorded so the
+        // lower-ranked `SAILFIN_TOOLCHAIN` cannot override the selector that
+        // outranks it, in the command's own gate or in the version path below.
+        ctx.selector_resolved = true;
     }
 
     // Root command, composed from each subcommand's `command_def()`. Built
@@ -778,7 +799,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         // `skip_flag` is true because reporting a version is not running a
         // build — a floor mismatch warns rather than refusing to answer.
         let env_selector = toolchain_env_exact_selector();
-        if env_selector.length > 0 {
+        if env_selector.length > 0 && !ctx.selector_resolved {
             let version_rc = toolchain_select_exact(env_selector, "SAILFIN_TOOLCHAIN", "", ctx, true, true);
             if version_rc != 0 { return version_rc; }
         }
