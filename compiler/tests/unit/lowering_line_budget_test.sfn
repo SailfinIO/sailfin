@@ -54,14 +54,14 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     // materialization block, which is self-contained and the obvious next
     // extraction; it was left alone here because it is untouched by the fix.
     // SFN-639 tracks the decomposition.
-    if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1547; }
+    if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1512; }
     if path == LOWERING_ROOT + "/lowering_recovery.sfn" { return 1056; }
-    if path == LOWERING_ROOT + "/instructions_let.sfn" { return 1037; }
-    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 963; }
-    if path == LOWERING_ROOT + "/instructions.sfn" { return 861; }
+    if path == LOWERING_ROOT + "/instructions_let.sfn" { return 984; }
+    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 908; }
+    if path == LOWERING_ROOT + "/instructions.sfn" { return 779; }
     if path == LOWERING_ROOT + "/instructions_helpers.sfn" { return 849; }
-    if path == LOWERING_ROOT + "/instructions_if.sfn" { return 832; }
-    if path == LOWERING_ROOT + "/emission.sfn" { return 820; }
+    if path == LOWERING_ROOT + "/instructions_if.sfn" { return 784; }
+    if path == LOWERING_ROOT + "/emission.sfn" { return 776; }
     return 0;
 }
 

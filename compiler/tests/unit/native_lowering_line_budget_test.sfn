@@ -70,29 +70,25 @@ fn _grandfathered_ceiling(name: string) -> int {
     // the same situation SFN-770 recorded below. Each ceiling is pinned to
     // its exact new length so the ratchet keeps holding. Splitting these
     // modules remains SFN-639's job.
-    if name == "core_concurrency_lowering.sfn" { return 1483; }
-    if name == "core_ops_lowering.sfn" { return 1671; }
+    if name == "core_concurrency_lowering.sfn" { return 1415; }
+    if name == "core_ops_lowering.sfn" { return 1536; }
     // 1447 -> 1460: SFN-770, a miscompile that stored a struct-typed local
     // into a pointer-width enum payload slot by value. 1460 -> 1536: SFN-915,
     // per the note above.
-    if name == "core_literals_lowering.sfn" { return 1536; }
-    if name == "core_member_lowering.sfn" { return 1243; }
-    if name == "core_parse.sfn" { return 1142; }
-    if name == "core_parsing.sfn" { return 1062; }
-    if name == "statement.sfn" { return 949; }
+    if name == "core_literals_lowering.sfn" { return 1389; }
+    if name == "core_member_lowering.sfn" { return 1186; }
+    if name == "core_parse.sfn" { return 1059; }
+    if name == "core_parsing.sfn" { return 959; }
+    if name == "statement.sfn" { return 845; }
     // 858 -> 859: SFN-744 moves the native IR model behind the `sfn/ir`
     // capsule facade; no lowering logic grew. 859 -> 925: SFN-915, per the
     // note above.
-    if name == "core_cast_lowering.sfn" { return 925; }
+    if name == "core_cast_lowering.sfn" { return 826; }
     if name == "core_operators.sfn" { return 830; }
-    if name == "core_strings.sfn" { return 844; }
-    if name == "core_text.sfn" { return 759; }
     // Newly grandfathered by SFN-915: both were under 750 before the
     // `diags` field landed and are over only by the per-literal cost of
     // naming it. They are the two smallest entries here and the first
     // candidates to drop back under the budget.
-    if name == "statement_assignment.sfn" { return 762; }
-    if name == "method_target.sfn" { return 758; }
     return 0;
 }
 
