@@ -4,7 +4,7 @@
 import { LoweringDiagnostic, NativeFunction, NativeSourceSpan } from "sfn/ir";
 
 import { lower_expression } from "../expression_lowering/native/core";
-import { emit_boolean_and, emit_comparison_instruction } from "../expression_lowering/native/core_operands/comparisons";
+import { emit_comparison_instruction } from "../expression_lowering/native/core_operands/comparisons";
 import { harmonise_operands, single_i8_union_variant_index } from "../expression_lowering/native/core_operands/dispatch";
 import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
 import { is_null_literal, is_union_llvm_type, parse_union_payload_types } from "../expression_lowering/native/core_text";
@@ -32,6 +32,7 @@ import {
     MatchCaseCondition,
     MatchCaseStructure,
     MatchFieldBinding,
+    MatchGuardEmission,
     MatchStructFieldBinding,
     ParameterBinding,
     StringConstant,
@@ -73,21 +74,75 @@ fn _match_null_variant_index(subject_type_annotation: string, subject_llvm_type:
 // which `lowering_core/diagnostics.sfn` discards rather than surfaces, so it
 // failed open too. Reject the form at both sites until a pass implements it.
 //
-// The message deliberately points at an `if` in the arm body rather than at a
-// `guard` clause: a guard on an enum destructuring arm is itself dropped
-// today (verified against seed 0.10.6 and the current build alike), so
-// recommending one would trade this silent wrong branch for another.
+// SFN-1168: the message now recommends a guard clause. It previously pointed at
+// an `if` in the arm body instead, because a guard on an enum destructuring arm
+// was itself dropped, and recommending one would have traded this silent wrong
+// branch for another. Guards are lowered correctly as of SFN-1168, so the guard
+// form is the better recommendation: it keeps the constraint in the pattern,
+// where the reader expects it, and falls through to the next arm on failure.
 fn _field_constraint_unsupported_diag(field_name: string, owner: string, span_in: NativeSourceSpan?) -> LoweringDiagnostic {
     return lowering_error_diag("E1023", "match pattern field `" + field_name
         + "` in `"
         + owner
-        + "` uses the `field: value` constraint form, which lowering does not implement: the constraint would be discarded and the arm would match every value. Bind the field and test it in the arm body instead — `"
+        + "` uses the `field: value` constraint form, which lowering does not implement: the constraint would be discarded and the arm would match every value. Bind the field and constrain it with a guard instead — `"
         + owner
         + " { "
         + field_name
-        + " }: { if "
+        + " } if "
         + field_name
-        + " == ... { ... } }`", span_in);
+        + " == ...: ...`", span_in);
+}
+
+// SFN-1168: emit a guarded arm's guard, and the branch it decides, into the
+// arm's guard block. `lower_match_case_condition` above deliberately returns
+// the pattern condition alone: a guard routinely reads a binder the pattern
+// introduces, and those binders are materialized by the caller only after the
+// pattern test has branched. So the guard is lowered here instead, against the
+// locals the caller has by then extended with the arm's payload bindings.
+//
+// Emits `br i1 <guard>, label %<body_label>, label %<failure_target>`, so an
+// arm whose guard fails falls through to the next arm rather than being taken.
+fn emit_match_guard_branch(function_name: string, guard_text: string, case_span: NativeSourceSpan?, bindings: ParameterBinding[], locals: LocalBinding[], body_label: string, failure_target: string, temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchGuardEmission {
+    let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
+    let lowered = lower_condition_to_i1(function_name, guard_text, bindings, locals, temp_index, lines, functions, context);
+    let mut idx: int = 0;
+    loop {
+        if idx >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[idx]);
+        idx += 1;
+    }
+    let mut current_lines = lowered.lines;
+    if lowered.operand != null {
+        current_lines.push("  br i1 " + lowered.operand.value + ", label %"
+            + body_label
+            + ", label %"
+            + failure_target);
+    } else {
+        // Fail closed: a guard that will not lower used to be dropped silently,
+        // leaving the arm an unconditional match on the variant tag. That is a
+        // wrong-control-flow bug, not a warning.
+        //
+        // Null operand only. `ConditionConversion` has no structured `diags`
+        // channel, and a guard whose sub-expression fails inside
+        // `lower_logical_and` returns a constant `false` rather than null, so
+        // `a && <unlowerable>` still degrades silently into an arm that is
+        // never taken. SFN-1171 tracks giving that path a channel.
+        let diag = lowering_error_diag("E1024", "match arm guard `" + guard_text
+            + "` in `"
+            + function_name
+            + "` could not be lowered to a condition; the arm would match every value of its pattern", case_span);
+        diags.push(diag);
+        diagnostics.push(diag_to_legacy_string(diag));
+        current_lines.push("  br label %" + failure_target);
+    }
+    return MatchGuardEmission {
+        lines: current_lines,
+        temp_index: lowered.temp_index,
+        diagnostics: diagnostics,
+        diags: diags,
+        string_constants: lowered.string_constants
+    };
 }
 
 fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
@@ -522,42 +577,18 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
         }
     }
 
-    if case.guard != null {
-        let guard_text = trim_text(case.guard);
-        if guard_text.length > 0 {
-            let guard_condition = lower_condition_to_i1(function_name, guard_text, bindings, locals, current_temp, current_lines, functions, context);
-            let mut _ci9: int = 0;
-            loop {
-                if _ci9 >= guard_condition.diagnostics.length { break; }
-                diagnostics.push(guard_condition.diagnostics[_ci9]);
-                _ci9 += 1;
-            }
-            current_lines = guard_condition.lines;
-            current_temp = guard_condition.temp_index;
-            collected_string_constants = merge_string_constants(collected_string_constants, guard_condition.string_constants);
-            if guard_condition.operand != null {
-                if condition_operand == null {
-                    condition_operand = guard_condition.operand;
-                } else {
-                    let merged = emit_boolean_and(condition_operand, guard_condition.operand, current_temp, current_lines);
-                    let mut _ci10: int = 0;
-                    loop {
-                        if _ci10 >= merged.diagnostics.length { break; }
-                        diagnostics.push(merged.diagnostics[_ci10]);
-                        _ci10 += 1;
-                    }
-                    current_lines = merged.lines;
-                    current_temp = merged.temp_index;
-                    condition_operand = merged.operand;
-                }
-            } else {
-                diagnostics.push("llvm lowering: unable to lower guard in match case for `"
-                    + function_name
-                    + "`");
-            }
-        }
-    }
-
+    // SFN-1168: the guard is deliberately NOT combined into the condition here.
+    // A guard routinely references a binder the pattern itself introduces
+    // (`Result.Ok { value } if value == 99`), but the payload binders are only
+    // materialized by the caller after this function returns, so lowering the
+    // guard against `locals` could never resolve them: it returned a null
+    // operand, the failure was recorded only as an untagged legacy string that
+    // `lowering_core/diagnostics.sfn` discards, and the arm silently fell back
+    // to the bare tag comparison and matched unconditionally.
+    //
+    // `lower_match_instruction` now emits the guard into its own block placed
+    // between the tag test and the arm body, where the binders exist. This
+    // function returns the pattern condition alone.
     let mut is_unconditional_default: boolean = false;
     if case.is_default {
         if case.guard == null { is_unconditional_default = true; } else {
