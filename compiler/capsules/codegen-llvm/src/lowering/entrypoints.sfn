@@ -142,7 +142,6 @@ import {
     ensure_intrinsic_declarations,
     extend_lifetime_regions_checked,
     extend_string_lines,
-    extend_string_lines_checked,
     module_source_filename
 } from "./lowering_io";
 import { recover_functions_for_lowering } from "./lowering_recovery";

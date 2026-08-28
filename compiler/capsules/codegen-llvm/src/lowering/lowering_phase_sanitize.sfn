@@ -21,7 +21,6 @@ import { parse_native_bindings_from_text, parse_native_functions_from_text } fro
 import { trace_log } from "../lowering_debug_state";
 import { number_to_string } from "../utils";
 import { is_test_module_slug, sanitize_collection_length } from "./lowering_helpers";
-import { extend_string_lines_checked, retain_fatal_diagnostics } from "./lowering_io";
 import { get_struct_fields_at, get_struct_name_at } from "./lowering_native_helpers";
 import {
     recover_functions_for_lowering,
@@ -47,12 +46,11 @@ import {
 //
 // After the Phase 4 PR 1 override-reparse removal, most of this function's
 // parameters are unused — retained for signature stability so downstream
-// callers don't need rewiring. Drop them in Phase 4b alongside the
-// `recover_*_light` fallback removal.
+// callers don't need rewiring.
 // unused — retained for signature stability:
 //   native_module, imported_manifests_in, imported_native_texts_in,
-//   diagnostics_in, native_text_override_path (debug-only).
-fn sanitize_lowering_inputs(parse_in: ParseNativeResult, native_text_override_path: string, native_module: NativeModule, imported_manifests_in: LayoutManifest[], imported_native_texts_in: string[], diagnostics_in: string[], debug_lowering: boolean) -> ParseNativeResult {
+//   native_text_override_path (debug-only).
+fn sanitize_lowering_inputs(parse_in: ParseNativeResult, native_text_override_path: string, native_module: NativeModule, imported_manifests_in: LayoutManifest[], imported_native_texts_in: string[], debug_lowering: boolean) -> ParseNativeResult {
     if debug_lowering { trace_log("emit-llvm: dbg-A parse_in assigned"); }
     if debug_lowering {
         trace_log("emit-llvm: dbg-B structured parse is authoritative (no override reparse) path_len="
@@ -87,28 +85,6 @@ fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowerin
     return safe;
 }
 
-// Sanitize diagnostics array: null-check + length guard.
-//
-// Unlike the sibling guards above, an over-length trip keeps the `[fatal]`
-// entries instead of clearing the array, because clearing a diagnostics array
-// that feeds a build gate turns a failing build into a passing one (SFN-529).
-// The structured twin of this guard is `retain_error_diags` (`lowering_io.sfn`),
-// which is what the gate reads after SFN-916.
-//
-// `sanitize_collection_length` doubles as the scan bound, which keeps the
-// two trip reasons apart: it returns 0 for a negative length — the corrupt
-// cross-module struct return this file exists to catch, where indexing the
-// buffer at all is unsafe — and the cap for a merely oversized one, where
-// the entries are real and worth filtering.
-fn sanitize_diagnostics(diagnostics_in: string[]) -> string[] {
-    let mut safe = diagnostics_in;
-    if safe == null { safe = []; }
-    if safe.length != sanitize_collection_length(safe.length, 1000000) {
-        safe = retain_fatal_diagnostics(safe, sanitize_collection_length(safe.length, 1000000));
-    }
-    return safe;
-}
-
 // Sanitize entry points array: null-check + length guard.
 fn sanitize_entry_points(entry_points: string[], debug_lowering: boolean) -> string[] {
     let mut safe = entry_points;
@@ -138,8 +114,8 @@ fn sanitize_imports(imports: NativeImport[], debug_lowering: boolean) -> NativeI
     return safe;
 }
 
-// Sanitize structs array: null-check + length guard + diagnostics.
-fn sanitize_structs(structs: NativeStruct[], diagnostics: string[]) -> NativeStruct[] {
+// Sanitize structs array: null-check + length guard.
+fn sanitize_structs(structs: NativeStruct[]) -> NativeStruct[] {
     let mut safe = structs;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
@@ -149,8 +125,8 @@ fn sanitize_structs(structs: NativeStruct[], diagnostics: string[]) -> NativeStr
     return safe;
 }
 
-// Sanitize enums array: null-check + length guard + diagnostics.
-fn sanitize_enums(enums: NativeEnum[], diagnostics: string[], _trace_enums: boolean) -> NativeEnum[] {
+// Sanitize enums array: null-check + length guard.
+fn sanitize_enums(enums: NativeEnum[], _trace_enums: boolean) -> NativeEnum[] {
     let mut safe = enums;
     if _trace_enums {
         let mut _enum_len_text: string = "null";
@@ -175,8 +151,8 @@ fn sanitize_enums(enums: NativeEnum[], diagnostics: string[], _trace_enums: bool
     return safe;
 }
 
-// Sanitize interfaces array: null-check + length guard + diagnostics.
-fn sanitize_interfaces(interfaces: NativeInterface[], diagnostics: string[]) -> NativeInterface[] {
+// Sanitize interfaces array: null-check + length guard.
+fn sanitize_interfaces(interfaces: NativeInterface[]) -> NativeInterface[] {
     let mut safe = interfaces;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
@@ -345,7 +321,7 @@ fn recover_structs_if_corrupt(safe_structs: NativeStruct[], native_text_override
 // Sanitize and recover bindings array.
 // The `native_text_override_path` param name is a misnomer retained for diff
 // stability — it carries the native IR text content, not a filesystem path.
-fn sanitize_bindings(bindings: NativeBinding[], diagnostics: string[], native_text_override_path: string) -> NativeBinding[] {
+fn sanitize_bindings(bindings: NativeBinding[], native_text_override_path: string) -> NativeBinding[] {
     let mut safe = bindings;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 200000) {

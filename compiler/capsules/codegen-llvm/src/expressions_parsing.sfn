@@ -589,7 +589,6 @@ fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
         };
     }
     if !ends_with(trimmed, ")") {
-        let diagnostics: string[] = ["llvm lowering: raw_address expression missing closing `)`"];
         return RawAddressParseResult {
             recognized: true,
             success: false,

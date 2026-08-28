@@ -91,7 +91,6 @@ import { empty_capability_manifest, flatten_struct_methods } from "./lowering_he
 import {
     ensure_intrinsic_declarations,
     extend_string_lines,
-    extend_string_lines_checked,
     module_source_filename
 } from "./lowering_io";
 import { lower_module_bindings_to_globals } from "./module_globals";

@@ -82,7 +82,6 @@ import {
     recover_safe_functions,
     recover_structs_if_corrupt,
     sanitize_bindings,
-    sanitize_diagnostics,
     sanitize_entry_points,
     sanitize_enums,
     sanitize_functions,
@@ -112,7 +111,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     set_syscall_lowering_module(native_module.module_name);
     let imported_manifests = import_context.manifests;
     let imported_native_texts = import_context.native_texts;
-    let diagnostics_in: string[] = [];
     let mut module_aliases = import_context.module_aliases;
     if module_aliases == null { module_aliases = []; }
     let mut implicit_symbols = import_context.implicit_symbols;
@@ -141,15 +139,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     }
 
     // ── Phase 1: Sanitize & recover inputs ──────────────────────────
-    let parse = sanitize_lowering_inputs(parse_in, native_text_override_path, native_module, imported_manifests, imported_native_texts, diagnostics_in, debug_lowering);
+    let parse = sanitize_lowering_inputs(parse_in, native_text_override_path, native_module, imported_manifests, imported_native_texts, debug_lowering);
 
     let safe_imported_manifests = sanitize_imported_manifests(imported_manifests, debug_lowering);
     let safe_imported_native_texts = sanitize_imported_native_texts(imported_native_texts, debug_lowering);
-    let mut diagnostics = sanitize_diagnostics(diagnostics_in);
     let mut diags: LoweringDiagnostic[] = [];
-    if debug_lowering {
-        trace_log("emit-llvm: dbg-F after diagnostics sanitize");
-    }
     let safe_entry_points = sanitize_entry_points(native_module.entry_points, debug_lowering);
     let _trace_enums = trace_call_lowering();
 
@@ -189,9 +183,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // localize aliased signatures. The older empty-list treatment belonged
     // to the retired textual-inlining path and made
     // `import { ones as tensor_ones }` unresolvable.
-    let mut safe_structs = sanitize_structs(parse.structs, diagnostics);
-    let safe_enums = sanitize_enums(parse.enums, diagnostics, _trace_enums);
-    let safe_interfaces = sanitize_interfaces(parse.interfaces, diagnostics);
+    let mut safe_structs = sanitize_structs(parse.structs);
+    let safe_enums = sanitize_enums(parse.enums, _trace_enums);
+    let safe_interfaces = sanitize_interfaces(parse.interfaces);
     if debug_lowering {
         trace_log("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
     }
@@ -206,7 +200,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
 
     safe_structs = recover_structs_if_corrupt(safe_structs, native_text_override_path, debug_lowering);
 
-    let safe_bindings = sanitize_bindings(parse.bindings, diagnostics, native_text_override_path);
+    let safe_bindings = sanitize_bindings(parse.bindings, native_text_override_path);
 
     // ── Trace setup ─────────────────────────────────────────────────
     // Timing is driver-owned (SFEP-0020 §4); the provider emits ordered
@@ -686,15 +680,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
             + " nonempty="
             + number_to_string(nonempty)
             + " first_len="
-            + number_to_string(first_len)
-            + " diagnostics="
-            + number_to_string(diagnostics.length));
-        let mut diag_index: int = 0;
-        loop {
-            if diag_index >= diagnostics.length { break; }
-            trace_log("test llvm: diagnostic " + diagnostics[diag_index]);
-            diag_index += 1;
-        }
+            + number_to_string(first_len));
     }
     if lines.length == 0 {
         trace_log("emit-llvm: lowering produced no lines (functions="
@@ -703,8 +689,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
             + number_to_string(module_structs.length)
             + " enums="
             + number_to_string(module_enums.length)
-            + " diagnostics="
-            + number_to_string(diagnostics.length)
             + ")");
     }
     if debug_lowering {

@@ -5,15 +5,14 @@
 // (`compiler/capsules/codegen-llvm/src/lowering/lowering_core/diagnostics.sfn`)
 // replaced the `[fatal]` substring scan as the only thing that turns a lowering
 // diagnostic into a build failure. It reads `severity` on the `diags` channel,
-// so the guard that bounds that channel has to preserve `severity: "error"` for
-// exactly the reason its string predecessor has to preserve `[fatal]`: a guard
-// that drops an oversized batch wholesale converts a failing build into a
+// so the guard that bounds that channel has to preserve `severity: "error"`: a
+// guard that drops an oversized batch wholesale converts a failing build into a
 // silently-passing one (SFN-529, audited in
 // `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3 A3).
 //
-// This is the structured twin of `lowering_diagnostic_gate_integrity_test.sfn`,
-// which covers the same contract on the legacy `string[]` channel. Both run
-// until that channel is retired.
+// This was the structured twin of a `string[]` counterpart that pinned the same
+// contract on the legacy channel. SFN-916 retired that channel and its test, so
+// this file is now the sole guard-integrity coverage.
 //
 // The threshold is not reachable through the CLI, so this drives the guard
 // helpers directly. Building an over-threshold array is the expensive part, so
