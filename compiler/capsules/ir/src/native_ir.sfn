@@ -3,6 +3,8 @@
 // Type definitions for the textual `.sfn-asm` IR. The parsing logic lives in
 // native_ir_parser.sfn; this module exists purely so that downstream modules
 // can import the types without pulling in the heavy parser code.
+import { LoweringDiagnostic } from "./lowering_diagnostic";
+
 enum NativeInstruction {
     Return {
         expression: string;
@@ -332,6 +334,7 @@ struct ParseNativeResult {
     enums: NativeEnum[];
     bindings: NativeBinding[];
     diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct EnumLayoutHeaderParse {

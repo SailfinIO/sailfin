@@ -123,6 +123,7 @@ struct LoweredLLVMResult {
     lifetime_regions: LifetimeRegionMetadata[];
     capability_manifest: CapabilityManifest;
     string_constants: StringConstant[];
+    diags: LoweringDiagnostic[];
 }
 
 struct LoweredLLVMLinesResult {
@@ -739,6 +740,7 @@ struct ConditionConversion {
     operand: LLVMOperand?;
     diagnostics: string[];
     string_constants: StringConstant[];
+    diags: LoweringDiagnostic[];
 }
 
 struct ComparisonEmission {
@@ -765,6 +767,7 @@ struct BinaryAlignmentResult {
     right: LLVMOperand?;
     diagnostics: string[];
     result_type: string;
+    diags: LoweringDiagnostic[];
 }
 
 // =============================================================================
@@ -797,6 +800,7 @@ struct ThrowLoweringResult {
     diagnostics: string[];
     terminated: boolean;
     string_constants: StringConstant[];
+    diags: LoweringDiagnostic[];
 }
 
 // =============================================================================
@@ -865,6 +869,7 @@ struct CallTargetResolution {
     is_closure_dispatch: boolean;
     closure_return_type: string;
     closure_parameter_types: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct CallSignatureResolution {
@@ -889,6 +894,7 @@ struct CallSignatureResolution {
     // resolver short-circuits the function-entry / helper lookup
     // (a `__closure__@…`-typed local has no function entry).
     is_closure_dispatch: boolean;
+    diags: LoweringDiagnostic[];
 }
 
 // Wraps the output of `lower_all_functions` so the orchestrator can

@@ -109,7 +109,8 @@ fn lower_to_llvm_for_tests(native_module: NativeModule, import_context: Imported
             function_effects: [],
             lifetime_regions: [],
             capability_manifest: empty_capability_manifest(),
-            string_constants: empty_string_constant_set()
+            string_constants: empty_string_constant_set(),
+            diags: []
         };
     }
     let parse = parse_native_artifact(artifact.contents);

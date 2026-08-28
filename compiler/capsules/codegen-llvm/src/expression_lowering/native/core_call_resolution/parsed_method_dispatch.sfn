@@ -24,7 +24,13 @@ import {
     StructTypeInfo,
     TypeContext
 } from "../../../types";
-import { extend_diag_array, starts_with, trim_text } from "../../../utils";
+import {
+    extend_diag_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    starts_with,
+    trim_text
+} from "../../../utils";
 import { array_pointer_element_type } from "../../arrays";
 import { lower_expression } from "../core";
 import { parse_member_access } from "../core_parse";
@@ -67,6 +73,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                 r_lines = lowered_self.lines;
                 r_temp = lowered_self.temp_index;
                 if lowered_self.operand == null {
+                    r_diags.push(lowering_warning_diag("E1006", "method call base `"
+                        + method_parse.base
+                        + "` produced no value", null));
                     r_diagnostics.push("llvm lowering: method call base `"
                         + method_parse.base
                         + "` produced no value");
@@ -85,7 +94,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         string_constants: r_string_constants,
                         is_closure_dispatch: false,
                         closure_return_type: "",
-                        closure_parameter_types: []
+                        closure_parameter_types: [],
+                        diags: r_diags
                     };
                 }
 
@@ -146,6 +156,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             r_target = method_info.name + method_parse.field;
                             r_injected_count = 1;
                         } else {
+                            r_diags.push(lowering_warning_diag("E1006", "method call base `"
+                                + method_parse.base
+                                + "` produced no value", null));
                             r_diagnostics.push("llvm lowering: method call base `"
                                 + method_parse.base
                                 + "` produced no value");
@@ -164,7 +177,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 string_constants: r_string_constants,
                                 is_closure_dispatch: false,
                                 closure_return_type: "",
-                                closure_parameter_types: []
+                                closure_parameter_types: [],
+                                diags: r_diags
                             };
                         }
                     }
@@ -185,6 +199,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_target = method_info.name + method_parse.field;
                         r_injected_count = 1;
                     } else {
+                        r_diags.push(lowering_warning_diag("E1006", "method call base `"
+                            + method_parse.base
+                            + "` produced no value", null));
                         r_diagnostics.push("llvm lowering: method call base `"
                             + method_parse.base
                             + "` produced no value");
@@ -203,7 +220,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             string_constants: r_string_constants,
                             is_closure_dispatch: false,
                             closure_return_type: "",
-                            closure_parameter_types: []
+                            closure_parameter_types: [],
+                            diags: r_diags
                         };
                     }
                 }
@@ -225,6 +243,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         + method_parse.field;
                     r_injected_count = 1;
                 } else {
+                    r_diags.push(lowering_warning_diag("E1006", "method call base `"
+                        + method_parse.base
+                        + "` produced no value", null));
                     r_diagnostics.push("llvm lowering: method call base `"
                         + method_parse.base
                         + "` produced no value");
@@ -243,7 +264,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         string_constants: r_string_constants,
                         is_closure_dispatch: false,
                         closure_return_type: "",
-                        closure_parameter_types: []
+                        closure_parameter_types: [],
+                        diags: r_diags
                     };
                 }
             } else {
@@ -283,6 +305,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_target = _struct_fallback_info.name + method_parse.field;
                         r_injected_count = 1;
                     } else {
+                        r_diags.push(lowering_warning_diag("E1006", "method call base `"
+                            + method_parse.base
+                            + "` produced no value", null));
                         r_diagnostics.push("llvm lowering: method call base `"
                             + method_parse.base
                             + "` produced no value");
@@ -301,7 +326,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             string_constants: r_string_constants,
                             is_closure_dispatch: false,
                             closure_return_type: "",
-                            closure_parameter_types: []
+                            closure_parameter_types: [],
+                            diags: r_diags
                         };
                     }
                 } else {
@@ -371,6 +397,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             // emitting a value-where-pointer-expected
                             // miscompile.
                             if method_parse.field != "close" {
+                                r_diags.push(lowering_error_diag("E1010", "channel `"
+                                    + method_parse.field
+                                    + "` reached the descriptor call path — the bespoke channel lowering (#1266) was bypassed", null));
                                 r_diagnostics.push("llvm lowering [fatal]: channel `"
                                     + method_parse.field
                                     + "` reached the descriptor call path — the bespoke channel lowering (#1266) was bypassed");
@@ -414,6 +443,11 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 }
                             }
                             if _g_fail_closed {
+                                r_diags.push(lowering_error_diag("E1007", "method call base `"
+                                    + method_parse.base
+                                    + "` has declared type `"
+                                    + _g_annotation
+                                    + "` which is not in the lowering type context", null));
                                 r_diagnostics.push("llvm lowering [fatal]: method call base `"
                                     + method_parse.base
                                     + "` has declared type `"
@@ -434,7 +468,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                     string_constants: r_string_constants,
                                     is_closure_dispatch: false,
                                     closure_return_type: "",
-                                    closure_parameter_types: []
+                                    closure_parameter_types: [],
+                                    diags: r_diags
                                 };
                             }
                         }
@@ -456,6 +491,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_lines = lowered_self.lines;
                         r_temp = lowered_self.temp_index;
                         if lowered_self.operand == null {
+                            r_diags.push(lowering_warning_diag("E1006", "method call base `"
+                                + method_parse.base
+                                + "` produced no value", null));
                             r_diagnostics.push("llvm lowering: method call base `"
                                 + method_parse.base
                                 + "` produced no value");
@@ -474,7 +512,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 string_constants: r_string_constants,
                                 is_closure_dispatch: false,
                                 closure_return_type: "",
-                                closure_parameter_types: []
+                                closure_parameter_types: [],
+                                diags: r_diags
                             };
                         }
 
@@ -539,7 +578,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
         string_constants: r_string_constants,
         is_closure_dispatch: false,
         closure_return_type: "",
-        closure_parameter_types: []
+        closure_parameter_types: [],
+        diags: r_diags
     };
 }
 

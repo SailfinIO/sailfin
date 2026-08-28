@@ -20,6 +20,7 @@ import {
     ParameterBinding,
     TypeContext
 } from "../../types";
+import { extend_diag_array, lowering_warning_diag } from "../../utils";
 import { find_parameter_binding } from "./core_bindings";
 import { load_local_operand } from "./core_operands/comparisons";
 import { find_local_binding } from "./core_scopes";
@@ -33,6 +34,7 @@ struct _ClosurePairLowerResult {
     temp_index: int;
     operand: LLVMOperand?;
     diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 // Parse `<closure_pair @sfn_lambda_<N> <env_var>>` and emit the
@@ -82,6 +84,9 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
     }
 
     if fn_symbol.length == 0 {
+        diags.push(lowering_warning_diag("E1006", "malformed closure_pair marker `"
+            + marker
+            + "`", null));
         diagnostics.push("llvm lowering: malformed closure_pair marker `"
             + marker
             + "`");
@@ -89,7 +94,8 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            diags: diags
         };
     }
 
@@ -101,13 +107,17 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
 
     let target = find_function_by_name(functions, function_name);
     if target == null {
+        diags.push(lowering_warning_diag("E1006", "lifted lambda `"
+            + function_name
+            + "` not found in module function table", null));
         diagnostics.push("llvm lowering: lifted lambda `" + function_name
             + "` not found in module function table");
         return _ClosurePairLowerResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            diags: diags
         };
     }
 
@@ -128,12 +138,14 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
             diagnostics.push(alloc_diag.diagnostics[_aci]);
             _aci += 1;
         }
+        diags = extend_diag_array(diags, alloc_diag.diags);
         if alloc_diag.operand == null {
             return _ClosurePairLowerResult {
                 lines: alloc_diag.lines,
                 temp_index: alloc_diag.temp_index,
                 operand: null,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                diags: diags
             };
         }
         new_lines = alloc_diag.lines;
@@ -156,7 +168,8 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
         lines: new_lines,
         temp_index: pair.next_temp,
         operand: operand,
-        diagnostics: diagnostics
+        diagnostics: diagnostics,
+        diags: diags
     };
 }
 
@@ -221,7 +234,8 @@ fn _lower_closure_env_alloc(env_var_text: string, target: NativeFunction, bindin
         lines: new_lines,
         temp_index: alloc.next_temp,
         operand: env_operand,
-        diagnostics: diagnostics
+        diagnostics: diagnostics,
+        diags: diags
     };
 }
 
@@ -417,6 +431,7 @@ fn _lower_named_fn_value(target: NativeFunction, context: TypeContext, temp_inde
             llvm_type: pair.operand_type,
             value: pair.operand_value
         },
-        diagnostics: []
+        diagnostics: [],
+        diags: []
     };
 }

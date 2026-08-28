@@ -3,6 +3,7 @@
 // Shared utility functions for LLVM IR lowering.
 import {
     LayoutManifest,
+    LoweringDiagnostic,
     NativeArtifact,
     NativeEnum,
     NativeEnumLayout,
@@ -265,6 +266,7 @@ fn is_test_module_slug(module_name: string) -> boolean {
 struct MangledModuleResult {
     lines: string[];
     diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct DeclareSignature {

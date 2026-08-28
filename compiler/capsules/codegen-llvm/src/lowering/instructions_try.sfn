@@ -36,6 +36,7 @@ import {
     append_string,
     extend_diag_array,
     extend_string_array,
+    lowering_warning_diag,
     number_to_string,
     trim_text
 } from "../utils";
@@ -164,16 +165,19 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
     collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
 
     if lowered_expr.operand == null {
-        diagnostics.push("llvm lowering: unsupported throw expression in `"
+        let unsupported_message = "unsupported throw expression in `"
             + function_name
-            + "`");
+            + "`";
+        diagnostics.push("llvm lowering: " + unsupported_message);
+        diags.push(lowering_warning_diag("E1006", unsupported_message, null));
         current_lines.push("  unreachable");
         return ThrowLoweringResult {
             lines: current_lines,
             temp_index: current_temp,
             diagnostics: diagnostics,
             terminated: true,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -188,16 +192,19 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
     if coerced.operand == null {
-        diagnostics.push("llvm lowering: unable to coerce throw value to string in `"
+        let coerce_message = "unable to coerce throw value to string in `"
             + function_name
-            + "`");
+            + "`";
+        diagnostics.push("llvm lowering: " + coerce_message);
+        diags.push(lowering_warning_diag("E1006", coerce_message, null));
         current_lines.push("  unreachable");
         return ThrowLoweringResult {
             lines: current_lines,
             temp_index: current_temp,
             diagnostics: diagnostics,
             terminated: true,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -232,7 +239,8 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
         temp_index: current_temp,
         diagnostics: diagnostics,
         terminated: true,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: diags
     };
 }
 

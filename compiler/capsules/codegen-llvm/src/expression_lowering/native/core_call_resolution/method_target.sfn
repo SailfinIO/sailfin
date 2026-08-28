@@ -21,6 +21,7 @@ import {
     ends_with,
     extend_diag_array,
     extend_string_array,
+    lowering_error_diag,
     starts_with,
     trim_text
 } from "../../../utils";
@@ -593,6 +594,9 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     }
                                     if _pre_is_channel_method {
                                         if _pre_field != "close" {
+                                            result_diags.push(lowering_error_diag("E1010", "channel `"
+                                                + _pre_field
+                                                + "` reached the descriptor call path — the bespoke channel lowering (#1266) was bypassed", null));
                                             result_diagnostics.push("llvm lowering [fatal]: channel `"
                                                 + _pre_field
                                                 + "` reached the descriptor call path — the bespoke channel lowering (#1266) was bypassed");
@@ -639,6 +643,11 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                         }
                                     }
                                     if _pre_fail_closed {
+                                        result_diags.push(lowering_error_diag("E1007", "method call base `"
+                                            + _pre_base
+                                            + "` has declared type `"
+                                            + _pre_struct
+                                            + "` which is not in the lowering type context", null));
                                         result_diagnostics.push("llvm lowering [fatal]: method call base `"
                                             + _pre_base
                                             + "` has declared type `"
@@ -659,7 +668,8 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                             string_constants: result_string_constants,
                                             is_closure_dispatch: false,
                                             closure_return_type: "",
-                                            closure_parameter_types: []
+                                            closure_parameter_types: [],
+                                            diags: result_diags
                                         };
                                     }
                                     let _pre_lowered = lower_expression(_pre_base, bindings, locals, result_temp, result_lines, functions, context, "");
@@ -744,7 +754,8 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
             string_constants: result_string_constants,
             is_closure_dispatch: true,
             closure_return_type: closure_return_type,
-            closure_parameter_types: closure_parameter_types
+            closure_parameter_types: closure_parameter_types,
+            diags: result_diags
         };
     }
 
