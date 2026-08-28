@@ -306,11 +306,12 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
         if target == "i1" { _future_scalar = true; }
         if target == "i8*" { _future_scalar = true; }
         if _future_scalar {
-            diagnostics.push("[fatal] llvm lowering: cannot coerce task handle `"
-                + operand.llvm_type
+            let task_handle_message = "cannot coerce task handle `" + operand.llvm_type
                 + "` to `"
                 + target
-                + "`; a `spawn` future pointer was stored through a non-pointer slot (see E0831)");
+                + "`; a `spawn` future pointer was stored through a non-pointer slot (see E0831)";
+            diagnostics.push("[fatal] llvm lowering: " + task_handle_message);
+            diags.push(lowering_error_diag("E1009", task_handle_message, span));
             return CoercionResult {
                 lines: current_lines,
                 temp_index: recover_temp_from_lines(current_lines, temp_index),

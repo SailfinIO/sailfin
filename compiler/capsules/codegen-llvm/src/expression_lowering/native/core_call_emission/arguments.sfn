@@ -23,23 +23,24 @@ struct CoercedCallState {
     diags: LoweringDiagnostic[];
 }
 
-// Slice E.1.5 (#528): if the wrapped diagnostics list contains the ABI
-// primitive mismatch sentinel, return the `llvm lowering [fatal]: ` prefix
-// so the location-aware follow-up message also escalates to fatal (the
-// emit-level entrypoint scans for `[fatal]` and refuses to write IR).
-// Returns the plain `llvm lowering: ` prefix otherwise so non-ABI coercion
-// failures keep their existing tier.
-fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
+// Slice E.1.5 (#528): a coercion that failed on the ABI primitive mismatch
+// escalates the location-aware follow-up message to error severity; other
+// coercion failures keep their advisory tier.
+//
+// SFN-916 reads the sentinel off the structured channel rather than the
+// legacy string. Both producers in `core_operands/dispatch.sfn` push an
+// `E1009` diag carrying the same sentinel in `message`, so this matches
+// exactly what the string scan matched, and survives the string channel.
+fn _has_abi_mismatch_diag(diags: LoweringDiagnostic[]) -> boolean {
     let mut idx: int = 0;
     loop {
-        if idx >= diagnostics.length { break; }
-        let diag = diagnostics[idx];
-        if find_substring_from(diag, "ABI primitive mismatch", 0) >= 0 {
-            return "llvm lowering [fatal]: ";
+        if idx >= diags.length { break; }
+        if find_substring_from(diags[idx].message, "ABI primitive mismatch", 0) >= 0 {
+            return true;
         }
         idx += 1;
     }
-    return "llvm lowering: ";
+    return false;
 }
 
 fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[]) -> CoercedCallState {
@@ -95,7 +96,10 @@ fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
             if coerced.operand == null {
-                let diagnostic_prefix = _abi_mismatch_diagnostic_prefix(coerced.diagnostics);
+                let mut diagnostic_prefix: string = "llvm lowering: ";
+                if _has_abi_mismatch_diag(coerced.diags) {
+                    diagnostic_prefix = "llvm lowering [fatal]: ";
+                }
                 let diagnostic_message = "unable to coerce argument "
                     + number_to_string(index)
                     + " (expected `"

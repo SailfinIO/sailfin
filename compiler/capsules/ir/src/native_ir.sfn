@@ -249,6 +249,7 @@ struct EnumParseResult {
     definition: NativeEnum?;
     next_index: int;
     diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct CaseComponents {
@@ -279,12 +280,14 @@ struct StructParseResult {
     definition: NativeStruct?;
     next_index: int;
     diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct InterfaceParseResult {
     definition: NativeInterface?;
     next_index: int;
     diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct InterfaceSignatureParse {

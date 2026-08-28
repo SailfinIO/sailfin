@@ -1361,8 +1361,8 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         let mut _abi_match: boolean = false;
                         let mut _abi_idx: int = 0;
                         loop {
-                            if _abi_idx >= coerced.diagnostics.length { break; }
-                            if find_substring_from(coerced.diagnostics[_abi_idx], "ABI primitive mismatch", 0) >= 0 {
+                            if _abi_idx >= coerced.diags.length { break; }
+                            if find_substring_from(coerced.diags[_abi_idx].message, "ABI primitive mismatch", 0) >= 0 {
                                 _abi_match = true;
                             }
                             _abi_idx += 1;

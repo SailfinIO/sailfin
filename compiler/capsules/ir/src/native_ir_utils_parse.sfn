@@ -11,6 +11,7 @@ import {
     InterfaceHeaderParse,
     InterfaceParseResult,
     InterfaceSignatureParse,
+    LoweringDiagnostic,
     NativeEnumVariant,
     NativeEnumVariantField,
     NativeImport,
@@ -210,8 +211,20 @@ fn parse_decorator_name(line: string) -> string? {
     return name;
 }
 
+fn _iface_warning_diag(message: string) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: "E1006",
+        severity: "warning",
+        message: message,
+        file_path: "",
+        span: null,
+        stage: "lowering"
+    };
+}
+
 fn parse_interface_definition(lines: string[], start_index: int) -> InterfaceParseResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".interface "));
     let header_parse = parse_interface_header(name_text);
@@ -224,10 +237,13 @@ fn parse_interface_definition(lines: string[], start_index: int) -> InterfacePar
     let interface_name = header_parse.name;
     if interface_name.length == 0 {
         diagnostics.push("unable to parse interface header: " + header);
+        diags.push(_iface_warning_diag("unable to parse interface header: "
+            + header));
         return InterfaceParseResult {
             definition: null,
             next_index: (start_index + 1) as int,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            diags: diags
         };
     }
 
@@ -236,6 +252,8 @@ fn parse_interface_definition(lines: string[], start_index: int) -> InterfacePar
     loop {
         if index >= lines.length {
             diagnostics.push("unterminated interface " + interface_name);
+            diags.push(_iface_warning_diag("unterminated interface "
+                + interface_name));
             return InterfaceParseResult {
                 definition: NativeInterface {
                     name: interface_name,
@@ -243,7 +261,8 @@ fn parse_interface_definition(lines: string[], start_index: int) -> InterfacePar
                     signatures: signatures
                 },
                 next_index: index as int,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                diags: diags
             };
         }
         let raw_line = trim_text(lines[index]);
@@ -277,6 +296,8 @@ fn parse_interface_definition(lines: string[], start_index: int) -> InterfacePar
             continue;
         }
         diagnostics.push("unsupported interface directive: " + raw_line);
+        diags.push(_iface_warning_diag("unsupported interface directive: "
+            + raw_line));
         index += 1;
     }
 
@@ -287,7 +308,8 @@ fn parse_interface_definition(lines: string[], start_index: int) -> InterfacePar
             signatures: signatures
         },
         next_index: index as int,
-        diagnostics: diagnostics
+        diagnostics: diagnostics,
+        diags: diags
     };
 }
 

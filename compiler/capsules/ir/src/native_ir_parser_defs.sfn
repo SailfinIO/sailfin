@@ -4,6 +4,7 @@
 // to keep the module under the seed compiler's OOM threshold.
 import { substring } from "sfn/strings";
 
+import { LoweringDiagnostic } from "./lowering_diagnostic";
 import {
     EnumParseResult,
     InstructionParseResult,
@@ -179,8 +180,37 @@ fn update_enum_variant_fields(variants: NativeEnumVariantLayout[], index: int, f
     return result;
 }
 
+// Structured twin of a plain `diagnostics.push(<message>)` site in this file.
+// `sfn/ir` cannot import codegen-llvm's `lowering_error_diag`, so this
+// mirrors it locally (SFN-916).
+fn _defs_error_diag(code: string, message: string) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: "",
+        span: null,
+        stage: "lowering"
+    };
+}
+
+// Structured twin of an untagged `diagnostics.push(<message>)` site. Severity
+// stays `warning` — an untagged site becoming `error` would make the build
+// gate refuse artifacts it accepts today (SFN-916).
+fn _defs_warning_diag(message: string) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: "E1006",
+        severity: "warning",
+        message: message,
+        file_path: "",
+        span: null,
+        stage: "lowering"
+    };
+}
+
 fn parse_struct_definition(lines: string[], start_index: int, include_instructions: boolean) -> StructParseResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".struct "));
     let header_parse = parse_struct_header(name_text);
@@ -194,10 +224,12 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
     let mut implements = header_parse.implements;
     if struct_name.length == 0 {
         diagnostics.push("unable to parse struct header: " + header);
+        diags.push(_defs_warning_diag("unable to parse struct header: " + header));
         return StructParseResult {
             definition: null,
             next_index: (start_index + 1) as int,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            diags: diags
         };
     }
 
@@ -216,6 +248,7 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
     loop {
         if index >= lines.length {
             diagnostics.push("unterminated struct " + struct_name);
+            diags.push(_defs_warning_diag("unterminated struct " + struct_name));
             let mut struct_layout_value: NativeStructLayout? = null;
             if struct_layout_header_success {
                 struct_layout_value = NativeStructLayout {
@@ -233,7 +266,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                     layout: struct_layout_value
                 },
                 next_index: index as int,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                diags: diags
             };
         }
         let raw_line = trim_text(lines[index]);
@@ -247,6 +281,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
         if raw_line == ".endstruct" {
             if current_method != null {
                 diagnostics.push("unterminated method in struct " + struct_name);
+                diags.push(_defs_warning_diag("unterminated method in struct "
+                    + struct_name));
                 methods.push(current_method);
                 current_method = null;
                 method_pending_span = null;
@@ -274,6 +310,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                 if parameter == null {
                     diagnostics.push("unable to parse method parameter: "
                         + raw_line);
+                    diags.push(_defs_warning_diag("unable to parse method parameter: "
+                        + raw_line));
                 } else {
                     current_method = append_parameter(current_method, parameter);
                 }
@@ -284,6 +322,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
             if starts_with(raw_line, ".method ") {
                 diagnostics.push("nested method declaration in struct "
                     + struct_name);
+                diags.push(_defs_warning_diag("nested method declaration in struct "
+                    + struct_name));
                 index += 1;
                 continue;
             }
@@ -292,6 +332,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                 if parsed_method_span == null {
                     diagnostics.push("unable to parse span metadata: "
                         + raw_line);
+                    diags.push(_defs_warning_diag("unable to parse span metadata: "
+                        + raw_line));
                 } else { method_pending_span = parsed_method_span; }
                 index += 1;
                 continue;
@@ -301,6 +343,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                 if parsed_method_init_span == null {
                     diagnostics.push("unable to parse initializer span metadata: "
                         + raw_line);
+                    diags.push(_defs_warning_diag("unable to parse initializer span metadata: "
+                        + raw_line));
                 } else { method_pending_value_span = parsed_method_init_span; }
                 index += 1;
                 continue;
@@ -324,6 +368,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                 method_pending_span = null;
             } else if method_pending_span != null {
                 diagnostics.push("unused span metadata before: " + raw_line);
+                diags.push(_defs_warning_diag("unused span metadata before: "
+                    + raw_line));
                 method_pending_span = null;
             }
             if method_instruction_result.value_span_consumed {
@@ -331,6 +377,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
             } else if method_pending_value_span != null {
                 diagnostics.push("unused initializer span metadata before: "
                     + raw_line);
+                diags.push(_defs_warning_diag("unused initializer span metadata before: "
+                    + raw_line));
                 method_pending_value_span = null;
             }
             let mut instruction_index: int = 0;
@@ -358,6 +406,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                     if struct_layout_header_success {
                         diagnostics.push("duplicate struct layout header in "
                             + struct_name);
+                        diags.push(_defs_warning_diag("duplicate struct layout header in "
+                            + struct_name));
                     } else {
                         struct_layout_size = header_result.size;
                         struct_layout_align = header_result.align;
@@ -389,6 +439,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                         if struct_layout_header_success {
                             diagnostics.push("duplicate struct layout header in "
                                 + struct_name);
+                            diags.push(_defs_warning_diag("duplicate struct layout header in "
+                                + struct_name));
                         } else {
                             struct_layout_size = header_result.size;
                             struct_layout_align = header_result.align;
@@ -412,6 +464,9 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                         if !struct_layout_reported_missing_header {
                             diagnostics.push("struct " + struct_name
                                 + " layout field encountered before layout header");
+                            diags.push(_defs_warning_diag("struct "
+                                + struct_name
+                                + " layout field encountered before layout header"));
                             struct_layout_reported_missing_header = true;
                         }
                     }
@@ -420,11 +475,17 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                         + struct_name
                         + ": "
                         + raw_line);
+                    diags.push(_defs_error_diag("E1005", "malformed layout field in struct "
+                        + struct_name
+                        + ": "
+                        + raw_line));
                 }
                 index += 1;
                 continue;
             }
             diagnostics.push("unsupported struct layout directive: " + raw_line);
+            diags.push(_defs_warning_diag("unsupported struct layout directive: "
+                + raw_line));
             index += 1;
             continue;
         }
@@ -436,6 +497,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
             let parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "));
             if parsed_field == null {
                 diagnostics.push("unable to parse struct field: " + raw_line);
+                diags.push(_defs_warning_diag("unable to parse struct field: "
+                    + raw_line));
             } else { fields.push(parsed_field); }
             index += 1;
             continue;
@@ -444,11 +507,15 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
             if current_method != null {
                 diagnostics.push("decorator directive encountered inside method body: "
                     + raw_line);
+                diags.push(_defs_warning_diag("decorator directive encountered inside method body: "
+                    + raw_line));
             } else {
                 let decorator_name = parse_decorator_name(raw_line);
                 if decorator_name == null {
                     diagnostics.push("unable to parse decorator directive: "
                         + raw_line);
+                    diags.push(_defs_warning_diag("unable to parse decorator directive: "
+                        + raw_line));
                 } else { method_pending_decorators.push(decorator_name); }
             }
             index += 1;
@@ -458,6 +525,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
             if current_method != null {
                 diagnostics.push("nested method declaration in struct "
                     + struct_name);
+                diags.push(_defs_warning_diag("nested method declaration in struct "
+                    + struct_name));
             }
             let header = strip_prefix(raw_line, ".method ");
             let trimmed = trim_text(header);
@@ -481,6 +550,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
             continue;
         }
         diagnostics.push("unsupported struct directive: " + raw_line);
+        diags.push(_defs_warning_diag("unsupported struct directive: "
+            + raw_line));
         index += 1;
     }
 
@@ -502,7 +573,8 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
             layout: struct_layout_value
         },
         next_index: index as int,
-        diagnostics: diagnostics
+        diagnostics: diagnostics,
+        diags: diags
     };
 }
 
@@ -535,6 +607,7 @@ fn parse_enum_header_type_parameters(header_name: string) -> string[] {
 
 fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".enum "));
     // Capture declared type parameters (e.g. `<T, E>`) from the full header
@@ -552,10 +625,12 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
     enum_name = strip_generics(enum_name);
     if enum_name.length == 0 {
         diagnostics.push("unable to parse enum header: " + header);
+        diags.push(_defs_warning_diag("unable to parse enum header: " + header));
         return EnumParseResult {
             definition: null,
             next_index: (start_index + 1) as int,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            diags: diags
         };
     }
 
@@ -572,6 +647,7 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
     loop {
         if index >= lines.length {
             diagnostics.push("unterminated enum " + enum_name);
+            diags.push(_defs_warning_diag("unterminated enum " + enum_name));
             let mut enum_layout_value: NativeEnumLayout? = null;
             if enum_layout_header_success {
                 enum_layout_value = NativeEnumLayout {
@@ -591,7 +667,8 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                     layout: enum_layout_value
                 },
                 next_index: index as int,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                diags: diags
             };
         }
         let raw_line = trim_text(lines[index]);
@@ -620,6 +697,8 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                     if enum_layout_header_success {
                         diagnostics.push("duplicate enum layout header in "
                             + enum_name);
+                        diags.push(_defs_warning_diag("duplicate enum layout header in "
+                            + enum_name));
                     } else {
                         enum_layout_size = header_result.size;
                         enum_layout_align = header_result.align;
@@ -664,6 +743,10 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                             + variant_result.variant.name
                             + "` in "
                             + enum_name);
+                        diags.push(_defs_warning_diag("duplicate enum layout variant `"
+                            + variant_result.variant.name
+                            + "` in "
+                            + enum_name));
                     } else {
                         enum_layout_variants.push(variant_result.variant);
                     }
@@ -671,6 +754,8 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                         if !enum_layout_reported_missing_header {
                             diagnostics.push("enum " + enum_name
                                 + " layout variant encountered before layout header");
+                            diags.push(_defs_warning_diag("enum " + enum_name
+                                + " layout variant encountered before layout header"));
                             enum_layout_reported_missing_header = true;
                         }
                     }
@@ -679,6 +764,10 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                         + enum_name
                         + ": "
                         + raw_line);
+                    diags.push(_defs_error_diag("E1005", "malformed layout variant in enum "
+                        + enum_name
+                        + ": "
+                        + raw_line));
                 }
                 index += 1;
                 continue;
@@ -698,6 +787,10 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                             + " layout payload references unknown variant `"
                             + payload_result.variant_name
                             + "`");
+                        diags.push(_defs_warning_diag("enum " + enum_name
+                            + " layout payload references unknown variant `"
+                            + payload_result.variant_name
+                            + "`"));
                     } else {
                         enum_layout_variants = update_enum_variant_fields(enum_layout_variants, target_index, payload_result.field);
                     }
@@ -705,6 +798,8 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                         if !enum_layout_reported_missing_header {
                             diagnostics.push("enum " + enum_name
                                 + " layout payload encountered before layout header");
+                            diags.push(_defs_warning_diag("enum " + enum_name
+                                + " layout payload encountered before layout header"));
                             enum_layout_reported_missing_header = true;
                         }
                     }
@@ -713,11 +808,17 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                         + enum_name
                         + ": "
                         + raw_line);
+                    diags.push(_defs_error_diag("E1005", "malformed layout payload in enum "
+                        + enum_name
+                        + ": "
+                        + raw_line));
                 }
                 index += 1;
                 continue;
             }
             diagnostics.push("unsupported enum layout directive: " + raw_line);
+            diags.push(_defs_warning_diag("unsupported enum layout directive: "
+                + raw_line));
             index += 1;
             continue;
         }
@@ -729,11 +830,14 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
             let parsed_variant = parse_enum_variant_line(strip_prefix(raw_line, ".variant "));
             if parsed_variant == null {
                 diagnostics.push("unable to parse enum variant: " + raw_line);
+                diags.push(_defs_warning_diag("unable to parse enum variant: "
+                    + raw_line));
             } else { variants.push(parsed_variant); }
             index += 1;
             continue;
         }
         diagnostics.push("unsupported enum directive: " + raw_line);
+        diags.push(_defs_warning_diag("unsupported enum directive: " + raw_line));
         index += 1;
     }
 
@@ -757,7 +861,8 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
             layout: enum_layout_value
         },
         next_index: index as int,
-        diagnostics: diagnostics
+        diagnostics: diagnostics,
+        diags: diags
     };
 }
 

@@ -27,7 +27,12 @@ import {
     TryFrameContext,
     TypeContext
 } from "../types";
-import { extend_diag_array, extend_string_array, trim_text } from "../utils";
+import {
+    extend_diag_array,
+    extend_string_array,
+    lowering_error_diag,
+    trim_text
+} from "../utils";
 import { lower_instruction_range } from "./instructions";
 import { allocate_block_label } from "./instructions_condition";
 import {
@@ -67,10 +72,12 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         let mut _ci8: int = 0;
         loop {
             if _ci8 >= range_parse.diagnostics.length { break; }
-            diagnostics.push("llvm lowering [fatal] [E1004]: invalid `.for` range in `"
-                + function.name
+            let invalid_range_message = "invalid `.for` range in `" + function.name
                 + "`: "
-                + range_parse.diagnostics[_ci8]);
+                + range_parse.diagnostics[_ci8];
+            diagnostics.push("llvm lowering [fatal] [E1004]: "
+                + invalid_range_message);
+            diags.push(lowering_error_diag("E1004", invalid_range_message, null));
             _ci8 += 1;
         }
         return BlockLoweringResult {
@@ -309,9 +316,12 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         if is_number_literal(stride_text) {
             let normalised_stride = normalise_number_literal(stride_text);
             if normalised_stride == "0.0" {
-                diagnostics.push("llvm lowering [fatal] [E1004]: `.for` stride must not be zero in `"
+                let zero_stride_message = "`.for` stride must not be zero in `"
                     + function.name
-                    + "`");
+                    + "`";
+                diagnostics.push("llvm lowering [fatal] [E1004]: "
+                    + zero_stride_message);
+                diags.push(lowering_error_diag("E1004", zero_stride_message, null));
                 return BlockLoweringResult {
                     lines: current_lines,
                     allocas: current_allocas,
