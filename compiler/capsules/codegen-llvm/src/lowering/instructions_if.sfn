@@ -65,7 +65,6 @@ import {
 } from "./phi";
 
 fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> IfStructure {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let then_start = start_index + 1;
     let mut then_end = end;
@@ -78,17 +77,13 @@ fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end
     if limit > instructions.length { limit = instructions.length; }
     loop {
         if index >= limit {
-            diagnostics.push("llvm lowering: unterminated `.if` in `"
-                + function_name
-                + "`");
             return IfStructure {
                 then_start: then_start,
                 then_end: limit,
                 else_start: else_start,
                 else_end: else_end,
                 has_else: has_else,
-                next_index: limit - 1,
-                diagnostics: diagnostics
+                next_index: limit - 1
             };
         }
         let _cur_tag = get_instruction_tag(instructions, index);
@@ -106,8 +101,7 @@ fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end
                     else_start: else_start,
                     else_end: else_end,
                     has_else: has_else,
-                    next_index: index,
-                    diagnostics: diagnostics
+                    next_index: index
                 };
             }
             depth -= 1;
@@ -116,11 +110,7 @@ fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end
         }
         if _cur_tag == 4 {  // Else
             if depth == 0 {
-                if has_else {
-                    diagnostics.push("llvm lowering: duplicate `.else` in `.if` within `"
-                        + function_name
-                        + "`");
-                } else {
+                if has_else { } else {
                     has_else = true;
                     then_end = index;
                     else_start = index + 1;
@@ -138,8 +128,7 @@ fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end
         else_start: else_start,
         else_end: else_end,
         has_else: has_else,
-        next_index: limit,
-        diagnostics: diagnostics
+        next_index: limit
     };
 }
 
@@ -289,7 +278,6 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     let mut current_temp: int = temp_index;
     let mut current_block_counter: int = block_counter;
     let mut current_next_local: int = next_local_id;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let base_bindings: ParameterBinding[] = bindings;
     let mut then_bindings: ParameterBinding[] = base_bindings;
@@ -299,12 +287,6 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     let mut collected_mutations: LocalMutation[] = [];
 
     let structure = collect_if_structure(function.instructions, start_index, end, function.name);
-    let mut _ci12: int = 0;
-    loop {
-        if _ci12 >= structure.diagnostics.length { break; }
-        diagnostics.push(structure.diagnostics[_ci12]);
-        _ci12 += 1;
-    }
 
     // Defensive: If a front-end pass accidentally includes the opening block brace (or
     // even the whole block) in the textual condition, strip the trailing block portion.
@@ -314,29 +296,13 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     let sanitized_condition_source = sanitize_if_condition_text(rendered_condition_source);
 
     let condition = lower_condition_to_i1(function.name, sanitized_condition_source, bindings, current_locals, current_temp, current_lines, functions, context);
-    let mut _ci13: int = 0;
-    loop {
-        if _ci13 >= condition.diagnostics.length { break; }
-        diagnostics.push(condition.diagnostics[_ci13]);
-        _ci13 += 1;
-    }
     current_lines = condition.lines;
     current_temp = condition.temp_index;
     let mut collected_string_constants: StringConstant[] = condition.string_constants;
 
     if condition.operand == null {
         let rendered_condition = sanitized_condition_source;
-        if rendered_condition.length == 0 {
-            diagnostics.push("llvm lowering: unable to lower if condition in `"
-                + function.name
-                + "`");
-        } else {
-            diagnostics.push("llvm lowering: unable to lower if condition in `"
-                + function.name
-                + "` for `"
-                + rendered_condition
-                + "`");
-        }
+        if rendered_condition.length == 0 { } else { }
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -344,7 +310,6 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
             bindings: base_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -452,12 +417,6 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     let then_scope_id = make_child_scope_id(scope_id, then_label);
     let then_result = lower_instruction_range(function, structure.then_start, structure.then_end, llvm_return, then_param_bindings, then_locals, base_allocas, [], base_temp, base_block_counter, base_local_id, current_next_region, functions, loop_stack, try_stack, context, then_scope_id, scope_depth
         + 1, then_label);
-    let mut _ci14: int = 0;
-    loop {
-        if _ci14 >= then_result.diagnostics.length { break; }
-        diagnostics.push(then_result.diagnostics[_ci14]);
-        _ci14 += 1;
-    }
     diags = extend_diag_array(diags, then_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, then_result.lifetime_regions);
     current_allocas = then_result.allocas;
@@ -507,12 +466,6 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
         let else_scope_id = make_child_scope_id(scope_id, else_label);
         let else_result = lower_instruction_range(function, structure.else_start, structure.else_end, llvm_return, bindings, base_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, try_stack, context, else_scope_id, scope_depth
             + 1, else_label);
-        let mut _ci15: int = 0;
-        loop {
-            if _ci15 >= else_result.diagnostics.length { break; }
-            diagnostics.push(else_result.diagnostics[_ci15]);
-            _ci15 += 1;
-        }
         diags = extend_diag_array(diags, else_result.diags);
         lifetime_regions = extend_lifetime_regions(lifetime_regions, else_result.lifetime_regions);
         current_allocas = else_result.allocas;
@@ -819,7 +772,6 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
         bindings: merged_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
-        diagnostics: diagnostics,
         diags: diags,
         terminated: terminated,
         next_local_id: current_next_local,

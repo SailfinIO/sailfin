@@ -47,7 +47,6 @@ import {
     TypeContext
 } from "./types";
 import {
-    extend_string_array,
     lowering_error_diag,
     lowering_warning_diag,
     number_to_string,
@@ -105,19 +104,16 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
     // Without the sentinel, `is_atomic_builtin` would short-circuit
     // the rest of the call pipeline and the .ll file would be
     // written with the side-effecting atomic call silently dropped.
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let message = "atomic builtin `" + trimmed
         + "` is reserved but not yet implemented (tracking issue #323)";
     diags.push(lowering_error_diag("E1006", message, null));
     let diag = "llvm lowering [fatal]: " + message;
     trace_log(diag);
-    diagnostics.push(diag);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: [],
         diags: diags
     };
@@ -126,7 +122,6 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
 // `atomic_load(ptr: *int) -> int` →
 //     %tN = load atomic i64, i64* <ptr>, seq_cst, align 8
 fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -144,12 +139,10 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
         diags.push(lowering_error_diag("E0806", message, null));
         let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
-        diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -157,7 +150,6 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
 
     let ptr_text = trim_text(arguments[0]);
     let ptr_lowered = lower_expression(ptr_text, bindings, locals, current_temp, current_lines, functions, context, "i64*");
-    diagnostics = extend_string_array(diagnostics, ptr_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
     current_lines = ptr_lowered.lines;
     current_temp = ptr_lowered.temp_index;
@@ -165,12 +157,10 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
     if ptr_lowered.operand == null {
         let message = "atomic_load failed to lower pointer argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -185,12 +175,10 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
         diags.push(lowering_error_diag("E0806", message, null));
         let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
-        diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -206,7 +194,6 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
         lines: current_lines,
         temp_index: current_temp,
         operand: LLVMOperand { llvm_type: "i64", value: result_name },
-        diagnostics: diagnostics,
         string_constants: collected_strings,
         diags: diags
     };
@@ -215,7 +202,6 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
 // `atomic_store(ptr: *int, value: int) -> void` →
 //     store atomic i64 <value>, i64* <ptr>, seq_cst, align 8
 fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -227,12 +213,10 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
         diags.push(lowering_error_diag("E0806", message, null));
         let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
-        diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -240,7 +224,6 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
 
     let ptr_text = trim_text(arguments[0]);
     let ptr_lowered = lower_expression(ptr_text, bindings, locals, current_temp, current_lines, functions, context, "i64*");
-    diagnostics = extend_string_array(diagnostics, ptr_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
     current_lines = ptr_lowered.lines;
     current_temp = ptr_lowered.temp_index;
@@ -248,12 +231,10 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     if ptr_lowered.operand == null {
         let message = "atomic_store failed to lower pointer argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -268,12 +249,10 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
         diags.push(lowering_error_diag("E0806", message, null));
         let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
-        diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -281,7 +260,6 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
 
     let value_text = trim_text(arguments[1]);
     let value_lowered = lower_expression(value_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
-    diagnostics = extend_string_array(diagnostics, value_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, value_lowered.string_constants);
     current_lines = value_lowered.lines;
     current_temp = value_lowered.temp_index;
@@ -289,12 +267,10 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     if value_lowered.operand == null {
         let message = "atomic_store failed to lower value argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -309,12 +285,10 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
         diags.push(lowering_error_diag("E0806", message, null));
         let diag3 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag3);
-        diagnostics.push(diag3);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -328,7 +302,6 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
         lines: current_lines,
         temp_index: current_temp,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: collected_strings,
         diags: diags
     };
@@ -342,7 +315,6 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
 // type errors), extended with an "expected zero arguments"
 // message as the sub-issue contract specifies.
 fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
 
@@ -352,12 +324,10 @@ fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) ->
         diags.push(lowering_error_diag("E0806", message, null));
         let diag = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag);
-        diagnostics.push(diag);
         return ExpressionResult {
             lines: current_lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -369,7 +339,6 @@ fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) ->
         lines: current_lines,
         temp_index: temp_index,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: [],
         diags: diags
     };
@@ -393,7 +362,6 @@ fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) ->
 // the diagnostics so the user sees the Sailfin-level builtin name
 // (e.g. `atomic_sub`) rather than the LLVM op.
 fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -406,12 +374,10 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
         diags.push(lowering_error_diag("E0806", message, null));
         let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
-        diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -419,7 +385,6 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
 
     let ptr_text = trim_text(arguments[0]);
     let ptr_lowered = lower_expression(ptr_text, bindings, locals, current_temp, current_lines, functions, context, "i64*");
-    diagnostics = extend_string_array(diagnostics, ptr_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
     current_lines = ptr_lowered.lines;
     current_temp = ptr_lowered.temp_index;
@@ -427,12 +392,10 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     if ptr_lowered.operand == null {
         let message = name + " failed to lower pointer argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -447,12 +410,10 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
         diags.push(lowering_error_diag("E0806", message, null));
         let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
-        diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -460,7 +421,6 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
 
     let delta_text = trim_text(arguments[1]);
     let delta_lowered = lower_expression(delta_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
-    diagnostics = extend_string_array(diagnostics, delta_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, delta_lowered.string_constants);
     current_lines = delta_lowered.lines;
     current_temp = delta_lowered.temp_index;
@@ -468,12 +428,10 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     if delta_lowered.operand == null {
         let message = name + " failed to lower delta argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -488,12 +446,10 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
         diags.push(lowering_error_diag("E0806", message, null));
         let diag3 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag3);
-        diagnostics.push(diag3);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -511,7 +467,6 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
         lines: current_lines,
         temp_index: current_temp,
         operand: LLVMOperand { llvm_type: "i64", value: result_name },
-        diagnostics: diagnostics,
         string_constants: collected_strings,
         diags: diags
     };
@@ -532,7 +487,6 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
 // (success and failure). v0 also ships strong cmpxchg only — no
 // `cmpxchg weak` — matching the rest of the M0 atomics surface.
 fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -544,12 +498,10 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
         diags.push(lowering_error_diag("E0806", message, null));
         let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
-        diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -557,7 +509,6 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
 
     let ptr_text = trim_text(arguments[0]);
     let ptr_lowered = lower_expression(ptr_text, bindings, locals, current_temp, current_lines, functions, context, "i64*");
-    diagnostics = extend_string_array(diagnostics, ptr_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
     current_lines = ptr_lowered.lines;
     current_temp = ptr_lowered.temp_index;
@@ -565,12 +516,10 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     if ptr_lowered.operand == null {
         let message = "atomic_cas failed to lower pointer argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -585,12 +534,10 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
         diags.push(lowering_error_diag("E0806", message, null));
         let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
-        diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -598,7 +545,6 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
 
     let expected_text = trim_text(arguments[1]);
     let expected_lowered = lower_expression(expected_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
-    diagnostics = extend_string_array(diagnostics, expected_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, expected_lowered.string_constants);
     current_lines = expected_lowered.lines;
     current_temp = expected_lowered.temp_index;
@@ -606,12 +552,10 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     if expected_lowered.operand == null {
         let message = "atomic_cas failed to lower expected argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -626,12 +570,10 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
         diags.push(lowering_error_diag("E0806", message, null));
         let diag3 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag3);
-        diagnostics.push(diag3);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -639,7 +581,6 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
 
     let new_text = trim_text(arguments[2]);
     let new_lowered = lower_expression(new_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
-    diagnostics = extend_string_array(diagnostics, new_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, new_lowered.string_constants);
     current_lines = new_lowered.lines;
     current_temp = new_lowered.temp_index;
@@ -647,12 +588,10 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     if new_lowered.operand == null {
         let message = "atomic_cas failed to lower new argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -667,12 +606,10 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
         diags.push(lowering_error_diag("E0806", message, null));
         let diag4 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag4);
-        diagnostics.push(diag4);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -702,7 +639,6 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
         lines: current_lines,
         temp_index: current_temp,
         operand: LLVMOperand { llvm_type: "i1", value: success_name },
-        diagnostics: diagnostics,
         string_constants: collected_strings,
         diags: diags
     };

@@ -369,8 +369,7 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
             needs_init_call: false,
             init_function: null,
             locals: [],
-            string_constants: empty_string_constant_set(),
-            diagnostics: []
+            string_constants: empty_string_constant_set()
         };
     }
 
@@ -439,8 +438,7 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
         needs_init_call: needs_init,
         init_function: init_function,
         locals: locals,
-        string_constants: empty_string_constant_set(),
-        diagnostics: []
+        string_constants: empty_string_constant_set()
     };
 }
 

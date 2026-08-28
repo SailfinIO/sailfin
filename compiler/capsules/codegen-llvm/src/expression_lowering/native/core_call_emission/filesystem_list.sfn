@@ -13,10 +13,9 @@ import {
 } from "../../../types";
 import { lowering_warning_diag, number_to_string } from "../../../utils";
 
-fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
+fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
-    let mut result_diagnostics = diagnostics;
     let mut result_diags = diags;
     // `list_dir(path) -> i8*` sentinel (SFN-51, epic #1485,
     // `docs/proposals/0021-windows-native-selfhost.md` §4.2(B)): enumerate a
@@ -42,7 +41,6 @@ fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operan
             if final_operands.length < 1 {
                 let message = "sailfin_intrinsic_fs_list_dir requires (path: i8*) operand";
                 result_diags.push(lowering_warning_diag("E1006", message, null));
-                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _ld_leg = fs_platform_leg();
                 let _ld_path = final_operands[0].value;
@@ -266,7 +264,6 @@ fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operan
                         lines: result_lines,
                         temp_index: result_temp,
                         operand: _w_operand,
-                        diagnostics: result_diagnostics,
                         string_constants: collected_string_constants,
                         diags: result_diags
                     };
@@ -423,7 +420,6 @@ fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operan
                         lines: result_lines,
                         temp_index: result_temp,
                         operand: _p_operand,
-                        diagnostics: result_diagnostics,
                         string_constants: collected_string_constants,
                         diags: result_diags
                     };
@@ -436,7 +432,6 @@ fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operan
         lines: result_lines,
         temp_index: result_temp,
         operand: null,
-        diagnostics: result_diagnostics,
         string_constants: collected_string_constants,
         diags: result_diags
     };

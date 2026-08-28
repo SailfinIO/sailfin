@@ -75,12 +75,7 @@ import {
     StringConstant,
     TypeContext
 } from "./types";
-import {
-    extend_string_array,
-    lowering_error_diag,
-    number_to_string,
-    trim_text
-} from "./utils";
+import { lowering_error_diag, number_to_string, trim_text } from "./utils";
 
 // Predicate over the reserved `secure_zero` name. Used by the
 // pre-resolution dispatch hook in `lower_call_expression` (see
@@ -96,11 +91,9 @@ fn is_secure_zero_builtin(name: string) -> boolean {
 // lowering state. Returns null in `operand` when the argument failed to
 // lower or is not an `i64`; the caller turns that into the E0806 fatal.
 fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let argument_text = trim_text(arguments[index]);
     let lowered = lower_expression(argument_text, bindings, locals, temp_index, lines, functions, context, "i64");
-    diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
 
     if lowered.operand == null {
         // `[fatal]`, unlike the otherwise-identical `byte_load.sfn` path.
@@ -116,12 +109,10 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
         diags.push(lowering_error_diag("E0806", message, null));
         let diag = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag);
-        diagnostics.push(diag);
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -139,12 +130,10 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
         diags.push(lowering_error_diag("E0806", message, null));
         let diag = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag);
-        diagnostics.push(diag);
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -154,7 +143,6 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
         lines: lowered.lines,
         temp_index: lowered.temp_index,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: lowered.string_constants,
         diags: diags
     };
@@ -173,7 +161,6 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
 // silently dropping the wipe (the #306 contract, as for the atomic and
 // byte-load arity gates).
 fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -185,19 +172,16 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
         diags.push(lowering_error_diag("E0806", message, null));
         let diag = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag);
-        diagnostics.push(diag);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
     }
 
     let addr_lowered = _lower_secure_zero_argument("address", 0, arguments, bindings, locals, current_temp, current_lines, functions, context);
-    diagnostics = extend_string_array(diagnostics, addr_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, addr_lowered.string_constants);
     current_lines = addr_lowered.lines;
     current_temp = addr_lowered.temp_index;
@@ -206,14 +190,12 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
     }
 
     let len_lowered = _lower_secure_zero_argument("length", 1, arguments, bindings, locals, current_temp, current_lines, functions, context);
-    diagnostics = extend_string_array(diagnostics, len_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, len_lowered.string_constants);
     current_lines = len_lowered.lines;
     current_temp = len_lowered.temp_index;
@@ -222,7 +204,6 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -306,7 +287,6 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
         lines: current_lines,
         temp_index: current_temp,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: collected_strings,
         diags: diags
     };

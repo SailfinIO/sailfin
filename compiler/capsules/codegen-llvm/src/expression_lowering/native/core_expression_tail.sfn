@@ -46,7 +46,6 @@ import { find_local_binding } from "./core_scopes";
 import { trim_text } from "./core_text";
 
 fn lower_postfix_expression(expression: string, stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     let dbg_expr = trace_lowering();
@@ -148,18 +147,11 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                 // out of scope per the issue's `Out:` section. Pass `null`;
                 // the ABI mismatch diagnostic falls back to its bare form.
                 let lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
-                let mut _ci2: int = 0;
-                loop {
-                    if _ci2 >= lowered_enum.diagnostics.length { break; }
-                    diagnostics.push(lowered_enum.diagnostics[_ci2]);
-                    _ci2 += 1;
-                }
                 diags = extend_diag_array(diags, lowered_enum.diags);
                 return ExpressionResult {
                     lines: lowered_enum.lines,
                     temp_index: lowered_enum.temp_index,
                     operand: lowered_enum.operand,
-                    diagnostics: diagnostics,
                     string_constants: lowered_enum.string_constants,
                     diags: diags
                 };
@@ -200,34 +192,20 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                 // explicit `T { ... }` arm's `!success` handling below so the
                 // bare form surfaces the same struct-literal diagnostics.
                 if !bare_parse.success {
-                    let mut _ci_bad: int = 0;
-                    loop {
-                        if _ci_bad >= bare_parse.diagnostics.length { break; }
-                        diagnostics.push(bare_parse.diagnostics[_ci_bad]);
-                        _ci_bad += 1;
-                    }
                     return ExpressionResult {
                         lines: lines,
                         temp_index: temp_index,
                         operand: null,
-                        diagnostics: diagnostics,
                         string_constants: empty_constants,
                         diags: diags
                     };
                 }
                 let bare_lowered = lower_struct_literal(bare_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
-                let mut _ci_bare: int = 0;
-                loop {
-                    if _ci_bare >= bare_lowered.diagnostics.length { break; }
-                    diagnostics.push(bare_lowered.diagnostics[_ci_bare]);
-                    _ci_bare += 1;
-                }
                 diags = extend_diag_array(diags, bare_lowered.diags);
                 return ExpressionResult {
                     lines: bare_lowered.lines,
                     temp_index: bare_lowered.temp_index,
                     operand: bare_lowered.operand,
-                    diagnostics: diagnostics,
                     string_constants: bare_lowered.string_constants,
                     diags: diags
                 };
@@ -238,17 +216,10 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
     let struct_parse = parse_struct_literal(stripped);
     if struct_parse.recognized {
         if !struct_parse.success {
-            let mut _ci3: int = 0;
-            loop {
-                if _ci3 >= struct_parse.diagnostics.length { break; }
-                diagnostics.push(struct_parse.diagnostics[_ci3]);
-                _ci3 += 1;
-            }
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: empty_constants,
                 diags: diags
             };
@@ -266,29 +237,20 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
             let message = "struct/enum literal `" + struct_parse.type_name
                 + "` references a type not in the lowering type context";
             diags.push(lowering_error_diag("E1012", message, null));
-            diagnostics.push("llvm lowering [fatal]: " + message);
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: empty_constants,
                 diags: diags
             };
         }
         let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
-        let mut _ci4: int = 0;
-        loop {
-            if _ci4 >= lowered_struct.diagnostics.length { break; }
-            diagnostics.push(lowered_struct.diagnostics[_ci4]);
-            _ci4 += 1;
-        }
         diags = extend_diag_array(diags, lowered_struct.diags);
         return ExpressionResult {
             lines: lowered_struct.lines,
             temp_index: lowered_struct.temp_index,
             operand: lowered_struct.operand,
-            diagnostics: diagnostics,
             string_constants: lowered_struct.string_constants,
             diags: diags
         };
@@ -313,17 +275,10 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
     let local = find_local_binding(locals, stripped);
     if local != null {
         let load_result = load_local_operand(local, temp_index, lines);
-        let mut _ci5: int = 0;
-        loop {
-            if _ci5 >= load_result.diagnostics.length { break; }
-            diagnostics.push(load_result.diagnostics[_ci5]);
-            _ci5 += 1;
-        }
         return ExpressionResult {
             lines: load_result.lines,
             temp_index: load_result.temp_index,
             operand: load_result.operand,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -349,7 +304,6 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
             lines: lines,
             temp_index: temp_index,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -387,7 +341,6 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                 lines: materialized.lines,
                 temp_index: materialized.temp_index,
                 operand: materialized.operand,
-                diagnostics: materialized.diagnostics,
                 string_constants: empty_constants,
                 // SFN-915: `_ClosurePairLowerResult` carries no structured
                 // channel, so there is nothing to forward here. Its legacy
@@ -406,7 +359,6 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
             lines: lines,
             temp_index: temp_index + 1,
             operand: fn_operand,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -418,12 +370,10 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
     }
     let message = "unable to lower expression `" + expression + "`";
     diags.push(lowering_warning_diag("E1006", message, null));
-    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: empty_constants,
         diags: diags
     };

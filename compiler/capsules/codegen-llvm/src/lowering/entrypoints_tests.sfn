@@ -104,7 +104,6 @@ fn lower_to_llvm_for_tests(native_module: NativeModule, import_context: Imported
     if artifact == null {
         return LoweredLLVMResult {
             ir: "",
-            diagnostics: [],
             trait_metadata: empty_trait_metadata(),
             function_effects: [],
             lifetime_regions: [],

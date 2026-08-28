@@ -41,7 +41,6 @@ import {
     StringConstant
 } from "../../types";
 import {
-    append_missing_legacy_lowering_diags,
     index_of,
     number_to_string,
     stamp_lowering_diag_file_paths,
@@ -74,7 +73,6 @@ import {
 import {
     extend_diag_array_checked,
     extend_string_lines,
-    extend_string_lines_checked,
     module_source_filename
 } from "../lowering_io";
 import { lower_all_functions } from "../lowering_phase_functions";
@@ -114,7 +112,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     set_syscall_lowering_module(native_module.module_name);
     let imported_manifests = import_context.manifests;
     let imported_native_texts = import_context.native_texts;
-    let diagnostics_in = import_context.diagnostics;
+    let diagnostics_in: string[] = [];
     let mut module_aliases = import_context.module_aliases;
     if module_aliases == null { module_aliases = []; }
     let mut implicit_symbols = import_context.implicit_symbols;
@@ -210,10 +208,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
 
     let safe_bindings = sanitize_bindings(parse.bindings, diagnostics, native_text_override_path);
 
-    let mut safe_parse_diagnostics = parse.diagnostics;
-    if safe_parse_diagnostics == null { safe_parse_diagnostics = []; }
-    diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
-
     // ── Trace setup ─────────────────────────────────────────────────
     // Timing is driver-owned (SFEP-0020 §4); the provider emits ordered
     // progress events without reading the clock.
@@ -231,7 +225,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     if !is_test_module {
         let mut module_manifest: LayoutManifest? = null;
         let manifest_application = apply_layout_manifest_to_module(safe_structs, safe_enums, module_manifest);
-        diagnostics = extend_string_lines_checked(diagnostics, manifest_application.diagnostics, "layout application");
         module_structs = manifest_application.structs;
         if module_structs == null { module_structs = []; }
         module_enums = manifest_application.enums;
@@ -303,9 +296,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     if trace { trace_log("test llvm: enum layout fixup start"); }
 
     if trace { trace_log("test llvm: type context build start"); }
-    let _tc_build = build_type_context_with_recovery(combined_structs, combined_enums, combined_interfaces, diagnostics, _trace_enums, debug_lowering);
+    let _tc_build = build_type_context_with_recovery(combined_structs, combined_enums, combined_interfaces, _trace_enums, debug_lowering);
     let type_context = _tc_build.context;
-    diagnostics = extend_string_lines_checked(diagnostics, _tc_build.diagnostics, "type context");
     if trace { trace_log("test llvm: type context built"); }
 
     // ── Build context functions ─────────────────────────────────────
@@ -461,9 +453,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
         module_init_function = _mg.init_function;
         module_global_locals = _mg.locals;
         module_string_constants = _mg.string_constants;
-        if _mg.diagnostics.length > 0 {
-            diagnostics = extend_string_lines_checked(diagnostics, _mg.diagnostics, "module globals");
-        }
     }
     // #1368: materialise module-level `let` constants that imported capsules
     // EXPORT as the importer's own value-carrying globals, and register a
@@ -509,9 +498,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     if module_init_function != null {
         let init_lowered = emit_llvm_function(module_init_function, context_functions, [], type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, false, decorator_import_names);
         module_init_lines = init_lowered.lines;
-        if init_lowered.diagnostics.length > 0 {
-            diagnostics = extend_string_lines_checked(diagnostics, init_lowered.diagnostics, "module init");
-        }
         diags = extend_diag_array_checked(diags, init_lowered.diags, "module init");
         if init_lowered.string_constants.length > 0 {
             module_string_constants = merge_string_constants(module_string_constants, init_lowered.string_constants);
@@ -523,7 +509,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // lines feed the post-lowering helper scan that closes the gap
     // for `emit_runtime_call` and panic-wrapper inline calls).
     let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering, decorator_import_names);
-    diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
     diags = extend_diag_array_checked(diags, function_result.diags, "function lowering");
 
     // ── M2.10 (#402): type-metadata descriptors. Emitted before
@@ -632,12 +617,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     }
     if effective_mangle_symbols {
         let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, module_aliases, implicit_symbols, native_text_override_path);
-        let mut _ci0: int = 0;
-        loop {
-            if _ci0 >= mangled.diagnostics.length { break; }
-            diagnostics.push(mangled.diagnostics[_ci0]);
-            _ci0 += 1;
-        }
         lines = mangled.lines;
     }
     // Drop exact-duplicate module-scope `declare` lines. The runtime-helper
@@ -731,11 +710,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     if debug_lowering {
         trace_log("emit-llvm: phase=end lines=" + number_to_string(lines.length));
     }
-    diags = append_missing_legacy_lowering_diags(diags, diagnostics);
     diags = stamp_lowering_diag_file_paths(diags, module_source_filename(native_module.module_name));
     return LoweredLLVMLinesResult {
         lines: lines,
-        diagnostics: diagnostics,
         diags: diags,
         trait_metadata: trait_metadata,
         function_effects: function_effects,

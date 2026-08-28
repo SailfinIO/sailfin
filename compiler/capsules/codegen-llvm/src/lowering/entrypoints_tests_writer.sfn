@@ -106,7 +106,6 @@ fn _failed_test_llvm_artifact(failure_message: string) -> LLVMArtifactResult {
         artifact_name: "test-module.ll",
         artifact_format: "llvm-ir-text",
         lines: [],
-        diagnostics: [],
         diags: [],
         failure_message: failure_message
     };
@@ -114,7 +113,6 @@ fn _failed_test_llvm_artifact(failure_message: string) -> LLVMArtifactResult {
 
 fn _failed_test_llvm_artifact_from_lowering(failure_message: string, lowered: LoweredLLVMLinesResult) -> LLVMArtifactResult {
     let mut result = _failed_test_llvm_artifact(failure_message);
-    result.diagnostics = lowered.diagnostics;
     result.diags = lowered.diags;
     return result;
 }
@@ -171,7 +169,6 @@ fn lower_llvm_for_tests_from_text_with_provider_context(native_text: string, mod
         artifact_name: "test-module.ll",
         artifact_format: "llvm-ir-text",
         lines: lowered_lines.lines,
-        diagnostics: lowered_lines.diagnostics,
         diags: lowered_lines.diags,
         failure_message: ""
     };

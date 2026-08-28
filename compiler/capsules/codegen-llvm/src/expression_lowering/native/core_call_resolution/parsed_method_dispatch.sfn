@@ -39,11 +39,10 @@ import { _is_primitive_receiver_type } from "./receiver_types";
 
 // Resolves method calls via parse_member_access (struct methods, interface dispatch,
 // runtime helpers, array concat/push).
-fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: int, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_diags: LoweringDiagnostic[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: int, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution {
+fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: int, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diags: LoweringDiagnostic[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: int, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution {
     let mut r_target = result_target;
     let mut r_lines = result_lines;
     let mut r_temp: int = result_temp;
-    let mut r_diagnostics = result_diagnostics;
     let mut r_diags = result_diags;
     let mut r_string_constants = result_string_constants;
     let mut r_method_operand = method_operand;
@@ -62,12 +61,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
             if method_parse.field == "push" { _if58 = true; }
             if _if58 {
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                let mut _ci2: int = 0;
-                loop {
-                    if _ci2 >= lowered_self.diagnostics.length { break; }
-                    r_diagnostics.push(lowered_self.diagnostics[_ci2]);
-                    _ci2 += 1;
-                }
                 r_diags = extend_diag_array(r_diags, lowered_self.diags);
                 r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                 r_lines = lowered_self.lines;
@@ -76,9 +69,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     r_diags.push(lowering_warning_diag("E1006", "method call base `"
                         + method_parse.base
                         + "` produced no value", null));
-                    r_diagnostics.push("llvm lowering: method call base `"
-                        + method_parse.base
-                        + "` produced no value");
                     return CallTargetResolution {
                         trimmed_target: r_target,
                         method_operand: null,
@@ -90,7 +80,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         array_push_element_type: "",
                         current_lines: r_lines,
                         current_temp: r_temp,
-                        diagnostics: r_diagnostics,
                         string_constants: r_string_constants,
                         is_closure_dispatch: false,
                         closure_return_type: "",
@@ -141,12 +130,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_injected_count = 0;
                     } else {
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                        let mut _ci3: int = 0;
-                        loop {
-                            if _ci3 >= lowered_self.diagnostics.length { break; }
-                            r_diagnostics.push(lowered_self.diagnostics[_ci3]);
-                            _ci3 += 1;
-                        }
                         r_diags = extend_diag_array(r_diags, lowered_self.diags);
                         r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                         r_lines = lowered_self.lines;
@@ -159,9 +142,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             r_diags.push(lowering_warning_diag("E1006", "method call base `"
                                 + method_parse.base
                                 + "` produced no value", null));
-                            r_diagnostics.push("llvm lowering: method call base `"
-                                + method_parse.base
-                                + "` produced no value");
                             return CallTargetResolution {
                                 trimmed_target: r_target,
                                 method_operand: null,
@@ -173,7 +153,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 array_push_element_type: "",
                                 current_lines: r_lines,
                                 current_temp: r_temp,
-                                diagnostics: r_diagnostics,
                                 string_constants: r_string_constants,
                                 is_closure_dispatch: false,
                                 closure_return_type: "",
@@ -184,12 +163,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     }
                 } else {
                     let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                    let mut _ci4: int = 0;
-                    loop {
-                        if _ci4 >= lowered_self.diagnostics.length { break; }
-                        r_diagnostics.push(lowered_self.diagnostics[_ci4]);
-                        _ci4 += 1;
-                    }
                     r_diags = extend_diag_array(r_diags, lowered_self.diags);
                     r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                     r_lines = lowered_self.lines;
@@ -202,9 +175,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_diags.push(lowering_warning_diag("E1006", "method call base `"
                             + method_parse.base
                             + "` produced no value", null));
-                        r_diagnostics.push("llvm lowering: method call base `"
-                            + method_parse.base
-                            + "` produced no value");
                         return CallTargetResolution {
                             trimmed_target: r_target,
                             method_operand: null,
@@ -216,7 +186,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             array_push_element_type: "",
                             current_lines: r_lines,
                             current_temp: r_temp,
-                            diagnostics: r_diagnostics,
                             string_constants: r_string_constants,
                             is_closure_dispatch: false,
                             closure_return_type: "",
@@ -227,12 +196,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                 }
             } else if interface_info != null {
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                let mut _ci5: int = 0;
-                loop {
-                    if _ci5 >= lowered_self.diagnostics.length { break; }
-                    r_diagnostics.push(lowered_self.diagnostics[_ci5]);
-                    _ci5 += 1;
-                }
                 r_diags = extend_diag_array(r_diags, lowered_self.diags);
                 r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                 r_lines = lowered_self.lines;
@@ -246,9 +209,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     r_diags.push(lowering_warning_diag("E1006", "method call base `"
                         + method_parse.base
                         + "` produced no value", null));
-                    r_diagnostics.push("llvm lowering: method call base `"
-                        + method_parse.base
-                        + "` produced no value");
                     return CallTargetResolution {
                         trimmed_target: r_target,
                         method_operand: null,
@@ -260,7 +220,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         array_push_element_type: "",
                         current_lines: r_lines,
                         current_temp: r_temp,
-                        diagnostics: r_diagnostics,
                         string_constants: r_string_constants,
                         is_closure_dispatch: false,
                         closure_return_type: "",
@@ -290,12 +249,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                 if _struct_fallback_info != null {
                     // Found a struct method — lower the base and dispatch
                     let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                    let mut _ci6b: int = 0;
-                    loop {
-                        if _ci6b >= lowered_self.diagnostics.length { break; }
-                        r_diagnostics.push(lowered_self.diagnostics[_ci6b]);
-                        _ci6b += 1;
-                    }
                     r_diags = extend_diag_array(r_diags, lowered_self.diags);
                     r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                     r_lines = lowered_self.lines;
@@ -308,9 +261,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_diags.push(lowering_warning_diag("E1006", "method call base `"
                             + method_parse.base
                             + "` produced no value", null));
-                        r_diagnostics.push("llvm lowering: method call base `"
-                            + method_parse.base
-                            + "` produced no value");
                         return CallTargetResolution {
                             trimmed_target: r_target,
                             method_operand: null,
@@ -322,7 +272,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             array_push_element_type: "",
                             current_lines: r_lines,
                             current_temp: r_temp,
-                            diagnostics: r_diagnostics,
                             string_constants: r_string_constants,
                             is_closure_dispatch: false,
                             closure_return_type: "",
@@ -400,21 +349,10 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 r_diags.push(lowering_error_diag("E1010", "channel `"
                                     + method_parse.field
                                     + "` reached the descriptor call path — the bespoke channel lowering (#1266) was bypassed", null));
-                                r_diagnostics.push("llvm lowering [fatal]: channel `"
-                                    + method_parse.field
-                                    + "` reached the descriptor call path — the bespoke channel lowering (#1266) was bypassed");
                             } else {
                                 // Lower the base (channel handle) and wire to
                                 // the close helper.
                                 let _g_ch_lowered = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                                let mut _cig: int = 0;
-                                loop {
-                                    if _cig >= _g_ch_lowered.diagnostics.length {
-                                        break;
-                                    }
-                                    r_diagnostics.push(_g_ch_lowered.diagnostics[_cig]);
-                                    _cig += 1;
-                                }
                                 r_diags = extend_diag_array(r_diags, _g_ch_lowered.diags);
                                 r_string_constants = merge_string_constants(r_string_constants, _g_ch_lowered.string_constants);
                                 r_lines = _g_ch_lowered.lines;
@@ -448,11 +386,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                     + "` has declared type `"
                                     + _g_annotation
                                     + "` which is not in the lowering type context", null));
-                                r_diagnostics.push("llvm lowering [fatal]: method call base `"
-                                    + method_parse.base
-                                    + "` has declared type `"
-                                    + _g_annotation
-                                    + "` which is not in the lowering type context");
                                 return CallTargetResolution {
                                     trimmed_target: r_target,
                                     method_operand: null,
@@ -464,7 +397,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                     array_push_element_type: "",
                                     current_lines: r_lines,
                                     current_temp: r_temp,
-                                    diagnostics: r_diagnostics,
                                     string_constants: r_string_constants,
                                     is_closure_dispatch: false,
                                     closure_return_type: "",
@@ -480,12 +412,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     } else {
                         let field_helper = find_runtime_helper(method_parse.field);
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                        let mut _ci6: int = 0;
-                        loop {
-                            if _ci6 >= lowered_self.diagnostics.length { break; }
-                            r_diagnostics.push(lowered_self.diagnostics[_ci6]);
-                            _ci6 += 1;
-                        }
                         r_diags = extend_diag_array(r_diags, lowered_self.diags);
                         r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                         r_lines = lowered_self.lines;
@@ -494,9 +420,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             r_diags.push(lowering_warning_diag("E1006", "method call base `"
                                 + method_parse.base
                                 + "` produced no value", null));
-                            r_diagnostics.push("llvm lowering: method call base `"
-                                + method_parse.base
-                                + "` produced no value");
                             return CallTargetResolution {
                                 trimmed_target: r_target,
                                 method_operand: null,
@@ -508,7 +431,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 array_push_element_type: "",
                                 current_lines: r_lines,
                                 current_temp: r_temp,
-                                diagnostics: r_diagnostics,
                                 string_constants: r_string_constants,
                                 is_closure_dispatch: false,
                                 closure_return_type: "",
@@ -574,7 +496,6 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
         array_push_element_type: r_array_push_element_type,
         current_lines: r_lines,
         current_temp: r_temp,
-        diagnostics: r_diagnostics,
         string_constants: r_string_constants,
         is_closure_dispatch: false,
         closure_return_type: "",

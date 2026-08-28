@@ -7,7 +7,6 @@ import { trace_log, trace_lowering } from "../../../lowering_debug_state";
 import { LLVMOperand } from "../../../types";
 import {
     extend_diag_array,
-    extend_string_array,
     lowering_error_diag,
     lowering_warning_diag,
     number_to_string
@@ -19,7 +18,6 @@ struct CoercedCallState {
     lines: string[];
     temp_index: int;
     operands: LLVMOperand[];
-    diagnostics: string[];
     diags: LoweringDiagnostic[];
 }
 
@@ -43,10 +41,9 @@ fn _has_abi_mismatch_diag(diags: LoweringDiagnostic[]) -> boolean {
     return false;
 }
 
-fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[]) -> CoercedCallState {
+fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, current_temp: int, current_lines: string[], diags: LoweringDiagnostic[]) -> CoercedCallState {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
-    let mut result_diagnostics = diagnostics;
     let mut result_diags = diags;
     let _trace_ccl = trace_lowering();
 
@@ -91,7 +88,6 @@ fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand
                 source_type = operand_source_types[index];
             }
             let coerced = coerce_operand_to_type_with_source(operand, source_type, target_type, result_temp, result_lines, false, null);
-            result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
             result_diags = extend_diag_array(result_diags, coerced.diags);
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
@@ -116,7 +112,6 @@ fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand
                 } else {
                     result_diags.push(lowering_warning_diag("E1006", diagnostic_message, null));
                 }
-                result_diagnostics.push(diagnostic);
                 coerced_operands.push(operand);
             } else { coerced_operands.push(coerced.operand); }
         }
@@ -132,7 +127,6 @@ fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand
         lines: result_lines,
         temp_index: result_temp,
         operands: coerced_operands,
-        diagnostics: result_diagnostics,
         diags: result_diags
     };
 }

@@ -10,7 +10,6 @@ import {
 import { substring } from "sfn/strings";
 
 import { lower_expression } from "../expression_lowering/native/core";
-import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
 import { recover_temp_from_lines } from "../expression_lowering/native/temp_recovery";
 import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
 import { default_return_literal, format_temp_name } from "../expressions_helpers";
@@ -40,15 +39,8 @@ fn allocate_block_label(prefix: string, counter: int) -> BlockLabelResult {
 }
 
 fn lower_condition_to_i1(function_name: string, expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ConditionConversion {
-    let mut diagnostics: string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
     let mut diags: LoweringDiagnostic[] = [];
     let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
-    let mut _ci11: int = 0;
-    loop {
-        if _ci11 >= lowered.diagnostics.length { break; }
-        diagnostics.push(lowered.diagnostics[_ci11]);
-        _ci11 += 1;
-    }
     diags = extend_diag_array(diags, lowered.diags);
     let mut current_lines: string[] = lowered.lines;
     let mut current_temp: int = lowered.temp_index;
@@ -61,21 +53,18 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
         if rendered_condition.length == 0 {
             let message = "condition produced no value in `" + function_name
                 + "`";
-            diagnostics.push("llvm lowering: " + message);
             diags.push(lowering_warning_diag("E1006", message, null));
         } else {
             let message = "condition produced no value in `" + function_name
                 + "` for `"
                 + rendered_condition
                 + "`";
-            diagnostics.push("llvm lowering: " + message);
             diags.push(lowering_warning_diag("E1006", message, null));
         }
         return ConditionConversion {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: string_constants,
             diags: diags
         };
@@ -87,7 +76,6 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
             lines: current_lines,
             temp_index: current_temp,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: string_constants,
             diags: diags
         };
@@ -102,7 +90,6 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
             lines: current_lines,
             temp_index: current_temp + 1,
             operand: converted,
-            diagnostics: diagnostics,
             string_constants: string_constants,
             diags: diags
         };
@@ -124,7 +111,6 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
             lines: current_lines,
             temp_index: current_temp + 1,
             operand: converted,
-            diagnostics: diagnostics,
             string_constants: string_constants,
             diags: diags
         };
@@ -134,13 +120,11 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
         + "` in `"
         + function_name
         + "`";
-    diagnostics.push("llvm lowering: " + unsupported_message);
     diags.push(lowering_warning_diag("E1006", unsupported_message, null));
     return ConditionConversion {
         lines: current_lines,
         temp_index: current_temp,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: string_constants,
         diags: diags
     };

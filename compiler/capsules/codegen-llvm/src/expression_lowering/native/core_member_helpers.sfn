@@ -20,7 +20,7 @@ import { number_to_string, trim_text } from "../../utils";
 // Try to resolve a struct field access via in-memory TypeContext when the
 // base type is i8* (opaque pointer). Returns an ExpressionResult with the
 // loaded field value, or null if resolution fails.
-fn lower_inline_gep_field_access(base_name: string, field_name: string, base_operand: LLVMOperand, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[], context: TypeContext) -> ExpressionResult? {
+fn lower_inline_gep_field_access(base_name: string, field_name: string, base_operand: LLVMOperand, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[], context: TypeContext) -> ExpressionResult? {
     let _igep_base = trim_text(base_name);
     let mut _igep_struct: string = "";
 
@@ -89,7 +89,6 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
         lines: current_lines,
         temp_index: current_temp,
         operand: _igep_op,
-        diagnostics: diagnostics,
         string_constants: string_constants,
         diags: diags
     };

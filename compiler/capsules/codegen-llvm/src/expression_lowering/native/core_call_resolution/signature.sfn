@@ -36,7 +36,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
     let mut llvm_return: string = "";
     let mut expected_params: string[] = [];
     let mut is_trait_dispatch: boolean = false;
-    let mut result_diagnostics: string[] = [];
     let mut result_diags: LoweringDiagnostic[] = [];
     let mut result_helper = helper_descriptor;
 
@@ -64,7 +63,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             llvm_return: llvm_return,
             expected_params: expected_params,
             is_trait_dispatch: false,
-            diagnostics: result_diagnostics,
             helper_overridden: false,
             is_closure_dispatch: true,
             diags: result_diags
@@ -107,13 +105,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                                     + "` has unsupported return type `"
                                     + sig.return_type
                                     + "`", null));
-                                result_diagnostics.push("llvm lowering: trait `"
-                                    + interface_name
-                                    + "` method `"
-                                    + method_name
-                                    + "` has unsupported return type `"
-                                    + sig.return_type
-                                    + "`");
                             }
                             expected_params = ["i8*"];
                             break;
@@ -159,11 +150,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                         + "` has unsupported return type `"
                         + function_entry.return_type
                         + "`", null));
-                    result_diagnostics.push("llvm lowering: async function `"
-                        + result_target
-                        + "` has unsupported return type `"
-                        + function_entry.return_type
-                        + "`");
                     llvm_return = "i8*";
                 } else { llvm_return = future_return; }
                 // The underlying Sailfin return type is recovered on the let
@@ -176,9 +162,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                     result_diags.push(lowering_warning_diag("E1006", "unsupported return type in call to `"
                         + result_target
                         + "`", null));
-                    result_diagnostics.push("llvm lowering: unsupported return type in call to `"
-                        + result_target
-                        + "`");
                     llvm_return = "i8*";
                 }
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
@@ -217,9 +200,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                 result_diags.push(lowering_warning_diag("E1006", "call to unknown function `"
                     + result_target
                     + "`", null));
-                result_diagnostics.push("llvm lowering: call to unknown function `"
-                    + result_target
-                    + "`");
             }
         }
     }
@@ -246,7 +226,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         llvm_return: llvm_return,
         expected_params: expected_params,
         is_trait_dispatch: is_trait_dispatch,
-        diagnostics: result_diagnostics,
         helper_overridden: helper_overridden,
         is_closure_dispatch: false,
         diags: result_diags

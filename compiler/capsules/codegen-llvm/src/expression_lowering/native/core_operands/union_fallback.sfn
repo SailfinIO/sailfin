@@ -20,7 +20,6 @@ import { coerce_numeric_primitive } from "./numeric_coercion";
 
 fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
 
     if is_union_llvm_type(target) {
@@ -39,12 +38,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
             } else {
                 let variant_numeric = coerce_numeric_primitive(operand, operand_type, variant_type, local_temp, local_lines);
                 if variant_numeric != null {
-                    let mut _vndi: int = 0;
-                    loop {
-                        if _vndi >= variant_numeric.diagnostics.length { break; }
-                        diagnostics.push(variant_numeric.diagnostics[_vndi]);
-                        _vndi += 1;
-                    }
                     diags = extend_diag_array(diags, variant_numeric.diags);
                     if variant_numeric.operand != null {
                         local_lines = variant_numeric.lines;
@@ -98,7 +91,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                             if _alloc_di_d >= alloc_result_d.diagnostics.length {
                                 break;
                             }
-                            diagnostics.push(alloc_result_d.diagnostics[_alloc_di_d]);
                             _alloc_di_d += 1;
                         }
                         diags = extend_diag_array(diags, alloc_result_d.diags);
@@ -127,7 +119,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                             if _mp_di_d >= mp_result_d.diagnostics.length {
                                 break;
                             }
-                            diagnostics.push(mp_result_d.diagnostics[_mp_di_d]);
                             _mp_di_d += 1;
                         }
                         diags = extend_diag_array(diags, mp_result_d.diags);
@@ -185,7 +176,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                                 if _alloc_di_e >= alloc_result_e.diagnostics.length {
                                     break;
                                 }
-                                diagnostics.push(alloc_result_e.diagnostics[_alloc_di_e]);
                                 _alloc_di_e += 1;
                             }
                             diags = extend_diag_array(diags, alloc_result_e.diags);
@@ -214,7 +204,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                                 if _mp_di_e >= mp_result_e.diagnostics.length {
                                     break;
                                 }
-                                diagnostics.push(mp_result_e.diagnostics[_mp_di_e]);
                                 _mp_di_e += 1;
                             }
                             diags = extend_diag_array(diags, mp_result_e.diags);
@@ -251,7 +240,6 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                     lines: local_lines,
                     temp_index: local_temp + 2,
                     operand: coerced,
-                    diagnostics: diagnostics,
                     diags: diags
                 };
             }
@@ -259,19 +247,15 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
         }
     }
 
-    // No variant matched. Before this arm was split out of
-    // `coerce_general_fallback` it shared that function's single
-    // `diagnostics` array, so messages accumulated while probing variants
-    // survived the fall-through and rode out on whichever later guard
-    // returned a result. Returning a bare null here would drop them, so
-    // hand them back with a null `operand` — the caller's signal for
-    // "no match, but carry these forward".
-    if diagnostics.length > 0 {
+    // No variant matched. Diagnostics accumulated while probing variants must
+    // survive the fall-through: returning a bare null would drop them, so hand
+    // them back with a null `operand` — the caller's signal for "no match, but
+    // carry these forward".
+    if diags.length > 0 {
         return CoercionResult {
             lines: current_lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             diags: diags
         };
     }

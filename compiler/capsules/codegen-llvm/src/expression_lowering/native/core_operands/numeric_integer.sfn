@@ -12,7 +12,6 @@ import { CoercionResult, LLVMOperand } from "../../../types";
 // caller (`coerce_numeric_primitive`) falls through to the i8* tail.
 fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
 
     if target == "i64" {
@@ -34,7 +33,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 2,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -49,7 +47,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -64,7 +61,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -79,7 +75,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -94,7 +89,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -109,7 +103,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -124,7 +117,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -148,7 +140,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 2,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -163,7 +154,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -178,7 +168,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -193,7 +182,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -214,7 +202,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 2,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -237,7 +224,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 2,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -258,7 +244,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -273,7 +258,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -288,7 +272,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -303,7 +286,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -318,7 +300,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -333,7 +314,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -348,7 +328,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -372,7 +351,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 2,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -388,7 +366,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -403,7 +380,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -418,7 +394,6 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }

@@ -53,7 +53,6 @@ import { get_instruction_tag } from "./lowering_native_helpers";
 // `.endroutine` does not close the outer one. Mirrors
 // `collect_loop_structure`.
 fn collect_routine_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> RoutineStructure {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let body_start = start_index + 1;
     let mut depth: int = 0;
@@ -62,14 +61,10 @@ fn collect_routine_structure(instructions: NativeInstruction[], start_index: int
     if limit > instructions.length { limit = instructions.length; }
     loop {
         if index >= limit {
-            diagnostics.push("llvm lowering: unterminated `.routine` in `"
-                + function_name
-                + "`");
             return RoutineStructure {
                 body_start: body_start,
                 body_end: limit,
-                next_index: limit - 1,
-                diagnostics: diagnostics
+                next_index: limit - 1
             };
         }
         let _tag = get_instruction_tag(instructions, index);
@@ -83,8 +78,7 @@ fn collect_routine_structure(instructions: NativeInstruction[], start_index: int
                 return RoutineStructure {
                     body_start: body_start,
                     body_end: index,
-                    next_index: index,
-                    diagnostics: diagnostics
+                    next_index: index
                 };
             }
             depth -= 1;
@@ -97,8 +91,7 @@ fn collect_routine_structure(instructions: NativeInstruction[], start_index: int
     return RoutineStructure {
         body_start: body_start,
         body_end: limit,
-        next_index: limit,
-        diagnostics: diagnostics
+        next_index: limit
     };
 }
 
@@ -153,21 +146,18 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
                 + "structured concurrency forbids non-local exit from a "
                 + "`routine` (issue #1181) — restructure so the routine "
                 + "completes normally.";
-            diagnostics.push(lowering_error_diag("E1011", message, instructions[index].span));
         }
         if _tag == 19 {  // Throw
             let message = "`throw` inside `routine` in `" + function_name
                 + "` would exit the nursery before its spawned tasks join; "
                 + "structured concurrency forbids non-local exit from a "
                 + "`routine` (issue #1181).";
-            diagnostics.push(lowering_error_diag("E1011", message, instructions[index].span));
         }
         if _tag == 10 {  // Break
             if loop_depth == 0 {
                 let message = "`break` inside `routine` in `" + function_name
                     + "` targets a loop outside the routine and would exit "
                     + "the nursery before its spawned tasks join (issue #1181).";
-                diagnostics.push(lowering_error_diag("E1011", message, null));
             }
         }
         if _tag == 11 {  // Continue
@@ -175,7 +165,6 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
                 let message = "`continue` inside `routine` in `" + function_name
                     + "` targets a loop outside the routine and would exit "
                     + "the nursery before its spawned tasks join (issue #1181).";
-                diagnostics.push(lowering_error_diag("E1011", message, null));
             }
         }
 
@@ -185,7 +174,6 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
 }
 
 fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -199,12 +187,6 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let structure = collect_routine_structure(function.instructions, start_index, end, function.name);
-    let mut _cd: int = 0;
-    loop {
-        if _cd >= structure.diagnostics.length { break; }
-        diagnostics.push(structure.diagnostics[_cd]);
-        _cd += 1;
-    }
 
     // v0 fail-closed: reject non-local exit out of the routine.
     let escape_diagnostics = collect_routine_escape_diagnostics(function.instructions, structure.body_start, structure.body_end, function.name);
@@ -212,7 +194,6 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
     loop {
         if _ed >= escape_diagnostics.length { break; }
         diags.push(escape_diagnostics[_ed]);
-        diagnostics.push(diag_to_legacy_string(escape_diagnostics[_ed]));
         _ed += 1;
     }
 
@@ -227,12 +208,6 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
     let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, try_stack, context, body_scope_id, scope_depth
         + 1, current_label);
 
-    let mut _bd: int = 0;
-    loop {
-        if _bd >= body_result.diagnostics.length { break; }
-        diagnostics.push(body_result.diagnostics[_bd]);
-        _bd += 1;
-    }
     diags = extend_diag_array(diags, body_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_lines = extend_string_array(current_lines, body_result.lines);
@@ -284,7 +259,6 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
         bindings: current_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
-        diagnostics: diagnostics,
         diags: diags,
         terminated: body_result.terminated,
         next_local_id: current_next_local,

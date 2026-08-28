@@ -265,7 +265,6 @@ fn is_test_module_slug(module_name: string) -> boolean {
 
 struct MangledModuleResult {
     lines: string[];
-    diagnostics: string[];
     diags: LoweringDiagnostic[];
 }
 

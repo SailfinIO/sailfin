@@ -33,9 +33,7 @@ import {
     TypeContext
 } from "../../types";
 import {
-    append_string,
     extend_diag_array,
-    extend_string_array,
     join_with_separator,
     lowering_error_diag,
     lowering_warning_diag,
@@ -78,7 +76,6 @@ fn pick_agg_cast_shim_target(operand_type: string, target_type: string) -> strin
 }
 
 fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -98,7 +95,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -112,7 +108,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             if element_text.length == 0 {
                 let _empty_element_message = "empty element in array literal";
                 diags.push(lowering_warning_diag("E1006", _empty_element_message, null));
-                diagnostics.push("llvm lowering: " + _empty_element_message);
                 index += 1;
                 continue;
             }
@@ -126,18 +121,11 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                         lines: current_lines,
                         temp_index: current_temp,
                         operand: null,
-                        diagnostics: diagnostics,
                         string_constants: collected_string_constants,
                         diags: diags
                     };
                 }
                 let with_sep = emit_string_concat(current_operand, sep.operand, current_temp, current_lines);
-                let mut _ci0: int = 0;
-                loop {
-                    if _ci0 >= with_sep.diagnostics.length { break; }
-                    diagnostics.push(with_sep.diagnostics[_ci0]);
-                    _ci0 += 1;
-                }
                 diags = extend_diag_array(diags, with_sep.diags);
                 current_lines = with_sep.lines;
                 current_temp = with_sep.temp_index;
@@ -146,7 +134,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                         lines: current_lines,
                         temp_index: current_temp,
                         operand: null,
-                        diagnostics: diagnostics,
                         string_constants: collected_string_constants,
                         diags: diags
                     };
@@ -155,12 +142,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
 
             let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, "");
-            let mut _ci1: int = 0;
-            loop {
-                if _ci1 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci1]);
-                _ci1 += 1;
-            }
             diags = extend_diag_array(diags, lowered.diags);
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             current_lines = lowered.lines;
@@ -168,24 +149,16 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             if lowered.operand == null {
                 let _no_value_message = "array literal element produced no value";
                 diags.push(lowering_warning_diag("E1006", _no_value_message, null));
-                diagnostics.push("llvm lowering: " + _no_value_message);
                 return ExpressionResult {
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: null,
-                    diagnostics: diagnostics,
                     string_constants: collected_string_constants,
                     diags: diags
                 };
             }
 
             let as_string = coerce_operand_to_string(lowered.operand, current_temp, current_lines);
-            let mut _ci2: int = 0;
-            loop {
-                if _ci2 >= as_string.diagnostics.length { break; }
-                diagnostics.push(as_string.diagnostics[_ci2]);
-                _ci2 += 1;
-            }
             diags = extend_diag_array(diags, as_string.diags);
             collected_string_constants = merge_string_constants(collected_string_constants, as_string.string_constants);
             current_lines = as_string.lines;
@@ -193,24 +166,16 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             if as_string.operand == null {
                 let _stringify_message = "unable to stringify array literal element";
                 diags.push(lowering_warning_diag("E1013", _stringify_message, null));
-                diagnostics.push("llvm lowering: " + _stringify_message);
                 return ExpressionResult {
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: null,
-                    diagnostics: diagnostics,
                     string_constants: collected_string_constants,
                     diags: diags
                 };
             }
 
             let appended = emit_string_concat(current_operand, as_string.operand, current_temp, current_lines);
-            let mut _ci3: int = 0;
-            loop {
-                if _ci3 >= appended.diagnostics.length { break; }
-                diagnostics.push(appended.diagnostics[_ci3]);
-                _ci3 += 1;
-            }
             diags = extend_diag_array(diags, appended.diags);
             current_lines = appended.lines;
             current_temp = appended.temp_index;
@@ -219,7 +184,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: null,
-                    diagnostics: diagnostics,
                     string_constants: collected_string_constants,
                     diags: diags
                 };
@@ -237,18 +201,11 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
         }
         let finished = emit_string_concat(current_operand, close.operand, current_temp, current_lines);
-        let mut _ci4: int = 0;
-        loop {
-            if _ci4 >= finished.diagnostics.length { break; }
-            diagnostics.push(finished.diagnostics[_ci4]);
-            _ci4 += 1;
-        }
         diags = extend_diag_array(diags, finished.diags);
         current_lines = finished.lines;
         current_temp = finished.temp_index;
@@ -256,7 +213,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             lines: current_lines,
             temp_index: current_temp,
             operand: finished.operand,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -340,24 +296,20 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         if element_text.length == 0 {
             let _empty_element_message2 = "empty element in array literal";
             diags.push(lowering_warning_diag("E1006", _empty_element_message2, null));
-            diagnostics.push("llvm lowering: " + _empty_element_message2);
             index += 1;
             continue;
         }
         let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, element_expected_type);
-        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
         if lowered.operand == null {
             let _no_value_message2 = "array literal element produced no value";
             diags.push(lowering_warning_diag("E1006", _no_value_message2, null));
-            diagnostics.push("llvm lowering: " + _no_value_message2);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -467,12 +419,10 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     if inferred_element_type.length == 0 {
         let _unsupported_element_message = "unsupported array literal element type";
         diags.push(lowering_warning_diag("E1006", _unsupported_element_message, null));
-        diagnostics.push("llvm lowering: " + _unsupported_element_message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -507,7 +457,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     }
                     if !should_unwrap_string {
                         let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
-                        diagnostics = extend_string_array(diagnostics, boxed.diagnostics);
                         current_lines = boxed.lines;
                         current_temp = boxed.temp_index;
                         if boxed.operand == null {
@@ -515,12 +464,10 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                                 + element_type
                                 + "`";
                             diags.push(lowering_warning_diag("E1006", _boxed_message, null));
-                            diagnostics.push("llvm lowering: " + _boxed_message);
                             return ExpressionResult {
                                 lines: current_lines,
                                 temp_index: current_temp,
                                 operand: null,
-                                diagnostics: diagnostics,
                                 string_constants: collected_string_constants,
                                 diags: diags
                             };
@@ -533,7 +480,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         // Slice E.1.5 (#528): array literal element coerce — exempt
         // (array-element store is not in the slice's strict scope).
         let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines, true, null);
-        diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
         if coerced.operand == null {
@@ -541,12 +487,10 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 + element_type
                 + "`";
             diags.push(lowering_warning_diag("E1006", _coerced_message, null));
-            diagnostics.push("llvm lowering: " + _coerced_message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -615,12 +559,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     };
     let raw_array_operands: LLVMOperand[] = [raw_array_size_operand];
     let raw_array_result = emit_runtime_call("alloc_struct", raw_array_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _raw_array_di: int = 0;
-    loop {
-        if _raw_array_di >= raw_array_result.diagnostics.length { break; }
-        diagnostics.push(raw_array_result.diagnostics[_raw_array_di]);
-        _raw_array_di += 1;
-    }
     diags = extend_diag_array(diags, raw_array_result.diags);
     current_lines = raw_array_result.lines;
     current_temp += 1;
@@ -682,12 +620,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     };
     let struct_alloc_operands: LLVMOperand[] = [struct_size_operand];
     let struct_alloc_result = emit_runtime_call("alloc_struct", struct_alloc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _struct_alloc_di: int = 0;
-    loop {
-        if _struct_alloc_di >= struct_alloc_result.diagnostics.length { break; }
-        diagnostics.push(struct_alloc_result.diagnostics[_struct_alloc_di]);
-        _struct_alloc_di += 1;
-    }
     diags = extend_diag_array(diags, struct_alloc_result.diags);
     current_lines = struct_alloc_result.lines;
     current_temp += 1;
@@ -752,7 +684,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         lines: current_lines,
         temp_index: current_temp,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: collected_string_constants,
         diags: diags
     };
@@ -765,7 +696,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
 // fan-out) thread `null` until they pick up an enclosing span — see the
 // issue's `Out:` section for the deferred plumbing.
 fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
-    let mut diagnostics: string[] = parse.diagnostics;
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -778,17 +708,14 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 + parse.type_name
                 + "`";
             diags.push(lowering_warning_diag("E1012", _unknown_struct_message, span));
-            diagnostics.push("llvm lowering: " + _unknown_struct_message);
         } else {
             let _unknown_struct_bare_message = "struct literal references unknown struct";
             diags.push(lowering_warning_diag("E1012", _unknown_struct_bare_message, span));
-            diagnostics.push("llvm lowering: " + _unknown_struct_bare_message);
         }
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -801,17 +728,10 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         };
         // 0.5.8+ boxed-struct ABI: heap-allocate the aggregate and return %T*.
         let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
-        let mut _bdi: int = 0;
-        loop {
-            if _bdi >= boxed.diagnostics.length { break; }
-            diagnostics.push(boxed.diagnostics[_bdi]);
-            _bdi += 1;
-        }
         return ExpressionResult {
             lines: boxed.lines,
             temp_index: boxed.temp_index,
             operand: boxed.operand,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -845,12 +765,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 field_value_text = literal_field.name;
             }
             let lowered = lower_expression(field_value_text, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
-            let mut _ci5: int = 0;
-            loop {
-                if _ci5 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci5]);
-                _ci5 += 1;
-            }
             diags = extend_diag_array(diags, lowered.diags);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
@@ -864,12 +778,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 // span so the bare ABI primitive mismatch diagnostic from
                 // `coerce_operand_to_type` carries a `line:col`.
                 let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines, false, span);
-                let mut _ci6: int = 0;
-                loop {
-                    if _ci6 >= coerced.diagnostics.length { break; }
-                    diagnostics.push(coerced.diagnostics[_ci6]);
-                    _ci6 += 1;
-                }
                 diags = extend_diag_array(diags, coerced.diags);
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
@@ -900,7 +808,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                     if span != null {
                         _lit_diag = _lit_diag + " at " + _format_literal_span(span);
                     }
-                    diagnostics.push(_lit_diag);
                 }
                 if coerced.operand != null { value_operand = coerced.operand; }
             } else {
@@ -924,7 +831,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                     _unlowered_diag = _unlowered_diag + " at "
                         + _format_literal_span(span);
                 }
-                diagnostics.push(_unlowered_diag);
             }
             if !string_array_contains(used_names, expected.name) {
                 used_names.push(expected.name);
@@ -946,7 +852,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             if span != null {
                 _missing_diag = _missing_diag + " at " + _format_literal_span(span);
             }
-            diagnostics.push(_missing_diag);
         }
 
         let mut value_text: string = default_return_literal(expected.llvm_type);
@@ -981,7 +886,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 + literal_field.name
                 + "`";
             diags.push(lowering_warning_diag("E1012", _extra_field_message, span));
-            diagnostics.push("llvm lowering: " + _extra_field_message);
         }
         extra_index += 1;
     }
@@ -993,17 +897,10 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         };
         // 0.5.8+ boxed-struct ABI: heap-allocate the aggregate and return %T*.
         let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
-        let mut _bdi: int = 0;
-        loop {
-            if _bdi >= boxed.diagnostics.length { break; }
-            diagnostics.push(boxed.diagnostics[_bdi]);
-            _bdi += 1;
-        }
         return ExpressionResult {
             lines: boxed.lines,
             temp_index: boxed.temp_index,
             operand: boxed.operand,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -1022,24 +919,16 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         value: previous_value
     };
     let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
-    let mut _bdi: int = 0;
-    loop {
-        if _bdi >= boxed.diagnostics.length { break; }
-        diagnostics.push(boxed.diagnostics[_bdi]);
-        _bdi += 1;
-    }
     return ExpressionResult {
         lines: boxed.lines,
         temp_index: boxed.temp_index,
         operand: boxed.operand,
-        diagnostics: diagnostics,
         string_constants: collected_string_constants,
         diags: diags
     };
 }
 
 fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, temp_index: int, lines: string[], context: TypeContext) -> HeapBoxResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -1085,12 +974,6 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
     };
     let box_operands: LLVMOperand[] = [box_size_operand];
     let box_result = emit_runtime_call("alloc_struct", box_operands, box_overrides, current_temp - 1, current_lines);
-    let mut _box_di: int = 0;
-    loop {
-        if _box_di >= box_result.diagnostics.length { break; }
-        diagnostics.push(box_result.diagnostics[_box_di]);
-        _box_di += 1;
-    }
     diags = extend_diag_array(diags, box_result.diags);
     current_lines = box_result.lines;
 
@@ -1130,15 +1013,13 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
     return HeapBoxResult {
         lines: current_lines,
         temp_index: current_temp,
-        operand: pointer_operand,
-        diagnostics: diagnostics
+        operand: pointer_operand
     };
 }
 
 // Slice E.2 follow-up (#540): `span` mirrors the threading in
 // `lower_struct_literal`. Pre-#540 callers pass `null`.
 fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
-    let mut diagnostics: string[] = parse.diagnostics;
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -1151,17 +1032,14 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                 + parse.enum_name
                 + "`";
             diags.push(lowering_warning_diag("E1006", _unknown_enum_message, span));
-            diagnostics.push("llvm lowering: " + _unknown_enum_message);
         } else {
             let _unknown_enum_bare_message = "enum literal references unknown enum";
             diags.push(lowering_warning_diag("E1006", _unknown_enum_bare_message, span));
-            diagnostics.push("llvm lowering: " + _unknown_enum_bare_message);
         }
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -1174,12 +1052,10 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
             + parse.variant_name
             + "`";
         diags.push(lowering_warning_diag("E1006", _no_variant_message, span));
-        diagnostics.push("llvm lowering: " + _no_variant_message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -1265,12 +1141,6 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
             if literal_index >= 0 {
                 let literal_field = parse.fields[literal_index];
                 let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, value_type_hint);
-                let mut _ci7: int = 0;
-                loop {
-                    if _ci7 >= lowered.diagnostics.length { break; }
-                    diagnostics.push(lowered.diagnostics[_ci7]);
-                    _ci7 += 1;
-                }
                 diags = extend_diag_array(diags, lowered.diags);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
@@ -1328,7 +1198,6 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                                         if _ci8 >= boxed.diagnostics.length {
                                             break;
                                         }
-                                        diagnostics.push(boxed.diagnostics[_ci8]);
                                         _ci8 += 1;
                                     }
                                     current_lines = boxed.lines;
@@ -1348,12 +1217,6 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     // Slice E.2 follow-up (#540): thread the enum-literal
                     // site span; same shape as the struct-literal branch.
                     let coerced = coerce_operand_to_type(field_operand, field_llvm_type, current_temp, current_lines, false, span);
-                    let mut _ci9: int = 0;
-                    loop {
-                        if _ci9 >= coerced.diagnostics.length { break; }
-                        diagnostics.push(coerced.diagnostics[_ci9]);
-                        _ci9 += 1;
-                    }
                     diags = extend_diag_array(diags, coerced.diags);
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;
@@ -1395,7 +1258,6 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                             _payload_diag = _payload_diag + " at "
                                 + _format_literal_span(span);
                         }
-                        diagnostics.push(_payload_diag);
                     }
                     if coerced.operand != null {
                         if alloca_ptr != null {
@@ -1464,7 +1326,6 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     + expected.name
                     + "`";
                 diags.push(lowering_warning_diag("E1006", _enum_missing_message, span));
-                diagnostics.push("llvm lowering: " + _enum_missing_message);
             }
 
             field_index += 1;
@@ -1482,7 +1343,6 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     + literal_field.name
                     + "`";
                 diags.push(lowering_warning_diag("E1006", _enum_extra_message, span));
-                diagnostics.push("llvm lowering: " + _enum_extra_message);
             }
             extra_index += 1;
         }
@@ -1511,17 +1371,10 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
         value: enum_value
     };
     let boxed = box_aggregate_operand(aggregate, enum_info.llvm_name + "*", current_temp, current_lines, context);
-    let mut _edi: int = 0;
-    loop {
-        if _edi >= boxed.diagnostics.length { break; }
-        diagnostics.push(boxed.diagnostics[_edi]);
-        _edi += 1;
-    }
     return ExpressionResult {
         lines: boxed.lines,
         temp_index: boxed.temp_index,
         operand: boxed.operand,
-        diagnostics: diagnostics,
         string_constants: collected_string_constants,
         diags: diags
     };

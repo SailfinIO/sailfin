@@ -18,7 +18,6 @@ import {
 // =============================================================================
 struct EnumLayoutFixupResult {
     enums: NativeEnum[];
-    diagnostics: string[];
 }
 
 // =============================================================================
@@ -117,7 +116,6 @@ struct InterpolatedTemplateParse {
 // =============================================================================
 struct LoweredLLVMResult {
     ir: string;
-    diagnostics: string[];
     trait_metadata: TraitMetadata;
     function_effects: FunctionEffectEntry[];
     lifetime_regions: LifetimeRegionMetadata[];
@@ -128,7 +126,6 @@ struct LoweredLLVMResult {
 
 struct LoweredLLVMLinesResult {
     lines: string[];
-    diagnostics: string[];
     trait_metadata: TraitMetadata;
     function_effects: FunctionEffectEntry[];
     lifetime_regions: LifetimeRegionMetadata[];
@@ -145,7 +142,6 @@ struct LLVMArtifactResult {
     artifact_name: string;
     artifact_format: string;
     lines: string[];
-    diagnostics: string[];
     diags: LoweringDiagnostic[];
     failure_message: string;
 }
@@ -153,12 +149,10 @@ struct LLVMArtifactResult {
 struct LayoutManifestApplication {
     structs: NativeStruct[];
     enums: NativeEnum[];
-    diagnostics: string[];
 }
 
 struct LoweredLLVMFunction {
     lines: string[];
-    diagnostics: string[];
     lifetime_regions: LifetimeRegionMetadata[];
     string_constants: StringConstant[];
     diags: LoweringDiagnostic[];
@@ -166,7 +160,6 @@ struct LoweredLLVMFunction {
 
 struct BodyResult {
     lines: string[];
-    diagnostics: string[];
     lifetime_regions: LifetimeRegionMetadata[];
     string_constants: StringConstant[];
 }
@@ -191,7 +184,6 @@ struct ParameterBinding {
 struct ParameterPreparation {
     signature: string[];
     bindings: ParameterBinding[];
-    diagnostics: string[];
 }
 
 struct LocalBinding {
@@ -238,7 +230,6 @@ struct ModuleGlobalLoweringResult {
     init_function: NativeFunction?;
     locals: LocalBinding[];
     string_constants: StringConstant[];
-    diagnostics: string[];
 }
 
 struct BindingLoweringResult {
@@ -259,7 +250,6 @@ struct ExpressionResult {
     lines: string[];
     temp_index: int;
     operand: LLVMOperand?;
-    diagnostics: string[];
     string_constants: StringConstant[];
     // SFN-915: structured twin of `diagnostics`, appended last per the
     // GEP-append discipline (docs/rca/2026-04-18-reexport-diagnostic-gep.md).
@@ -317,7 +307,6 @@ struct ScopeMetadata {
 struct OwnershipAnalysis {
     ownership: OwnershipInfo?;
     consumption: OwnershipConsumption?;
-    diagnostics: string[];
 }
 
 // =============================================================================
@@ -393,7 +382,6 @@ struct TypeContext {
 
 struct TypeContextBuild {
     context: TypeContext;
-    diagnostics: string[];
 }
 
 struct TypeAllocationInfo {
@@ -409,7 +397,6 @@ struct HeapBoxResult {
     lines: string[];
     temp_index: int;
     operand: LLVMOperand?;
-    diagnostics: string[];
 }
 
 // M1.5.3 (issue #327): result of `emit_scope_drops` /
@@ -454,7 +441,6 @@ struct StructLiteralParse {
     success: boolean;
     type_name: string;
     fields: StructLiteralField[];
-    diagnostics: string[];
 }
 
 struct EnumLiteralParse {
@@ -463,7 +449,6 @@ struct EnumLiteralParse {
     enum_name: string;
     variant_name: string;
     fields: StructLiteralField[];
-    diagnostics: string[];
 }
 
 struct MemberAccessParse {
@@ -510,20 +495,17 @@ struct BorrowParseResult {
     success: boolean;
     target: string;
     mutable: boolean;
-    diagnostics: string[];
 }
 
 struct BorrowArgumentParse {
     success: boolean;
     argument: string;
-    diagnostics: string[];
 }
 
 struct RawAddressParseResult {
     recognized: boolean;
     success: boolean;
     target: string;
-    diagnostics: string[];
 }
 
 struct CastParseResult {
@@ -531,7 +513,6 @@ struct CastParseResult {
     success: boolean;
     value: string;
     type_annotation: string;
-    diagnostics: string[];
 }
 
 struct TernaryParseResult {
@@ -539,7 +520,6 @@ struct TernaryParseResult {
     condition: string;
     true_value: string;
     false_value: string;
-    diagnostics: string[];
 }
 
 // =============================================================================
@@ -550,7 +530,6 @@ struct ExpressionStatementResult {
     temp_index: int;
     locals: LocalBinding[];
     bindings: ParameterBinding[];
-    diagnostics: string[];
     lifetime_regions: LifetimeRegionMetadata[];
     lifetime_releases: LifetimeReleaseEvent[];
     next_region_id: int;
@@ -565,7 +544,6 @@ struct LetLoweringResult {
     locals: LocalBinding[];
     bindings: ParameterBinding[];
     temp_index: int;
-    diagnostics: string[];
     next_local_id: int;
     lifetime_regions: LifetimeRegionMetadata[];
     lifetime_releases: LifetimeReleaseEvent[];
@@ -581,7 +559,6 @@ struct InlineLetParseResult {
     mutable: boolean;
     type_annotation: string;
     initializer: string?;
-    diagnostics: string[];
 }
 
 // =============================================================================
@@ -599,7 +576,6 @@ struct IfStructure {
     else_end: int;
     has_else: boolean;
     next_index: int;
-    diagnostics: string[];
 }
 
 struct LoopContext {
@@ -616,7 +592,6 @@ struct LoopStructure {
     body_start: int;
     body_end: int;
     next_index: int;
-    diagnostics: string[];
 }
 
 // SFN-400: a per-try-frame entry on the `try_stack` threaded through
@@ -641,7 +616,6 @@ struct RoutineStructure {
     body_start: int;
     body_end: int;
     next_index: int;
-    diagnostics: string[];
 }
 
 struct TryStructure {
@@ -656,7 +630,6 @@ struct TryStructure {
     finally_end: int;
     end_index: int;
     next_index: int;
-    diagnostics: string[];
 }
 
 struct RangeIterableParse {
@@ -664,7 +637,7 @@ struct RangeIterableParse {
     start: string;
     end: string;
     stride: string;
-    diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 // =============================================================================
@@ -685,7 +658,6 @@ struct MatchCaseStructure {
 struct MatchStructure {
     cases: MatchCaseStructure[];
     end_index: int;
-    diagnostics: string[];
 }
 
 struct MatchFieldBinding {
@@ -705,7 +677,6 @@ struct MatchStructFieldBinding {
 struct MatchGuardEmission {
     lines: string[];
     temp_index: int;
-    diagnostics: string[];
     diags: LoweringDiagnostic[];
     string_constants: StringConstant[];
 }
@@ -714,7 +685,6 @@ struct MatchCaseCondition {
     lines: string[];
     temp_index: int;
     operand: LLVMOperand?;
-    diagnostics: string[];
     is_default: boolean;
     field_bindings: MatchFieldBinding[];
     enum_info: EnumTypeInfo?;
@@ -738,7 +708,6 @@ struct ConditionConversion {
     lines: string[];
     temp_index: int;
     operand: LLVMOperand?;
-    diagnostics: string[];
     string_constants: StringConstant[];
     diags: LoweringDiagnostic[];
 }
@@ -747,14 +716,12 @@ struct ComparisonEmission {
     lines: string[];
     temp_index: int;
     operand: LLVMOperand?;
-    diagnostics: string[];
 }
 
 struct CoercionResult {
     lines: string[];
     temp_index: int;
     operand: LLVMOperand?;
-    diagnostics: string[];
     // SFN-915: structured twin of `diagnostics`, appended last. See
     // `ExpressionResult` above.
     diags: LoweringDiagnostic[];
@@ -765,7 +732,6 @@ struct BinaryAlignmentResult {
     temp_index: int;
     left: LLVMOperand?;
     right: LLVMOperand?;
-    diagnostics: string[];
     result_type: string;
     diags: LoweringDiagnostic[];
 }
@@ -780,7 +746,6 @@ struct BlockLoweringResult {
     bindings: ParameterBinding[];
     temp_index: int;
     block_counter: int;
-    diagnostics: string[];
     terminated: boolean;
     next_local_id: int;
     lifetime_regions: LifetimeRegionMetadata[];
@@ -797,7 +762,6 @@ struct BlockLoweringResult {
 struct ThrowLoweringResult {
     lines: string[];
     temp_index: int;
-    diagnostics: string[];
     terminated: boolean;
     string_constants: StringConstant[];
     diags: LoweringDiagnostic[];
@@ -840,7 +804,6 @@ struct LoadLocalResult {
     lines: string[];
     temp_index: int;
     operand: LLVMOperand?;
-    diagnostics: string[];
 }
 
 // =============================================================================
@@ -857,7 +820,6 @@ struct CallTargetResolution {
     array_push_element_type: string;
     current_lines: string[];
     current_temp: int;
-    diagnostics: string[];
     string_constants: StringConstant[];
     // Issue #689: closure-callee dispatch. When the call target
     // resolves to a `__closure__@sfn_lambda_<N>`-typed local or a
@@ -878,7 +840,6 @@ struct CallSignatureResolution {
     llvm_return: string;
     expected_params: string[];
     is_trait_dispatch: boolean;
-    diagnostics: string[];
     // Issue #633: when a user-defined function entry wins over a
     // colliding `target == symbol` runtime-helper row, signal the
     // caller to drop its `helper_descriptor` so downstream emission
@@ -907,7 +868,6 @@ struct CallSignatureResolution {
 // contaminate downstream state.
 struct FunctionLoweringResult {
     lines: string[];
-    diagnostics: string[];
     diags: LoweringDiagnostic[];
 }
 
@@ -916,5 +876,4 @@ struct FunctionLoweringResult {
 // `.phase_types_diagnostics` file IPC channel.
 struct TypeContextBuildResult {
     context: TypeContext;
-    diagnostics: string[];
 }

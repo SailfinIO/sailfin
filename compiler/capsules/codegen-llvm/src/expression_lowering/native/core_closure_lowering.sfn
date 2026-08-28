@@ -33,7 +33,6 @@ struct _ClosurePairLowerResult {
     lines: string[];
     temp_index: int;
     operand: LLVMOperand?;
-    diagnostics: string[];
     diags: LoweringDiagnostic[];
 }
 
@@ -55,7 +54,6 @@ struct _ClosurePairLowerResult {
 //     comment) and the aggregate with the alloc's `i8*` env raw var
 //     as the env slot.
 fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], context: TypeContext, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ClosurePairLowerResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let prefix = "<closure_pair ";
     let mut cursor: int = prefix.length;
@@ -87,14 +85,10 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
         diags.push(lowering_warning_diag("E1006", "malformed closure_pair marker `"
             + marker
             + "`", null));
-        diagnostics.push("llvm lowering: malformed closure_pair marker `"
-            + marker
-            + "`");
         return _ClosurePairLowerResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
@@ -110,13 +104,10 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
         diags.push(lowering_warning_diag("E1006", "lifted lambda `"
             + function_name
             + "` not found in module function table", null));
-        diagnostics.push("llvm lowering: lifted lambda `" + function_name
-            + "` not found in module function table");
         return _ClosurePairLowerResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
@@ -132,19 +123,12 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
     // aggregate emission with the alloc's env_raw_var.
     if starts_with(env_var, "env_alloc ") {
         let alloc_diag = _lower_closure_env_alloc(env_var, target, bindings, locals, current_temp, new_lines);
-        let mut _aci: int = 0;
-        loop {
-            if _aci >= alloc_diag.diagnostics.length { break; }
-            diagnostics.push(alloc_diag.diagnostics[_aci]);
-            _aci += 1;
-        }
         diags = extend_diag_array(diags, alloc_diag.diags);
         if alloc_diag.operand == null {
             return _ClosurePairLowerResult {
                 lines: alloc_diag.lines,
                 temp_index: alloc_diag.temp_index,
                 operand: null,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -168,7 +152,6 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
         lines: new_lines,
         temp_index: pair.next_temp,
         operand: operand,
-        diagnostics: diagnostics,
         diags: diags
     };
 }
@@ -179,7 +162,6 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
 // `_ClosurePairLowerResult.operand.value` slot (callers read this
 // to wire the closure-pair aggregate's env slot).
 fn _lower_closure_env_alloc(env_var_text: string, target: NativeFunction, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ClosurePairLowerResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     // `owned_env` (spawn/parallel task lambdas, #1475) is tagged right
     // after `env_alloc` by the lift pass; route its env through the
@@ -211,12 +193,6 @@ fn _lower_closure_env_alloc(env_var_text: string, target: NativeFunction, bindin
     // value text spliced verbatim from the operand list — passing a
     // pointer text where a value is expected is a type error.
     let resolved = _resolve_capture_operands(captures, bindings, locals, current_temp, new_lines);
-    let mut _ri: int = 0;
-    loop {
-        if _ri >= resolved.diagnostics.length { break; }
-        diagnostics.push(resolved.diagnostics[_ri]);
-        _ri += 1;
-    }
     new_lines = resolved.lines;
     current_temp = resolved.temp_index;
     let alloc = emit_closure_env_alloc(layout, resolved.operands, current_temp, owned_env);
@@ -234,7 +210,6 @@ fn _lower_closure_env_alloc(env_var_text: string, target: NativeFunction, bindin
         lines: new_lines,
         temp_index: alloc.next_temp,
         operand: env_operand,
-        diagnostics: diagnostics,
         diags: diags
     };
 }
@@ -247,7 +222,6 @@ struct _ResolvedCaptureOperands {
     operands: ClosureCaptureOperand[];
     lines: string[];
     temp_index: int;
-    diagnostics: string[];
 }
 
 // Resolve each capture name against the caller's
@@ -260,7 +234,6 @@ struct _ResolvedCaptureOperands {
 // `_field_zero_value` behaviour inside `emit_closure_env_alloc` —
 // that path is instrumented by the A2 golden tests.
 fn _resolve_capture_operands(captures: NativeLambdaCapture[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ResolvedCaptureOperands {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut operands: ClosureCaptureOperand[] = [];
     let mut current_lines: string[] = lines;
@@ -289,12 +262,6 @@ fn _resolve_capture_operands(captures: NativeLambdaCapture[], bindings: Paramete
                 current_temp = load_result.temp_index;
                 value_text = load_result.operand.value;
                 value_type = load_result.operand.llvm_type;
-                let mut _ldi: int = 0;
-                loop {
-                    if _ldi >= load_result.diagnostics.length { break; }
-                    diagnostics.push(load_result.diagnostics[_ldi]);
-                    _ldi += 1;
-                }
             } else {
                 value_text = local.pointer;
                 value_type = local.llvm_type;
@@ -314,8 +281,7 @@ fn _resolve_capture_operands(captures: NativeLambdaCapture[], bindings: Paramete
     return _ResolvedCaptureOperands {
         operands: operands,
         lines: current_lines,
-        temp_index: current_temp,
-        diagnostics: diagnostics
+        temp_index: current_temp
     };
 }
 
@@ -431,7 +397,6 @@ fn _lower_named_fn_value(target: NativeFunction, context: TypeContext, temp_inde
             llvm_type: pair.operand_type,
             value: pair.operand_value
         },
-        diagnostics: [],
         diags: []
     };
 }

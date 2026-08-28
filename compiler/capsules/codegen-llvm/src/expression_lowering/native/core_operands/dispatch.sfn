@@ -70,7 +70,6 @@ fn coerce_null_literal_to_union_variant(operand: LLVMOperand, operand_type: stri
         lines: current_lines,
         temp_index: temp_index + 2,
         operand: coerced,
-        diagnostics: [],
         diags: []
     };
 }
@@ -130,7 +129,6 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             + " target="
             + target_type);
     }
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let operand_type = collapse_type_spaces(trim_text(operand.llvm_type));
@@ -140,7 +138,6 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             lines: current_lines,
             temp_index: recover_temp_from_lines(current_lines, temp_index),
             operand: operand,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
@@ -149,7 +146,6 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             lines: current_lines,
             temp_index: recover_temp_from_lines(current_lines, temp_index),
             operand: operand,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
@@ -199,12 +195,10 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             }
             abi_diag = abi_diag + abi_tail;
             trace_log(abi_diag);
-            diagnostics.push(abi_diag);
             return CoercionResult {
                 lines: current_lines,
                 temp_index: recover_temp_from_lines(current_lines, temp_index),
                 operand: null,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -238,12 +232,10 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             }
             bool_diag = bool_diag + bool_tail;
             trace_log(bool_diag);
-            diagnostics.push(bool_diag);
             return CoercionResult {
                 lines: current_lines,
                 temp_index: recover_temp_from_lines(current_lines, temp_index),
                 operand: null,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -252,18 +244,11 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     let numeric = coerce_numeric_primitive(operand, operand_type, target, temp_index, current_lines);
     if numeric != null {
         // Merge so any kind-check warning pushed above survives (#550).
-        let mut _nd_i: int = 0;
-        loop {
-            if _nd_i >= numeric.diagnostics.length { break; }
-            diagnostics.push(numeric.diagnostics[_nd_i]);
-            _nd_i += 1;
-        }
         diags = extend_diag_array(diags, numeric.diags);
         return CoercionResult {
             lines: numeric.lines,
             temp_index: recover_temp_from_lines(numeric.lines, numeric.temp_index),
             operand: numeric.operand,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
@@ -274,24 +259,16 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             lines: null_union.lines,
             temp_index: recover_temp_from_lines(null_union.lines, null_union.temp_index),
             operand: null_union.operand,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
     let pointer = coerce_pointer_or_struct(operand, operand_type, target, temp_index, current_lines);
     if pointer != null {
-        let mut _pd_i: int = 0;
-        loop {
-            if _pd_i >= pointer.diagnostics.length { break; }
-            diagnostics.push(pointer.diagnostics[_pd_i]);
-            _pd_i += 1;
-        }
         diags = extend_diag_array(diags, pointer.diags);
         return CoercionResult {
             lines: pointer.lines,
             temp_index: recover_temp_from_lines(pointer.lines, pointer.temp_index),
             operand: pointer.operand,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
@@ -310,44 +287,29 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
                 + "` to `"
                 + target
                 + "`; a `spawn` future pointer was stored through a non-pointer slot (see E0831)";
-            diagnostics.push("[fatal] llvm lowering: " + task_handle_message);
             diags.push(lowering_error_diag("E1009", task_handle_message, span));
             return CoercionResult {
                 lines: current_lines,
                 temp_index: recover_temp_from_lines(current_lines, temp_index),
                 operand: null,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
     }
     let general = coerce_general_fallback(operand, operand_type, target, temp_index, current_lines);
     if general != null {
-        let mut _gd_i: int = 0;
-        loop {
-            if _gd_i >= general.diagnostics.length { break; }
-            diagnostics.push(general.diagnostics[_gd_i]);
-            _gd_i += 1;
-        }
         diags = extend_diag_array(diags, general.diags);
         return CoercionResult {
             lines: general.lines,
             temp_index: recover_temp_from_lines(general.lines, general.temp_index),
             operand: general.operand,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
-    diagnostics.push("llvm lowering: unable to coerce operand of type `"
-        + operand.llvm_type
-        + "` to `"
-        + target_type
-        + "`");
     return CoercionResult {
         lines: current_lines,
         temp_index: recover_temp_from_lines(current_lines, temp_index),
         operand: null,
-        diagnostics: diagnostics,
         diags: diags
     };
 }
@@ -388,7 +350,6 @@ fn coerce_operand_to_type_with_source(operand: LLVMOperand, source_type: string,
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: LLVMOperand { llvm_type: target, value: widened },
-                diagnostics: [],
                 diags: []
             };
         }
@@ -486,7 +447,6 @@ fn dominant_type(first: string, second: string) -> string {
 }
 
 fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> BinaryAlignmentResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -514,7 +474,6 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
             temp_index: recover_temp_from_lines(current_lines, current_temp),
             left: left_operand,
             right: right_operand,
-            diagnostics: diagnostics,
             result_type: left_operand.llvm_type,
             diags: diags
         };
@@ -536,24 +495,16 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
             + numeric_type_kind(right_operand.llvm_type)
             + ") — add `as float` or `as int` to disambiguate";
         diags.push(lowering_error_diag("E1009", abi_core, null));
-        diagnostics.push("llvm lowering [fatal]: " + abi_core);
         return BinaryAlignmentResult {
             lines: current_lines,
             temp_index: recover_temp_from_lines(current_lines, current_temp),
             left: null,
             right: null,
-            diagnostics: diagnostics,
             result_type: "",
             diags: diags
         };
     }
     let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines, true, null);
-    let mut _ci0: int = 0;
-    loop {
-        if _ci0 >= left_coercion.diagnostics.length { break; }
-        diagnostics.push(left_coercion.diagnostics[_ci0]);
-        _ci0 += 1;
-    }
     diags = extend_diag_array(diags, left_coercion.diags);
     if left_coercion.operand == null {
         let left_unable_message = "unable to convert left operand from `"
@@ -562,13 +513,11 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
             + target_type
             + "`";
         diags.push(lowering_warning_diag("E1006", left_unable_message, null));
-        diagnostics.push("llvm lowering: " + left_unable_message);
         return BinaryAlignmentResult {
             lines: left_coercion.lines,
             temp_index: recover_temp_from_lines(left_coercion.lines, left_coercion.temp_index),
             left: null,
             right: null,
-            diagnostics: diagnostics,
             result_type: target_type,
             diags: diags
         };
@@ -578,12 +527,6 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
     current_temp = left_coercion.temp_index;
 
     let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines, true, null);
-    let mut _ci1: int = 0;
-    loop {
-        if _ci1 >= right_coercion.diagnostics.length { break; }
-        diagnostics.push(right_coercion.diagnostics[_ci1]);
-        _ci1 += 1;
-    }
     diags = extend_diag_array(diags, right_coercion.diags);
     if right_coercion.operand == null {
         let right_unable_message = "unable to convert right operand from `"
@@ -592,13 +535,11 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
             + target_type
             + "`";
         diags.push(lowering_warning_diag("E1006", right_unable_message, null));
-        diagnostics.push("llvm lowering: " + right_unable_message);
         return BinaryAlignmentResult {
             lines: right_coercion.lines,
             temp_index: recover_temp_from_lines(right_coercion.lines, right_coercion.temp_index),
             left: null,
             right: null,
-            diagnostics: diagnostics,
             result_type: target_type,
             diags: diags
         };
@@ -612,7 +553,6 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
         temp_index: recover_temp_from_lines(current_lines, current_temp),
         left: left_operand,
         right: right_operand,
-        diagnostics: diagnostics,
         result_type: target_type,
         diags: diags
     };

@@ -16,7 +16,6 @@ import {
     TypeContext
 } from "./types";
 import {
-    extend_string_array,
     join_with_separator,
     lowering_error_diag,
     number_to_string,
@@ -76,7 +75,6 @@ fn _failure(message: string, lines: string[], temp_index: int, strings: StringCo
         lines: lines,
         temp_index: temp_index,
         operand: null,
-        diagnostics: [diag],
         string_constants: strings,
         diags: [structured]
     };
@@ -106,7 +104,6 @@ fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterB
 
     let mut current_lines = lines;
     let mut current_temp = temp_index;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut strings: StringConstant[] = [];
     let mut operands: LLVMOperand[] = [];
@@ -114,7 +111,6 @@ fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterB
     loop {
         if index >= arguments.length { break; }
         let lowered = lower_expression(trim_text(arguments[index]), bindings, locals, current_temp, current_lines, functions, context, "i64");
-        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
         strings = merge_string_constants(strings, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -150,7 +146,6 @@ fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterB
         lines: current_lines,
         temp_index: current_temp + 1,
         operand: LLVMOperand { llvm_type: "i64", value: result },
-        diagnostics: diagnostics,
         string_constants: strings,
         diags: diags
     };

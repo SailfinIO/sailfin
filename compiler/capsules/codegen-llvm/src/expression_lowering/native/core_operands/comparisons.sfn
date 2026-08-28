@@ -17,7 +17,6 @@ import {
 } from "../../../types";
 
 fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[], operands_unsigned: boolean) -> ComparisonEmission {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut symbol_is_equality: boolean = false;
@@ -37,13 +36,7 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
         if left_is_string {
             if right_is_string { both_string_shapes = true; }
         }
-        if !both_string_shapes {
-            diagnostics.push("llvm lowering: comparison operands have mismatched types `"
-                + left_operand.llvm_type
-                + "` and `"
-                + right_operand.llvm_type
-                + "`");
-        }
+        if !both_string_shapes { }
     }
     let left_is_null = left_operand.value == "null";
     let right_is_null = right_operand.value == "null";
@@ -161,8 +154,7 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
                         return ComparisonEmission {
                             lines: current_lines,
                             temp_index: next_index,
-                            operand: operand,
-                            diagnostics: diagnostics
+                            operand: operand
                         };
                     }
                 }
@@ -272,8 +264,7 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
                         return ComparisonEmission {
                             lines: current_lines,
                             temp_index: next_index,
-                            operand: ordered_operand,
-                            diagnostics: diagnostics
+                            operand: ordered_operand
                         };
                     }
                 }
@@ -283,16 +274,10 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
     let llvm_type = left_operand.llvm_type;
     let predicate = comparison_predicate_for_symbol(symbol, llvm_type, operands_unsigned);
     if predicate.length == 0 {
-        diagnostics.push("llvm lowering: unsupported comparison operator `"
-            + symbol
-            + "` for type `"
-            + llvm_type
-            + "`");
         return ComparisonEmission {
             lines: current_lines,
             temp_index: temp_index,
-            operand: null,
-            diagnostics: diagnostics
+            operand: null
         };
     }
     let temp_name = format_temp_name(temp_index);
@@ -305,25 +290,15 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
     return ComparisonEmission {
         lines: current_lines,
         temp_index: temp_index + 1,
-        operand: operand,
-        diagnostics: diagnostics
+        operand: operand
     };
 }
 
 fn emit_boolean_and(left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[]) -> ComparisonEmission {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
-    if left_operand.llvm_type != "i1" {
-        diagnostics.push("llvm lowering: expected boolean operand for `and`, found `"
-            + left_operand.llvm_type
-            + "`");
-    }
-    if right_operand.llvm_type != "i1" {
-        diagnostics.push("llvm lowering: expected boolean operand for `and`, found `"
-            + right_operand.llvm_type
-            + "`");
-    }
+    if left_operand.llvm_type != "i1" { }
+    if right_operand.llvm_type != "i1" { }
     let temp_name = format_temp_name(temp_index);
     current_lines.push("  " + temp_name + " = and i1 " + left_operand.value
         + ", "
@@ -332,8 +307,7 @@ fn emit_boolean_and(left_operand: LLVMOperand, right_operand: LLVMOperand, temp_
     return ComparisonEmission {
         lines: current_lines,
         temp_index: temp_index + 1,
-        operand: operand,
-        diagnostics: diagnostics
+        operand: operand
     };
 }
 
@@ -421,7 +395,6 @@ fn is_string_pointer_type(llvm_type: string) -> boolean {
 }
 
 fn load_local_operand(local: LocalBinding, temp_index: int, lines: string[]) -> LoadLocalResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let load_name = format_temp_name(temp_index);
     let mut current_lines: string[] = lines;
@@ -436,7 +409,6 @@ fn load_local_operand(local: LocalBinding, temp_index: int, lines: string[]) -> 
     return LoadLocalResult {
         lines: current_lines,
         temp_index: temp_index + 1,
-        operand: operand,
-        diagnostics: diagnostics
+        operand: operand
     };
 }

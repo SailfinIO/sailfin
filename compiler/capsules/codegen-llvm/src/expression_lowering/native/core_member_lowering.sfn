@@ -42,7 +42,6 @@ import {
     TypeContext
 } from "../../types";
 import {
-    append_string,
     contains_text,
     diag_from_legacy_lowering_error,
     extend_diag_array,
@@ -59,12 +58,11 @@ import {
     empty_runtime_call_overrides
 } from "./runtime_call";
 
-fn make_expression_result(lines: string[], temp_index: int, operand: LLVMOperand?, diagnostics: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[]) -> ExpressionResult {
+fn make_expression_result(lines: string[], temp_index: int, operand: LLVMOperand?, diags: LoweringDiagnostic[], string_constants: StringConstant[]) -> ExpressionResult {
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: string_constants,
         diags: diags
     };
@@ -89,7 +87,7 @@ fn emit_string_constant_pointer(constant: StringConstant, temp_index: int, lines
     };
 }
 
-fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[]) -> ExpressionResult {
+fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_index: int, lines: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[]) -> ExpressionResult {
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
     let mut dynamic_string_constants: StringConstant[] = string_constants;
@@ -121,17 +119,11 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     };
     let gf_operands: LLVMOperand[] = [base_operand, field_pointer_operand];
     let gf_result = emit_runtime_call("get_field", gf_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _gf_di: int = 0;
-    loop {
-        if _gf_di >= gf_result.diagnostics.length { break; }
-        diagnostics.push(gf_result.diagnostics[_gf_di]);
-        _gf_di += 1;
-    }
     diags = extend_diag_array(diags, gf_result.diags);
     current_lines = gf_result.lines;
     current_temp = gf_result.temp_index;
     if gf_result.operand == null {
-        return make_expression_result(current_lines, current_temp, null, diagnostics, diags, dynamic_string_constants);
+        return make_expression_result(current_lines, current_temp, null, diags, dynamic_string_constants);
     }
     // Take the actual call result rather than recomputing the SSA temp
     // name — `emit_runtime_call` may have consumed temps for argument
@@ -158,20 +150,14 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
         };
         let stn_operands: LLVMOperand[] = [gf_operand];
         let stn_result = emit_runtime_call("string.to_number", stn_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _stn_di: int = 0;
-        loop {
-            if _stn_di >= stn_result.diagnostics.length { break; }
-            diagnostics.push(stn_result.diagnostics[_stn_di]);
-            _stn_di += 1;
-        }
         diags = extend_diag_array(diags, stn_result.diags);
         current_lines = stn_result.lines;
         current_temp = stn_result.temp_index;
-        return make_expression_result(current_lines, current_temp, stn_result.operand, diagnostics, diags, dynamic_string_constants);
+        return make_expression_result(current_lines, current_temp, stn_result.operand, diags, dynamic_string_constants);
     }
 
     let operand = LLVMOperand { llvm_type: "i8*", value: call_result_value };
-    return make_expression_result(current_lines, current_temp, operand, diagnostics, diags, dynamic_string_constants);
+    return make_expression_result(current_lines, current_temp, operand, diags, dynamic_string_constants);
 }
 
 fn lower_runtime_global_reference(temp_index: int, lines: string[]) -> ExpressionResult {
@@ -184,7 +170,6 @@ fn lower_runtime_global_reference(temp_index: int, lines: string[]) -> Expressio
         lines: current_lines,
         temp_index: temp_index + 1,
         operand: operand,
-        diagnostics: [],
         string_constants: empty_constants,
         diags: []
     };
@@ -229,11 +214,10 @@ fn _enum_field_conflict_diag(enum_name: string, field: string, variants: EnumVar
         + "`, or rename the field in one variant";
 }
 
-fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: int, lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[], expected_type: string, narrowed_variant: string) -> ExpressionResult {
+fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: int, lines: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[], expected_type: string, narrowed_variant: string) -> ExpressionResult {
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
     let mut enum_string_constants: StringConstant[] = string_constants;
-    let mut messages: string[] = diagnostics;
     let mut messages_diags = diags;
 
     let mut tag_operand: LLVMOperand = LLVMOperand {
@@ -348,7 +332,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         }
 
         let operand = LLVMOperand { llvm_type: "i8*", value: current_pointer };
-        return make_expression_result(current_lines, current_temp, operand, messages, messages_diags, enum_string_constants);
+        return make_expression_result(current_lines, current_temp, operand, messages_diags, enum_string_constants);
     }
 
     let mut matched_variants: EnumVariantInfo[] = [];
@@ -422,13 +406,12 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         // least one variant continue to read the user value, not the
         // implicit discriminator.
         if parse.field == "tag" {
-            return make_expression_result(current_lines, current_temp, tag_operand, messages, messages_diags, enum_string_constants);
+            return make_expression_result(current_lines, current_temp, tag_operand, messages_diags, enum_string_constants);
         }
         let message = "enum `" + enum_info.name + "` has no field `" + parse.field
             + "` on any variant";
         messages_diags.push(lowering_warning_diag("E1006", message, null));
-        messages.push("llvm lowering: " + message);
-        return make_expression_result(current_lines, current_temp, null, messages, messages_diags, enum_string_constants);
+        return make_expression_result(current_lines, current_temp, null, messages_diags, enum_string_constants);
     }
 
     let mut selected_variants: EnumVariantInfo[] = matched_variants;
@@ -502,15 +485,13 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
                 + expected_type
                 + "`";
             messages_diags.push(lowering_warning_diag("E1006", message, null));
-            messages.push("llvm lowering: " + message);
         } else {
             let message = "enum member access for `" + enum_info.name + "."
                 + parse.field
                 + "` uses incompatible field types across variants";
             messages_diags.push(lowering_warning_diag("E1006", message, null));
-            messages.push("llvm lowering: " + message);
         }
-        return make_expression_result(current_lines, current_temp, null, messages, messages_diags, enum_string_constants);
+        return make_expression_result(current_lines, current_temp, null, messages_diags, enum_string_constants);
     }
 
     let first_type = selected_fields[0].llvm_type;
@@ -570,8 +551,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         trace_log(diag);
         let structured_diag = diag_from_legacy_lowering_error(diag);
         if structured_diag != null { messages_diags.push(structured_diag); }
-        messages.push(diag);
-        return make_expression_result(current_lines, current_temp, null, messages, messages_diags, enum_string_constants);
+        return make_expression_result(current_lines, current_temp, null, messages_diags, enum_string_constants);
     }
 
     let mut field_type: string = selected_fields[0].llvm_type;
@@ -603,8 +583,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             // the chain can repair — also unrepresentable as one result type.
             let diag = _enum_field_conflict_diag(enum_info.name, parse.field, selected_variants, selected_fields);
             trace_log(diag);
-            messages.push(diag);
-            return make_expression_result(current_lines, current_temp, null, messages, messages_diags, enum_string_constants);
+            return make_expression_result(current_lines, current_temp, null, messages_diags, enum_string_constants);
         }
     }
 
@@ -651,12 +630,6 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             };
             let alloc_operands: LLVMOperand[] = [alloc_size_op];
             let alloc_result = emit_runtime_call("alloc_struct", alloc_operands, alloc_overrides, current_temp, current_lines);
-            let mut _alloc_di: int = 0;
-            loop {
-                if _alloc_di >= alloc_result.diagnostics.length { break; }
-                messages.push(alloc_result.diagnostics[_alloc_di]);
-                _alloc_di += 1;
-            }
             messages_diags = extend_diag_array(messages_diags, alloc_result.diags);
             current_lines = alloc_result.lines;
             current_temp = alloc_result.temp_index;
@@ -680,12 +653,6 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             let mp_op = LLVMOperand { llvm_type: "i8*", value: box_i8_value };
             let mp_operands: LLVMOperand[] = [mp_op];
             let mp_result = emit_runtime_call("mark_persistent", mp_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-            let mut _mp_di: int = 0;
-            loop {
-                if _mp_di >= mp_result.diagnostics.length { break; }
-                messages.push(mp_result.diagnostics[_mp_di]);
-                _mp_di += 1;
-            }
             messages_diags = extend_diag_array(messages_diags, mp_result.diags);
             current_lines = mp_result.lines;
             current_temp = mp_result.temp_index;
@@ -811,12 +778,11 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         llvm_type: field_type,
         value: current_value_text
     };
-    return make_expression_result(current_lines, current_temp, operand, messages, messages_diags, enum_string_constants);
+    return make_expression_result(current_lines, current_temp, operand, messages_diags, enum_string_constants);
 }
 
 fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
-    let mut diagnostics: string[] = base_result.diagnostics;
     let mut diags = base_result.diags;
     let mut collected_string_constants: StringConstant[] = base_result.string_constants;
     if base_result.operand == null {
@@ -824,7 +790,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             lines: base_result.lines,
             temp_index: base_result.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -886,7 +851,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                                 lines: current_lines,
                                 temp_index: current_temp,
                                 operand: operand,
-                                diagnostics: diagnostics,
                                 string_constants: collected_string_constants,
                                 diags: diags
                             };
@@ -914,7 +878,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: operand,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -937,12 +900,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             // preserving the M2.4a swap byte-for-byte.
             let sl_operands: LLVMOperand[] = [base_operand];
             let sl_result = emit_runtime_call("string.length", sl_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-            let mut _sl_di: int = 0;
-            loop {
-                if _sl_di >= sl_result.diagnostics.length { break; }
-                diagnostics.push(sl_result.diagnostics[_sl_di]);
-                _sl_di += 1;
-            }
             diags = extend_diag_array(diags, sl_result.diags);
             current_lines = sl_result.lines;
             current_temp = sl_result.temp_index;
@@ -950,7 +907,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: sl_result.operand,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -972,12 +928,12 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
         if struct_info == null {
             let enum_info_candidate = find_enum_info_by_llvm_type(context, candidate);
             if enum_info_candidate != null {
-                return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diagnostics, diags, collected_string_constants, expected_type, base_narrowed_variant);
+                return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diags, collected_string_constants, expected_type, base_narrowed_variant);
             }
             if base_type_trimmed == "i8*" {
-                let _igep_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diagnostics, diags, collected_string_constants, context);
+                let _igep_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diags, collected_string_constants, context);
                 if _igep_result != null { return _igep_result; }
-                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, diags, collected_string_constants);
+                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diags, collected_string_constants);
             }
 
             if base_type_trimmed != "double" {
@@ -985,14 +941,12 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                     let message = "member access base `" + base_type_trimmed
                         + "` lacks struct metadata";
                     diags.push(lowering_warning_diag("E1006", message, null));
-                    diagnostics.push("llvm lowering: " + message);
                 }
             }
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -1003,26 +957,24 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
         if struct_info == null {
             let enum_info_candidate = find_enum_info_by_llvm_type(context, base_type_trimmed);
             if enum_info_candidate != null {
-                return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diagnostics, diags, collected_string_constants, expected_type, base_narrowed_variant);
+                return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diags, collected_string_constants, expected_type, base_narrowed_variant);
             }
             if base_type_trimmed == "i8*" {
-                let _igep2_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diagnostics, diags, collected_string_constants, context);
+                let _igep2_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diags, collected_string_constants, context);
                 if _igep2_result != null { return _igep2_result; }
-                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, diags, collected_string_constants);
+                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diags, collected_string_constants);
             }
             if base_type_trimmed != "double" {
                 if base_type_trimmed != "i8" {
                     let message = "member access base `" + base_type_trimmed
                         + "` lacks struct metadata";
                     diags.push(lowering_warning_diag("E1006", message, null));
-                    diagnostics.push("llvm lowering: " + message);
                 }
             }
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -1035,12 +987,10 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
         let message = "struct `" + info.name + "` has no field `" + parse.field
             + "`";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -1083,7 +1033,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: typed_operand,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -1117,7 +1066,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                         lines: current_lines,
                         temp_index: current_temp,
                         operand: typed_operand,
-                        diagnostics: diagnostics,
                         string_constants: collected_string_constants,
                         diags: diags
                     };
@@ -1140,7 +1088,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                         lines: current_lines,
                         temp_index: current_temp,
                         operand: typed_operand,
-                        diagnostics: diagnostics,
                         string_constants: collected_string_constants,
                         diags: diags
                     };
@@ -1156,7 +1103,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             lines: current_lines,
             temp_index: current_temp,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -1190,7 +1136,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: typed_operand,
-                    diagnostics: diagnostics,
                     string_constants: collected_string_constants,
                     diags: diags
                 };
@@ -1213,7 +1158,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: typed_operand,
-                    diagnostics: diagnostics,
                     string_constants: collected_string_constants,
                     diags: diags
                 };
@@ -1229,7 +1173,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
         lines: current_lines,
         temp_index: current_temp,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: collected_string_constants,
         diags: diags
     };

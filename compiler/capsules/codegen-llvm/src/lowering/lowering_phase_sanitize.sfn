@@ -90,11 +90,10 @@ fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowerin
 // Sanitize diagnostics array: null-check + length guard.
 //
 // Unlike the sibling guards above, an over-length trip keeps the `[fatal]`
-// entries instead of clearing the array. This is the inbound diagnostics of
-// `lower_to_llvm_lines_with_parsed_context`, which `append_missing_legacy_lowering_diags`
-// converts into the `diags` the gate reads, so clearing it would turn a
-// failing build into a passing one (SFN-529). The link to the gate is that
-// reconciliation — read it before touching this function.
+// entries instead of clearing the array, because clearing a diagnostics array
+// that feeds a build gate turns a failing build into a passing one (SFN-529).
+// The structured twin of this guard is `retain_error_diags` (`lowering_io.sfn`),
+// which is what the gate reads after SFN-916.
 //
 // `sanitize_collection_length` doubles as the scan bound, which keeps the
 // two trip reasons apart: it returns 0 for a negative length — the corrupt
@@ -146,12 +145,7 @@ fn sanitize_structs(structs: NativeStruct[], diagnostics: string[]) -> NativeStr
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         safe = [];
     }
-    if safe.length > 100000 {
-        diagnostics.push("llvm lowering: struct list too large ("
-            + number_to_string(safe.length)
-            + "); dropping");
-        safe = [];
-    }
+    if safe.length > 100000 { safe = []; }
     return safe;
 }
 
@@ -174,12 +168,7 @@ fn sanitize_enums(enums: NativeEnum[], diagnostics: string[], _trace_enums: bool
         }
         safe = [];
     }
-    if safe.length > 100000 {
-        diagnostics.push("llvm lowering: enum list too large ("
-            + number_to_string(safe.length)
-            + "); dropping");
-        safe = [];
-    }
+    if safe.length > 100000 { safe = []; }
     if _trace_enums {
         trace_log("enum_trace: safe_enums.length=" + number_to_string(safe.length));
     }
@@ -193,12 +182,7 @@ fn sanitize_interfaces(interfaces: NativeInterface[], diagnostics: string[]) -> 
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         safe = [];
     }
-    if safe.length > 100000 {
-        diagnostics.push("llvm lowering: interface list too large ("
-            + number_to_string(safe.length)
-            + "); dropping");
-        safe = [];
-    }
+    if safe.length > 100000 { safe = []; }
     return safe;
 }
 
@@ -367,12 +351,7 @@ fn sanitize_bindings(bindings: NativeBinding[], diagnostics: string[], native_te
     if safe.length != sanitize_collection_length(safe.length, 200000) {
         safe = [];
     }
-    if safe.length > 200000 {
-        diagnostics.push("llvm lowering: binding list too large ("
-            + number_to_string(safe.length)
-            + "); dropping");
-        safe = [];
-    }
+    if safe.length > 200000 { safe = []; }
     // Recovery: if bindings empty, re-parse from in-memory native text.
     if safe.length == 0 {
         if native_text_override_path.length > 0 {

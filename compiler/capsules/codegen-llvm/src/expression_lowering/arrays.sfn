@@ -16,7 +16,6 @@ import {
     append_string,
     ends_with,
     extend_diag_array,
-    index_of,
     lowering_error_diag,
     lowering_warning_diag,
     trim_text
@@ -27,11 +26,14 @@ import {
     empty_runtime_call_overrides
 } from "./native/runtime_call";
 
-fn _has_fatal_runtime_call_diagnostic(diagnostics: string[]) -> boolean {
+// SFN-916: the structured replacement for the legacy `[fatal]` substring scan.
+// `emit_runtime_call` reports a failed descriptor dispatch as an `error` diag;
+// continuing past one would emit a concat whose `copy_bytes` never ran.
+fn _runtime_call_failed(call_diags: LoweringDiagnostic[]) -> boolean {
     let mut index: int = 0;
     loop {
-        if index >= diagnostics.length { break; }
-        if index_of(diagnostics[index], "[fatal]") >= 0 { return true; }
+        if index >= call_diags.length { break; }
+        if call_diags[index].severity == "error" { return true; }
         index += 1;
     }
     return false;
@@ -46,17 +48,14 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
 fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int, alloc_target: string) -> ExpressionResult {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if element_type.length == 0 {
         let message = "concat requires a concrete element type";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -66,12 +65,10 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
     if array_struct_type.length == 0 {
         let message = "unsupported concat element type `" + element_type + "`";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -180,24 +177,16 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
     };
     let buffer_operands: LLVMOperand[] = [buffer_size_operand];
     let buffer_result = emit_runtime_call(alloc_target, buffer_operands, buffer_overrides, current_temp, current_lines);
-    let mut _buffer_di: int = 0;
-    loop {
-        if _buffer_di >= buffer_result.diagnostics.length { break; }
-        diagnostics.push(buffer_result.diagnostics[_buffer_di]);
-        _buffer_di += 1;
-    }
     diags = extend_diag_array(diags, buffer_result.diags);
     current_lines = buffer_result.lines;
     current_temp = buffer_result.temp_index;
     if buffer_result.operand == null {
         let message = "struct-array concat buffer allocation produced no operand";
         diags.push(lowering_error_diag("E1008", message, null));
-        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -234,21 +223,14 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
     let lhs_copy_len = LLVMOperand { llvm_type: "i64", value: lhs_bytes };
     let lhs_copy_operands: LLVMOperand[] = [lhs_copy_dest, lhs_copy_src, lhs_copy_len];
     let lhs_copy_result = emit_runtime_call("copy_bytes", lhs_copy_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _lhs_copy_di: int = 0;
-    loop {
-        if _lhs_copy_di >= lhs_copy_result.diagnostics.length { break; }
-        diagnostics.push(lhs_copy_result.diagnostics[_lhs_copy_di]);
-        _lhs_copy_di += 1;
-    }
     diags = extend_diag_array(diags, lhs_copy_result.diags);
     current_lines = lhs_copy_result.lines;
     current_temp = lhs_copy_result.temp_index;
-    if _has_fatal_runtime_call_diagnostic(lhs_copy_result.diagnostics) {
+    if _runtime_call_failed(lhs_copy_result.diags) {
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -287,21 +269,14 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
     let rhs_copy_len = LLVMOperand { llvm_type: "i64", value: rhs_bytes };
     let rhs_copy_operands: LLVMOperand[] = [rhs_copy_dest, rhs_copy_src, rhs_copy_len];
     let rhs_copy_result = emit_runtime_call("copy_bytes", rhs_copy_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _rhs_copy_di: int = 0;
-    loop {
-        if _rhs_copy_di >= rhs_copy_result.diagnostics.length { break; }
-        diagnostics.push(rhs_copy_result.diagnostics[_rhs_copy_di]);
-        _rhs_copy_di += 1;
-    }
     diags = extend_diag_array(diags, rhs_copy_result.diags);
     current_lines = rhs_copy_result.lines;
     current_temp = rhs_copy_result.temp_index;
-    if _has_fatal_runtime_call_diagnostic(rhs_copy_result.diagnostics) {
+    if _runtime_call_failed(rhs_copy_result.diags) {
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -332,26 +307,16 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
     };
     let struct_concat_operands: LLVMOperand[] = [struct_concat_size_operand];
     let struct_concat_result = emit_runtime_call(alloc_target, struct_concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _struct_concat_di: int = 0;
-    loop {
-        if _struct_concat_di >= struct_concat_result.diagnostics.length {
-            break;
-        }
-        diagnostics.push(struct_concat_result.diagnostics[_struct_concat_di]);
-        _struct_concat_di += 1;
-    }
     diags = extend_diag_array(diags, struct_concat_result.diags);
     current_lines = struct_concat_result.lines;
     current_temp = struct_concat_result.temp_index;
     if struct_concat_result.operand == null {
         let message = "struct-array concat result allocation produced no operand";
         diags.push(lowering_error_diag("E1008", message, null));
-        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -412,7 +377,6 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
         lines: current_lines,
         temp_index: current_temp,
         operand: result_operand,
-        diagnostics: diagnostics,
         string_constants: [],
         diags: diags
     };
@@ -421,17 +385,14 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
 fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if element_type.length == 0 {
         let message = "push requires a concrete element type";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -482,7 +443,6 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
             lines: current_lines,
             temp_index: current_temp,
             operand: result_operand,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -492,12 +452,10 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
     if array_struct_type.length == 0 {
         let message = "unsupported push element type `" + element_type + "`";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: [],
             diags: diags
         };
@@ -611,7 +569,6 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
         lines: current_lines,
         temp_index: current_temp,
         operand: array,
-        diagnostics: diagnostics,
         string_constants: [],
         diags: diags
     };

@@ -47,7 +47,6 @@ import { get_instruction_scan_text, get_instruction_tag } from "./lowering_nativ
 import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> LoopStructure {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let body_start = start_index + 1;
     let mut body_end = end;
@@ -58,14 +57,10 @@ fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, e
     loop {
         if index >= limit {
             if limit <= 0 { limit = 0; }
-            diagnostics.push("llvm lowering: unterminated `.loop` in `"
-                + function_name
-                + "`");
             return LoopStructure {
                 body_start: body_start,
                 body_end: limit,
-                next_index: limit - 1,
-                diagnostics: diagnostics
+                next_index: limit - 1
             };
         }
         let _loop_tag = get_instruction_tag(instructions, index);
@@ -86,8 +81,7 @@ fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, e
                 return LoopStructure {
                     body_start: body_start,
                     body_end: body_end,
-                    next_index: index,
-                    diagnostics: diagnostics
+                    next_index: index
                 };
             }
             if depth > 0 { depth -= 1; }
@@ -100,8 +94,7 @@ fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, e
     return LoopStructure {
         body_start: body_start,
         body_end: body_end,
-        next_index: limit,
-        diagnostics: diagnostics
+        next_index: limit
     };
 }
 
@@ -132,7 +125,6 @@ fn last_loop_context(values: LoopContext[]) -> LoopContext {
 }
 
 fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -187,13 +179,6 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
                 }
             }
         }
-    }
-
-    let mut _ci6: int = 0;
-    loop {
-        if _ci6 >= structure.diagnostics.length { break; }
-        diagnostics.push(structure.diagnostics[_ci6]);
-        _ci6 += 1;
     }
 
     // Preload all locals before entering the loop for phi node merging
@@ -285,12 +270,6 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
             + number_to_string(body_result.lines.length));
     }
 
-    let mut _ci7: int = 0;
-    loop {
-        if _ci7 >= body_result.diagnostics.length { break; }
-        diagnostics.push(body_result.diagnostics[_ci7]);
-        _ci7 += 1;
-    }
     diags = extend_diag_array(diags, body_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_allocas = body_result.allocas;
@@ -352,12 +331,6 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
         current_lines = header_cond.lines;
         current_temp = header_cond.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, header_cond.string_constants);
-        let mut _hc_diag_idx: int = 0;
-        loop {
-            if _hc_diag_idx >= header_cond.diagnostics.length { break; }
-            diagnostics.push(header_cond.diagnostics[_hc_diag_idx]);
-            _hc_diag_idx += 1;
-        }
 
         if header_cond.operand != null {
             current_lines.push("  br i1 " + header_cond.operand.value
@@ -623,7 +596,6 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
         bindings: current_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
-        diagnostics: diagnostics,
         diags: diags,
         terminated: false,
         next_local_id: current_next_local,

@@ -21,7 +21,6 @@ fn lower_mem_footprint_intrinsic(temp_index: int, lines: string[], diagnostics: 
             lines: lines,
             temp_index: temp_index,
             operand: zero,
-            diagnostics: diagnostics,
             string_constants: string_constants,
             diags: diags
         };
@@ -91,7 +90,6 @@ fn lower_mem_footprint_intrinsic(temp_index: int, lines: string[], diagnostics: 
         lines: out_lines,
         temp_index: next_temp,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: string_constants,
         diags: diags
     };

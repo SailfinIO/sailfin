@@ -174,20 +174,15 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
 }
 
 fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(expression);
     if trimmed.length < 4 {
-        diagnostics.push("llvm lowering: malformed let expression `"
-            + expression
-            + "`");
         return InlineLetParseResult {
             success: false,
             name: "",
             mutable: false,
             type_annotation: "",
-            initializer: null,
-            diagnostics: diagnostics
+            initializer: null
         };
     }
     let prefix = substring(trimmed, 0, 4);
@@ -197,8 +192,7 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
             name: "",
             mutable: false,
             type_annotation: "",
-            initializer: null,
-            diagnostics: diagnostics
+            initializer: null
         };
     }
     let mut remainder: string = trim_text(substring(trimmed, 4, trimmed.length));
@@ -211,16 +205,12 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
         }
     }
     if remainder.length == 0 {
-        diagnostics.push("llvm lowering: let expression missing binding name in `"
-            + expression
-            + "`");
         return InlineLetParseResult {
             success: false,
             name: "",
             mutable: is_mutable,
             type_annotation: "",
-            initializer: null,
-            diagnostics: diagnostics
+            initializer: null
         };
     }
     let mut name: string = "";
@@ -239,16 +229,12 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     }
     name = trim_text(name);
     if name.length == 0 {
-        diagnostics.push("llvm lowering: let expression missing binding name in `"
-            + expression
-            + "`");
         return InlineLetParseResult {
             success: false,
             name: "",
             mutable: is_mutable,
             type_annotation: "",
-            initializer: null,
-            diagnostics: diagnostics
+            initializer: null
         };
     }
     let mut tail: string = trim_text(substring(remainder, index, remainder.length));
@@ -291,16 +277,12 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
         }
     }
     if initializer == null {
-        diagnostics.push("llvm lowering: let expression missing initializer for `"
-            + name
-            + "`");
         return InlineLetParseResult {
             success: false,
             name: name,
             mutable: is_mutable,
             type_annotation: type_annotation,
-            initializer: null,
-            diagnostics: diagnostics
+            initializer: null
         };
     }
     return InlineLetParseResult {
@@ -308,7 +290,6 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
         name: name,
         mutable: is_mutable,
         type_annotation: type_annotation,
-        initializer: initializer,
-        diagnostics: diagnostics
+        initializer: initializer
     };
 }

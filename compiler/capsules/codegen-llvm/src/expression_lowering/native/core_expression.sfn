@@ -19,7 +19,6 @@ import {
 import {
     ends_with,
     extend_diag_array,
-    extend_string_array,
     lowering_error_diag,
     lowering_warning_diag,
     starts_with
@@ -89,7 +88,6 @@ import {
 
 fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let trimmed = trim_text(expression);
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     let dbg_expr = trace_lowering();
@@ -103,12 +101,10 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     if trimmed.length == 0 {
         let message = "empty expression encountered";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -147,17 +143,10 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             }
         }
         let pair_result = lower_closure_pair_marker(stripped, functions, context, bindings, locals, temp_index, lines);
-        let mut _ci_pair: int = 0;
-        loop {
-            if _ci_pair >= pair_result.diagnostics.length { break; }
-            diagnostics.push(pair_result.diagnostics[_ci_pair]);
-            _ci_pair += 1;
-        }
         return ExpressionResult {
             lines: pair_result.lines,
             temp_index: pair_result.temp_index,
             operand: pair_result.operand,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -179,12 +168,10 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             + name_for_diag
             + "` (not yet supported, see #687)";
         diags.push(lowering_error_diag("E1012", message, null));
-        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -209,12 +196,10 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             + name_for_diag
             + "` by reference across the task boundary (not yet supported, see SFN-381)";
         diags.push(lowering_error_diag("E1010", message, null));
-        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -320,7 +305,6 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             lines: lines,
             temp_index: temp_index,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -338,7 +322,6 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             lines: lines,
             temp_index: temp_index,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -355,7 +338,6 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             lines: lines,
             temp_index: temp_index,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -364,23 +346,19 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         let interpolated = try_lower_interpolated_string_literal(stripped, bindings, locals, temp_index, lines, functions, context);
         if interpolated != null {
             let result = interpolated;
-            diagnostics = extend_string_array(diagnostics, result.diagnostics);
             return ExpressionResult {
                 lines: result.lines,
                 temp_index: result.temp_index,
                 operand: result.operand,
-                diagnostics: diagnostics,
                 string_constants: result.string_constants,
                 diags: diags
             };
         }
         let literal_result = lower_string_literal(stripped, temp_index, lines);
-        diagnostics = extend_string_array(diagnostics, literal_result.diagnostics);
         return ExpressionResult {
             lines: literal_result.lines,
             temp_index: literal_result.temp_index,
             operand: literal_result.operand,
-            diagnostics: diagnostics,
             string_constants: literal_result.string_constants,
             diags: diags
         };
@@ -391,12 +369,10 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         if stripped.length == 5 {
             let message = "await expression missing operand";
             diags.push(lowering_warning_diag("E1010", message, null));
-            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: empty_constants,
                 diags: diags
             };
@@ -517,14 +493,14 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             let operand_text = trim_text(substring(stripped, 1, stripped.length));
             if operand_text.length > 0 {
                 let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
-                return lower_logical_not_result(lowered_operand, diagnostics);
+                return lower_logical_not_result(lowered_operand);
             }
         }
         if substring(stripped, 0, 1) == "-" {
             let operand_text = trim_text(substring(stripped, 1, stripped.length));
             if operand_text.length > 0 {
                 let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, expected_type);
-                return lower_numeric_negation_result(lowered_operand, diagnostics);
+                return lower_numeric_negation_result(lowered_operand);
             }
         }
         if substring(stripped, 0, 1) == "*" {
@@ -532,30 +508,21 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             if operand_text.length == 0 {
                 let message = "deref expression missing operand";
                 diags.push(lowering_warning_diag("E1006", message, null));
-                diagnostics.push("llvm lowering: " + message);
                 return ExpressionResult {
                     lines: lines,
                     temp_index: temp_index,
                     operand: null,
-                    diagnostics: diagnostics,
                     string_constants: empty_constants,
                     diags: diags
                 };
             }
             let lowered_ptr = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
-            let mut _ci1: int = 0;
-            loop {
-                if _ci1 >= lowered_ptr.diagnostics.length { break; }
-                diagnostics.push(lowered_ptr.diagnostics[_ci1]);
-                _ci1 += 1;
-            }
             diags = extend_diag_array(diags, lowered_ptr.diags);
             if lowered_ptr.operand == null {
                 return ExpressionResult {
                     lines: lowered_ptr.lines,
                     temp_index: lowered_ptr.temp_index,
                     operand: null,
-                    diagnostics: diagnostics,
                     string_constants: lowered_ptr.string_constants,
                     diags: diags
                 };
@@ -565,15 +532,12 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 let issue_message = "cannot dereference non-pointer type `"
                     + ptr_operand.llvm_type
                     + "`";
-                let with_issue = append_string(diagnostics, "llvm lowering: "
-                    + issue_message);
                 let mut with_issue_diags = diags;
                 with_issue_diags.push(lowering_warning_diag("E1006", issue_message, null));
                 return ExpressionResult {
                     lines: lowered_ptr.lines,
                     temp_index: lowered_ptr.temp_index,
                     operand: null,
-                    diagnostics: with_issue,
                     string_constants: lowered_ptr.string_constants,
                     diags: with_issue_diags
                 };
@@ -596,7 +560,6 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 lines: updated_lines,
                 temp_index: lowered_ptr.temp_index + 1,
                 operand: operand,
-                diagnostics: diagnostics,
                 string_constants: lowered_ptr.string_constants,
                 diags: diags
             };

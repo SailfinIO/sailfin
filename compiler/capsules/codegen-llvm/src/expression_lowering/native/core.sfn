@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core.sfn
 //
 // Compatibility facade for the stable native expression-lowering surface.
-import { NativeSourceSpan } from "sfn/ir";
+import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
 
 import {
     LocalBinding,
@@ -69,7 +69,7 @@ fn analyze_value_ownership(initializer: string?, span: NativeSourceSpan?, locals
     return analyze_value_ownership_impl(initializer, span, locals, bindings);
 }
 
-fn detect_borrow_conflicts(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> string[] {
+fn detect_borrow_conflicts(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> LoweringDiagnostic[] {
     return detect_borrow_conflicts_impl(ownership, locals, binding_name, function_name);
 }
 

@@ -83,7 +83,6 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
 // joining to one string that this parser would immediately re-split
 // (#1817). The text entry point above is the thin `split_lines` shim.
 fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: boolean, include_top_level_bindings: boolean) -> ParseNativeResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut functions: NativeFunction[] = [];
     let mut imports: NativeImport[] = [];
@@ -116,7 +115,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         if starts_with(line, ".import ") {
             let parsed_import = parse_import_entry("import", strip_prefix(line, ".import "));
             if parsed_import == null {
-                diagnostics.push("unable to parse import: " + line);
                 diags.push(_parser_diag("unable to parse import: " + line));
             } else { imports.push(parsed_import); }
             index += 1;
@@ -125,7 +123,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         if starts_with(line, ".export ") {
             let parsed_export = parse_import_entry("export", strip_prefix(line, ".export "));
             if parsed_export == null {
-                diagnostics.push("unable to parse export: " + line);
                 diags.push(_parser_diag("unable to parse export: " + line));
             } else { imports.push(parsed_export); }
             index += 1;
@@ -134,7 +131,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         if starts_with(line, ".span ") {
             let parsed_span = parse_source_span(strip_prefix(line, ".span "));
             if parsed_span == null {
-                diagnostics.push("unable to parse span metadata: " + line);
                 diags.push(_parser_diag("unable to parse span metadata: " + line));
             } else { pending_span = parsed_span; }
             index += 1;
@@ -145,7 +141,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
             if parsed_init_span == null {
                 let _init_span_message = "unable to parse initializer span metadata: "
                     + line;
-                diagnostics.push(_init_span_message);
                 diags.push(_parser_diag(_init_span_message));
             } else { pending_value_span = parsed_init_span; }
             index += 1;
@@ -153,17 +148,10 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         }
         if starts_with(line, ".struct ") {
             if pending_decorators.length > 0 {
-                diagnostics.push("dangling decorator directives before struct definition");
                 diags.push(_parser_diag("dangling decorator directives before struct definition"));
                 pending_decorators = [];
             }
             let struct_result = parse_struct_definition(lines, index, include_instructions);
-            let mut _ci: int = 0;
-            loop {
-                if _ci >= struct_result.diagnostics.length { break; }
-                diagnostics.push(struct_result.diagnostics[_ci]);
-                _ci += 1;
-            }
             diags = _extend_diag_array(diags, struct_result.diags);
             if struct_result.definition != null {
                 structs.push(struct_result.definition);
@@ -173,17 +161,10 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         }
         if starts_with(line, ".interface ") {
             if pending_decorators.length > 0 {
-                diagnostics.push("dangling decorator directives before interface definition");
                 diags.push(_parser_diag("dangling decorator directives before interface definition"));
                 pending_decorators = [];
             }
             let interface_result = parse_interface_definition(lines, index);
-            let mut _ci: int = 0;
-            loop {
-                if _ci >= interface_result.diagnostics.length { break; }
-                diagnostics.push(interface_result.diagnostics[_ci]);
-                _ci += 1;
-            }
             diags = _extend_diag_array(diags, interface_result.diags);
             if interface_result.definition != null {
                 interfaces.push(interface_result.definition);
@@ -193,17 +174,10 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         }
         if starts_with(line, ".enum ") {
             if pending_decorators.length > 0 {
-                diagnostics.push("dangling decorator directives before enum definition");
                 diags.push(_parser_diag("dangling decorator directives before enum definition"));
                 pending_decorators = [];
             }
             let enum_result = parse_enum_definition(lines, index);
-            let mut _ci: int = 0;
-            loop {
-                if _ci >= enum_result.diagnostics.length { break; }
-                diagnostics.push(enum_result.diagnostics[_ci]);
-                _ci += 1;
-            }
             diags = _extend_diag_array(diags, enum_result.diags);
             if enum_result.definition != null {
                 enums.push(enum_result.definition);
@@ -215,14 +189,12 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
             if current != null {
                 let _decorator_in_body_message = "decorator directive encountered inside function body: "
                     + line;
-                diagnostics.push(_decorator_in_body_message);
                 diags.push(_parser_diag(_decorator_in_body_message));
             } else {
                 let decorator_name = parse_decorator_name(line);
                 if decorator_name == null {
                     let _decorator_unparsed_message = "unable to parse decorator directive: "
                         + line;
-                    diagnostics.push(_decorator_unparsed_message);
                     diags.push(_parser_diag(_decorator_unparsed_message));
                 } else { pending_decorators.push(decorator_name); }
             }
@@ -242,7 +214,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         }
         if starts_with(line, ".fn ") {
             if current != null {
-                diagnostics.push("encountered nested .fn while previous function still open");
                 diags.push(_parser_diag("encountered nested .fn while previous function still open"));
             }
             let header = strip_prefix(line, ".fn ");
@@ -265,12 +236,10 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         }
         if starts_with(line, ".test ") {
             if current != null {
-                diagnostics.push("encountered nested .test while previous function still open");
                 diags.push(_parser_diag("encountered nested .test while previous function still open"));
             }
 
             if pending_decorators.length > 0 {
-                diagnostics.push("dangling decorator directives before test declaration");
                 diags.push(_parser_diag("dangling decorator directives before test declaration"));
                 pending_decorators = [];
             }
@@ -278,7 +247,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
             let header = strip_prefix(line, ".test ");
             let trimmed = trim_text(header);
             if trimmed.length == 0 {
-                diagnostics.push("unable to parse test header: " + line);
                 diags.push(_parser_diag("unable to parse test header: " + line));
                 index += 1;
                 continue;
@@ -320,7 +288,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
 
             let name = strip_quotes(trim_text(raw_name));
             if name.length == 0 {
-                diagnostics.push("unable to parse test header: " + line);
                 diags.push(_parser_diag("unable to parse test header: " + line));
                 index += 1;
                 continue;
@@ -341,7 +308,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         }
         if starts_with(line, ".endfn") {
             if current == null {
-                diagnostics.push("encountered .endfn without active function");
                 diags.push(_parser_diag("encountered .endfn without active function"));
             } else {
                 functions.push(current);
@@ -352,7 +318,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         }
         if starts_with(line, ".endtest") {
             if current == null {
-                diagnostics.push("encountered .endtest without active test");
                 diags.push(_parser_diag("encountered .endtest without active test"));
             } else {
                 functions.push(current);
@@ -365,7 +330,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
             if current != null {
                 current = apply_meta(current, strip_prefix(line, ".meta "));
             } else {
-                diagnostics.push("metadata outside function body: " + line);
                 diags.push(_parser_diag("metadata outside function body: "
                     + line));
             }
@@ -394,7 +358,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
 
                 let entries = split_parameter_entries(combined);
                 if entries.length == 0 {
-                    diagnostics.push("unable to parse parameter line: " + line);
                     diags.push(_parser_diag("unable to parse parameter line: "
                         + line));
                     pending_span = null;
@@ -410,7 +373,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
                         if parameter == null {
                             let _param_entry_message = "unable to parse parameter entry: "
                                 + entry;
-                            diagnostics.push(_param_entry_message);
                             diags.push(_parser_diag(_param_entry_message));
                         } else {
                             current = append_parameter(current, parameter);
@@ -422,7 +384,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
                 }
                 index = lookahead - 1;
             } else {
-                diagnostics.push("parameter outside function body: " + line);
                 diags.push(_parser_diag("parameter outside function body: "
                     + line));
             }
@@ -463,7 +424,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         let instruction_result = parse_instruction(gathered_line, pending_span, pending_value_span);
         let instructions = instruction_result.instructions;
         if instruction_result.span_consumed { pending_span = null; } else if pending_span != null {
-            diagnostics.push("unused span metadata before: " + gathered_line);
             diags.push(_parser_diag("unused span metadata before: "
                 + gathered_line));
             pending_span = null;
@@ -471,7 +431,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         if instruction_result.value_span_consumed { pending_value_span = null; } else if pending_value_span != null {
             let _unused_init_span_message = "unused initializer span metadata before: "
                 + gathered_line;
-            diagnostics.push(_unused_init_span_message);
             diags.push(_parser_diag(_unused_init_span_message));
             pending_value_span = null;
         }
@@ -487,7 +446,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
                 } else {
                     let _top_level_unsupported_message = "top-level directive not supported in lowering: "
                         + gathered_line;
-                    diagnostics.push(_top_level_unsupported_message);
                     diags.push(_parser_diag(_top_level_unsupported_message));
                 }
             }
@@ -502,14 +460,12 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
     }
 
     if current != null {
-        diagnostics.push("unterminated function at end of artifact");
         diags.push(_parser_diag("unterminated function at end of artifact"));
         functions.push(current);
         current = null;
     }
 
     if pending_decorators.length > 0 {
-        diagnostics.push("dangling decorator directives at end of artifact");
         diags.push(_parser_diag("dangling decorator directives at end of artifact"));
     }
 
@@ -520,7 +476,6 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
         interfaces: interfaces,
         enums: enums,
         bindings: bindings,
-        diagnostics: diagnostics,
         diags: diags
     };
 }

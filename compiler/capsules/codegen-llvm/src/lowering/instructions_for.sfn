@@ -55,7 +55,6 @@ import { collect_mutation_names, find_mutation_for_name } from "./phi";
 // Lower a range-based for loop (e.g., `for i in 0..10`).
 // Returns null if the iterable is not a recognized range pattern.
 fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_target: string, instruction: NativeInstruction, iterable_operand: LLVMOperand, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, next_index: int) -> BlockLoweringResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -219,12 +218,6 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
     let body_locals = append_local_binding(current_locals, iteration_binding);
     let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, stacked, try_stack, context, element_loop_scope_id, scope_depth
         + 1, loop_body_label);
-    let mut _ci24: int = 0;
-    loop {
-        if _ci24 >= body_result.diagnostics.length { break; }
-        diagnostics.push(body_result.diagnostics[_ci24]);
-        _ci24 += 1;
-    }
     diags = extend_diag_array(diags, body_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_allocas = body_result.allocas;
@@ -323,7 +316,6 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
         bindings: current_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
-        diagnostics: diagnostics,
         diags: diags,
         terminated: false,
         next_local_id: current_next_local,
@@ -337,7 +329,6 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
 
 // Shared helper: build exit mutations for loop locals after the loop exit label.
 fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -352,12 +343,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
-    let mut _ci8: int = 0;
-    loop {
-        if _ci8 >= structure.diagnostics.length { break; }
-        diagnostics.push(structure.diagnostics[_ci8]);
-        _ci8 += 1;
-    }
     let mut next_index: int = structure.next_index + 1;
 
     let instruction = function.instructions[start_index];
@@ -368,9 +353,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
     let mut raw_target = trim_text(for_target_text);
     raw_target = strip_mut_prefix(raw_target);
     if raw_target.length == 0 {
-        diagnostics.push("llvm lowering: `.for` loop missing iteration binding in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -378,7 +360,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: [],
             terminated: false,
             next_local_id: current_next_local,
@@ -391,10 +372,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
     }
 
     if !is_simple_identifier(raw_target) {
-        diagnostics.push("llvm lowering: `.for` loop target `" + raw_target
-            + "` is not a simple identifier in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -402,7 +379,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: [],
             terminated: false,
             next_local_id: current_next_local,
@@ -415,10 +391,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
     }
 
     if find_local_binding(current_locals, raw_target) != null {
-        diagnostics.push("llvm lowering: `.for` loop target `" + raw_target
-            + "` shadows existing local in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -426,7 +398,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: [],
             terminated: false,
             next_local_id: current_next_local,
@@ -446,26 +417,11 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
     let range_parse = parse_range_iterable(for_iterable_text);
 
     let iterable_result = lower_expression(for_iterable_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    let mut _ci21: int = 0;
-    loop {
-        if _ci21 >= iterable_result.diagnostics.length { break; }
-        diagnostics.push(iterable_result.diagnostics[_ci21]);
-        _ci21 += 1;
-    }
     diags = extend_diag_array(diags, iterable_result.diags);
     current_lines = iterable_result.lines;
     current_temp = iterable_result.temp_index;
 
     if iterable_result.operand == null {
-        let mut _ci22: int = 0;
-        loop {
-            if _ci22 >= range_parse.diagnostics.length { break; }
-            diagnostics.push(range_parse.diagnostics[_ci22]);
-            _ci22 += 1;
-        }
-        diagnostics.push("llvm lowering: unable to lower `.for` iterable in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -473,7 +429,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: [],
             terminated: false,
             next_local_id: current_next_local,
@@ -488,15 +443,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
     let iterable_operand = iterable_result.operand;
     let element_type = array_pointer_element_type(iterable_operand.llvm_type);
     if element_type.length == 0 {
-        let mut _ci23: int = 0;
-        loop {
-            if _ci23 >= range_parse.diagnostics.length { break; }
-            diagnostics.push(range_parse.diagnostics[_ci23]);
-            _ci23 += 1;
-        }
-        diagnostics.push("llvm lowering: `.for` iterable must resolve to an array value in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -504,7 +450,6 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: [],
             terminated: false,
             next_local_id: current_next_local,

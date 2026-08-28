@@ -15,7 +15,6 @@ import { emit_runtime_call, empty_runtime_call_overrides } from "../runtime_call
 // caller (`coerce_numeric_primitive`) falls through to the integer arm.
 fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
 
     if target == "double" {
@@ -31,7 +30,6 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -49,7 +47,6 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -67,7 +64,6 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -85,7 +81,6 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -101,18 +96,11 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
             // argument-coercion walk is a no-op here.
             let stn_operands: LLVMOperand[] = [operand];
             let stn_result = emit_runtime_call("string.to_number", stn_operands, empty_runtime_call_overrides(), temp_index, current_lines);
-            let mut _stn_di: int = 0;
-            loop {
-                if _stn_di >= stn_result.diagnostics.length { break; }
-                diagnostics.push(stn_result.diagnostics[_stn_di]);
-                _stn_di += 1;
-            }
             diags = extend_diag_array(diags, stn_result.diags);
             return CoercionResult {
                 lines: stn_result.lines,
                 temp_index: stn_result.temp_index,
                 operand: stn_result.operand,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -136,7 +124,6 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -158,7 +145,6 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -176,7 +162,6 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
                 lines: narrowed.lines,
                 temp_index: narrowed.temp_index,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }

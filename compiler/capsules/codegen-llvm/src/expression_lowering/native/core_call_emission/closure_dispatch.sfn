@@ -13,10 +13,9 @@ import {
     number_to_string
 } from "../../../utils";
 
-fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], rendered_args: string[], expected_params: string[], llvm_return: string, current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
+fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], rendered_args: string[], expected_params: string[], llvm_return: string, current_temp: int, current_lines: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
-    let mut result_diagnostics = diagnostics;
     let mut result_diags = diags;
     let is_closure_dispatch: boolean = true;
     // Issue #689: closure-callee dispatch. `final_operands[0]` is the
@@ -31,12 +30,10 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
         if final_operands.length == 0 {
             let message = "closure dispatch requires a closure-pair operand";
             result_diags.push(lowering_warning_diag("E1006", message, null));
-            result_diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: null,
-                diagnostics: result_diagnostics,
                 string_constants: collected_string_constants,
                 diags: result_diags
             };
@@ -59,12 +56,10 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
             let arity_diag = "llvm lowering [fatal]: " + arity_message;
             trace_log(arity_diag);
             result_diags.push(lowering_error_diag("E1007", arity_message, null));
-            result_diagnostics.push(arity_diag);
             return ExpressionResult {
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: null,
-                diagnostics: result_diagnostics,
                 string_constants: collected_string_constants,
                 diags: result_diags
             };
@@ -120,7 +115,6 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: null,
-                diagnostics: result_diagnostics,
                 string_constants: collected_string_constants,
                 diags: result_diags
             };
@@ -141,7 +135,6 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
             lines: result_lines,
             temp_index: result_temp + 1,
             operand: closure_result_operand,
-            diagnostics: result_diagnostics,
             string_constants: collected_string_constants,
             diags: result_diags
         };
@@ -150,7 +143,6 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
         lines: result_lines,
         temp_index: result_temp,
         operand: null,
-        diagnostics: result_diagnostics,
         string_constants: collected_string_constants,
         diags: result_diags
     };
