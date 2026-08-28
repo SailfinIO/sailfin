@@ -7,18 +7,40 @@ import {
     Command,
     Matches,
     arg,
+    arg_optional,
     arg_variadic,
     command,
+    flag,
     get,
+    has_flag,
     subcommand,
     with_arg,
+    with_flag,
     with_subcommand,
     with_usage
 } from "sfn/cli";
 
 import { render_terminal_diagnostic } from "../../terminal_output";
+import { toolchain_current_host } from "../../toolchain/host";
+import {
+    ToolchainInspectEntry,
+    ToolchainInspectReport,
+    toolchain_entry_findings,
+    toolchain_inspect_classify,
+    toolchain_inspect_exit_code,
+    toolchain_inspect_report,
+    toolchain_inspect_report_shallow,
+    toolchain_integrity_name,
+    toolchain_merge_findings,
+    toolchain_state_name
+} from "../../toolchain/inspect";
+import { render_toolchains_json } from "../../toolchain/inspect_json";
 import { toolchain_install_to_user_store } from "../../toolchain/install";
-import { toolchain_store_diagnostic, toolchain_versions_base } from "../../toolchain/store";
+import {
+    toolchain_resolve_compatible_store_entry,
+    toolchain_store_diagnostic,
+    toolchain_versions_base
+} from "../../toolchain/store";
 import { CliContext } from "../context";
 
 fn _toolchain_install(version: string, work_root: string) -> int ![io, net] {
@@ -29,6 +51,165 @@ fn _toolchain_install(version: string, work_root: string) -> int ![io, net] {
         return 1;
     }
     return toolchain_install_to_user_store(version, versions_base, work_root);
+}
+
+// SFEP-0003 reserves exit 2 for a setup failure, and a setup failure emits no
+// envelope at all — a `--json` consumer must read empty-stdout-with-nonzero as
+// "the tool never ran". Returning "" is that signal; the caller exits 2 before
+// any report exists. (`_toolchain_install` above keeps its historical exit 1
+// for the same condition: its contract predates the inspection matrix and is
+// not SFN-1066's to change.)
+fn _inspect_store_base() -> string ![io] {
+    let versions_base = toolchain_versions_base();
+    if versions_base.length == 0 { _print_store_error(); }
+    return versions_base;
+}
+
+fn _print_store_error() -> void ![io] {
+    let empty_lines: string[] = [];
+    print.err(render_terminal_diagnostic(diagnostic_to_diag(toolchain_store_diagnostic(), "toolchain"), empty_lines, "toolchain"));
+}
+
+// Roles render as a bracketed suffix so a row stays one grep-able line.
+fn _render_roles(roles: string[]) -> string {
+    if roles.length == 0 { return ""; }
+    let mut out: string = " [";
+    let mut i: int = 0;
+    loop {
+        if i >= roles.length { break; }
+        if i > 0 { out = out + ","; }
+        out = out + roles[i];
+        i += 1;
+    }
+    return out + "]";
+}
+
+// One row per store entry on stdout. Findings go to stderr: the row set is
+// this command's output contract, a finding is a diagnostic about it.
+fn _render_entries(entries: ToolchainInspectEntry[]) -> void ![io] {
+    if entries.length == 0 {
+        print("no toolchains installed");
+        return;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let entry = entries[i];
+        print(entry.version + "  " + toolchain_state_name(entry.state) + "  "
+            + toolchain_integrity_name(entry.integrity)
+            + _render_roles(entry.roles));
+        i += 1;
+    }
+}
+
+fn _render_findings(report: ToolchainInspectReport) -> void ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= report.findings.length { break; }
+        let finding = report.findings[i];
+        print.err(finding.severity + "[" + finding.code + "]: " + finding.message);
+        i += 1;
+    }
+}
+
+// Human rendering and the JSON envelope are mutually exclusive: under
+// `--json` nothing human may reach stdout (SFEP-0003).
+fn _emit_report(report: ToolchainInspectReport, as_json: boolean, render_rows: boolean) -> int ![io] {
+    if as_json {
+        print(render_toolchains_json(report));
+        return toolchain_inspect_exit_code(report);
+    }
+    if render_rows { _render_entries(report.entries); }
+    _render_findings(report);
+    return toolchain_inspect_exit_code(report);
+}
+
+fn _toolchain_list(ctx: CliContext, as_json: boolean) -> int ![io] {
+    if _inspect_store_base().length == 0 { return 2; }
+    let report = toolchain_inspect_report("list", ctx.binary_dir, ctx.compiler_path, "");
+    return _emit_report(report, as_json, true);
+}
+
+// `active` explains the selection and performs no network request: every
+// field it prints is resolved from the store, the environment, and the
+// project manifests already on disk.
+fn _toolchain_active(ctx: CliContext, as_json: boolean) -> int ![io] {
+    if _inspect_store_base().length == 0 { return 2; }
+    // SFEP-0073 §3.4's `active` envelope carries an empty `toolchains` array:
+    // this leaf explains the selection, not the store. Skipping the walk also
+    // keeps an interactive "why this toolchain?" free of a full-store hash.
+    let report = toolchain_inspect_report_shallow("active", ctx.binary_dir, ctx.compiler_path, "");
+    if as_json { return _emit_report(report, true, false); }
+
+    print("selected:     " + report.selection.version);
+    let mut path = report.selection.path;
+    if path.length == 0 { path = "(not installed)"; }
+    print("path:         " + path);
+    print("source:       " + report.selection.source);
+    print("integrity:    " + toolchain_integrity_name(report.selection.integrity));
+    print("entry:        " + report.entry_version);
+    print("entry path:   " + report.entry_path);
+    print("host:         " + report.host);
+    print("fetch policy: " + report.fetch_policy);
+    if report.requirement.minimum.length > 0 {
+        print("requires:     sfn >= " + report.requirement.minimum + " ("
+            + report.requirement.source
+            + ")");
+    }
+    if report.requirement.channel.length > 0 {
+        print("channel:      " + report.requirement.channel);
+    }
+    _render_findings(report);
+    return toolchain_inspect_exit_code(report);
+}
+
+// `verify` always performs a full, uncached payload hash (SFEP-0073 §3.8).
+// With no argument it verifies the selected toolchain — the one an ordinary
+// command in this directory would actually run.
+//
+// Only `--all` walks the store. A single-version verify builds its report
+// without the entry walk: that walk hashes every committed entry in full, and
+// the non-`--all` path discards the result, so paying for it would cost
+// O(total installed bytes) to report on one entry.
+fn _toolchain_verify(ctx: CliContext, version: string, all: boolean, as_json: boolean) -> int ![io] {
+    let versions_base = _inspect_store_base();
+    if versions_base.length == 0 { return 2; }
+    if all {
+        let report = toolchain_inspect_report("verify", ctx.binary_dir, ctx.compiler_path, "");
+        return _emit_report(report, as_json, true);
+    }
+
+    let mut report = toolchain_inspect_report_shallow("verify", ctx.binary_dir, ctx.compiler_path, "");
+    let mut target = version;
+    if target.length == 0 { target = report.selection.version; }
+
+    let host = toolchain_current_host();
+    let store = toolchain_resolve_compatible_store_entry(versions_base, host, target);
+    if !store.ready {
+        // An explicitly named version that is not installed is a usage error:
+        // the user asked about something that does not exist, so exit 2 with
+        // no envelope. A *defaulted* target came from the same selection
+        // resolution `active` reports, so it is the E0620 finding that
+        // resolution already produced — exit 1 with an envelope, or `verify`
+        // and `active` would disagree about one store condition.
+        if version.length > 0 {
+            print.err("error: toolchain " + target + " is not installed");
+            print.err("  install it with: sfn toolchain install " + target);
+            return 2;
+        }
+        return _emit_report(report, as_json, false);
+    }
+    let mut entry = toolchain_inspect_classify(store.dir);
+    entry.version = target;
+    entry.host = host.triple;
+    let mut only: ToolchainInspectEntry[] = [];
+    only.push(entry);
+    report.entries = only;
+    // Keep the selection findings the report already carries and add this
+    // entry's: dropping them would let an envelope report an uninstalled
+    // selection with an empty `diagnostics` array and exit 0.
+    report.findings = toolchain_merge_findings(report.findings, toolchain_entry_findings(only));
+    return _emit_report(report, as_json, true);
 }
 
 // `run` is registered for help text and for usage errors only. A well-formed
@@ -46,9 +227,17 @@ fn command_def() -> Command {
     let install_cmd = with_arg(command("install", "Download, verify, and store a pinned toolchain"), arg("version", "Toolchain version to install (e.g. 0.8.0-alpha.3)"));
     let run_cmd = with_arg(command("run", "Run a command with an exact toolchain, without changing any configuration"), arg("version", "Exact toolchain version to run (e.g. 0.10.6)"));
     let run_cmd_full = with_arg(run_cmd, arg_variadic("args", "Command and arguments to run, after a -- separator"));
+    let list_cmd = with_flag(command("list", "List installed toolchains, their integrity state, and their roles"), flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
+    let active_cmd = with_flag(command("active", "Explain which toolchain this directory selects, and why"), flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
+    let mut verify_cmd = with_arg(command("verify", "Verify an installed toolchain against its recorded install manifest"), arg_optional("version", "Toolchain version to verify (default: the selected toolchain)", ""));
+    verify_cmd = with_flag(verify_cmd, flag("all", "Verify every complete store entry"));
+    verify_cmd = with_flag(verify_cmd, flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
     let mut cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
     cmd = with_subcommand(cmd, run_cmd_full);
-    return with_usage(cmd, "packages", "sfn toolchain install <ver>", "install a toolchain version");
+    cmd = with_subcommand(cmd, list_cmd);
+    cmd = with_subcommand(cmd, active_cmd);
+    cmd = with_subcommand(cmd, verify_cmd);
+    return with_usage(cmd, "packages", "sfn toolchain list", "inspect and install toolchains");
 }
 
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
@@ -64,7 +253,16 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         print("usage: sfn toolchain run <version> -- <command> [args...]");
         return 2;
     }
-    print("usage: sfn toolchain install <version>");
+    if sub == "list" {
+        return _toolchain_list(ctx, has_flag(matches, "json"));
+    }
+    if sub == "active" {
+        return _toolchain_active(ctx, has_flag(matches, "json"));
+    }
+    if sub == "verify" {
+        return _toolchain_verify(ctx, get(matches, "version"), has_flag(matches, "all"), has_flag(matches, "json"));
+    }
+    print("usage: sfn toolchain <install|list|active|verify|run>");
     return 2;
 }
 

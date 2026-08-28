@@ -1,0 +1,395 @@
+// compiler/tests/e2e/toolchain_inspect_json_test.sfn
+//
+// Schema-lock e2e test for `sfn toolchain list|active|verify --json`
+// (`sailfin-toolchains/1`, SFEP-0073 §3.4, SFN-1066). Drives the compiler
+// binary as a subprocess against a pre-seeded scratch store and asserts on
+// the captured output via `sfn/strings::find`, per
+// `.claude/rules/no-bash-e2e.md` (the `sfn/test` `expect_*` matchers are
+// `![pure]` and unusable from an `![io]` subprocess-driving test). Ground
+// truth for field order and shape: `compiler/src/toolchain/inspect_json.sfn`
+// and `docs/reference/toolchains-json-schema.md`.
+import { remove_all } from "sfn/fs";
+import { find } from "sfn/strings";
+import {
+    clean_runner_env_without,
+    default_scratch_dir,
+    host_is_windows,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_abs_path,
+    sfn_bin_path
+} from "sfn/test";
+
+import { toolchain_current_host } from "../../src/toolchain/host";
+import { toolchain_build_records } from "../../src/toolchain/integrity";
+import {
+    TOOLCHAIN_MANAGEMENT_PROTOCOL,
+    TOOLCHAIN_MANIFEST_SCHEMA,
+    ToolchainManifestMeta,
+    toolchain_manifest_write
+} from "../../src/toolchain/manifest";
+import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
+
+// A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
+// under the parallel pool; `/tmp` is the standalone fallback.
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    return dir + "/sfn-toolchain-inspect-json-e2e";
+}
+
+// The store entry's binary name. `toolchain_store_ready`
+// (`compiler/src/toolchain/store.sfn`) probes `host_exe_name(dir +
+// "/sailfin")`, so a suffix-less name on Windows would read as NOT ready.
+fn _stub_bin(dir: string) -> string ![io] {
+    if host_is_windows() { return dir + "/sailfin.exe"; }
+    return dir + "/sailfin";
+}
+
+// A clean nested-runner environment plus the caller's extra `KEY=VALUE`
+// entries (`run_capture`'s empty env is EMPTY, not "inherit", so the child
+// needs PATH etc. to resolve the compiler and its toolchain subprocesses).
+// `env.get` resolves via libc `getenv`, which returns the FIRST match, so an
+// inherited `INSTALL_BASE`/`SAILFIN_HOME`/`SAILFIN_TOOLCHAIN` in the
+// developer's own environment would otherwise sit earlier in the array and
+// silently defeat the push below, pointing the child at the real store
+// instead of the scratch one (SFN-925).
+fn _env_with(extra: string[]) -> string[] ![io] {
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-inspect"), ["INSTALL_BASE", "SAILFIN_HOME", "SAILFIN_TOOLCHAIN"]);
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    return e;
+}
+
+// A project directory carrying no `[toolchain]` pin, so `requirement` reads
+// as fully null and the running toolchain always resolves as `selected`
+// with `source: "entry"`. Scratch lives under `/tmp` (or
+// `SAILFIN_TEST_SCRATCH`), never under the repo, so no ancestor
+// `workspace.toml` leaks the real project's pin into the assertions.
+fn _seed_project(root: string) -> void ![io] {
+    assert remove_all(root);
+    fs.createDirectory(root, true);
+}
+
+// Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a
+// placeholder file (never executed by `list`/`active`/`verify` — they only
+// hash and classify the payload, never dispatch it). When `complete` is
+// true the `.sha256` completeness marker is written last (the installer's
+// commit-point contract), so the entry reads as `state: "complete"`; when
+// false it reads as `state: "partial"`.
+fn _seed_stub(store: string, ver: string, complete: boolean) -> string ![io] {
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    fs.writeFile(_stub_bin(dir), "not a real binary; never executed by inspect commands\n");
+    if complete {
+        fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+    }
+    return dir;
+}
+
+// (Re-)derive and write an install manifest covering whatever payload
+// already sits in `dir`, so a caller that mutates a payload file afterward
+// can be caught as `corrupt` rather than the legacy `unverified` boundary.
+fn _write_verified_manifest(dir: string, ver: string) -> void ![io] {
+    let records = toolchain_build_records(dir);
+    assert records.length > 0;
+    let meta = ToolchainManifestMeta {
+        schema: TOOLCHAIN_MANIFEST_SCHEMA,
+        management_protocol: TOOLCHAIN_MANAGEMENT_PROTOCOL,
+        version: ver,
+        host: toolchain_current_host().triple,
+        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    };
+    assert toolchain_manifest_write(dir, meta, records);
+}
+
+// `_seed_stub` plus a real install manifest covering the seeded payload, for
+// legs that need `integrity: "verified"` rather than the legacy
+// `"unverified"` boundary.
+fn _seed_stub_verified(store: string, ver: string) -> string ![io] {
+    let dir = _seed_stub(store, ver, true);
+    _write_verified_manifest(dir, ver);
+    return dir;
+}
+
+test "toolchain: list --json locks the field set and order on a seeded store" ![io] {
+    let store = _scratch_root() + "/field-order-store";
+    let proj = _scratch_root() + "/field-order-proj";
+    _seed_stub(store, "1.2.3", true);
+    _seed_project(proj);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list", "--json"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain list --json field-order", exit, out, err);
+    assert exit == 0;
+
+    // `schema_version` is the first field, verbatim.
+    assert find(out, "{\"schema_version\":\"sailfin-toolchains/1\"", 0) == 0;
+
+    // Top-level field ORDER: a monotonic index chain, each search starting
+    // at the previous field's index, so a reorder of the `parts.push` calls
+    // in `inspect_json.sfn` fails this test even though every field is still
+    // present. Anchored on strings that are unambiguous at top level —
+    // `"version"`, `"path"`, `"host"`, `"integrity"`, and `"source"` also
+    // occur inside nested objects, so those are not usable as top-level
+    // anchors here.
+    let i_schema = find(out, "\"schema_version\":", 0);
+    assert i_schema == 1;
+    let i_operation = find(out, "\"operation\":", i_schema);
+    assert i_operation > i_schema;
+    let i_host = find(out, "\"host\":", i_operation);
+    assert i_host > i_operation;
+    let i_entry = find(out, "\"entry\":", i_host);
+    assert i_entry > i_host;
+    let i_selected = find(out, "\"selected\":", i_entry);
+    assert i_selected > i_entry;
+    let i_requirement = find(out, "\"requirement\":", i_selected);
+    assert i_requirement > i_selected;
+    let i_fetch_policy = find(out, "\"fetch_policy\":", i_requirement);
+    assert i_fetch_policy > i_requirement;
+    let i_default = find(out, "\"default\":", i_fetch_policy);
+    assert i_default > i_fetch_policy;
+    let i_update = find(out, "\"update\":", i_default);
+    assert i_update > i_default;
+    let i_toolchains = find(out, "\"toolchains\":", i_update);
+    assert i_toolchains > i_update;
+    let i_diagnostics = find(out, "\"diagnostics\":", i_toolchains);
+    assert i_diagnostics > i_toolchains;
+
+    // Top-level field SET: exact adjacencies across every neighboring pair
+    // among the 11 top-level fields. This catches both a reorder (already
+    // caught above) and an INSERTED field, neither of which the
+    // presence-only `find(...) >= 0` checks elsewhere in this file can
+    // catch. `SAILFIN_TOOLCHAIN` is stripped by `_env_with`, so
+    // `fetch_policy` is deterministically "auto"; the actual host triple is
+    // volatile across machines but constant within this run, so it is
+    // interpolated rather than hardcoded (`_write_verified_manifest` already
+    // relies on the same `toolchain_current_host()` import for the same
+    // reason).
+    let host_triple = toolchain_current_host().triple;
+    // 1: schema_version -> operation
+    assert find(out, "\"schema_version\":\"sailfin-toolchains/1\",\"operation\":\"list\"", 0) >= 0;
+    // 2 and 3: operation -> host -> entry, in one literal since both values
+    // are known.
+    assert find(out, "\"operation\":\"list\",\"host\":\"" + host_triple
+        + "\",\"entry\":{", 0) >= 0;
+    // 4: entry -> selected. The entry object always closes with a literal
+    // `}` (`_ij_render_entry_object`'s `"{" + join + "}"` shape), so the
+    // boundary is exact regardless of the (volatile) entry version/path.
+    assert find(out, "},\"selected\":{", 0) >= 0;
+    // 5: selected -> requirement, same closing-brace boundary.
+    assert find(out, "},\"requirement\":{", 0) >= 0;
+    // 6: requirement -> fetch_policy.
+    assert find(out, "},\"fetch_policy\":\"auto\"", 0) >= 0;
+    // 7, 8, 9: fetch_policy -> default -> update -> toolchains, all
+    // deterministic literals.
+    assert find(out, "\"fetch_policy\":\"auto\",\"default\":null,\"update\":null,\"toolchains\":[", 0) >= 0;
+    // 10: toolchains -> diagnostics. The array closes with the last row
+    // object's `}` followed by the array's own `]`.
+    assert find(out, "}],\"diagnostics\":", 0) >= 0;
+
+    // `entry` object field order, scoped inside the `"entry":{...}` substring.
+    let entry_start = find(out, "\"entry\":{", 0);
+    assert entry_start >= 0;
+    let i_entry_version = find(out, "\"version\":", entry_start);
+    assert i_entry_version > entry_start;
+    let i_entry_path = find(out, "\"path\":", i_entry_version);
+    assert i_entry_path > i_entry_version;
+
+    // `selected` object field order, scoped inside `"selected":{...}`.
+    let selected_start = find(out, "\"selected\":{", 0);
+    assert selected_start >= 0;
+    let i_sel_version = find(out, "\"version\":", selected_start);
+    assert i_sel_version > selected_start;
+    let i_sel_path = find(out, "\"path\":", i_sel_version);
+    assert i_sel_path > i_sel_version;
+    let i_sel_source = find(out, "\"source\":", i_sel_path);
+    assert i_sel_source > i_sel_path;
+    let i_sel_installed = find(out, "\"installed\":", i_sel_source);
+    assert i_sel_installed > i_sel_source;
+    let i_sel_integrity = find(out, "\"integrity\":", i_sel_installed);
+    assert i_sel_integrity > i_sel_installed;
+
+    // `requirement` object field order, scoped inside `"requirement":{...}`.
+    let requirement_start = find(out, "\"requirement\":{", 0);
+    assert requirement_start >= 0;
+    let i_req_minimum = find(out, "\"minimum\":", requirement_start);
+    assert i_req_minimum > requirement_start;
+    let i_req_version = find(out, "\"version\":", i_req_minimum);
+    assert i_req_version > i_req_minimum;
+    let i_req_channel = find(out, "\"channel\":", i_req_version);
+    assert i_req_channel > i_req_version;
+    let i_req_source = find(out, "\"source\":", i_req_channel);
+    assert i_req_source > i_req_channel;
+
+    // `toolchains[]` row field order, scoped inside the single seeded row.
+    let row_start = find(out, "\"1.2.3\"", 0);
+    assert row_start >= 0;
+    let i_row_host = find(out, "\"host\":", row_start);
+    assert i_row_host > row_start;
+    let i_row_path = find(out, "\"path\":", i_row_host);
+    assert i_row_path > i_row_host;
+    let i_row_state = find(out, "\"state\":", i_row_path);
+    assert i_row_state > i_row_path;
+    let i_row_integrity = find(out, "\"integrity\":", i_row_state);
+    assert i_row_integrity > i_row_state;
+    let i_row_roles = find(out, "\"roles\":", i_row_integrity);
+    assert i_row_roles > i_row_integrity;
+}
+
+test "toolchain: list --json renders the null contract and empty collections" ![io] {
+    let store = _scratch_root() + "/null-contract-store";
+    let proj = _scratch_root() + "/null-contract-proj";
+    _seed_stub(store, "1.2.4", true);
+    _seed_project(proj);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list", "--json"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain list --json null-contract", exit, out, err);
+    assert exit == 0;
+
+    // `default` and `update` are unshipped in this slice and locked as null.
+    assert find(out, "\"default\":null", 0) >= 0;
+    assert find(out, "\"update\":null", 0) >= 0;
+    // Exact project pins are SFEP-0073 Slice 2 and unshipped; the
+    // unpinned project also means `requirement.version` reads null here.
+    assert find(out, "\"version\":null", 0) >= 0;
+    // A single seeded entry with no manifest holds no role and the run has
+    // no actionable finding — both render as an empty array, never null.
+    assert find(out, "\"roles\":[]", 0) >= 0;
+    assert find(out, "\"diagnostics\":[]", 0) >= 0;
+}
+
+test "toolchain: list --json exits 0 with no diagnostics on a clean store" ![io] {
+    let store = _scratch_root() + "/clean-store";
+    let proj = _scratch_root() + "/clean-proj";
+    _seed_stub(store, "1.2.5", true);
+    _seed_project(proj);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list", "--json"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain list --json clean", exit, out, err);
+    assert exit == 0;
+    assert find(out, "\"diagnostics\":[]", 0) >= 0;
+}
+
+test "toolchain: list --json exits 1 and codes a partial entry E0619" ![io] {
+    let store = _scratch_root() + "/partial-store";
+    let proj = _scratch_root() + "/partial-proj";
+    // Binary present but no `.sha256` marker — a partial install.
+    _seed_stub(store, "1.2.6", false);
+    _seed_project(proj);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list", "--json"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 1;
+    assert find(out, "\"state\":\"partial\"", 0) >= 0;
+    assert find(out, "\"code\":\"E0619\"", 0) >= 0;
+    assert find(out, "\"severity\":\"error\"", 0) >= 0;
+    assert err.length == 0;
+}
+
+test "toolchain: list --json exits 1 and codes a corrupt entry E0618" ![io] {
+    let store = _scratch_root() + "/corrupt-store";
+    let proj = _scratch_root() + "/corrupt-proj";
+    let dir = _seed_stub_verified(store, "1.2.7");
+    _seed_project(proj);
+
+    // Mutate the recorded payload file AFTER the manifest was written
+    // against the original bytes: the installer's contract already
+    // committed, so this must classify as `corrupt`, never `partial`.
+    let original = fs.readFile(_stub_bin(dir));
+    fs.writeFile(_stub_bin(dir), original + "X");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list", "--json"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 1;
+    assert find(out, "\"state\":\"corrupt\"", 0) >= 0;
+    assert find(out, "\"code\":\"E0618\"", 0) >= 0;
+}
+
+test "toolchain: list --json emits no envelope and exits 2 on a setup failure" ![io] {
+    // No INSTALL_BASE, no HOME, no SAILFIN_HOME: the store root cannot be
+    // determined, so the tool must never run far enough to print anything
+    // on stdout.
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "list", "--json"], ["PATH="
+        + env.get("PATH")]);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert out.length == 0;
+    assert find(err, "E0616", 0) >= 0;
+}
+
+test "toolchain: verify <version> exits 2 with empty stdout on a selection failure" ![io] {
+    let store = _scratch_root() + "/selection-failure-store";
+    let proj = _scratch_root() + "/selection-failure-proj";
+    _seed_project(proj);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "verify", "9.9.9", "--json"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert out.length == 0;
+    assert find(err, "9.9.9", 0) >= 0;
+}
+
+test "toolchain: stdout under --json carries no human rendering" ![io] {
+    let store = _scratch_root() + "/stdout-purity-store";
+    let proj = _scratch_root() + "/stdout-purity-proj";
+    _seed_stub(store, "1.2.8", true);
+    _seed_project(proj);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list", "--json"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain list --json stdout-purity", exit, out, err);
+    assert exit == 0;
+    assert find(out, "{", 0) == 0;
+    assert find(out, "no toolchains installed", 0) < 0;
+    assert find(out, "error[", 0) < 0;
+}
+
+test "toolchain: active and verify --json share the envelope with list" ![io] {
+    let store = _scratch_root() + "/shared-envelope-store";
+    let proj = _scratch_root() + "/shared-envelope-proj";
+    _seed_stub(store, "1.2.9", true);
+    _seed_project(proj);
+    let run_env = _env_with(["INSTALL_BASE=" + store]);
+
+    let active_exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "active", "--json"], run_env, proj);
+    let active_out = process.capture_take_stdout();
+    let active_err = process.capture_take_stderr();
+    report_child_failure("toolchain active --json shared-envelope", active_exit, active_out, active_err);
+    assert active_exit == 0;
+    assert find(active_out, "{\"schema_version\":\"sailfin-toolchains/1\"", 0) == 0;
+    assert find(active_out, "\"operation\":\"active\"", 0) >= 0;
+
+    // An explicit version avoids the default-to-selected-toolchain path,
+    // which would resolve to the RUNNING compiler's own version — not the
+    // arbitrary version seeded into this store.
+    let verify_exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "verify", "1.2.9", "--json"], run_env, proj);
+    let verify_out = process.capture_take_stdout();
+    let verify_err = process.capture_take_stderr();
+    report_child_failure("toolchain verify --json shared-envelope", verify_exit, verify_out, verify_err);
+    assert verify_exit == 0;
+    assert find(verify_out, "{\"schema_version\":\"sailfin-toolchains/1\"", 0) == 0;
+    assert find(verify_out, "\"operation\":\"verify\"", 0) >= 0;
+}

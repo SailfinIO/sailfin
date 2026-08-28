@@ -29,7 +29,7 @@ test "handle fd/kill/eof accessors: zero handle reports the dead-handle sentinel
 
 test "handle_stdout_fd/handle_stderr_fd: expose distinct live child fds" ![io] {
     if host_is_windows() {
-        skip("SFN-1130: native Windows process handles do not expose pollable CRT file descriptors");
+        skip("SFN-1194: Windows HANDLE streams expose no pollable CRT fds; remove when this assertion has a framed-read equivalent");
     }
     let id = process.spawn_with_env(["sh", "-c", "printf 'out'; printf 'err' 1>&2"], []);
     assert id != 0;
@@ -48,7 +48,7 @@ test "handle_stdout_fd/handle_stderr_fd: expose distinct live child fds" ![io] {
 
 test "handle_read_bytes_stderr: returns at most n bytes preserving the remainder" ![io] {
     if host_is_windows() {
-        skip("SFN-1130: this fixture requires a POSIX sh child and pollable CRT file descriptors");
+        skip("SFN-1194: this fixture requires a POSIX sh child and pollable CRT fds; remove when a Windows-native bounded stderr fixture exists");
     }
     let id = process.spawn_with_env(["sh", "-c", "printf 'abcdefgh' 1>&2"], []);
     assert id != 0;
@@ -72,7 +72,7 @@ test "handle_read_bytes_stderr: returns at most n bytes preserving the remainder
 
 test "poll_any demux: stdout(user) and stderr(records) separate cleanly" ![io] {
     if host_is_windows() {
-        skip("SFN-1130: native Windows process handles use framed reads instead of io.poll_any file descriptors");
+        skip("SFN-1194: Windows process handles use framed reads instead of io.poll_any fds; remove when an equivalent framed demux assertion exists");
     }
     // The child writes distinct payloads to each stream. The loop is the
     // streamed-runner transport in miniature: poll both raw fds, read one
@@ -119,7 +119,7 @@ test "poll_any demux: stdout(user) and stderr(records) separate cleanly" ![io] {
 
 test "handle_kill: SIGKILLs a running child; handle_wait reports signal death" ![io] {
     if host_is_windows() {
-        skip("SFN-1130: this assertion pins POSIX SIGKILL exit semantics");
+        skip("SFN-1194: this assertion pins POSIX SIGKILL exit semantics; remove when Windows termination has an equivalent handle-outcome assertion");
     }
     // A child that would outlive the test by far; kill it through the handle
     // (no external `timeout(1)`), then reap. `handle_wait` after SIGKILL(9)

@@ -1,0 +1,280 @@
+# `sfn toolchain --json` Schema (`sailfin-toolchains/1`)
+
+Status: Locked at `sailfin-toolchains/1`. Shipped in SFN-1066
+(`docs/proposals/0073-toolchain-lifecycle.md` §3.4).
+
+`sfn toolchain list --json`, `sfn toolchain active --json`, and
+`sfn toolchain verify --json` emit a single UTF-8 JSON document on stdout.
+Under `--json`, stdout carries **only** the envelope; all human-readable
+diagnostics go to stderr. The exit matrix follows SFEP-0003: `0` means the
+inspection completed with no actionable finding; `1` means the inspection
+completed and found an actionable condition — a `partial` or `corrupt` store
+entry; `2` means a setup, selection, policy, or CLI-usage failure.
+**Availability and state are data, never an error exit** — an unfetched
+toolchain, an unselected version, or a `null` update field never by itself
+produces a non-zero exit.
+
+A setup or pre-flight failure — most commonly an unresolvable toolchain
+store — emits **no envelope at all**: empty stdout paired with a non-zero
+exit code, mirroring `sfn bench`'s documented pre-flight behaviour. Consumers
+must treat empty-stdout-with-nonzero-exit as a setup error rather than assume
+every invocation yields a parseable document.
+
+## Versioning
+
+The first field of every envelope is `schema_version`. Today it is the
+literal string `"sailfin-toolchains/1"`. Breaking changes bump this string
+(e.g. `"sailfin-toolchains/2"`). Consumers MUST hard-fail on unknown versions
+rather than guess at unfamiliar field shapes.
+
+Additive changes (new optional fields) keep the same version string. The
+schema-lock test (`compiler/tests/e2e/toolchain_inspect_json_test.sfn`)
+guards the field set so a silent leak fails CI before it lands.
+
+## Envelope shape
+
+```jsonc
+{
+  "schema_version": "sailfin-toolchains/1",
+  "operation": "active",
+  "host": "aarch64-apple-darwin",
+  "entry": { "version": "0.10.4", "path": "/.../sfn" },
+  "selected": {
+    "version": "0.10.3",
+    "path": "/.../aarch64-apple-darwin/0.10.3/sfn",
+    "source": "workspace.toml",
+    "installed": true,
+    "integrity": "verified"
+  },
+  "requirement": {
+    "minimum": "0.10.0",
+    "version": null,
+    "channel": "stable",
+    "source": "workspace.toml"
+  },
+  "fetch_policy": "auto",
+  "default": null,
+  "update": null,
+  "toolchains": [],
+  "diagnostics": []
+}
+```
+
+## Top-level fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `schema_version` | string | Always first. `"sailfin-toolchains/N"` — consumers must hard-fail on unknown N. |
+| `operation` | string | The leaf that produced the envelope: `"list"`, `"active"`, or `"verify"`. |
+| `host` | string \| null | The current host triple. `null` only if host identity could not be resolved. |
+| `entry` | object | The PATH entry toolchain's identity. See `entry`. |
+| `selected` | object | What the current directory resolves to, with no fetch performed. See `selected`. |
+| `requirement` | object | The project's `[toolchain]` requirement, as read from `workspace.toml`/`capsule.toml`. See `requirement`. |
+| `fetch_policy` | string | One of `"auto"`, `"local"`, `"off"`, derived from `SAILFIN_TOOLCHAIN`. |
+| `default` | object \| null | The per-user default. Always `null` in this slice — the per-user default is SFN-1068 and unshipped. The field is locked into the envelope now so no schema bump is needed once it lands. |
+| `update` | object \| null | Update-check results. Always `null` in this slice — update checks are SFEP-0073 Slice 4 and unshipped. |
+| `toolchains` | array | Every store entry this inspection enumerated. `[]` when the store is empty, and always `[]` for `active` and for `verify <version>` — neither enumerates the store. Only `list` and `verify --all` populate it. See `toolchains[]`. |
+| `diagnostics` | array | One coded entry per non-`complete` store entry. `[]` when everything is `complete`. See `diagnostics[]`. |
+
+## `entry`
+
+| Field | Type | Notes |
+|---|---|---|
+| `version` | string | The PATH entry toolchain's own version. Never empty. |
+| `path` | string \| null | The entry executable's resolved path. `null` if unresolvable. |
+
+## `selected`
+
+| Field | Type | Notes |
+|---|---|---|
+| `version` | string \| null | The version the current directory resolves to. `null` only if resolution failed entirely. |
+| `path` | string \| null | The selected executable's path. `null` when the selected version is not installed. |
+| `source` | string | Where the selection came from: `"entry"`, `"environment"` (`SAILFIN_TOOLCHAIN`), or the project pin's source (e.g. `"workspace.toml"`). Never empty. |
+| `installed` | boolean | Whether the selected version has a ready store entry. |
+| `integrity` | string | One of `"verified"`, `"unverified"`, `"failed"`. See the `integrity` vocabulary below. |
+
+## `requirement`
+
+| Field | Type | Notes |
+|---|---|---|
+| `minimum` | string \| null | The project's floor version (today's pin semantics). `null` when the project declares no requirement. |
+| `version` | string \| null | The project's *exact* pin. Always `null` in this slice — exact project pins are SFEP-0073 Slice 2 and unshipped. |
+| `channel` | string \| null | The project's declared update channel, if any. |
+| `source` | string \| null | Which file supplied the requirement (e.g. `"workspace.toml"`). `null` when there is no requirement. |
+
+## `toolchains[]`
+
+Each entry is a JSON object with a fixed field set, one per store entry this
+inspection enumerated (host-qualified entries plus the read-only flat legacy
+tree).
+
+| Field | Type | Notes |
+|---|---|---|
+| `version` | string | The store entry's version. Never empty. |
+| `host` | string \| null | The host triple this entry is qualified under. `null` for a legacy flat-tree entry with no host qualification. |
+| `path` | string \| null | The entry's on-disk directory. `null` only if unresolvable. |
+| `state` | string | One of `"complete"`, `"partial"`, `"corrupt"`. See the `state` vocabulary below. |
+| `integrity` | string | One of `"verified"`, `"unverified"`, `"failed"`. See the `integrity` vocabulary below. |
+| `roles` | array | Zero or more of `"entry"`, `"selected"`, `"project"`, `"default"`, `"management"`, always emitted in that fixed order. `[]` when the entry holds none. Only `"entry"`, `"selected"`, and `"project"` are ever assigned in this slice — `"default"` (SFN-1068) and `"management"` (SFEP-0073 §3.5) are reserved. |
+
+### `state` vocabulary
+
+- `complete` — a fully committed, runnable entry.
+- `partial` — an install that never committed: the installer writes the
+  `.sha256` marker last, so a missing or empty marker means the payload was
+  never published, not that it decayed.
+- `corrupt` — a committed entry whose recorded payload failed verification
+  against its install manifest.
+
+### `integrity` vocabulary
+
+- `verified` — the payload was hashed against its recorded install manifest
+  and matched.
+- `unverified` — covers the documented SFN-1064 legacy boundary: an entry
+  installed before install manifests existed carries no records to check
+  against, and is neither trusted nor condemned.
+- `failed` — the payload was hashed and did not match its recorded manifest.
+
+**`list` and `verify` both perform a full, uncached payload hash of every
+committed entry.** `integrity: "verified"` is a claim that the payload was
+actually hashed against its recorded install manifest, not merely that a
+manifest exists. This has a real cost: `list` is **O(total installed payload
+bytes)**, not O(entry count) — it re-hashes every committed toolchain's full
+payload on every invocation.
+
+## `diagnostics[]`
+
+One object per actionable finding: each `toolchains[]` entry whose `state` is
+not `complete`, plus `E0620` when the selected toolchain is not installed
+(which `active` can report with an empty `toolchains` array). Uses
+SFEP-0061's coded severity/message shape.
+
+| Field | Type | Notes |
+|---|---|---|
+| `code` | string | `"E0619"` for a `partial` entry, `"E0618"` for a `corrupt` entry, `"E0620"` when the selected toolchain is not installed. |
+| `severity` | string | Always `"error"` in this slice. |
+| `message` | string | `<version>: <detail>` — the entry's version and its classification detail. |
+
+## Examples
+
+### Clean `active` run
+
+```jsonc
+{
+  "schema_version": "sailfin-toolchains/1",
+  "operation": "active",
+  "host": "x86_64-unknown-linux-gnu",
+  "entry": { "version": "0.10.4", "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.4/sfn" },
+  "selected": {
+    "version": "0.10.4",
+    "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.4/sfn",
+    "source": "entry",
+    "installed": true,
+    "integrity": "verified"
+  },
+  "requirement": {
+    "minimum": null,
+    "version": null,
+    "channel": null,
+    "source": null
+  },
+  "fetch_policy": "auto",
+  "default": null,
+  "update": null,
+  "toolchains": [],
+  "diagnostics": []
+}
+```
+
+Exit code: `0`. Note `toolchains` is `[]`: `active` explains the *selection*,
+not the store, so it does not enumerate entries. Use `list` for the store.
+
+### `list` run with one corrupt and one partial entry
+
+```jsonc
+{
+  "schema_version": "sailfin-toolchains/1",
+  "operation": "list",
+  "host": "x86_64-unknown-linux-gnu",
+  "entry": { "version": "0.10.4", "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.4/sfn" },
+  "selected": {
+    "version": "0.10.4",
+    "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.4/sfn",
+    "source": "entry",
+    "installed": true,
+    "integrity": "verified"
+  },
+  "requirement": {
+    "minimum": null,
+    "version": null,
+    "channel": null,
+    "source": null
+  },
+  "fetch_policy": "auto",
+  "default": null,
+  "update": null,
+  "toolchains": [
+    {
+      "version": "0.10.4",
+      "host": "x86_64-unknown-linux-gnu",
+      "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.4",
+      "state": "complete",
+      "integrity": "verified",
+      "roles": ["entry", "selected"]
+    },
+    {
+      "version": "0.10.3",
+      "host": "x86_64-unknown-linux-gnu",
+      "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.3",
+      "state": "corrupt",
+      "integrity": "failed",
+      "roles": []
+    },
+    {
+      "version": "0.10.5",
+      "host": "x86_64-unknown-linux-gnu",
+      "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.5",
+      "state": "partial",
+      "integrity": "unverified",
+      "roles": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "E0618",
+      "severity": "error",
+      "message": "0.10.3: payload hash does not match recorded install manifest"
+    },
+    {
+      "code": "E0619",
+      "severity": "error",
+      "message": "0.10.5: install never completed (no committed .sha256 marker)"
+    }
+  ]
+}
+```
+
+Exit code: `1`.
+
+## Consumers
+
+- **CI scrapers / agentic tooling**: `jq` is the canonical reader. Examples:
+  ```bash
+  sfn toolchain list --json | jq '.toolchains[] | select(.state != "complete")'
+  sfn toolchain active --json | jq '.selected'
+  sfn toolchain verify --json | jq '.diagnostics'
+  ```
+- **`sfn toolchain` human renderer** shares the same underlying
+  `ToolchainInspectReport` (`compiler/src/toolchain/inspect.sfn`) so the
+  human and `--json` surfaces never disagree about what was found — only how
+  it is presented.
+
+## Stability contract
+
+- Field names and types in `sailfin-toolchains/1` are frozen.
+- New fields must be optional (or the new/reserved `null` shape already
+  documented above) or the schema bumps to `sailfin-toolchains/2`.
+- Field renames or removals bump to `sailfin-toolchains/2`.
+- The schema-lock test
+  (`compiler/tests/e2e/toolchain_inspect_json_test.sfn`) exercises the field
+  set against this document and fails CI on drift.

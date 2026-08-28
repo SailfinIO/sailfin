@@ -238,7 +238,7 @@ fn _mem_harness_c() -> string {
 // (No sanitizer leg in the original — nothing omitted here.)
 test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io] {
     if host_is_windows() {
-        skip("the C harness verifies the abort paths (bounds_check, sfn_alloc_struct OOM) via fork()/waitpid(2)/WIFSIGNALED/WTERMSIG/SIGABRT, none of which exist on Windows (MinGW does not implement a working fork()) — a genuine platform absence, not a product gap");
+        skip("SFN-1152: the C oracle requires fork/waitpid/SIGABRT; remove when its Windows provider can isolate and observe aborting children");
     }
     let dir = _scratch_dir();
     let ll = dir + "/mem.ll";
