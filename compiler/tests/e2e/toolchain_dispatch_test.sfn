@@ -44,7 +44,7 @@ import {
     read_bytes,
     remove_all
 } from "sfn/fs";
-import { contains } from "sfn/strings";
+import { contains, split, trim } from "sfn/strings";
 import {
     clean_runner_env,
     default_scratch_dir,
@@ -163,6 +163,41 @@ fn _write_exit_code_stub(dir: string, marker: string, code_str: string) -> strin
     assert exit == 0;
     assert fs.exists(bin);
     return bin;
+}
+
+// A stub that reports `SAILFIN_TOOLCHAIN` and `SAILFIN_TOOLCHAIN_DISPATCHED`
+// as it sees them, rather than just a marker — the only way to observe the
+// dispatched CHILD's environment contract (`_dispatch_child_env`,
+// `compiler/src/toolchain/dispatch.sfn`), which every other seeded stub here
+// is structurally blind to (SFN-1065).
+fn _write_env_report_stub(dir: string, name: string) -> string ![io] {
+    let src_dir = _scratch_root() + "/stub-src";
+    fs.createDirectory(src_dir, true);
+    let src = src_dir + "/" + name + ".sfn";
+    fs.writeFile(src, "fn main() -> int ![io] {\n"
+        + "    let knob = env.get(\"SAILFIN_TOOLCHAIN\");\n"
+        + "    let marker = env.get(\"SAILFIN_TOOLCHAIN_DISPATCHED\");\n"
+        + "    print(\"KNOB=\" + knob);\n"
+        + "    print(\"MARKER=\" + marker);\n"
+        + "    return 0;\n"
+        + "}\n");
+    let bin = _stub_bin(dir);
+    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch("toolchain-dispatch-env-stub")));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch env-report stub build", exit, out, err);
+    assert exit == 0;
+    assert fs.exists(bin);
+    return bin;
+}
+
+// `_seed_stub` sibling seeding an env-reporting stub instead of a marker one.
+fn _seed_env_report_stub(store: string, ver: string, name: string) -> void ![io] {
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    let _ = _write_env_report_stub(dir, name);
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
 }
 
 // `_seed_stub` sibling for a store entry whose stub exits non-zero, so a
@@ -738,6 +773,141 @@ test "toolchain dispatch: a channel selector is rejected as not yet available" !
     assert exit == 2;
     assert contains(err, "channel selectors");
     assert contains(err, "not available yet");
+}
+
+// The exact version string this compiler-under-test reports for itself, so
+// a selector naming it can be constructed without hardcoding a version that
+// would drift out of sync with the binary under test.
+fn _running_version() -> string ![io] {
+    let exit = process.run_capture([sfn_bin_abs_path(), "--version"], _env_with([]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch running-version probe", exit, out, err);
+    assert exit == 0;
+    let parts = split(trim(out), " ");
+    assert parts.length >= 2;
+    return parts[1];
+}
+
+// SFN-1065 bug fix regression: `_dispatch_child_env` used to forward the
+// parent's exact `SAILFIN_TOOLCHAIN` verbatim, handing the dispatched child a
+// selection knob disagreeing with what it IS. The child's own dispatch-loop
+// guard would then die on that self-contradiction. The env-reporting stub is
+// the only seeded entry that can observe this: every marker-only stub prints
+// and exits without ever re-entering the dispatcher.
+test "toolchain dispatch: the dispatched child does not inherit a conflicting exact knob" ![io] {
+    _require_reexec();
+    let store = _scratch_root() + "/child-env-conflict-store";
+    let proj = _scratch_root() + "/child-env-conflict-proj";
+    _seed_env_report_stub(store, "888.0.0", "child_env_conflict");
+    let src = _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+888.0.0", "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN=999.0.0"]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch child-env-conflict run", exit, out, err);
+    assert exit == 0;
+    // The dispatched child sees itself as the target, never the stale knob.
+    assert contains(out, "MARKER=888.0.0");
+    assert contains(out, "KNOB=\n");
+}
+
+// A mode word (unlike an exact version) constrains fetching/floor behavior
+// rather than selecting a version, so it must survive into the child.
+test "toolchain dispatch: a mode word survives into the dispatched child" ![io] {
+    _require_reexec();
+    let store = _scratch_root() + "/child-env-mode-store";
+    let proj = _scratch_root() + "/child-env-mode-proj";
+    _seed_env_report_stub(store, "888.0.0", "child_env_mode");
+    let src = _seed_project(proj, "0.0.1");
+
+    // `local` forbids fetching, not dispatching an already-seeded entry.
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+888.0.0", "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN=local"]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch child-env-mode run", exit, out, err);
+    assert exit == 0;
+    assert contains(out, "MARKER=888.0.0");
+    assert contains(out, "KNOB=local\n");
+}
+
+// SFN-1065 bug fix regression: a `+<version>` selector that resolves to the
+// running toolchain in-process must outrank an exact `SAILFIN_TOOLCHAIN` in
+// the command's own gate too (`ctx.selector_resolved`), not just at the
+// selector site itself — otherwise the lower-ranked env knob reopens a
+// decision the selector already made.
+test "toolchain dispatch: a CLI selector naming the running toolchain beats the env knob" ![io] {
+    let store = _scratch_root() + "/cli-running-beats-env-store";
+    let proj = _scratch_root() + "/cli-running-beats-env-proj";
+    let env_marker = "DISPATCH_ENV_999_SHOULD_NOT_RUN_9f3c";
+    _seed_stub(store, "999.0.0", env_marker, true);
+    let src = _seed_project(proj, "0.0.1");
+    let running = _running_version();
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+" + running, "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN=999.0.0"]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch cli-running-beats-env run", exit, out, err);
+    assert exit == 0;
+    // The 999.0.0 store stub never ran — the selector resolved in-process.
+    assert ! contains(out + err, env_marker);
+}
+
+// `_dispatch_normalize_ver` strips a leading `v`; nothing else in this file
+// exercises a `v`-prefixed selector.
+test "toolchain dispatch: a v-prefixed selector normalizes" ![io] {
+    _require_reexec();
+    let store = _scratch_root() + "/v-prefixed-store";
+    let proj = _scratch_root() + "/v-prefixed-proj";
+    let marker = "DISPATCH_V_PREFIXED_888_6b1e";
+    _seed_stub(store, "888.0.0", marker, true);
+    let src = _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+v888.0.0", "check", src], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch v-prefixed run", exit, out, err);
+    assert contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: toolchain run --help renders help and never dispatches" ![io] {
+    let store = _scratch_root() + "/toolchain-run-help-store";
+    let proj = _scratch_root() + "/toolchain-run-help-proj";
+    let marker = "DISPATCH_RUN_HELP_888_2a9d";
+    _seed_stub(store, "888.0.0", marker, true);
+    let _ = _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "run", "--help"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "<version>");
+    assert ! contains(out + err, marker);
+}
+
+// A `toolchain run <version>` with no forwarded command is a local usage
+// error, not a dispatch — dispatching here would fetch a toolchain just to
+// print its own usage.
+test "toolchain dispatch: toolchain run with no forwarded command does not dispatch" ![io] {
+    let store = _scratch_root() + "/toolchain-run-no-cmd-store";
+    let proj = _scratch_root() + "/toolchain-run-no-cmd-proj";
+    let marker = "DISPATCH_RUN_NO_CMD_888_2a9d";
+    _seed_stub(store, "888.0.0", marker, true);
+    let _ = _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "run", "888.0.0"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "usage:");
+    assert ! contains(out + err, marker);
 }
 
 test "toolchain dispatch: a + version query never fetches and still reports the entry version" ![io] {
