@@ -84,15 +84,21 @@ through to the runtime trap. See `lower_match_instruction`
 ```sfn
 let mut match_exhaustive: boolean = has_unconditional_default;
 if !match_exhaustive {
-    if !has_guarded_cases {
-        if subject_enum_info != null {
-            match_exhaustive = matched_enum_tags.length == subject_enum_info.variants.length;
-        } else if union_payload_types.length > 0 {
-            match_exhaustive = matched_union_variants.length == union_payload_types.length;
-        }
+    if subject_enum_info != null {
+        match_exhaustive = matched_enum_tags.length == subject_enum_info.variants.length;
+    } else if union_payload_types.length > 0 {
+        match_exhaustive = matched_union_variants.length == union_payload_types.length;
     }
 }
 ```
+
+SFN-1168 removed an outer `if !has_guarded_cases { ... }` wrapper from the
+block above. Guarded arms already decline to record their tag per arm, via the
+`!guard_has_text` gate on `matched_enum_tags` and `matched_union_variants`, so
+the match-wide flag double-counted the guard: a single guarded arm suppressed
+the tags contributed by every *unguarded* arm, and an exhaustive match
+containing one was reported non-exhaustive. The rule this SFEP describes was
+always the correct one; only the lowering pass carried the extra gate.
 
 This is the right *algorithm* (guarded arms excluded, tag-set-equality test)
 at the wrong *pipeline stage* to serve as a user-facing diagnostic: it runs
@@ -239,8 +245,8 @@ for the common case:
 ### 3.4 Guards do not count as coverage
 
 An arm with a non-empty guard (`case.guard != null` and, per the existing
-`guard_has_text` check the lowering pass already performs at
-`instructions_match.sfn:419-426`, a guard with actual trimmed text) does
+`guard_has_text` check the lowering pass already performs, a guard with
+actual trimmed text) does
 **not** count toward covering its variant, because the guard may evaluate to
 `false` and fall through. This matches Rust and Swift:
 
@@ -254,9 +260,9 @@ match r {
 
 Concretely: the coverage set for step 3.3.2 is built only from **unguarded**
 case patterns. This is a direct mirror of the lowering pass's own
-`has_guarded_cases` / `!guard_has_text` gating on `matched_enum_tags`
-(`instructions_match.sfn:411-491`) — the typecheck-level pass reimplements
-the same rule so `sfn check` and `build`/`run` agree (see §5).
+per-arm `!guard_has_text` gating on `matched_enum_tags` and
+`matched_union_variants` — the typecheck-level pass reimplements the same rule
+so `sfn check` and `build`/`run` agree (see §5).
 
 ### 3.5 The diagnostic
 
@@ -412,9 +418,9 @@ Passes touched, in pipeline order:
   - It also remains correct **even for the now-statically-guaranteed
     exhaustive matches**: once `E0823` passes, `match_exhaustive` at lowering
     time is definitionally `true` for that same match (same tag-set-equality
-    algorithm, same guard exclusion — §3.4 explicitly mirrors
-    `instructions_match.sfn:411-491`'s `has_guarded_cases`/`!guard_has_text`
-    gating), so lowering already emits `unreachable` instead of a trap call
+    algorithm, same guard exclusion — §3.4 explicitly mirrors lowering's
+    per-arm `!guard_has_text` gating), so lowering already emits `unreachable`
+    instead of a trap call
     for these matches today. The typecheck gate and the lowering computation
     independently agree; there is no need to delete or thread a "already
     proven exhaustive" flag through IR — recomputing a cheap tag-set
@@ -596,8 +602,8 @@ in the same pass.
   (`resolve_match_subject_annotation`/`resolve_match_subject_call_annotation`
   — the name-based, no-type-inference resolution precedent this SFEP's
   §3.3 follows), `:825-834` (the existing `match_exhaustive` computation
-  this SFEP leaves untouched at the lowering layer), `:411-491`
-  (`has_guarded_cases`/`!guard_has_text` gating this SFEP's §3.4 mirrors).
+  this SFEP leaves untouched at the lowering layer), the per-arm
+  `!guard_has_text` gating this SFEP's §3.4 mirrors.
 - `runtime/prelude.sfn:701-704` (`match_exhaustive_failed` — the runtime
   backstop kept as defense-in-depth, §3.1/§5).
 - `docs/proposals/0004-check-architecture.md` — `sfn check` as the fast,

@@ -23,6 +23,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` are `![pure]` and cannot be
 // called from an `![io]` test; assert on captured output with
 // `sfn/strings::contains`.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current, run_bounded } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
@@ -203,7 +204,7 @@ test "serve TLS loopback: handshake + request→response cycle over TLS" ![clock
         return 0;
     });
 
-    // Best-effort cleanup. The server itself was already killed and reaped
+    // Cleanup after the server was already killed and reaped
     // by `with_background` on scope exit.
-    let _rm = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }

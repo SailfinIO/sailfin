@@ -20,6 +20,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured bytes with
 // `sfn/strings::contains`/`find` instead.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current, env_set } from "sfn/os";
 import { contains, find } from "sfn/strings";
 import {
@@ -550,9 +551,9 @@ test "websocket.serve loopback: handshake + echo + close round-trip" ![clock, io
         return 0;
     });
 
-    // Best-effort cleanup of the consumer tree. The server itself was
+    // Cleanup of the consumer tree after the server was
     // already killed and reaped by `with_background` on scope exit.
-    let _rm = process.run(["rm", "-rf", _app_root()]);
+    assert remove_all(_app_root());
 }
 
 test "websocket.serve loopback: two clients served concurrently" ![clock, io, net] {
@@ -649,9 +650,9 @@ test "websocket.serve loopback: two clients served concurrently" ![clock, io, ne
         return 0;
     });
 
-    // Best-effort cleanup of the consumer tree. The server itself was
+    // Cleanup of the consumer tree after the server was
     // already killed and reaped by `with_background` on scope exit.
-    let _rm = process.run(["rm", "-rf", _app_root2()]);
+    assert remove_all(_app_root2());
 }
 
 // ── RFC 6455 protocol-completeness cases (#1924) ───────────────────────
@@ -911,7 +912,7 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
         return 0;
     });
 
-    // Best-effort cleanup of the consumer tree. The server itself was
+    // Cleanup of the consumer tree after the server was
     // already killed and reaped by `with_background` on scope exit.
-    let _rm = process.run(["rm", "-rf", _app_root3()]);
+    assert remove_all(_app_root3());
 }

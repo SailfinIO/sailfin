@@ -1,5 +1,6 @@
 // Native e2e regression for SFN-33: a pure-Sailfin `sfn/http` server keeps
 // module-global state across requests in one process.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
@@ -214,5 +215,5 @@ test "stateful users server: POST persists across GET requests (SFN-33)" ![clock
         return 0;
     });
 
-    let _rm = process.run(["rm", "-rf", _work_root()]);
+    assert remove_all(_work_root());
 }

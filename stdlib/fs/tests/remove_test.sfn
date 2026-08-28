@@ -20,6 +20,7 @@ import {
     remove,
     remove_all,
     remove_dir,
+    set_perms,
     symlink,
     write
 } from "../src/mod";
@@ -94,6 +95,19 @@ test "fs: remove_all clears a directory containing files" ![io] {
     write(scratch + "/a.txt", "one");
     write(scratch + "/b.txt", "two");
     assert exists(scratch + "/a.txt");
+
+    assert remove_all(scratch);
+    assert exists(scratch) == false;
+}
+
+test "fs: remove_all clears a tree containing a read-only file" ![io] {
+    let scratch = mkdtemp("sfn-fs-rmall-readonly-");
+    assert scratch.length > 0;
+    let file = scratch + "/object";
+    write(file, "git-object-shaped");
+    // 292 = 0o444. On Windows UCRT maps this to the read-only attribute;
+    // on POSIX it pins the same force-delete contract without write bits.
+    assert set_perms(file, 292);
 
     assert remove_all(scratch);
     assert exists(scratch) == false;

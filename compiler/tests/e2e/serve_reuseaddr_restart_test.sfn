@@ -19,6 +19,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` are `![pure]`, so an
 // `![io]` test asserts on the captured response text with
 // `sfn/strings::contains` instead.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
@@ -325,7 +326,7 @@ test "serve: SO_REUSEADDR lets a server rebind its port after restart (#1583)" !
         return 0;
     });
 
-    // Best-effort cleanup. Both servers were already killed and reaped by
+    // Cleanup after both servers were already killed and reaped by
     // `with_background` on scope exit.
-    let _rm = process.run(["rm", "-rf", _app_root()]);
+    assert remove_all(_app_root());
 }

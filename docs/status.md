@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-26 (SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
+Updated: 2026-08-28 (SFN-1065, SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
 SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726). Seed pinned to `0.10.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
@@ -270,12 +270,17 @@ here.
   tarball. `SAILFIN_TOOLCHAIN_RELEASE_BASE` overrides the release host for
   air-gapped mirrors (verification stays mandatory). The compiler's own
   `[capabilities] required` gained `net` (SFEP-0046 §4). **Re-exec dispatch**
-  (SFEP-0046 §3.5, SFN-172) is shipped: on a floor-check failure, `sfn
-  build`/`run`/`check`/`test` consult `SAILFIN_TOOLCHAIN` — `auto` (default)
+  (SFEP-0046 §3.5, SFN-172) is shipped: `sfn build`/`run`/`check`/`test`
+  consult `SAILFIN_TOOLCHAIN`. On a floor-check failure, `auto` (default)
   ensures the pinned toolchain is in the version store (fetching it via the
   SFN-168 install path if absent) and transparently re-execs it with the
-  original argv; `local` verifies only and never fetches; `<version>` forces
-  that exact dispatch target; `off`/`0` skips the gate. A re-entrancy guard
+  original argv; `local` verifies only and never fetches; `off`/`0` skips the
+  gate. An exact `<version>` is **not** floor-mismatch-only recovery: as of
+  SFEP-0073 §3.3 slice 1 (SFN-1065) it is an unconditional selection input
+  that dispatches to the named toolchain whether or not the project is
+  pinned and whether or not the running toolchain already satisfies the pin
+  — see the one-shot selector entry below for the full surface this
+  unlocked. A re-entrancy guard
   (`SAILFIN_TOOLCHAIN_DISPATCHED=<version>`) hard-fails loudly rather than
   looping if a dispatched toolchain still doesn't satisfy the pin. Offline, an
   host-qualified toolchain dispatches after re-verifying its completeness
@@ -327,6 +332,44 @@ here.
   management-protocol routing ships (SFN-1067), and no signed index,
   channels, update policy, per-user default, or yank/revocation enforcement
   ships here — SFEP-0073 stays `Accepted`, not `Implemented`.
+- **One-shot exact toolchain selector — "Inspect and Run"** (SFEP-0073 §3.3
+  slice 1, SFN-1065). `sfn +<exact-version> <command> ...` and its long form
+  `sfn toolchain run <exact-version> [--] <command> ...` (the `--` separator
+  is optional) select an installed toolchain for a single invocation without
+  writing to any project or user configuration. `cli/main.sfn::
+  _v2_peel_selector` parses the selector ahead of the full command tree (an
+  early prefix scan), so an older entry toolchain can hand a command it does
+  not recognize to a newer selected payload; the project `[toolchain]` floor
+  for a one-shot selection is discovered from the working directory rather
+  than the entry file, which the scan runs ahead of resolving; that floor is
+  enforced, so `cd pinned-project && sfn +<ver> check /elsewhere/main.sfn`
+  is rejected against the *current directory's* pin, not the target file's.
+  The selector must also be the first argument — `sfn --color always +<ver>`
+  is not recognized as a selection. Precedence:
+  `+<version>`/`toolchain run` outranks an exact `SAILFIN_TOOLCHAIN`, which
+  outranks the project `[toolchain]` floor, which outranks the entry
+  toolchain (per-user defaults and exact `[toolchain] version`
+  project-manifest fields are later slices, not implemented).
+  `toolchain/dispatch.sfn::toolchain_select_exact` still enforces the floor
+  after selection — a selected toolchain below the pin is a hard error
+  unless one of the three pre-existing escape hatches
+  (`--skip-toolchain-check`, `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`,
+  `SAILFIN_TOOLCHAIN=off`/`=0`) downgrades it to a warning and proceeds.
+  Dispatch replaces this image via `process.exec`, so the selected
+  toolchain's exit code and terminating signal are preserved exactly;
+  selecting the running toolchain is a no-op rather than a re-exec, and
+  `SAILFIN_TOOLCHAIN_DISPATCHED` is now compared against the selection
+  target rather than merely tested for presence, so a matching re-entrant
+  process runs the command instead of dispatching again.
+  `sfn --version`/`-V`/`version` stay network-silent: an exact selector
+  applies to a version query too, but when the selected payload is not
+  installed it prints a note plus an `sfn toolchain install <version>` hint
+  and reports the entry toolchain instead of fetching. Channel selectors
+  (`stable`/`rc`/`beta`/`alpha`/`latest`, e.g. `sfn +stable`) are rejected
+  with an actionable error naming the gap — they need the signed index
+  (SFEP-0073 §3.9 slice 4). This is slice 1 only: `sfn toolchain
+  list`/`active`/`verify`/`default`/`update`/`remove`/`entry-version` are
+  later issues, not shipped here.
 - **Compiler bootstrap manifest — `bootstrap.toml` + `sfn dev bootstrap`**
   (SFEP-0047, SFN-197). A root `bootstrap.toml` is the compiler checkout's
   exact bootstrap-seed policy — `[seed].version/source/repo/asset_prefix/policy`,
@@ -1416,7 +1459,7 @@ stay under `capsules/sfn/*`. Their manifest identities and imports are unchanged
 | `sfn/math` | `"math"` | Shipped | None | abs, min/max, clamp, floor/ceil/round, pow, sum/mean |
 | `sfn/path` | `"path"` | Shipped | None | Path join, dirname, basename, ext, normalize |
 | `sfn/toml` | `"toml"` | Shipped | None | TOML v1.0 parsing, serialization, dotted-path access |
-| `sfn/fs` | `"fs"` | Shipped | `io` | File read/write/append, exists, mkdir, read_dir, perms, mkdtemp, is_directory, symlink, read_link. Windows symlink creation uses `CreateSymbolicLinkA` with the unprivileged-create flag and a legacy retry, raw-target reads use `FSCTL_GET_REPARSE_POINT`, and deletion tries both file- and directory-link removal without following the target (SFN-1143); tests capability-gate only when the runner lacks Developer Mode / `SeCreateSymbolicLinkPrivilege`. Permission APIs keep their host contract: Windows `set_perms` delegates to UCRT `chmod`, `get_perms` reports the documented `-1` no-mode-bits sentinel, and `is_executable` means an existing accessible path because Win32 has no POSIX execute bit (SFN-1141). Binary-safe `FileBytes` API (`read_bytes`, `write_bytes`, `byte_at`, `free_bytes`, `copy`) added for content with interior NULs; `read`/`readFile` now aborts with a diagnostic on an interior NUL instead of silently truncating (SFN-1008) |
+| `sfn/fs` | `"fs"` | Shipped | `io` | File read/write/append, exists, mkdir, read_dir, perms, mkdtemp, is_directory, symlink, read_link. `remove_all` provides cross-platform `rm -rf` semantics, including clearing a read-only file bit before retrying deletion so Git object trees and other Windows fixtures are removable (SFN-1166). Windows symlink creation uses `CreateSymbolicLinkA` with the unprivileged-create flag and a legacy retry, raw-target reads use `FSCTL_GET_REPARSE_POINT`, and deletion tries both file- and directory-link removal without following the target (SFN-1143); tests capability-gate only when the runner lacks Developer Mode / `SeCreateSymbolicLinkPrivilege`. Permission APIs keep their host contract: Windows `set_perms` delegates to UCRT `chmod`, `get_perms` reports the documented `-1` no-mode-bits sentinel, and `is_executable` means an existing accessible path because Win32 has no POSIX execute bit (SFN-1141). Binary-safe `FileBytes` API (`read_bytes`, `write_bytes`, `byte_at`, `free_bytes`, `copy`) added for content with interior NULs; `read`/`readFile` now aborts with a diagnostic on an interior NUL instead of silently truncating (SFN-1008) |
 | `sfn/archive` | `"sfn/archive"` | Partial (tar read only; compression codecs shipped, tar write missing) | `io` (`targz_extract` only; everything else pure) | New capsule (SFEP-0071, layering + issue map in `stdlib/archive/src/mod.sfn:9-19`). Pure-Sailfin CRC-32 (RFC 1952 §8), DEFLATE inflate (RFC 1951, SFN-896) *and* compress (`deflate_all`, fixed Huffman + greedy LZ77, dynamic Huffman parsed but rejected `UnsupportedFeature`, SFN-897), gzip header parse *and* write (`gzip_write_all`, `src/gzip.sfn:262`), and POSIX ustar header **decode** with GNU long-name/long-link and PAX extended-header support (`ustar.sfn`, SFN-898) — all already two-directional except tar itself. `targz_extract(archive_path, dest_dir, opts) -> Result<ExtractSummary, ArchiveError> ![io]` (`src/tar_read.sfn:500`, SFN-898) composes gzip → inflate → ustar → the mandatory 8-rule path-traversal guard (`path_guard.sfn`, SFEP-0071 §3.6, enforced on every member before any filesystem call) → filesystem write; bounded by caller-supplied `max_total_bytes`/`max_members` (decompression-bomb guard) and a 4 GiB in-memory inflate cap. Sole consumer today: `sfn toolchain install`'s seed-tarball extraction (`cli/commands/toolchain.sfn:605`), retiring its `tar` shell-out. **No tar writer** — a ustar header encoder and a composing tar-creation entry point don't exist yet (tracked as SFN-899 in `mod.sfn`'s layering comment), so `sfn package`'s three `tar -czf` sites (see the `sfn package` bullet below, same section) are untouched and SFEP-0071 stays `Accepted`. |
 | `sfn/os` | `"os"` | Shipped | `clock`, `io` | Env vars, home dir, exec, exit; typed `Env` (`env_empty`/`env_set`/`env_from_current`) follows the host contract: Windows keys compare case-insensitively while POSIX keys remain case-sensitive, and an empty `Env` is always an explicit empty child environment rather than inheritance. Also provides `run_capture(args, env, cwd)`; both blocking capture and asynchronous `spawn_with_env` honor a per-child cwd on POSIX and Windows without mutating the parent, including when the child environment carries a stale `PWD`. Child-process control over a `ProcessHandle` includes framed stdout line/chunk reads plus the stderr chunk twin, `handle_stdout_fd`/`handle_stderr_fd` and the `*_at_eof` predicates for `io.poll_any` demultiplexing, and `handle_kill` (SIGKILL). The owned-buffer `handle_read_bytes_stdout` waits for bytes or true EOF on every host, while `handle_read_chunk_stdout` retains the Windows deadline-observation contract in which an empty chunk can mean that the child is still live but silent. `drain_to_exit(h, deadline_ms)` pumps both streams to exit under an optional wall-clock deadline and reports `timed_out` as a boolean rather than remapping the exit code (a SIGKILL wait yields 137, indistinguishable from an OOM kill); `run_bounded` pairs it with `spawn_with_env`. `![clock]` is scoped to the deadline paths |
 | `sfn/log` | `"log"` | Shipped | `io`, `clock` | Structured leveled logging with named loggers |

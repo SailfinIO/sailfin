@@ -36,6 +36,7 @@
 //
 // Skips cleanly (`assert true`) when `openssl` is unavailable, matching
 // `runtime_tls_verify_failure_test.sfn`.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
@@ -380,7 +381,7 @@ test "runtime tls: anchor cache survives an intervening verify failure in-proces
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }
 
 test "runtime tls: a trust-store load failure is never cached (SFN-816 stays fixed)" ![clock, io, net] {
@@ -423,5 +424,5 @@ test "runtime tls: a trust-store load failure is never cached (SFN-816 stays fix
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }

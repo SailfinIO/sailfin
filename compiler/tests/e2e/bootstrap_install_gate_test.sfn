@@ -46,7 +46,12 @@
 //      seed-store layout and the native dispatch's expectation of it
 //      (SFN-1163), then proves the round trip: `sfn dev bootstrap build`
 //      finds and invokes that installer-produced seed.
-import { copy, free_bytes, read_bytes } from "sfn/fs";
+import {
+    copy,
+    free_bytes,
+    read_bytes,
+    remove_all
+} from "sfn/fs";
 import { find, int_to_string, split } from "sfn/strings";
 import {
     clean_runner_env,
@@ -372,7 +377,7 @@ fn _report_child_always(tag: string, exit: int, out: string, err: string) -> voi
 
 test "bootstrap install gate: build installs, short-circuits, and refuses a stale publish" ![io] {
     let repo = _repo_root();
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     _create_fingerprint_roots(repo);
     fs.createDirectory(repo + "/compiler/capsules/syntax/src", true);
@@ -507,12 +512,12 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     assert sha256_hex_of_bytes(after_refusal.addr, after_refusal.length) == installed_hash;
     free_bytes(after_refusal);
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "bootstrap install gate: a malformed .pending is treated as no snapshot, not a race" ![io] {
     let repo = _scratch_repo("bootstrap-install-gate-repo-malformed-pending");
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     _create_fingerprint_roots(repo);
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
@@ -547,12 +552,12 @@ test "bootstrap install gate: a malformed .pending is treated as no snapshot, no
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint");
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "bootstrap install gate: a matching raw-v1 pending digest is never promoted as v2" ![io] {
     let repo = _scratch_repo("bootstrap-install-gate-repo-raw-v1");
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     _create_fingerprint_roots(repo);
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
@@ -597,12 +602,12 @@ test "bootstrap install gate: a matching raw-v1 pending digest is never promoted
     assert fs.exists(installed);
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint");
     assert find(install_out, "freshness record not written", 0) >= 0;
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "bootstrap install gate: a failed build leaves the installed binary and fingerprint untouched" ![io] {
     let repo = _scratch_repo("bootstrap-install-gate-repo-failed-build");
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     _create_fingerprint_roots(repo);
 
@@ -662,12 +667,12 @@ test "bootstrap install gate: a failed build leaves the installed binary and fin
     assert fs.readFile(repo + "/build/.compiler-source-fingerprint") == fingerprint_before;
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "bootstrap install gate: a seed that produces an unrunnable binary leaves the installed binary and fingerprint untouched" ![io] {
     let repo = _scratch_repo("bootstrap-install-gate-repo-unrunnable");
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     _create_fingerprint_roots(repo);
 
@@ -731,7 +736,7 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
     assert fs.readFile(repo + "/build/.compiler-source-fingerprint") == fingerprint_before;
     assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }
 
 test "bootstrap: install.sh lands the seed where the native dispatch probes" ![io] {
@@ -745,7 +750,7 @@ test "bootstrap: install.sh lands the seed where the native dispatch probes" ![i
     }
 
     let repo = _scratch_repo("seed-store-layout-repo");
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
     fs.createDirectory(repo, true);
     _create_fingerprint_roots(repo);
     _write_bootstrap_toml(repo);
@@ -836,5 +841,5 @@ test "bootstrap: install.sh lands the seed where the native dispatch probes" ![i
     assert build_exit == 0;
     assert _marker_count(marker) == 1;
 
-    process.run(["rm", "-rf", repo]);
+    assert remove_all(repo);
 }

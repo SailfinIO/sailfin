@@ -29,6 +29,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
@@ -377,8 +378,8 @@ test "runtime tls: https GET round-trips against a local openssl s_server" ![clo
         throw err;
     }
 
-    // Best-effort cleanup. The server itself was already killed and reaped
+    // Cleanup after the server was already killed and reaped
     // above.
-    let _rmd = process.run(["rm", "-rf", dir + "/client"]);
+    assert remove_all(dir + "/client");
     let _rmo = fs.deleteFile(out_path);
 }

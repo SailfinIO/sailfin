@@ -21,7 +21,7 @@ import {
 
 // Write `<caps_dir>/<name>` with `content`, creating `caps_dir`.
 fn _write_ll(caps_dir: string, name: string, content: string) ![io] {
-    process.run(["mkdir", "-p", caps_dir]);
+    fs.createDirectory(caps_dir, true);
     fs.writeFile(caps_dir + "/" + name, content);
 }
 

@@ -14,8 +14,11 @@
 // `.github/actions/sailfin-build/action.yml` and the `build-quality`
 // job) and the restore prefix (the same action, plus the warmer job) must
 // never drift apart, or PR CI is stranded on a permanently cold cache.
+import { remove_all } from "sfn/fs";
 import { contains } from "sfn/strings";
 import { clean_runner_env, sfn_bin_abs_path } from "sfn/test";
+
+import { copy_tree } from "../../src/build/fs_tree";
 
 fn _repo_root() -> string ![io] {
     let mut repo = env.get("SAILFIN_REPO_ROOT");
@@ -91,7 +94,7 @@ fn _native_freshness_fingerprint(root: string) -> string ![io] {
 test "module layout fingerprint: deterministic across repeated runs" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/module-layout-fingerprint-determinism";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
 
@@ -100,13 +103,13 @@ test "module layout fingerprint: deterministic across repeated runs" ![io] {
 
     assert first.length > 0;
     assert first == second;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "module layout fingerprint: content edits do not change it" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/module-layout-fingerprint-content";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     let source = scratch + "/main.sfn";
     fs.writeFile(source, "fn value() -> int { return 1; }\n");
@@ -120,13 +123,13 @@ test "module layout fingerprint: content edits do not change it" ![io] {
 
     assert before.length > 0;
     assert before == after;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "module layout fingerprint: adding a module changes it" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/module-layout-fingerprint-add";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
     let before = _fingerprint(scratch);
@@ -135,13 +138,13 @@ test "module layout fingerprint: adding a module changes it" ![io] {
     let after = _fingerprint(scratch);
 
     assert before != after;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "module layout fingerprint: explicit overlapping roots preserve v1 multiplicity" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/module-layout-fingerprint-overlap";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
     fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
     let once = _fingerprint(scratch);
@@ -150,7 +153,7 @@ test "module layout fingerprint: explicit overlapping roots preserve v1 multipli
     let twice = process.capture_take_stdout();
     let _error = process.capture_take_stderr();
     assert once != twice;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "module layout fingerprint: transitional workspace expands deterministically" ![io] {
@@ -207,10 +210,10 @@ test "module layout fingerprint: freshness is checkout-root independent and igno
         + "/module-layout-fingerprint-root-independence";
     let first = scratch + "/first";
     let second = scratch + "/second";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
-    process.run(["cp", "-R", fixture, first]);
-    process.run(["cp", "-R", fixture, second]);
+    assert copy_tree(fixture, first);
+    assert copy_tree(fixture, second);
 
     let dependency = "\n[dependencies]\n\"sfn/strings\" = \"*\"\n";
     let first_manifest = first + "/compiler/driver/capsule.toml";
@@ -224,7 +227,7 @@ test "module layout fingerprint: freshness is checkout-root independent and igno
     assert baseline == _ci_freshness_fingerprint(second);
     fs.writeFile(second + "/stdlib/strings/src/mod.sfn", "fn moved() -> int { return 2; }\n");
     assert baseline != _ci_freshness_fingerprint(second);
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "module layout fingerprint: duplicate canonical members fail every inventory view" ![io] {
@@ -262,7 +265,7 @@ test "module layout fingerprint: ML capsule sources move to stdlib exactly once"
 test "module layout fingerprint: literal members ignore workspace excludes" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/module-layout-fingerprint-literal-exclude";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch + "/stdlib/kept/src", true);
     fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/kept\"]\nexclude = [\"stdlib/kept\"]\n");
     fs.writeFile(scratch + "/stdlib/kept/capsule.toml", "[capsule]\nname = \"sfn/kept\"\n\n[build]\nkind = \"library\"\n");
@@ -270,13 +273,13 @@ test "module layout fingerprint: literal members ignore workspace excludes" ![io
     let shell = _freshness_fingerprint(scratch);
     let native = _native_freshness_fingerprint(scratch);
     assert shell == native;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "module layout fingerprint: missing declared entry fails closed" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/module-layout-fingerprint-missing-entry";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch + "/compiler/src", true);
     fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"compiler\"]\n");
     fs.writeFile(scratch + "/compiler/capsule.toml", "[capsule]\nname = \"sfn/compiler\"\n\n[build]\nkind = \"binary\"\nentry = \"src/missing.sfn\"\n");
@@ -287,13 +290,13 @@ test "module layout fingerprint: missing declared entry fails closed" ![io] {
     let error = process.capture_take_stderr();
     assert exit != 0;
     assert contains(error, "missing declared entry");
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "module layout fingerprint: non-runtime IR is outside the layout" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH")
         + "/module-layout-fingerprint-nonruntime-ir";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch + "/stdlib/lib/src", true);
     fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/lib\"]\n");
     fs.writeFile(scratch + "/stdlib/lib/capsule.toml", "[capsule]\nname = \"sfn/lib\"\n\n[build]\nkind = \"library\"\n");
@@ -302,7 +305,7 @@ test "module layout fingerprint: non-runtime IR is outside the layout" ![io] {
     fs.createDirectory(scratch + "/stdlib/lib/ir", true);
     fs.writeFile(scratch + "/stdlib/lib/ir/ignored.ll", "; ignored\n");
     assert _default_fingerprint(scratch) == before;
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "module layout fingerprint: missing member source fails closed" ![io] {

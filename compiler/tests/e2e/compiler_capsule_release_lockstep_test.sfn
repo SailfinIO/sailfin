@@ -1,5 +1,6 @@
 // Release-version lockstep guard for private compiler implementation capsules
 // (SFEP-0020, established with sfn/syntax in SFN-741).
+import { remove_all } from "sfn/fs";
 import { contains, find } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
@@ -25,7 +26,7 @@ fn _release_git(argv: string[], child_env: string[], cwd: string) -> string ![io
 
 fn _release_relocation_fixture(label: string, semantic_suffix: string) -> string[] ![io] {
     let root = nested_runner_scratch("capsule-release-" + label);
-    process.run(["rm", "-rf", root]);
+    assert remove_all(root);
     fs.createDirectory(root + "/capsules/sfn/probe/tests", true);
     fs.writeFile(root + "/capsules/sfn/probe/capsule.toml", "[capsule]\nname = \"sfn/probe\"\nversion = \"1.2.3\"\n\n"
         + "[build]\nentry = \"src/mod.sfn\"\nkind = \"library\"\n");
@@ -72,7 +73,7 @@ fn _release_topology_exit(fixture: string[]) -> int ![io] {
         + "/before-public", "sfn/probe", "stdlib/probe", fixture[3], "capsules/sfn/probe/tests/path_test.sfn", "stdlib/probe/tests/path_test.sfn"], child_env, root);
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
-    process.run(["rm", "-rf", root]);
+    assert remove_all(root);
     return exit;
 }
 

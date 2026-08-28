@@ -56,6 +56,7 @@
 // external tool, no shell, and a strictly stronger claim than an mtime
 // check ever made (a rewrite that preserves the timestamp would pass
 // `-newer` but not this).
+import { copy, remove_all, set_perms } from "sfn/fs";
 import { clean_runner_env, sfn_bin_abs_path } from "sfn/test";
 
 // Write a minimal two-module fixture: `main.sfn` relatively imports
@@ -225,7 +226,8 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
     let bin_b = root + "/binb";
     fs.createDirectory(work_b, true);
     fs.createDirectory(bin_b, true);
-    process.run(["cp", exe, bin_b + "/sfn-renamed"]);
+    assert copy(exe, bin_b + "/sfn-renamed");
+    assert set_perms(bin_b + "/sfn-renamed", 493);
     let rc_b = process.run_capture_cwd([bin_b + "/sfn-renamed", "check", src_dir
         + "/main.sfn"], _check_env(), work_b);
     assert rc_b == 0;
@@ -246,7 +248,7 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
         + "/build/compiler/import-context"]);
     assert rc_diff == 0;
 
-    process.run(["rm", "-rf", root]);
+    assert remove_all(root);
 }
 
 test "check staging: warm re-run is a cache hit (staged artifacts untouched)" ![io] {
@@ -300,5 +302,5 @@ test "check staging: warm re-run is a cache hit (staged artifacts untouched)" ![
     assert set_before == _join_lines(files_after);
     assert snapshot_before == _staged_snapshot(ctx, files_after);
 
-    process.run(["rm", "-rf", root]);
+    assert remove_all(root);
 }

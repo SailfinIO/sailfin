@@ -41,6 +41,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` / `sfn/strings::find` instead.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { contains, find } from "sfn/strings";
 import {
@@ -578,9 +579,9 @@ test "tls loopback: native serve ↔ native https client round-trips + verify-fa
         throw err;
     }
 
-    // Best-effort cleanup. The server itself was already killed and reaped
+    // Cleanup after the server was already killed and reaped
     // above.
-    let _rm = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }
 
 test "tls loopback: plaintext serve still round-trips (regression guard)" ![clock, io, net] {
@@ -628,5 +629,5 @@ test "tls loopback: plaintext serve still round-trips (regression guard)" ![cloc
         throw err;
     }
 
-    let _rm = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }

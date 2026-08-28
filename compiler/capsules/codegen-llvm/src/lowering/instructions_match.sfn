@@ -65,7 +65,7 @@ import {
     trim_text
 } from "../utils";
 import { lower_instruction_range } from "./instructions";
-import { allocate_block_label, lower_condition_to_i1 } from "./instructions_condition";
+import { allocate_block_label } from "./instructions_condition";
 import {
     _parse_int_from_string,
     clone_local_bindings,
@@ -73,7 +73,7 @@ import {
     extend_lifetime_regions,
     extend_mutations
 } from "./instructions_helpers";
-import { lower_match_case_condition } from "./instructions_match_condition";
+import { emit_match_guard_branch, lower_match_case_condition } from "./instructions_match_condition";
 import { emit_phi_merges_for_match, materialize_mutation_values_at_label } from "./phi";
 
 // Build a LocalBinding separately so loops never have inline struct literals
@@ -231,7 +231,8 @@ fn collect_match_structure(instructions: NativeInstruction[], start_index: int, 
                 guard: guard_text,
                 body_start: index + 1,
                 body_end: index + 1,
-                is_default: is_default_pattern(instruction.pattern)
+                is_default: is_default_pattern(instruction.pattern),
+                span: instruction.span
             };
             index += 1;
             continue;
@@ -259,7 +260,8 @@ fn finalize_match_case(case: MatchCaseStructure?, body_end: int) -> MatchCaseStr
         guard: value.guard,
         body_start: value.body_start,
         body_end: body_end,
-        is_default: value.is_default
+        is_default: value.is_default,
+        span: value.span
     };
 }
 
@@ -395,14 +397,20 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
 
     let mut test_labels: string[] = [];
     let mut body_labels: string[] = [];
+    // SFN-1168: a guarded arm needs a third block between its tag test and its
+    // body, so the payload binders the guard reads are materialized before the
+    // guard is evaluated. Allocated for every case; only guarded arms emit one.
+    let mut guard_labels: string[] = [];
     let mut index: int = 0;
     loop {
         if index >= structure.cases.length { break; }
         let test_alloc = allocate_block_label("matchcase", current_block_counter);
         let body_alloc = allocate_block_label("matchbody", test_alloc.next_counter);
+        let guard_alloc = allocate_block_label("matchguard", body_alloc.next_counter);
         test_labels.push(test_alloc.label);
         body_labels.push(body_alloc.label);
-        current_block_counter = body_alloc.next_counter;
+        guard_labels.push(guard_alloc.label);
+        current_block_counter = guard_alloc.next_counter;
         index += 1;
     }
 
@@ -444,7 +452,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
 
     let mut all_terminated: boolean = true;
     let mut has_unconditional_default: boolean = false;
-    let mut has_guarded_cases: boolean = false;
     let mut arm_mutations_list: MatchArmMutations[] = [];
 
     index = 0;
@@ -452,14 +459,9 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         if index >= structure.cases.length { break; }
         let case = structure.cases[index];
 
-        let mut guard_has_text: boolean = false;
-        if case.guard != null {
-            let guard_trimmed = trim_text(case.guard);
-            if guard_trimmed.length > 0 {
-                guard_has_text = true;
-                has_guarded_cases = true;
-            }
-        }
+        let mut guard_text: string = "";
+        if case.guard != null { guard_text = trim_text(case.guard); }
+        let guard_has_text: boolean = guard_text.length > 0;
 
         let mut failure_target: string = merge_label;
         let _mc_next = index + 1;
@@ -475,6 +477,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
             diagnostics.push(lowered_condition.diagnostics[_ci2]);
             _ci2 += 1;
         }
+        diags = extend_diag_array(diags, lowered_condition.diags);
         current_lines = lowered_condition.lines;
         current_temp = lowered_condition.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants);
@@ -526,18 +529,29 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
             }
         }
 
+        // SFN-1168: a guarded arm branches to its guard block, not straight to
+        // the body. The payload binders are materialized in that block, so the
+        // guard can reference them; the body is entered only once the guard
+        // also holds, and a failing guard falls through to the next arm.
+        let mut binder_label: string = body_labels[index];
+        if guard_has_text { binder_label = guard_labels[index]; }
+
         if lowered_condition.is_default {
             has_unconditional_default = true;
-            current_lines.push("  br label %" + body_labels[index]);
+            current_lines.push("  br label %" + binder_label);
         } else if lowered_condition.operand != null {
             current_lines.push("  br i1 " + lowered_condition.operand.value
                 + ", label %"
-                + body_labels[index]
+                + binder_label
                 + ", label %"
                 + failure_target);
+        } else if guard_has_text {
+            // A guarded wildcard (`_ if cond`) contributes no pattern test of
+            // its own; the guard alone decides whether the arm is taken.
+            current_lines.push("  br label %" + binder_label);
         } else { current_lines.push("  br label %" + failure_target); }
 
-        current_lines.push(body_labels[index] + ":");
+        current_lines.push(binder_label + ":");
 
         let mut base_locals: LocalBinding[] = clone_local_bindings(current_locals);
         let mut base_allocas: string[] = current_allocas;
@@ -807,6 +821,24 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
             }
         }
 
+        // SFN-1168: the guard is lowered here, in the guard block, now that
+        // the pattern's payload binders exist in `base_locals`. Lowering it
+        // earlier, against the pre-match locals, could not resolve them.
+        if guard_has_text {
+            let guard_emit = emit_match_guard_branch(function.name, guard_text, case.span, bindings, base_locals, body_labels[index], failure_target, current_temp, current_lines, functions, context);
+            let mut _cg1: int = 0;
+            loop {
+                if _cg1 >= guard_emit.diagnostics.length { break; }
+                diagnostics.push(guard_emit.diagnostics[_cg1]);
+                _cg1 += 1;
+            }
+            diags = extend_diag_array(diags, guard_emit.diags);
+            current_lines = guard_emit.lines;
+            current_temp = guard_emit.temp_index;
+            collected_string_constants = merge_string_constants(collected_string_constants, guard_emit.string_constants);
+            current_lines.push(body_labels[index] + ":");
+        }
+
         let body_result = lower_instruction_range(function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, try_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth
             + 1, body_labels[index]);
         let mut _ci3: int = 0;
@@ -867,14 +899,20 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         index += 1;
     }
 
+    // SFN-1168: exhaustiveness is decided per arm, not match-wide. A guarded
+    // arm already declines to record its tag above (`guard_has_text` gates both
+    // `matched_enum_tags` and `matched_union_variants`), because its guard may
+    // fail at runtime. Gating this whole computation on a match-wide
+    // `has_guarded_cases` on top of that double-counted the guard: one guarded
+    // arm suppressed the tags contributed by every *unguarded* arm, so
+    // `Ok { v } if ...` / `Ok { v }` / `Err { e }` was reported non-exhaustive
+    // and raised a spurious E1002 even though the unguarded arms cover the enum.
     let mut match_exhaustive: boolean = has_unconditional_default;
     if !match_exhaustive {
-        if !has_guarded_cases {
-            if subject_enum_info != null {
-                match_exhaustive = matched_enum_tags.length == subject_enum_info.variants.length;
-            } else if union_payload_types.length > 0 {
-                match_exhaustive = matched_union_variants.length == union_payload_types.length;
-            }
+        if subject_enum_info != null {
+            match_exhaustive = matched_enum_tags.length == subject_enum_info.variants.length;
+        } else if union_payload_types.length > 0 {
+            match_exhaustive = matched_union_variants.length == union_payload_types.length;
         }
     }
 

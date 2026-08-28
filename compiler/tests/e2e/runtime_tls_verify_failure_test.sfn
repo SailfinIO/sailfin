@@ -31,6 +31,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured state with
 // direct comparisons instead.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { contains, find } from "sfn/strings";
 import {
@@ -413,7 +414,7 @@ test "runtime tls: an untrusted server cert is rejected (verify enforced)" ![clo
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }
 
 test "runtime tls: a hostname/SAN mismatch is rejected (RFC-6125 enforced)" ![clock, io, net] {
@@ -455,7 +456,7 @@ test "runtime tls: a hostname/SAN mismatch is rejected (RFC-6125 enforced)" ![cl
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }
 
 test "runtime tls: an untrusted peer reports cert-verify, not silence" ![clock, io, net] {
@@ -494,7 +495,7 @@ test "runtime tls: an untrusted peer reports cert-verify, not silence" ![clock, 
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }
 
 test "runtime tls: an unreadable trust store reports trust-store, not cert-verify" ![clock, io, net] {
@@ -586,5 +587,5 @@ test "runtime tls: an unreadable trust store reports trust-store, not cert-verif
         return 0;
     });
 
-    let _rmd = process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
 }

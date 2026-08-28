@@ -22,6 +22,7 @@
 // fold were removed from `_prepare_runtime_sfn_object`, `beta`'s key would
 // collapse onto `alpha`'s stored entry and this leg would wrongly hit
 // instead.
+import { remove_all } from "sfn/fs";
 import { default_scratch_dir } from "sfn/test";
 
 import {
@@ -51,14 +52,12 @@ fn _ros_tmp_root(label: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
     if base.length == 0 { base = default_scratch_dir(); }
     let dir = base + "/sfn_runtime_obj_slug_wiring_test_" + label;
-    process.run(["rm", "-rf", dir]);
-    process.run(["mkdir", "-p", dir]);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
     return dir;
 }
 
-fn _ros_cleanup(path: string) ![io] {
-    process.run(["rm", "-rf", path]);
-}
+fn _ros_cleanup(path: string) ![io] { assert remove_all(path); }
 
 test "runtime-obj slug wiring: a shared entry stored under one slug is never served to a different slug" ![io] {
     let manifest_dir = _ros_tmp_root("manifest");

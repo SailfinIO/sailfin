@@ -52,6 +52,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured output with
 // `sfn/strings` predicates instead.
+import { remove_all } from "sfn/fs";
 import { contains, ends_with, find } from "sfn/strings";
 import {
     c_math_link_flags,
@@ -617,7 +618,7 @@ test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-
     // from a handler run on a worker thread.
     assert ok == 8;
 
-    let _rm = process.run(["rm", "-rf", _server_app_root()]);
+    assert remove_all(_server_app_root());
 }
 
 // Read a file if present, else "" — the server log may not exist yet if

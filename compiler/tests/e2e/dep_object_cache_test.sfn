@@ -15,8 +15,15 @@
 // `_child_env()` derives its base from `clean_runner_env` (SFN-1114) and
 // re-threads the parent cache knobs per the build-and-run isolation rule
 // (`.claude/rules/no-bash-e2e.md`).
+import { set_perms } from "sfn/fs";
 import { contains, find, split } from "sfn/strings";
-import { clean_runner_env, default_scratch_dir, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    host_is_windows,
+    sfn_bin_path,
+    skip
+} from "sfn/test";
 
 // Base env derived by subtraction via `clean_runner_env` (SFN-1114).
 // `SAILFIN_TEST_RUNTIME_OBJDIR` is pool-managed, so it is always stripped
@@ -65,19 +72,22 @@ test "test link: dep objects cached content-addressed in the shared objdir" ![io
 }
 
 test "test link: unwritable link-obj dir uses ephemeral objects" ![io] {
+    if host_is_windows() {
+        skip("Windows UCRT chmod does not deny directory writes; this POSIX permission-path test requires mode-bit enforcement");
+        return;
+    }
     let base = _scratch_base();
     let d2 = fs.mkdtemp(base + "/sfn-dep-obj-cache-b-");
     // Pre-create link-obj and make it unwritable so cache publication fails.
     let link_obj_dir = d2 + "/link-obj";
     fs.createDirectory(link_obj_dir, true);
-    let chmod_rc = process.run(["chmod", "555", link_obj_dir]);
-    assert chmod_rc == 0;
+    assert set_perms(link_obj_dir, 365);
     let env_args = _child_env(d2, d2);
     let exit = process.run_capture([sfn_bin_path(), "test", "--no-test-cache", "compiler/tests/unit/string_utils_test.sfn"], env_args);
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     // Restore before any early-return so tmp cleanup works.
-    let _chmod_back = process.run(["chmod", "755", link_obj_dir]);
+    assert set_perms(link_obj_dir, 493);
     // The suite must pass even when the shared object cache is unavailable;
     // the final link still receives objects only.
     assert exit == 0;

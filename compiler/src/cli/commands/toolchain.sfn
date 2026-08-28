@@ -7,6 +7,7 @@ import {
     Command,
     Matches,
     arg,
+    arg_variadic,
     command,
     get,
     subcommand,
@@ -30,9 +31,23 @@ fn _toolchain_install(version: string, work_root: string) -> int ![io, net] {
     return toolchain_install_to_user_store(version, versions_base, work_root);
 }
 
+// `run` is registered for help text and for usage errors only. A well-formed
+// `sfn toolchain run <version> -- <args...>` is intercepted by the early
+// selector scan in `cli/main.sfn` and dispatched before this tree is built, so
+// the trailing arguments stay opaque to *this* toolchain's parser — that is
+// what lets an older entry hand an unfamiliar command to a newer payload
+// (SFEP-0073 §3.3). The scan declines to peel three shapes, which are exactly
+// the ones that reach this tree: a flag where the version belongs (so
+// `toolchain run --help` renders this leaf's help instead of a version error),
+// a selector with no command after it (a local usage error rather than a
+// dispatch that would fetch a toolchain just to print its usage), and a missing
+// selector (which `parse()` rejects on the required positional).
 fn command_def() -> Command {
     let install_cmd = with_arg(command("install", "Download, verify, and store a pinned toolchain"), arg("version", "Toolchain version to install (e.g. 0.8.0-alpha.3)"));
-    let cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
+    let run_cmd = with_arg(command("run", "Run a command with an exact toolchain, without changing any configuration"), arg("version", "Exact toolchain version to run (e.g. 0.10.6)"));
+    let run_cmd_full = with_arg(run_cmd, arg_variadic("args", "Command and arguments to run, after a -- separator"));
+    let mut cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
+    cmd = with_subcommand(cmd, run_cmd_full);
     return with_usage(cmd, "packages", "sfn toolchain install <ver>", "install a toolchain version");
 }
 
@@ -43,13 +58,23 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         if work_root.length == 0 { work_root = "/tmp"; }
         return _toolchain_install(get(matches, "version"), work_root);
     }
+    if sub == "run" {
+        // Reached only when the early scan declined to peel this invocation,
+        // i.e. no selector followed `run`.
+        print("usage: sfn toolchain run <version> -- <command> [args...]");
+        return 2;
+    }
     print("usage: sfn toolchain install <version>");
     return 2;
 }
 
 export { command_def, run };
 
-export { toolchain_gate_or_dispatch } from "../../toolchain/dispatch";
+export {
+    toolchain_env_exact_selector,
+    toolchain_gate_or_dispatch,
+    toolchain_select_exact
+} from "../../toolchain/dispatch";
 
 export { toolchain_install_to_base, toolchain_is_valid_install_version } from "../../toolchain/install";
 

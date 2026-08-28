@@ -38,6 +38,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on the captured response
 // text with `sfn/strings::contains` instead.
+import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import {
@@ -547,8 +548,8 @@ test "serve loopback: macOS request delivery + framed behavioral round-trips" ![
         return 0;
     });
 
-    // Best-effort cleanup of the consumer trees. The server itself was
+    // Cleanup of the consumer trees after the server was
     // already killed and reaped by `with_background` on scope exit.
-    let _rm = process.run(["rm", "-rf", _app_root()]);
-    let _rmc = process.run(["rm", "-rf", _client_root()]);
+    assert remove_all(_app_root());
+    assert remove_all(_client_root());
 }
