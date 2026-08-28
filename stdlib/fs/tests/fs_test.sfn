@@ -117,7 +117,7 @@ test "fs: mkdtemp creates a unique directory with mode 0700" ![io] {
         // not get_perms), so the POSIX 0700 assertion below cannot
         // hold here. Skip loudly rather than silently pass or weaken
         // the POSIX assertion.
-        skip("Windows has no mode bits (ACL, not 0700); get_perms is a -1 stub there");
+        skip("SFN-1195: Windows uses ACLs and get_perms is a -1 stub; remove when the test can assert mkdtemp's current-user ACL contract");
     }
     // 448 = 0o700 — `mkdtemp(3)` is documented to create the dir
     // with this mode regardless of umask.

@@ -305,7 +305,7 @@ test "capsule reachability: an unreached submodule is excluded from the link" ![
     // this guard cannot observe on msvc the same way it does via ELF/Mach-O
     // `T`/`t` symbols (SFN-943; see `runtime/sfn/platform/fd_io.sfn:37-39`).
     if host_is_windows() {
-        skip("SFN-943: linked PE carries no symbol table for llvm-nm to inspect on msvc");
+        skip("SFN-943: linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts unreached-module exclusion");
     }
     let out_bin = _bin_path("unreached");
     let build = _build_consumer(out_bin, []);
@@ -332,7 +332,7 @@ test "capsule reachability: an unreached submodule is excluded from the link" ![
 test "capsule reachability: a declared-but-never-imported dependency contributes nothing" ![io] {
     // See the Windows skip rationale on Test 1 above (SFN-943).
     if host_is_windows() {
-        skip("SFN-943: linked PE carries no symbol table for llvm-nm to inspect on msvc");
+        skip("SFN-943: linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts unused-dependency exclusion");
     }
     let out_bin = _bin_path("neverused");
     let build = _build_consumer(out_bin, []);
@@ -355,7 +355,7 @@ test "capsule reachability: a declared-but-never-imported dependency contributes
 test "capsule reachability: the disable toggle restores the unfiltered set" ![io] {
     // See the Windows skip rationale on Test 1 above (SFN-943).
     if host_is_windows() {
-        skip("SFN-943: linked PE carries no symbol table for llvm-nm to inspect on msvc");
+        skip("SFN-943: linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts the disabled filter restores the full set");
     }
     let out_bin = _bin_path("toggle-off");
     let build = _build_consumer(out_bin, ["SAILFIN_CAPSULE_FILTER=off"]);

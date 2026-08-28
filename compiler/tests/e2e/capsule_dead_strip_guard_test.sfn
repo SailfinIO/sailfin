@@ -160,7 +160,7 @@ test "dead-strip guard: used capsule symbol (abs) is present in the linked binar
     // `-dead_strip` flags this guard pins — see `runtime/sfn/platform/
     // fd_io.sfn:37-39`, SFN-943), so `llvm-nm` has nothing to check here.
     if host_is_windows() {
-        skip("SFN-943: msvc dead-strip is /OPT:REF, not the POSIX flags this guard pins; the linked PE carries no symbol table for llvm-nm to inspect");
+        skip("SFN-943: msvc dead-strip is /OPT:REF and the linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts used-symbol retention");
     }
     let out_bin = _bin_path("present");
     let build_exit = _build_consumer(out_bin);
@@ -179,7 +179,7 @@ test "dead-strip guard: unreferenced capsule symbols (clamp, mean) are stripped"
     // test above (SFN-943): this guard pins a POSIX-only dead-strip
     // mechanism, and the linked PE has no symbol table to inspect either way.
     if host_is_windows() {
-        skip("SFN-943: msvc dead-strip is /OPT:REF, not the POSIX flags this guard pins; the linked PE carries no symbol table for llvm-nm to inspect");
+        skip("SFN-943: msvc dead-strip is /OPT:REF and the linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts unused-symbol removal");
     }
     let out_bin = _bin_path("strip");
     let build_exit = _build_consumer(out_bin);
