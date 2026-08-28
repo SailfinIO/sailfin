@@ -1,7 +1,7 @@
 # Status
 
 Updated: 2026-08-28 (SFN-1065, SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
-SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726). Seed pinned to `0.10.5` (`bootstrap.toml`
+SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726, SFN-916). Seed pinned to `0.10.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -908,6 +908,27 @@ here.
   `E0505` — both reject in `check` and `build` before lowering, so a truncated
   body can no longer silently lose `main` and surface as a missing-`main`
   linker ICE (SFN-384).
+- **LLVM lowering retires the legacy diagnostics channel (SFN-916, SFEP-0061
+  §5.2 S5b).** `sfn/codegen-llvm` and `sfn/ir` diagnostics now travel
+  exclusively on the structured `diags: LoweringDiagnostic[]` channel; the
+  build gate reads `severity` (`has_error_diag`) instead of scanning for a
+  `[fatal]` substring. Thirteen carriers that had only the string channel
+  gained `diags` (GEP-append discipline,
+  `docs/rca/2026-04-18-reexport-diagnostic-gep.md`), including three IR
+  parse-result carriers whose malformed-layout `E1005` rejections previously
+  reached the gate only as strings, and two converters that silently dropped
+  structured diagnostics now forward them. `diagnostics: string[]` is removed
+  from 64 struct declarations; the reconciliation that used to backfill the
+  gate (`append_missing_legacy_lowering_diags`, the legacy fallback branch,
+  and the string-channel size guards) is deleted with the channel, leaving
+  `retain_error_diags`/`extend_diag_array_checked` as the sole bound on the
+  channel the gate reads. Untagged `"llvm lowering: ..."` sites map to
+  `warning` severity, so the gate refuses exactly what it refused before.
+  `diag_to_legacy_string` survives as the renderer behind
+  `render_lowering_error_diag`, pinned by
+  `compiler/tests/unit/diagnostic_test.sfn`. `sfn/codegen`'s `emit_native`
+  diagnostics remain on the string channel — a separate stage of the same
+  SFEP.
 - **Import-resolution checking (#1953).** `sfn check` now diagnoses a
   relative `import { ... } from "./x"`/`"../x"` that resolves to no module
   on disk (`E0430`) and a named specifier defined nowhere in the staged
