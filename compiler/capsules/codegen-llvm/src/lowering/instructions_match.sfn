@@ -169,7 +169,6 @@ fn resolve_match_subject_call_annotation(subject_expression: string, functions: 
 }
 
 fn collect_match_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> MatchStructure {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut cases: MatchCaseStructure[] = [];
     let mut current_case: MatchCaseStructure? = null;
@@ -179,18 +178,11 @@ fn collect_match_structure(instructions: NativeInstruction[], start_index: int, 
     if limit > instructions.length { limit = instructions.length; }
     loop {
         if index >= limit {
-            diagnostics.push("llvm lowering: unterminated `.match` in `"
-                + function_name
-                + "`");
             if current_case != null {
                 let finished = finalize_match_case(current_case, limit);
                 cases = append_match_case(cases, finished);
             }
-            return MatchStructure {
-                cases: cases,
-                end_index: limit - 1,
-                diagnostics: diagnostics
-            };
+            return MatchStructure { cases: cases, end_index: limit - 1 };
         }
         let instruction = instructions[index];
         if instruction.variant == "Match" {
@@ -205,11 +197,7 @@ fn collect_match_structure(instructions: NativeInstruction[], start_index: int, 
                     cases = append_match_case(cases, finished);
                     current_case = null;
                 }
-                return MatchStructure {
-                    cases: cases,
-                    end_index: index,
-                    diagnostics: diagnostics
-                };
+                return MatchStructure { cases: cases, end_index: index };
             }
             depth -= 1;
             index += 1;
@@ -240,11 +228,7 @@ fn collect_match_structure(instructions: NativeInstruction[], start_index: int, 
         index += 1;
     }
 
-    return MatchStructure {
-        cases: cases,
-        end_index: limit,
-        diagnostics: diagnostics
-    };
+    return MatchStructure { cases: cases, end_index: limit };
 }
 
 fn append_match_case(cases: MatchCaseStructure[], value: MatchCaseStructure) -> MatchCaseStructure[] {
@@ -273,7 +257,6 @@ fn is_default_pattern(pattern: string) -> boolean {
 }
 
 fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let base_lines_snapshot = copy_string_array(lines);
@@ -290,31 +273,16 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
-    let mut _ci0: int = 0;
-    loop {
-        if _ci0 >= structure.diagnostics.length { break; }
-        diagnostics.push(structure.diagnostics[_ci0]);
-        _ci0 += 1;
-    }
 
     let subject_instruction = function.instructions[start_index];
     let subject_name = extract_simple_identifier(subject_instruction.expression);
     let subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions, context, "");
-    let mut _ci1: int = 0;
-    loop {
-        if _ci1 >= subject_result.diagnostics.length { break; }
-        diagnostics.push(subject_result.diagnostics[_ci1]);
-        _ci1 += 1;
-    }
     diags = extend_diag_array(diags, subject_result.diags);
     current_lines = subject_result.lines;
     current_temp = subject_result.temp_index;
     collected_string_constants = merge_string_constants(collected_string_constants, subject_result.string_constants);
 
     if subject_result.operand == null {
-        diagnostics.push("llvm lowering: unable to lower match subject in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -322,7 +290,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
             bindings: base_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -369,8 +336,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
     let mut matched_enum_tags: int[] = [];
 
     if structure.cases.length == 0 {
-        diagnostics.push("llvm lowering: match without cases in `" + function.name
-            + "`");
         let merge_alloc = allocate_block_label("matchmerge", current_block_counter);
         let merge_label = merge_alloc.label;
         current_block_counter = merge_alloc.next_counter;
@@ -383,7 +348,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
             bindings: base_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -471,12 +435,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
 
         current_lines.push(test_labels[index] + ":");
         let lowered_condition = lower_match_case_condition(function.name, subject_operand, subject_type_annotation, case, bindings, current_locals, current_temp, current_lines, functions, context);
-        let mut _ci2: int = 0;
-        loop {
-            if _ci2 >= lowered_condition.diagnostics.length { break; }
-            diagnostics.push(lowered_condition.diagnostics[_ci2]);
-            _ci2 += 1;
-        }
         diags = extend_diag_array(diags, lowered_condition.diags);
         current_lines = lowered_condition.lines;
         current_temp = lowered_condition.temp_index;
@@ -826,12 +784,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         // earlier, against the pre-match locals, could not resolve them.
         if guard_has_text {
             let guard_emit = emit_match_guard_branch(function.name, guard_text, case.span, bindings, base_locals, body_labels[index], failure_target, current_temp, current_lines, functions, context);
-            let mut _cg1: int = 0;
-            loop {
-                if _cg1 >= guard_emit.diagnostics.length { break; }
-                diagnostics.push(guard_emit.diagnostics[_cg1]);
-                _cg1 += 1;
-            }
             diags = extend_diag_array(diags, guard_emit.diags);
             current_lines = guard_emit.lines;
             current_temp = guard_emit.temp_index;
@@ -841,12 +793,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
 
         let body_result = lower_instruction_range(function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, try_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth
             + 1, body_labels[index]);
-        let mut _ci3: int = 0;
-        loop {
-            if _ci3 >= body_result.diagnostics.length { break; }
-            diagnostics.push(body_result.diagnostics[_ci3]);
-            _ci3 += 1;
-        }
         diags = extend_diag_array(diags, body_result.diags);
         lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
         current_lines = extend_string_array(current_lines, body_result.lines);
@@ -950,7 +896,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         bindings: merged_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
-        diagnostics: diagnostics,
         diags: diags,
         terminated: terminated,
         next_local_id: current_next_local,

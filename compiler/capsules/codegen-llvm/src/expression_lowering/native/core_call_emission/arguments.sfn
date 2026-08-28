@@ -5,7 +5,12 @@ import { LoweringDiagnostic } from "sfn/ir";
 
 import { trace_log, trace_lowering } from "../../../lowering_debug_state";
 import { LLVMOperand } from "../../../types";
-import { extend_string_array, number_to_string } from "../../../utils";
+import {
+    extend_diag_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    number_to_string
+} from "../../../utils";
 import { coerce_operand_to_type_with_source } from "../core_operands/dispatch";
 import { find_substring_from } from "../core_text";
 
@@ -13,32 +18,32 @@ struct CoercedCallState {
     lines: string[];
     temp_index: int;
     operands: LLVMOperand[];
-    diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
-// Slice E.1.5 (#528): if the wrapped diagnostics list contains the ABI
-// primitive mismatch sentinel, return the `llvm lowering [fatal]: ` prefix
-// so the location-aware follow-up message also escalates to fatal (the
-// emit-level entrypoint scans for `[fatal]` and refuses to write IR).
-// Returns the plain `llvm lowering: ` prefix otherwise so non-ABI coercion
-// failures keep their existing tier.
-fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
+// Slice E.1.5 (#528): a coercion that failed on the ABI primitive mismatch
+// escalates the location-aware follow-up message to error severity; other
+// coercion failures keep their advisory tier.
+//
+// SFN-916 reads the sentinel off the structured channel rather than the
+// legacy string. Both producers in `core_operands/dispatch.sfn` push an
+// `E1009` diag carrying the same sentinel in `message`, so this matches
+// exactly what the string scan matched, and survives the string channel.
+fn _has_abi_mismatch_diag(diags: LoweringDiagnostic[]) -> boolean {
     let mut idx: int = 0;
     loop {
-        if idx >= diagnostics.length { break; }
-        let diag = diagnostics[idx];
-        if find_substring_from(diag, "ABI primitive mismatch", 0) >= 0 {
-            return "llvm lowering [fatal]: ";
+        if idx >= diags.length { break; }
+        if find_substring_from(diags[idx].message, "ABI primitive mismatch", 0) >= 0 {
+            return true;
         }
         idx += 1;
     }
-    return "llvm lowering: ";
+    return false;
 }
 
-fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[]) -> CoercedCallState {
+fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, current_temp: int, current_lines: string[], diags: LoweringDiagnostic[]) -> CoercedCallState {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
-    let mut result_diagnostics = diagnostics;
     let mut result_diags = diags;
     let _trace_ccl = trace_lowering();
 
@@ -83,13 +88,15 @@ fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand
                 source_type = operand_source_types[index];
             }
             let coerced = coerce_operand_to_type_with_source(operand, source_type, target_type, result_temp, result_lines, false, null);
-            result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
+            result_diags = extend_diag_array(result_diags, coerced.diags);
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
             if coerced.operand == null {
-                let diagnostic_prefix = _abi_mismatch_diagnostic_prefix(coerced.diagnostics);
-                let diagnostic = diagnostic_prefix
-                    + "unable to coerce argument "
+                let mut diagnostic_prefix: string = "llvm lowering: ";
+                if _has_abi_mismatch_diag(coerced.diags) {
+                    diagnostic_prefix = "llvm lowering [fatal]: ";
+                }
+                let diagnostic_message = "unable to coerce argument "
                     + number_to_string(index)
                     + " (expected `"
                     + target_type
@@ -98,10 +105,13 @@ fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand
                     + "`) for call to `"
                     + trimmed_target
                     + "`: passing original operand";
+                let diagnostic = diagnostic_prefix + diagnostic_message;
                 if diagnostic_prefix == "llvm lowering [fatal]: " {
                     trace_log(diagnostic);
+                    result_diags.push(lowering_error_diag("E1009", diagnostic_message, null));
+                } else {
+                    result_diags.push(lowering_warning_diag("E1006", diagnostic_message, null));
                 }
-                result_diagnostics.push(diagnostic);
                 coerced_operands.push(operand);
             } else { coerced_operands.push(coerced.operand); }
         }
@@ -117,7 +127,7 @@ fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand
         lines: result_lines,
         temp_index: result_temp,
         operands: coerced_operands,
-        diagnostics: result_diagnostics
+        diags: result_diags
     };
 }
 

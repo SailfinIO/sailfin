@@ -155,17 +155,12 @@ fn normalize_import_module_path(value: string) -> string {
 // =============================================================================
 fn apply_layout_manifest_to_module(structs: NativeStruct[], enums: NativeEnum[], manifest: LayoutManifest?) -> LayoutManifestApplication {
     if manifest == null {
-        return LayoutManifestApplication {
-            structs: structs,
-            enums: enums,
-            diagnostics: []
-        };
+        return LayoutManifestApplication { structs: structs, enums: enums };
     }
     return apply_layout_manifest_entries(structs, enums, manifest);
 }
 
 fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], manifest: LayoutManifest) -> LayoutManifestApplication {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
 
     let mut updated_structs: NativeStruct[] = structs;
@@ -174,10 +169,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
         if struct_index >= manifest.structs.length { break; }
         let layout_struct = manifest.structs[struct_index];
         let target_index = find_struct_index(updated_structs, layout_struct.name);
-        if target_index < 0 {
-            diagnostics.push("layout manifest: struct `" + layout_struct.name
-                + "` missing from native module");
-        } else {
+        if target_index < 0 { } else {
             let target = updated_structs[target_index];
             let replaced = NativeStruct {
                 name: target.name,
@@ -197,10 +189,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
         if enum_index >= manifest.enums.length { break; }
         let layout_enum = manifest.enums[enum_index];
         let target_index = find_enum_index(updated_enums, layout_enum.name);
-        if target_index < 0 {
-            diagnostics.push("layout manifest: enum `" + layout_enum.name
-                + "` missing from native module");
-        } else {
+        if target_index < 0 { } else {
             let target = updated_enums[target_index];
             let replaced = NativeEnum {
                 name: target.name,
@@ -215,8 +204,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
 
     return LayoutManifestApplication {
         structs: updated_structs,
-        enums: updated_enums,
-        diagnostics: diagnostics
+        enums: updated_enums
     };
 }
 

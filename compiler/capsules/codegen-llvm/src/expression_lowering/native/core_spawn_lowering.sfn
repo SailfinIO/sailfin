@@ -23,7 +23,7 @@ import {
 } from "../../types";
 import {
     ends_with,
-    extend_string_array,
+    extend_diag_array,
     lowering_error_diag,
     lowering_warning_diag
 } from "../../utils";
@@ -45,7 +45,6 @@ import {
 // behaviour is identical; each `let` here lives in its own function scope
 // instead of accumulating into `lower_expression`'s 240+-local frame.
 fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let diagnostics: string[] = [];
     let diags: LoweringDiagnostic[] = [];
     let colon_pos = index_of(stripped, ":");
     let space_pos = index_of(stripped, " ");
@@ -82,7 +81,6 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
     let fn_ptr_type = fn_ret_llvm + " ()*";
     let mut spawn_lines: string[] = lines;
     let mut spawn_temp: int = temp_index;
-    let mut spawn_diag: string[] = diagnostics;
     let mut spawn_diags = diags;
     let empty_spawn_constants: StringConstant[] = [];
     let mut have_operand: boolean = false;
@@ -90,9 +88,9 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
     let mut op_value: string = "";
     if spawn_operand_text.length > 0 {
         let lowered_op = lower_expression(spawn_operand_text, bindings, locals, spawn_temp, spawn_lines, functions, context, "");
-        spawn_diag = extend_string_array(spawn_diag, lowered_op.diagnostics);
         spawn_lines = lowered_op.lines;
         spawn_temp = lowered_op.temp_index;
+        spawn_diags = extend_diag_array(spawn_diags, lowered_op.diags);
         if lowered_op.operand != null {
             let raw_op = lowered_op.operand;
             op_llvm_type = raw_op.llvm_type;
@@ -104,12 +102,10 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
         let message = "spawn:<kind>: could not lower operand for `" + stripped
             + "`";
         spawn_diags.push(lowering_warning_diag("E1006", message, null));
-        spawn_diag.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: spawn_lines,
             temp_index: spawn_temp,
             operand: null,
-            diagnostics: spawn_diag,
             string_constants: empty_spawn_constants,
             diags: spawn_diags
         };
@@ -182,7 +178,6 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
         lines: spawn_lines,
         temp_index: spawn_temp,
         operand: spawn_operand,
-        diagnostics: spawn_diag,
         string_constants: empty_spawn_constants,
         diags: spawn_diags
     };
@@ -198,12 +193,10 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
 // else fails closed with `E1010` rather than evaluating the callee
 // synchronously and casting its return value into a task pointer.
 fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let diagnostics: string[] = [];
     let diags: LoweringDiagnostic[] = [];
     let spawn_op_text = trim_text(substring(stripped, 6, stripped.length));
     let mut spawn2_lines: string[] = lines;
     let mut spawn2_temp: int = temp_index;
-    let mut spawn2_diag: string[] = diagnostics;
     let mut spawn2_diags = diags;
     let empty_spawn2_constants: StringConstant[] = [];
 
@@ -272,7 +265,6 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
                         lines: spawn2_lines,
                         temp_index: spawn2_temp,
                         operand: spawn2_operand,
-                        diagnostics: spawn2_diag,
                         string_constants: empty_spawn2_constants,
                         diags: spawn2_diags
                     };
@@ -286,12 +278,10 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
         + "named function or an inline `fn` literal can be spawned "
         + "(see E0842)";
     spawn2_diags.push(lowering_error_diag("E1010", message, null));
-    spawn2_diag.push("llvm lowering [fatal]: " + message);
     return ExpressionResult {
         lines: spawn2_lines,
         temp_index: spawn2_temp,
         operand: null,
-        diagnostics: spawn2_diag,
         string_constants: empty_spawn2_constants,
         diags: spawn2_diags
     };

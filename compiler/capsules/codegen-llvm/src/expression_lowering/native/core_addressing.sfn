@@ -17,7 +17,6 @@ import { find_parameter_binding } from "./core_bindings";
 import { find_local_binding } from "./core_scopes";
 
 fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
-    let mut diagnostics = parse.diagnostics;
     let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -25,7 +24,6 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -36,12 +34,10 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
             + target
             + "`)";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -56,7 +52,6 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
             lines: lines,
             temp_index: temp_index,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -66,24 +61,20 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
         let message = "cannot take raw address of parameter `" + target
             + "` yet";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
     }
     let message = "&raw target `" + target + "` is not a local";
     diags.push(lowering_warning_diag("E1006", message, null));
-    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: empty_constants,
         diags: diags
     };

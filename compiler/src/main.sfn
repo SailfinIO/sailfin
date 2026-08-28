@@ -109,8 +109,8 @@ fn _drain_llvm_lowering_traces() ![io] {
     if buffered.length > 0 { print.err(buffered); }
 }
 
-fn _print_fatal_lowering_diagnostics(diagnostics: string[], diags: LoweringDiagnostic[]) ![io] {
-    let lines = fatal_lowering_diagnostic_lines(diagnostics, diags);
+fn _print_fatal_lowering_diagnostics(diags: LoweringDiagnostic[]) ![io] {
+    let lines = fatal_lowering_diagnostic_lines(diags);
     let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
@@ -124,7 +124,6 @@ fn _load_llvm_import_context(native_text: string, module_name: string, context_r
         return ImportedModuleContext {
             manifests: [],
             native_texts: [],
-            diagnostics: [],
             module_aliases: [],
             implicit_symbols: []
         };
@@ -138,7 +137,6 @@ fn _load_llvm_import_context_with_implicit(native_text: string, module_name: str
         return ImportedModuleContext {
             manifests: [],
             native_texts: [],
-            diagnostics: [],
             module_aliases: [],
             implicit_symbols: implicit_symbols
         };
@@ -149,9 +147,9 @@ fn _load_llvm_import_context_with_implicit(native_text: string, module_name: str
     return context;
 }
 
-fn _llvm_import_context_from_loaded_data(native_text: string, module_name: string, context_root: string, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> ImportedModuleContext ![io] {
+fn _llvm_import_context_from_loaded_data(native_text: string, module_name: string, context_root: string, imported_manifests: LayoutManifest[], imported_native_texts: string[]) -> ImportedModuleContext ![io] {
     let parsed = parse_native_artifact(native_text);
-    return imported_module_context_from_loaded_data(parsed.imports, module_name, context_root, imported_manifests, imported_native_texts, imported_diagnostics);
+    return imported_module_context_from_loaded_data(parsed.imports, module_name, context_root, imported_manifests, imported_native_texts);
 }
 
 fn _load_llvm_import_context_from_lines(native_lines: string[], module_name: string, context_root: string) -> ImportedModuleContext ![io] {
@@ -344,7 +342,7 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
     _drain_llvm_lowering_traces();
     if !generated.ok {
         if has_error_diag(generated.diags) {
-            _print_fatal_lowering_diagnostics(generated.diagnostics, generated.diags);
+            _print_fatal_lowering_diagnostics(generated.diags);
         } else if generated.failure_message.length > 0 {
             print.err(generated.failure_message);
         }
@@ -633,9 +631,8 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
         }
     }
 
-    let empty_diagnostics: string[] = [];
     let parsed_native = parse_native_artifact(native_text);
-    let import_context = imported_module_context_from_loaded_data_with_implicit(parsed_native.imports, module_name, import_context_root(""), imported_manifests, imported_native_texts, empty_diagnostics, implicit_symbols);
+    let import_context = imported_module_context_from_loaded_data_with_implicit(parsed_native.imports, module_name, import_context_root(""), imported_manifests, imported_native_texts, implicit_symbols);
     let generated = lower_llvm_for_tests_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
     _drain_llvm_lowering_traces();
     if !_publish_llvm_artifact(generated, out_path, "test llvm: wrote truncated IR to "
@@ -825,7 +822,7 @@ fn _publish_llvm_artifact(result: LLVMArtifactResult, out_path: string, publicat
     if !result.ok {
         let fatal = has_error_diag(result.diags);
         if fatal {
-            _print_fatal_lowering_diagnostics(result.diagnostics, result.diags);
+            _print_fatal_lowering_diagnostics(result.diags);
             if fs.exists(out_path) { fs.deleteFile(out_path); }
         } else if result.failure_message.length > 0 {
             print.err(result.failure_message);

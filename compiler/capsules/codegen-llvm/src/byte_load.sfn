@@ -48,7 +48,7 @@ import {
     TypeContext
 } from "./types";
 import {
-    extend_string_array,
+    extend_diag_array,
     lowering_error_diag,
     lowering_warning_diag,
     number_to_string,
@@ -71,7 +71,6 @@ fn is_byte_load_builtin(name: string) -> boolean {
 // single-byte load + zext triple. Returns an `ExpressionResult` whose
 // `operand` is the zero-extended i64 byte value.
 fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -87,12 +86,10 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
         diags.push(lowering_error_diag("E0806", message, null));
         let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
-        diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -100,20 +97,18 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
 
     let addr_text = trim_text(arguments[0]);
     let addr_lowered = lower_expression(addr_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
-    diagnostics = extend_string_array(diagnostics, addr_lowered.diagnostics);
     collected_strings = merge_string_constants(collected_strings, addr_lowered.string_constants);
     current_lines = addr_lowered.lines;
     current_temp = addr_lowered.temp_index;
+    diags = extend_diag_array(diags, addr_lowered.diags);
 
     if addr_lowered.operand == null {
         let message = "load_byte failed to lower address argument";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -128,12 +123,10 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
         diags.push(lowering_error_diag("E0806", message, null));
         let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
-        diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_strings,
             diags: diags
         };
@@ -157,7 +150,6 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
         lines: current_lines,
         temp_index: current_temp,
         operand: LLVMOperand { llvm_type: "i64", value: result_name },
-        diagnostics: diagnostics,
         string_constants: collected_strings,
         diags: diags
     };

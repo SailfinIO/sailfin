@@ -15,7 +15,6 @@ import {
     TypeContext
 } from "../../types";
 import {
-    append_string,
     is_effect_delimiter,
     is_identifier_part_char,
     is_identifier_start_char,
@@ -26,15 +25,13 @@ import { map_primitive_type } from "./core_type_mapping";
 
 fn parse_borrow_expression(expression: string) -> BorrowParseResult {
     let trimmed = trim_text(expression);
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return BorrowParseResult {
             recognized: false,
             success: false,
             target: "",
-            mutable: false,
-            diagnostics: diagnostics
+            mutable: false
         };
     }
     // Support both prefix borrows (`&x`, `&mut x`) and the historical built-in
@@ -49,8 +46,7 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
                 recognized: false,
                 success: false,
                 target: "",
-                mutable: false,
-                diagnostics: diagnostics
+                mutable: false
             };
         }
         is_prefix_form = true;
@@ -69,8 +65,7 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
                 recognized: false,
                 success: false,
                 target: "",
-                mutable: false,
-                diagnostics: diagnostics
+                mutable: false
             };
         }
         let mut _if116: boolean = false;
@@ -81,8 +76,7 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
                 recognized: false,
                 success: false,
                 target: "",
-                mutable: false,
-                diagnostics: diagnostics
+                mutable: false
             };
         }
         remainder = after_keyword;
@@ -97,34 +91,23 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
         }
     }
     if remainder.length == 0 {
-        let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
         return BorrowParseResult {
             recognized: true,
             success: false,
             target: "",
-            mutable: mutable_flag,
-            diagnostics: issue
+            mutable: mutable_flag
         };
     }
 
     if remainder.length > 0 {
         if substring(remainder, 0, 1) == "(" {
             let argument_parse = extract_borrow_argument(remainder);
-            let mut messages: string[] = diagnostics;
-            let mut messages_diags = diags;
-            let mut _ci0: int = 0;
-            loop {
-                if _ci0 >= argument_parse.diagnostics.length { break; }
-                messages.push(argument_parse.diagnostics[_ci0]);
-                _ci0 += 1;
-            }
             if !argument_parse.success {
                 return BorrowParseResult {
                     recognized: true,
                     success: false,
                     target: "",
-                    mutable: mutable_flag,
-                    diagnostics: messages
+                    mutable: mutable_flag
                 };
             }
             let mut argument_text: string = argument_parse.argument;
@@ -137,13 +120,11 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
                 }
             }
             if argument_text.length == 0 {
-                messages.push("llvm lowering: borrow expression missing target");
                 return BorrowParseResult {
                     recognized: true,
                     success: false,
                     target: "",
-                    mutable: mutable_flag,
-                    diagnostics: messages
+                    mutable: mutable_flag
                 };
             }
             if !is_valid_borrow_target(argument_text) {
@@ -151,16 +132,14 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
                     recognized: false,
                     success: false,
                     target: "",
-                    mutable: mutable_flag,
-                    diagnostics: diagnostics
+                    mutable: mutable_flag
                 };
             }
             return BorrowParseResult {
                 recognized: true,
                 success: true,
                 target: argument_text,
-                mutable: mutable_flag,
-                diagnostics: messages
+                mutable: mutable_flag
             };
         }
     }
@@ -171,8 +150,7 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
             recognized: false,
             success: false,
             target: "",
-            mutable: mutable_flag,
-            diagnostics: diagnostics
+            mutable: mutable_flag
         };
     }
     if !is_valid_borrow_target(simple_parse.argument) {
@@ -180,21 +158,18 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
             recognized: false,
             success: false,
             target: "",
-            mutable: mutable_flag,
-            diagnostics: diagnostics
+            mutable: mutable_flag
         };
     }
     return BorrowParseResult {
         recognized: true,
         success: true,
         target: simple_parse.argument,
-        mutable: mutable_flag,
-        diagnostics: diagnostics
+        mutable: mutable_flag
     };
 }
 
 fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut depth: int = 0;
     let mut index: int = 0;
@@ -209,12 +184,7 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
         }
         if ch == ")" {
             if depth == 0 {
-                diagnostics.push("llvm lowering: borrow expression missing opening `(`");
-                return BorrowArgumentParse {
-                    success: false,
-                    argument: "",
-                    diagnostics: diagnostics
-                };
+                return BorrowArgumentParse { success: false, argument: "" };
             }
             depth -= 1;
             let current_index = index;
@@ -228,43 +198,24 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
         index += 1;
     }
     if closing_index < 0 {
-        diagnostics.push("llvm lowering: borrow expression missing closing `)`");
-        return BorrowArgumentParse {
-            success: false,
-            argument: "",
-            diagnostics: diagnostics
-        };
+        return BorrowArgumentParse { success: false, argument: "" };
     }
     let inner = substring(text, 1, closing_index);
     let remainder = trim_text(substring(text, closing_index + 1, text.length));
     if remainder.length > 0 {
-        diagnostics.push("llvm lowering: borrow expression trailing content `"
-            + remainder
-            + "`");
-        return BorrowArgumentParse {
-            success: false,
-            argument: "",
-            diagnostics: diagnostics
-        };
+        return BorrowArgumentParse { success: false, argument: "" };
     }
     return BorrowArgumentParse {
         success: true,
-        argument: trim_text(inner),
-        diagnostics: diagnostics
+        argument: trim_text(inner)
     };
 }
 
 fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
-        diagnostics.push("llvm lowering: borrow expression missing target");
-        return BorrowArgumentParse {
-            success: false,
-            argument: "",
-            diagnostics: diagnostics
-        };
+        return BorrowArgumentParse { success: false, argument: "" };
     }
     let mut index: int = 0;
     loop {
@@ -275,29 +226,13 @@ fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
     }
     let target = trim_text(substring(trimmed, 0, index));
     if target.length == 0 {
-        diagnostics.push("llvm lowering: borrow expression missing target");
-        return BorrowArgumentParse {
-            success: false,
-            argument: "",
-            diagnostics: diagnostics
-        };
+        return BorrowArgumentParse { success: false, argument: "" };
     }
     let remainder = trim_text(substring(trimmed, index, trimmed.length));
     if remainder.length > 0 {
-        diagnostics.push("llvm lowering: borrow expression trailing content `"
-            + remainder
-            + "`");
-        return BorrowArgumentParse {
-            success: false,
-            argument: target,
-            diagnostics: diagnostics
-        };
+        return BorrowArgumentParse { success: false, argument: target };
     }
-    return BorrowArgumentParse {
-        success: true,
-        argument: target,
-        diagnostics: diagnostics
-    };
+    return BorrowArgumentParse { success: true, argument: target };
 }
 
 fn is_valid_borrow_target(text: string) -> boolean {
@@ -322,7 +257,6 @@ fn is_valid_borrow_target(text: string) -> boolean {
 }
 
 fn parse_ternary_expression(text: string) -> TernaryParseResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(text);
 
@@ -331,8 +265,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
             success: false,
             condition: "",
             true_value: "",
-            false_value: "",
-            diagnostics: diagnostics
+            false_value: ""
         };
     }
 
@@ -441,19 +374,16 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
             success: false,
             condition: "",
             true_value: "",
-            false_value: "",
-            diagnostics: diagnostics
+            false_value: ""
         };
     }
 
     if question_index >= colon_index {
-        diagnostics.push("llvm lowering: malformed ternary expression - `:` before `?`");
         return TernaryParseResult {
             success: false,
             condition: "",
             true_value: "",
-            false_value: "",
-            diagnostics: diagnostics
+            false_value: ""
         };
     }
 
@@ -462,33 +392,27 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
     let false_value = trim_text(substring(trimmed, colon_index + 1, trimmed.length));
 
     if condition.length == 0 {
-        diagnostics.push("llvm lowering: ternary expression missing condition");
         return TernaryParseResult {
             success: false,
             condition: "",
             true_value: "",
-            false_value: "",
-            diagnostics: diagnostics
+            false_value: ""
         };
     }
     if true_value.length == 0 {
-        diagnostics.push("llvm lowering: ternary expression missing true branch value");
         return TernaryParseResult {
             success: false,
             condition: "",
             true_value: "",
-            false_value: "",
-            diagnostics: diagnostics
+            false_value: ""
         };
     }
     if false_value.length == 0 {
-        diagnostics.push("llvm lowering: ternary expression missing false branch value");
         return TernaryParseResult {
             success: false,
             condition: "",
             true_value: "",
-            false_value: "",
-            diagnostics: diagnostics
+            false_value: ""
         };
     }
 
@@ -496,48 +420,41 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
         success: true,
         condition: condition,
         true_value: true_value,
-        false_value: false_value,
-        diagnostics: diagnostics
+        false_value: false_value
     };
 }
 
 fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
     let trimmed = trim_text(text);
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return RawAddressParseResult {
             recognized: false,
             success: false,
-            target: "",
-            diagnostics: diagnostics
+            target: ""
         };
     }
     if !starts_with(trimmed, "&") {
         return RawAddressParseResult {
             recognized: false,
             success: false,
-            target: "",
-            diagnostics: diagnostics
+            target: ""
         };
     }
     // Support `&raw x` and `& raw x`.
     if starts_with(trimmed, "&raw") {
         let remainder = trim_text(substring(trimmed, 4, trimmed.length));
         if remainder.length == 0 {
-            diagnostics.push("llvm lowering: &raw expression missing target");
             return RawAddressParseResult {
                 recognized: true,
                 success: false,
-                target: "",
-                diagnostics: diagnostics
+                target: ""
             };
         }
         return RawAddressParseResult {
             recognized: true,
             success: true,
-            target: remainder,
-            diagnostics: diagnostics
+            target: remainder
         };
     }
     if starts_with(trimmed, "&") {
@@ -545,27 +462,23 @@ fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
         if starts_with(after_amp, "raw") {
             let remainder = trim_text(substring(after_amp, 3, after_amp.length));
             if remainder.length == 0 {
-                diagnostics.push("llvm lowering: &raw expression missing target");
                 return RawAddressParseResult {
                     recognized: true,
                     success: false,
-                    target: "",
-                    diagnostics: diagnostics
+                    target: ""
                 };
             }
             return RawAddressParseResult {
                 recognized: true,
                 success: true,
-                target: remainder,
-                diagnostics: diagnostics
+                target: remainder
             };
         }
     }
     return RawAddressParseResult {
         recognized: false,
         success: false,
-        target: "",
-        diagnostics: diagnostics
+        target: ""
     };
 }
 
@@ -629,15 +542,13 @@ fn _cast_annotation_has_binary_continuation(annotation: string) -> boolean {
 
 fn parse_cast_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return CastParseResult {
             recognized: false,
             success: false,
             value: "",
-            type_annotation: "",
-            diagnostics: diagnostics
+            type_annotation: ""
         };
     }
 
@@ -770,8 +681,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             recognized: false,
             success: false,
             value: "",
-            type_annotation: "",
-            diagnostics: diagnostics
+            type_annotation: ""
         };
     }
     let value = trim_text(substring(trimmed, 0, match_index));
@@ -780,14 +690,11 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     if value.length == 0 { _if120 = true; }
     if annotation.length == 0 { _if120 = true; }
     if _if120 {
-        diagnostics.push("llvm lowering: malformed cast expression `" + text
-            + "`");
         return CastParseResult {
             recognized: true,
             success: false,
             value: value,
-            type_annotation: annotation,
-            diagnostics: diagnostics
+            type_annotation: annotation
         };
     }
     // Precedence guard (#1193): a trailing `+`/`-` in the annotation means
@@ -799,16 +706,14 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             recognized: false,
             success: false,
             value: "",
-            type_annotation: "",
-            diagnostics: diagnostics
+            type_annotation: ""
         };
     }
     return CastParseResult {
         recognized: true,
         success: true,
         value: value,
-        type_annotation: annotation,
-        diagnostics: diagnostics
+        type_annotation: annotation
     };
 }
 
@@ -827,15 +732,13 @@ fn parse_cast_expression(text: string) -> CastParseResult {
 // a depth-0 space before `<` — is NOT mistaken for a trailing operator.
 fn parse_is_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return CastParseResult {
             recognized: false,
             success: false,
             value: "",
-            type_annotation: "",
-            diagnostics: diagnostics
+            type_annotation: ""
         };
     }
 
@@ -953,8 +856,7 @@ fn parse_is_expression(text: string) -> CastParseResult {
             recognized: false,
             success: false,
             value: "",
-            type_annotation: "",
-            diagnostics: diagnostics
+            type_annotation: ""
         };
     }
     let value = trim_text(substring(trimmed, 0, match_index));
@@ -963,14 +865,11 @@ fn parse_is_expression(text: string) -> CastParseResult {
     if value.length == 0 { _is_malformed = true; }
     if annotation.length == 0 { _is_malformed = true; }
     if _is_malformed {
-        diagnostics.push("llvm lowering: malformed `is` expression `" + text
-            + "`");
         return CastParseResult {
             recognized: true,
             success: false,
             value: value,
-            type_annotation: annotation,
-            diagnostics: diagnostics
+            type_annotation: annotation
         };
     }
     // Precedence guard: a top-level (angle-depth-0) binary OPERATOR character in
@@ -1006,8 +905,7 @@ fn parse_is_expression(text: string) -> CastParseResult {
                     recognized: false,
                     success: false,
                     value: "",
-                    type_annotation: "",
-                    diagnostics: diagnostics
+                    type_annotation: ""
                 };
             }
         }
@@ -1017,8 +915,7 @@ fn parse_is_expression(text: string) -> CastParseResult {
         recognized: true,
         success: true,
         value: value,
-        type_annotation: annotation,
-        diagnostics: diagnostics
+        type_annotation: annotation
     };
 }
 

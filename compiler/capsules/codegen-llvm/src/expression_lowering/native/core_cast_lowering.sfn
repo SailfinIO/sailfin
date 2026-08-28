@@ -69,7 +69,6 @@ fn float_intrinsic_suffix(llvm_type: string) -> string {
 // without the narrowed use would be a half-feature. They are documented
 // fast-follows (SFEP-0034 §3.6).
 fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics = parse.diagnostics;
     let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -77,26 +76,18 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
     }
 
     let lowered = lower_expression(parse.value, bindings, locals, temp_index, lines, functions, context, "");
-    let mut _ci_is: int = 0;
-    loop {
-        if _ci_is >= lowered.diagnostics.length { break; }
-        diagnostics.push(lowered.diagnostics[_ci_is]);
-        _ci_is += 1;
-    }
     diags = extend_diag_array(diags, lowered.diags);
     if lowered.operand == null {
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -117,12 +108,10 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
         let message = "`is` on a non-enum value `" + subject.llvm_type
             + "` is not yet supported; the operand must be a named `enum` type";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -132,12 +121,10 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
         let message = "enum `" + enum_info.name + "` has no variant `" + parse.type_annotation
             + "` for `is`";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -187,24 +174,16 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
         value: number_to_string(variant_info.tag)
     };
     let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines, false);
-    let mut _cc_is: int = 0;
-    loop {
-        if _cc_is >= comparison.diagnostics.length { break; }
-        diagnostics.push(comparison.diagnostics[_cc_is]);
-        _cc_is += 1;
-    }
     return ExpressionResult {
         lines: comparison.lines,
         temp_index: comparison.temp_index,
         operand: comparison.operand,
-        diagnostics: diagnostics,
         string_constants: lowered.string_constants,
         diags: diags
     };
 }
 
 fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let mut diagnostics = parse.diagnostics;
     let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -212,7 +191,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -222,31 +200,22 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         let message = "unsupported cast target type `" + parse.type_annotation
             + "`";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
     }
 
     let lowered = lower_expression(parse.value, bindings, locals, temp_index, lines, functions, context, "");
-    let mut _ci10: int = 0;
-    loop {
-        if _ci10 >= lowered.diagnostics.length { break; }
-        diagnostics.push(lowered.diagnostics[_ci10]);
-        _ci10 += 1;
-    }
     diags = extend_diag_array(diags, lowered.diags);
     if lowered.operand == null {
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -257,7 +226,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -278,12 +246,10 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             let message = "cast to `bool` via `as` is rejected;"
                 + " use a comparison like `x != null` instead";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -292,12 +258,10 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             let message = "cast to `bool` via `as` is rejected;"
                 + " use a comparison like `x != 0` instead";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -306,12 +270,10 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             let message = "cast to `bool` via `as` is rejected;"
                 + " use a comparison like `x != 0.0` instead";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -339,19 +301,12 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         let coerced = coerce_operand_to_type(operand, shim_target, current_temp, current_lines, true, null);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
-        let mut _agg_di: int = 0;
-        loop {
-            if _agg_di >= coerced.diagnostics.length { break; }
-            diagnostics.push(coerced.diagnostics[_agg_di]);
-            _agg_di += 1;
-        }
         diags = extend_diag_array(diags, coerced.diags);
         if coerced.operand == null {
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -375,7 +330,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             lines: current_lines,
             temp_index: current_temp,
             operand: result_operand,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -395,18 +349,11 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     // annotated and inferred bindings.
     if target_type == "{i8*, i64}" {
         let str_cast = coerce_operand_to_type(operand, target_type, current_temp, current_lines, true, null);
-        let mut _str_di: int = 0;
-        loop {
-            if _str_di >= str_cast.diagnostics.length { break; }
-            diagnostics.push(str_cast.diagnostics[_str_di]);
-            _str_di += 1;
-        }
         diags = extend_diag_array(diags, str_cast.diags);
         return ExpressionResult {
             lines: str_cast.lines,
             temp_index: str_cast.temp_index,
             operand: str_cast.operand,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -427,7 +374,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: casted,
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -450,7 +396,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: casted,
-                    diagnostics: diagnostics,
                     string_constants: lowered.string_constants,
                     diags: diags
                 };
@@ -474,7 +419,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: casted,
-                    diagnostics: diagnostics,
                     string_constants: lowered.string_constants,
                     diags: diags
                 };
@@ -573,7 +517,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     llvm_type: "bfloat",
                     value: narrowed.value
                 },
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -622,7 +565,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: casted,
-                    diagnostics: diagnostics,
                     string_constants: lowered.string_constants,
                     diags: diags
                 };
@@ -654,7 +596,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     llvm_type: "float",
                     value: widened.value
                 },
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -668,7 +609,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     llvm_type: "double",
                     value: widened.value
                 },
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -684,7 +624,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     llvm_type: "bfloat",
                     value: narrowed.value
                 },
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -700,7 +639,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     llvm_type: "bfloat",
                     value: narrowed.value
                 },
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -736,7 +674,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             lines: current_lines,
             temp_index: current_temp,
             operand: casted,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -746,12 +683,10 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         + target_type
         + "`";
     diags.push(lowering_warning_diag("E1006", message, null));
-    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: current_lines,
         temp_index: current_temp,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: lowered.string_constants,
         diags: diags
     };
@@ -767,7 +702,6 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
 
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
@@ -781,7 +715,6 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -794,12 +727,6 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
 
         let expr_text = parsed.expressions[index];
         let lowered_expr = lower_expression(expr_text, bindings, locals, current_temp, current_lines, functions, context, "i8*");
-        let mut _ci11: int = 0;
-        loop {
-            if _ci11 >= lowered_expr.diagnostics.length { break; }
-            diagnostics.push(lowered_expr.diagnostics[_ci11]);
-            _ci11 += 1;
-        }
         diags = extend_diag_array(diags, lowered_expr.diags);
         current_lines = lowered_expr.lines;
         current_temp = lowered_expr.temp_index;
@@ -810,24 +737,16 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 + expr_text
                 + "`";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
         }
 
         let coerced = coerce_operand_to_string(lowered_expr.operand, current_temp, current_lines);
-        let mut _ci12: int = 0;
-        loop {
-            if _ci12 >= coerced.diagnostics.length { break; }
-            diagnostics.push(coerced.diagnostics[_ci12]);
-            _ci12 += 1;
-        }
         diags = extend_diag_array(diags, coerced.diags);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
@@ -840,24 +759,16 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 + expr_text
                 + "`";
             diags.push(lowering_error_diag("E1013", message, null));
-            diagnostics.push("llvm lowering [fatal]: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
         }
 
         let concat1 = emit_string_concat(current_operand, coerced.operand, current_temp, current_lines);
-        let mut _ci13: int = 0;
-        loop {
-            if _ci13 >= concat1.diagnostics.length { break; }
-            diagnostics.push(concat1.diagnostics[_ci13]);
-            _ci13 += 1;
-        }
         diags = extend_diag_array(diags, concat1.diags);
         current_lines = concat1.lines;
         current_temp = concat1.temp_index;
@@ -866,7 +777,6 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -883,19 +793,12 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
         }
 
         let concat2 = emit_string_concat(current_operand, part_value.operand, current_temp, current_lines);
-        let mut _ci14: int = 0;
-        loop {
-            if _ci14 >= concat2.diagnostics.length { break; }
-            diagnostics.push(concat2.diagnostics[_ci14]);
-            _ci14 += 1;
-        }
         diags = extend_diag_array(diags, concat2.diags);
         current_lines = concat2.lines;
         current_temp = concat2.temp_index;
@@ -904,7 +807,6 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -918,7 +820,6 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         lines: current_lines,
         temp_index: current_temp,
         operand: current_operand,
-        diagnostics: diagnostics,
         string_constants: collected_string_constants,
         diags: diags
     };

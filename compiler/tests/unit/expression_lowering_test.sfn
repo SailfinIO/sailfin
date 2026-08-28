@@ -47,12 +47,12 @@ test "expression_lowering: an integer literal lowers without emitting lines" {
     // Literals are pure value substitution: no instructions, no temps burned.
     assert expect_eq_int(result.lines.length, 0).ok;
     assert expect_eq_int(result.temp_index, 0).ok;
-    assert expect_eq_int(result.diagnostics.length, 0).ok;
+    assert expect_eq_int(result.diags.length, 0).ok;
 }
 
 test "expression_lowering: a boolean literal lowers to i1" {
     let result = lower_expression("true", [], [], 0, [], [], _empty_context(), "");
     assert expect_eq_str(result.operand.llvm_type, "i1").ok;
     assert expect_eq_str(result.operand.value, "1").ok;
-    assert expect_eq_int(result.diagnostics.length, 0).ok;
+    assert expect_eq_int(result.diags.length, 0).ok;
 }

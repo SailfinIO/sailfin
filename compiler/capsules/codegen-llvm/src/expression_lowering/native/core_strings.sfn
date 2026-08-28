@@ -54,7 +54,6 @@ fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> Ex
     let byte_count = content.length;
 
     let mut current_lines: string[] = lines;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     // M1.7.2a (#496): route through descriptor-driven dispatch. The
     // alloc_struct emission here intentionally does *not* carry the
@@ -69,12 +68,6 @@ fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> Ex
     };
     let alloc_operands: LLVMOperand[] = [alloc_size_operand];
     let alloc_result = emit_runtime_call("alloc_struct", alloc_operands, empty_runtime_call_overrides(), temp_index, current_lines);
-    let mut _alloc_di: int = 0;
-    loop {
-        if _alloc_di >= alloc_result.diagnostics.length { break; }
-        diagnostics.push(alloc_result.diagnostics[_alloc_di]);
-        _alloc_di += 1;
-    }
     diags = extend_diag_array(diags, alloc_result.diags);
     current_lines = alloc_result.lines;
     let malloc_temp = format_temp_name(temp_index);
@@ -109,7 +102,6 @@ fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> Ex
         lines: current_lines,
         temp_index: temp_index + 4,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: empty_constants,
         diags: diags
     };
@@ -125,7 +117,6 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
             lines: harmonised.lines,
             temp_index: harmonised.temp_index,
             operand: null,
-            diagnostics: harmonised.diagnostics,
             string_constants: empty_string_constant_set(),
             // SFN-915: `BinaryAlignmentResult` carries no structured channel,
             // so there is nothing to forward here. See `core_expression_tail`.
@@ -142,22 +133,9 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
     // length-aware bodies. Return type stays `i8*` so downstream
     // legacy-shape consumers don't need updating in this PR.
     let left_aligned = coerce_operand_to_type(harmonised.left, "{i8*, i64}", harmonised.temp_index, harmonised.lines, true, null);
-    let mut diagnostics: string[] = harmonised.diagnostics;
     let mut diags: LoweringDiagnostic[] = [];
-    let mut _ci0: int = 0;
-    loop {
-        if _ci0 >= left_aligned.diagnostics.length { break; }
-        diagnostics.push(left_aligned.diagnostics[_ci0]);
-        _ci0 += 1;
-    }
     diags = extend_diag_array(diags, left_aligned.diags);
     let right_aligned = coerce_operand_to_type(harmonised.right, "{i8*, i64}", left_aligned.temp_index, left_aligned.lines, true, null);
-    let mut _ci1: int = 0;
-    loop {
-        if _ci1 >= right_aligned.diagnostics.length { break; }
-        diagnostics.push(right_aligned.diagnostics[_ci1]);
-        _ci1 += 1;
-    }
     diags = extend_diag_array(diags, right_aligned.diags);
     let mut _if122: boolean = false;
     if left_aligned.operand == null { _if122 = true; }
@@ -167,7 +145,6 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
             lines: right_aligned.lines,
             temp_index: right_aligned.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_string_constant_set(),
             diags: diags
         };
@@ -188,12 +165,6 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
     let arena_operand = LLVMOperand { llvm_type: "ptr", value: "null" };
     let concat_operands: LLVMOperand[] = [left_aligned.operand, right_aligned.operand, arena_operand];
     let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), right_aligned.temp_index, right_aligned.lines);
-    let mut _concat_di: int = 0;
-    loop {
-        if _concat_di >= concat_result.diagnostics.length { break; }
-        diagnostics.push(concat_result.diagnostics[_concat_di]);
-        _concat_di += 1;
-    }
     diags = extend_diag_array(diags, concat_result.diags);
     // M1.A.2: return the full `{i8*, i64}` aggregate `sfn_str_concat` produces
     // (data + length) rather than extracting just the data pointer. The length
@@ -208,7 +179,6 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
         lines: concat_result.lines,
         temp_index: right_aligned.temp_index + 1,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: empty_string_constant_set(),
         diags: diags
     };
@@ -220,48 +190,32 @@ fn coerce_string_operand_to_aggregate(operand: LLVMOperand, temp_index: int, lin
         lines: coerced.lines,
         temp_index: coerced.temp_index,
         operand: coerced.operand,
-        diagnostics: coerced.diagnostics,
         string_constants: empty_string_constant_set(),
         diags: coerced.diags
     };
 }
 
 fn select_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_false: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let true_aggregate = coerce_string_operand_to_aggregate(when_true, temp_index, lines);
-    let mut _ci_union_true: int = 0;
-    loop {
-        if _ci_union_true >= true_aggregate.diagnostics.length { break; }
-        diagnostics.push(true_aggregate.diagnostics[_ci_union_true]);
-        _ci_union_true += 1;
-    }
     diags = extend_diag_array(diags, true_aggregate.diags);
     if true_aggregate.operand == null {
         return ExpressionResult {
             lines: true_aggregate.lines,
             temp_index: true_aggregate.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_string_constant_set(),
             diags: diags
         };
     }
 
     let false_aggregate = coerce_string_operand_to_aggregate(when_false, true_aggregate.temp_index, true_aggregate.lines);
-    let mut _ci_union_false: int = 0;
-    loop {
-        if _ci_union_false >= false_aggregate.diagnostics.length { break; }
-        diagnostics.push(false_aggregate.diagnostics[_ci_union_false]);
-        _ci_union_false += 1;
-    }
     diags = extend_diag_array(diags, false_aggregate.diags);
     if false_aggregate.operand == null {
         return ExpressionResult {
             lines: false_aggregate.lines,
             temp_index: false_aggregate.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_string_constant_set(),
             diags: diags
         };
@@ -317,29 +271,20 @@ fn select_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_
         lines: current_lines,
         temp_index: false_aggregate.temp_index + 8,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: empty_string_constant_set(),
         diags: diags
     };
 }
 
 fn select_i8_pointer_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_false: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let false_aggregate = coerce_string_operand_to_aggregate(when_false, temp_index, lines);
-    let mut _ci_false: int = 0;
-    loop {
-        if _ci_false >= false_aggregate.diagnostics.length { break; }
-        diagnostics.push(false_aggregate.diagnostics[_ci_false]);
-        _ci_false += 1;
-    }
     diags = extend_diag_array(diags, false_aggregate.diags);
     if false_aggregate.operand == null {
         return ExpressionResult {
             lines: false_aggregate.lines,
             temp_index: false_aggregate.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_string_constant_set(),
             diags: diags
         };
@@ -362,12 +307,6 @@ fn select_i8_pointer_string_aggregate(condition: LLVMOperand, when_true: LLVMOpe
     let sl_operands: LLVMOperand[] = [sl_operand];
     let sl_result = emit_runtime_call("string.length", sl_operands, empty_runtime_call_overrides(), false_aggregate.temp_index
         + 2, current_lines);
-    let mut _ci_len: int = 0;
-    loop {
-        if _ci_len >= sl_result.diagnostics.length { break; }
-        diagnostics.push(sl_result.diagnostics[_ci_len]);
-        _ci_len += 1;
-    }
     diags = extend_diag_array(diags, sl_result.diags);
     current_lines = sl_result.lines;
 
@@ -391,7 +330,6 @@ fn select_i8_pointer_string_aggregate(condition: LLVMOperand, when_true: LLVMOpe
         lines: current_lines,
         temp_index: sl_result.temp_index + 2,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: empty_string_constant_set(),
         diags: diags
     };
@@ -399,17 +337,14 @@ fn select_i8_pointer_string_aggregate(condition: LLVMOperand, when_true: LLVMOpe
 
 fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let variants = parse_union_payload_types(operand.llvm_type);
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if variants.length == 0 {
         let message = "unable to inspect union payloads for string interpolation";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_string_constant_set(),
             diags: diags
         };
@@ -431,7 +366,6 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_string_constant_set(),
             diags: diags
         };
@@ -482,12 +416,6 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
                 value: active_temp
             };
             let selected = select_i8_pointer_string_aggregate(condition, payload_operand, current_operand, current_temp, current_lines);
-            let mut _ci_i8_selected: int = 0;
-            loop {
-                if _ci_i8_selected >= selected.diagnostics.length { break; }
-                diagnostics.push(selected.diagnostics[_ci_i8_selected]);
-                _ci_i8_selected += 1;
-            }
             diags = extend_diag_array(diags, selected.diags);
             current_lines = selected.lines;
             current_temp = selected.temp_index;
@@ -496,7 +424,6 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
                     lines: current_lines,
                     temp_index: current_temp,
                     operand: null,
-                    diagnostics: diagnostics,
                     string_constants: empty_string_constant_set(),
                     diags: diags
                 };
@@ -518,12 +445,6 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
                 value: payload_temp
             };
             let payload_string = coerce_operand_to_string(payload_operand, current_temp, current_lines);
-            let mut _ci_payload: int = 0;
-            loop {
-                if _ci_payload >= payload_string.diagnostics.length { break; }
-                diagnostics.push(payload_string.diagnostics[_ci_payload]);
-                _ci_payload += 1;
-            }
             diags = extend_diag_array(diags, payload_string.diags);
             current_lines = payload_string.lines;
             current_temp = payload_string.temp_index;
@@ -539,12 +460,6 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
                     value: compare_temp
                 };
                 let selected = select_string_aggregate(condition, payload_string.operand, current_operand, current_temp, current_lines);
-                let mut _ci_selected: int = 0;
-                loop {
-                    if _ci_selected >= selected.diagnostics.length { break; }
-                    diagnostics.push(selected.diagnostics[_ci_selected]);
-                    _ci_selected += 1;
-                }
                 diags = extend_diag_array(diags, selected.diags);
                 current_lines = selected.lines;
                 current_temp = selected.temp_index;
@@ -553,7 +468,6 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
                         lines: current_lines,
                         temp_index: current_temp,
                         operand: null,
-                        diagnostics: diagnostics,
                         string_constants: empty_string_constant_set(),
                         diags: diags
                     };
@@ -568,7 +482,6 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
         lines: current_lines,
         temp_index: current_temp,
         operand: current_operand,
-        diagnostics: diagnostics,
         string_constants: empty_string_constant_set(),
         diags: diags
     };
@@ -581,7 +494,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
             lines: lines,
             temp_index: temp_index,
             operand: operand,
-            diagnostics: [],
             string_constants: empty_constants,
             diags: []
         };
@@ -598,7 +510,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
             lines: lines,
             temp_index: temp_index,
             operand: operand,
-            diagnostics: [],
             string_constants: empty_constants,
             diags: []
         };
@@ -616,7 +527,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
             lines: nts_result.lines,
             temp_index: nts_result.temp_index,
             operand: nts_result.operand,
-            diagnostics: nts_result.diagnostics,
             string_constants: empty_constants,
             diags: nts_result.diags
         };
@@ -679,7 +589,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
             lines: nts_result.lines,
             temp_index: nts_result.temp_index,
             operand: nts_result.operand,
-            diagnostics: nts_result.diagnostics,
             string_constants: empty_constants,
             diags: nts_result.diags
         };
@@ -703,7 +612,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
             lines: nts_result.lines,
             temp_index: nts_result.temp_index,
             operand: nts_result.operand,
-            diagnostics: nts_result.diagnostics,
             string_constants: empty_constants,
             diags: nts_result.diags
         };
@@ -729,7 +637,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
             lines: nts_result.lines,
             temp_index: nts_result.temp_index,
             operand: nts_result.operand,
-            diagnostics: nts_result.diagnostics,
             string_constants: empty_constants,
             diags: nts_result.diags
         };
@@ -742,7 +649,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
                 lines: true_lit.lines,
                 temp_index: true_lit.temp_index,
                 operand: null,
-                diagnostics: [],
                 string_constants: empty_constants,
                 diags: []
             };
@@ -753,7 +659,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
                 lines: false_lit.lines,
                 temp_index: false_lit.temp_index,
                 operand: null,
-                diagnostics: [],
                 string_constants: empty_constants,
                 diags: []
             };
@@ -816,7 +721,6 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
                 lines: ats_result.lines,
                 temp_index: ats_result.temp_index,
                 operand: ats_result.operand,
-                diagnostics: ats_result.diagnostics,
                 string_constants: empty_constants,
                 diags: ats_result.diags
             };
@@ -832,12 +736,10 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
         + operand.llvm_type
         + "` (no Display arm)";
     let diags: LoweringDiagnostic[] = [lowering_error_diag("E0832", message, null)];
-    let diagnostics: string[] = ["llvm lowering [fatal]: E0832: " + message];
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: empty_constants,
         diags: diags
     };
