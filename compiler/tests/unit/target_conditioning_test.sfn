@@ -375,11 +375,10 @@ test "target: the MSVC manifest table selects native providers" ![io] {
     assert ! _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/process.sfn");
     assert ! _argv_contains(via_manifest[0].sfn_sources, "runtime/sfn/platform/rlimit.sfn");
 
-    // MSVC adds no manifest link libs because
-    // `target_extra_link_libs` already supplies them for this ABI. Asserting
-    // it here stops someone copying MinGW's
-    // `link-libs-add` across and double-adding them.
-    assert expect_eq_str_array(via_manifest[0].link_libs, caps[0].link_libs).ok;
+    // The runtime manifest owns advapi32 because the ACL provider introduced
+    // by SFN-1195 needs it while the released seed compiles runtime sources.
+    // The three legacy Windows libraries remain compiler-global for MSVC.
+    assert expect_eq_str_array(via_manifest[0].link_libs, ["-lm", "-lpthread", "-ladvapi32"]).ok;
     assert expect_eq_str_array(target_extra_link_libs("x86_64-pc-windows-msvc"), ["-lbcrypt", "-lcrypt32", "-lws2_32"]).ok;
 
     // The two Windows tables are the only ones that add IR: the 8-bit Win32
