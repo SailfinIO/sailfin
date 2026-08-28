@@ -201,13 +201,97 @@ fn verdict_classify(rc: int, kind: string) -> string {
     return "compile-error";
 }
 
+// -------------------------------------------------------------------
+// Native `--verdict` accumulator (SFN-1120)
+// -------------------------------------------------------------------
+//
+// `sfn dev verify` composes its `Verdict` inline because it owns a phase
+// ledger and knows its outcome structurally. The three verbs this
+// accumulator serves — `sfn test`, `sfn build`, `sfn dev bootstrap build`
+// — have no ledger and ~10 return sites apiece, so their verdict is
+// derived from the one thing all three produce: the process exit code,
+// read at the CLI's single exit funnel
+// (`cli/main.sfn::sailfin_cli_main_with_paths`). Arming and emission are
+// therefore split — the dispatch knows WHICH verb ran, the funnel knows
+// HOW it ended — and no per-command control flow is touched.
+//
+// Module-mutable state with constant initializers, the `ice.sfn` pattern;
+// the constant initializers keep these clear of the
+// runtime-evaluated-global class (#1386).
+//
+// Gated on a flag rather than an env var by construction: a child
+// receives the argv its parent builds explicitly, so `--verdict` cannot
+// leak into a per-module emit child, a pooled test child, or a nested
+// `sfn` an e2e test spawns. An env var would reach all of them and would
+// need exactly the `SAILFIN_INNER`-style suppression guard SFN-726
+// deleted.
+let mut _verdict_armed: boolean = false;
+let mut _verdict_host: string = "";
+let mut _verdict_target: string = "";
+
+// Funnel re-entry depth. The funnel is re-entrant in-process: bare-file
+// dispatch (`sfn <file>.sfn`) re-enters it as `["run", <file>]`
+// (`cli/main.sfn`). Only the outermost exit emits, so an inner return can
+// never consume an outer invocation's armed verdict. Nothing arms today
+// on a path that can re-enter — `run` carries no `--verdict` — so this is
+// insurance that keeps the funnel's correctness independent of which
+// verbs happen to be flagged.
+let mut _verdict_depth: int = 0;
+
+// `kind` is the verb's own nature, which is what decides how a generic
+// nonzero exit reads: a failing `sfn test` is a `test-failure`, a failing
+// build a `compile-error`. Structural — the verb was dispatched, not
+// inferred from a target name or grepped out of a log.
+fn verdict_kind_for_target(target: string) -> string {
+    if strings_equal(target, "test") { return "test"; }
+    return "build";
+}
+
+// Request a trailer for this invocation. Called from the CLI dispatch,
+// where the parsed `--verdict` flag and the descended subcommand path are
+// both in scope.
+fn verdict_arm(host: string, target: string) {
+    _verdict_armed = true;
+    _verdict_host = host;
+    _verdict_target = target;
+}
+
+fn verdict_funnel_enter() { _verdict_depth += 1; }
+
+// Emit the armed trailer, if any, as the last output of the outermost CLI
+// invocation.
+//
+// `phase` and `first_error` stay null: these verbs run no phase ledger,
+// and precise source-location extraction is explicitly not part of the
+// contract (`docs/reference/run-result-schema.md`). `report` stays null —
+// only `sfn dev verify` writes a report file.
+//
+// `warn` is unreachable here: it exists for `sfn dev verify`'s
+// `nondeterminism` class, which no exit code alone can express.
+fn verdict_funnel_exit(rc: int) -> void ![io] {
+    _verdict_depth -= 1;
+    if _verdict_depth > 0 { return; }
+    if !_verdict_armed { return; }
+    _verdict_armed = false;
+    let mut status: string = "pass";
+    if rc != 0 { status = "fail"; }
+    let failure = verdict_classify(rc, verdict_kind_for_target(_verdict_target));
+    verdict_emit(Verdict {
+        host: _verdict_host, target: _verdict_target, status: status, failure: failure, phase: "", first_error: "", report: ""
+    });
+}
+
 export {
     VERDICT_SCHEMA,
     Verdict,
+    verdict_arm,
     verdict_classify,
     verdict_emit,
     verdict_fields,
+    verdict_funnel_enter,
+    verdict_funnel_exit,
     verdict_json,
     verdict_json_or_null,
-    verdict_json_quote
+    verdict_json_quote,
+    verdict_kind_for_target
 };

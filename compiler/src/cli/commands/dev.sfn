@@ -1422,6 +1422,9 @@ fn command_def() -> Command {
     let mut bootstrap: Command = command("bootstrap", "Compiler seed bootstrap (reads bootstrap.toml)");
     bootstrap = with_subcommand(bootstrap, command("fetch", "Acquire and verify the pinned seed"));
     let mut build = with_flag(command("build", "Build the compiler with the exact seed"), flag("force", "Rebuild even when the source fingerprint is unchanged"));
+    // SFN-1120. Unlike `sfn test` / `sfn build`, this leaf spawns the seed
+    // with a constructed argv, so the flag is never forwarded to the child.
+    build = with_flag(build, flag("verdict", "Emit a machine-readable sailfin-run/2 verdict trailer after the run"));
     build = with_arg(build, arg_variadic("build-arg", "Arguments forwarded to the seed build after --"));
     bootstrap = with_subcommand(bootstrap, build);
     bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
