@@ -19,6 +19,7 @@ import {
     read_dir,
     read_link,
     remove,
+    remove_all,
     set_perms,
     symlink,
     write
@@ -74,7 +75,7 @@ test "fs: set_perms + get_perms round-trip on a regular file" ![io] {
         // model supersedes the documented -1 sentinel.
         assert set_perms(target, 420);
         assert get_perms(target) == -1;
-        process.run(["rm", "-rf", scratch]);
+        assert remove_all(scratch);
         return;
     }
 
@@ -86,7 +87,7 @@ test "fs: set_perms + get_perms round-trip on a regular file" ![io] {
     assert set_perms(target, 384);
     assert get_perms(target) == 384;
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "fs: set_perms returns false on a missing path" ![io] {
@@ -168,7 +169,7 @@ test "fs: is_executable returns false for /etc/passwd" ![io] {
         let target = scratch + "/plain.txt";
         write(target, "plain");
         assert is_executable(target);
-        process.run(["rm", "-rf", scratch]);
+        assert remove_all(scratch);
         return;
     }
     // /etc/passwd exists on every POSIX system but is never `+x`.
@@ -194,7 +195,7 @@ test "fs: is_executable tracks set_perms flips" ![io] {
         assert is_executable(script);
         assert set_perms(script, 493);
         assert is_executable(script);
-        process.run(["rm", "-rf", scratch]);
+        assert remove_all(scratch);
         return;
     }
 
@@ -206,7 +207,7 @@ test "fs: is_executable tracks set_perms flips" ![io] {
     assert set_perms(script, 493);
     assert is_executable(script);
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 // ── is_directory ──────────────────────────────────────────────────
@@ -225,7 +226,7 @@ test "fs: is_directory returns false for a regular file" ![io] {
 
     assert is_directory(target) == false;
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "fs: is_directory returns false for a missing path" ![io] {
@@ -248,7 +249,7 @@ test "fs: is_directory follows a symlink to a directory" ![io] {
     _require_symlink(dir, link);
     assert is_directory(link);
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 // ── symlink ────────────────────────────────────────────────────────
@@ -263,7 +264,7 @@ test "fs: symlink creates a link readable through the target" ![io] {
     // creating the link and the kernel resolving it on open.
     assert strings_equal(read(link), "linked-content");
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "fs: symlink accepts a dangling target" ![io] {
@@ -279,7 +280,7 @@ test "fs: symlink accepts a dangling target" ![io] {
     // while Windows GetFileAttributesA reports the reparse point itself.
     assert strings_equal(read_link(link), _stored_link_target(nonexistent));
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "fs: symlink returns false when link path already exists" ![io] {
@@ -292,7 +293,7 @@ test "fs: symlink returns false when link path already exists" ![io] {
 
     assert symlink("/tmp", link) == false;
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 // ── read_link ──────────────────────────────────────────────────────
@@ -309,7 +310,7 @@ test "fs: read_link returns the raw target of a symlink" ![io] {
     // separators on Windows and no resolution of the target's contents.
     assert strings_equal(read_link(link), _stored_link_target(target));
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "fs: read_link returns a relative target uncanonicalized" ![io] {
@@ -323,7 +324,7 @@ test "fs: read_link returns a relative target uncanonicalized" ![io] {
     _require_symlink("../sibling", link);
     assert strings_equal(read_link(link), _stored_link_target("../sibling"));
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "fs: read_link on a non-symlink returns empty" ![io] {
@@ -335,7 +336,7 @@ test "fs: read_link on a non-symlink returns empty" ![io] {
 
     assert read_link(plain).length == 0;
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 test "fs: read_link on a missing path returns empty" ![io] {
@@ -344,7 +345,7 @@ test "fs: read_link on a missing path returns empty" ![io] {
 
     assert read_link(scratch + "/never-created").length == 0;
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 // ── read_dir (list_directory) ──────────────────────────────────────
@@ -367,7 +368,7 @@ test "fs: read_dir lists entries sorted, omitting . and .." ![io] {
     assert strings_equal(entries[1], "bravo.txt");
     assert strings_equal(entries[2], "charlie.txt");
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }
 
 // An empty directory lists as a zero-length array (never null), so
@@ -379,5 +380,5 @@ test "fs: read_dir on an empty directory is empty" ![io] {
     let entries = read_dir(scratch);
     assert entries.length == 0;
 
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
 }

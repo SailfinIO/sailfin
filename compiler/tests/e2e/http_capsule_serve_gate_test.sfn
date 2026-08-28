@@ -24,6 +24,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on the captured `.ll`
 // text with `sfn/strings` predicates instead.
+import { remove_all } from "sfn/fs";
 import { contains } from "sfn/strings";
 import { sfn_bin_path } from "sfn/test";
 
@@ -108,8 +109,8 @@ test "http serve gate: emit staging lowers imported serve to the capsule fn, not
 
     let ir = fs.readFile(ll);
 
-    // Cleanup the consumer tree (rmdir is non-recursive; rm -rf the tree).
-    let _rm1 = process.run(["rm", "-rf", _app_root()]);
+    // Cleanup the consumer tree recursively.
+    assert remove_all(_app_root());
 
     // The imported capsule `serve` must win — `@serve__sfn__http__mod`.
     assert contains(ir, "@serve__sfn__http");

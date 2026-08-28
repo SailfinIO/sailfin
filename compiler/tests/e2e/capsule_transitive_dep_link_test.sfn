@@ -9,6 +9,7 @@
 // dependency closure). This builds and runs such a consumer, asserting the
 // link succeeds and the formatted status reaches the framed output — a
 // build-only proof, no server/socket path, so it holds on every platform.
+import { remove_all } from "sfn/fs";
 import { find } from "sfn/strings";
 import { sfn_bin_path } from "sfn/test";
 
@@ -65,5 +66,5 @@ test "capsule resolver: transitive dep of a declared capsule links and runs" ![i
     // symbol was linked AND executes correctly.
     assert find(run_out, "HTTP/1.1 200", 0) >= 0;
 
-    let _rm = process.run(["rm", "-rf", root]);
+    assert remove_all(root);
 }

@@ -22,7 +22,12 @@
 //      `auto` falls through to a fail-closed install that names the hint.
 //   5. `off` (and `--skip-toolchain-check`) skips the gate and proceeds.
 //   6. an explicit `<version>` knob forces that version as the target.
-import { copy, free_bytes, read_bytes } from "sfn/fs";
+import {
+    copy,
+    free_bytes,
+    read_bytes,
+    remove_all
+} from "sfn/fs";
 import { contains } from "sfn/strings";
 import {
     clean_runner_env,
@@ -139,7 +144,7 @@ fn _binary_digest(path: string) -> string ![io] {
 // reads as dispatch-ready; when false the entry is left partial.
 fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> void ![io] {
     let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
-    process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
     fs.createDirectory(dir, true);
     let _ = _write_marker_stub(dir, marker);
     if complete {
@@ -149,7 +154,7 @@ fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> 
 
 fn _seed_legacy_stub(store: string, ver: string, marker: string) -> void ![io] {
     let dir = store + "/" + ver;
-    process.run(["rm", "-rf", dir]);
+    assert remove_all(dir);
     fs.createDirectory(dir, true);
     let _ = _write_marker_stub(dir, marker);
     fs.writeFile(dir + "/.sha256", "legacy-archive-marker\n");
@@ -205,7 +210,7 @@ fn _require_reexec() -> void ![io] {
 // Seed a project whose `[toolchain]` pin is `pin_ver` and a trivial
 // source file the gate's entry hint points at. Returns the source path.
 fn _seed_project(root: string, pin_ver: string) -> string ![io] {
-    process.run(["rm", "-rf", root]);
+    assert remove_all(root);
     fs.createDirectory(root, true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\nname = \"dispatch-e2e\"\nversion = \"0.0.1\"\n\n[toolchain]\nsfn = \""
         + pin_ver
@@ -335,7 +340,7 @@ test "toolchain dispatch: qualified entry wins over the legacy fallback" ![io] {
     _require_reexec();
     let store = _scratch_root() + "/qualified-wins-store";
     let proj = _scratch_root() + "/qualified-wins-proj";
-    process.run(["rm", "-rf", store]);
+    assert remove_all(store);
     let qualified_marker = "DISPATCH_QUALIFIED_WINS_3c71";
     let legacy_marker = "DISPATCH_LEGACY_LOSES_9f20";
     _seed_stub(store, "999.0.0", qualified_marker, true);
@@ -356,7 +361,7 @@ test "toolchain dispatch: legacy-only fallback is read-only" ![io] {
     _require_reexec();
     let store = _scratch_root() + "/legacy-fallback-store";
     let proj = _scratch_root() + "/legacy-fallback-proj";
-    process.run(["rm", "-rf", store]);
+    assert remove_all(store);
     let legacy_marker = "DISPATCH_LEGACY_READ_ONLY_54da";
     _seed_legacy_stub(store, "999.0.0", legacy_marker);
     let legacy_dir = store + "/999.0.0";
@@ -439,12 +444,12 @@ fn _bundled_verify_root() -> string ![io] {
 
 test "toolchain dispatch: a modified bundled runtime input refuses a build-like command" ![io] {
     let scratch = _scratch_root() + "/bundled-verify";
-    process.run(["rm", "-rf", scratch]);
+    assert remove_all(scratch);
     fs.createDirectory(scratch, true);
 
     let copied_bin = _stub_bin(scratch);
     assert copy(sfn_bin_abs_path(), copied_bin);
-    fs.set_perms(copied_bin, 493);
+    assert fs.set_perms(copied_bin, 493);
 
     fs.createDirectory(scratch + "/runtime", true);
     let payload_path = scratch + "/runtime/bundled-probe.sfn";
