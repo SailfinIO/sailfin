@@ -51,6 +51,14 @@ jobs:
   # appears in each consuming step's environment.
   resolve-version:
     name: Resolve pinned release
+    # Draft PRs defer the installer matrix, same policy as `ci.yml`'s
+    # `ci-scope` (see its `ready` output). The three installer jobs all gate on
+    # this one, so skipping here skips the whole matrix -- including its two
+    # `macos-26` legs, which contend with `ci.yml`'s five for an account-wide
+    # pool of five. A draft cannot merge, so nothing is let through. `site`
+    # deliberately stays ungated: it is a cheap ubuntu leg and the earliest
+    # signal on a docs change.
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:

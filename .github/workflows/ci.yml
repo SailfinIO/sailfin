@@ -61,6 +61,7 @@ jobs:
       source: ${{ steps.scope.outputs.source }}
       public_claims: ${{ steps.scope.outputs.public_claims }}
       windows: ${{ steps.scope.outputs.windows }}
+      ready: ${{ steps.scope.outputs.ready }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -70,6 +71,8 @@ jobs:
       - name: Determine compiler CI scope
         id: scope
         shell: bash
+        env:
+          PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           set -euo pipefail
 
@@ -183,15 +186,44 @@ jobs:
             done < changed-files.txt
           fi
 
+          # A draft PR cannot be merged, so nothing it pushes needs the heavy
+          # matrix yet. Defer every scarce-runner leg until it is marked ready
+          # for review. This is the throughput half of the scarce-pool policy
+          # the `build-compiler-macos` comment below states: macOS runner
+          # concurrency is 5 and one in-scope PR already wants 6 macOS
+          # job-slots, so an in-progress session pushing to a draft evicts a
+          # PR that is actually waiting to land. Deferring is fail-closed by
+          # construction -- GitHub refuses to merge a draft -- and marking the
+          # PR ready fires `ready_for_review`, which reruns this workflow on
+          # the same head with the full matrix in scope.
+          ready=true
+          ready_reason="pull request is ready for review"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ "${PR_IS_DRAFT:-false}" = "true" ]; then
+            ready=false
+            ready_reason="draft pull request; heavy CI deferred until marked ready for review"
+            source=false
+            public_claims=false
+            windows=false
+            reason="$ready_reason"
+            public_claims_reason="$ready_reason"
+            windows_reason="$ready_reason"
+          elif [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            ready_reason="draft state applies to pull_request events only"
+          fi
+
           echo "source=$source" >> "$GITHUB_OUTPUT"
           echo "public_claims=$public_claims" >> "$GITHUB_OUTPUT"
           echo "windows=$windows" >> "$GITHUB_OUTPUT"
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
           echo "[ci-scope] source=$source ($reason)"
           echo "[ci-scope] public_claims=$public_claims ($public_claims_reason)"
           echo "[ci-scope] windows=$windows ($windows_reason)"
+          echo "[ci-scope] ready=$ready ($ready_reason)"
           {
             echo "### CI scope"
             echo ""
+            echo "- ready for review: \`$ready\`"
+            echo "- reason: $ready_reason"
             echo "- compiler CI in scope: \`$source\`"
             echo "- reason: $reason"
             echo "- public-claim verification in scope: \`$public_claims\`"
@@ -2637,6 +2669,7 @@ jobs:
       SOURCE_CI: ${{ needs.ci-scope.outputs.source }}
       PUBLIC_CLAIMS_CI: ${{ needs.ci-scope.outputs.public_claims }}
       WINDOWS_CI: ${{ needs.ci-scope.outputs.windows }}
+      READY_CI: ${{ needs.ci-scope.outputs.ready }}
       CHECK_PUBLIC_CLAIMS: ${{ needs.check-public-claims.result }}
       CHECK_FAST: ${{ needs.check-fast.result }}
       BUILD_COMPILER_LINUX: ${{ needs.build-compiler-linux.result }}
@@ -2666,6 +2699,28 @@ jobs:
 
           if [ "${CI_SCOPE_RESULT:-}" != "success" ]; then
             echo "[required-ci] CI scope did not succeed; failing closed." >&2
+            exit 1
+          fi
+
+          # Deferred, not passed. `ci-scope` forces every scope output false on
+          # a draft, and an out-of-scope gate reports green -- so without this
+          # branch a draft PR would advertise a green required check it never
+          # earned. Fail closed instead: a red gate on a draft says "not
+          # validated yet", and `ready_for_review` reruns the full matrix on
+          # the same head. Distinguishing the two is the whole reason
+          # `ci-scope` emits `ready` separately from `source`.
+          if [ "${READY_CI:-}" = "false" ]; then
+            echo "[required-ci] draft pull request: heavy CI deferred until it is marked ready for review." >&2
+            {
+              echo "| Required CI gate | deferred -- draft pull request |"
+              echo ""
+              echo "Mark this pull request **ready for review** to run the full gate."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if [ "${READY_CI:-}" != "true" ]; then
+            echo "[required-ci] CI scope emitted unexpected ready value: ${READY_CI:-unset}" >&2
             exit 1
           fi
 
