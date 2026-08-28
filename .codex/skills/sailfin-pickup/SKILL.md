@@ -11,6 +11,9 @@ through a ready-for-review pull request unless a stop condition below applies.
 
 ## Select and claim
 
+- Before selecting or claiming an issue, run `git pull --ff-only origin main`
+  so the pickup starts from the latest remote main. Stop if the update fails;
+  do not merge, rebase, or overwrite local work to force it through.
 - `SFN-123` selects that Linear issue. A bare number selects that GitHub issue
   and its Linear mirror when one exists. With no identifier, choose the
   highest-priority pickable Sailfin issue in Linear's native `Ready` state.
