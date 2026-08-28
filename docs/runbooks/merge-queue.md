@@ -52,6 +52,14 @@ docs/site-only PRs after `CI scope` marks compiler CI out of scope, and
 fails any in-scope PR where a compiler build, shard, shard-cover,
 fast-check, or Windows smoke job does not succeed.
 
+It also fails **any draft PR**, docs-only ones included, reporting
+"deferred -- draft pull request". `CI scope` defers the whole heavy matrix
+while a PR is a draft (its `ready` output), and the gate fails closed rather
+than reporting the green an out-of-scope PR would get: GitHub counts a
+skipped job as success for a required check, so a green-by-deferral gate
+would leave a merge window open across the ready transition. Marking the PR
+ready fires `ready_for_review` and reruns the full matrix on the same head.
+
 The effect-gate smoke and fmt gates are steps *inside* the primary
 `unit-a` legs, so they are covered by `Required CI gate` through those
 legs' aggregate result.

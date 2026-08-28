@@ -17,6 +17,12 @@ name: Installer and install docs
 
 on:
   pull_request:
+    # `ready_for_review` is load-bearing, not redundancy: `resolve-version`
+    # below defers the whole installer matrix while the PR is a draft, and this
+    # is the only activity type that runs it for a PR that started as one.
+    # Dropping it would leave every draft-started PR's installer jobs skipped
+    # -- which GitHub reports as *success* for a status check, so the omission
+    # would be silent. Unlike `ci.yml`, nothing here fails closed to catch it.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "install.sh"
@@ -54,7 +60,7 @@ jobs:
     # Draft PRs defer the installer matrix, same policy as `ci.yml`'s
     # `ci-scope` (see its `ready` output). The three installer jobs all gate on
     # this one, so skipping here skips the whole matrix -- including its two
-    # `macos-26` legs, which contend with `ci.yml`'s five for an account-wide
+    # `macos-26` legs, which contend with `ci.yml`'s six for an account-wide
     # pool of five. A draft cannot merge, so nothing is let through. `site`
     # deliberately stays ungated: it is a cheap ubuntu leg and the earliest
     # signal on a docs change.

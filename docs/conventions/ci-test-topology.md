@@ -230,6 +230,12 @@ The design for the content-addressed key derivation lives in
   `linear-branch-claim` is the gate that
   fails an `sfn-<N>` branch whose PR body does not close `SFN-<N>`; see
   `CLAUDE.md` (## Task tracking).
+  The gate has one non-path failure mode: a **draft** PR fails it with
+  "deferred -- draft pull request". `ci-scope` forces every scope output
+  false while a PR is a draft, so only `ci-scope`, `linear-branch-claim` and
+  `required-ci` run at all -- the scarce macOS pool (5 account-wide, against
+  six job-slots per in-scope PR) is not spent on a change that cannot merge.
+  `ready_for_review` reruns the full matrix on the same head.
 
 ## Metrics and the known gap
 

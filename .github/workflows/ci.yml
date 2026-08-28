@@ -196,6 +196,24 @@ jobs:
           # construction -- GitHub refuses to merge a draft -- and marking the
           # PR ready fires `ready_for_review`, which reruns this workflow on
           # the same head with the full matrix in scope.
+          #
+          # This defers the cheap uncontended legs too -- `check-fast` and the
+          # Linux/Windows matrices -- even though the `check-fast` comment
+          # below correctly notes their pools are not contended. That is
+          # deliberate: one lever that forces every scope output false cannot
+          # leave a heavy job running by omission, and it composes with the
+          # single fail-closed branch in `required-ci`. Exempting individual
+          # jobs reintroduces exactly the gap this shape exists to remove.
+          #
+          # Recovery trap: `draft` on a `synchronize` payload is a snapshot. If
+          # a mark-ready and a push land together, the `ready_for_review` run
+          # fires against the old head while a `synchronize` run carrying stale
+          # `draft: true` fires against the new head and wins the concurrency
+          # group, leaving the new head deferred with no further event pending.
+          # Re-running all jobs does NOT recover it -- that replays the
+          # original payload and defers again. Push another commit, or toggle
+          # the PR back to draft and mark it ready, which fires a fresh
+          # `ready_for_review`.
           ready=true
           ready_reason="pull request is ready for review"
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ "${PR_IS_DRAFT:-false}" = "true" ]; then
@@ -204,9 +222,11 @@ jobs:
             source=false
             public_claims=false
             windows=false
-            reason="$ready_reason"
-            public_claims_reason="$ready_reason"
-            windows_reason="$ready_reason"
+            # Keep the path-derived verdicts in the log: they are the only
+            # scope signal a deferred run can still give away for free.
+            reason="$ready_reason (path scope would be: $reason)"
+            public_claims_reason="$ready_reason (path scope would be: $public_claims_reason)"
+            windows_reason="$ready_reason (path scope would be: $windows_reason)"
           elif [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             ready_reason="draft state applies to pull_request events only"
           fi
@@ -2709,6 +2729,15 @@ jobs:
           # validated yet", and `ready_for_review` reruns the full matrix on
           # the same head. Distinguishing the two is the whole reason
           # `ci-scope` emits `ready` separately from `source`.
+          #
+          # Skipping this job on a draft is NOT equivalent, and the difference
+          # is easy to re-litigate into a regression: GitHub counts a skipped
+          # job as *success* for a required status check (the same distinction
+          # docs/runbooks/merge-queue.md draws between "skipped" and "never
+          # created"). A draft whose only required check reads green then has a
+          # window, between the ready transition and the new run registering a
+          # pending check, where the last known state of that check is green.
+          # Red is the only state with no ambiguous window.
           if [ "${READY_CI:-}" = "false" ]; then
             echo "[required-ci] draft pull request: heavy CI deferred until it is marked ready for review." >&2
             {
