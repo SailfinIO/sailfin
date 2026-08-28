@@ -1,0 +1,176 @@
+// compiler/tests/e2e/match_guard_arm_test.sfn
+//
+// Regression coverage for SFN-1168: a `guard` clause on a match arm that
+// destructures an enum variant was dropped during lowering, so the arm
+// matched on the variant tag alone and fired unconditionally regardless of
+// the guard's outcome. Guard lowering now happens in a dedicated
+// `matchguard` block emitted between the arm's tag test and its body, after
+// the pattern's payload binders are materialized, so a failing guard falls
+// through to the next arm.
+//
+// A second defect fixed in the same change: an exhaustive match containing a
+// guarded arm raised a spurious `E1002` ("function can reach the end without
+// returning"), because a match-wide `has_guarded_cases` flag suppressed the
+// enum-tag exhaustiveness tracking contributed by the *unguarded* arms.
+//
+// These are behavioural cases: each fixture is compiled and *run* through a
+// nested `sfn test` invocation (not just emitted and IR-inspected), so a
+// wrong-branch or spurious-E1002 regression fails the nested run's exit
+// code, not a string match on emitted IR.
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-1168-match-guard-arm";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Writes `source` to `<scratch>/<label>_test.sfn`, runs it through a nested
+// `sfn test`, and returns the child's exit code. The fixture's own `assert`s
+// carry the actual behavioural check; a wrong-branch or E1002 regression
+// surfaces here as a nonzero exit.
+fn _run_fixture(label: string, source: string) -> i64 ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + "_test.sfn";
+    if fs.exists(src) { fs.deleteFile(src); }
+    fs.writeFile(src, source);
+
+    let child_env = clean_runner_env(nested_runner_scratch("sfn1168-" + label));
+    let exit = process.run_capture([sfn_bin_path(), "test", src], child_env);
+    let child_stdout = process.capture_take_stdout();
+    let child_stderr = process.capture_take_stderr();
+
+    // Discarding the child's output collapses every failure into a bare
+    // nonzero exit, which cannot distinguish the wrong-branch regression this
+    // file is meant to catch from an unrelated build failure in the nested
+    // run (a missing runtime capsule, say). Echo it so a red run is
+    // diagnosable from the log alone.
+    if exit != 0 {
+        print("nested fixture `" + label + "` failed (nonzero exit)");
+        print("--- nested stdout ---");
+        print(child_stdout);
+        print("--- nested stderr ---");
+        print(child_stderr);
+    }
+
+    fs.deleteFile(src);
+    return exit;
+}
+
+test "match guard: a failing guard falls through to the next arm" ![io] {
+    let source = "fn make() -> Result<int, string> {\n"
+        + "    return Result.Ok { value: 5 };\n"
+        + "}\n"
+        + "\n"
+        + "test \"guard false falls through\" {\n"
+        + "    match make() {\n"
+        + "        Result.Ok { value } if value == 99 => { assert false; },\n"
+        + "        Result.Ok { value } => { assert value == 5; },\n"
+        + "        Result.Err { error } => { assert false; }\n"
+        + "    }\n"
+        + "}\n";
+    let exit = _run_fixture("guard-false-fallthrough", source);
+    assert exit == 0;
+}
+
+test "match guard: a holding guard takes the guarded arm" ![io] {
+    let source = "fn make() -> Result<int, string> {\n"
+        + "    return Result.Ok { value: 99 };\n"
+        + "}\n"
+        + "\n"
+        + "test \"guard true taken\" {\n"
+        + "    match make() {\n"
+        + "        Result.Ok { value } if value == 99 => { assert value == 99; },\n"
+        + "        Result.Ok { value } => { assert false; },\n"
+        + "        Result.Err { error } => { assert false; }\n"
+        + "    }\n"
+        + "}\n";
+    let exit = _run_fixture("guard-true-taken", source);
+    assert exit == 0;
+}
+
+test "match guard: exhaustive match with a guarded arm and no wildcard compiles and runs" ![io] {
+    let source = "fn classify(x: Result<int, string>) -> int {\n"
+        + "    match x {\n"
+        + "        Result.Ok { value } if value > 10 => { return 1; },\n"
+        + "        Result.Ok { value } => { return 2; },\n"
+        + "        Result.Err { error } => { return 3; }\n"
+        + "    }\n"
+        + "}\n"
+        + "\n"
+        + "test \"exhaustive guard no wildcard\" {\n"
+        + "    assert classify(Result.Ok { value: 20 }) == 1;\n"
+        + "    assert classify(Result.Ok { value: 5 }) == 2;\n"
+        + "    assert classify(Result.Err { error: \"x\" }) == 3;\n"
+        + "}\n";
+    let exit = _run_fixture("exhaustive-guard-no-wildcard", source);
+    assert exit == 0;
+}
+
+// Unlike the other cases here, a guarded wildcard lowered correctly before
+// SFN-1168 (its guard references no pattern binder, so it resolved against
+// the pre-match locals). Verified identical on seed 0.10.6 and the fixed
+// compiler; this guards the path against the restructure rather than pinning
+// the original defect.
+test "match guard: a guarded wildcard arm is honored" ![io] {
+    let source = "fn classify(x: int) -> int {\n" + "    match x {\n"
+        + "        _ if x > 10 => { return 1; },\n"
+        + "        _ => { return 2; }\n"
+        + "    }\n"
+        + "}\n"
+        + "\n"
+        + "test \"guarded wildcard\" {\n"
+        + "    assert classify(20) == 1;\n"
+        + "    assert classify(5) == 2;\n"
+        + "}\n";
+    let exit = _run_fixture("guarded-wildcard", source);
+    assert exit == 0;
+}
+
+test "match guard: two guarded arms on the same variant chain fall-through in sequence" ![io] {
+    let source = "fn classify(x: Result<int, string>) -> int {\n"
+        + "    match x {\n"
+        + "        Result.Ok { value } if value == 1 => { return 100; },\n"
+        + "        Result.Ok { value } if value == 2 => { return 200; },\n"
+        + "        Result.Ok { value } => { return 300; },\n"
+        + "        Result.Err { error } => { return 400; }\n"
+        + "    }\n"
+        + "}\n"
+        + "\n"
+        + "test \"chained guarded arms\" {\n"
+        + "    assert classify(Result.Ok { value: 1 }) == 100;\n"
+        + "    assert classify(Result.Ok { value: 2 }) == 200;\n"
+        + "    assert classify(Result.Ok { value: 3 }) == 300;\n"
+        + "}\n";
+    let exit = _run_fixture("chained-guarded-arms", source);
+    assert exit == 0;
+}
+
+// The guard here reads both the pattern's own binder (`value`) and a local
+// from the enclosing scope (`limit`), so it pins that the guard block sees
+// both scopes at once — the binder it materializes and everything already
+// live at the match.
+test "match guard: a guard may read both a pattern binder and an outer local" ![io] {
+    let source = "fn classify(x: Result<int, string>) -> int {\n"
+        + "    let limit = 10;\n"
+        + "    match x {\n"
+        + "        Result.Ok { value } if value > limit => { return 1; },\n"
+        + "        Result.Ok { value } => { return 2; },\n"
+        + "        Result.Err { error } => { return 3; }\n"
+        + "    }\n"
+        + "}\n"
+        + "\n"
+        + "test \"guard reads outer local\" {\n"
+        + "    assert classify(Result.Ok { value: 20 }) == 1;\n"
+        + "    assert classify(Result.Ok { value: 5 }) == 2;\n"
+        + "}\n";
+    let exit = _run_fixture("guard-outer-local", source);
+    assert exit == 0;
+}
