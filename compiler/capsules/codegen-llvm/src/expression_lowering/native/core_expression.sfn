@@ -148,7 +148,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: pair_result.temp_index,
             operand: pair_result.operand,
             string_constants: empty_constants,
-            diags: diags
+            diags: extend_diag_array(diags, pair_result.diags)
         };
     }
 
@@ -351,7 +351,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 temp_index: result.temp_index,
                 operand: result.operand,
                 string_constants: result.string_constants,
-                diags: diags
+                diags: extend_diag_array(diags, result.diags)
             };
         }
         let literal_result = lower_string_literal(stripped, temp_index, lines);
@@ -360,7 +360,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: literal_result.temp_index,
             operand: literal_result.operand,
             string_constants: literal_result.string_constants,
-            diags: diags
+            diags: extend_diag_array(diags, literal_result.diags)
         };
     }
 

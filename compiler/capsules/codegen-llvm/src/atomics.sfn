@@ -47,6 +47,7 @@ import {
     TypeContext
 } from "./types";
 import {
+    extend_diag_array,
     lowering_error_diag,
     lowering_warning_diag,
     number_to_string,
@@ -153,6 +154,7 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
     collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
     current_lines = ptr_lowered.lines;
     current_temp = ptr_lowered.temp_index;
+    diags = extend_diag_array(diags, ptr_lowered.diags);
 
     if ptr_lowered.operand == null {
         let message = "atomic_load failed to lower pointer argument";
@@ -227,6 +229,7 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
     current_lines = ptr_lowered.lines;
     current_temp = ptr_lowered.temp_index;
+    diags = extend_diag_array(diags, ptr_lowered.diags);
 
     if ptr_lowered.operand == null {
         let message = "atomic_store failed to lower pointer argument";
@@ -263,6 +266,7 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     collected_strings = merge_string_constants(collected_strings, value_lowered.string_constants);
     current_lines = value_lowered.lines;
     current_temp = value_lowered.temp_index;
+    diags = extend_diag_array(diags, value_lowered.diags);
 
     if value_lowered.operand == null {
         let message = "atomic_store failed to lower value argument";
@@ -388,6 +392,7 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
     current_lines = ptr_lowered.lines;
     current_temp = ptr_lowered.temp_index;
+    diags = extend_diag_array(diags, ptr_lowered.diags);
 
     if ptr_lowered.operand == null {
         let message = name + " failed to lower pointer argument";
@@ -424,6 +429,7 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     collected_strings = merge_string_constants(collected_strings, delta_lowered.string_constants);
     current_lines = delta_lowered.lines;
     current_temp = delta_lowered.temp_index;
+    diags = extend_diag_array(diags, delta_lowered.diags);
 
     if delta_lowered.operand == null {
         let message = name + " failed to lower delta argument";
@@ -512,6 +518,7 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
     current_lines = ptr_lowered.lines;
     current_temp = ptr_lowered.temp_index;
+    diags = extend_diag_array(diags, ptr_lowered.diags);
 
     if ptr_lowered.operand == null {
         let message = "atomic_cas failed to lower pointer argument";
@@ -548,6 +555,7 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     collected_strings = merge_string_constants(collected_strings, expected_lowered.string_constants);
     current_lines = expected_lowered.lines;
     current_temp = expected_lowered.temp_index;
+    diags = extend_diag_array(diags, expected_lowered.diags);
 
     if expected_lowered.operand == null {
         let message = "atomic_cas failed to lower expected argument";
@@ -584,6 +592,7 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     collected_strings = merge_string_constants(collected_strings, new_lowered.string_constants);
     current_lines = new_lowered.lines;
     current_temp = new_lowered.temp_index;
+    diags = extend_diag_array(diags, new_lowered.diags);
 
     if new_lowered.operand == null {
         let message = "atomic_cas failed to lower new argument";

@@ -75,7 +75,12 @@ import {
     StringConstant,
     TypeContext
 } from "./types";
-import { lowering_error_diag, number_to_string, trim_text } from "./utils";
+import {
+    extend_diag_array,
+    lowering_error_diag,
+    number_to_string,
+    trim_text
+} from "./utils";
 
 // Predicate over the reserved `secure_zero` name. Used by the
 // pre-resolution dispatch hook in `lower_call_expression` (see
@@ -94,6 +99,7 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
     let mut diags: LoweringDiagnostic[] = [];
     let argument_text = trim_text(arguments[index]);
     let lowered = lower_expression(argument_text, bindings, locals, temp_index, lines, functions, context, "i64");
+    diags = extend_diag_array(diags, lowered.diags);
 
     if lowered.operand == null {
         // `[fatal]`, unlike the otherwise-identical `byte_load.sfn` path.
@@ -185,6 +191,7 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
     collected_strings = merge_string_constants(collected_strings, addr_lowered.string_constants);
     current_lines = addr_lowered.lines;
     current_temp = addr_lowered.temp_index;
+    diags = extend_diag_array(diags, addr_lowered.diags);
     if addr_lowered.operand == null {
         return ExpressionResult {
             lines: current_lines,
@@ -199,6 +206,7 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
     collected_strings = merge_string_constants(collected_strings, len_lowered.string_constants);
     current_lines = len_lowered.lines;
     current_temp = len_lowered.temp_index;
+    diags = extend_diag_array(diags, len_lowered.diags);
     if len_lowered.operand == null {
         return ExpressionResult {
             lines: current_lines,

@@ -166,6 +166,7 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
         let coerced = coerce_operand_to_type(lowered.operand, expected_type, result_temp, result_lines, false, null);
         result_lines = coerced.lines;
         result_temp = coerced.temp_index;
+        diags = extend_diag_array(diags, coerced.diags);
         if coerced.operand != null { arg_operands.push(coerced.operand); } else {
             arg_operands.push(lowered.operand);
         }
@@ -366,6 +367,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let mut llvm_return = sig.llvm_return;
     let mut expected_params = sig.expected_params;
     let is_trait_dispatch = sig.is_trait_dispatch;
+    diags = extend_diag_array(diags, sig.diags);
 
     // Issue #633: when `resolve_call_signature` chose the function
     // entry over a colliding runtime-helper row, drop our own
@@ -425,6 +427,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
             argument_expected_type = expected_params[parameter_index];
         }
         let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, argument_expected_type);
+        diags = extend_diag_array(diags, lowered.diags);
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -510,6 +513,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered_default.string_constants);
                 current_lines = lowered_default.lines;
                 current_temp = lowered_default.temp_index;
+                diags = extend_diag_array(diags, lowered_default.diags);
                 if lowered_default.operand == null {
                     let message = "failed to lower default argument for parameter `"
                         + param.name

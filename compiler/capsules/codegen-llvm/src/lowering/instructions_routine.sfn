@@ -146,18 +146,21 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
                 + "structured concurrency forbids non-local exit from a "
                 + "`routine` (issue #1181) — restructure so the routine "
                 + "completes normally.";
+            diagnostics.push(lowering_error_diag("E1011", message, instructions[index].span));
         }
         if _tag == 19 {  // Throw
             let message = "`throw` inside `routine` in `" + function_name
                 + "` would exit the nursery before its spawned tasks join; "
                 + "structured concurrency forbids non-local exit from a "
                 + "`routine` (issue #1181).";
+            diagnostics.push(lowering_error_diag("E1011", message, instructions[index].span));
         }
         if _tag == 10 {  // Break
             if loop_depth == 0 {
                 let message = "`break` inside `routine` in `" + function_name
                     + "` targets a loop outside the routine and would exit "
                     + "the nursery before its spawned tasks join (issue #1181).";
+                diagnostics.push(lowering_error_diag("E1011", message, null));
             }
         }
         if _tag == 11 {  // Continue
@@ -165,6 +168,7 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
                 let message = "`continue` inside `routine` in `" + function_name
                     + "` targets a loop outside the routine and would exit "
                     + "the nursery before its spawned tasks join (issue #1181).";
+                diagnostics.push(lowering_error_diag("E1011", message, null));
             }
         }
 

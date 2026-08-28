@@ -109,6 +109,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                 if _rng_is_hof {
                     if find_top_level_range_separator(_rng_base) >= 0 {
                         let _rng_parse = parse_range_iterable(_rng_base);
+                        result_diags = extend_diag_array(result_diags, _rng_parse.diags);
                         if _rng_parse.success {
                             let _rng_start = lower_expression(_rng_parse.start, bindings, locals, result_temp, result_lines, functions, context, "i64");
                             result_diags = extend_diag_array(result_diags, _rng_start.diags);

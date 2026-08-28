@@ -48,6 +48,7 @@ import {
     TypeContext
 } from "./types";
 import {
+    extend_diag_array,
     lowering_error_diag,
     lowering_warning_diag,
     number_to_string,
@@ -99,6 +100,7 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
     collected_strings = merge_string_constants(collected_strings, addr_lowered.string_constants);
     current_lines = addr_lowered.lines;
     current_temp = addr_lowered.temp_index;
+    diags = extend_diag_array(diags, addr_lowered.diags);
 
     if addr_lowered.operand == null {
         let message = "load_byte failed to lower address argument";

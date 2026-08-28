@@ -16,6 +16,7 @@ import {
     TypeContext
 } from "./types";
 import {
+    extend_diag_array,
     join_with_separator,
     lowering_error_diag,
     number_to_string,
@@ -114,6 +115,7 @@ fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterB
         strings = merge_string_constants(strings, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
+        diags = extend_diag_array(diags, lowered.diags);
         if lowered.operand == null {
             return _failure(builtin + " failed to lower argument "
                 + number_to_string(index), current_lines, current_temp, strings);

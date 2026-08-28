@@ -415,6 +415,7 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
 
     // Fall through to array-based for loop.
     let range_parse = parse_range_iterable(for_iterable_text);
+    diags = extend_diag_array(diags, range_parse.diags);
 
     let iterable_result = lower_expression(for_iterable_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
     diags = extend_diag_array(diags, iterable_result.diags);

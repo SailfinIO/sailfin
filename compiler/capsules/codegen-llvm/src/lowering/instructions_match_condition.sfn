@@ -105,6 +105,7 @@ fn _field_constraint_unsupported_diag(field_name: string, owner: string, span_in
 fn emit_match_guard_branch(function_name: string, guard_text: string, case_span: NativeSourceSpan?, bindings: ParameterBinding[], locals: LocalBinding[], body_label: string, failure_target: string, temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchGuardEmission {
     let mut diags: LoweringDiagnostic[] = [];
     let lowered = lower_condition_to_i1(function_name, guard_text, bindings, locals, temp_index, lines, functions, context);
+    diags = extend_diag_array(diags, lowered.diags);
     let mut current_lines = lowered.lines;
     if lowered.operand != null {
         current_lines.push("  br i1 " + lowered.operand.value + ", label %"
@@ -116,8 +117,7 @@ fn emit_match_guard_branch(function_name: string, guard_text: string, case_span:
         // leaving the arm an unconditional match on the variant tag. That is a
         // wrong-control-flow bug, not a warning.
         //
-        // Null operand only. `ConditionConversion` has no structured `diags`
-        // channel, and a guard whose sub-expression fails inside
+        // Null operand only. A guard whose sub-expression fails inside
         // `lower_logical_and` returns a constant `false` rather than null, so
         // `a && <unlowerable>` still degrades silently into an arm that is
         // never taken. SFN-1171 tracks giving that path a channel.
@@ -470,6 +470,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                 collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants);
                 if pattern_result.operand != null {
                     let harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines);
+                    diags = extend_diag_array(diags, harmonised.diags);
                     let mut _if231: boolean = false;
                     if harmonised.left != null {
                         if harmonised.right != null { _if231 = true; }

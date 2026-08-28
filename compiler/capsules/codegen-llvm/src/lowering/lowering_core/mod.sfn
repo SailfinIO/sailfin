@@ -612,6 +612,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     if effective_mangle_symbols {
         let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, module_aliases, implicit_symbols, native_text_override_path);
         lines = mangled.lines;
+        diags = extend_diag_array_checked(diags, mangled.diags, "module symbol mangling");
     }
     // Drop exact-duplicate module-scope `declare` lines. The runtime-helper
     // preamble and the imported-function / inline-preamble paths can each

@@ -170,6 +170,7 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
 
     let cond_result = lower_expression(parse.condition, bindings, locals, label_temp_offset, lines, functions, context, "");
     string_constants = cond_result.string_constants;
+    diags = extend_diag_array(diags, cond_result.diags);
     if cond_result.operand == null {
         return ExpressionResult {
             lines: cond_result.lines,
@@ -181,6 +182,7 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     }
 
     let cond_bool = coerce_operand_to_type(cond_result.operand, "i1", cond_result.temp_index, cond_result.lines, true, null);
+    diags = extend_diag_array(diags, cond_bool.diags);
     if cond_bool.operand == null {
         return ExpressionResult {
             lines: cond_bool.lines,
@@ -204,6 +206,7 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     current_lines.push(then_label + ":");
     let then_result = lower_expression(parse.true_value, bindings, locals, cond_bool.temp_index, current_lines, functions, context, expected_type);
     string_constants = merge_string_constants(string_constants, then_result.string_constants);
+    diags = extend_diag_array(diags, then_result.diags);
     if then_result.operand == null {
         return ExpressionResult {
             lines: then_result.lines,
@@ -225,6 +228,7 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     current_lines.push(else_label + ":");
     let else_result = lower_expression(parse.false_value, bindings, locals, then_result.temp_index, current_lines, functions, context, expected_type);
     string_constants = merge_string_constants(string_constants, else_result.string_constants);
+    diags = extend_diag_array(diags, else_result.diags);
     if else_result.operand == null {
         return ExpressionResult {
             lines: else_result.lines,
@@ -336,6 +340,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     if _left_is_number_literal && !_right_is_number_literal {
         let right_first = lower_expression(right_text, bindings, locals, temp_index, lines, functions, context, "");
         string_constants = right_first.string_constants;
+        diags = extend_diag_array(diags, right_first.diags);
         if right_first.operand == null {
             return ExpressionResult {
                 lines: right_first.lines,
@@ -347,6 +352,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         }
         let left_second = lower_expression(left_text, bindings, locals, right_first.temp_index, right_first.lines, functions, context, right_first.operand.llvm_type);
         string_constants = merge_string_constants(string_constants, left_second.string_constants);
+        diags = extend_diag_array(diags, left_second.diags);
         if left_second.operand == null {
             return ExpressionResult {
                 lines: left_second.lines,
@@ -367,6 +373,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     } else {
         let left_first = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
         string_constants = left_first.string_constants;
+        diags = extend_diag_array(diags, left_first.diags);
         if left_first.operand == null {
             return ExpressionResult {
                 lines: left_first.lines,
@@ -382,6 +389,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         }
         let right_second = lower_expression(right_text, bindings, locals, left_first.temp_index, left_first.lines, functions, context, _right_expected);
         string_constants = merge_string_constants(string_constants, right_second.string_constants);
+        diags = extend_diag_array(diags, right_second.diags);
         if right_second.operand == null {
             return ExpressionResult {
                 lines: right_second.lines,
@@ -485,6 +493,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines, true, null);
                 current_lines = lhs_coerced.lines;
                 current_temp = lhs_coerced.temp_index;
+                diags = extend_diag_array(diags, lhs_coerced.diags);
                 if lhs_coerced.operand == null {
                     return ExpressionResult {
                         lines: current_lines,
@@ -504,6 +513,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines, true, null);
                 current_lines = rhs_coerced.lines;
                 current_temp = rhs_coerced.temp_index;
+                diags = extend_diag_array(diags, rhs_coerced.diags);
                 if rhs_coerced.operand == null {
                     return ExpressionResult {
                         lines: current_lines,
@@ -520,6 +530,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let lhs_agg = coerce_operand_to_type(lhs_at_string, "{i8*, i64}", current_temp, current_lines, true, null);
             current_lines = lhs_agg.lines;
             current_temp = lhs_agg.temp_index;
+            diags = extend_diag_array(diags, lhs_agg.diags);
             if lhs_agg.operand == null {
                 return ExpressionResult {
                     lines: current_lines,
@@ -532,6 +543,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let rhs_agg = coerce_operand_to_type(rhs_at_string, "{i8*, i64}", current_temp, current_lines, true, null);
             current_lines = rhs_agg.lines;
             current_temp = rhs_agg.temp_index;
+            diags = extend_diag_array(diags, rhs_agg.diags);
             if rhs_agg.operand == null {
                 return ExpressionResult {
                     lines: current_lines,
@@ -557,6 +569,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let concat_operands: LLVMOperand[] = [lhs_agg.operand, rhs_agg.operand, arena_operand];
             let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
             current_lines = concat_result.lines;
+            diags = extend_diag_array(diags, concat_result.diags);
             // SFN-689: return the aggregate, as `emit_string_concat`
             // (core_strings.sfn) does. Extracting the data pointer made a
             // chained `"a" + n + "b" + m` read as `*u8` arithmetic at the
@@ -595,6 +608,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 let lhs_coerced = coerce_operand_to_type(lhs, "double", current_temp, current_lines, true, null);
                 current_lines = lhs_coerced.lines;
                 current_temp = lhs_coerced.temp_index;
+                diags = extend_diag_array(diags, lhs_coerced.diags);
                 if lhs_coerced.operand == null {
                     return ExpressionResult {
                         lines: current_lines,
@@ -608,6 +622,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 let rhs_coerced = coerce_operand_to_type(rhs, "double", current_temp, current_lines, true, null);
                 current_lines = rhs_coerced.lines;
                 current_temp = rhs_coerced.temp_index;
+                diags = extend_diag_array(diags, rhs_coerced.diags);
                 if rhs_coerced.operand == null {
                     return ExpressionResult {
                         lines: current_lines,
@@ -729,6 +744,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         right_pre_type = right_result.operand.llvm_type;
     }
     let harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines);
+    diags = extend_diag_array(diags, harmonised.diags);
     let mut _if99: boolean = false;
     if harmonised.left == null { _if99 = true; }
     if harmonised.right == null { _if99 = true; }
@@ -792,6 +808,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let concat_operands: LLVMOperand[] = [lhs_agg.operand, rhs_agg.operand, arena_operand];
             let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
             current_lines = concat_result.lines;
+            diags = extend_diag_array(diags, concat_result.diags);
             let agg_name = format_temp_name(current_temp);
             let operand = LLVMOperand {
                 llvm_type: "{i8*, i64}",
@@ -969,6 +986,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if _left_is_number_literal && !_right_is_number_literal {
         let right_first = lower_expression(right_text, bindings, locals, temp_index, lines, functions, context, "");
         string_constants = right_first.string_constants;
+        diags = extend_diag_array(diags, right_first.diags);
         if right_first.operand == null {
             return ExpressionResult {
                 lines: right_first.lines,
@@ -985,6 +1003,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         }
         let left_second = lower_expression(left_text, bindings, locals, right_first.temp_index, right_first.lines, functions, context, _left_expected);
         string_constants = merge_string_constants(string_constants, left_second.string_constants);
+        diags = extend_diag_array(diags, left_second.diags);
         if left_second.operand == null {
             return ExpressionResult {
                 lines: left_second.lines,
@@ -1005,6 +1024,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     } else {
         let left_first = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
         string_constants = left_first.string_constants;
+        diags = extend_diag_array(diags, left_first.diags);
         if left_first.operand == null {
             return ExpressionResult {
                 lines: left_first.lines,
@@ -1023,6 +1043,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         }
         let right_second = lower_expression(right_text, bindings, locals, left_first.temp_index, left_first.lines, functions, context, _right_expected);
         string_constants = merge_string_constants(string_constants, right_second.string_constants);
+        diags = extend_diag_array(diags, right_second.diags);
         if right_second.operand == null {
             return ExpressionResult {
                 lines: right_second.lines,
@@ -1191,6 +1212,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                 }
                 if _if109 {
                     let coercion = coerce_operand_to_type(right_operand, "i8", alignment_temp, alignment_lines, true, null);
+                    diags = extend_diag_array(diags, coercion.diags);
                     if coercion.operand == null {
                         return ExpressionResult {
                             lines: coercion.lines,
@@ -1210,6 +1232,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                     }
                     if _elif111 {
                         let coercion = coerce_operand_to_type(left_operand, "i8", alignment_temp, alignment_lines, true, null);
+                        diags = extend_diag_array(diags, coercion.diags);
                         if coercion.operand == null {
                             return ExpressionResult {
                                 lines: coercion.lines,
@@ -1235,6 +1258,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if left_operand != null { left_cmp_pre_type = left_operand.llvm_type; }
     if right_operand != null { right_cmp_pre_type = right_operand.llvm_type; }
     let harmonised = harmonise_operands(left_operand, right_operand, alignment_temp, alignment_lines);
+    diags = extend_diag_array(diags, harmonised.diags);
     let mut _if105: boolean = false;
     if harmonised.left == null { _if105 = true; }
     if harmonised.right == null { _if105 = true; }
@@ -1300,6 +1324,7 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
 
     let left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context, "");
     string_constants = left_result.string_constants;
+    diags = extend_diag_array(diags, left_result.diags);
     if left_result.operand == null {
         return ExpressionResult {
             lines: left_result.lines,
@@ -1312,6 +1337,7 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
 
     let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines, true, null);
     string_constants = merge_string_constants(string_constants, left_result.string_constants);
+    diags = extend_diag_array(diags, left_bool.diags);
     if left_bool.operand == null {
         return ExpressionResult {
             lines: left_bool.lines,
@@ -1336,6 +1362,7 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
 
     let right_result = lower_expression(right_text, bindings, locals, left_bool.temp_index, current_lines, functions, context, "");
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
+    diags = extend_diag_array(diags, right_result.diags);
     if right_result.operand == null {
         let message = "unable to lower && RHS in `" + expression + "`";
         diags.push(lowering_warning_diag("E1006", message, null));
@@ -1358,6 +1385,7 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
 
     let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines, true, null);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
+    diags = extend_diag_array(diags, right_bool.diags);
     if right_bool.operand == null {
         return ExpressionResult {
             lines: right_bool.lines,
@@ -1426,6 +1454,7 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
 
     let left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context, "");
     string_constants = left_result.string_constants;
+    diags = extend_diag_array(diags, left_result.diags);
     if left_result.operand == null {
         return ExpressionResult {
             lines: left_result.lines,
@@ -1438,6 +1467,7 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
 
     let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines, true, null);
     string_constants = merge_string_constants(string_constants, left_result.string_constants);
+    diags = extend_diag_array(diags, left_bool.diags);
     if left_bool.operand == null {
         return ExpressionResult {
             lines: left_bool.lines,
@@ -1462,6 +1492,7 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
 
     let right_result = lower_expression(right_text, bindings, locals, left_bool.temp_index, current_lines, functions, context, "");
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
+    diags = extend_diag_array(diags, right_result.diags);
     if right_result.operand == null {
         let message = "unable to lower || RHS in `" + expression + "`";
         diags.push(lowering_warning_diag("E1006", message, null));
@@ -1487,6 +1518,7 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
 
     let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines, true, null);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
+    diags = extend_diag_array(diags, right_bool.diags);
     if right_bool.operand == null {
         return ExpressionResult {
             lines: right_bool.lines,
