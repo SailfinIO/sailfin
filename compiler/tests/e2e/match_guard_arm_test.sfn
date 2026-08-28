@@ -17,6 +17,7 @@
 // nested `sfn test` invocation (not just emitted and IR-inspected), so a
 // wrong-branch or spurious-E1002 regression fails the nested run's exit
 // code, not a string match on emitted IR.
+import { contains } from "sfn/strings/mod";
 import {
     clean_runner_env,
     default_scratch_dir,
@@ -36,7 +37,7 @@ fn _scratch_dir() -> string ![io] {
 // `sfn test`, and returns the child's exit code. The fixture's own `assert`s
 // carry the actual behavioural check; a wrong-branch or E1002 regression
 // surfaces here as a nonzero exit.
-fn _run_fixture(label: string, source: string) -> i64 ![io] {
+fn _run_fixture(label: string, source: string) -> boolean ![io] {
     let dir = _scratch_dir();
     let src = dir + "/" + label + "_test.sfn";
     if fs.exists(src) { fs.deleteFile(src); }
@@ -47,13 +48,16 @@ fn _run_fixture(label: string, source: string) -> i64 ![io] {
     let child_stdout = process.capture_take_stdout();
     let child_stderr = process.capture_take_stderr();
 
-    // Discarding the child's output collapses every failure into a bare
-    // nonzero exit, which cannot distinguish the wrong-branch regression this
-    // file is meant to catch from an unrelated build failure in the nested
-    // run (a missing runtime capsule, say). Echo it so a red run is
-    // diagnosable from the log alone.
-    if exit != 0 {
-        print("nested fixture `" + label + "` failed (nonzero exit)");
+    // An exit code alone is not enough on either side. A failure cannot be
+    // told apart from an unrelated build failure in the child (a missing
+    // runtime capsule, say) without its output, and a *success* is not
+    // evidence either: a child that discovers zero tests also exits 0, so if
+    // these fixtures ever stop parsing into tests every case here would pass
+    // vacuously. Require the child to have reported a pass, and echo its
+    // output when it did not.
+    let passed = exit == 0 && contains(child_stdout, "PASS");
+    if !passed {
+        print("nested fixture `" + label + "` did not report a pass");
         print("--- nested stdout ---");
         print(child_stdout);
         print("--- nested stderr ---");
@@ -61,7 +65,7 @@ fn _run_fixture(label: string, source: string) -> i64 ![io] {
     }
 
     fs.deleteFile(src);
-    return exit;
+    return passed;
 }
 
 test "match guard: a failing guard falls through to the next arm" ![io] {
@@ -76,8 +80,8 @@ test "match guard: a failing guard falls through to the next arm" ![io] {
         + "        Result.Err { error } => { assert false; }\n"
         + "    }\n"
         + "}\n";
-    let exit = _run_fixture("guard-false-fallthrough", source);
-    assert exit == 0;
+    let passed = _run_fixture("guard-false-fallthrough", source);
+    assert passed;
 }
 
 test "match guard: a holding guard takes the guarded arm" ![io] {
@@ -92,8 +96,8 @@ test "match guard: a holding guard takes the guarded arm" ![io] {
         + "        Result.Err { error } => { assert false; }\n"
         + "    }\n"
         + "}\n";
-    let exit = _run_fixture("guard-true-taken", source);
-    assert exit == 0;
+    let passed = _run_fixture("guard-true-taken", source);
+    assert passed;
 }
 
 test "match guard: exhaustive match with a guarded arm and no wildcard compiles and runs" ![io] {
@@ -110,8 +114,8 @@ test "match guard: exhaustive match with a guarded arm and no wildcard compiles 
         + "    assert classify(Result.Ok { value: 5 }) == 2;\n"
         + "    assert classify(Result.Err { error: \"x\" }) == 3;\n"
         + "}\n";
-    let exit = _run_fixture("exhaustive-guard-no-wildcard", source);
-    assert exit == 0;
+    let passed = _run_fixture("exhaustive-guard-no-wildcard", source);
+    assert passed;
 }
 
 // Unlike the other cases here, a guarded wildcard lowered correctly before
@@ -130,8 +134,8 @@ test "match guard: a guarded wildcard arm is honored" ![io] {
         + "    assert classify(20) == 1;\n"
         + "    assert classify(5) == 2;\n"
         + "}\n";
-    let exit = _run_fixture("guarded-wildcard", source);
-    assert exit == 0;
+    let passed = _run_fixture("guarded-wildcard", source);
+    assert passed;
 }
 
 test "match guard: two guarded arms on the same variant chain fall-through in sequence" ![io] {
@@ -148,9 +152,35 @@ test "match guard: two guarded arms on the same variant chain fall-through in se
         + "    assert classify(Result.Ok { value: 1 }) == 100;\n"
         + "    assert classify(Result.Ok { value: 2 }) == 200;\n"
         + "    assert classify(Result.Ok { value: 3 }) == 300;\n"
+        + "    assert classify(Result.Err { error: \"boom\" }) == 400;\n"
         + "}\n";
-    let exit = _run_fixture("chained-guarded-arms", source);
-    assert exit == 0;
+    let passed = _run_fixture("chained-guarded-arms", source);
+    assert passed;
+}
+
+// A short-circuiting guard is the interesting block-structure case: the `&&`
+// opens its own basic blocks *inside* the `matchguard` block, so the binder
+// stores must still dominate the block the guard's `br i1` actually lands in,
+// not merely the guard block's entry.
+test "match guard: a short-circuiting guard over a pattern binder is honored" ![io] {
+    let source = "fn classify(x: Result<int, string>) -> int {\n"
+        + "    match x {\n"
+        + "        Result.Ok { value } if value > 10 && value < 20 => { return 1; },\n"
+        + "        Result.Ok { value } if value > 100 || value < 0 => { return 2; },\n"
+        + "        Result.Ok { value } => { return 3; },\n"
+        + "        Result.Err { error } => { return 4; }\n"
+        + "    }\n"
+        + "}\n"
+        + "\n"
+        + "test \"short-circuiting guard\" {\n"
+        + "    assert classify(Result.Ok { value: 15 }) == 1;\n"
+        + "    assert classify(Result.Ok { value: 25 }) == 3;\n"
+        + "    assert classify(Result.Ok { value: 500 }) == 2;\n"
+        + "    assert classify(Result.Ok { value: 0 - 5 }) == 2;\n"
+        + "    assert classify(Result.Err { error: \"boom\" }) == 4;\n"
+        + "}\n";
+    let passed = _run_fixture("short-circuit-guard", source);
+    assert passed;
 }
 
 // The guard here reads both the pattern's own binder (`value`) and a local
@@ -171,6 +201,6 @@ test "match guard: a guard may read both a pattern binder and an outer local" ![
         + "    assert classify(Result.Ok { value: 20 }) == 1;\n"
         + "    assert classify(Result.Ok { value: 5 }) == 2;\n"
         + "}\n";
-    let exit = _run_fixture("guard-outer-local", source);
-    assert exit == 0;
+    let passed = _run_fixture("guard-outer-local", source);
+    assert passed;
 }

@@ -461,11 +461,9 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         if index >= structure.cases.length { break; }
         let case = structure.cases[index];
 
-        let mut guard_has_text: boolean = false;
-        if case.guard != null {
-            let guard_trimmed = trim_text(case.guard);
-            if guard_trimmed.length > 0 { guard_has_text = true; }
-        }
+        let mut guard_text: string = "";
+        if case.guard != null { guard_text = trim_text(case.guard); }
+        let guard_has_text: boolean = guard_text.length > 0;
 
         let mut failure_target: string = merge_label;
         let _mc_next = index + 1;
@@ -832,7 +830,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         // string channel, so the guard vanished and the arm matched on its tag
         // alone.
         if guard_has_text {
-            let guard_text = trim_text(case.guard);
             let guard_condition = lower_condition_to_i1(function.name, guard_text, bindings, base_locals, current_temp, current_lines, functions, context);
             let mut _cg1: int = 0;
             loop {
@@ -853,6 +850,13 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
                 // Fail closed. A guard that will not lower used to be dropped
                 // silently, turning the arm into an unconditional match on the
                 // variant tag; that is a wrong-control-flow bug, not a warning.
+                //
+                // This catches a null operand only. `ConditionConversion`
+                // carries no structured `diags` channel, and a guard whose
+                // sub-expression fails inside `lower_logical_and` comes back as
+                // a constant `false` rather than null, so `a && <unlowerable>`
+                // still degrades silently to an arm that is never taken.
+                // SFN-1171 tracks giving that path a diagnostic channel.
                 let guard_diag = lowering_error_diag("E1024", "match arm guard `"
                     + guard_text
                     + "` in `"
