@@ -466,6 +466,54 @@ fn sfn_arena_enabled() -> bool {
     return _sfn_arena_enabled_state == 1;
 }
 
+// `_arena_oom_msg_addr` — the pre-rendered arena-OOM diagnostic. Primed
+// ahead of the page allocation that may fail and only *read* on the
+// failure path, so that path allocates nothing (SFN-1133).
+// `thread_local` to match `_sfn_arena_global_addr`: each thread creates
+// its own arena, so each primes its own message.
+thread_local let mut _arena_oom_msg_addr: i64 = 0;
+
+// `_arena_oom_msg_prime()` materialises the OOM line *before* the
+// allocation that may fail.
+//
+// A `string` literal lowers to an `sfn_alloc_struct` call that copies
+// the bytes into freshly-allocated memory (the same lowering documented
+// at `sfn_arena_enabled()` above), and with the arena enabled that
+// re-enters `sfn_arena_global` with `_sfn_arena_global_addr` still 0 —
+// the recursion that kept this diagnostic unshippable. Publishing
+// `_sfn_arena_enabled_state = 0` around the literal routes the nested
+// allocation through `sfn_alloc_struct`'s libc `calloc` fallback
+// instead: the same provisional-disable technique `sfn_arena_enabled()`
+// uses for its `getenv` probe. The previous state is restored so an
+// unprobed (-1) state still probes normally on the next call.
+//
+// The rendered buffer is deliberately never freed — one small
+// per-thread allocation that must stay valid for any later abort.
+fn _arena_oom_msg_prime() -> void {
+    if _arena_oom_msg_addr != 0 { return; }
+    let saved: i64 = _sfn_arena_enabled_state;
+    _sfn_arena_enabled_state = 0;
+    // The byte count mirrors the `sfn_arena_sfn_create` argument in
+    // `sfn_arena_global` below; keep the two in sync.
+    let m: string = "[sailfin-oom] arena page allocation failed: 4194304 bytes requested\n";
+    // The `*u8` local is load-bearing: assigning `m as i64` straight to
+    // the global lowers to a dropped store under the pinned seed (E1002).
+    let p: *u8 = m as *u8;
+    _arena_oom_msg_addr = p as i64;
+    _sfn_arena_enabled_state = saved;
+}
+
+// `_arena_oom_report()` writes the primed line to fd 2. Allocation-free
+// by construction — a global load, `strlen` and `write`, nothing that
+// re-enters the allocator — so it is safe on the path where the arena
+// could not be created. `2` is the stderr fd (inline-numeric, matching
+// `_arena_write_lit` below and `mem.sfn`'s `[sailfin-oom]` lines).
+fn _arena_oom_report() -> void {
+    if _arena_oom_msg_addr == 0 { return; }
+    let p: *u8 = _arena_oom_msg_addr as *u8;
+    let _ = write(2, p, strlen(p));
+}
+
 // `sfn_arena_global()` — the calling thread's lazily-created arena
 // (4 MiB pages for the compiler), faithful port of `_init_global_arena`
 // + `sfn_arena_global` (`sailfin_arena.c:310,321`). "Global" is retained
@@ -479,16 +527,26 @@ fn sfn_arena_enabled() -> bool {
 // the returned base with no null-check, so a silent NULL would surface
 // as a bare SIGSEGV — `abort` turns OOM into a clean SIGABRT).
 //
-// The C original printed "[sailfin-arena] fatal: …" before aborting,
-// but a message here is unshippable: emitting one builds an `SfnString`
-// via `sfn_alloc_struct`, which (arena enabled) re-enters
-// `sfn_arena_global` with `_sfn_arena_global_addr` still 0 and recurses
-// until the stack overflows — turning a clean OOM abort into a crash.
-// The bare `abort()` (SIGABRT) is the faithful, recursion-free signal.
+// The C original printed "[sailfin-arena] fatal: …" before aborting. A
+// message built *on* the failure path stays unshippable: emitting one
+// there builds an `SfnString` via `sfn_alloc_struct`, which (arena
+// enabled) re-enters `sfn_arena_global` with `_sfn_arena_global_addr`
+// still 0 and recurses until the stack overflows — turning a clean OOM
+// abort into a crash. SFN-1133 restores the diagnostic by moving the
+// construction *ahead* of the fallible allocation
+// (`_arena_oom_msg_prime` above): the failure path then only loads a
+// pointer and `write`s it, so it allocates nothing and cannot recurse.
+// A silent `abort()` was expensive — it raises `0xC0000409` on Windows,
+// one digit from the `0xC0000005` access violation, so with no output an
+// OOM was indistinguishable from a segfault.
 fn sfn_arena_global() -> *u8 {
     if _sfn_arena_global_addr == 0 {
+        // Render the diagnostic while allocation still works — after the
+        // failure below there may be no memory left to build it.
+        _arena_oom_msg_prime();
         let created: *u8 = sfn_arena_sfn_create(4194304 as usize);
         if created as i64 == 0 {
+            _arena_oom_report();
             unsafe { abort(); }
         }
         _sfn_arena_global_addr = created as i64;

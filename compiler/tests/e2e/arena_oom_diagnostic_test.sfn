@@ -1,0 +1,114 @@
+// E2E test pinning the arena page-allocation OOM diagnostic
+// (`runtime/sfn/memory/arena.sfn::sfn_arena_global`, SFN-1133).
+//
+// When the process-global arena cannot allocate its first 4 MiB page,
+// `sfn_arena_global` used to `abort()` with no output at all. `abort()`
+// raises `0xC0000409` on Windows (exit -1073740791), one digit from
+// `0xC0000005` (access violation, exit -1073741819), so a silent abort
+// made an out-of-memory condition indistinguishable from a segfault.
+//
+// Contracts pinned here:
+//
+//   1. The failure path emits an identifiable `[sailfin-oom]` line to
+//      stderr naming the arena page allocation and the requested bytes.
+//   2. The line appears EXACTLY once. This is the recursion guard: the
+//      diagnostic is primed *before* the fallible allocation
+//      (`_arena_oom_msg_prime`) precisely so the failure path allocates
+//      nothing. A message built on the failure path would re-enter
+//      `sfn_arena_global` via `sfn_alloc_struct` and recurse until the
+//      stack overflowed, printing the line repeatedly before dying. A
+//      count of exactly 1 pins both halves of that contract.
+//
+// Forcing the failure needs a cap that is in force *from exec*, so
+// `process.run_capture_rlimit_as` (SFN-45) is the vehicle rather than
+// `SAILFIN_MEM_LIMIT`: the self-cap installs inside `fn main`, by which
+// point early string work has already created the arena successfully, so
+// no `SAILFIN_MEM_LIMIT` value can starve the *first* page. No
+// `bash -c "ulimit -v"` vehicle (`.claude/rules/no-bash-e2e.md`).
+//
+// The window is narrow and host-dependent: the cap must leave less than
+// one 4 MiB page of headroom at arena-creation time but still admit the
+// binary and libc mappings. Below it the process dies earlier in
+// `sfn_alloc_struct`; above it the 4 MiB page fits and the starvation
+// lands somewhere later. The test therefore sweeps a range rather than
+// pinning one magic number, and skips when no cap in the sweep reaches
+// the arena path (a host whose base mappings sit outside the range) —
+// measured on Linux x86_64 the window is ~10-12 MB.
+//
+// Linux-only: `RLIMIT_AS` is a no-op on Darwin
+// (`.claude/rules/compiler-safety.md`), so the failure cannot be forced
+// there and the test skips.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. Assert on the captured
+// stderr with `sfn/strings` predicates instead. (#842.)
+import { contains, count, int_to_string } from "sfn/strings";
+import { clean_runner_env_without, default_scratch_dir, sfn_bin_path } from "sfn/test";
+
+// The marker the runtime writes on the arena page-allocation failure.
+// Must stay in sync with `_arena_oom_msg_prime` in `arena.sfn`.
+let _OOM_MARKER: string = "arena page allocation failed";
+
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_MEM_LIMIT"]);
+}
+
+// True on Linux, where RLIMIT_AS is honored and the cap can actually
+// starve the arena page allocation.
+fn _is_linux() -> boolean ![io] { return fs.exists("/proc/self/status"); }
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Run `sfn emit llvm` on a trivial source file under a per-child
+// `RLIMIT_AS` of `cap_bytes` and return captured stderr. `emit` (not
+// `version`) is the reproduction from SFN-1133: it is the first command
+// that drives a real arena allocation.
+fn _emit_under_cap(label: string, cap_bytes: int) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    let out = dir + "/" + label + ".ll";
+    fs.writeFile(src, "fn main() -> int {\n    return 0;\n}\n");
+
+    let e = _child_env();
+    let _exit = process.run_capture_rlimit_as([sfn_bin_path(), "emit", "-o", out, "llvm", src], e, cap_bytes);
+    let _out = process.capture_take_stdout();
+    return process.capture_take_stderr();
+}
+
+// Sweep caps upward until one starves the arena's first page. Returns
+// the captured stderr for that run, or "" when no cap in the range
+// reaches the arena path on this host.
+fn _stderr_from_starved_arena(label: string) -> string ![io] {
+    let mut mb = 8;
+    loop {
+        if mb > 20 { break; }
+        let err = _emit_under_cap(label + "_" + int_to_string(mb), mb * 1048576);
+        if contains(err, _OOM_MARKER) { return err; }
+        mb += 1;
+    }
+    return "";
+}
+
+test "arena: page-allocation failure reports OOM instead of aborting silently" ![io] {
+    if !_is_linux() { return; }
+    let err = _stderr_from_starved_arena("arena_oom_identifiable");
+    // No cap in the sweep reached the arena path on this host.
+    if err.length == 0 { return; }
+
+    assert contains(err, "[sailfin-oom]");
+    assert contains(err, _OOM_MARKER);
+    assert contains(err, "4194304");
+}
+
+test "arena: the OOM line is emitted exactly once (no recursion)" ![io] {
+    if !_is_linux() { return; }
+    let err = _stderr_from_starved_arena("arena_oom_once");
+    if err.length == 0 { return; }
+
+    assert count(err, _OOM_MARKER) == 1;
+}
