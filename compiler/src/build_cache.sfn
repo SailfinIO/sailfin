@@ -1578,7 +1578,7 @@ fn test_bin_compiler_identity(compiler_version: string, compiler_binary_path: st
 // module `.ll` cache under SFN-677. The schema bump makes every v3
 // entry unreachable once, so a pre-fix entry linked for the wrong
 // target can never false-hit under the new key.
-fn test_bin_cache_schema_version() -> string { return "v5"; }
+fn test_bin_cache_schema_version() -> string { return "v4"; }
 
 // Root for the per-test binary cache: `<base>/test-bin/<schema>`,
 // where `<base>` is `$SAILFIN_BUILD_CACHE_DIR` (when set) or the
@@ -1721,8 +1721,29 @@ fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_t
     // digests are self-delimiting, so `("ab", "c")` and `("a", "bc")` stay
     // distinct without a length prefix, and nothing in the pair can absorb
     // the `tgt1:` marker that follows.
-    let filter_identity = _sha256_of_string(name_filter, unique_suffix + "_fltn")
-        + _sha256_of_string(tag_filter, unique_suffix + "_fltt");
+    //
+    // No schema bump accompanies this term. The key GAINED a component, so it
+    // is strictly more distinguishing: no pre-existing entry — poisoned or
+    // not — is addressable by the new derivation, and the old entries age out
+    // on their own. That is the documented no-bump case in this module's
+    // schema policy above, with SFN-661 as precedent. Bumping would also
+    // strand the old `test-bin/v<N>` tree for good: `cache_sweep_stale_schemas`
+    // skips the `test-bin` subtree by design, and `sfn cache prune`/`clean` are
+    // never handed `test_bin_cache_root()`, while CI archives that path
+    // wholesale.
+    let name_digest = _sha256_of_string(name_filter, unique_suffix + "_fltn");
+    let tag_digest = _sha256_of_string(tag_filter, unique_suffix + "_fltt");
+    // Self-delimiting only while both halves are exactly 64 chars. The
+    // underlying hash fails closed by returning "", and an empty half would
+    // make the pair ambiguous again — ("", "x") would alias ("x", ""), i.e.
+    // `-k foo` sharing an entry with `--tag foo`. Fail closed the way
+    // `test_bin_compiler_identity` does: an invalid digest fails
+    // `_is_valid_digest`, which makes both the lookup and the store a hard
+    // miss, so the run cold-builds rather than addressing a wrong entry.
+    if name_digest.length != 64 || tag_digest.length != 64 {
+        return CacheKey { digest: "" };
+    }
+    let filter_identity = name_digest + tag_digest;
 
     let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_identity
         + "\n"

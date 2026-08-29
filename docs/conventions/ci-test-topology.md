@@ -169,7 +169,7 @@ fan-out's policy.
 The design for the content-addressed key derivation lives in
 `docs/proposals/0011-ci-test-speed.md`; this is the plumbing.
 
-- Cache root: `<base>/test-bin/v5`, where `<base>` is
+- Cache root: `<base>/test-bin/v4`, where `<base>` is
   `$SAILFIN_BUILD_CACHE_DIR` or the in-tree default `build/cache`
   (`test_bin_cache_root_with_override`, `compiler/src/build_cache.sfn:1380-1389`).
 - `--no-test-cache` (`compiler/src/cli/commands/test/mod.sfn:232`) bypasses
