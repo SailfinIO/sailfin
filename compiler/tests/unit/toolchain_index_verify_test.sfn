@@ -1,0 +1,243 @@
+// toolchain_index_verify_test.sfn
+//
+// Success-path and rejection coverage for `toolchain_index_verify`
+// (`compiler/src/toolchain/index.sfn`, SFEP-0073 §3.7, SFN-1069). The
+// producer and trust-root pinning live outside this repo, but
+// `toolchain_index_verify` takes the trust root as a parameter, so a unit
+// test can mint its own Ed25519 keypair, sign a fixture payload with
+// `sfn/crypto`'s `ed25519_sign`, and pass its own public key back in as the
+// root — no released trust root or CI secret required.
+//
+// `sfn/crypto` publishes no seed-to-public-key derivation (`ed25519.sfn`'s
+// `_ed_point_encode` and `ed25519_sign.sfn`'s `_eds_public_key` are both
+// module-private), so the two keypairs below are hardcoded: seed A and its
+// public key are the RFC 8032 TEST 1 vector already checked into
+// `capsules/sfn/crypto/tests/ed25519_sign_test.sfn` ("generated signature
+// verifies and tampered message fails"); seed B is that file's RFC 8032
+// TEST 2 signing seed, with its public key independently verified via
+// `openssl pkey -in <PKCS8 DER of the seed> -text -noout` rather than
+// invented.
+import { ed25519_sign } from "sfn/crypto";
+import { int_to_string } from "sfn/strings";
+
+import { char_code, substring } from "../../src/string_utils";
+import { toolchain_index_parse_timestamp, toolchain_index_verify } from "../../src/toolchain/index";
+
+let SEED_A_HEX = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
+let PUBLIC_KEY_A = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+
+let SEED_B_HEX = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
+let PUBLIC_KEY_B = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
+
+// A fixed-shape 64-char lowercase hex digest for the release-manifest and
+// host `sha256` fields; the verifier never checks these against real
+// bytes, only their hex shape.
+let DUMMY_SHA256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn _fx_hex_value(c: string) -> int {
+    let code = char_code(c) & 255;
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    return -1;
+}
+
+fn _fx_hex_bytes(hex: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= hex.length { break; }
+        out.push((_fx_hex_value(substring(hex, i, i + 1)) << 4) | _fx_hex_value(substring(hex, i
+            + 1, i
+            + 2)));
+        i += 2;
+    }
+    return out;
+}
+
+let _FX_HEX_DIGITS: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"];
+
+fn _fx_bytes_to_hex(bytes: int[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        out = out + _FX_HEX_DIGITS[(bytes[i] >> 4) & 15] + _FX_HEX_DIGITS[bytes[i] & 15];
+        i += 1;
+    }
+    return out;
+}
+
+// The fixture payload is pure ASCII (hex digests, RFC3339 timestamps,
+// semver strings), so byte-for-byte conversion via `char_code`/`substring`
+// is exact — no general UTF-8 decoding is needed.
+fn _fx_ascii_bytes(text: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        out.push(char_code(substring(text, i, i + 1)));
+        i += 1;
+    }
+    return out;
+}
+
+// One release, one host, one channel row, empty yanks/revocations/advisories
+// — schema-minimal per docs/reference/toolchain-index-schema.md. Object keys
+// are hand-sorted lexicographically at every nesting level and the payload
+// carries exactly one trailing `\n`, matching `json_parse_canonical`'s
+// strict canonical grammar (`compiler/src/toolchain/index_json.sfn`).
+fn _fx_payload(sequence: int, generated_at: string, expires_at: string, key_id: string, public_key: string) -> string {
+    return "{\"advisories\":[],\"channels\":{\"stable\":{\"x86_64-unknown-linux-gnu\":\"0.10.4\"}},\"expires_at\":\""
+        + expires_at
+        + "\",\"generated_at\":\""
+        + generated_at
+        + "\",\"key_transitions\":[],\"releases\":{\"0.10.4\":{\"channel\":\"stable\",\"hosts\":{\"x86_64-unknown-linux-gnu\":{\"asset\":\"sailfin_0.10.4_linux_x86_64.tar.gz\",\"sha256\":\""
+        + DUMMY_SHA256
+        + "\"}},\"manifest_key_id\":\"ed25519:"
+        + PUBLIC_KEY_A
+        + "\",\"release_manifest\":{\"path\":\"v0.10.4/SHA256SUMS\",\"sha256\":\""
+        + DUMMY_SHA256
+        + "\"},\"version\":\"0.10.4\"}},\"revocations\":[],\"schema_version\":\"sailfin-toolchain-index/1\",\"sequence\":"
+        + int_to_string(sequence)
+        + ",\"signing\":{\"key_id\":\""
+        + key_id
+        + "\",\"public_key\":\""
+        + public_key
+        + "\"},\"yanks\":[]}\n";
+}
+
+fn _fx_sign(seed_hex: string, payload: string) -> string {
+    return _fx_bytes_to_hex(ed25519_sign(_fx_hex_bytes(seed_hex), _fx_ascii_bytes(payload)));
+}
+
+test "toolchain index: a correctly signed index verifies" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, 0, now_epoch);
+
+    assert result.ok == true;
+    assert result.error == "";
+    assert result.sequence == 1;
+    assert result.key_id == key_id_a;
+    assert result.public_key == PUBLIC_KEY_A;
+    assert result.channels.length == 1;
+    assert result.channels[0].name == "stable";
+    assert result.channels[0].host == "x86_64-unknown-linux-gnu";
+    assert result.channels[0].version == "0.10.4";
+    assert result.releases.length == 1;
+    assert result.releases[0].version == "0.10.4";
+    assert result.releases[0].channel == "stable";
+    assert result.releases[0].hosts.length == 1;
+    assert result.releases[0].hosts[0].host == "x86_64-unknown-linux-gnu";
+    assert result.releases[0].hosts[0].asset == "sailfin_0.10.4_linux_x86_64.tar.gz";
+}
+
+test "toolchain index: a signature from another key is rejected" {
+    // The payload's own signing block, and the trust root passed to the
+    // verifier, both name key B — so the key-chain resolves cleanly and the
+    // only thing wrong is that the bytes were signed with key A's seed
+    // instead. That isolates the failure to the signature check itself
+    // rather than the earlier key-chain-resolution gate.
+    let key_id_b = "ed25519:" + PUBLIC_KEY_B;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_b, PUBLIC_KEY_B);
+    let wrong_signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, wrong_signature_hex, PUBLIC_KEY_B, 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the signed index signature does not verify";
+}
+
+test "toolchain index: a mutated payload is rejected" {
+    // Both payloads are independently well-formed canonical JSON (built by
+    // the same fixture function), differing only in the `generated_at`
+    // seconds digit, so this exercises the signature check itself rather
+    // than the parser — a hand-sliced byte flip risks corrupting the JSON
+    // shape and failing at the earlier `json_parse_canonical` gate instead.
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let expires_at = "2026-12-31T00:00:00Z";
+    let signed_generated_at = "2026-01-01T00:00:00Z";
+    let tampered_generated_at = "2026-01-01T00:00:01Z";
+    let payload = _fx_payload(1, signed_generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let mutated = _fx_payload(1, tampered_generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let now_epoch = toolchain_index_parse_timestamp(signed_generated_at) + 1;
+
+    let result = toolchain_index_verify(mutated, signature_hex, PUBLIC_KEY_A, 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the signed index signature does not verify";
+}
+
+test "toolchain index: an expired index is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-01-02T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(expires_at);
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the signed index expired at " + expires_at;
+}
+
+test "toolchain index: an index older than the cached sequence is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(5, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, 6, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the signed index sequence 5 is older than the cached sequence 6";
+}
+
+test "toolchain index: an unreadable clock refuses rather than accepting" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+
+    // Valid signature and an unexpired window at any real clock reading; a
+    // broken clock (`now_epoch == -1`) must still refuse, not fall back to
+    // treating the index as not-yet-expired.
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, 0, -1);
+
+    assert result.ok == false;
+    assert result.error == "the host clock is unavailable, so index freshness cannot be established";
+}
+
+test "toolchain index: a non-canonical payload is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let canonical = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+
+    // Insert one insignificant space right after the opening brace. The
+    // document is still well-formed JSON a lenient reader would accept
+    // unchanged, but `json_parse_canonical` rejects any whitespace outside
+    // string literals. Sign these exact mutated bytes, so the signature is
+    // genuinely valid over them — this must fail on canonicality, not on
+    // the signature.
+    let noncanonical = substring(canonical, 0, 1) + " " + substring(canonical, 1, canonical.length);
+    let signature_hex = _fx_sign(SEED_A_HEX, noncanonical);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(noncanonical, signature_hex, PUBLIC_KEY_A, 0, now_epoch);
+
+    assert result.ok == false;
+}
