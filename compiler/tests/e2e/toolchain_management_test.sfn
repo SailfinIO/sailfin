@@ -338,9 +338,16 @@ test "toolchain management: a partial payload is never a candidate" ![io] {
         + store]), proj);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    report_child_failure("toolchain-management partial run", exit, out, err);
-    assert exit == 0;
+    // The stub never ran: routing declined the partial entry.
     assert ! contains(out + err, marker);
+    // What answered instead is this entry's own `list`, which reports a
+    // partial entry as E0619 and exits 1 (SFN-1066). That non-zero exit is
+    // the proof the command stayed in-process — a routed stub prints its
+    // marker and exits 0 — so it is asserted rather than tolerated.
+    assert exit == 1;
+    assert contains(out, "999.0.0");
+    assert contains(out, "partial");
+    assert contains(err, "E0619");
 }
 
 test "toolchain management: an incompatible protocol increase fails with upgrade guidance" ![io] {
