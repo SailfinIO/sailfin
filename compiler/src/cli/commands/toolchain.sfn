@@ -46,14 +46,14 @@ import {
 import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 
-fn _toolchain_install(version: string, work_root: string) -> int ![io, net] {
+fn _toolchain_install(version: string, work_root: string, allow_yanked: boolean) -> int ![clock, io, net] {
     let versions_base = toolchain_versions_base();
     if versions_base.length == 0 {
         let empty_lines: string[] = [];
         print.err(render_terminal_diagnostic(diagnostic_to_diag(toolchain_store_diagnostic(), "toolchain"), empty_lines, "toolchain"));
         return 1;
     }
-    return toolchain_install_to_user_store(version, versions_base, work_root);
+    return toolchain_install_to_user_store(version, versions_base, work_root, allow_yanked);
 }
 
 // SFEP-0003 reserves exit 2 for a setup failure, and a setup failure emits no
@@ -247,7 +247,8 @@ fn _toolchain_entry_version(ctx: CliContext) -> int ![io] {
 // declines — with a routable payload installed, the whole `toolchain` prefix
 // is forwarded and none of them are answered here.
 fn command_def() -> Command {
-    let install_cmd = with_arg(command("install", "Download, verify, and store a pinned toolchain"), arg("version", "Toolchain version to install (e.g. 0.8.0-alpha.3)"));
+    let mut install_cmd = with_arg(command("install", "Download, verify, and store a pinned toolchain"), arg("version", "Exact version (e.g. 0.8.0-alpha.3) or channel (stable|rc|beta|alpha|latest)"));
+    install_cmd = with_flag(install_cmd, flag("allow-yanked", "Install an exact version the signed index has yanked; revoked releases are never installable"));
     let run_cmd = with_arg(command("run", "Run a command with an exact toolchain, without changing any configuration"), arg("version", "Exact toolchain version to run (e.g. 0.10.6)"));
     let run_cmd_full = with_arg(run_cmd, arg_variadic("args", "Command and arguments to run, after a -- separator"));
     let list_cmd = with_flag(command("list", "List installed toolchains, their integrity state, and their roles"), flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
@@ -270,7 +271,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if sub == "install" {
         let mut work_root = env.get("TMPDIR");
         if work_root.length == 0 { work_root = "/tmp"; }
-        return _toolchain_install(get(matches, "version"), work_root);
+        return _toolchain_install(get(matches, "version"), work_root, has_flag(matches, "allow-yanked"));
     }
     if sub == "run" {
         // Reached only when the early scan declined to peel this invocation,

@@ -19,11 +19,26 @@ import {
     substring
 } from "../string_utils";
 import {
+    toolchain_channel_canonical,
+    toolchain_channel_refusal,
+    toolchain_channel_resolve
+} from "./channel";
+import {
     ToolchainHostIdentity,
     toolchain_asset_host_triple,
     toolchain_current_host
 } from "./host";
+import { ToolchainIndex } from "./index";
+import { toolchain_revocations_read } from "./index_cache";
 import { toolchain_verify_entry } from "./integrity";
+import {
+    ToolchainPolicyOutcome,
+    toolchain_index_payload_url,
+    toolchain_index_signature_url,
+    toolchain_policy_acquire,
+    toolchain_policy_decide,
+    toolchain_policy_now_epoch
+} from "./release_policy";
 import {
     toolchain_binary_path,
     toolchain_commit_staged_entry,
@@ -164,21 +179,82 @@ fn _resolved_store_dir(store_base: string, version: string, host: ToolchainHostI
     return toolchain_version_dir(toolchain_host_store_base(store_base, triple), version);
 }
 
+// Fetch the signed index, or fall back to whatever is cached. A fetch failure
+// is not itself fatal here: `toolchain_policy_acquire` decides whether the
+// cache can stand in, and refuses when neither is available.
+fn _install_acquire_index(versions_base: string, temp: string) -> ToolchainIndex ![clock, io, net] {
+    let base = _release_base();
+    let payload_path = temp + "/toolchain-index.json";
+    let sig_path = temp + "/toolchain-index.json.sig";
+    let mut payload = "";
+    let mut signature = "";
+    if _download_to(toolchain_index_payload_url(base), payload_path) {
+        if _download_to(toolchain_index_signature_url(base), sig_path) {
+            payload = fs.readFile(payload_path);
+            signature = _toml_trim_cmd(fs.readFile(sig_path));
+        }
+    }
+    return toolchain_policy_acquire(versions_base, payload, signature, toolchain_policy_now_epoch());
+}
+
+fn _print_policy_refusal(outcome: ToolchainPolicyOutcome) -> void ![io] {
+    print("error: " + outcome.reason);
+    if outcome.hint.length > 0 { print("  " + outcome.hint); }
+}
+
+// An advisory release stays runnable — the indexed severity is information,
+// not a gate (SFEP-0073 §3.6).
+fn _print_policy_advisories(outcome: ToolchainPolicyOutcome) -> void ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= outcome.advisories.length { break; }
+        print("warning: " + outcome.advisories[i]);
+        i += 1;
+    }
+}
+
+fn _policy_exempt() -> ToolchainPolicyOutcome {
+    let advisories: string[] = [];
+    return ToolchainPolicyOutcome {
+        ok: true,
+        reason: "",
+        hint: "",
+        listed: false,
+        asset: "",
+        asset_sha256: "",
+        advisories: advisories
+    };
+}
+
 // Core pipeline: signed manifest, selected host asset, digest, extraction,
 // complete sibling staging, then atomic directory commit.
-fn _toolchain_install(version_arg: string, store_base: string, work_root: string, qualify_user_store: boolean) -> int ![io, net] {
+fn _toolchain_install(version_arg: string, store_base: string, work_root: string, qualify_user_store: boolean, allow_yanked: boolean) -> int ![clock, io, net] {
     if version_arg.length == 0 {
         print("error: sfn toolchain install requires a <version>");
-        print("usage: sfn toolchain install <version>");
+        print("usage: sfn toolchain install <version|channel>");
         return 2;
     }
     let mut version = version_arg;
     if starts_with(version, "v") {
         version = substring(version, 1, version.length);
     }
-    if !toolchain_is_valid_install_version(version) {
-        print("error: not a valid version: \"" + version_arg + "\"");
-        return 1;
+    // A channel is resolved to an exact release by the signed index, so it is
+    // only meaningful where the index is consulted. The bootstrap path pins an
+    // exact seed by design (SFEP-0047) and never resolves one.
+    let channel = toolchain_channel_canonical(version_arg);
+    let is_channel = channel.length > 0;
+    if is_channel {
+        if !qualify_user_store {
+            print("error: the bootstrap store installs exact versions only, not the channel \""
+                + version_arg
+                + "\"");
+            return 1;
+        }
+    } else {
+        if !toolchain_is_valid_install_version(version) {
+            print("error: not a valid version: \"" + version_arg + "\"");
+            return 1;
+        }
     }
 
     let host = toolchain_current_host();
@@ -191,15 +267,46 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         return 1;
     }
 
-    let tag = "v" + version;
-    let release_base = _release_base() + "/" + tag;
-    let sums_url = release_base + "/SHA256SUMS";
-    let sig_url = release_base + "/SHA256SUMS.sig";
     let temp = _install_work_dir(work_root, version);
     if temp.length == 0 {
         print("error: could not create toolchain download staging directory");
         return 1;
     }
+
+    // SFEP-0073 §3.7 (SFN-1069): a user install consults the signed index
+    // before fetching anything release-specific, so a revoked version is
+    // refused without the network ever being asked for it. The bootstrap path
+    // is exempt: its seed is a reviewed `bootstrap.toml` pin (SFEP-0047), and
+    // gating it on index liveness would couple the self-host build to the
+    // index's expiry, so a missed republish would break every CI bootstrap.
+    let mut policy = _policy_exempt();
+    if qualify_user_store {
+        let index = _install_acquire_index(store_base, temp);
+        // Re-read after acquisition: a verified index merges its revocations
+        // into the ledger, so this is the post-merge view the decision needs.
+        let known = toolchain_revocations_read(store_base);
+        if is_channel {
+            version = toolchain_channel_resolve(index, known, channel, host.triple);
+            if version.length == 0 {
+                print("error: " + toolchain_channel_refusal(index, known, channel, host.triple));
+                remove_tree(temp);
+                return 1;
+            }
+            print("sfn toolchain: " + channel + " resolves to " + version);
+        }
+        policy = toolchain_policy_decide(index, known, version, host.triple, allow_yanked);
+        if !policy.ok {
+            _print_policy_refusal(policy);
+            remove_tree(temp);
+            return 1;
+        }
+        _print_policy_advisories(policy);
+    }
+
+    let tag = "v" + version;
+    let release_base = _release_base() + "/" + tag;
+    let sums_url = release_base + "/SHA256SUMS";
+    let sig_url = release_base + "/SHA256SUMS.sig";
 
     let sums_path = temp + "/SHA256SUMS";
     let sig_path = temp + "/SHA256SUMS.sig";
@@ -229,12 +336,32 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         return 1;
     }
 
-    let asset = _select_asset(host, version, sums_text);
+    // A release the index names binds one exact host asset; one it does not
+    // falls back to the manifest-driven preference. Either way the asset must
+    // still appear in the release-specific signed manifest below — the index
+    // narrows the choice, it never replaces that verification (§3.7).
+    let mut asset = _select_asset(host, version, sums_text);
+    if policy.listed { asset = policy.asset; }
     let expected = _digest_for_asset(sums_text, asset);
     if expected.length == 0 {
         print("error: asset not listed in the signed manifest: " + asset);
         remove_tree(temp);
         return 1;
+    }
+    // Two independently signed statements about the same bytes. Disagreement
+    // means one of them is compromised, and there is no safe way to pick a
+    // winner, so refuse rather than prefer either.
+    if policy.listed {
+        if policy.asset_sha256.length > 0 {
+            if !strings_equal(policy.asset_sha256, expected) {
+                print("error: the signed index and the release manifest disagree on the digest for "
+                    + asset);
+                print("  index:    " + policy.asset_sha256);
+                print("  manifest: " + expected);
+                remove_tree(temp);
+                return 1;
+            }
+        }
     }
     let store_dir = _resolved_store_dir(store_base, version, host, asset, qualify_user_store);
     let sha_path = store_dir + "/.sha256";
@@ -353,13 +480,15 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
 
 // Bootstrap compatibility API: store_base/<version>, exactly as
 // bootstrap.toml and sfn dev bootstrap expect.
-fn toolchain_install_to_base(version_arg: string, store_base: string, work_root: string) -> int ![io, net] {
-    return _toolchain_install(version_arg, store_base, work_root, false);
+fn toolchain_install_to_base(version_arg: string, store_base: string, work_root: string) -> int ![clock, io, net] {
+    return _toolchain_install(version_arg, store_base, work_root, false, false);
 }
 
-// Per-user API: store_base/<asset-host-triple>/<version>.
-fn toolchain_install_to_user_store(version_arg: string, store_base: string, work_root: string) -> int ![io, net] {
-    return _toolchain_install(version_arg, store_base, work_root, true);
+// Per-user API: store_base/<asset-host-triple>/<version>. `version_arg` may
+// name a channel here, and `allow_yanked` overrides a yank — never a
+// revocation, which `toolchain_policy_decide` refuses unconditionally.
+fn toolchain_install_to_user_store(version_arg: string, store_base: string, work_root: string, allow_yanked: boolean) -> int ![clock, io, net] {
+    return _toolchain_install(version_arg, store_base, work_root, true, allow_yanked);
 }
 
 export {

@@ -1,0 +1,221 @@
+// compiler/src/toolchain/release_policy.sfn
+//
+// Release-state policy for network-backed installs (SFEP-0073 §§3.6-3.7,
+// SFN-1069). Joins the three primitives this slice landed — the signed index
+// (`index.sfn`), the monotonic local revocation ledger (`index_cache.sfn`),
+// and the release-state verdict (`channel.sfn`) — into the single decision an
+// install has to make: may this exact version be fetched for this host, and
+// does the index carry a stronger asset binding than `SHA256SUMS` alone.
+//
+// This module holds no `![net]` on purpose. The caller downloads the index
+// bytes and hands them in, which keeps every decision here testable against a
+// payload string and stops `install.sfn` and this file importing each other.
+import { release_signing_public_key_hex } from "../release_trust";
+import {
+    TOOLCHAIN_RELEASE_REVOKED,
+    TOOLCHAIN_RELEASE_YANKED,
+    toolchain_advisory_line,
+    toolchain_index_advisories_for,
+    toolchain_index_host_index,
+    toolchain_index_release_index,
+    toolchain_known_sequence,
+    toolchain_release_state
+} from "./channel";
+import {
+    ToolchainIndex,
+    ToolchainIndexAdvisory,
+    ToolchainIndexChannel,
+    ToolchainIndexRelease,
+    ToolchainIndexYank,
+    toolchain_index_verify
+} from "./index";
+import {
+    ToolchainRevocationRecord,
+    toolchain_index_cache_read_payload,
+    toolchain_index_cache_read_signature,
+    toolchain_index_cache_store,
+    toolchain_revocations_merge,
+    toolchain_revocations_read
+} from "./index_cache";
+
+// Published beside the release assets under a fixed tag, so one URL serves
+// every version (`docs/reference/toolchain-index-schema.md`).
+let TOOLCHAIN_INDEX_TAG: string = "toolchain-index-v1";
+
+// The verdict an install acts on. `listed` distinguishes the two verification
+// strengths: a release the index names carries an exact host asset and digest,
+// while one it does not falls back to the release-specific signed manifest.
+struct ToolchainPolicyOutcome {
+    ok: boolean;
+    reason: string;  // "" when ok
+    hint: string;  // second diagnostic line; "" when none
+    listed: boolean;
+    asset: string;  // index-bound asset name; "" when unlisted
+    asset_sha256: string;  // index-bound digest; "" when unlisted
+    advisories: string[];  // rendered lines; runnable, so warnings not errors
+}
+
+fn toolchain_index_payload_url(release_base: string) -> string {
+    return release_base + "/" + TOOLCHAIN_INDEX_TAG + "/toolchain-index.json";
+}
+
+fn toolchain_index_signature_url(release_base: string) -> string {
+    return toolchain_index_payload_url(release_base) + ".sig";
+}
+
+// Wall-clock seconds, or `-1` when the realtime provider fails. `index.sfn`
+// treats a negative value as a refusal rather than as "not expired", so a
+// broken clock can never be the reason an expired index is accepted.
+fn toolchain_policy_now_epoch() -> int ![clock] {
+    let mut epoch_ms: i64 = 0;
+    let out: *i64 = & epoch_ms;
+    let status: i32 = runtime_unix_millis_fn(out);
+    if status != 1 { return -1; }
+    let value: i64 = sailfin_intrinsic_pointer_read_i64(out);
+    return (value as int) / 1000;
+}
+
+fn _policy_index_failure(reason: string) -> ToolchainIndex {
+    let channels: ToolchainIndexChannel[] = [];
+    let releases: ToolchainIndexRelease[] = [];
+    let yanks: ToolchainIndexYank[] = [];
+    let revocations: ToolchainRevocationRecord[] = [];
+    let advisories: ToolchainIndexAdvisory[] = [];
+    return ToolchainIndex {
+        ok: false,
+        error: reason,
+        sequence: -1,
+        generated_at: "",
+        expires_at: "",
+        key_id: "",
+        public_key: "",
+        channels: channels,
+        releases: releases,
+        yanks: yanks,
+        revocations: revocations,
+        advisories: advisories
+    };
+}
+
+// Resolve the index this install will be judged against: the freshly fetched
+// one when it verifies, otherwise the cached one.
+//
+// `min_sequence` is the highest sequence the local ledger has ever accepted,
+// so an endpoint serving an older index is rejected as a rollback rather than
+// silently believed. A verified index is persisted and its revocations merged
+// *before* the caller acts on it, so a revocation is recorded even if the
+// install that learned it then fails.
+//
+// A fetch that returned bytes which then fail verification is fatal, and
+// deliberately does not fall back to the cache: a tampered or expired endpoint
+// must not be able to downgrade a client to stale policy by serving garbage.
+fn toolchain_policy_acquire(versions_base: string, fetched_payload: string, fetched_signature: string, now_epoch: int) -> ToolchainIndex ![io] {
+    let root = release_signing_public_key_hex();
+    let known = toolchain_revocations_read(versions_base);
+    let min_sequence = toolchain_known_sequence(known);
+
+    if fetched_payload.length > 0 && fetched_signature.length > 0 {
+        let fresh = toolchain_index_verify(fetched_payload, fetched_signature, root, min_sequence, now_epoch);
+        if !fresh.ok { return fresh; }
+        let _stored = toolchain_index_cache_store(versions_base, fetched_payload, fetched_signature);
+        let _merged = toolchain_revocations_merge(versions_base, fresh.revocations);
+        return fresh;
+    }
+
+    // Offline, or the endpoint was unreachable. A cached index still carries
+    // authenticated policy, and is re-verified from the trust root on every
+    // read rather than trusted because it is on disk.
+    let cached_payload = toolchain_index_cache_read_payload(versions_base);
+    let cached_signature = toolchain_index_cache_read_signature(versions_base);
+    if cached_payload.length == 0 || cached_signature.length == 0 {
+        return _policy_index_failure("the signed toolchain index could not be fetched and none is cached");
+    }
+    return toolchain_index_verify(cached_payload, cached_signature, root, min_sequence, now_epoch);
+}
+
+fn _policy_advisory_lines(index: ToolchainIndex, version: string) -> string[] {
+    let found = toolchain_index_advisories_for(index, version);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= found.length { break; }
+        out.push(toolchain_advisory_line(found[i]));
+        i += 1;
+    }
+    return out;
+}
+
+fn _policy_refusal(reason: string, hint: string) -> ToolchainPolicyOutcome {
+    let advisories: string[] = [];
+    return ToolchainPolicyOutcome {
+        ok: false,
+        reason: reason,
+        hint: hint,
+        listed: false,
+        asset: "",
+        asset_sha256: "",
+        advisories: advisories
+    };
+}
+
+// Decide whether `version` may be installed for `host_triple`.
+//
+// Ordering is deliberate: revocation outranks yank, and both are checked
+// before the release is looked up, so a revoked version is refused whether or
+// not the index still describes it.
+fn toolchain_policy_decide(index: ToolchainIndex, known: ToolchainRevocationRecord[], version: string, host_triple: string, allow_yanked: boolean) -> ToolchainPolicyOutcome {
+    if !index.ok {
+        return _policy_refusal("the signed toolchain index is unavailable or failed verification: "
+            + index.error, "release state cannot be checked, so this install is refused");
+    }
+
+    let state = toolchain_release_state(index, known, version);
+    if state == TOOLCHAIN_RELEASE_REVOKED {
+        return _policy_refusal("toolchain " + version + " is revoked", "revocation has no override; install a different version");
+    }
+    if state == TOOLCHAIN_RELEASE_YANKED {
+        if !allow_yanked {
+            return _policy_refusal("toolchain " + version + " is yanked", "re-run with --allow-yanked to install it anyway");
+        }
+    }
+
+    let mut out = _policy_refusal("", "");
+    out.advisories = _policy_advisory_lines(index, version);
+
+    let release_at = toolchain_index_release_index(index, version);
+    if release_at < 0 {
+        // Absent from the index is not a refusal. The index carries live
+        // releases, not history, so refusing here would make every release
+        // aged out of it uninstallable and would make index availability a
+        // hard dependency for old versions. What §3.7 actually requires is
+        // that the index was fetched, authenticated, and consulted for
+        // revocation — all of which happened above. Verification falls back
+        // to the release-specific signed manifest (SFEP-0046).
+        out.ok = true;
+        return out;
+    }
+
+    let release = index.releases[release_at];
+    let host_at = toolchain_index_host_index(release, host_triple);
+    if host_at < 0 {
+        return _policy_refusal("the signed index lists " + version
+            + " but publishes no asset for "
+            + host_triple, "this release does not ship for this host");
+    }
+
+    out.listed = true;
+    out.asset = release.hosts[host_at].asset;
+    out.asset_sha256 = release.hosts[host_at].sha256;
+    out.ok = true;
+    return out;
+}
+
+export {
+    TOOLCHAIN_INDEX_TAG,
+    ToolchainPolicyOutcome,
+    toolchain_index_payload_url,
+    toolchain_index_signature_url,
+    toolchain_policy_acquire,
+    toolchain_policy_decide,
+    toolchain_policy_now_epoch
+};

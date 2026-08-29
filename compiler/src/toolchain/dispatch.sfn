@@ -16,7 +16,9 @@ import { CliContext } from "../cli/context";
 import { starts_with, strings_equal, substring } from "../string_utils";
 import { render_terminal_diagnostic } from "../terminal_output";
 import { resolve_compiler_version } from "../version";
+import { toolchain_known_sequence, toolchain_known_sequence_note } from "./channel";
 import { toolchain_current_host } from "./host";
+import { toolchain_revocation_find, toolchain_revocations_read } from "./index_cache";
 import { toolchain_install_to_user_store, toolchain_is_valid_install_version } from "./install";
 import {
     toolchain_print_integrity_failure,
@@ -329,7 +331,10 @@ fn _dispatch_exec_target(target: string, ctx: CliContext, allow_fetch: boolean, 
             print.err("  install it: sfn toolchain install " + target);
             return 1;
         }
-        let rc = toolchain_install_to_user_store(target, versions_base, _dispatch_work_root());
+        // `false`: this install is implied by a project pin, not typed by a
+        // user, so it must never silently override a yank. An explicit
+        // `sfn toolchain install --allow-yanked <version>` is the only way in.
+        let rc = toolchain_install_to_user_store(target, versions_base, _dispatch_work_root(), false);
         if rc != 0 {
             print.err("error: could not obtain the pinned toolchain " + target);
             print.err("  run: sfn toolchain install " + target);
@@ -348,6 +353,22 @@ fn _dispatch_exec_target(target: string, ctx: CliContext, allow_fetch: boolean, 
         print.err("  " + entry.dir);
         print.err("  run 'sfn toolchain install " + target
             + "' online to install a verified host-qualified entry");
+    }
+
+    // SFEP-0073 §3.7 (SFN-1069): a cached-known revoked release cannot be
+    // executed, online or offline. The ledger is local and monotonic, so this
+    // holds with no network at all — which is the point: revocation that only
+    // bit while connected would be trivially evaded by pulling the cable. A
+    // client never claims more than its highest cached signed sequence, so an
+    // entry absent from the ledger runs normally rather than being presumed
+    // revoked.
+    let revoked = toolchain_revocations_read(versions_base);
+    if toolchain_revocation_find(revoked, "release", target) >= 0 {
+        print.err("error: toolchain " + target
+            + " is revoked and will not be executed");
+        print.err("  " + toolchain_known_sequence_note(toolchain_known_sequence(revoked)));
+        print.err("  revocation has no override; select a different version");
+        return 1;
     }
 
     // SFEP-0073 §3.8: hash the selected executable against its install
