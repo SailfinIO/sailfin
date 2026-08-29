@@ -1,0 +1,455 @@
+// compiler/src/toolchain/index_cache.sfn
+//
+// Persistence for the highest accepted signed release index and the
+// monotonic local record of revoked release identities (SFEP-0073 §3.7,
+// SFN-1069). Pure storage: no parsing of the index payload, no signature
+// verification, no policy — the caller (`index.sfn`/`index_json.sfn`)
+// re-verifies the cached payload against the pinned trust root on every
+// read, so a tampered cache is caught there, not here.
+import { int_to_string } from "sfn/strings";
+
+import { _atomic_rename_into_place, _mktemp_sibling_cmd, _toml_trim_cmd } from "../build/fs";
+import { ensure_dir_p } from "../build/fs_tree";
+import { char_code_at_text, substring } from "../string_utils";
+
+let TOOLCHAIN_REVOCATIONS_MAGIC: string = "sailfin-toolchain-revocations 1";
+
+fn toolchain_index_cache_dir(versions_base: string) -> string {
+    if versions_base.length == 0 { return ""; }
+    return versions_base + "/.index";
+}
+
+fn _index_cache_payload_path(versions_base: string) -> string {
+    let dir = toolchain_index_cache_dir(versions_base);
+    if dir.length == 0 { return ""; }
+    return dir + "/toolchain-index.json";
+}
+
+fn _index_cache_sig_path(versions_base: string) -> string {
+    let dir = toolchain_index_cache_dir(versions_base);
+    if dir.length == 0 { return ""; }
+    return dir + "/toolchain-index.json.sig";
+}
+
+fn _index_cache_sequence_path(versions_base: string) -> string {
+    let dir = toolchain_index_cache_dir(versions_base);
+    if dir.length == 0 { return ""; }
+    return dir + "/sequence";
+}
+
+// The highest index sequence this client has ever accepted.
+//
+// Kept separate from the revocation ledger because the two answer different
+// questions: the ledger records *what* was revoked, this records *how current*
+// the client's view is. Deriving the floor from the ledger instead would leave
+// a client that has only ever seen revocation-free indices with a floor of
+// zero, which is no floor at all — and a client whose newest revocation is old
+// would accept any index newer than that revocation rather than newer than the
+// last index it trusted (SFEP-0073 §3.7).
+//
+// A missing or unreadable file reads as 0, which only ever widens what is
+// accepted; it never lets a lower sequence through than the ledger already
+// implies, because the caller takes the maximum of the two.
+fn toolchain_sequence_read(versions_base: string) -> int ![io] {
+    let path = _index_cache_sequence_path(versions_base);
+    if path.length == 0 { return 0; }
+    if !fs.exists(path) { return 0; }
+    let value = _revocation_parse_uint(_toml_trim_cmd(fs.readFile(path)));
+    if value < 0 { return 0; }
+    return value;
+}
+
+// Whether a sequence file exists but will not parse.
+//
+// The counterpart to `toolchain_revocations_corrupt`, and for the same reason:
+// `toolchain_sequence_read` cannot distinguish "never recorded a sequence"
+// from "the record is unreadable", because both have to collapse to a single
+// int. Without this a caller cannot tell them apart either, and reading an
+// unreadable floor as zero is no floor at all — anyone able to write garbage
+// here would reset anti-rollback protection.
+fn toolchain_sequence_corrupt(versions_base: string) -> boolean ![io] {
+    let path = _index_cache_sequence_path(versions_base);
+    if path.length == 0 { return false; }
+    if !fs.exists(path) { return false; }
+    return _revocation_parse_uint(_toml_trim_cmd(fs.readFile(path))) < 0;
+}
+
+// Raise the recorded high-water sequence. Monotonic by construction: a lower
+// or equal value is a no-op, so replaying an older signed index can never walk
+// the floor back down.
+fn toolchain_sequence_record(versions_base: string, sequence: int) -> boolean ![io] {
+    if sequence < 0 { return false; }
+    if toolchain_sequence_read(versions_base) >= sequence { return true; }
+    let dir = toolchain_index_cache_dir(versions_base);
+    if dir.length == 0 { return false; }
+    if !ensure_dir_p(dir) { return false; }
+    let path = _index_cache_sequence_path(versions_base);
+    let tmp = _mktemp_sibling_cmd(path);
+    if tmp.length == 0 { return false; }
+    fs.writeFile(tmp, int_to_string(sequence) + "\n");
+    if !fs.exists(tmp) {
+        fs.deleteFile(tmp);
+        return false;
+    }
+    return _atomic_rename_into_place(tmp, path);
+}
+
+// No verification — the caller re-verifies the cached bytes against the
+// pinned trust root on every read (SFEP-0073 §3.7), so a tampered cache is
+// caught there, not here.
+fn toolchain_index_cache_read_payload(versions_base: string) -> string ![io] {
+    let path = _index_cache_payload_path(versions_base);
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    return fs.readFile(path);
+}
+
+// Trims trailing whitespace/newline: the on-disk `.sig` may carry a
+// trailing LF, but the hex the caller compares must not.
+fn toolchain_index_cache_read_signature(versions_base: string) -> string ![io] {
+    let path = _index_cache_sig_path(versions_base);
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    return _toml_trim_cmd(fs.readFile(path));
+}
+
+// Writes both files atomically and together: each through a sibling temp
+// plus rename, signature FIRST and payload LAST. That ordering bounds the
+// only reachable inconsistent state after a crash to "new signature, old
+// payload" — never "new payload, stale signature that appears to
+// authenticate it" (SFEP-0073 §3.7). A failure before either rename leaves
+// the previous pair untouched; a failure after the signature rename but
+// before the payload rename is the narrow, accepted crash window the
+// ordering exists to bound.
+fn toolchain_index_cache_store(versions_base: string, payload: string, signature: string) -> boolean ![io] {
+    let dir = toolchain_index_cache_dir(versions_base);
+    if dir.length == 0 { return false; }
+    if !ensure_dir_p(dir) { return false; }
+
+    let payload_path = _index_cache_payload_path(versions_base);
+    let sig_path = _index_cache_sig_path(versions_base);
+
+    let sig_tmp = _mktemp_sibling_cmd(sig_path);
+    if sig_tmp.length == 0 { return false; }
+    fs.writeFile(sig_tmp, signature);
+    if !fs.exists(sig_tmp) {
+        fs.deleteFile(sig_tmp);
+        return false;
+    }
+
+    let payload_tmp = _mktemp_sibling_cmd(payload_path);
+    if payload_tmp.length == 0 {
+        fs.deleteFile(sig_tmp);
+        return false;
+    }
+    fs.writeFile(payload_tmp, payload);
+    if !fs.exists(payload_tmp) {
+        fs.deleteFile(sig_tmp);
+        fs.deleteFile(payload_tmp);
+        return false;
+    }
+
+    if !_atomic_rename_into_place(sig_tmp, sig_path) {
+        fs.deleteFile(payload_tmp);
+        return false;
+    }
+    if !_atomic_rename_into_place(payload_tmp, payload_path) { return false; }
+    return true;
+}
+
+struct ToolchainRevocationRecord {
+    kind: string;  // "release" or "signing-key"
+    subject: string;  // exact version, or a key id
+    reason: string;
+    recorded_at: string;  // RFC3339 whole-second UTC
+    sequence: int;  // index sequence this revocation was first accepted at
+}
+
+fn toolchain_revocations_path(versions_base: string) -> string {
+    let dir = toolchain_index_cache_dir(versions_base);
+    if dir.length == 0 { return ""; }
+    return dir + "/revocations";
+}
+
+fn _revocations_split_lines(text: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut start: int = 0;
+    let length = text.length;
+    let mut i: int = 0;
+    loop {
+        if i >= length { break; }
+        if char_code_at_text(text, i) == 10 {
+            lines.push(substring(text, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start <= length { lines.push(substring(text, start, length)); }
+    return lines;
+}
+
+fn _revocation_split_tabs(line: string) -> string[] {
+    let mut fields: string[] = [];
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= line.length { break; }
+        if char_code_at_text(line, i) == 9 {
+            fields.push(substring(line, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    fields.push(substring(line, start, line.length));
+    return fields;
+}
+
+// Strict, no partial parse: any non-digit byte, or an empty string, fails.
+// Mirrors `manifest.sfn::_manifest_parse_uint`'s discipline (that helper is
+// module-private there, so it is not reused across the module boundary).
+fn _revocation_parse_uint(s: string) -> int {
+    if s.length == 0 || s.length > 18 { return -1; }
+    let mut value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let code = char_code_at_text(s, i);
+        if code < 48 || code > 57 { return -1; }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    return value;
+}
+
+fn _revocation_empty_record() -> ToolchainRevocationRecord {
+    return ToolchainRevocationRecord {
+        kind: "",
+        subject: "",
+        reason: "",
+        recorded_at: "",
+        sequence: -1
+    };
+}
+
+fn _revocation_field_has_tab_or_newline(value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let code = char_code_at_text(value, i);
+        if code == 9 || code == 10 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Shared validity gate for both a text-parsed record and a caller-supplied
+// `incoming` record handed to `toolchain_revocations_merge`: non-empty
+// `kind`/`subject`, `kind` in {"release", "signing-key"}, non-negative
+// `sequence`, and no TAB/newline in any field.
+fn _revocation_record_valid(record: ToolchainRevocationRecord) -> boolean {
+    if record.kind.length == 0 { return false; }
+    if record.subject.length == 0 { return false; }
+    if record.kind != "release" && record.kind != "signing-key" { return false; }
+    if record.sequence < 0 { return false; }
+    if _revocation_field_has_tab_or_newline(record.kind) { return false; }
+    if _revocation_field_has_tab_or_newline(record.subject) { return false; }
+    if _revocation_field_has_tab_or_newline(record.reason) { return false; }
+    if _revocation_field_has_tab_or_newline(record.recorded_at) { return false; }
+    return true;
+}
+
+struct _RevocationLineResult {
+    ok: boolean;
+    record: ToolchainRevocationRecord;
+}
+
+// Field order on disk is `kind, subject, sequence, recorded_at, reason`
+// (TAB-separated); `reason` is free text and last, so it may contain
+// spaces but never a TAB. A malformed shape (wrong field count) or a field
+// that fails `_revocation_record_valid` both fail this line.
+fn _revocation_parse_line(line: string) -> _RevocationLineResult {
+    let fields = _revocation_split_tabs(line);
+    if fields.length != 5 {
+        return _RevocationLineResult {
+            ok: false,
+            record: _revocation_empty_record()
+        };
+    }
+    let sequence = _revocation_parse_uint(fields[2]);
+    let record = ToolchainRevocationRecord {
+        kind: fields[0],
+        subject: fields[1],
+        reason: fields[4],
+        recorded_at: fields[3],
+        sequence: sequence
+    };
+    if !_revocation_record_valid(record) {
+        return _RevocationLineResult {
+            ok: false,
+            record: _revocation_empty_record()
+        };
+    }
+    return _RevocationLineResult { ok: true, record: record };
+}
+
+struct _RevocationsParseResult {
+    ok: boolean;
+    records: ToolchainRevocationRecord[];
+}
+
+// Pure. First line must be the exact magic; every following non-blank line
+// is one record. A bad magic or any malformed record fails the whole
+// parse — `toolchain_revocations_read`/`_corrupt` are what let a caller
+// tell "no revocations known" apart from "cannot tell" using this result.
+fn _revocations_parse(text: string) -> _RevocationsParseResult {
+    if _toml_trim_cmd(text).length == 0 {
+        return _RevocationsParseResult { ok: false, records: [] };
+    }
+    let lines = _revocations_split_lines(text);
+    if lines.length == 0 || lines[0] != TOOLCHAIN_REVOCATIONS_MAGIC {
+        return _RevocationsParseResult { ok: false, records: [] };
+    }
+
+    let mut records: ToolchainRevocationRecord[] = [];
+    let mut i: int = 1;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_last = i == lines.length - 1;
+        if line.length == 0 {
+            if is_last {
+                i += 1;
+                continue;
+            }
+            return _RevocationsParseResult { ok: false, records: [] };
+        }
+        let parsed_line = _revocation_parse_line(line);
+        if !parsed_line.ok {
+            return _RevocationsParseResult { ok: false, records: [] };
+        }
+        records.push(parsed_line.record);
+        i += 1;
+    }
+    return _RevocationsParseResult { ok: true, records: records };
+}
+
+fn _revocations_render(records: ToolchainRevocationRecord[]) -> string {
+    let mut out: string = TOOLCHAIN_REVOCATIONS_MAGIC + "\n";
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let r = records[i];
+        out = out + r.kind + "\t" + r.subject + "\t" + int_to_string(r.sequence)
+            + "\t"
+            + r.recorded_at
+            + "\t"
+            + r.reason
+            + "\n";
+        i += 1;
+    }
+    return out;
+}
+
+// Missing file reads as `[]` — the "no revocations known" case, distinct
+// from "cannot tell" (`toolchain_revocations_corrupt`).
+fn toolchain_revocations_read(versions_base: string) -> ToolchainRevocationRecord[] ![io] {
+    let path = toolchain_revocations_path(versions_base);
+    if path.length == 0 { return []; }
+    if !fs.exists(path) { return []; }
+    let parsed = _revocations_parse(fs.readFile(path));
+    if !parsed.ok { return []; }
+    return parsed.records;
+}
+
+// `true` only when the file EXISTS and fails to parse — a missing file is
+// "no revocations known", not corruption. A caller uses this to refuse
+// rather than silently proceed as if nothing were revoked (SFEP-0073
+// §3.7's fail-closed contract).
+fn toolchain_revocations_corrupt(versions_base: string) -> boolean ![io] {
+    let path = toolchain_revocations_path(versions_base);
+    if path.length == 0 { return false; }
+    if !fs.exists(path) { return false; }
+    let parsed = _revocations_parse(fs.readFile(path));
+    return !parsed.ok;
+}
+
+fn toolchain_revocation_find(records: ToolchainRevocationRecord[], kind: string, subject: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        if records[i].kind == kind && records[i].subject == subject { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Append-only and monotonic: an identity already on disk keyed on
+// `(kind, subject)` is never removed and never rewritten, even when
+// `incoming` carries the same identity with a different `reason`,
+// `recorded_at`, or `sequence` — first acceptance is durable ("a later
+// index cannot un-revoke it", SFEP-0073 §3.7). Only genuinely new
+// identities are appended. An on-disk file that fails to parse is refused
+// outright (`toolchain_revocations_corrupt` is what surfaces that to the
+// caller); merging over it would erase the evidence of corruption.
+//
+// A malformed incoming record (empty `kind`/`subject`, an unrecognized
+// `kind`, a negative `sequence`, or a TAB/newline in any field) is skipped
+// rather than aborting the whole merge, but makes the return `false` so
+// the caller knows the merge was not clean. Writes atomically through a
+// sibling temp plus rename.
+fn toolchain_revocations_merge(versions_base: string, incoming: ToolchainRevocationRecord[]) -> boolean ![io] {
+    let path = toolchain_revocations_path(versions_base);
+    if path.length == 0 { return false; }
+    let dir = toolchain_index_cache_dir(versions_base);
+    if !ensure_dir_p(dir) { return false; }
+
+    let mut merged: ToolchainRevocationRecord[] = [];
+    if fs.exists(path) {
+        let parsed = _revocations_parse(fs.readFile(path));
+        if !parsed.ok { return false; }
+        merged = parsed.records;
+    }
+
+    let mut clean: boolean = true;
+    let mut j: int = 0;
+    loop {
+        if j >= incoming.length { break; }
+        let candidate = incoming[j];
+        if !_revocation_record_valid(candidate) {
+            clean = false;
+            j += 1;
+            continue;
+        }
+        if toolchain_revocation_find(merged, candidate.kind, candidate.subject) < 0 {
+            merged.push(candidate);
+        }
+        j += 1;
+    }
+
+    let text = _revocations_render(merged);
+    let tmp = _mktemp_sibling_cmd(path);
+    if tmp.length == 0 { return false; }
+    fs.writeFile(tmp, text);
+    if !fs.exists(tmp) {
+        fs.deleteFile(tmp);
+        return false;
+    }
+    if !_atomic_rename_into_place(tmp, path) { return false; }
+    return clean;
+}
+
+export {
+    ToolchainRevocationRecord,
+    toolchain_index_cache_dir,
+    toolchain_index_cache_read_payload,
+    toolchain_index_cache_read_signature,
+    toolchain_index_cache_store,
+    toolchain_revocation_find,
+    toolchain_revocations_corrupt,
+    toolchain_revocations_merge,
+    toolchain_revocations_path,
+    toolchain_revocations_read,
+    toolchain_sequence_corrupt,
+    toolchain_sequence_read,
+    toolchain_sequence_record
+};

@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-29 (SFN-1067, SFN-1120, SFN-1066, SFN-1065, SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
+Updated: 2026-08-29 (SFN-1069, SFN-1067, SFN-1120, SFN-1066, SFN-1065, SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
 SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726, SFN-916). Seed pinned to `0.10.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
@@ -328,12 +328,12 @@ here.
   host-qualified entry installed before this change, or a dev build —
   reports `unverified` and still runs; that is the documented SFEP-0046
   compatibility boundary, not a gap. This is SFEP-0073 **slice 1** only: no
-  signed index, channels, update policy, per-user default, or
-  yank/revocation enforcement ships here — SFEP-0073 stays `Accepted`, not
-  `Implemented`. The `sfn toolchain list`/`active`/`verify` inspection CLI
-  built on this manifest ships separately (SFN-1066, below); routing on the
-  `management_protocol` field it records ships separately too
-  (SFN-1067, below).
+  signed index, channels, update policy, or per-user default ships here —
+  SFEP-0073 stays `Accepted`, not `Implemented`. The `sfn toolchain
+  list`/`active`/`verify` inspection CLI built on this manifest ships
+  separately (SFN-1066, below); routing on the `management_protocol` field it
+  records ships separately too (SFN-1067, below); yank/revocation enforcement
+  for exact installs ships separately too (SFN-1069, below).
 - **One-shot exact toolchain selector — "Inspect and Run"** (SFEP-0073 §3.3
   slice 1, SFN-1065). `sfn +<exact-version> <command> ...` and its long form
   `sfn toolchain run <exact-version> [--] <command> ...` (the `--` separator
@@ -367,9 +367,13 @@ here.
   applies to a version query too, but when the selected payload is not
   installed it prints a note plus an `sfn toolchain install <version>` hint
   and reports the entry toolchain instead of fetching. Channel selectors
-  (`stable`/`rc`/`beta`/`alpha`/`latest`, e.g. `sfn +stable`) are rejected
-  with an actionable error naming the gap — they need the signed index
-  (SFEP-0073 §3.9 slice 4). This is slice 1 only: `sfn toolchain
+  (`stable`/`rc`/`beta`/`alpha`/`latest`, e.g. `sfn +stable`) are still
+  rejected by `+<selector>`, `toolchain run`, and `SAILFIN_TOOLCHAIN` with an
+  actionable error naming the gap: `toolchain_select_exact`
+  (`compiler/src/toolchain/dispatch.sfn`) does not call the channel resolver
+  the signed index client now provides — only `sfn toolchain install
+  <channel>` does (SFEP-0073 §3.9 slice 4, SFN-1069, below). This is slice 1
+  only: `sfn toolchain
   default`/`update`/`remove` are later issues, not shipped here;
   `list`/`active`/`verify` ship separately (SFN-1066, below); `entry-version`
   and management-protocol routing ship separately too (SFN-1067, below).
@@ -443,13 +447,62 @@ here.
   as the routed payload; a marker naming a different version warns and
   answers in-process rather than failing. Routing reads no project
   `[toolchain]` pin, so management stays reachable when ordinary selection is
-  broken or unsatisfiable. Revocation exclusion is **not implemented** —
-  `_management_known_revoked` is a deliberate empty stub pending the cached
-  revocation index (SFEP-0073 §3.9 slice 4, SFN-1069); nothing on disk
-  records a revoked version yet. This is the routing half of §3.9
-  slice 3 only: the per-user default and `sfn toolchain remove` (SFN-1068),
-  and channels, updates, and the signed index (SFN-1069), remain unshipped.
-  SFEP-0073 stays `Accepted`, not `Implemented`.
+  broken or unsatisfiable. Revocation exclusion now reads the local ledger:
+  `_management_known_revoked` retired the empty stub this entry originally
+  shipped with and excludes a known-revoked payload from the survey
+  (SFEP-0073 §3.9 slice 4, SFN-1069, below). This is the routing half of §3.9
+  slice 3 only: the per-user default and `sfn toolchain remove` (SFN-1068)
+  remain unshipped. SFEP-0073 stays `Accepted`, not `Implemented`.
+- **Signed index client + local revocation ledger — release-state policy**
+  (SFEP-0073 §§3.6-3.7/§3.9 slice 4, SFN-1069). `compiler/src/toolchain/
+  index.sfn::toolchain_index_verify` parses and authenticates the signed
+  index SFN-1062's producer publishes: strict canonical JSON (the signature
+  covers the canonical bytes, not the wire bytes), a key-transition chain
+  walked from the pinned `compiler/src/release_trust.sfn` root to the
+  payload's claimed signing key (a payload's self-declared key is never
+  trusted directly), and refusal on a rollback sequence or an unreadable
+  clock — a failed clock read is a refusal, never "not expired".
+  `compiler/src/toolchain/index_cache.sfn` persists the highest-accepted
+  payload/signature pair (signature written before payload, so a crash
+  mid-write cannot leave a payload that appears self-authenticating) and an
+  append-only, monotonic local revocation ledger at
+  `<versions_base>/.index/revocations`, keyed on `(kind, subject)`: an
+  identity once accepted is never un-revoked by a later index.
+  `compiler/src/toolchain/channel.sfn::toolchain_channel_resolve` resolves
+  `stable`/`rc`/`beta`/`alpha` (and the `latest` alias for `stable`) to an
+  exact release per host, excluding yanked and revoked releases.
+  `compiler/src/toolchain/release_policy.sfn::toolchain_policy_decide` is the
+  single verdict an install acts on — revocation outranks yank and both are
+  checked before release lookup, so a revoked version is refused whether or
+  not the index still names it. `sfn toolchain install
+  <stable|rc|beta|alpha|latest|version>` now consults the index before any
+  release-specific fetch: revoked is refused with no override; yanked is
+  refused unless `--allow-yanked`; a release the index lists binds one exact
+  host asset, and when both the index and the release manifest name a digest
+  they must agree or the install is refused. A version absent from the index
+  is *not* refused — the index carries live releases, not history, so
+  absence falls back to SFEP-0046's release-specific signed manifest.
+  `toolchain_install_to_base` (the `bootstrap.toml` seed path, SFEP-0047) is
+  exempt from all of this: gating the self-host bootstrap seed on index
+  liveness would couple it to the index's expiry. Dispatch
+  (`compiler/src/toolchain/dispatch.sfn`) refuses to re-exec a cached-known
+  revoked release before any network access, and both dispatch and install
+  fail closed on a revocation ledger that exists but fails to parse — a
+  ledger that will not parse is not the same as "nothing is revoked", and
+  §3.7 requires revocation to hold with no network at all.
+  `_management_known_revoked` (SFN-1067) now reads the ledger, retiring the
+  empty stub that entry shipped with. Not shipped: default update tracks,
+  `sfn toolchain update`, opportunistic update notification/scheduling,
+  per-user defaults, `sfn toolchain remove`, and any automatic installation
+  or project-manifest mutation — those are SFN-1071/1073/1068. SFEP-0073
+  stays `Accepted`, not `Implemented`. Channel resolution, yank handling, and
+  index-listed asset binding are covered at unit level only
+  (`compiler/tests/unit/toolchain_release_policy_test.sfn`,
+  `toolchain_index_verify_test.sfn`, `toolchain_index_cache_test.sfn`); an
+  e2e test cannot forge a signature against the pinned release-signing trust
+  root. Offline revoked-execution refusal is e2e-covered
+  (`compiler/tests/e2e/toolchain_revocation_test.sfn`) because it reads only
+  the local ledger, not a signed index.
 - **Compiler bootstrap manifest — `bootstrap.toml` + `sfn dev bootstrap`**
   (SFEP-0047, SFN-197). A root `bootstrap.toml` is the compiler checkout's
   exact bootstrap-seed policy — `[seed].version/source/repo/asset_prefix/policy`,
@@ -660,8 +713,9 @@ here.
   and preserves the last pair for interrupted upload recovery. This is discovery metadata
   only: it does not replace the signed per-release manifest or archive-digest
   check. Client parsing, cache/anti-rollback enforcement, channel resolution,
-  and yank/revocation/advisory policy remain unshipped pending SFN-1069, so
-  today's exact install behavior remains SFEP-0046 release-manifest-only.
+  and yank/revocation enforcement now ship (SFEP-0073 §3.9 slice 4, SFN-1069,
+  above); a client-side advisory report ships with the same client, but
+  update discovery/notification (`sfn toolchain update`) remains unshipped.
   Schema and operations: `docs/reference/toolchain-index-schema.md` and
   `docs/release-signing.md`; design: SFEP-0073 §3.7 and §3.9 slice 4.
 - **CLI dispatch.** `sailfin_cli_main_v2` (`compiler/src/cli/main.sfn`) is the

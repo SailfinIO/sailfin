@@ -1,0 +1,774 @@
+// compiler/src/toolchain/index_json.sfn
+//
+// Canonical-JSON reader for the signed `toolchain-index.json` payload
+// (docs/reference/toolchain-index-schema.md, "Canonical encoding and
+// signature"). The detached Ed25519 signature covers the exact downloaded
+// bytes, so this reader rejects any noncanonical encoding before the
+// payload is trusted rather than normalizing it — no insignificant
+// whitespace, sorted object keys, no duplicate keys, integer-only numbers,
+// and exactly one trailing newline.
+//
+// Node shape is a flat array with integer child indices (jsmn-style),
+// deliberately not a recursive struct/enum — that shape is a self-hosting
+// risk for a parser this deep in the toolchain path. Pure module: no
+// effects, no filesystem, no network.
+import { int_to_string } from "sfn/strings";
+
+import { char_code, strings_equal, substring } from "../string_utils";
+import { char_from_code } from "runtime/prelude";
+
+let JSON_NULL: int = 0;
+let JSON_BOOL: int = 1;
+let JSON_NUMBER: int = 2;
+let JSON_STRING: int = 3;
+let JSON_ARRAY: int = 4;
+let JSON_OBJECT: int = 5;
+
+// Nesting and node-count ceilings (canonical grammar section of the schema
+// doc). Both are guard rails against a pathological payload, not values the
+// real schema is expected to approach.
+let _JSON_MAX_DEPTH: int = 64;
+let _JSON_MAX_NODES: int = 200000;
+
+struct JsonNode {
+    kind: int;
+    // STRING: the decoded text. NUMBER: the raw lexeme. BOOL: "true"/"false".
+    // NULL/ARRAY/OBJECT: "".
+    text: string;
+    // OBJECT only: keys[i] is the name of children[i]. Empty for every other kind.
+    keys: string[];
+    // OBJECT/ARRAY: node indices of the members, in document order.
+    children: int[];
+}
+
+struct JsonDoc {
+    nodes: JsonNode[];
+    ok: boolean;
+    // Empty when ok. Otherwise a lowercase reason, one of the exact strings
+    // named in the module doc comment, suffixed with " at offset <n>".
+    error: string;
+}
+
+// Internal parse state threaded through the recursive-descent helpers below,
+// mirroring the syntax parser's `Parser`-threading idiom
+// (compiler/capsules/syntax/src/parser/types.sfn): every helper takes the
+// current state and returns the updated state rather than mutating shared
+// storage.
+struct _JsonParseState {
+    text: string;
+    pos: int;
+    depth: int;
+    nodes: JsonNode[];
+    ok: boolean;
+    error: string;
+}
+
+struct _JsonValueResult {
+    state: _JsonParseState;
+    node: int;
+}
+
+struct _JsonStringResult {
+    state: _JsonParseState;
+    text: string;
+}
+
+struct _JsonPushResult {
+    state: _JsonParseState;
+    index: int;
+}
+
+fn _is_ws_byte(code: int) -> boolean {
+    return code == 32 || code == 9 || code == 13 || code == 10;
+}
+
+fn _hex_digit_val(code: int) -> int {
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    return -1;
+}
+
+fn _json_fail_doc(reason: string, offset: int) -> JsonDoc {
+    return JsonDoc {
+        nodes: [],
+        ok: false,
+        error: reason + " at offset " + int_to_string(offset)
+    };
+}
+
+fn _json_fail_state_at(state: _JsonParseState, reason: string, offset: int) -> _JsonParseState {
+    let mut st = state;
+    st.ok = false;
+    st.error = reason + " at offset " + int_to_string(offset);
+    return st;
+}
+
+fn _json_fail_state(state: _JsonParseState, reason: string) -> _JsonParseState {
+    return _json_fail_state_at(state, reason, state.pos);
+}
+
+fn _json_fail_value(state: _JsonParseState, reason: string) -> _JsonValueResult {
+    return _JsonValueResult {
+        state: _json_fail_state(state, reason),
+        node: -1
+    };
+}
+
+fn _json_propagate(state: _JsonParseState) -> _JsonValueResult {
+    return _JsonValueResult { state: state, node: -1 };
+}
+
+fn _json_bytewise_compare(a: string, b: string) -> int {
+    let la = a.length;
+    let lb = b.length;
+    let mut n = la;
+    if lb < n { n = lb; }
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        let ca = char_code(substring(a, i, i + 1));
+        let cb = char_code(substring(b, i, i + 1));
+        if ca != cb {
+            if ca < cb { return -1; }
+            return 1;
+        }
+        i += 1;
+    }
+    if la < lb { return -1; }
+    if la > lb { return 1; }
+    return 0;
+}
+
+fn _json_push_node(state: _JsonParseState, node: JsonNode) -> _JsonPushResult {
+    if state.nodes.length >= _JSON_MAX_NODES {
+        return _JsonPushResult {
+            state: _json_fail_state(state, "json document too large"),
+            index: -1
+        };
+    }
+    let mut st = state;
+    st.nodes.push(node);
+    return _JsonPushResult { state: st, index: st.nodes.length - 1 };
+}
+
+fn _json_parse_string(state: _JsonParseState) -> _JsonStringResult {
+    let text = state.text;
+    let len = text.length;
+    let quote_pos = state.pos;
+    let mut pos = quote_pos + 1;
+    let mut out: string = "";
+    let mut seg_start = pos;
+    let guard_limit = len + 8;
+    let mut guard: int = 0;
+    loop {
+        guard += 1;
+        if guard > guard_limit {
+            return _JsonStringResult {
+                state: _json_fail_state_at(state, "unterminated string", quote_pos),
+                text: ""
+            };
+        }
+        if pos >= len {
+            return _JsonStringResult {
+                state: _json_fail_state_at(state, "unterminated string", quote_pos),
+                text: ""
+            };
+        }
+        let code = char_code(substring(text, pos, pos + 1));
+        if code == 34 {
+            out = out + substring(text, seg_start, pos);
+            let mut st = state;
+            st.pos = pos + 1;
+            return _JsonStringResult { state: st, text: out };
+        }
+        if code == 92 {
+            out = out + substring(text, seg_start, pos);
+            pos += 1;
+            if pos >= len {
+                return _JsonStringResult {
+                    state: _json_fail_state_at(state, "unterminated string", quote_pos),
+                    text: ""
+                };
+            }
+            let esc = char_code(substring(text, pos, pos + 1));
+            if esc == 34 {
+                out = out + "\"";
+                pos += 1;
+            } else if esc == 92 {
+                out = out + "\\";
+                pos += 1;
+            } else if esc == 47 {
+                out = out + "/";
+                pos += 1;
+            } else if esc == 98 {
+                out = out + char_from_code(8);
+                pos += 1;
+            } else if esc == 102 {
+                out = out + char_from_code(12);
+                pos += 1;
+            } else if esc == 110 {
+                out = out + "\n";
+                pos += 1;
+            } else if esc == 114 {
+                out = out + "\r";
+                pos += 1;
+            } else if esc == 116 {
+                out = out + "\t";
+                pos += 1;
+            } else if esc == 117 {
+                let esc_start = pos - 1;
+                pos += 1;
+                if pos + 4 > len {
+                    return _JsonStringResult {
+                        state: _json_fail_state_at(state, "invalid escape", esc_start),
+                        text: ""
+                    };
+                }
+                let mut value: int = 0;
+                let mut hi: int = 0;
+                let mut hex_ok: boolean = true;
+                loop {
+                    if hi >= 4 { break; }
+                    let hc = char_code(substring(text, pos + hi, pos + hi + 1));
+                    let digit = _hex_digit_val(hc);
+                    if digit < 0 {
+                        hex_ok = false;
+                        break;
+                    }
+                    value = value * 16 + digit;
+                    hi += 1;
+                }
+                if !hex_ok {
+                    return _JsonStringResult {
+                        state: _json_fail_state_at(state, "invalid escape", esc_start),
+                        text: ""
+                    };
+                }
+                if value >= 32 {
+                    return _JsonStringResult {
+                        state: _json_fail_state_at(state, "noncanonical unicode escape", esc_start),
+                        text: ""
+                    };
+                }
+                out = out + char_from_code(value);
+                pos += 4;
+            } else {
+                return _JsonStringResult {
+                    state: _json_fail_state_at(state, "invalid escape", pos - 1),
+                    text: ""
+                };
+            }
+            seg_start = pos;
+            continue;
+        }
+        if code < 32 {
+            return _JsonStringResult {
+                state: _json_fail_state_at(state, "control character in string", pos),
+                text: ""
+            };
+        }
+        pos += 1;
+    }
+}
+
+fn _json_parse_string_value(state: _JsonParseState) -> _JsonValueResult {
+    let str_result = _json_parse_string(state);
+    let st = str_result.state;
+    if !st.ok { return _json_propagate(st); }
+    let node = JsonNode {
+        kind: JSON_STRING,
+        text: str_result.text,
+        keys: [],
+        children: []
+    };
+    let push_result = _json_push_node(st, node);
+    if !push_result.state.ok { return _json_propagate(push_result.state); }
+    return _JsonValueResult {
+        state: push_result.state,
+        node: push_result.index
+    };
+}
+
+fn _json_finish_literal(state: _JsonParseState, end_pos: int, kind: int, text: string) -> _JsonValueResult {
+    let mut st = state;
+    st.pos = end_pos;
+    let node = JsonNode {
+        kind: kind,
+        text: text,
+        keys: [],
+        children: []
+    };
+    let push_result = _json_push_node(st, node);
+    if !push_result.state.ok { return _json_propagate(push_result.state); }
+    return _JsonValueResult {
+        state: push_result.state,
+        node: push_result.index
+    };
+}
+
+fn _json_parse_literal(state: _JsonParseState) -> _JsonValueResult {
+    let text = state.text;
+    let len = text.length;
+    let start = state.pos;
+    if start + 4 <= len && strings_equal(substring(text, start, start + 4), "true") {
+        return _json_finish_literal(state, start + 4, JSON_BOOL, "true");
+    }
+    if start + 4 <= len && strings_equal(substring(text, start, start + 4), "null") {
+        return _json_finish_literal(state, start + 4, JSON_NULL, "");
+    }
+    if start + 5 <= len && strings_equal(substring(text, start, start + 5), "false") {
+        return _json_finish_literal(state, start + 5, JSON_BOOL, "false");
+    }
+    return _json_fail_value(state, "invalid literal");
+}
+
+fn _json_parse_number(state: _JsonParseState) -> _JsonValueResult {
+    let text = state.text;
+    let len = text.length;
+    let start = state.pos;
+    let mut pos = start;
+    if pos < len && char_code(substring(text, pos, pos + 1)) == 45 { pos += 1; }
+    if pos >= len { return _json_fail_value(state, "noncanonical number"); }
+    let first = char_code(substring(text, pos, pos + 1));
+    if first < 48 || first > 57 {
+        return _json_fail_value(state, "noncanonical number");
+    }
+    if first == 48 {
+        pos += 1;
+        if pos < len {
+            let after_zero = char_code(substring(text, pos, pos + 1));
+            if after_zero >= 48 && after_zero <= 57 {
+                return _json_fail_value(state, "noncanonical number");
+            }
+        }
+    } else {
+        pos += 1;
+        let guard_limit = len + 8;
+        let mut guard: int = 0;
+        loop {
+            guard += 1;
+            if guard > guard_limit {
+                return _json_fail_value(state, "noncanonical number");
+            }
+            if pos >= len { break; }
+            let code = char_code(substring(text, pos, pos + 1));
+            if code < 48 || code > 57 { break; }
+            pos += 1;
+        }
+    }
+    if pos < len {
+        let nxt = char_code(substring(text, pos, pos + 1));
+        if nxt == 46 || nxt == 101 || nxt == 69 {
+            return _json_fail_value(state, "noncanonical number");
+        }
+    }
+    let lexeme = substring(text, start, pos);
+    if strings_equal(lexeme, "-0") {
+        return _json_fail_value(state, "noncanonical number");
+    }
+    let mut st = state;
+    st.pos = pos;
+    let node = JsonNode {
+        kind: JSON_NUMBER,
+        text: lexeme,
+        keys: [],
+        children: []
+    };
+    let push_result = _json_push_node(st, node);
+    if !push_result.state.ok { return _json_propagate(push_result.state); }
+    return _JsonValueResult {
+        state: push_result.state,
+        node: push_result.index
+    };
+}
+
+fn _json_parse_object(state: _JsonParseState) -> _JsonValueResult {
+    if state.depth >= _JSON_MAX_DEPTH {
+        return _json_fail_value(state, "json nesting too deep");
+    }
+    let mut st = state;
+    st.pos = st.pos + 1;
+    st.depth = st.depth + 1;
+    let mut keys: string[] = [];
+    let mut children: int[] = [];
+    if st.pos < st.text.length {
+        let code = char_code(substring(st.text, st.pos, st.pos + 1));
+        if code == 125 {
+            st.pos = st.pos + 1;
+            st.depth = st.depth - 1;
+            let node = JsonNode {
+                kind: JSON_OBJECT,
+                text: "",
+                keys: keys,
+                children: children
+            };
+            let push_result = _json_push_node(st, node);
+            if !push_result.state.ok {
+                return _json_propagate(push_result.state);
+            }
+            return _JsonValueResult {
+                state: push_result.state,
+                node: push_result.index
+            };
+        }
+    }
+    let mut have_prev: boolean = false;
+    let mut prev_key: string = "";
+    let guard_limit = st.text.length + 8;
+    let mut guard: int = 0;
+    loop {
+        guard += 1;
+        if guard > guard_limit {
+            return _json_fail_value(st, "unexpected character");
+        }
+        if st.pos >= st.text.length {
+            return _json_fail_value(st, "unexpected character");
+        }
+        let kc = char_code(substring(st.text, st.pos, st.pos + 1));
+        if _is_ws_byte(kc) {
+            return _json_fail_value(st, "noncanonical whitespace");
+        }
+        if kc != 34 { return _json_fail_value(st, "unexpected character"); }
+
+        let str_result = _json_parse_string(st);
+        st = str_result.state;
+        if !st.ok { return _json_propagate(st); }
+        let key = str_result.text;
+
+        if st.pos >= st.text.length {
+            return _json_fail_value(st, "unexpected character");
+        }
+        let cc = char_code(substring(st.text, st.pos, st.pos + 1));
+        if _is_ws_byte(cc) {
+            return _json_fail_value(st, "noncanonical whitespace");
+        }
+        if cc != 58 { return _json_fail_value(st, "unexpected character"); }
+        st.pos = st.pos + 1;
+
+        let val_result = _json_parse_value(st);
+        st = val_result.state;
+        if !st.ok { return _json_propagate(st); }
+
+        if have_prev {
+            let cmp = _json_bytewise_compare(prev_key, key);
+            if cmp == 0 {
+                return _json_fail_value(st, "duplicate object key");
+            }
+            if cmp > 0 {
+                return _json_fail_value(st, "unsorted object keys");
+            }
+        }
+        keys.push(key);
+        children.push(val_result.node);
+        prev_key = key;
+        have_prev = true;
+
+        if st.pos >= st.text.length {
+            return _json_fail_value(st, "unexpected character");
+        }
+        let dc = char_code(substring(st.text, st.pos, st.pos + 1));
+        if _is_ws_byte(dc) {
+            return _json_fail_value(st, "noncanonical whitespace");
+        }
+        if dc == 44 {
+            st.pos = st.pos + 1;
+            continue;
+        }
+        if dc == 125 {
+            st.pos = st.pos + 1;
+            break;
+        }
+        return _json_fail_value(st, "unexpected character");
+    }
+    st.depth = st.depth - 1;
+    let node = JsonNode {
+        kind: JSON_OBJECT,
+        text: "",
+        keys: keys,
+        children: children
+    };
+    let push_result = _json_push_node(st, node);
+    if !push_result.state.ok { return _json_propagate(push_result.state); }
+    return _JsonValueResult {
+        state: push_result.state,
+        node: push_result.index
+    };
+}
+
+fn _json_parse_array(state: _JsonParseState) -> _JsonValueResult {
+    if state.depth >= _JSON_MAX_DEPTH {
+        return _json_fail_value(state, "json nesting too deep");
+    }
+    let mut st = state;
+    st.pos = st.pos + 1;
+    st.depth = st.depth + 1;
+    let mut children: int[] = [];
+    if st.pos < st.text.length {
+        let code = char_code(substring(st.text, st.pos, st.pos + 1));
+        if code == 93 {
+            st.pos = st.pos + 1;
+            st.depth = st.depth - 1;
+            let node = JsonNode {
+                kind: JSON_ARRAY,
+                text: "",
+                keys: [],
+                children: children
+            };
+            let push_result = _json_push_node(st, node);
+            if !push_result.state.ok {
+                return _json_propagate(push_result.state);
+            }
+            return _JsonValueResult {
+                state: push_result.state,
+                node: push_result.index
+            };
+        }
+    }
+    let guard_limit = st.text.length + 8;
+    let mut guard: int = 0;
+    loop {
+        guard += 1;
+        if guard > guard_limit {
+            return _json_fail_value(st, "unexpected character");
+        }
+
+        let val_result = _json_parse_value(st);
+        st = val_result.state;
+        if !st.ok { return _json_propagate(st); }
+        children.push(val_result.node);
+
+        if st.pos >= st.text.length {
+            return _json_fail_value(st, "unexpected character");
+        }
+        let dc = char_code(substring(st.text, st.pos, st.pos + 1));
+        if _is_ws_byte(dc) {
+            return _json_fail_value(st, "noncanonical whitespace");
+        }
+        if dc == 44 {
+            st.pos = st.pos + 1;
+            continue;
+        }
+        if dc == 93 {
+            st.pos = st.pos + 1;
+            break;
+        }
+        return _json_fail_value(st, "unexpected character");
+    }
+    st.depth = st.depth - 1;
+    let node = JsonNode {
+        kind: JSON_ARRAY,
+        text: "",
+        keys: [],
+        children: children
+    };
+    let push_result = _json_push_node(st, node);
+    if !push_result.state.ok { return _json_propagate(push_result.state); }
+    return _JsonValueResult {
+        state: push_result.state,
+        node: push_result.index
+    };
+}
+
+fn _json_parse_value(state: _JsonParseState) -> _JsonValueResult {
+    if state.pos >= state.text.length {
+        return _json_fail_value(state, "unexpected character");
+    }
+    let code = char_code(substring(state.text, state.pos, state.pos + 1));
+    if _is_ws_byte(code) {
+        return _json_fail_value(state, "noncanonical whitespace");
+    }
+    if code == 34 { return _json_parse_string_value(state); }
+    if code == 123 { return _json_parse_object(state); }
+    if code == 91 { return _json_parse_array(state); }
+    if code == 116 || code == 102 || code == 110 {
+        return _json_parse_literal(state);
+    }
+    if code == 45 || (code >= 48 && code <= 57) {
+        return _json_parse_number(state);
+    }
+    if code == 43 { return _json_fail_value(state, "noncanonical number"); }
+    return _json_fail_value(state, "unexpected character");
+}
+
+// Parses one canonical JSON document: a single value, exactly one `\n`, then
+// end of input, with no insignificant whitespace anywhere outside string
+// literals. Root is node index 0 when `ok`.
+fn json_parse_canonical(text: string) -> JsonDoc {
+    if text.length == 0 { return _json_fail_doc("empty input", 0); }
+    let last_code = char_code(substring(text, text.length - 1, text.length));
+    if last_code != 10 {
+        return _json_fail_doc("missing trailing newline", text.length);
+    }
+
+    let initial = _JsonParseState {
+        text: text,
+        pos: 0,
+        depth: 0,
+        nodes: [],
+        ok: true,
+        error: ""
+    };
+    let result = _json_parse_value(initial);
+    let st = result.state;
+    if !st.ok {
+        return JsonDoc { nodes: [], ok: false, error: st.error };
+    }
+    if st.pos != text.length - 1 {
+        return _json_fail_doc("trailing content after the root value", st.pos);
+    }
+    return JsonDoc {
+        nodes: _json_finalize_nodes(st.nodes),
+        ok: true,
+        error: ""
+    };
+}
+
+// Every helper above appends a container node only after all of its
+// children are pushed, so a non-scalar root ends up as the *last* entry in
+// `nodes`, not index 0. The public contract requires root at index 0, so
+// this relocates it there and remaps every child index accordingly: the old
+// root index maps to 0, and every other old index i (which, by the same
+// push-order invariant, is always < the old root index) maps to i + 1.
+fn _json_finalize_nodes(nodes: JsonNode[]) -> JsonNode[] {
+    let count = nodes.length;
+    if count <= 1 { return nodes; }
+    let root_old = count - 1;
+    let mut out: JsonNode[] = [];
+    out.push(_json_remap_node(nodes[root_old], root_old));
+    let mut i: int = 0;
+    loop {
+        if i >= root_old { break; }
+        out.push(_json_remap_node(nodes[i], root_old));
+        i += 1;
+    }
+    return out;
+}
+
+fn _json_remap_node(node: JsonNode, root_old: int) -> JsonNode {
+    if node.kind != JSON_OBJECT && node.kind != JSON_ARRAY { return node; }
+    let mut new_children: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= node.children.length { break; }
+        let old_idx = node.children[i];
+        let mut new_idx = old_idx + 1;
+        if old_idx == root_old { new_idx = 0; }
+        new_children.push(new_idx);
+        i += 1;
+    }
+    return JsonNode {
+        kind: node.kind,
+        text: node.text,
+        keys: node.keys,
+        children: new_children
+    };
+}
+
+fn json_kind(doc: JsonDoc, node: int) -> int {
+    if node < 0 || node >= doc.nodes.length { return JSON_NULL; }
+    return doc.nodes[node].kind;
+}
+
+fn json_len(doc: JsonDoc, node: int) -> int {
+    if node < 0 || node >= doc.nodes.length { return 0; }
+    let n = doc.nodes[node];
+    if n.kind == JSON_OBJECT || n.kind == JSON_ARRAY {
+        return n.children.length;
+    }
+    return 0;
+}
+
+fn json_at(doc: JsonDoc, node: int, i: int) -> int {
+    if node < 0 || node >= doc.nodes.length { return -1; }
+    let n = doc.nodes[node];
+    if i < 0 || i >= n.children.length { return -1; }
+    return n.children[i];
+}
+
+fn json_key_at(doc: JsonDoc, node: int, i: int) -> string {
+    if node < 0 || node >= doc.nodes.length { return ""; }
+    let n = doc.nodes[node];
+    if n.kind != JSON_OBJECT { return ""; }
+    if i < 0 || i >= n.keys.length { return ""; }
+    return n.keys[i];
+}
+
+fn json_member(doc: JsonDoc, node: int, key: string) -> int {
+    if node < 0 || node >= doc.nodes.length { return -1; }
+    let n = doc.nodes[node];
+    if n.kind != JSON_OBJECT { return -1; }
+    let mut i: int = 0;
+    loop {
+        if i >= n.keys.length { break; }
+        if strings_equal(n.keys[i], key) { return n.children[i]; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn json_string(doc: JsonDoc, node: int) -> string {
+    if node < 0 || node >= doc.nodes.length { return ""; }
+    let n = doc.nodes[node];
+    if n.kind != JSON_STRING { return ""; }
+    return n.text;
+}
+
+fn json_is_null(doc: JsonDoc, node: int) -> boolean {
+    return json_kind(doc, node) == JSON_NULL;
+}
+
+fn json_bool(doc: JsonDoc, node: int) -> boolean {
+    if node < 0 || node >= doc.nodes.length { return false; }
+    let n = doc.nodes[node];
+    if n.kind != JSON_BOOL { return false; }
+    return strings_equal(n.text, "true");
+}
+
+// Decodes a NUMBER node's integer lexeme. Bounded at 18 significant digits
+// (mirrors `_manifest_parse_uint`'s bound in manifest.sfn) so a value that
+// would overflow `int` returns `fallback` instead of wrapping.
+fn json_int(doc: JsonDoc, node: int, fallback: int) -> int {
+    if node < 0 || node >= doc.nodes.length { return fallback; }
+    let n = doc.nodes[node];
+    if n.kind != JSON_NUMBER { return fallback; }
+    let lexeme = n.text;
+    let mut i: int = 0;
+    let mut neg: boolean = false;
+    if lexeme.length > 0 && char_code(substring(lexeme, 0, 1)) == 45 {
+        neg = true;
+        i = 1;
+    }
+    let digit_count = lexeme.length - i;
+    if digit_count <= 0 || digit_count > 18 { return fallback; }
+    let mut value: int = 0;
+    loop {
+        if i >= lexeme.length { break; }
+        let code = char_code(substring(lexeme, i, i + 1));
+        if code < 48 || code > 57 { return fallback; }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    if neg { value = -value; }
+    return value;
+}
+
+export {
+    JSON_NULL,
+    JSON_BOOL,
+    JSON_NUMBER,
+    JSON_STRING,
+    JSON_ARRAY,
+    JSON_OBJECT,
+    JsonNode,
+    JsonDoc,
+    json_parse_canonical,
+    json_kind,
+    json_len,
+    json_at,
+    json_key_at,
+    json_member,
+    json_string,
+    json_is_null,
+    json_bool,
+    json_int
+};

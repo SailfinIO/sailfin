@@ -1,0 +1,340 @@
+// compiler/src/toolchain/channel.sfn
+//
+// Release-state policy over an authenticated signed index (SFEP-0073 §3.7).
+// `index.sfn` decides whether a payload is *trustworthy*; this module decides
+// what that payload permits. The three states are deliberately not a single
+// severity ladder — they have different overrides:
+//
+//   yanked    unsuitable for new selection, not unsafe. Channels skip it; an
+//             exact install needs --allow-yanked; an installed copy still runs.
+//   revoked   unsafe. No channel, no install, no execution, no override.
+//   advisory  runnable, but reported with severity, affected range, and the
+//             release that fixes it.
+//
+// Pure — no io, no net. Every input is already-authenticated data, which is
+// what lets the whole policy be unit-tested without a store or a server.
+import { int_to_string } from "sfn/strings";
+
+import {
+    SemVer,
+    semver_compare,
+    semver_is_valid,
+    semver_parse
+} from "../semver";
+import { strings_equal, substring } from "../string_utils";
+import { ToolchainIndex, ToolchainIndexAdvisory, ToolchainIndexRelease } from "./index";
+import { ToolchainRevocationRecord } from "./index_cache";
+
+let TOOLCHAIN_RELEASE_OK: int = 0;
+let TOOLCHAIN_RELEASE_YANKED: int = 1;
+let TOOLCHAIN_RELEASE_REVOKED: int = 2;
+
+// The four published channels. `latest` is never stored in the index
+// (docs/reference/toolchain-index-schema.md); it exists only as a CLI spelling
+// that aliases `stable`, so resolving it here is the one place the alias lives.
+fn toolchain_channel_is_name(value: string) -> boolean {
+    if strings_equal(value, "stable") { return true; }
+    if strings_equal(value, "rc") { return true; }
+    if strings_equal(value, "beta") { return true; }
+    if strings_equal(value, "alpha") { return true; }
+    return strings_equal(value, "latest");
+}
+
+fn toolchain_channel_canonical(value: string) -> string {
+    if strings_equal(value, "latest") { return "stable"; }
+    if toolchain_channel_is_name(value) { return value; }
+    return "";
+}
+
+fn toolchain_index_release_index(index: ToolchainIndex, version: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= index.releases.length { break; }
+        if strings_equal(index.releases[i].version, version) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn toolchain_index_host_index(release: ToolchainIndexRelease, host: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= release.hosts.length { break; }
+        if strings_equal(release.hosts[i].host, host) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn toolchain_index_yank_index(index: ToolchainIndex, version: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= index.yanks.length { break; }
+        if strings_equal(index.yanks[i].version, version) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Revocation is answered from `known` — the merged, monotonic local record —
+// rather than from the index alone, because SFEP-0073 §3.7 makes local
+// revocation durable: a later index cannot un-revoke an identity, so an index
+// that has quietly dropped a record must not restore the release.
+//
+// `index` is consulted only to map a *signing-key* revocation onto the
+// releases it covers. A revoked key revokes every release whose manifest it
+// signed, which the exact-version list alone cannot express.
+fn toolchain_release_is_revoked(known: ToolchainRevocationRecord[], index: ToolchainIndex, version: string) -> boolean {
+    let release_at = toolchain_index_release_index(index, version);
+    let mut manifest_key_id: string = "";
+    if release_at >= 0 {
+        manifest_key_id = index.releases[release_at].manifest_key_id;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= known.length { break; }
+        let record = known[i];
+        if strings_equal(record.kind, "release") {
+            if strings_equal(record.subject, version) { return true; }
+        }
+        if strings_equal(record.kind, "signing-key") {
+            if manifest_key_id.length > 0 && strings_equal(record.subject, manifest_key_id) {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// The single verdict an install or execution decision is made against.
+// Revocation outranks a yank: a release that is both is reported revoked, so
+// `--allow-yanked` can never be the answer to it.
+fn toolchain_release_state(index: ToolchainIndex, known: ToolchainRevocationRecord[], version: string) -> int {
+    if toolchain_release_is_revoked(known, index, version) {
+        return TOOLCHAIN_RELEASE_REVOKED;
+    }
+    if toolchain_index_yank_index(index, version) >= 0 {
+        return TOOLCHAIN_RELEASE_YANKED;
+    }
+    return TOOLCHAIN_RELEASE_OK;
+}
+
+fn _split_spaces(text: string) -> string[] {
+    let mut parts: string[] = [];
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i > text.length { break; }
+        let mut boundary = i == text.length;
+        if i < text.length && strings_equal(substring(text, i, i + 1), " ") {
+            boundary = true;
+        }
+        if boundary {
+            if i > start { parts.push(substring(text, start, i)); }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    return parts;
+}
+
+// One `<op><version>` comparator from an advisory's `affected` range.
+// An unrecognised operator or an unparseable version makes the whole range
+// fail to match, which under-reports rather than over-reports: an advisory is
+// informational, and inventing a match from a range this client cannot read
+// would be a worse answer than staying silent about it.
+fn _comparator_matches(comparator: string, candidate: SemVer) -> boolean {
+    let mut op: string = "";
+    let mut rest: string = comparator;
+    if comparator.length >= 2 {
+        let two = substring(comparator, 0, 2);
+        if strings_equal(two, ">=") || strings_equal(two, "<=") {
+            op = two;
+            rest = substring(comparator, 2, comparator.length);
+        }
+    }
+    if op.length == 0 && comparator.length >= 1 {
+        let one = substring(comparator, 0, 1);
+        if strings_equal(one, ">") || strings_equal(one, "<") || strings_equal(one, "=") {
+            op = one;
+            rest = substring(comparator, 1, comparator.length);
+        }
+    }
+    if op.length == 0 { return false; }
+    let bound = semver_parse(rest);
+    if !semver_is_valid(bound) { return false; }
+    let ordering = semver_compare(candidate, bound);
+    if strings_equal(op, ">=") { return ordering >= 0; }
+    if strings_equal(op, "<=") { return ordering <= 0; }
+    if strings_equal(op, ">") { return ordering > 0; }
+    if strings_equal(op, "<") { return ordering < 0; }
+    return ordering == 0;
+}
+
+// Every comparator in the space-separated range must hold (`>=1.2.0 <1.2.4`).
+fn toolchain_advisory_covers(affected: string, version: string) -> boolean {
+    let candidate = semver_parse(version);
+    if !semver_is_valid(candidate) { return false; }
+    let comparators = _split_spaces(affected);
+    if comparators.length == 0 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= comparators.length { break; }
+        if !_comparator_matches(comparators[i], candidate) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn toolchain_index_advisories_for(index: ToolchainIndex, version: string) -> ToolchainIndexAdvisory[] {
+    let mut out: ToolchainIndexAdvisory[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= index.advisories.length { break; }
+        if toolchain_advisory_covers(index.advisories[i].affected, version) {
+            out.push(index.advisories[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// SFEP-0073 §3.7 requires the notice to name severity, affected range, and the
+// fixed version. A nullable `fixed_version` is reported as such rather than
+// omitted, so "no fix yet" is distinguishable from "this client did not say".
+fn toolchain_advisory_line(advisory: ToolchainIndexAdvisory) -> string {
+    let mut fixed = advisory.fixed_version;
+    if fixed.length == 0 { fixed = "none published"; }
+    return advisory.severity + " advisory " + advisory.id + ": " + advisory.summary
+        + " (affects "
+        + advisory.affected
+        + "; fixed in "
+        + fixed
+        + ")";
+}
+
+// Resolve a channel to the one exact release it names for this host, or "".
+//
+// The index stores exactly one candidate per (channel, host), so this is a
+// lookup and a set of eligibility checks, never a search: the schema doc's
+// rule is that a candidate must name a release on the same channel, carrying
+// the same host, and not excluded by a yank, a release revocation, or a
+// signing-key revocation. A head that fails any of those resolves to nothing
+// rather than silently falling back to an older release — picking a
+// replacement is the producer's job, and guessing one here would hand the user
+// a version no signed metadata ever pointed a channel at.
+fn toolchain_channel_resolve(index: ToolchainIndex, known: ToolchainRevocationRecord[], channel: string, host: string) -> string {
+    if !index.ok { return ""; }
+    let canonical = toolchain_channel_canonical(channel);
+    if canonical.length == 0 { return ""; }
+    let mut version: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= index.channels.length { break; }
+        let entry = index.channels[i];
+        if strings_equal(entry.name, canonical) && strings_equal(entry.host, host) {
+            version = entry.version;
+            break;
+        }
+        i += 1;
+    }
+    if version.length == 0 { return ""; }
+    let release_at = toolchain_index_release_index(index, version);
+    if release_at < 0 { return ""; }
+    let release = index.releases[release_at];
+    if !strings_equal(release.channel, canonical) { return ""; }
+    if toolchain_index_host_index(release, host) < 0 { return ""; }
+    if toolchain_release_state(index, known, version) != TOOLCHAIN_RELEASE_OK {
+        return "";
+    }
+    return version;
+}
+
+// Why a channel resolved to nothing, for a diagnostic that tells the user
+// something more useful than "not found". Recomputed rather than threaded out
+// of the resolver so the resolver stays a single-value function.
+fn toolchain_channel_refusal(index: ToolchainIndex, known: ToolchainRevocationRecord[], channel: string, host: string) -> string {
+    let canonical = toolchain_channel_canonical(channel);
+    if canonical.length == 0 {
+        return "\"" + channel
+            + "\" is not a channel (stable|rc|beta|alpha|latest)";
+    }
+    let mut version: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= index.channels.length { break; }
+        let entry = index.channels[i];
+        if strings_equal(entry.name, canonical) && strings_equal(entry.host, host) {
+            version = entry.version;
+            break;
+        }
+        i += 1;
+    }
+    if version.length == 0 {
+        return "the signed index publishes no " + canonical + " release for "
+            + host;
+    }
+    let state = toolchain_release_state(index, known, version);
+    if state == TOOLCHAIN_RELEASE_REVOKED {
+        return "the " + canonical + " release " + version + " is revoked";
+    }
+    if state == TOOLCHAIN_RELEASE_YANKED {
+        return "the " + canonical + " release " + version + " is yanked";
+    }
+    let release_at = toolchain_index_release_index(index, version);
+    if release_at < 0 {
+        return "the signed index names " + canonical + " release " + version
+            + " but carries no record for it";
+    }
+    if toolchain_index_host_index(index.releases[release_at], host) < 0 {
+        return "the " + canonical + " release " + version
+            + " publishes no asset for "
+            + host;
+    }
+    return "the " + canonical + " release " + version + " is not on the "
+        + canonical
+        + " channel";
+}
+
+// Highest sequence this client can honestly claim to know about. SFEP-0073
+// §3.7 is explicit that a never-informed offline client must not imply
+// omniscient revocation: this is the number a diagnostic quotes when it
+// refuses, so the user can see how current that refusal is.
+fn toolchain_known_sequence(known: ToolchainRevocationRecord[]) -> int {
+    let mut highest: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= known.length { break; }
+        if known[i].sequence > highest { highest = known[i].sequence; }
+        i += 1;
+    }
+    return highest;
+}
+
+fn toolchain_known_sequence_note(sequence: int) -> string {
+    if sequence <= 0 {
+        return "  this client has never accepted signed release metadata";
+    }
+    return "  known as of signed index sequence " + int_to_string(sequence);
+}
+
+export {
+    TOOLCHAIN_RELEASE_OK,
+    TOOLCHAIN_RELEASE_REVOKED,
+    TOOLCHAIN_RELEASE_YANKED,
+    toolchain_advisory_covers,
+    toolchain_advisory_line,
+    toolchain_channel_canonical,
+    toolchain_channel_is_name,
+    toolchain_channel_refusal,
+    toolchain_channel_resolve,
+    toolchain_index_advisories_for,
+    toolchain_index_host_index,
+    toolchain_index_release_index,
+    toolchain_index_yank_index,
+    toolchain_known_sequence,
+    toolchain_known_sequence_note,
+    toolchain_release_is_revoked,
+    toolchain_release_state
+};

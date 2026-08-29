@@ -23,6 +23,7 @@ import {
 import { starts_with, strings_equal } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import { ToolchainHostIdentity, toolchain_current_host } from "./host";
+import { toolchain_revocations_corrupt, toolchain_revocations_read } from "./index_cache";
 import { toolchain_is_valid_install_version } from "./install";
 import { toolchain_verify_executable } from "./integrity";
 import {
@@ -82,13 +83,22 @@ fn _management_none() -> ToolchainManagementCandidate {
     };
 }
 
-// Versions the local cache knows to be revoked. The signed index that records
-// revocation is SFEP-0073 §3.9 slice 4 and lands with SFN-1069; until then
-// nothing on disk records one, so this list is empty and excludes nothing.
-// SFN-1069 replaces the body with the cached-index read and this comment.
-fn _management_known_revoked() -> string[] {
-    let empty: string[] = [];
-    return empty;
+// Versions the local revocation ledger knows to be revoked (SFEP-0073 §3.7).
+// Read from disk rather than the network: routing must exclude a revoked
+// payload offline too, and the ledger is monotonic so a later index cannot
+// un-revoke one.
+fn _management_known_revoked(versions_base: string) -> string[] ![io] {
+    let records = toolchain_revocations_read(versions_base);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        if strings_equal(records[i].kind, "release") {
+            out.push(records[i].subject);
+        }
+        i += 1;
+    }
+    return out;
 }
 
 fn _management_contains(items: string[], value: string) -> boolean {
@@ -193,7 +203,7 @@ fn toolchain_management_survey(versions_base: string, host: ToolchainHostIdentit
     let mut compatible: ToolchainManagementCandidate[] = [];
     let mut blocked = _management_none();
     let mut seen: string[] = [];
-    let revoked = _management_known_revoked();
+    let revoked = _management_known_revoked(versions_base);
     let triples = _management_host_triples(host);
 
     let mut t: int = 0;
@@ -392,6 +402,16 @@ fn toolchain_route_management(args: string[], ctx: CliContext) -> int ![io] {
     if versions_base.length == 0 { return 0; }
     let host = toolchain_current_host();
     if host.triple.length == 0 { return 0; }
+
+    // An unparseable ledger means we cannot say which payloads are revoked.
+    // Routing under that uncertainty is what corrupting the file would buy an
+    // attacker, so decline to route. Unlike dispatch this need not refuse the
+    // command: the entry's own identity is not in question, so it answers
+    // in-process and management stays usable.
+    if toolchain_revocations_corrupt(versions_base) {
+        print.err("warning: the local revocation ledger is unreadable; answering in-process rather than routing");
+        return 0;
+    }
 
     let survey = toolchain_management_survey(versions_base, host);
     let running_semver: SemVer = semver_parse(running);

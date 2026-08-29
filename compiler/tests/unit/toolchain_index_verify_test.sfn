@@ -1,0 +1,465 @@
+// toolchain_index_verify_test.sfn
+//
+// Success-path and rejection coverage for `toolchain_index_verify`
+// (`compiler/src/toolchain/index.sfn`, SFEP-0073 §3.7, SFN-1069). The
+// producer and trust-root pinning live outside this repo, but
+// `toolchain_index_verify` takes the trust root as a parameter, so a unit
+// test can mint its own Ed25519 keypair, sign a fixture payload with
+// `sfn/crypto`'s `ed25519_sign`, and pass its own public key back in as the
+// root — no released trust root or CI secret required.
+//
+// `sfn/crypto` publishes no seed-to-public-key derivation (`ed25519.sfn`'s
+// `_ed_point_encode` and `ed25519_sign.sfn`'s `_eds_public_key` are both
+// module-private), so the two keypairs below are hardcoded: seed A and its
+// public key are the RFC 8032 TEST 1 vector already checked into
+// `capsules/sfn/crypto/tests/ed25519_sign_test.sfn` ("generated signature
+// verifies and tampered message fails"); seed B is that file's RFC 8032
+// TEST 2 signing seed, with its public key independently verified via
+// `openssl pkey -in <PKCS8 DER of the seed> -text -noout` rather than
+// invented.
+//
+// The same two keypairs also pin `_resolve_signer`'s key-transition walk:
+// key A plays the pinned trust root and key B the successor it authorizes,
+// which is enough to cover a valid hop, a hop signed by the wrong key, a
+// non-contiguous chain, a hop that takes effect after the index sequence,
+// and revocation of a hop's installed key or of the root itself.
+import { ed25519_sign } from "sfn/crypto";
+import { int_to_string } from "sfn/strings";
+
+import { char_code, substring } from "../../src/string_utils";
+import { toolchain_index_parse_timestamp, toolchain_index_verify } from "../../src/toolchain/index";
+
+let SEED_A_HEX = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
+let PUBLIC_KEY_A = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+
+let SEED_B_HEX = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
+let PUBLIC_KEY_B = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
+
+// A fixed-shape 64-char lowercase hex digest for the release-manifest and
+// host `sha256` fields; the verifier never checks these against real
+// bytes, only their hex shape.
+let DUMMY_SHA256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn _fx_hex_value(c: string) -> int {
+    let code = char_code(c) & 255;
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    return -1;
+}
+
+fn _fx_hex_bytes(hex: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= hex.length { break; }
+        out.push((_fx_hex_value(substring(hex, i, i + 1)) << 4) | _fx_hex_value(substring(hex, i
+            + 1, i
+            + 2)));
+        i += 2;
+    }
+    return out;
+}
+
+let _FX_HEX_DIGITS: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"];
+
+fn _fx_bytes_to_hex(bytes: int[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        out = out + _FX_HEX_DIGITS[(bytes[i] >> 4) & 15] + _FX_HEX_DIGITS[bytes[i] & 15];
+        i += 1;
+    }
+    return out;
+}
+
+// The fixture payload is pure ASCII (hex digests, RFC3339 timestamps,
+// semver strings), so byte-for-byte conversion via `char_code`/`substring`
+// is exact — no general UTF-8 decoding is needed.
+fn _fx_ascii_bytes(text: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        out.push(char_code(substring(text, i, i + 1)));
+        i += 1;
+    }
+    return out;
+}
+
+// One release, one host, one channel row, empty yanks/revocations/advisories
+// — schema-minimal per docs/reference/toolchain-index-schema.md. Object keys
+// are hand-sorted lexicographically at every nesting level and the payload
+// carries exactly one trailing `\n`, matching `json_parse_canonical`'s
+// strict canonical grammar (`compiler/src/toolchain/index_json.sfn`).
+// No signing-key revocations in these fixtures: the chain-vs-ledger
+// interaction is its own concern and is covered separately.
+fn _fx_no_revoked_keys() -> string[] {
+    let empty: string[] = [];
+    return empty;
+}
+
+fn _fx_payload(sequence: int, generated_at: string, expires_at: string, key_id: string, public_key: string) -> string {
+    return "{\"advisories\":[],\"channels\":{\"stable\":{\"x86_64-unknown-linux-gnu\":\"0.10.4\"}},\"expires_at\":\""
+        + expires_at
+        + "\",\"generated_at\":\""
+        + generated_at
+        + "\",\"key_transitions\":[],\"releases\":{\"0.10.4\":{\"channel\":\"stable\",\"hosts\":{\"x86_64-unknown-linux-gnu\":{\"asset\":\"sailfin_0.10.4_linux_x86_64.tar.gz\",\"sha256\":\""
+        + DUMMY_SHA256
+        + "\"}},\"manifest_key_id\":\"ed25519:"
+        + PUBLIC_KEY_A
+        + "\",\"release_manifest\":{\"path\":\"v0.10.4/SHA256SUMS\",\"sha256\":\""
+        + DUMMY_SHA256
+        + "\"},\"version\":\"0.10.4\"}},\"revocations\":[],\"schema_version\":\"sailfin-toolchain-index/1\",\"sequence\":"
+        + int_to_string(sequence)
+        + ",\"signing\":{\"key_id\":\""
+        + key_id
+        + "\",\"public_key\":\""
+        + public_key
+        + "\"},\"yanks\":[]}\n";
+}
+
+fn _fx_sign(seed_hex: string, payload: string) -> string {
+    return _fx_bytes_to_hex(ed25519_sign(_fx_hex_bytes(seed_hex), _fx_ascii_bytes(payload)));
+}
+
+// Same shape as `_fx_payload`, plus a caller-supplied `key_transitions` array
+// literal so the key-transition-chain tests do not have to duplicate the
+// whole schema-minimal fixture.
+fn _fx_payload_with_transitions(sequence: int, generated_at: string, expires_at: string, key_id: string, public_key: string, transitions_json: string) -> string {
+    return "{\"advisories\":[],\"channels\":{\"stable\":{\"x86_64-unknown-linux-gnu\":\"0.10.4\"}},\"expires_at\":\""
+        + expires_at
+        + "\",\"generated_at\":\""
+        + generated_at
+        + "\",\"key_transitions\":"
+        + transitions_json
+        + ",\"releases\":{\"0.10.4\":{\"channel\":\"stable\",\"hosts\":{\"x86_64-unknown-linux-gnu\":{\"asset\":\"sailfin_0.10.4_linux_x86_64.tar.gz\",\"sha256\":\""
+        + DUMMY_SHA256
+        + "\"}},\"manifest_key_id\":\"ed25519:"
+        + PUBLIC_KEY_A
+        + "\",\"release_manifest\":{\"path\":\"v0.10.4/SHA256SUMS\",\"sha256\":\""
+        + DUMMY_SHA256
+        + "\"},\"version\":\"0.10.4\"}},\"revocations\":[],\"schema_version\":\"sailfin-toolchain-index/1\",\"sequence\":"
+        + int_to_string(sequence)
+        + ",\"signing\":{\"key_id\":\""
+        + key_id
+        + "\",\"public_key\":\""
+        + public_key
+        + "\"},\"yanks\":[]}\n";
+}
+
+// One `key_transitions` array entry, with object keys sorted the way
+// `json_parse_canonical` requires (`compiler/src/toolchain/index_json.sfn`):
+// effective_sequence, from_key_id, signature, to_key_id, to_public_key.
+fn _fx_key_transition_json(effective_sequence: int, from_key_id: string, to_key_id: string, to_public_key: string, signature: string) -> string {
+    return "{\"effective_sequence\":" + int_to_string(effective_sequence)
+        + ",\"from_key_id\":\""
+        + from_key_id
+        + "\",\"signature\":\""
+        + signature
+        + "\",\"to_key_id\":\""
+        + to_key_id
+        + "\",\"to_public_key\":\""
+        + to_public_key
+        + "\"}";
+}
+
+// Mirrors `_canonical_transition_bytes` in `compiler/src/toolchain/index.sfn`
+// exactly: this is what the key being replaced actually signs, and it is not
+// the same field order as `_fx_key_transition_json` above (that one is the
+// stored, canonically-key-sorted JSON object; this one is a fixed schema
+// with its own `schema_version` field and no `signature`).
+fn _fx_transition_bytes(effective_sequence: int, from_key_id: string, to_key_id: string, to_public_key: string) -> string {
+    return "{\"effective_sequence\":" + int_to_string(effective_sequence)
+        + ",\"from_key_id\":\""
+        + from_key_id
+        + "\",\"schema_version\":\"sailfin-toolchain-key-transition/1\",\"to_key_id\":\""
+        + to_key_id
+        + "\",\"to_public_key\":\""
+        + to_public_key
+        + "\"}\n";
+}
+
+test "toolchain index: a correctly signed index verifies" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == true;
+    assert result.error == "";
+    assert result.sequence == 1;
+    assert result.key_id == key_id_a;
+    assert result.public_key == PUBLIC_KEY_A;
+    assert result.channels.length == 1;
+    assert result.channels[0].name == "stable";
+    assert result.channels[0].host == "x86_64-unknown-linux-gnu";
+    assert result.channels[0].version == "0.10.4";
+    assert result.releases.length == 1;
+    assert result.releases[0].version == "0.10.4";
+    assert result.releases[0].channel == "stable";
+    assert result.releases[0].hosts.length == 1;
+    assert result.releases[0].hosts[0].host == "x86_64-unknown-linux-gnu";
+    assert result.releases[0].hosts[0].asset == "sailfin_0.10.4_linux_x86_64.tar.gz";
+}
+
+test "toolchain index: a signature from another key is rejected" {
+    // The payload's own signing block, and the trust root passed to the
+    // verifier, both name key B — so the key-chain resolves cleanly and the
+    // only thing wrong is that the bytes were signed with key A's seed
+    // instead. That isolates the failure to the signature check itself
+    // rather than the earlier key-chain-resolution gate.
+    let key_id_b = "ed25519:" + PUBLIC_KEY_B;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_b, PUBLIC_KEY_B);
+    let wrong_signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, wrong_signature_hex, PUBLIC_KEY_B, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the signed index signature does not verify";
+}
+
+test "toolchain index: a mutated payload is rejected" {
+    // Both payloads are independently well-formed canonical JSON (built by
+    // the same fixture function), differing only in the `generated_at`
+    // seconds digit, so this exercises the signature check itself rather
+    // than the parser — a hand-sliced byte flip risks corrupting the JSON
+    // shape and failing at the earlier `json_parse_canonical` gate instead.
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let expires_at = "2026-12-31T00:00:00Z";
+    let signed_generated_at = "2026-01-01T00:00:00Z";
+    let tampered_generated_at = "2026-01-01T00:00:01Z";
+    let payload = _fx_payload(1, signed_generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let mutated = _fx_payload(1, tampered_generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let now_epoch = toolchain_index_parse_timestamp(signed_generated_at) + 1;
+
+    let result = toolchain_index_verify(mutated, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the signed index signature does not verify";
+}
+
+test "toolchain index: an expired index is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-01-02T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(expires_at);
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the signed index expired at " + expires_at;
+}
+
+test "toolchain index: an index older than the cached sequence is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(5, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 6, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the signed index sequence 5 is older than the cached sequence 6";
+}
+
+test "toolchain index: an unreadable clock refuses rather than accepting" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+
+    // Valid signature and an unexpired window at any real clock reading; a
+    // broken clock (`now_epoch == -1`) must still refuse, not fall back to
+    // treating the index as not-yet-expired.
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, -1);
+
+    assert result.ok == false;
+    assert result.error == "the host clock is unavailable, so index freshness cannot be established";
+}
+
+test "toolchain index: a non-canonical payload is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let canonical = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+
+    // Insert one insignificant space right after the opening brace. The
+    // document is still well-formed JSON a lenient reader would accept
+    // unchanged, but `json_parse_canonical` rejects any whitespace outside
+    // string literals. Sign these exact mutated bytes, so the signature is
+    // genuinely valid over them — this must fail on canonicality, not on
+    // the signature.
+    let noncanonical = substring(canonical, 0, 1) + " " + substring(canonical, 1, canonical.length);
+    let signature_hex = _fx_sign(SEED_A_HEX, noncanonical);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(noncanonical, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == false;
+}
+
+test "toolchain index: a valid key transition authorizes the new signer" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let key_id_b = "ed25519:" + PUBLIC_KEY_B;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let sequence = 1;
+
+    // A signs the hop that authorizes B, so the chain from the pinned root
+    // (A) to the index's actual signer (B) is unbroken.
+    let hop_bytes = _fx_transition_bytes(1, key_id_a, key_id_b, PUBLIC_KEY_B);
+    let hop_signature = _fx_sign(SEED_A_HEX, hop_bytes);
+    let transitions_json = "[" + _fx_key_transition_json(1, key_id_a, key_id_b, PUBLIC_KEY_B, hop_signature)
+        + "]";
+
+    let payload = _fx_payload_with_transitions(sequence, generated_at, expires_at, key_id_b, PUBLIC_KEY_B, transitions_json);
+    let signature_hex = _fx_sign(SEED_B_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == true;
+    assert result.error == "";
+    assert result.key_id == key_id_b;
+}
+
+test "toolchain index: a transition not signed by the key it replaces is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let key_id_b = "ed25519:" + PUBLIC_KEY_B;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let sequence = 1;
+
+    // The hop claims to be signed by A (the key it replaces) but is
+    // actually signed with B's seed, so the chain never proves A authorized
+    // it.
+    let hop_bytes = _fx_transition_bytes(1, key_id_a, key_id_b, PUBLIC_KEY_B);
+    let wrong_hop_signature = _fx_sign(SEED_B_HEX, hop_bytes);
+    let transitions_json = "[" + _fx_key_transition_json(1, key_id_a, key_id_b, PUBLIC_KEY_B, wrong_hop_signature)
+        + "]";
+
+    let payload = _fx_payload_with_transitions(sequence, generated_at, expires_at, key_id_b, PUBLIC_KEY_B, transitions_json);
+    let signature_hex = _fx_sign(SEED_B_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "a key transition is not signed by the key it replaces (key transition 0)";
+}
+
+test "toolchain index: a non-contiguous chain is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let key_id_b = "ed25519:" + PUBLIC_KEY_B;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let sequence = 1;
+
+    // `from_key_id` names B, not the pinned trust root A, so the walk can
+    // never reach this hop from where the caller actually starts trust —
+    // even though the hop is itself correctly signed by B.
+    let hop_bytes = _fx_transition_bytes(1, key_id_b, key_id_a, PUBLIC_KEY_A);
+    let hop_signature = _fx_sign(SEED_B_HEX, hop_bytes);
+    let transitions_json = "[" + _fx_key_transition_json(1, key_id_b, key_id_a, PUBLIC_KEY_A, hop_signature)
+        + "]";
+
+    let payload = _fx_payload_with_transitions(sequence, generated_at, expires_at, key_id_a, PUBLIC_KEY_A, transitions_json);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the key transition chain is not contiguous from the trusted root (key transition 0)";
+}
+
+test "toolchain index: a transition effective after the index sequence is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let key_id_b = "ed25519:" + PUBLIC_KEY_B;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let sequence = 1;
+
+    // The hop is otherwise valid — correctly signed, contiguous from the
+    // root — but claims to take effect at sequence 2, after the index's own
+    // sequence 1.
+    let hop_bytes = _fx_transition_bytes(2, key_id_a, key_id_b, PUBLIC_KEY_B);
+    let hop_signature = _fx_sign(SEED_A_HEX, hop_bytes);
+    let transitions_json = "[" + _fx_key_transition_json(2, key_id_a, key_id_b, PUBLIC_KEY_B, hop_signature)
+        + "]";
+
+    let payload = _fx_payload_with_transitions(sequence, generated_at, expires_at, key_id_b, PUBLIC_KEY_B, transitions_json);
+    let signature_hex = _fx_sign(SEED_B_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "a key transition takes effect after the index sequence (key transition 0)";
+}
+
+test "toolchain index: a key transition to a revoked key is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let key_id_b = "ed25519:" + PUBLIC_KEY_B;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let sequence = 1;
+
+    // A structurally and cryptographically valid A -> B hop, exactly like
+    // the success-path test above — the only difference is B is on the
+    // revocation ledger. Without this check, a compromised key could mint
+    // its own successor and the ledger would never be consulted.
+    let hop_bytes = _fx_transition_bytes(1, key_id_a, key_id_b, PUBLIC_KEY_B);
+    let hop_signature = _fx_sign(SEED_A_HEX, hop_bytes);
+    let transitions_json = "[" + _fx_key_transition_json(1, key_id_a, key_id_b, PUBLIC_KEY_B, hop_signature)
+        + "]";
+
+    let payload = _fx_payload_with_transitions(sequence, generated_at, expires_at, key_id_b, PUBLIC_KEY_B, transitions_json);
+    let signature_hex = _fx_sign(SEED_B_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+    let mut revoked: string[] = [];
+    revoked.push(key_id_b);
+
+    // This is also the "revoked chain endpoint" case: B is both the key the
+    // hop installs and the key that signs the index, and `_resolve_signer`
+    // checks a transition's installed key inside the loop before any
+    // post-loop endpoint check could run, so there is no separate code path
+    // to exercise for "endpoint" versus "hop target" here.
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, revoked, 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "a key transition installs a revoked key (key transition 0)";
+}
+
+test "toolchain index: a revoked trust root is rejected" {
+    let key_id_a = "ed25519:" + PUBLIC_KEY_A;
+    let generated_at = "2026-01-01T00:00:00Z";
+    let expires_at = "2026-12-31T00:00:00Z";
+    let payload = _fx_payload(1, generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
+    let signature_hex = _fx_sign(SEED_A_HEX, payload);
+    let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
+    let mut revoked: string[] = [];
+    revoked.push(key_id_a);
+
+    // No transitions: the index is signed directly by the pinned root, and
+    // that root is itself on the revocation ledger. This must stop the walk
+    // before it starts, not just before it ends.
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, revoked, 0, now_epoch);
+
+    assert result.ok == false;
+    assert result.error == "the pinned release-signing trust root is revoked";
+}

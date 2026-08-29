@@ -1,0 +1,231 @@
+// Unit coverage for the network-install release-state policy
+// (`compiler/src/toolchain/release_policy.sfn::toolchain_policy_decide`,
+// SFEP-0073 §3.7, SFN-1069). `toolchain_policy_decide` is pure — no `![io]`,
+// no `![net]` — so every fixture below is a `ToolchainIndex` struct literal
+// built directly, never a parsed or signed payload. `toolchain_policy_acquire`
+// needs a real signed payload and `![io]` and is out of scope here.
+import { index_of } from "../../src/string_utils";
+import {
+    ToolchainIndex,
+    ToolchainIndexAdvisory,
+    ToolchainIndexHost,
+    ToolchainIndexRelease,
+    ToolchainIndexYank
+} from "../../src/toolchain/index";
+import { ToolchainRevocationRecord } from "../../src/toolchain/index_cache";
+import { toolchain_policy_decide } from "../../src/toolchain/release_policy";
+
+// A 64-char lowercase-hex digest built from a repeated byte rather than
+// pasted, so a wrong-length literal fails loudly instead of silently passing
+// a shape check by coincidence.
+fn _digest(byte: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 64 { break; }
+        out = out + byte;
+        i += 1;
+    }
+    return out;
+}
+
+fn _release(version: string, manifest_key_id: string, host_triple: string, asset: string, sha256: string) -> ToolchainIndexRelease {
+    let mut hosts: ToolchainIndexHost[] = [];
+    hosts.push(ToolchainIndexHost {
+        host: host_triple, asset: asset, sha256: sha256
+    });
+    return ToolchainIndexRelease {
+        version: version,
+        channel: "stable",
+        manifest_key_id: manifest_key_id,
+        manifest_path: version + "/SHA256SUMS",
+        manifest_sha256: _digest("f"),
+        hosts: hosts
+    };
+}
+
+fn _yank(version: string) -> ToolchainIndexYank {
+    return ToolchainIndexYank {
+        version: version,
+        reason: "test yank",
+        recorded_at: "2026-01-01T00:00:00Z"
+    };
+}
+
+fn _revocation(kind: string, subject: string) -> ToolchainRevocationRecord {
+    return ToolchainRevocationRecord {
+        kind: kind,
+        subject: subject,
+        reason: "test revocation",
+        recorded_at: "2026-01-01T00:00:00Z",
+        sequence: 1
+    };
+}
+
+// Builds an authenticated (`ok: true`) index directly, skipping the signed
+// payload this function would otherwise require — `toolchain_policy_decide`
+// never parses or verifies, so a struct literal is a faithful fixture.
+fn _index_with(releases: ToolchainIndexRelease[], yanks: ToolchainIndexYank[], advisories: ToolchainIndexAdvisory[]) -> ToolchainIndex {
+    let no_revocations: ToolchainRevocationRecord[] = [];
+    return ToolchainIndex {
+        ok: true,
+        error: "",
+        sequence: 1,
+        generated_at: "2026-01-01T00:00:00Z",
+        expires_at: "2027-01-01T00:00:00Z",
+        key_id: "",
+        public_key: "",
+        channels: [],
+        releases: releases,
+        yanks: yanks,
+        revocations: no_revocations,
+        advisories: advisories
+    };
+}
+
+fn _index_failure(reason: string) -> ToolchainIndex {
+    let no_releases: ToolchainIndexRelease[] = [];
+    let no_yanks: ToolchainIndexYank[] = [];
+    let no_revocations: ToolchainRevocationRecord[] = [];
+    let no_advisories: ToolchainIndexAdvisory[] = [];
+    return ToolchainIndex {
+        ok: false,
+        error: reason,
+        sequence: -1,
+        generated_at: "",
+        expires_at: "",
+        key_id: "",
+        public_key: "",
+        channels: [],
+        releases: no_releases,
+        yanks: no_yanks,
+        revocations: no_revocations,
+        advisories: no_advisories
+    };
+}
+
+test "toolchain policy: a listed release binds its host asset and digest" {
+    let mut releases: ToolchainIndexRelease[] = [];
+    releases.push(_release("1.2.3", "key-a", "x86_64-unknown-linux-gnu", "sailfin-1.2.3-x86_64-unknown-linux-gnu.tar.gz", _digest("a")));
+    let index = _index_with(releases, [], []);
+    let known: ToolchainRevocationRecord[] = [];
+
+    let outcome = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", false);
+    assert outcome.ok;
+    assert outcome.listed;
+    assert outcome.asset == "sailfin-1.2.3-x86_64-unknown-linux-gnu.tar.gz";
+    assert outcome.asset_sha256 == _digest("a");
+}
+
+// The index carries live releases, not history: a version aged out of it
+// must stay installable, verified instead through the release-specific
+// signed manifest.
+test "toolchain policy: an unlisted release is allowed and unbound" {
+    let index = _index_with([], [], []);
+    let known: ToolchainRevocationRecord[] = [];
+
+    let outcome = toolchain_policy_decide(index, known, "9.9.9", "x86_64-unknown-linux-gnu", false);
+    assert outcome.ok;
+    assert ! outcome.listed;
+    assert outcome.asset == "";
+    assert outcome.asset_sha256 == "";
+}
+
+test "toolchain policy: a revoked release is refused with no override" {
+    let index = _index_with([], [], []);
+    let mut known: ToolchainRevocationRecord[] = [];
+    known.push(_revocation("release", "1.2.3"));
+
+    let refused = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", false);
+    assert ! refused.ok;
+    assert index_of(refused.reason, "1.2.3") >= 0;
+
+    // Revocation outranks the yank override; there is no way around it.
+    let still_refused = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", true);
+    assert ! still_refused.ok;
+}
+
+// Revocation is checked before the release lookup, so a version dropped
+// from the index cannot shed its revocation.
+test "toolchain policy: a revoked release is refused even when unlisted" {
+    let index = _index_with([], [], []);
+    let mut known: ToolchainRevocationRecord[] = [];
+    known.push(_revocation("release", "1.2.3"));
+
+    let outcome = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", false);
+    assert ! outcome.ok;
+}
+
+test "toolchain policy: a yanked release is refused without the override" {
+    let mut yanks: ToolchainIndexYank[] = [];
+    yanks.push(_yank("1.2.3"));
+    let index = _index_with([], yanks, []);
+    let known: ToolchainRevocationRecord[] = [];
+
+    let outcome = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", false);
+    assert ! outcome.ok;
+    assert index_of(outcome.hint, "--allow-yanked") >= 0;
+}
+
+test "toolchain policy: a yanked release installs with the override" {
+    let mut yanks: ToolchainIndexYank[] = [];
+    yanks.push(_yank("1.2.3"));
+    let index = _index_with([], yanks, []);
+    let known: ToolchainRevocationRecord[] = [];
+
+    let outcome = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", true);
+    assert outcome.ok;
+}
+
+// A revoked signing key revokes every release whose manifest it signed —
+// `toolchain_release_is_revoked` maps the key subject onto the release's
+// `manifest_key_id`, not onto the version directly.
+test "toolchain policy: a signing-key revocation cascades to its releases" {
+    let mut releases: ToolchainIndexRelease[] = [];
+    releases.push(_release("1.2.3", "key-a", "x86_64-unknown-linux-gnu", "sailfin-1.2.3-x86_64-unknown-linux-gnu.tar.gz", _digest("a")));
+    let index = _index_with(releases, [], []);
+    let mut known: ToolchainRevocationRecord[] = [];
+    known.push(_revocation("signing-key", "key-a"));
+
+    let outcome = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", false);
+    assert ! outcome.ok;
+}
+
+test "toolchain policy: a listed release with no asset for this host is refused" {
+    let mut releases: ToolchainIndexRelease[] = [];
+    releases.push(_release("1.2.3", "key-a", "aarch64-apple-darwin", "sailfin-1.2.3-aarch64-apple-darwin.tar.gz", _digest("a")));
+    let index = _index_with(releases, [], []);
+    let known: ToolchainRevocationRecord[] = [];
+
+    let outcome = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", false);
+    assert ! outcome.ok;
+    assert index_of(outcome.reason, "x86_64-unknown-linux-gnu") >= 0;
+}
+
+// Fail-closed: no authenticated index means release state cannot be
+// checked, so every version is refused, not just the ones it happens to name.
+test "toolchain policy: an unverified index refuses every version" {
+    let index = _index_failure("the signed index expired at 2025-01-01T00:00:00Z");
+    let known: ToolchainRevocationRecord[] = [];
+
+    let outcome = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", false);
+    assert ! outcome.ok;
+    assert index_of(outcome.reason, "expired at 2025-01-01T00:00:00Z") >= 0;
+}
+
+// Advisory severity is information, never a gate: a covered release stays
+// installable and the advisory is surfaced alongside it.
+test "toolchain policy: an advisory release stays installable and reports" {
+    let mut releases: ToolchainIndexRelease[] = [];
+    releases.push(_release("1.2.3", "key-a", "x86_64-unknown-linux-gnu", "sailfin-1.2.3-x86_64-unknown-linux-gnu.tar.gz", _digest("a")));
+    let mut advisories: ToolchainIndexAdvisory[] = [];
+    advisories.push(ToolchainIndexAdvisory {
+        id: "SFA-0001", severity: "moderate", affected: "=1.2.3", fixed_version: "1.2.4", summary: "test advisory", url: "https://example.invalid/SFA-0001"
+    });
+    let index = _index_with(releases, [], advisories);
+    let known: ToolchainRevocationRecord[] = [];
+
+    let outcome = toolchain_policy_decide(index, known, "1.2.3", "x86_64-unknown-linux-gnu", false);
+    assert outcome.ok;
+    assert outcome.advisories.length > 0;
+}
