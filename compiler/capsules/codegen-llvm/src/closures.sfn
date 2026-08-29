@@ -464,17 +464,26 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
         // `field.llvm_type + "*"` leaves an operand that is already the
         // aggregate (an annotated local, the OwnedBuf spawn-env path)
         // untouched.
-        if starts_with(field.llvm_type, "%") {
-            if !ends_with_pointer_suffix(field.llvm_type) {
-                if operand_type == field.llvm_type + "*" {
-                    let loaded = format_temp_name(current_temp);
-                    current_temp += 1;
-                    lines.push("  " + loaded + " = load " + field.llvm_type
-                        + ", "
-                        + operand_type
-                        + " "
-                        + value);
-                    value = loaded;
+        // The `value.length > 0` term keeps the zero-value substitution above
+        // out of the bridge locally. It is unreachable today — an empty
+        // operand implies an empty `operand_type`, which cannot equal
+        // `field.llvm_type + "*"` — but that invariant lives two files away in
+        // `_resolve_capture_operands`, and getting it wrong would emit
+        // `load %T, %T* zeroinitializer`, which LLVM accepts as a null
+        // constant and faults at run time rather than rejecting at parse.
+        if value.length > 0 {
+            if starts_with(field.llvm_type, "%") {
+                if !ends_with_pointer_suffix(field.llvm_type) {
+                    if operand_type == field.llvm_type + "*" {
+                        let loaded = format_temp_name(current_temp);
+                        current_temp += 1;
+                        lines.push("  " + loaded + " = load " + field.llvm_type
+                            + ", "
+                            + operand_type
+                            + " "
+                            + value);
+                        value = loaded;
+                    }
                 }
             }
         }

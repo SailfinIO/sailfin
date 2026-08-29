@@ -20,6 +20,10 @@
 //                                 `map_type_annotation`
 //   - heap-pointer capture      — `*MyStruct` annotation lowers to a
 //                                 pointer field (no double-indirection)
+//   - by-value struct capture   — the env field is the aggregate `%T`
+//                                 (#1476), and a `%T*` operand is loaded
+//                                 before the store while an already-
+//                                 aggregate `%T` operand is not (SFN-1126)
 //   - missing operand           — `_field_zero_value` fallback emits
 //                                 `null` for pointer fields and `0`
 //                                 for primitives, so a wiring gap
@@ -49,6 +53,12 @@ fn _capture_int(name: string) -> NativeLambdaCapture {
     };
 }
 
+// `by_value: true` alongside `mutable: true` is a combination the encoder
+// never produces: `decode_captures` sets `mutable` only in the `ref_mut`
+// branch, which also sets `by_value = false`. It is harmless for `int` (no
+// pointer suffix to strip), but do not clone this helper into a user-struct
+// variant — `closure_field_llvm_type`'s by-value strip would then be exercised
+// on a shape that cannot reach it in production (SFN-1126).
 fn _capture_int_mut(name: string) -> NativeLambdaCapture {
     return NativeLambdaCapture {
         name: name,
@@ -90,6 +100,18 @@ fn _capture_user_pointer(name: string, type_text: string) -> NativeLambdaCapture
         name: name,
         type_text: type_text,
         by_value: false,
+        mutable: false
+    };
+}
+
+// A by-value user-struct capture: `closure_field_llvm_type` strips the
+// pointer suffix `map_type_annotation` returns, so the env field is the
+// aggregate `%T` rather than `%T*` (#1476).
+fn _capture_struct_by_value(name: string, type_text: string) -> NativeLambdaCapture {
+    return NativeLambdaCapture {
+        name: name,
+        type_text: type_text,
+        by_value: true,
         mutable: false
     };
 }
@@ -263,6 +285,46 @@ test "closure_env: missing operand falls back to deterministic zero-init store" 
     // count -> i64 zero, acc -> %Buffer* null
     assert result.lines[5] == "  store i64 0, i64* %t4";
     assert result.lines[7] == "  store %Buffer* null, %Buffer** %t5";
+}
+
+test "closure_env: by-value struct field takes the aggregate type, not a pointer" {
+    let capture = _capture_struct_by_value("b", "Box");
+    assert closure_field_llvm_type(capture) == "%Box";
+}
+
+test "closure_env: a pointer operand is loaded before the aggregate-field store" {
+    let captures: NativeLambdaCapture[] = [_capture_struct_by_value("b", "Box")];
+    let layout = synthesize_closure_env_struct(captures, 0);
+    // A struct PARAMETER reaches the capture site as `%Box*` with no load —
+    // the shape that emitted `store %Box %b` and was rejected by clang before
+    // SFN-1126. The bridge must dereference it first.
+    let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
+        name: "b", llvm_value: "%b", llvm_type: "%Box*"
+    }];
+    let result = emit_closure_env_alloc(layout, operands, 0, false);
+    assert result.lines.length == 7;
+    assert result.lines[4] == "  %t4 = load %Box, %Box* %b";
+    assert result.lines[5] == "  %t5 = getelementptr inbounds %sfn_closure_env_0, %sfn_closure_env_0* %t3, i32 0, i32 0";
+    assert result.lines[6] == "  store %Box %t4, %Box* %t5";
+    assert result.next_temp == 6;
+}
+
+test "closure_env: an already-aggregate struct operand is stored without a load" {
+    let captures: NativeLambdaCapture[] = [_capture_struct_by_value("buf", "OwnedBuf")];
+    let layout = synthesize_closure_env_struct(captures, 0);
+    // The no-fire half of the same guard: an annotated local and the spawn-env
+    // path both hand over a loaded `%T` aggregate. Emitting a load here would
+    // dereference a value, so the guard's exact `field.llvm_type + "*"` test
+    // must not match. This is the assertion a future refactor is most likely
+    // to break.
+    let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
+        name: "buf", llvm_value: "%l0", llvm_type: "%OwnedBuf"
+    }];
+    let result = emit_closure_env_alloc(layout, operands, 0, false);
+    assert result.lines.length == 6;
+    assert result.lines[4] == "  %t4 = getelementptr inbounds %sfn_closure_env_0, %sfn_closure_env_0* %t3, i32 0, i32 0";
+    assert result.lines[5] == "  store %OwnedBuf %l0, %OwnedBuf* %t4";
+    assert result.next_temp == 5;
 }
 
 // ── Env-load prologue inside the lifted lambda body ──────────────────
