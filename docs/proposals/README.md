@@ -97,6 +97,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0072](./0072-domain-oriented-repository-topology.md) | Domain-Oriented Repository Topology | Accepted | tooling |
 | [0073](./0073-toolchain-lifecycle.md) | Installed Toolchain Lifecycle, Exact Selection, and Update Policy | Accepted | tooling |
 | [0074](./0074-repo-tooling-ownership.md) | Repo Tooling Ownership — Retiring `scripts/` into Native Verbs | Accepted | tooling |
+| [0075](./0075-struct-value-semantics.md) | Struct Value Semantics and the Mutability Floor | Draft | language |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -164,6 +165,12 @@ ownership/affine types with `E0910`–`E0915` already reserved by SFEP-0054, and
 `E1001` and `E1003` as the only `E1xxx` codes in use, so `E11xx` is entirely
 free and gets its own home, `compiler/src/contract/`. Drafts must skip
 `E1100`–`E1114`.
+
+SFEP-0075 (struct value semantics) allocates `E0919`–`E0921` in the
+ownership/affine `E09xx` range — `E0919` assignment to an immutable binding,
+`E0920` write through an immutable place, `W0921` deprecated field-level `mut`.
+Mutability is the ownership floor's first rung, so the codes compose with
+`E0901`–`E0907` rather than opening a new range. Drafts must skip them.
 
 ## Subdirectories
 
