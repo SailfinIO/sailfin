@@ -742,6 +742,8 @@ def build_index(
         requested_pairs.append((f"candidate previous {index}", pair[0], pair[1]))
     if requested_pairs and args.allow_bootstrap:
         fail("--allow-bootstrap cannot be combined with previous index candidates")
+    if args.refresh_window and args.allow_bootstrap:
+        fail("--refresh-window cannot be combined with --allow-bootstrap")
 
     if requested_pairs:
         authenticated: list[tuple[dict[str, Any], bytes, Path, Path, str]] = []
@@ -862,6 +864,9 @@ def build_index(
     validate_record_versions(candidate)
     candidate["channels"] = rebuild_channels(candidate)
 
+    if args.refresh_window and previous is None:
+        fail("--refresh-window requires a previous signed index")
+
     desired_sequence = 1
     if previous is not None:
         semantic_candidate = dict(candidate)
@@ -870,7 +875,11 @@ def build_index(
             semantic_candidate.pop(temporal_field)
             semantic_previous.pop(temporal_field)
         previous_expiry = parse_timestamp(previous["expires_at"], "previous index.expires_at")
-        if canonical_bytes(semantic_candidate) == canonical_bytes(semantic_previous) and previous_expiry > now:
+        if (
+            not args.refresh_window
+            and canonical_bytes(semantic_candidate) == canonical_bytes(semantic_previous)
+            and previous_expiry > now
+        ):
             candidate["generated_at"] = previous["generated_at"]
             candidate["expires_at"] = previous["expires_at"]
             desired_sequence = previous["sequence"]
@@ -940,6 +949,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--authenticated-previous-signature-output", type=Path)
     parser.add_argument("--sequence", type=int)
     parser.add_argument("--allow-bootstrap", action="store_true")
+    # Without this, a scheduled republish with unchanged semantics is a silent
+    # no-op: the idempotence guard in build_index reuses the previous index's
+    # generated_at/expires_at/sequence whenever the semantic payload matches
+    # and the previous window has not expired yet. --refresh-window opts a
+    # caller into advancing the window anyway (SFN-1204).
+    parser.add_argument("--refresh-window", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--signature-output", type=Path, required=True)
     return parser.parse_args(argv)
