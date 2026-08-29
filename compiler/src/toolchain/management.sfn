@@ -23,7 +23,7 @@ import {
 import { starts_with, strings_equal } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import { ToolchainHostIdentity, toolchain_current_host } from "./host";
-import { toolchain_revocations_read } from "./index_cache";
+import { toolchain_revocations_corrupt, toolchain_revocations_read } from "./index_cache";
 import { toolchain_is_valid_install_version } from "./install";
 import { toolchain_verify_executable } from "./integrity";
 import {
@@ -402,6 +402,16 @@ fn toolchain_route_management(args: string[], ctx: CliContext) -> int ![io] {
     if versions_base.length == 0 { return 0; }
     let host = toolchain_current_host();
     if host.triple.length == 0 { return 0; }
+
+    // An unparseable ledger means we cannot say which payloads are revoked.
+    // Routing under that uncertainty is what corrupting the file would buy an
+    // attacker, so decline to route. Unlike dispatch this need not refuse the
+    // command: the entry's own identity is not in question, so it answers
+    // in-process and management stays usable.
+    if toolchain_revocations_corrupt(versions_base) {
+        print.err("warning: the local revocation ledger is unreadable; answering in-process rather than routing");
+        return 0;
+    }
 
     let survey = toolchain_management_survey(versions_base, host);
     let running_semver: SemVer = semver_parse(running);

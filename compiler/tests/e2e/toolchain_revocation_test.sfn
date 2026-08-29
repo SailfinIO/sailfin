@@ -1,0 +1,311 @@
+// toolchain_revocation_test.sfn
+//
+// End-to-end coverage for the local revocation ledger's execution gate
+// (SFEP-0073 §3.7, SFN-1069). Native (no-bash) `*_test.sfn` per
+// `.claude/rules/no-bash-e2e.md`: it drives the compiler-under-test as a
+// subprocess against a pre-seeded stub store and asserts on the captured
+// output. Ground truth: `compiler/src/toolchain/index_cache.sfn`,
+// `compiler/src/toolchain/dispatch.sfn`, `compiler/src/toolchain/management.sfn`,
+// `compiler/src/toolchain/install.sfn`.
+//
+// Most of §3.7's release-state policy (channels, yanks, exact asset binding)
+// needs a genuinely signed index payload to exercise, and there is no
+// in-repo signing primitive to fabricate one — those paths are covered at
+// unit level only (`compiler/tests/unit/toolchain_index_cache_test.sfn`,
+// `compiler/tests/unit/toolchain_release_policy_test.sfn`). What IS
+// e2e-testable with zero crypto is the revocation ledger: it is a plain
+// TAB-separated text file on disk (`toolchain_revocations_path`), so a test
+// can seed it directly and observe the one guarantee that matters most —
+// a cached-known revoked release must never be executed, online or offline.
+//
+// What it pins:
+//   1. a revoked pinned toolchain is refused at dispatch, never executed.
+//   2. an unrevoked toolchain still dispatches normally (the gate does not
+//      over-refuse).
+//   3. a `signing-key` revocation record alone does not block dispatch —
+//      the execution gate keys on `release` records only.
+//   4. a revoked payload is never a management-routing candidate; routing
+//      falls through to the newest unrevoked one.
+//   5. a corrupt ledger refuses execution rather than reading as clean —
+//      "cannot tell" is not "nothing is revoked".
+//   6. an unreachable signed index refuses a user install outright, with no
+//      network fallback for a version with nothing cached.
+import { remove_all } from "sfn/fs";
+import { contains } from "sfn/strings";
+import {
+    clean_runner_env,
+    clean_runner_env_without,
+    default_scratch_dir,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_abs_path,
+    sfn_bin_path
+} from "sfn/test";
+
+import { host_exe_name } from "../../src/build/target";
+import { toolchain_current_host } from "../../src/toolchain/host";
+import { toolchain_index_cache_dir, toolchain_revocations_path } from "../../src/toolchain/index_cache";
+import { toolchain_build_records } from "../../src/toolchain/integrity";
+import {
+    TOOLCHAIN_MANAGEMENT_PROTOCOL,
+    TOOLCHAIN_MANIFEST_SCHEMA,
+    ToolchainManifestMeta,
+    toolchain_manifest_write
+} from "../../src/toolchain/manifest";
+import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
+
+// A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
+// under the parallel pool; `/tmp` is the standalone fallback.
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    return dir + "/sfn-toolchain-revocation-e2e";
+}
+
+// Clean child environment plus the caller's extra `KEY=VALUE` entries.
+// Every key this fixture (or a path it exercises) reads is stripped before
+// the extras are pushed: libc `getenv` returns the first duplicate, so an
+// ambient value otherwise defeats the test's later override.
+fn _env_with(extra: string[]) -> string[] ![io] {
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-revocation-child"), ["INSTALL_BASE", "SAILFIN_HOME", "SAILFIN_TOOLCHAIN", "SAILFIN_TOOLCHAIN_DISPATCHED", "SAILFIN_TOOLCHAIN_MANAGEMENT", "SAILFIN_TOOLCHAIN_RELEASE_BASE"]);
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    return e;
+}
+
+// The store entry's binary name. `toolchain_store_ready`
+// (`compiler/src/toolchain/store.sfn`) probes `host_exe_name(dir +
+// "/sailfin")`, so a suffix-less name on Windows would read as NOT ready.
+fn _stub_bin(dir: string) -> string ![io] {
+    return host_exe_name(dir + "/sailfin");
+}
+
+// Build a native Sailfin stub that prints `marker` and exits 0, regardless
+// of the argv it is re-exec'd or routed with. Compiling the fixture
+// exercises the same compiler-under-test that later launches it.
+fn _write_marker_stub(dir: string, marker: string) -> string ![io] {
+    let src_dir = _scratch_root() + "/stub-src";
+    fs.createDirectory(src_dir, true);
+    let src = src_dir + "/" + marker + ".sfn";
+    fs.writeFile(src, "fn main() -> int ![io] {\n" + "    print(\"" + marker
+        + "\");\n"
+        + "    return 0;\n"
+        + "}\n");
+    let bin = _stub_bin(dir);
+    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch("toolchain-revocation-stub")));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-revocation stub build", exit, out, err);
+    assert exit == 0;
+    assert fs.exists(bin);
+    return bin;
+}
+
+// Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a stub
+// that prints `marker` and exits 0. `.sha256` is written last (the
+// installer's commit-point contract), so the entry reads as ready.
+fn _seed_stub(store: string, ver: string, marker: string) -> void ![io] {
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    let _ = _write_marker_stub(dir, marker);
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+}
+
+// (Re-)derive and write an install manifest for whatever payload already
+// sits in `dir`, recording `TOOLCHAIN_MANAGEMENT_PROTOCOL` (this build's own
+// writing value) as the management protocol.
+fn _write_verified_manifest(dir: string, ver: string) -> void ![io] {
+    let records = toolchain_build_records(dir);
+    assert records.length > 0;
+    let meta = ToolchainManifestMeta {
+        schema: TOOLCHAIN_MANIFEST_SCHEMA,
+        management_protocol: TOOLCHAIN_MANAGEMENT_PROTOCOL,
+        version: ver,
+        host: toolchain_current_host().triple,
+        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    };
+    assert toolchain_manifest_write(dir, meta, records);
+}
+
+// `_seed_stub` plus a real install manifest covering the seeded payload —
+// exercises the SFEP-0073 §3.8 integrity gate every dispatch/management
+// candidate is verified against. Returns the host-qualified store entry
+// directory.
+fn _seed_stub_verified(store: string, ver: string, marker: string) -> string ![io] {
+    _seed_stub(store, ver, marker);
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    _write_verified_manifest(dir, ver);
+    return dir;
+}
+
+// Seed a project whose `[toolchain]` pin is `pin_ver` and a trivial source
+// file for `sfn check` to consume. Returns the source path.
+fn _seed_project(root: string, pin_ver: string) -> string ![io] {
+    assert remove_all(root);
+    fs.createDirectory(root, true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\nname = \"revocation-e2e\"\nversion = \"0.0.1\"\n\n[toolchain]\nsfn = \""
+        + pin_ver
+        + "\"\n");
+    let src = root + "/main.sfn";
+    fs.writeFile(src, "fn main() -> int { return 0; }\n");
+    return src;
+}
+
+// Write a revocation ledger directly. The on-disk format is public and
+// plain text, so a test can put the client in a known-revoked state
+// without a signed index or any signing primitive. Field order is
+// `kind, subject, sequence, recorded_at, reason` (TAB-separated), preceded
+// by the exact magic line `_revocations_parse` requires
+// (`TOOLCHAIN_REVOCATIONS_MAGIC` in `index_cache.sfn`, not exported outside
+// that module, so it is reproduced verbatim here).
+fn _seed_revocation(store: string, kind: string, subject: string) -> void ![io] {
+    let dir = toolchain_index_cache_dir(store);
+    fs.createDirectory(dir, true);
+    let magic = "sailfin-toolchain-revocations 1";
+    let record = kind + "\t" + subject + "\t" + "42" + "\t"
+        + "2026-01-01T00:00:00Z"
+        + "\t"
+        + "seeded for e2e testing";
+    fs.writeFile(toolchain_revocations_path(store), magic + "\n" + record + "\n");
+}
+
+test "toolchain revocation: a revoked pinned toolchain is not executed" ![io] {
+    let store = _scratch_root() + "/revoked-not-executed-store";
+    let proj = _scratch_root() + "/revoked-not-executed-proj";
+    let marker = "REVOCATION_NOT_EXECUTED_999_c31a";
+    _seed_stub_verified(store, "999.0.0", marker);
+    let src = _seed_project(proj, "999.0.0");
+    _seed_revocation(store, "release", "999.0.0");
+
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    // The core security assertion: the stub never ran, online or offline —
+    // the ledger is local and the gate refuses before `process.exec`.
+    assert ! contains(out + err, marker);
+    assert contains(err, "999.0.0");
+    assert contains(err, "revoked");
+    assert contains(err, "will not be executed");
+}
+
+test "toolchain revocation: an unrevoked toolchain still dispatches" ![io] {
+    let store = _scratch_root() + "/unrevoked-dispatches-store";
+    let proj = _scratch_root() + "/unrevoked-dispatches-proj";
+    let marker = "REVOCATION_UNREVOKED_DISPATCHES_999_c31a";
+    _seed_stub_verified(store, "999.0.0", marker);
+    let src = _seed_project(proj, "999.0.0");
+    // The ledger names a DIFFERENT version — this pin's target is untouched.
+    _seed_revocation(store, "release", "997.0.0");
+
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-revocation unrevoked-dispatches run", exit, out, err);
+    assert contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain revocation: a signing-key revocation does not block dispatch by itself" ![io] {
+    let store = _scratch_root() + "/signing-key-only-store";
+    let proj = _scratch_root() + "/signing-key-only-proj";
+    let marker = "REVOCATION_SIGNING_KEY_ONLY_999_c31a";
+    _seed_stub_verified(store, "999.0.0", marker);
+    let src = _seed_project(proj, "999.0.0");
+    // `_dispatch_exec_target` (dispatch.sfn) calls
+    // `toolchain_revocation_find(revoked, "release", target)` only — a
+    // `signing-key` record's subject is a key id, never a version, so it can
+    // never match regardless of what string it holds.
+    _seed_revocation(store, "signing-key", "some-signing-key-id-e2e");
+
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-revocation signing-key-only run", exit, out, err);
+    assert contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain revocation: a revoked payload is never a management candidate" ![io] {
+    let store = _scratch_root() + "/management-excludes-revoked-store";
+    let proj = _scratch_root() + "/management-excludes-revoked-proj";
+    let marker_a = "REVOCATION_MANAGEMENT_UNREVOKED_998_c31a";
+    let marker_b = "REVOCATION_MANAGEMENT_REVOKED_999_c31a";
+    _seed_stub_verified(store, "998.0.0", marker_a);
+    _seed_stub_verified(store, "999.0.0", marker_b);
+    _seed_project(proj, "0.0.1");
+    // Without the revocation, `toolchain_management_survey`
+    // (management.sfn) would route to 999.0.0 as the newest candidate — see
+    // `toolchain_management_test.sfn`'s "newest verified compatible payload
+    // wins". Revoking it must fall the walk through to 998.0.0.
+    _seed_revocation(store, "release", "999.0.0");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-revocation management-excludes-revoked run", exit, out, err);
+    assert exit == 0;
+    assert contains(out + err, marker_a);
+    assert ! contains(out + err, marker_b);
+}
+
+// `_revocations_parse` (index_cache.sfn) requires an exact magic first line, and
+// a malformed file fails the whole parse. `toolchain_revocations_read` folds
+// that failure into the SAME empty list it returns for a genuinely missing
+// file, so on its own it cannot tell "no revocations known" from "cannot
+// tell" — which is why `toolchain_revocations_corrupt` exists beside it.
+//
+// Writing this test is what found the gate consulting only the former. A
+// corrupted ledger therefore read as "nothing is revoked" and the payload ran,
+// which hands anyone who can write to that file a way to un-revoke every
+// release by scribbling on it — the exact evasion revocation resists. The gate
+// now consults both and refuses on "cannot tell".
+test "toolchain revocation: a corrupt ledger refuses execution" ![io] {
+    let store = _scratch_root() + "/corrupt-ledger-store";
+    let proj = _scratch_root() + "/corrupt-ledger-proj";
+    let marker = "REVOCATION_CORRUPT_LEDGER_999_c31a";
+    _seed_stub_verified(store, "999.0.0", marker);
+    let src = _seed_project(proj, "999.0.0");
+
+    let dir = toolchain_index_cache_dir(store);
+    fs.createDirectory(dir, true);
+    fs.writeFile(toolchain_revocations_path(store), "not-the-magic-line\nrelease\t999.0.0\t1\t2026-01-01T00:00:00Z\tbogus\n");
+
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The stub never ran: an unreadable ledger is "cannot tell", not "clean".
+    assert ! contains(out + err, marker);
+    assert exit != 0;
+    assert contains(err, "revocation ledger is unreadable");
+    // The refusal has to be recoverable without hand-editing the store, and
+    // §3.8 forbids deleting it for the user, so it names the path instead.
+    assert contains(err, toolchain_revocations_path(store));
+}
+
+test "toolchain revocation: an unreachable index refuses a user install" ![io] {
+    let store = _scratch_root() + "/unreachable-index-install-store";
+    assert remove_all(store);
+
+    // Port 1 on loopback is unroutable (nothing listens there), so the
+    // index fetch fails fast, there is nothing cached to fall back to, and
+    // `toolchain_policy_acquire` (release_policy.sfn) must refuse rather
+    // than proceed as though nothing were revoked.
+    let exit = process.run_capture([sfn_bin_abs_path(), "toolchain", "install", "999.0.0"], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:1/"]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "signed toolchain index");
+    assert contains(out + err, "refused");
+}

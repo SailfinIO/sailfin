@@ -18,7 +18,12 @@ import { render_terminal_diagnostic } from "../terminal_output";
 import { resolve_compiler_version } from "../version";
 import { toolchain_known_sequence, toolchain_known_sequence_note } from "./channel";
 import { toolchain_current_host } from "./host";
-import { toolchain_revocation_find, toolchain_revocations_read } from "./index_cache";
+import {
+    toolchain_revocation_find,
+    toolchain_revocations_corrupt,
+    toolchain_revocations_path,
+    toolchain_revocations_read
+} from "./index_cache";
 import { toolchain_install_to_user_store, toolchain_is_valid_install_version } from "./install";
 import {
     toolchain_print_integrity_failure,
@@ -362,6 +367,20 @@ fn _dispatch_exec_target(target: string, ctx: CliContext, allow_fetch: boolean, 
     // client never claims more than its highest cached signed sequence, so an
     // entry absent from the ledger runs normally rather than being presumed
     // revoked.
+    // A ledger that will not parse means revocation cannot be evaluated, which
+    // is not the same as "nothing is revoked" — `toolchain_revocations_read`
+    // returns an empty list for both. Failing open here would hand anyone who
+    // can write to this file a way to un-revoke every release by corrupting it,
+    // which is precisely the evasion revocation exists to resist. §3.8 forbids
+    // repairing it without an explicit user command, so refuse and say how.
+    if toolchain_revocations_corrupt(versions_base) {
+        print.err("error: the local revocation ledger is unreadable; refusing to execute "
+            + target);
+        print.err("  " + toolchain_revocations_path(versions_base));
+        print.err("  delete that file to re-fetch revocation state on the next install");
+        return 1;
+    }
+
     let revoked = toolchain_revocations_read(versions_base);
     if toolchain_revocation_find(revoked, "release", target) >= 0 {
         print.err("error: toolchain " + target

@@ -29,7 +29,11 @@ import {
     toolchain_current_host
 } from "./host";
 import { ToolchainIndex } from "./index";
-import { toolchain_revocations_read } from "./index_cache";
+import {
+    toolchain_revocations_corrupt,
+    toolchain_revocations_path,
+    toolchain_revocations_read
+} from "./index_cache";
 import { toolchain_verify_entry } from "./integrity";
 import {
     ToolchainPolicyOutcome,
@@ -284,6 +288,13 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         let index = _install_acquire_index(store_base, temp);
         // Re-read after acquisition: a verified index merges its revocations
         // into the ledger, so this is the post-merge view the decision needs.
+        if toolchain_revocations_corrupt(store_base) {
+            print("error: the local revocation ledger is unreadable; refusing to install");
+            print("  " + toolchain_revocations_path(store_base));
+            print("  delete that file to re-fetch revocation state");
+            remove_tree(temp);
+            return 1;
+        }
         let known = toolchain_revocations_read(store_base);
         if is_channel {
             version = toolchain_channel_resolve(index, known, channel, host.triple);
