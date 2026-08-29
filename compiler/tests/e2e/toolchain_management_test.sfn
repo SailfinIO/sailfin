@@ -25,16 +25,24 @@
 //      through to the next-newest candidate, with a named warning.
 //   5. an incomplete (`.sha256`-less) payload is never a candidate.
 //   6. a payload whose protocol is above this entry's range fails closed
-//      with upgrade guidance when it is the newest candidate.
-//   7. the same incompatible protocol is silently ignored when it is older
+//      with upgrade guidance, at exit 2, when it is the only candidate.
+//   7. that refusal still spares exact-version `toolchain install`, the one
+//      repair path SFEP-0073 §3.5 keeps in the entry for this case.
+//   8. a blocked payload does not discard a compatible one — it warns and
+//      routes to the payload that still works.
+//   9. the same incompatible protocol is silently ignored when it is older
 //      than the running entry.
-//   8. an empty store leaves the entry answering in-process.
-//   9. `toolchain entry-version` reports the entry's own identity and is
-//      never routed.
-//   10. management routing is independent of the ordinary project pin —
+//   10. an empty store leaves the entry answering in-process.
+//   11. `toolchain entry-version` reports the entry's own identity and is
+//       never routed.
+//   12. management routing is independent of the ordinary project pin —
 //       an unsatisfiable pin does not block it.
-//   11. the loop guard refuses a mismatched routed-payload marker.
-//   12. an exact `+<version>` selector resolving in-process outranks
+//   13. a mismatched routed-payload marker warns and answers in-process
+//       rather than failing closed.
+//   14. a selector that re-execs is not routed onward by the child it
+//       dispatched into — the toolchain the user named is the one that
+//       answers.
+//   15. an exact `+<version>` selector resolving in-process outranks
 //       management routing entirely.
 import { remove_all } from "sfn/fs";
 import { contains, split, trim } from "sfn/strings";
@@ -499,22 +507,32 @@ test "toolchain management: routing is independent of a broken ordinary selectio
     assert contains(out + err, marker);
 }
 
-test "toolchain management: the loop guard refuses a mismatched marker" ![io] {
+// A set marker stops the survey whether or not it agrees with the running
+// version. A mismatch is a labelling discrepancy, not a loop — this process
+// cannot route again either way — so it must not be fatal: refusing would let
+// one stray exported variable brick every management command against a
+// perfectly healthy store, with no override.
+test "toolchain management: a mismatched marker warns and answers in-process" ![io] {
     let store = _scratch_root() + "/loop-guard-store";
     let proj = _scratch_root() + "/loop-guard-proj";
     let marker = "MANAGEMENT_LOOP_GUARD_999_9e14";
     _seed_stub_verified(store, "999.0.0", marker);
     _seed_project(proj, "0.0.1");
 
-    // The routed-payload marker names 999.0.0, but THIS running process
-    // reports a different version — the corrupt-or-wrong-version loop case.
+    // The marker names 999.0.0, but THIS process reports something else, and
+    // 999.0.0 is a verified payload the survey would otherwise route to.
     let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
         + store, "SAILFIN_TOOLCHAIN_MANAGEMENT=999.0.0"]), proj);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    assert exit == 1;
-    assert contains(err, "toolchain management routing loop");
+    report_child_failure("toolchain-management marker-mismatch run", exit, out, err);
+    assert exit == 0;
+    assert contains(err, "warning");
+    assert contains(err, "SAILFIN_TOOLCHAIN_MANAGEMENT");
+    // The stub never ran: the marker suppressed routing rather than causing it.
     assert ! contains(out + err, marker);
+    // And the entry's own list still answered.
+    assert contains(out, "999.0.0");
 }
 
 // The in-process case below is the easy half. This is the half that bit: a
