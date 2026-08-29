@@ -1,0 +1,172 @@
+// Regression coverage for SFN-1120: the opt-in `--verdict` flag on `sfn
+// test`, `sfn build`, and `sfn dev bootstrap build` prints the
+// `sailfin-run/2` framed trailer (`===SAILFIN-RESULT===` / JSON /
+// `===END-SAILFIN-RESULT===`) as the last three lines of output, and stays
+// silent — byte-identical to before — when the flag is absent. Schema and
+// per-verb `host`/`target` contract: `docs/reference/run-result-schema.md`.
+//
+// `sfn dev bootstrap build`'s registration is asserted only via `--help`
+// (test 6) rather than actually invoking it: running a bootstrap build
+// inside this suite would self-host the whole compiler, which is far
+// outside what an e2e regression test should do.
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`: drives subprocesses via
+// `process.run_capture` and asserts on captured output with `sfn/strings`.
+import { find } from "sfn/strings";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
+
+// `--help` invocations spawn no nested build, so a minimal PATH/HOME
+// environment is enough (matches `cli_help_test.sfn`'s `_child_env`).
+fn _help_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+test "cli verdict: sfn test --verdict emits a passing trailer" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/verdict_pass_test.sfn";
+        fs.writeFile(src, "test \"verdict probe: passes\" {\n"
+            + "    assert 1 + 1 == 2;\n"
+            + "}\n");
+        let exit = process.run_capture([sfn_bin_path(), "test", src, "--verdict"], clean_runner_env(nested_runner_scratch("verdict-test-pass")));
+        let combined = process.capture_take_stdout() + process.capture_take_stderr();
+        assert exit == 0;
+        assert find(combined, "===SAILFIN-RESULT===", 0) >= 0;
+        assert find(combined, "===END-SAILFIN-RESULT===", 0) >= 0;
+        assert find(combined, "\"host\":\"sfn test\"", 0) >= 0;
+        assert find(combined, "\"target\":\"test\"", 0) >= 0;
+        assert find(combined, "\"status\":\"pass\"", 0) >= 0;
+        assert find(combined, "\"failure\":null", 0) >= 0;
+        assert find(combined, "\"phase\":null", 0) >= 0;
+        assert find(combined, "\"first_error\":null", 0) >= 0;
+        assert find(combined, "\"report\":null", 0) >= 0;
+        assert find(combined, "\"schema_version\":\"sailfin-run/2\"", 0) >= 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "cli verdict: sfn test --verdict classifies a failed assertion as test-failure" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/verdict_fail_test.sfn";
+        fs.writeFile(src, "test \"verdict probe: fails\" {\n"
+            + "    assert 1 == 2;\n"
+            + "}\n");
+        let exit = process.run_capture([sfn_bin_path(), "test", src, "--verdict"], clean_runner_env(nested_runner_scratch("verdict-test-fail")));
+        let combined = process.capture_take_stdout() + process.capture_take_stderr();
+        assert exit != 0;
+        assert find(combined, "\"host\":\"sfn test\"", 0) >= 0;
+        assert find(combined, "\"status\":\"fail\"", 0) >= 0;
+        assert find(combined, "\"failure\":\"test-failure\"", 0) >= 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+// The `--json` primary-document-purity guard (SFEP-0014 §3.9): an unasked-
+// for trailer must never be appended to a stream someone is teeing into a
+// file, so the same passing fixture as test 1 must emit no trailer at all
+// without `--verdict`.
+test "cli verdict: sfn test emits no trailer unless asked" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/verdict_quiet_test.sfn";
+        fs.writeFile(src, "test \"verdict probe: passes\" {\n"
+            + "    assert 1 + 1 == 2;\n"
+            + "}\n");
+        let exit = process.run_capture([sfn_bin_path(), "test", src], clean_runner_env(nested_runner_scratch("verdict-test-quiet")));
+        let combined = process.capture_take_stdout() + process.capture_take_stderr();
+        assert exit == 0;
+        assert find(combined, "===SAILFIN-RESULT===", 0) < 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "cli verdict: sfn build --verdict emits a passing trailer" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/verdict_build_pass.sfn";
+        fs.writeFile(src, "fn main() { }\n");
+        let out = dir + "/probe";
+        let exit = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--verdict"], clean_runner_env(nested_runner_scratch("verdict-build-pass")));
+        let combined = process.capture_take_stdout() + process.capture_take_stderr();
+        assert exit == 0;
+        assert find(combined, "\"host\":\"sfn build\"", 0) >= 0;
+        assert find(combined, "\"target\":\"build\"", 0) >= 0;
+        assert find(combined, "\"status\":\"pass\"", 0) >= 0;
+        assert find(combined, "\"failure\":null", 0) >= 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "cli verdict: sfn build --verdict classifies a rejected source as compile-error" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/verdict_build_fail.sfn";
+        fs.writeFile(src, "fn main() {\n" + "    let x: int = \"not an int\";\n"
+            + "}\n");
+        let out = dir + "/probe";
+        let exit = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--verdict"], clean_runner_env(nested_runner_scratch("verdict-build-fail")));
+        let combined = process.capture_take_stdout() + process.capture_take_stderr();
+        assert exit != 0;
+        assert find(combined, "\"host\":\"sfn build\"", 0) >= 0;
+        assert find(combined, "\"status\":\"fail\"", 0) >= 0;
+        assert find(combined, "\"failure\":\"compile-error\"", 0) >= 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+// The same guard on `sfn build`, which is where it bites hardest: `sfn
+// test --json` emits line-oriented JSONL, but `sfn build --json` emits a
+// single JSON document — the "teed straight into a `.json` file" case the
+// opt-in design argues from (SFEP-0014 §3.9). A trailer appended there
+// would corrupt the document outright.
+test "cli verdict: sfn build --json stays a pure document without the flag" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/verdict_build_json.sfn";
+        fs.writeFile(src, "fn main() { }\n");
+        let out = dir + "/probe";
+        let exit = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--json"], clean_runner_env(nested_runner_scratch("verdict-build-json")));
+        let combined = process.capture_take_stdout() + process.capture_take_stderr();
+        assert exit == 0;
+        assert find(combined, "===SAILFIN-RESULT===", 0) < 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+// `sfn dev bootstrap build` is registered too, but actually running one
+// here would self-host the whole compiler inside a test — so its
+// registration is pinned via `--help`, alongside the other two verbs, and
+// via the negative control that `--help` (a non-ok parse) never arms the
+// trailer.
+test "cli verdict: --verdict is registered on all three verbs" ![io] {
+    let child_env = _help_env();
+
+    let test_exit = process.run_capture([sfn_bin_path(), "test", "--help"], child_env);
+    let test_out = process.capture_take_stdout() + process.capture_take_stderr();
+    assert test_exit == 0;
+    assert find(test_out, "--verdict", 0) >= 0;
+    assert find(test_out, "===SAILFIN-RESULT===", 0) < 0;
+
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "--help"], child_env);
+    let build_out = process.capture_take_stdout() + process.capture_take_stderr();
+    assert build_exit == 0;
+    assert find(build_out, "--verdict", 0) >= 0;
+    assert find(build_out, "===SAILFIN-RESULT===", 0) < 0;
+
+    let bootstrap_exit = process.run_capture([sfn_bin_path(), "dev", "bootstrap", "build", "--help"], child_env);
+    let bootstrap_out = process.capture_take_stdout() + process.capture_take_stderr();
+    assert bootstrap_exit == 0;
+    assert find(bootstrap_out, "--verdict", 0) >= 0;
+    assert find(bootstrap_out, "===SAILFIN-RESULT===", 0) < 0;
+}

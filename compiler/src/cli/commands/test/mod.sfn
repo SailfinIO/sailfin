@@ -217,7 +217,12 @@ import { _run_single_process } from "./single_process_run";
 // a variadic `suite` positional.
 fn command_def() -> Command {
     let cmd: Command = with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run tests or workspace default members"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary and shared runtime object caches")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_int("slowest", "Print the N slowest test files after a multi-file run (0 disables, default 5)")), flag_value("shard", "Run only the I-th of N shards (e.g. 1/3; file-count stride unless --shard-weights loads)")), flag_value("shard-weights", "Path to a path\\tweight TSV; --shard partitions by SFN-863 LPT instead of the stride")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "Suite paths (omit at a workspace root to test [workspace].default-members)"));
-    return with_usage(cmd, "project", "sfn test [path...]", "run tests");
+    // SFN-1120. Registered as a separate binding rather than another link in
+    // the `with_flag` tower above: the pinned seed miscompiles a builder
+    // chain past a certain nesting depth (#1773), and the tower is already
+    // ten deep.
+    let flagged: Command = with_flag(cmd, flag("verdict", "Emit a machine-readable sailfin-run/2 verdict trailer after the run"));
+    return with_usage(flagged, "project", "sfn test [path...]", "run tests");
 }
 
 // Human-readable rendering of the active `-k`/`--tag` selectors, for the

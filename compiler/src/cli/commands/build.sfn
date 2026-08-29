@@ -106,6 +106,9 @@ fn command_def() -> Command {
     // packaging PLATFORM LABEL (`linux-x86_64`), not a compilation triple —
     // the two are deliberately not unified.
     cmd = with_flag(cmd, flag_value("target", "Cross-compile for this triple (e.g. x86_64-w64-mingw32)"));
+    // SFN-1120: the `sailfin-run/2` trailer, opt-in so it can never be
+    // appended to a `--json` document someone is teeing into a file.
+    cmd = with_flag(cmd, flag("verdict", "Emit a machine-readable sailfin-run/2 verdict trailer after the run"));
     cmd = with_arg(cmd, arg_variadic("path", "Source file to build (omit in a capsule, or at a workspace root to build [workspace].default-members)"));
     return with_usage(cmd, "build & run", "sfn build <file|-p path>", "compile a file or capsule");
 }
