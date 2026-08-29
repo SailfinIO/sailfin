@@ -153,16 +153,6 @@ fn _management_candidate(base: string, host_triple: string, version: string) -> 
     return out;
 }
 
-fn _management_seen(items: ToolchainManagementCandidate[], version: string) -> boolean {
-    let mut i: int = 0;
-    loop {
-        if i >= items.length { break; }
-        if strings_equal(items[i].version, version) { return true; }
-        i += 1;
-    }
-    return false;
-}
-
 // Insertion sort, newest first. Store entries number in the single digits, so
 // the quadratic shape costs nothing and keeps the ordering rule in one place.
 fn _management_sort_desc(items: ToolchainManagementCandidate[]) -> ToolchainManagementCandidate[] {
@@ -201,7 +191,7 @@ fn _management_sort_desc(items: ToolchainManagementCandidate[]) -> ToolchainMana
 fn toolchain_management_survey(versions_base: string, host: ToolchainHostIdentity) -> ToolchainManagementSurvey ![io] {
     let mut compatible: ToolchainManagementCandidate[] = [];
     let mut blocked = _management_none();
-    let mut seen: ToolchainManagementCandidate[] = [];
+    let mut seen: string[] = [];
     let revoked = _management_known_revoked();
     let triples = _management_host_triples(host);
 
@@ -217,10 +207,8 @@ fn toolchain_management_survey(versions_base: string, host: ToolchainHostIdentit
             let version = names[i];
             // A version present under two host keys resolves to the first,
             // matching per-version store resolution.
-            if !_management_seen(seen, version) {
-                let mut marker = _management_none();
-                marker.version = version;
-                seen.push(marker);
+            if !_management_contains(seen, version) {
+                seen.push(version);
                 if !_management_contains(revoked, version) {
                     let candidate = _management_candidate(base, triple, version);
                     if candidate.ok {
