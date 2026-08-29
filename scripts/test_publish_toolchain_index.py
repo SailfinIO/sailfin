@@ -471,6 +471,68 @@ def main() -> int:
             "refresh-window cannot bootstrap fixture",
         )
 
+        refresh_only_temporal, refresh_only_temporal_index, _ = run_publisher(
+            root,
+            normal_state,
+            old_private,
+            manifest_123,
+            "1.2.3",
+            "stable",
+            "refresh-only-temporal",
+            generated_at="2026-08-25T00:00:00Z",
+            expires_at="2026-09-29T00:00:00Z",
+            now="2026-08-25T00:00:00Z",
+            previous=(index_1, signature_1),
+            refresh_window=True,
+        )
+        expect_success(refresh_only_temporal, "refresh-window only-temporal fixture")
+        refresh_only_temporal_payload = json.loads(
+            refresh_only_temporal_index.read_text(encoding="utf-8")
+        )
+        temporal_keys = ("generated_at", "expires_at", "sequence")
+        refresh_only_temporal_rest = dict(refresh_only_temporal_payload)
+        payload_1_rest = dict(payload_1)
+        for key in temporal_keys:
+            refresh_only_temporal_rest.pop(key, None)
+            payload_1_rest.pop(key, None)
+        if refresh_only_temporal_rest != payload_1_rest:
+            differing_keys = {
+                key
+                for key in set(refresh_only_temporal_rest) | set(payload_1_rest)
+                if refresh_only_temporal_rest.get(key) != payload_1_rest.get(key)
+            }
+            raise AssertionError(
+                "--refresh-window changed non-temporal fields: "
+                f"{sorted(differing_keys)}"
+            )
+
+        refresh_after_expiry, refresh_after_expiry_index, _ = run_publisher(
+            root,
+            normal_state,
+            old_private,
+            manifest_123,
+            "1.2.3",
+            "stable",
+            "refresh-after-expiry",
+            generated_at="2026-10-05T00:00:00Z",
+            expires_at="2026-11-09T00:00:00Z",
+            now="2026-10-05T00:00:00Z",
+            previous=(index_1, signature_1),
+            refresh_window=True,
+        )
+        expect_success(refresh_after_expiry, "refresh-window after-expiry fixture")
+        refresh_after_expiry_payload = json.loads(
+            refresh_after_expiry_index.read_text(encoding="utf-8")
+        )
+        if refresh_after_expiry_payload["sequence"] != payload_1["sequence"] + 1:
+            raise AssertionError(
+                "--refresh-window did not advance sequence past an expired previous index"
+            )
+        if refresh_after_expiry_payload["expires_at"] != "2026-11-09T00:00:00Z":
+            raise AssertionError(
+                "--refresh-window did not restore expires_at for an expired previous index"
+            )
+
         malformed = fixture("malformed-host.json")
         malformed_manifest = write_release(
             root, "1.2.3", old_private, str(malformed["asset"]), "malformed-host"

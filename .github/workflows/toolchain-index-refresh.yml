@@ -14,7 +14,7 @@ name: Toolchain index refresh
 on:
   schedule:
     # Wednesday 06:00 UTC. Deliberately off the Monday release-train cadence so
-    # a refresh does not queue behind a release cut on the shared
+    # a refresh does not contend with a release cut on the shared
     # `release-publication` concurrency group. Weekly against a 35-day window
     # leaves roughly four missed runs of margin.
     - cron: "0 6 * * 3"
@@ -29,10 +29,12 @@ on:
 permissions:
   contents: read
 
-# The canonical index has one global monotonic sequence, so a refresh must
-# never run concurrently with a release publication. This is deliberately the
-# same group `release-tag.yml` uses; `cancel-in-progress: false` so a refresh
-# queues behind a release rather than cancelling it.
+# The canonical index has one global monotonic sequence, so a refresh must not
+# run concurrently with a release publication. This is deliberately the same
+# group `release-tag.yml` uses. `cancel-in-progress: false` keeps a running
+# refresh from being cancelled; note GitHub still retains only one *pending*
+# run per group, so a refresh queued behind a release can itself be superseded.
+# That is acceptable against roughly four runs of margin.
 concurrency:
   group: release-publication
   cancel-in-progress: false
@@ -60,23 +62,37 @@ jobs:
             scripts/publish-toolchain-index.py
           sparse-checkout-cone-mode: false
 
-      - name: Fetch the canonical signed index
+      - name: Gather authenticated previous index candidates
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p dist previous
-          if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TOOLCHAIN_INDEX_TAG}" >/dev/null 2>&1; then
-            echo "[index-refresh][error] the canonical index release ${TOOLCHAIN_INDEX_TAG} is absent." >&2
-            echo "[index-refresh][error] A refresh cannot bootstrap signed history. See docs/runbooks/toolchain-index-refresh.md" >&2
+          : > previous/candidate-dirs.txt
+
+          set +e
+          canonical_probe="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TOOLCHAIN_INDEX_TAG}" 2>&1)"
+          canonical_status=$?
+          set -e
+          if [ "$canonical_status" -ne 0 ]; then
+            if [[ "$canonical_probe" == *"HTTP 404"* ]]; then
+              echo "[index-refresh][error] the canonical index release ${TOOLCHAIN_INDEX_TAG} is absent." >&2
+              echo "[index-refresh][error] A refresh must not bootstrap signed history; repair through the release path." >&2
+              echo "[index-refresh][error] See docs/runbooks/toolchain-index-refresh.md" >&2
+            else
+              echo "[index-refresh][error] could not query the canonical index release: ${canonical_probe}" >&2
+            fi
             exit 1
           fi
+
           pair_count="$(gh release view "$TOOLCHAIN_INDEX_TAG" --json assets \
             --jq '[.assets[].name | select(. == "toolchain-index.json" or . == "toolchain-index.json.sig")] | length')"
           if [ "$pair_count" -ne 2 ]; then
             echo "[index-refresh][error] the canonical release has an incomplete public index pair." >&2
-            echo "[index-refresh][error] Repair it through the release path rather than here. See docs/runbooks/toolchain-index-refresh.md" >&2
+            echo "[index-refresh][error] Repair it through the release path rather than here." >&2
+            echo "[index-refresh][error] See docs/runbooks/toolchain-index-refresh.md" >&2
             exit 1
           fi
           gh release download "$TOOLCHAIN_INDEX_TAG" \
@@ -84,6 +100,50 @@ jobs:
             --pattern toolchain-index.json.sig \
             --dir previous \
             --clobber
+
+          # Gather the same authenticated candidate set `release-tag.yml` does,
+          # not just the canonical pair. `release-tag.yml` uploads a new index
+          # to the versioned release before it publishes to the canonical tag,
+          # so a failure between those two steps leaves a versioned copy at a
+          # higher sequence than the canonical one. Refreshing from the
+          # canonical alone would then republish *different* bytes at a
+          # sequence the versioned copy already occupies, and the next release
+          # cut would hard-fail with "authenticated previous candidates
+          # disagree". The producer takes the maximum sequence across
+          # candidates and cross-checks their bytes, so handing it everything
+          # keeps that self-healing property intact.
+          candidate_count=0
+          mapfile -t indexed_release_tags < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name != "toolchain-index-v1") | select(([.assets[].name] | index("toolchain-index.json")) != null and ([.assets[].name] | index("toolchain-index.json.sig")) != null) | .tag_name'
+          )
+          for indexed_tag in ${indexed_release_tags[@]+"${indexed_release_tags[@]}"}; do
+            candidate_dir="previous/versioned-${candidate_count}"
+            mkdir -p "$candidate_dir"
+            gh release download "$indexed_tag" \
+              --pattern toolchain-index.json \
+              --pattern toolchain-index.json.sig \
+              --dir "$candidate_dir" \
+              --clobber
+            echo "$candidate_dir" >> previous/candidate-dirs.txt
+            candidate_count=$((candidate_count + 1))
+          done
+
+          backup_count="$(gh release view "$TOOLCHAIN_INDEX_TAG" --json assets \
+            --jq '[.assets[].name | select(. == "toolchain-index.previous.json" or . == "toolchain-index.previous.json.sig")] | length')"
+          if [ "$backup_count" -eq 2 ]; then
+            mkdir -p previous/backup
+            gh release download "$TOOLCHAIN_INDEX_TAG" \
+              --pattern toolchain-index.previous.json \
+              --pattern toolchain-index.previous.json.sig \
+              --dir previous/backup \
+              --clobber
+            mv previous/backup/toolchain-index.previous.json previous/backup/toolchain-index.json
+            mv previous/backup/toolchain-index.previous.json.sig previous/backup/toolchain-index.json.sig
+            echo "previous/backup" >> previous/candidate-dirs.txt
+          elif [ "$backup_count" -eq 1 ]; then
+            echo "[index-refresh][warning] ignoring an incomplete preserved previous pair" >&2
+          fi
 
       - name: Report current freshness
         id: freshness
@@ -110,12 +170,22 @@ jobs:
         run: |
           set -euo pipefail
           # A refresh restates a release the index already carries, so the
-          # rebuilt record is byte-identical and only the validity window
-          # moves. Never introduce a new release here: publishing a release
-          # into the index is the release pipeline's decision, not this job's.
-          version="$(jq -r '.releases | keys[]' previous/toolchain-index.json | sort -V | tail -n1)"
+          # rebuilt release record is byte-identical and the validity window is
+          # the only thing that has to move. Never introduce a new release
+          # here: publishing a release into the index is the release
+          # pipeline's decision, not this job's.
+          #
+          # Restrict the choice to releases whose manifest was signed by the
+          # key that is active now. `parse_manifest` verifies the release
+          # manifest against the active signing key, so a release cut before a
+          # key rotation can no longer be restated at all.
+          active_key="$(jq -r '.signing_key.key_id' .github/release-signing/toolchain-index-state.json)"
+          version="$(jq -r --arg k "$active_key" \
+            '.releases | to_entries | map(select(.value.manifest_key_id == $k)) | .[].key' \
+            previous/toolchain-index.json | sort -V | tail -n1)"
           if [ -z "$version" ] || [ "$version" = "null" ]; then
-            echo "[index-refresh][error] the canonical index carries no releases to restate" >&2
+            echo "[index-refresh][error] the canonical index carries no release signed by the active key ${active_key}" >&2
+            echo "[index-refresh][error] Cut a release signed by the current key. See docs/runbooks/toolchain-index-refresh.md" >&2
             exit 1
           fi
           # Read the channel the index already records for this release rather
@@ -128,9 +198,15 @@ jobs:
             exit 1
           fi
           echo "[index-refresh] restating ${version} on channel ${channel}"
+          # The host tarballs are required, not incidental: `parse_manifest`
+          # re-hashes every supported host asset from the manifest's own
+          # directory and fails if one is unreadable. `release-tag.yml` gets
+          # them for free from its build matrix; this job has to fetch them.
+          # Do not "optimise" this down to the manifest pair.
           gh release download "v${version}" \
             --pattern SHA256SUMS \
             --pattern SHA256SUMS.sig \
+            --pattern "sailfin_${version}_*.tar.gz" \
             --dir dist \
             --clobber
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -144,6 +220,19 @@ jobs:
           TARGET_CHANNEL: ${{ steps.target.outputs.channel }}
         run: |
           set -euo pipefail
+          previous_args=(
+            --previous-index previous/toolchain-index.json
+            --previous-signature previous/toolchain-index.json.sig
+          )
+          while IFS= read -r candidate_dir; do
+            [ -n "$candidate_dir" ] || continue
+            previous_args+=(
+              --candidate-previous
+              "$candidate_dir/toolchain-index.json"
+              "$candidate_dir/toolchain-index.json.sig"
+            )
+          done < previous/candidate-dirs.txt
+
           generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           expires_at="$(date -u -d "${generated_at} +${REFRESH_WINDOW_DAYS} days" '+%Y-%m-%dT%H:%M:%SZ')"
           # --refresh-window is required: without it the producer treats a
@@ -157,8 +246,7 @@ jobs:
             --generated-at "$generated_at" \
             --expires-at "$expires_at" \
             --refresh-window \
-            --previous-index previous/toolchain-index.json \
-            --previous-signature previous/toolchain-index.json.sig \
+            "${previous_args[@]}" \
             --authenticated-previous-output dist/toolchain-index.previous.json \
             --authenticated-previous-signature-output dist/toolchain-index.previous.json.sig \
             --output dist/toolchain-index.json \
@@ -176,9 +264,12 @@ jobs:
           set -euo pipefail
           new_expiry="$(jq -r '.expires_at' dist/toolchain-index.json)"
           new_sequence="$(jq -r '.sequence' dist/toolchain-index.json)"
-          old_sequence="$(jq -r '.sequence' previous/toolchain-index.json)"
+          # Compare against the authenticated previous the producer actually
+          # selected, which may outrank the canonical pair.
+          old_sequence="$(jq -r '.sequence' dist/toolchain-index.previous.json)"
+          old_expiry="$(jq -r '.expires_at' dist/toolchain-index.previous.json)"
           new_epoch="$(date -u -d "$new_expiry" '+%s')"
-          old_epoch="$(date -u -d "$PREVIOUS_EXPIRY" '+%s')"
+          old_epoch="$(date -u -d "$old_expiry" '+%s')"
           now_epoch="$(date -u '+%s')"
           remaining_days=$(( (new_epoch - now_epoch) / 86400 ))
           if [ "$new_sequence" -le "$old_sequence" ]; then
@@ -186,18 +277,21 @@ jobs:
             exit 1
           fi
           if [ "$new_epoch" -le "$old_epoch" ]; then
-            echo "[index-refresh][error] the refreshed index expires no later than the one it replaces (${PREVIOUS_EXPIRY} -> ${new_expiry})" >&2
-            echo "[index-refresh][error] the validity window did not move; user installs still break at ${PREVIOUS_EXPIRY}" >&2
+            echo "[index-refresh][error] the refreshed index expires no later than the one it replaces (${old_expiry} -> ${new_expiry})" >&2
+            echo "[index-refresh][error] the validity window did not move; user installs still break at ${old_expiry}" >&2
             exit 1
           fi
           if [ "$remaining_days" -lt "$MIN_MARGIN_DAYS" ]; then
             echo "[index-refresh][error] the refreshed index expires ${new_expiry}, only ${remaining_days} days away, under the ${MIN_MARGIN_DAYS}-day margin" >&2
             exit 1
           fi
-          echo "[index-refresh] sequence ${old_sequence} -> ${new_sequence}; expiry ${PREVIOUS_EXPIRY} -> ${new_expiry} (${remaining_days} days remaining)"
+          echo "[index-refresh] sequence ${old_sequence} -> ${new_sequence}; expiry ${old_expiry} -> ${new_expiry} (${remaining_days} days remaining)"
+          if [ "$old_expiry" != "$PREVIOUS_EXPIRY" ]; then
+            echo "[index-refresh] note: the producer selected an authenticated previous outranking the canonical pair (canonical expiry ${PREVIOUS_EXPIRY})"
+          fi
 
       - name: Publish the refreshed index
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run != true }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
@@ -220,7 +314,7 @@ jobs:
             --draft=false --prerelease --latest=false
 
       - name: Report dry run
-        if: ${{ inputs.dry_run == true }}
+        if: ${{ github.event_name != 'schedule' && inputs.dry_run == true }}
         shell: bash
         run: |
           set -euo pipefail
