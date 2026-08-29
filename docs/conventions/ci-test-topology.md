@@ -164,6 +164,54 @@ in the tree, and that is why the test pool now budgets a parent term plus a
 separately-measured per-child reserve rather than sharing the emit
 fan-out's policy.
 
+## Measured macOS shard cost (2026-08-28)
+
+The `[ci-metrics]` lines from run `33215108439` (`macos-arm64`, all eight
+shards, one PR). `test_s` is test-phase wall seconds; `test_bin_hit_rate` is
+the fraction of that shard's tests whose linked binary came from the cache.
+
+| shard | `test_s` | `test_bin_hit_rate` | leg it ran in |
+| --- | ---: | ---: | --- |
+| `e2e-b` | 1566 | 0.00 | `e2e-b` |
+| `e2e-d` | 1289 | 0.00 | `e2e-d+unit-b` |
+| `e2e-a` | 1245 | 0.00 | `e2e-a` |
+| `e2e-c` | 932 | 0.96 | `e2e-c+int-caps` |
+| `unit-a` | 518 | 1.00 | `unit-a+unit-c` |
+| `int-caps` | 498 | 0.00 | `e2e-c+int-caps` |
+| `unit-b` | 406 | 1.00 | `e2e-d+unit-b` |
+| `unit-c` | 299 | 0.00 | `unit-a+unit-c` |
+
+Two things follow, and they point in different directions.
+
+**The five-way packing is stale, but the upside is small.** SFN-873 packed the
+groups when `e2e-b` was the long pole; it no longer is. Current makespan is
+`e2e-d+unit-b` at 1695 s against a 6753 s total, and the LPT-optimal packing of
+these numbers — `e2e-b` | `e2e-c+unit-b` | `unit-a+int-caps+unit-c` | `e2e-d` |
+`e2e-a` — reaches 1566 s. That is a **7.6% (2.15 min) makespan gain, and it is
+the ceiling**: `e2e-b` alone is 1566 s, and no five-way packing of eight
+indivisible shards can beat the largest one. Repacking also saves **zero
+runner-minutes** — total work is unchanged, only the critical path shortens.
+
+So a repack is not worth a CI run on its own: it edits `ci.yml` and
+`seed-test-bin.yml`, and `ci.yml` is in `ci-scope`'s `source` glob, so landing
+it costs a full matrix (~135 macOS runner-minutes measured on the same run) to
+save 2.15 min of wall clock per later PR. Fold it into the next change that
+already touches `ci.yml` or `compiler/tests/` for another reason. Keep the two
+groupings in sync when you do — `seed-test-bin.yml`'s `seed-macos` is the
+producer of the same five cache keys `build-macos` consumes.
+
+**The bigger cost is the cache, not the packing.** Five of eight shards, and
+all three of the most expensive, recorded a `test_bin_hit_rate` of **0.00** on
+a PR whose diff touched no compiler source at all. Entry keys include the
+compiler binary's SHA-256 (SFN-545), so a PR branched even a few commits behind
+`main` gets a seeded cache built by a different compiler and misses everything
+in it. Cutting those three shards' misses is worth far more than 2.15 min, and
+it is a keying problem, not a packing one. No issue is open for it yet.
+
+Note this is a single-run sample, and the caveat the section below already
+makes still applies: there is no durable time-series for test-suite wall time,
+so treat these as one measurement, not a baseline.
+
 ## Test-artifact cache (operational)
 
 The design for the content-addressed key derivation lives in
