@@ -92,6 +92,13 @@ import {
     strings_equal,
     substring
 } from "../../string_utils";
+import {
+    toolchain_revocation_find,
+    toolchain_revocations_corrupt,
+    toolchain_revocations_path,
+    toolchain_revocations_read
+} from "../../toolchain/index_cache";
+import { toolchain_versions_base } from "../../toolchain/store";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 import { arena_command_def, arena_run } from "./dev_arena";
@@ -766,7 +773,7 @@ fn _bootstrap_alias(abs_bin: string, alias: string) -> void ![io] {
 // Acquire + verify + install the pinned seed into the checkout's repo-local
 // store, then lay the `bin/` aliases. Reuses the toolchain installer's
 // fail-closed fetch/verify/extract pipeline against the bootstrap store base.
-fn _bootstrap_fetch(m: BootstrapManifest) -> int ![io, net] {
+fn _bootstrap_fetch(m: BootstrapManifest) -> int ![clock, io, net] {
     let rc = toolchain_install_to_base(m.version, m.install_base, _bootstrap_work_root());
     if rc != 0 { return rc; }
     _bootstrap_link_bin(m.install_base, m.bin_dir, m.version);
@@ -775,7 +782,7 @@ fn _bootstrap_fetch(m: BootstrapManifest) -> int ![io, net] {
 
 // Ensure the pinned seed is present in the store, fetching (and verifying) it
 // when absent. Returns 0 when the store is ready.
-fn _bootstrap_ensure_seed(m: BootstrapManifest) -> int ![io, net] {
+fn _bootstrap_ensure_seed(m: BootstrapManifest) -> int ![clock, io, net] {
     if _bootstrap_store_ready(m.install_base, m.version) { return 0; }
     let rc = _bootstrap_fetch(m);
     if rc != 0 {
@@ -903,6 +910,29 @@ fn bootstrap_gate_or_dispatch(ctx: CliContext) -> int ![clock, io, net] {
         exec_argv.push(ctx.orig_args[i]);
         i += 1;
     }
+    // The seed about to replace this image is chosen by `bootstrap.toml`, which
+    // a cloned repository supplies. Dispatch and management routing both refuse
+    // a cached-known revoked release before their own `process.exec`; this was
+    // the one exec site without that check, so a revoked seed kept running for
+    // as long as the pin named it. Local ledger only — no network, nothing that
+    // can expire, so the self-host build stays independent of index liveness.
+    let ledger_base = toolchain_versions_base();
+    if ledger_base.length > 0 {
+        if toolchain_revocations_corrupt(ledger_base) {
+            print.err("error: the local revocation ledger is unreadable; refusing to run seed "
+                + m.version);
+            print.err("  " + toolchain_revocations_path(ledger_base));
+            return 1;
+        }
+        let ledger = toolchain_revocations_read(ledger_base);
+        if toolchain_revocation_find(ledger, "release", m.version) >= 0 {
+            print.err("error: the pinned bootstrap seed " + m.version
+                + " is revoked and will not be executed");
+            print.err("  revocation has no override; pin a different seed in bootstrap.toml");
+            return 1;
+        }
+    }
+
     let mut exec_env: string[] = process.environ();
     exec_env.push("SAILFIN_BOOTSTRAP_DISPATCHED=" + m.version);
     let _rc = process.exec(exec_argv, exec_env);
@@ -913,7 +943,7 @@ fn bootstrap_gate_or_dispatch(ctx: CliContext) -> int ![clock, io, net] {
 
 // ---- `sfn dev bootstrap` subcommands ----
 // fetch: acquire + verify the pinned seed only.
-fn _dev_bootstrap_fetch() -> int ![io, net] {
+fn _dev_bootstrap_fetch() -> int ![clock, io, net] {
     let m = _bootstrap_resolve_manifest();
     if !m.ok {
         print.err("error: " + m.error);
@@ -987,7 +1017,7 @@ fn _bootstrap_force_env() -> boolean ![io] {
 // promoted after the binary is installed — never before — so an
 // interrupted run cannot leave a stored fingerprint claiming a binary
 // that was never installed.
-fn _dev_bootstrap_build(force: boolean, build_args: string[]) -> int ![io, net] {
+fn _dev_bootstrap_build(force: boolean, build_args: string[]) -> int ![clock, io, net] {
     let m = _bootstrap_resolve_manifest();
     if !m.ok {
         print.err("error: " + m.error);
@@ -1346,7 +1376,7 @@ fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) ->
 }
 
 // check: build with the exact seed, then smoke-verify the built compiler.
-fn _dev_bootstrap_check() -> int ![io, net] {
+fn _dev_bootstrap_check() -> int ![clock, io, net] {
     let m = _bootstrap_resolve_manifest();
     if !m.ok {
         print.err("error: " + m.error);

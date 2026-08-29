@@ -30,6 +30,7 @@ import {
 } from "./host";
 import { ToolchainIndex } from "./index";
 import {
+    toolchain_revocation_find,
     toolchain_revocations_corrupt,
     toolchain_revocations_path,
     toolchain_revocations_read
@@ -52,7 +53,8 @@ import {
     toolchain_lay_out_store_entry,
     toolchain_staging_dir,
     toolchain_store_ready,
-    toolchain_version_dir
+    toolchain_version_dir,
+    toolchain_versions_base
 } from "./store";
 
 let TOOLCHAIN_RELEASE_BASE = "https://github.com/SailfinIO/sailfin/releases/download";
@@ -277,6 +279,32 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         return 1;
     }
 
+    // The bootstrap exemption below is from the *index*, which needs the
+    // network and can expire. It was never meant to reach the local revocation
+    // ledger, which needs neither: nothing in SFEP-0047 asks for a reviewed pin
+    // to remain installable after it is revoked, and leaving the gap meant an
+    // attacker-authored `bootstrap.toml` in a cloned repo could name any
+    // version and any store and fetch it with no revocation check at all.
+    let ledger_base = toolchain_versions_base();
+    if ledger_base.length > 0 {
+        if toolchain_revocations_corrupt(ledger_base) {
+            print("error: the local revocation ledger is unreadable; refusing to install");
+            print("  " + toolchain_revocations_path(ledger_base));
+            print("  delete that file to re-fetch revocation state");
+            remove_tree(temp);
+            return 1;
+        }
+        if !is_channel {
+            let ledger = toolchain_revocations_read(ledger_base);
+            if toolchain_revocation_find(ledger, "release", version) >= 0 {
+                print("error: toolchain " + version + " is revoked");
+                print("  revocation has no override; install a different version");
+                remove_tree(temp);
+                return 1;
+            }
+        }
+    }
+
     // SFEP-0073 §3.7 (SFN-1069): a user install consults the signed index
     // before fetching anything release-specific, so a revoked version is
     // refused without the network ever being asked for it. The bootstrap path
@@ -300,6 +328,18 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
             version = toolchain_channel_resolve(index, known, channel, host.triple);
             if version.length == 0 {
                 print("error: " + toolchain_channel_refusal(index, known, channel, host.triple));
+                remove_tree(temp);
+                return 1;
+            }
+            // The resolved string comes from the index and goes on to build a
+            // URL and a filesystem path. The exact-version branch validates;
+            // this one must too, rather than trusting a signed payload's map
+            // key to be well-formed.
+            if !toolchain_is_valid_install_version(version) {
+                print("error: the signed index resolved " + channel
+                    + " to a malformed version: \""
+                    + version
+                    + "\"");
                 remove_tree(temp);
                 return 1;
             }
@@ -352,7 +392,17 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     // still appear in the release-specific signed manifest below — the index
     // narrows the choice, it never replaces that verification (§3.7).
     let mut asset = _select_asset(host, version, sums_text);
-    if policy.listed { asset = policy.asset; }
+    if policy.listed {
+        // `archive = temp + "/" + asset` below, so a separator or a parent
+        // reference here escapes the staging directory.
+        if !_is_safe_capsule_version_cmd(policy.asset) {
+            print("error: the signed index names an unsafe asset filename: "
+                + policy.asset);
+            remove_tree(temp);
+            return 1;
+        }
+        asset = policy.asset;
+    }
     let expected = _digest_for_asset(sums_text, asset);
     if expected.length == 0 {
         print("error: asset not listed in the signed manifest: " + asset);

@@ -35,7 +35,9 @@ import {
     toolchain_index_cache_read_signature,
     toolchain_index_cache_store,
     toolchain_revocations_merge,
-    toolchain_revocations_read
+    toolchain_revocations_read,
+    toolchain_sequence_read,
+    toolchain_sequence_record
 } from "./index_cache";
 
 // Published beside the release assets under a fixed tag, so one URL serves
@@ -112,13 +114,24 @@ fn _policy_index_failure(reason: string) -> ToolchainIndex {
 fn toolchain_policy_acquire(versions_base: string, fetched_payload: string, fetched_signature: string, now_epoch: int) -> ToolchainIndex ![io] {
     let root = release_signing_public_key_hex();
     let known = toolchain_revocations_read(versions_base);
-    let min_sequence = toolchain_known_sequence(known);
+    // The floor is the highest index sequence ever accepted, not the highest
+    // sequence appearing in the ledger. Those differ whenever a client has
+    // accepted indices carrying no revocations — the ledger-derived value is
+    // then 0, which is no floor at all, and a correctly signed but older index
+    // replays cleanly. Revoked versions survive such a replay because the
+    // ledger is monotonic, but yanks and advisories live only in the index and
+    // would roll back with it. The maximum of the two is taken so an existing
+    // ledger cannot lower a floor the sequence file already recorded.
+    let mut min_sequence = toolchain_sequence_read(versions_base);
+    let ledger_floor = toolchain_known_sequence(known);
+    if ledger_floor > min_sequence { min_sequence = ledger_floor; }
 
     if fetched_payload.length > 0 && fetched_signature.length > 0 {
         let fresh = toolchain_index_verify(fetched_payload, fetched_signature, root, min_sequence, now_epoch);
         if !fresh.ok { return fresh; }
         let _stored = toolchain_index_cache_store(versions_base, fetched_payload, fetched_signature);
         let _merged = toolchain_revocations_merge(versions_base, fresh.revocations);
+        let _sequence = toolchain_sequence_record(versions_base, fresh.sequence);
         return fresh;
     }
 
@@ -131,6 +144,23 @@ fn toolchain_policy_acquire(versions_base: string, fetched_payload: string, fetc
         return _policy_index_failure("the signed toolchain index could not be fetched and none is cached");
     }
     return toolchain_index_verify(cached_payload, cached_signature, root, min_sequence, now_epoch);
+}
+
+fn _policy_union(known: ToolchainRevocationRecord[], incoming: ToolchainRevocationRecord[]) -> ToolchainRevocationRecord[] {
+    let mut out: ToolchainRevocationRecord[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= known.length { break; }
+        out.push(known[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= incoming.length { break; }
+        out.push(incoming[j]);
+        j += 1;
+    }
+    return out;
 }
 
 fn _policy_advisory_lines(index: ToolchainIndex, version: string) -> string[] {
@@ -169,7 +199,16 @@ fn toolchain_policy_decide(index: ToolchainIndex, known: ToolchainRevocationReco
             + index.error, "release state cannot be checked, so this install is refused");
     }
 
-    let state = toolchain_release_state(index, known, version);
+    // The freshly fetched index is already authenticated here, so its
+    // revocations are evidence in their own right — not merely a thing to
+    // persist. Deciding from the on-disk ledger alone made enforcement
+    // conditional on `toolchain_revocations_merge` having succeeded, and that
+    // returns false without persisting anything when the store is read-only or
+    // full. A revoked version would then install, because a well-formed but
+    // stale ledger is not a *corrupt* one and the corruption check above lets
+    // it through. Taking the union removes the disk from the decision path.
+    let effective = _policy_union(known, index.revocations);
+    let state = toolchain_release_state(index, effective, version);
     if state == TOOLCHAIN_RELEASE_REVOKED {
         return _policy_refusal("toolchain " + version + " is revoked", "revocation has no override; install a different version");
     }
