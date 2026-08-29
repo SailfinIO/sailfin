@@ -23,10 +23,16 @@
 // under the same isolated root. That is what makes "walk the scratch"
 // a complete audit rather than a partial one.
 //
+// A build can write a THIRD tree into that root: the content-addressed build
+// cache, when its root resolves relative (see `_sfn_asm_files`). Those entries
+// are duplicates of the staged modules, not additional ones, so the count
+// assertions exclude them by basename — a scratch walk that included them
+// would measure the caller's cache configuration rather than the gate.
+//
 // NOTE: assert on captured output with `sfn/strings` predicates — the
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test (`.claude/rules/no-bash-e2e.md`).
-import { contains, ends_with } from "sfn/strings";
+import { contains, ends_with, int_to_string } from "sfn/strings";
 import {
     clean_runner_env,
     host_is_windows,
@@ -64,13 +70,34 @@ fn _collect_leaves(dir: string, acc: string[], depth: int) -> string[] ![io] {
     return out;
 }
 
+// Staged runtime modules only — never content-addressed cache entries.
+//
+// A build writes each staged module under `rt-import-context/` named for its
+// module slug, and ALSO publishes it to the build cache as
+// `<cache-root>/v2/<key>/ir.sfn-asm` (`_filename_for_kind`,
+// compiler/src/build_cache.sfn:827). When that cache root resolves inside the
+// walked scratch, every module appears twice and a count-based assertion
+// doubles. `cache_root_from` (compiler/src/build_cache.sfn:781-788) lands it
+// there whenever the root is relative — an explicit relative
+// `SAILFIN_BUILD_CACHE_DIR`, or rung 5's cwd-relative `build/cache/<schema>`
+// fallback when neither `$XDG_CACHE_HOME` nor `$HOME` resolves (containers,
+// minimal CI) — because `_build_in_scratch` pins the nested build's cwd to the
+// scratch. Filtering here keeps the count a property of the gate rather than
+// of the caller's cache configuration.
+//
+// The `ir.sfn-asm` basename is exact, not a heuristic: it is minted only by
+// `_filename_for_kind`, and no runtime source is named `ir.sfn` (staged names
+// carry the module slug — `string.sfn-asm`, `tls_status.sfn-asm`).
 fn _sfn_asm_files(leaves: string[]) -> string[] {
     let mut out: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= leaves.length { break; }
-        if ends_with(leaves[i], ".sfn-asm") { out.push(leaves[i]); }
+        let path = leaves[i];
         i += 1;
+        if !ends_with(path, ".sfn-asm") { continue; }
+        if ends_with(path, "/ir.sfn-asm") { continue; }
+        out.push(path);
     }
     return out;
 }
@@ -244,9 +271,18 @@ test "runtime gates: module count stays under the ceiling" ![io] {
     // added for SFN-754. It was 40 before that — exactly on the old shared
     // ceiling, which is why adding one ungated module tripped a guard that
     // was never meant to be a Windows exact-count assertion.
-    if host_is_windows() { assert asm.length <= 48; } else {
-        assert asm.length <= 40;
+    let mut limit: int = 40;
+    if host_is_windows() { limit = 48; }
+    // Name the count before asserting. A bare `assertion failed` says only
+    // that a ceiling moved, not by how much, and the difference between "one
+    // module was added" and "the whole runtime was staged" is the entire
+    // diagnosis — the two have unrelated causes and unrelated fixes.
+    if asm.length > limit {
+        print.err("[runtime-gates] staged .sfn-asm = " + int_to_string(asm.length)
+            + ", ceiling = "
+            + int_to_string(limit));
     }
+    assert asm.length <= limit;
 }
 
 test "runtime gates: a net-demanding program still links and runs" ![io] {
