@@ -22,7 +22,6 @@ import { strip_enclosing_parentheses } from "./core_operators";
 import { find_local_binding } from "./core_scopes";
 
 fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
-    let mut diagnostics: string[] = parse.diagnostics;
     let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -30,7 +29,6 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -41,12 +39,10 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
     if target.length == 0 {
         let message = "borrow expression missing target";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -58,12 +54,10 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
         if parameter == null {
             let message = "borrow target `" + target + "` not found";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: empty_constants,
                 diags: diags
             };
@@ -79,7 +73,6 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
                 lines: lines,
                 temp_index: temp_index,
                 operand: operand,
-                diagnostics: diagnostics,
                 string_constants: empty_constants,
                 diags: diags
             };
@@ -90,12 +83,10 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             + parameter.llvm_type
             + "`)";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -110,7 +101,6 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
         lines: lines,
         temp_index: temp_index,
         operand: operand,
-        diagnostics: diagnostics,
         string_constants: empty_constants,
         diags: diags
     };

@@ -37,6 +37,7 @@ import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
 import { interfaces_from_native } from "sfn/analyzer/typecheck_imports";
 import {
     ImplicitSymbol,
+    LoweringDiagnostic,
     NativeBinding,
     NativeEnum,
     NativeFunction,
@@ -57,7 +58,7 @@ import { Statement } from "sfn/syntax";
 struct ArtifactInterfaceParse {
     interfaces: Statement[];
     function_effects: ImportSymbolTable;
-    diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 // Result of loading a batch of `.sfn-asm` artifacts. The path lists
@@ -145,7 +146,7 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     return ArtifactInterfaceParse {
         interfaces: interfaces,
         function_effects: function_effects,
-        diagnostics: parsed.diagnostics
+        diags: parsed.diags
     };
 }
 
@@ -626,7 +627,7 @@ fn build_closure_symbol_set(asm_paths: string[]) -> ClosureSymbolSet ![io] {
         }
         let text = fs.readFile(asm);
         let parsed = parse_native_artifact_for_import_context(text);
-        if parsed.diagnostics.length > 0 {
+        if parsed.diags.length > 0 {
             complete = false;
             i += 1;
             continue;
@@ -756,7 +757,7 @@ fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths:
         let is_implicit = _interface_path_contains(implicit_paths, path);
         if is_implicit { implicit_texts.push(text); }
         let parsed = interfaces_from_native_artifact(text);
-        if parsed.diagnostics.length > 0 {
+        if parsed.diags.length > 0 {
             parse_failures.push(path);
             i += 1;
             continue;

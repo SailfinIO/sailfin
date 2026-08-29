@@ -53,15 +53,16 @@ test "coerce_operand_to_type: bare diagnostic when span is null" ![io] {
     // bare form (no span) still emits the diagnostic plus the canonical
     // fix-it suffix without a `" at <line>:<col>"` location.
     assert result.operand == null;
-    assert result.diagnostics.length >= 1;
+    assert result.diags.length >= 1;
     let mut saw_bare: boolean = false;
     let mut idx: int = 0;
     loop {
-        if idx >= result.diagnostics.length { break; }
-        let diag = result.diagnostics[idx];
-        if _contains(diag, "ABI primitive mismatch") {
-            // The bare form does NOT include the " at " suffix.
-            if !_contains(diag, " at ") { saw_bare = true; }
+        if idx >= result.diags.length { break; }
+        let diag = result.diags[idx];
+        if _contains(diag.message, "ABI primitive mismatch") {
+            // The bare form carries no span — the location is threaded
+            // through the structured `span` field, not the message text.
+            if diag.span == null { saw_bare = true; }
         }
         idx += 1;
     }
@@ -80,11 +81,15 @@ test "coerce_operand_to_type: span-aware diagnostic carries line:col" ![io] {
     let mut saw_location: boolean = false;
     let mut idx: int = 0;
     loop {
-        if idx >= result.diagnostics.length { break; }
-        let diag = result.diagnostics[idx];
-        if _contains(diag, "ABI primitive mismatch") {
-            // Expect "...at 42:17-42:18" with the threaded span.
-            if _contains(diag, " at 42:17") { saw_location = true; }
+        if idx >= result.diags.length { break; }
+        let diag = result.diags[idx];
+        if _contains(diag.message, "ABI primitive mismatch") {
+            // Expect the threaded span: start 42:17.
+            if diag.span != null {
+                if diag.span.start_line == 42 {
+                    if diag.span.start_column == 17 { saw_location = true; }
+                }
+            }
         }
         idx += 1;
     }
@@ -100,5 +105,5 @@ test "coerce_operand_to_type: span ignored when widening is allowed" ![io] {
     let span = _span(7, 3);
     let result = coerce_operand_to_type(operand, "i64", 0, lines, true, span);
     assert result.operand != null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }

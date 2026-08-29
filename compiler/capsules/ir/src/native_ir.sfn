@@ -3,6 +3,9 @@
 // Type definitions for the textual `.sfn-asm` IR. The parsing logic lives in
 // native_ir_parser.sfn; this module exists purely so that downstream modules
 // can import the types without pulling in the heavy parser code.
+import { LoweringDiagnostic } from "./lowering_diagnostic";
+import { NativeSourceSpan } from "./source_span";
+
 enum NativeInstruction {
     Return {
         expression: string;
@@ -67,13 +70,6 @@ enum NativeInstruction {
     },
     Noop,
     Unknown { text: string }
-}
-
-struct NativeSourceSpan {
-    start_line: int;
-    start_column: int;
-    end_line: int;
-    end_column: int;
 }
 
 struct NativeParameter {
@@ -246,7 +242,7 @@ struct ImplicitSymbol {
 struct EnumParseResult {
     definition: NativeEnum?;
     next_index: int;
-    diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct CaseComponents {
@@ -276,38 +272,39 @@ struct InstructionDepthState {
 struct StructParseResult {
     definition: NativeStruct?;
     next_index: int;
-    diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct InterfaceParseResult {
     definition: NativeInterface?;
     next_index: int;
-    diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct InterfaceSignatureParse {
     success: boolean;
     signature: NativeInterfaceSignature;
-    diagnostics: string[];
 }
 
 struct StructHeaderParse {
     name: string;
     implements: string[];
-    diagnostics: string[];
 }
 
 struct InterfaceHeaderParse {
     name: string;
     type_parameters: string[];
-    diagnostics: string[];
 }
 
 struct HeaderNameParse {
     name: string;
     type_parameters: string[];
     remainder: string;
-    diagnostics: string[];
+    // True when the header could not be parsed structurally (an unterminated
+    // generic argument list). Callers that gate a `success` flag must treat a
+    // malformed header as a parse failure; SFN-916 replaced the string
+    // diagnostic array this used to be inferred from.
+    malformed: boolean;
 }
 
 struct StructLayoutHeaderParse {
@@ -315,13 +312,11 @@ struct StructLayoutHeaderParse {
     name: string;
     size: int;
     align: int;
-    diagnostics: string[];
 }
 
 struct StructLayoutFieldParse {
     success: boolean;
     field: NativeStructLayoutField;
-    diagnostics: string[];
 }
 
 struct ParseNativeResult {
@@ -331,7 +326,7 @@ struct ParseNativeResult {
     interfaces: NativeInterface[];
     enums: NativeEnum[];
     bindings: NativeBinding[];
-    diagnostics: string[];
+    diags: LoweringDiagnostic[];
 }
 
 struct EnumLayoutHeaderParse {
@@ -342,20 +337,17 @@ struct EnumLayoutHeaderParse {
     tag_type: string;
     tag_size: int;
     tag_align: int;
-    diagnostics: string[];
 }
 
 struct EnumLayoutVariantParse {
     success: boolean;
     variant: NativeEnumVariantLayout;
-    diagnostics: string[];
 }
 
 struct EnumLayoutPayloadParse {
     success: boolean;
     variant_name: string;
     field: NativeStructLayoutField;
-    diagnostics: string[];
 }
 
 struct NumberParseResult {
@@ -366,7 +358,6 @@ struct NumberParseResult {
 struct LayoutManifest {
     structs: NativeStruct[];
     enums: NativeEnum[];
-    diagnostics: string[];
 }
 
 // Driver-resolved mapping from a path-shaped import slug to the canonical
@@ -383,7 +374,6 @@ struct ImportModuleAlias {
 struct ImportedModuleContext {
     manifests: LayoutManifest[];
     native_texts: string[];
-    diagnostics: string[];
     module_aliases: ImportModuleAlias[];
     // Provider-qualified declarations from selected implicit capsule entry
     // interfaces. Appended last so existing context field offsets stay stable

@@ -2,7 +2,7 @@
 // The carrier stays independent of analyzer diagnostics: providers report
 // lowering failures against source coordinates already preserved in native IR,
 // while the compiler driver owns user-facing rendering and publication policy.
-import { NativeSourceSpan } from "./native_ir";
+import { NativeSourceSpan } from "./source_span";
 
 struct LoweringDiagnostic {
     code: string;

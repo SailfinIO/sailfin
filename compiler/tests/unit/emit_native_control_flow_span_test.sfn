@@ -122,9 +122,9 @@ fn _assert_no_unused_span_metadata(text: string) {
     let parsed = parse_native_artifact(text);
     let mut index: int = 0;
     loop {
-        if index >= parsed.diagnostics.length { break; }
-        assert index_of(parsed.diagnostics[index], "unused span metadata") < 0;
-        assert index_of(parsed.diagnostics[index], "unused initializer span metadata") < 0;
+        if index >= parsed.diags.length { break; }
+        assert index_of(parsed.diags[index].message, "unused span metadata") < 0;
+        assert index_of(parsed.diags[index].message, "unused initializer span metadata") < 0;
         index += 1;
     }
 }

@@ -12,6 +12,7 @@
 // genuinely-unresolvable literals so the failure is loud instead of silent.
 import { lower_expression } from "sfn/codegen-llvm/expression_lowering/native/core";
 import { TypeContext } from "sfn/codegen-llvm/types";
+import { LoweringDiagnostic } from "sfn/ir";
 
 import { index_of } from "../../src/string_utils";
 
@@ -28,13 +29,13 @@ fn _contains(text: string, needle: string) -> boolean {
     return index_of(text, needle) >= 0;
 }
 
-fn _has_fatal_type_context_diag(diagnostics: string[]) -> boolean {
+fn _has_fatal_type_context_diag(diags: LoweringDiagnostic[]) -> boolean {
     let mut idx: int = 0;
     loop {
-        if idx >= diagnostics.length { break; }
-        let diag = diagnostics[idx];
-        if _contains(diag, "[fatal]") {
-            if _contains(diag, "references a type not in the lowering type context") {
+        if idx >= diags.length { break; }
+        let diag = diags[idx];
+        if diag.severity == "error" {
+            if _contains(diag.message, "references a type not in the lowering type context") {
                 return true;
             }
         }
@@ -55,7 +56,7 @@ test "unresolvable enum-shaped brace literal emits a fatal diagnostic" ![io] {
     assert result.operand == null;
     // The diagnostic must carry `severity == "error"` so `has_error_diag`
     // refuses to emit IR (the compile fails instead of succeeding silently).
-    assert _has_fatal_type_context_diag(result.diagnostics);
+    assert _has_fatal_type_context_diag(result.diags);
 }
 
 // -------------------------------------------------------------------
@@ -66,5 +67,5 @@ test "unresolvable plain struct literal emits a fatal diagnostic" ![io] {
     let mut lines: string[] = [];
     let result = lower_expression("UnknownStruct { x: 1 }", [], [], 0, lines, [], context, "");
     assert result.operand == null;
-    assert _has_fatal_type_context_diag(result.diagnostics);
+    assert _has_fatal_type_context_diag(result.diags);
 }

@@ -1,0 +1,5 @@
+// POSIX provider for the Windows-only `fs.mkdtemp` ACL test seam.
+// POSIX callers observe the public `0700` contract through `get_perms`;
+// returning false here keeps the private seam link-complete without
+// pretending an NT security descriptor exists on that platform.
+fn sfn_fs_mkdtemp_acl_is_private(_path: *u8) -> bool ![io] { return false; }

@@ -183,19 +183,6 @@ fn _collect_suspension_conflict_records(keyword: string, locals: LocalBinding[],
     return conflicts;
 }
 
-fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
-    let conflicts = _collect_suspension_conflict_records(keyword, locals, bindings, function_name, suspension_span);
-    let mut diagnostics: string[] = [];
-    let mut index: int = 0;
-    loop {
-        if index >= conflicts.length { break; }
-        let conflict = conflicts[index];
-        diagnostics.push("llvm lowering: " + conflict.message + conflict.location);
-        index += 1;
-    }
-    return diagnostics;
-}
-
 // The structured twin. These conflicts have never carried `[fatal]`, so they
 // stay `warning` severity — promoting them would make the gate SFN-540
 // derives from `diags` reject builds the string gate accepts today.
@@ -210,15 +197,6 @@ fn collect_suspension_conflict_diags(keyword: string, locals: LocalBinding[], bi
         index += 1;
     }
     return diags;
-}
-
-fn detect_suspension_conflicts(expression: string?, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
-    if expression == null { return []; }
-    let trimmed = trim_text(expression);
-    if trimmed.length == 0 { return []; }
-    let keyword = find_suspension_keyword(trimmed);
-    if keyword.length == 0 { return []; }
-    return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span);
 }
 
 fn detect_suspension_conflict_diags(expression: string?, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> LoweringDiagnostic[] {

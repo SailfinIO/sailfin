@@ -11,16 +11,10 @@ import { index_of, render_lowering_error_diag } from "../../utils";
 // contract it defines is audited in full by
 // `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
 //
-// This replaced a substring scan for a `[fatal]` tag in the legacy
-// `diagnostics: string[]` channel (issue #306). The legacy channel still
-// exists and is still populated, but it no longer decides the build:
-// `lowering_core/mod.sfn` reconciles every `[fatal]` string that lacks a
-// structured twin into an `error` diag (`append_missing_legacy_lowering_diags`)
-// immediately before building the `LoweredLLVMLinesResult` every gate site
-// consults, so reading `severity` here refuses exactly what the substring
-// refused. SFN-915 is why that holds for expression- and coercion-lowering;
-// retiring the string channel outright still needs the carriers named in
-// `instructions_condition.sfn` widened first.
+// This replaced a substring scan for a `[fatal]` tag in a legacy
+// `diagnostics: string[]` channel (issue #306). SFN-916 retired that channel:
+// every producer now emits a structured diagnostic at its origin, so severity
+// is the only thing the gate reads and there is nothing left to reconcile.
 //
 // 1. `severity: "error"` fails the build. `warning` and `note` do not, and
 //    lowering has no advisory *string* channel at all: an untagged legacy
@@ -65,26 +59,15 @@ fn has_error_diag(diags: LoweringDiagnostic[]) -> boolean {
 // consulting the gate first. Every gate path reaches this with an `error` in
 // `diags` — that is what `has_error_diag` just matched on — so the structured
 // branch always wins there. It goes away with the string channel (SFN-916).
-fn fatal_lowering_diagnostic_lines(diagnostics: string[], diags: LoweringDiagnostic[]) -> string[] {
+fn fatal_lowering_diagnostic_lines(diags: LoweringDiagnostic[]) -> string[] {
     let mut lines: string[] = [];
-    let mut printed: boolean = false;
     let mut diag_index: int = 0;
     loop {
         if diag_index >= diags.length { break; }
         if diags[diag_index].severity == "error" {
             lines.push(render_lowering_error_diag(diags[diag_index]));
-            printed = true;
         }
         diag_index += 1;
-    }
-    if printed { return lines; }
-    let mut legacy_index: int = 0;
-    loop {
-        if legacy_index >= diagnostics.length { break; }
-        if index_of(diagnostics[legacy_index], "[fatal]") >= 0 {
-            lines.push(diagnostics[legacy_index]);
-        }
-        legacy_index += 1;
     }
     return lines;
 }
@@ -96,8 +79,8 @@ fn fatal_lowering_diagnostic_lines(diagnostics: string[], diags: LoweringDiagnos
 //
 // Every gate site calls one of the two. A gate that refuses without naming
 // its cause hands the user a failed build and no reason (SFN-529).
-fn trace_lowering_error_diags(diagnostics: string[], diags: LoweringDiagnostic[]) {
-    let lines = fatal_lowering_diagnostic_lines(diagnostics, diags);
+fn trace_lowering_error_diags(diags: LoweringDiagnostic[]) {
+    let lines = fatal_lowering_diagnostic_lines(diags);
     let mut index: int = 0;
     loop {
         if index >= lines.length { break; }

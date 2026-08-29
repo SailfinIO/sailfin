@@ -43,7 +43,6 @@ struct _ClosureCalleeInfo {
     temp_index: int;
     return_type: string;
     parameter_types: string[];
-    diagnostics: string[];
     diags: LoweringDiagnostic[];
     string_constants: StringConstant[];
 }
@@ -264,7 +263,6 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                     temp_index: pair.temp_index,
                     return_type: effective_return,
                     parameter_types: user_params,
-                    diagnostics: pair.diagnostics,
                     diags: [],
                     string_constants: []
                 };
@@ -351,7 +349,6 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                                     temp_index: current_temp,
                                     return_type: signature.return_type,
                                     parameter_types: signature.parameter_types,
-                                    diagnostics: base.diagnostics,
                                     diags: base.diags,
                                     string_constants: base.string_constants
                                 };
@@ -375,7 +372,6 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                                 temp_index: current_temp,
                                 return_type: signature.return_type,
                                 parameter_types: signature.parameter_types,
-                                diagnostics: base.diagnostics,
                                 diags: base.diags,
                                 string_constants: base.string_constants
                             };
@@ -416,7 +412,6 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                     temp_index: load.temp_index,
                     return_type: effective_return,
                     parameter_types: user_params,
-                    diagnostics: load.diagnostics,
                     diags: [],
                     string_constants: []
                 };
@@ -432,7 +427,6 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                     temp_index: load.temp_index,
                     return_type: parsed.return_type,
                     parameter_types: parsed.parameter_types,
-                    diagnostics: load.diagnostics,
                     diags: [],
                     string_constants: []
                 };
@@ -455,7 +449,6 @@ fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], loca
                     temp_index: temp_index,
                     return_type: parsed.return_type,
                     parameter_types: parsed.parameter_types,
-                    diagnostics: [],
                     diags: [],
                     string_constants: []
                 };

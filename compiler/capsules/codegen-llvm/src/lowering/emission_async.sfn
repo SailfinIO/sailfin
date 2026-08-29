@@ -36,7 +36,6 @@ import { prepare_parameters_from_function } from "./emission";
 
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.
 fn emit_async_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let fn_name = function.name;
     let fn_return_type = function.return_type;
@@ -47,14 +46,9 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
     if future_return.length == 0 { _if205 = true; }
     if impl_return.length == 0 { _if205 = true; }
     if _if205 {
-        diagnostics.push("llvm lowering: async fn `" + fn_name
-            + "` has unsupported return type `"
-            + fn_return_type
-            + "`");
         let empty_constants = empty_string_constant_set();
         return LoweredLLVMFunction {
             lines: [],
-            diagnostics: diagnostics,
             diags: diags,
             lifetime_regions: [],
             string_constants: empty_constants
@@ -80,11 +74,9 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
     };
     let impl_lowered = emit_llvm_function(impl_function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call, imported_decorator_names);
 
-    diagnostics = extend_string_array(diagnostics, impl_lowered.diagnostics);
     diags = extend_diag_array(diags, impl_lowered.diags);
 
     let preparation = prepare_parameters_from_function(function, context);
-    diagnostics = extend_string_array(diagnostics, preparation.diagnostics);
 
     let mut wrapper_lines: string[] = [];
     let mut linkage: string = "";
@@ -97,14 +89,9 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
     if fn_param_count == 0 {
         let spawn_symbol = spawn_symbol_for_return_type(fn_return_type);
         if spawn_symbol.length == 0 {
-            diagnostics.push("llvm lowering: async fn `" + fn_name
-                + "` has unsupported return type `"
-                + fn_return_type
-                + "`");
             let empty_constants = empty_string_constant_set();
             return LoweredLLVMFunction {
                 lines: [],
-                diagnostics: diagnostics,
                 diags: diags,
                 lifetime_regions: [],
                 string_constants: empty_constants
@@ -137,14 +124,9 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
     } else {
         let spawn_symbol = spawn_ctx_symbol_for_return_type(fn_return_type);
         if spawn_symbol.length == 0 {
-            diagnostics.push("llvm lowering: async fn `" + fn_name
-                + "` has unsupported return type `"
-                + fn_return_type
-                + "`");
             let empty_constants = empty_string_constant_set();
             return LoweredLLVMFunction {
                 lines: [],
-                diagnostics: diagnostics,
                 diags: diags,
                 lifetime_regions: [],
                 string_constants: empty_constants
@@ -312,7 +294,6 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
     let merged_constants = merge_string_constants(impl_lowered.string_constants, empty_string_constant_set());
     return LoweredLLVMFunction {
         lines: merged_lines,
-        diagnostics: diagnostics,
         diags: diags,
         lifetime_regions: impl_lowered.lifetime_regions,
         string_constants: merged_constants

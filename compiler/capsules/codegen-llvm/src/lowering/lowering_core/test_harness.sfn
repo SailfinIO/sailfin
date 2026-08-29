@@ -165,11 +165,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
 
     if test_count == 0 { return base; }
 
-    if has_main {
-        let mut updated = base;
-        updated.diagnostics.push("llvm lowering (test): module defines `main`; skipping synthesized test harness");
-        return updated;
-    }
+    if has_main { return base; }
 
     // Build test harness inline using string arrays only
     // (avoids struct .push() and struct .concat() which produce unresolvable symbols)

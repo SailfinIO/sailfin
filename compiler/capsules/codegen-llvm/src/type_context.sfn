@@ -60,7 +60,6 @@ import {
 // =============================================================================
 struct EnumLayoutFixupResult {
     enums: NativeEnum[];
-    diagnostics: string[];
 }
 
 fn is_unit_enum(enum_def: NativeEnum) -> boolean {
@@ -121,14 +120,8 @@ fn enum_layout_matches_variants(enum_def: NativeEnum, layout: NativeEnumLayout) 
 
 fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
     if enums.length > 10000 {
-        return EnumLayoutFixupResult {
-            enums: [],
-            diagnostics: ["llvm lowering: enum layout fixup skipped (too many enums="
-                + number_to_string(enums.length)
-                + ")"]
-        };
+        return EnumLayoutFixupResult { enums: [] };
     }
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut updated: NativeEnum[] = [];
     let mut index: int = 0;
@@ -145,8 +138,6 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
                     variants: enum_def.variants,
                     layout: synthesize_unit_enum_layout(enum_def)
                 };
-                diagnostics.push("llvm lowering: enum `" + enum_def.name
-                    + "` missing layout metadata; synthesized unit-enum layout");
             }
             updated.push(fixed);
             index += 1;
@@ -162,11 +153,6 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
                     variants: enum_def.variants,
                     layout: synthesize_unit_enum_layout(enum_def)
                 };
-                diagnostics.push("llvm lowering: enum `" + enum_def.name
-                    + "` layout variants incomplete/garbled; synthesized unit-enum layout");
-            } else {
-                diagnostics.push("llvm lowering: enum `" + enum_def.name
-                    + "` layout variants incomplete/garbled; payload enums require full layout metadata");
             }
         }
 
@@ -174,7 +160,7 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
         index += 1;
     }
 
-    return EnumLayoutFixupResult { enums: updated, diagnostics: diagnostics };
+    return EnumLayoutFixupResult { enums: updated };
 }
 
 // =============================================================================
@@ -200,18 +186,8 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
     if enums.length > 1000000 { _if300 = true; }
     if interfaces.length > 1000000 { _if300 = true; }
     if _if300 {
-        return TypeContextBuild {
-            context: empty_type_context(),
-            diagnostics: ["llvm lowering: type context build skipped (counts structs="
-                + number_to_string(structs.length)
-                + " enums="
-                + number_to_string(enums.length)
-                + " interfaces="
-                + number_to_string(interfaces.length)
-                + ")",]
-        };
+        return TypeContextBuild { context: empty_type_context() };
     }
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut struct_entries: StructTypeInfo[] = [];
     let mut index: int = 0;
@@ -219,8 +195,6 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         if index >= structs.length { break; }
         let definition = structs[index];
         if definition.layout == null {
-            diagnostics.push("llvm lowering: struct `" + definition.name
-                + "` missing layout metadata; skipping type emission");
             index += 1;
             continue;
         }
@@ -242,15 +216,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                 // Preserve the actual enum pointer instead of sanitizing the
                 // full annotation into an unsized inline opaque type (SFN-568).
                 llvm_field_type = "%Result*";
-            } else if llvm_field_type.length == 0 {
-                diagnostics.push("llvm lowering: struct `" + definition.name
-                    + "` field `"
-                    + layout_field.name
-                    + "` uses unsupported type `"
-                    + layout_field.type_annotation
-                    + "`; lowering as `i8*`");
-                llvm_field_type = "i8*";
-            } else if ends_with_pointer_suffix(llvm_field_type) {
+            } else if llvm_field_type.length == 0 { llvm_field_type = "i8*"; } else if ends_with_pointer_suffix(llvm_field_type) {
                 let layout_base_type = layout_annotation_base_type(layout_field.type_annotation);
                 let references_self_type = layout_base_type == definition.name;
                 if layout_annotation_represents_user_value(layout_field.type_annotation) {
@@ -279,8 +245,6 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         if enum_index >= enums.length { break; }
         let enum_def = enums[enum_index];
         if enum_def.layout == null {
-            diagnostics.push("llvm lowering: enum `" + enum_def.name
-                + "` missing layout metadata; skipping type emission");
             enum_index += 1;
             continue;
         }
@@ -300,14 +264,6 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                 let mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation);
                 let mut llvm_variant_field_type: string = mapped_variant_type;
                 if llvm_variant_field_type.length == 0 {
-                    diagnostics.push("llvm lowering: enum `" + enum_def.name
-                        + "` variant `"
-                        + variant_layout.name
-                        + "` field `"
-                        + variant_field.name
-                        + "` uses unsupported type `"
-                        + variant_field.type_annotation
-                        + "`; lowering as `i8*`");
                     llvm_variant_field_type = "i8*";
                 } else if ends_with_pointer_suffix(llvm_variant_field_type) {
                     let variant_base_type = layout_annotation_base_type(variant_field.type_annotation);
@@ -388,10 +344,6 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             }
 
             if interface_def_opt == null {
-                diagnostics.push("llvm lowering: struct `" + struct_def.name
-                    + "` implements unknown interface `"
-                    + interface_name
-                    + "`");
                 implements_index += 1;
                 continue;
             }
@@ -498,8 +450,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             enums: enum_entries,
             interfaces: interface_entries,
             vtables: vtable_entries
-        },
-        diagnostics: diagnostics
+        }
     };
 }
 

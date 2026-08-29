@@ -17,6 +17,7 @@
 // negative tests below pin that boundary.
 import { lower_call_expression } from "sfn/codegen-llvm/expression_lowering/native/core_call_lowering";
 import { InterfaceTypeInfo, LocalBinding, TypeContext } from "sfn/codegen-llvm/types";
+import { LoweringDiagnostic } from "sfn/ir";
 
 import { index_of } from "../../src/string_utils";
 
@@ -52,13 +53,13 @@ fn _contains(text: string, needle: string) -> boolean {
 // guard's phrase so the downstream "cannot resolve return type" `[fatal]`
 // (emitted for any unresolved callee) does not produce false positives in
 // the negative cases below.
-fn _has_fatal_unresolved_base(diagnostics: string[]) -> boolean {
+fn _has_fatal_unresolved_base(diags: LoweringDiagnostic[]) -> boolean {
     let mut idx: int = 0;
     loop {
-        if idx >= diagnostics.length { break; }
-        let diag = diagnostics[idx];
-        if _contains(diag, "[fatal]") {
-            if _contains(diag, "not in the lowering type context") {
+        if idx >= diags.length { break; }
+        let diag = diags[idx];
+        if diag.severity == "error" {
+            if _contains(diag.message, "not in the lowering type context") {
                 return true;
             }
         }
@@ -95,7 +96,7 @@ test "method base with unresolved bare struct type emits a fatal diagnostic" ![i
     // Without the guard the call would lower `self` with a default/garbage
     // shape; the `[fatal]` diagnostic makes the emit/build gate refuse to
     // write IR instead of producing a miscompile.
-    assert _has_fatal_unresolved_base(result.diagnostics);
+    assert _has_fatal_unresolved_base(result.diags);
 }
 
 // -------------------------------------------------------------------
@@ -108,7 +109,7 @@ test "method base with generic-instantiation type does not fail closed" ![io] {
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("Result<int, Error>")];
     let result = lower_call_expression("acct.unwrap", [], [], locals, 0, lines, [], context, "");
-    assert ! _has_fatal_unresolved_base(result.diagnostics);
+    assert ! _has_fatal_unresolved_base(result.diags);
 }
 
 // -------------------------------------------------------------------
@@ -120,7 +121,7 @@ test "method base with empty (opacified) annotation does not fail closed" ![io] 
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("")];
     let result = lower_call_expression("acct.compute", [], [], locals, 0, lines, [], context, "");
-    assert ! _has_fatal_unresolved_base(result.diagnostics);
+    assert ! _has_fatal_unresolved_base(result.diags);
 }
 
 // -------------------------------------------------------------------
@@ -135,7 +136,7 @@ test "method base with interface-typed annotation does not fail closed" ![io] {
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("Meter")];
     let result = lower_call_expression("acct.total", [], [], locals, 0, lines, [], context, "");
-    assert ! _has_fatal_unresolved_base(result.diagnostics);
+    assert ! _has_fatal_unresolved_base(result.diags);
 }
 
 // -------------------------------------------------------------------
@@ -152,5 +153,5 @@ test "method base with primitive (string) annotation does not fail closed" ![io]
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("string")];
     let result = lower_call_expression("acct.substring", [], [], locals, 0, lines, [], context, "");
-    assert ! _has_fatal_unresolved_base(result.diagnostics);
+    assert ! _has_fatal_unresolved_base(result.diags);
 }

@@ -12,47 +12,34 @@ import {
     OwnershipInfo,
     ParameterBinding
 } from "../../types";
-import { append_string, number_to_string, trim_text } from "../../utils";
+import {
+    append_string,
+    lowering_warning_diag,
+    number_to_string,
+    trim_text
+} from "../../utils";
 import { find_parameter_binding } from "./core_bindings";
 import { parse_borrow_expression } from "./core_parsing";
 import { find_local_binding } from "./core_scopes";
 
 fn analyze_value_ownership_impl(initializer: string?, span: NativeSourceSpan?, locals: LocalBinding[], bindings: ParameterBinding[]) -> OwnershipAnalysis {
     if initializer == null {
-        return OwnershipAnalysis {
-            ownership: null,
-            consumption: null,
-            diagnostics: []
-        };
+        return OwnershipAnalysis { ownership: null, consumption: null };
     }
     let trimmed = trim_text(initializer);
     if trimmed.length == 0 {
-        return OwnershipAnalysis {
-            ownership: null,
-            consumption: null,
-            diagnostics: []
-        };
+        return OwnershipAnalysis { ownership: null, consumption: null };
     }
 
     let parse = parse_borrow_expression(trimmed);
-    let mut diagnostics: string[] = parse.diagnostics;
     let mut diags: LoweringDiagnostic[] = [];
     if parse.recognized {
         if !parse.success {
-            return OwnershipAnalysis {
-                ownership: null,
-                consumption: null,
-                diagnostics: diagnostics
-            };
+            return OwnershipAnalysis { ownership: null, consumption: null };
         }
         let resolved_base = resolve_borrow_base_impl(parse.target, locals);
         if resolved_base.length == 0 {
-            diagnostics.push("llvm lowering: borrow expression missing target");
-            return OwnershipAnalysis {
-                ownership: null,
-                consumption: null,
-                diagnostics: diagnostics
-            };
+            return OwnershipAnalysis { ownership: null, consumption: null };
         }
         let ownership = OwnershipInfo {
             variant: "Borrow",
@@ -61,11 +48,7 @@ fn analyze_value_ownership_impl(initializer: string?, span: NativeSourceSpan?, l
             span: span,
             region_id: -1
         };
-        return OwnershipAnalysis {
-            ownership: ownership,
-            consumption: null,
-            diagnostics: diagnostics
-        };
+        return OwnershipAnalysis { ownership: ownership, consumption: null };
     }
 
     if is_simple_identifier(trimmed) {
@@ -73,18 +56,15 @@ fn analyze_value_ownership_impl(initializer: string?, span: NativeSourceSpan?, l
         let local = find_local_binding(locals, name);
         if local != null {
             if local.consumed {
-                diagnostics.push(format_use_after_move_message(name, span));
                 return OwnershipAnalysis {
                     ownership: null,
-                    consumption: null,
-                    diagnostics: diagnostics
+                    consumption: null
                 };
             }
             if is_copy_type(local.type_annotation, local.llvm_type) {
                 return OwnershipAnalysis {
                     ownership: null,
-                    consumption: null,
-                    diagnostics: diagnostics
+                    consumption: null
                 };
             }
             let consumption = OwnershipConsumption {
@@ -93,26 +73,22 @@ fn analyze_value_ownership_impl(initializer: string?, span: NativeSourceSpan?, l
             };
             return OwnershipAnalysis {
                 ownership: null,
-                consumption: consumption,
-                diagnostics: diagnostics
+                consumption: consumption
             };
         }
 
         let parameter = find_parameter_binding(bindings, name);
         if parameter != null {
             if parameter.consumed {
-                diagnostics.push(format_use_after_move_message(name, span));
                 return OwnershipAnalysis {
                     ownership: null,
-                    consumption: null,
-                    diagnostics: diagnostics
+                    consumption: null
                 };
             }
             if is_copy_type(parameter.type_annotation, parameter.llvm_type) {
                 return OwnershipAnalysis {
                     ownership: null,
-                    consumption: null,
-                    diagnostics: diagnostics
+                    consumption: null
                 };
             }
             let consumption = OwnershipConsumption {
@@ -121,17 +97,12 @@ fn analyze_value_ownership_impl(initializer: string?, span: NativeSourceSpan?, l
             };
             return OwnershipAnalysis {
                 ownership: null,
-                consumption: consumption,
-                diagnostics: diagnostics
+                consumption: consumption
             };
         }
     }
 
-    return OwnershipAnalysis {
-        ownership: null,
-        consumption: null,
-        diagnostics: diagnostics
-    };
+    return OwnershipAnalysis { ownership: null, consumption: null };
 }
 
 fn format_use_after_move_message(name: string, span: NativeSourceSpan?) -> string {
@@ -166,11 +137,10 @@ fn format_suspension_location_impl(keyword: string, borrow_span: NativeSourceSpa
     return " (" + combined + ")";
 }
 
-fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> string[] {
-    let mut diagnostics: string[] = [];
+fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> LoweringDiagnostic[] {
     let mut diags: LoweringDiagnostic[] = [];
-    if ownership == null { return diagnostics; }
-    if ownership.variant != "Borrow" { return diagnostics; }
+    if ownership == null { return diags; }
+    if ownership.variant != "Borrow" { return diags; }
     let base = trim_text(ownership.base);
     let mut index: int = 0;
     loop {
@@ -183,7 +153,7 @@ fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[
                 if existing_base == base {
                     if ownership.mutable {
                         if details.mutable {
-                            diagnostics.push("llvm lowering: mutable borrow `"
+                            diags.push(lowering_warning_diag("E1006", "mutable borrow `"
                                 + binding_name
                                 + "` conflicts with active mutable borrow `"
                                 + existing.name
@@ -191,9 +161,9 @@ fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[
                                 + base
                                 + "` in `"
                                 + function_name
-                                + "`");
+                                + "`", null));
                         } else {
-                            diagnostics.push("llvm lowering: mutable borrow `"
+                            diags.push(lowering_warning_diag("E1006", "mutable borrow `"
                                 + binding_name
                                 + "` conflicts with active shared borrow `"
                                 + existing.name
@@ -201,11 +171,11 @@ fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[
                                 + base
                                 + "` in `"
                                 + function_name
-                                + "`");
+                                + "`", null));
                         }
                     } else {
                         if details.mutable {
-                            diagnostics.push("llvm lowering: shared borrow `"
+                            diags.push(lowering_warning_diag("E1006", "shared borrow `"
                                 + binding_name
                                 + "` conflicts with active mutable borrow `"
                                 + existing.name
@@ -213,7 +183,7 @@ fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[
                                 + base
                                 + "` in `"
                                 + function_name
-                                + "`");
+                                + "`", null));
                         }
                     }
                 }
@@ -221,7 +191,7 @@ fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[
         }
         index += 1;
     }
-    return diagnostics;
+    return diags;
 }
 
 fn resolve_borrow_base_impl(target: string, locals: LocalBinding[]) -> string {

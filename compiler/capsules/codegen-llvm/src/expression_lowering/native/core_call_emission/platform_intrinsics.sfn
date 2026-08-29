@@ -20,10 +20,9 @@ import {
 import { lowering_warning_diag, number_to_string } from "../../../utils";
 import { lower_mem_footprint_intrinsic } from "../mem_footprint_lowering";
 
-fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
+fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
-    let mut result_diagnostics = diagnostics;
     let mut result_diags = diags;
     // errno-location sentinel (#877, epic #763): emit a `call` to the
     // host's concrete locator symbol — `@__errno_location` on Linux/glibc,
@@ -48,7 +47,6 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: _en_operand,
-                diagnostics: result_diagnostics,
                 string_constants: collected_string_constants,
                 diags: result_diags
             };
@@ -73,7 +71,6 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: _cm_operand,
-                diagnostics: result_diagnostics,
                 string_constants: collected_string_constants,
                 diags: result_diags
             };
@@ -98,7 +95,6 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: _np_operand,
-                diagnostics: result_diagnostics,
                 string_constants: collected_string_constants,
                 diags: result_diags
             };
@@ -110,7 +106,7 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
     // target and returns an inline zero on Linux or Windows.
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_mem_footprint" {
-            return lower_mem_footprint_intrinsic(result_temp, result_lines, result_diagnostics, result_diags, collected_string_constants);
+            return lower_mem_footprint_intrinsic(result_temp, result_lines, result_diags, collected_string_constants);
         }
     }
 
@@ -131,7 +127,6 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
             if final_operands.length < 2 {
                 let message = "sailfin_intrinsic_exe_path requires (buf: i8*, size: i64) operands";
                 result_diags.push(lowering_warning_diag("E1006", message, null));
-                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _ep_leg = exe_path_locator();
                 let _ep_buf = final_operands[0].value;
@@ -202,7 +197,6 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
                         lines: result_lines,
                         temp_index: result_temp,
                         operand: _ep_operand,
-                        diagnostics: result_diagnostics,
                         string_constants: _ep_constants,
                         diags: result_diags
                     };
@@ -244,7 +238,6 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
                         lines: result_lines,
                         temp_index: result_temp,
                         operand: _ep_operand,
-                        diagnostics: result_diagnostics,
                         string_constants: _ep_constants,
                         diags: result_diags
                     };
@@ -298,7 +291,6 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
                         lines: result_lines,
                         temp_index: result_temp,
                         operand: _ep_operand,
-                        diagnostics: result_diagnostics,
                         string_constants: _ep_constants,
                         diags: result_diags
                     };
@@ -311,7 +303,6 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
         lines: result_lines,
         temp_index: result_temp,
         operand: null,
-        diagnostics: result_diagnostics,
         string_constants: collected_string_constants,
         diags: result_diags
     };

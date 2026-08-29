@@ -18,7 +18,6 @@ import {
 
 fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
 
     if target == "i8*" {
@@ -38,7 +37,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
                     lines: current_lines,
                     temp_index: temp_index + 1,
                     operand: coerced,
-                    diagnostics: diagnostics,
                     diags: diags
                 };
             }
@@ -60,7 +58,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
                     lines: current_lines,
                     temp_index: temp_index + 1,
                     operand: coerced,
-                    diagnostics: diagnostics,
                     diags: diags
                 };
             }
@@ -84,7 +81,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
                     lines: current_lines,
                     temp_index: temp_index + 1,
                     operand: coerced,
-                    diagnostics: diagnostics,
                     diags: diags
                 };
             }
@@ -132,14 +128,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
                     let alloc_operands_a: LLVMOperand[] = [alloc_size_op_a];
                     let alloc_result_a = emit_runtime_call("alloc_struct", alloc_operands_a, alloc_overrides_a, temp_index
                         + 2, current_lines);
-                    let mut _alloc_di_a: int = 0;
-                    loop {
-                        if _alloc_di_a >= alloc_result_a.diagnostics.length {
-                            break;
-                        }
-                        diagnostics.push(alloc_result_a.diagnostics[_alloc_di_a]);
-                        _alloc_di_a += 1;
-                    }
                     diags = extend_diag_array(diags, alloc_result_a.diags);
                     current_lines = alloc_result_a.lines;
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
@@ -159,12 +147,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
                     let mp_operands_a: LLVMOperand[] = [mp_op_a];
                     let mp_result_a = emit_runtime_call("mark_persistent", mp_operands_a, empty_runtime_call_overrides(), temp_index
                         + 4, current_lines);
-                    let mut _mp_di_a: int = 0;
-                    loop {
-                        if _mp_di_a >= mp_result_a.diagnostics.length { break; }
-                        diagnostics.push(mp_result_a.diagnostics[_mp_di_a]);
-                        _mp_di_a += 1;
-                    }
                     diags = extend_diag_array(diags, mp_result_a.diags);
                     current_lines = mp_result_a.lines;
                     let boxed = LLVMOperand {
@@ -175,7 +157,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
                         lines: current_lines,
                         temp_index: temp_index + 4,
                         operand: boxed,
-                        diagnostics: diagnostics,
                         diags: diags
                     };
                 }
@@ -204,7 +185,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
                             lines: current_lines,
                             temp_index: temp_index + 1,
                             operand: coerced,
-                            diagnostics: diagnostics,
                             diags: diags
                         };
                     }
@@ -249,12 +229,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
         let alloc_operands_b: LLVMOperand[] = [alloc_size_op_b];
         let alloc_result_b = emit_runtime_call("alloc_struct", alloc_operands_b, alloc_overrides_b, temp_index
             + 2, current_lines);
-        let mut _alloc_di_b: int = 0;
-        loop {
-            if _alloc_di_b >= alloc_result_b.diagnostics.length { break; }
-            diagnostics.push(alloc_result_b.diagnostics[_alloc_di_b]);
-            _alloc_di_b += 1;
-        }
         diags = extend_diag_array(diags, alloc_result_b.diags);
         current_lines = alloc_result_b.lines;
         current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
@@ -271,12 +245,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
         let mp_operands_b: LLVMOperand[] = [mp_op_b];
         let mp_result_b = emit_runtime_call("mark_persistent", mp_operands_b, empty_runtime_call_overrides(), temp_index
             + 4, current_lines);
-        let mut _mp_di_b: int = 0;
-        loop {
-            if _mp_di_b >= mp_result_b.diagnostics.length { break; }
-            diagnostics.push(mp_result_b.diagnostics[_mp_di_b]);
-            _mp_di_b += 1;
-        }
         diags = extend_diag_array(diags, mp_result_b.diags);
         current_lines = mp_result_b.lines;
         let boxed = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
@@ -284,7 +252,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
             lines: current_lines,
             temp_index: temp_index + 4,
             operand: boxed,
-            diagnostics: diagnostics,
             diags: diags
         };
     }
@@ -311,7 +278,6 @@ fn _coerce_pointer_tail(operand: LLVMOperand, operand_type: string, target: stri
             lines: current_lines,
             temp_index: temp_index + 2,
             operand: coerced,
-            diagnostics: diagnostics,
             diags: diags
         };
     }

@@ -17,7 +17,6 @@ import { _coerce_pointer_tail } from "./pointer_tail";
 // Returns null if no pointer coercion applies.
 fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
 
     // M1.A: SfnString aggregate ↔ i8* bridges. The literal-lowering path
@@ -39,7 +38,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 lines: current_lines,
                 temp_index: temp_index + 1,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -60,12 +58,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let len_temp = format_temp_name(temp_index);
             let sl_operands: LLVMOperand[] = [operand];
             let sl_result = emit_runtime_call("string.length", sl_operands, empty_runtime_call_overrides(), temp_index, current_lines);
-            let mut _sl_di: int = 0;
-            loop {
-                if _sl_di >= sl_result.diagnostics.length { break; }
-                diagnostics.push(sl_result.diagnostics[_sl_di]);
-                _sl_di += 1;
-            }
             diags = extend_diag_array(diags, sl_result.diags);
             current_lines = sl_result.lines;
             let agg0 = format_temp_name(sl_result.temp_index);
@@ -83,7 +75,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 lines: current_lines,
                 temp_index: sl_result.temp_index + 2,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -117,12 +108,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let len_temp = format_temp_name(temp_index + 1);
             let nts_operands: LLVMOperand[] = [operand];
             let nts_result = emit_runtime_call("number.to_string", nts_operands, empty_runtime_call_overrides(), temp_index, current_lines);
-            let mut _nts_di: int = 0;
-            loop {
-                if _nts_di >= nts_result.diagnostics.length { break; }
-                diagnostics.push(nts_result.diagnostics[_nts_di]);
-                _nts_di += 1;
-            }
             diags = extend_diag_array(diags, nts_result.diags);
             current_lines = nts_result.lines;
             let sl_operand = LLVMOperand {
@@ -131,12 +116,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             };
             let sl_operands: LLVMOperand[] = [sl_operand];
             let sl_result = emit_runtime_call("string.length", sl_operands, empty_runtime_call_overrides(), nts_result.temp_index, current_lines);
-            let mut _sl_di: int = 0;
-            loop {
-                if _sl_di >= sl_result.diagnostics.length { break; }
-                diagnostics.push(sl_result.diagnostics[_sl_di]);
-                _sl_di += 1;
-            }
             diags = extend_diag_array(diags, sl_result.diags);
             current_lines = sl_result.lines;
             let agg0 = format_temp_name(sl_result.temp_index);
@@ -154,7 +133,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 lines: current_lines,
                 temp_index: sl_result.temp_index + 2,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -182,12 +160,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let nts_operands: LLVMOperand[] = [cast_operand];
             let nts_result = emit_runtime_call("number.to_string", nts_operands, empty_runtime_call_overrides(), temp_index
                 + 1, current_lines);
-            let mut _nts_di: int = 0;
-            loop {
-                if _nts_di >= nts_result.diagnostics.length { break; }
-                diagnostics.push(nts_result.diagnostics[_nts_di]);
-                _nts_di += 1;
-            }
             diags = extend_diag_array(diags, nts_result.diags);
             current_lines = nts_result.lines;
             let sl_operand = LLVMOperand {
@@ -196,12 +168,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             };
             let sl_operands: LLVMOperand[] = [sl_operand];
             let sl_result = emit_runtime_call("string.length", sl_operands, empty_runtime_call_overrides(), nts_result.temp_index, current_lines);
-            let mut _sl_di: int = 0;
-            loop {
-                if _sl_di >= sl_result.diagnostics.length { break; }
-                diagnostics.push(sl_result.diagnostics[_sl_di]);
-                _sl_di += 1;
-            }
             diags = extend_diag_array(diags, sl_result.diags);
             current_lines = sl_result.lines;
             let agg0 = format_temp_name(sl_result.temp_index);
@@ -219,7 +185,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 lines: current_lines,
                 temp_index: sl_result.temp_index + 2,
                 operand: coerced,
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -250,18 +215,11 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let rec = coerce_pointer_or_struct(widened_operand, "i64", target, temp_index
                 + 1, current_lines);
             if rec != null {
-                let mut _rd_i: int = 0;
-                loop {
-                    if _rd_i >= rec.diagnostics.length { break; }
-                    diagnostics.push(rec.diagnostics[_rd_i]);
-                    _rd_i += 1;
-                }
                 diags = extend_diag_array(diags, rec.diags);
                 return CoercionResult {
                     lines: rec.lines,
                     temp_index: rec.temp_index,
                     operand: rec.operand,
-                    diagnostics: diagnostics,
                     diags: diags
                 };
             }
@@ -274,12 +232,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             // lowering paths.
             let true_size = LLVMOperand { llvm_type: "i64", value: "5" };
             let true_alloc = emit_runtime_call("alloc_struct", [true_size], empty_runtime_call_overrides(), temp_index, current_lines);
-            let mut _true_di: int = 0;
-            loop {
-                if _true_di >= true_alloc.diagnostics.length { break; }
-                diagnostics.push(true_alloc.diagnostics[_true_di]);
-                _true_di += 1;
-            }
             diags = extend_diag_array(diags, true_alloc.diags);
             current_lines = true_alloc.lines;
             let true_data = format_temp_name(temp_index);
@@ -292,12 +244,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let false_size = LLVMOperand { llvm_type: "i64", value: "6" };
             let false_alloc = emit_runtime_call("alloc_struct", [false_size], empty_runtime_call_overrides(), temp_index
                 + 2, current_lines);
-            let mut _false_di: int = 0;
-            loop {
-                if _false_di >= false_alloc.diagnostics.length { break; }
-                diagnostics.push(false_alloc.diagnostics[_false_di]);
-                _false_di += 1;
-            }
             diags = extend_diag_array(diags, false_alloc.diags);
             current_lines = false_alloc.lines;
             let false_data = format_temp_name(temp_index + 2);
@@ -336,7 +282,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                     llvm_type: "{i8*, i64}",
                     value: aggregate
                 },
-                diagnostics: diagnostics,
                 diags: diags
             };
         }
@@ -351,18 +296,11 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let rec = coerce_pointer_or_struct(widened_operand, "double", target, temp_index
                 + 1, current_lines);
             if rec != null {
-                let mut _rd_i: int = 0;
-                loop {
-                    if _rd_i >= rec.diagnostics.length { break; }
-                    diagnostics.push(rec.diagnostics[_rd_i]);
-                    _rd_i += 1;
-                }
                 diags = extend_diag_array(diags, rec.diags);
                 return CoercionResult {
                     lines: rec.lines,
                     temp_index: rec.temp_index,
                     operand: rec.operand,
-                    diagnostics: diagnostics,
                     diags: diags
                 };
             }
@@ -383,18 +321,11 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let rec = coerce_pointer_or_struct(widened_operand, "double", target, temp_index
                 + 1, current_lines);
             if rec != null {
-                let mut _rd_i: int = 0;
-                loop {
-                    if _rd_i >= rec.diagnostics.length { break; }
-                    diagnostics.push(rec.diagnostics[_rd_i]);
-                    _rd_i += 1;
-                }
                 diags = extend_diag_array(diags, rec.diags);
                 return CoercionResult {
                     lines: rec.lines,
                     temp_index: rec.temp_index,
                     operand: rec.operand,
-                    diagnostics: diagnostics,
                     diags: diags
                 };
             }
@@ -409,18 +340,11 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             };
             let rec = coerce_pointer_or_struct(widened_operand, "double", target, widened.temp_index, widened.lines);
             if rec != null {
-                let mut _rd_i2: int = 0;
-                loop {
-                    if _rd_i2 >= rec.diagnostics.length { break; }
-                    diagnostics.push(rec.diagnostics[_rd_i2]);
-                    _rd_i2 += 1;
-                }
                 diags = extend_diag_array(diags, rec.diags);
                 return CoercionResult {
                     lines: rec.lines,
                     temp_index: rec.temp_index,
                     operand: rec.operand,
-                    diagnostics: diagnostics,
                     diags: diags
                 };
             }
