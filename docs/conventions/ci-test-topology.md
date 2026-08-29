@@ -194,19 +194,44 @@ runner-minutes** — total work is unchanged, only the critical path shortens.
 
 So a repack is not worth a CI run on its own: it edits `ci.yml` and
 `seed-test-bin.yml`, and `ci.yml` is in `ci-scope`'s `source` glob, so landing
-it costs a full matrix (~135 macOS runner-minutes measured on the same run) to
-save 2.15 min of wall clock per later PR. Fold it into the next change that
-already touches `ci.yml` or `compiler/tests/` for another reason. Keep the two
-groupings in sync when you do — `seed-test-bin.yml`'s `seed-macos` is the
-producer of the same five cache keys `build-macos` consumes.
+it costs a full macOS matrix to save 2.15 min of wall clock per later PR. (For
+scale, the eight `test_s` values above total 112.6 runner-minutes of test phase
+alone, before per-leg setup and before `build-compiler-macos`; the whole-matrix
+figure is larger and is not derivable from this table.) Fold it into the next change that
+already touches `ci.yml` or `compiler/tests/` for another reason.
+
+**Keep the two groupings in sync when you do, because nothing enforces it.**
+`seed-test-bin.yml`'s `seed-macos` is the producer of the same five cache keys
+`build-macos` consumes, and they are matched by hand: no lint parses both
+matrices, and `shard-cover` validates the shard *taxonomy*, not the CI packing.
+Drift is silent — never a red job, only a slower macOS leg:
+
+- **Membership drift** (a shard moves to a different leg on one side only):
+  that shard restores an entry the seeder filled with someone else's binaries
+  and gets nothing. Costs one shard's link time.
+- **Leader swap** (a pair is reordered so the `shard2` becomes the leader):
+  `build-macos` now restores a key `seed-macos` no longer writes at all, so
+  *both* shards in that leg go cold and the seeder's entry is unreachable.
+
+A cross-reference comment in `build-macos`'s own matrix would be the natural
+guard — `ci.yml` is the file people actually edit — but `ci.yml` is in the
+`source` glob, so adding one costs a full macOS matrix. It belongs in the same
+change as the repack.
 
 **The bigger cost is the cache, not the packing.** Five of eight shards, and
 all three of the most expensive, recorded a `test_bin_hit_rate` of **0.00** on
-a PR whose diff touched no compiler source at all. Entry keys include the
-compiler binary's SHA-256 (SFN-545), so a PR branched even a few commits behind
-`main` gets a seeded cache built by a different compiler and misses everything
-in it. Cutting those three shards' misses is worth far more than 2.15 min, and
-it is a keying problem, not a packing one. No issue is open for it yet.
+a PR whose diff was confined to `.github/` — no `compiler/src` or `runtime/`
+change (it reached the matrix via `ci.yml` being in the `source` glob, so
+"touched no compiler source" is not available as an explanation for the misses).
+
+Why is open. Entry keys include the compiler binary's SHA-256 (SFN-545), which
+makes bit-reproducibility of that binary between the seeder run and the PR run
+the obvious suspect — but note the PR leg downloads the compiler built by
+`build-compiler-macos` from the PR's own merge ref, which already contains
+`main`, so "branched behind `main`" does not on its own explain a miss. Treat
+this as a hypothesis to test, not a finding. Whatever the cause, cutting those
+three shards' misses is worth far more than the 2.15 min a repack buys, and it
+is a keying question rather than a packing one. No issue is open for it yet.
 
 Note this is a single-run sample, and the caveat the section below already
 makes still applies: there is no durable time-series for test-suite wall time,
@@ -281,8 +306,12 @@ The design for the content-addressed key derivation lives in
   The gate has one non-path failure mode: a **draft** PR fails it with
   "deferred -- draft pull request". `ci-scope` forces every scope output
   false while a PR is a draft, so only `ci-scope`, `linear-branch-claim` and
-  `required-ci` run at all -- the scarce macOS pool (5 account-wide, against
-  six job-slots per in-scope PR) is not spent on a change that cannot merge.
+  `required-ci` run at all -- the scarce macOS pool (5 account-wide) is not
+  spent on a change that cannot merge. An in-scope PR asks this workflow for
+  six macOS job-slots; before `installer-smoke.yml` gained its own installer
+  scope it could ask for two more, so a PR touching compiler code and
+  `docs/status.md` -- the pairing Stage1 readiness requires -- requested eight
+  against a pool of five and contended with itself.
   `ready_for_review` reruns the full matrix on the same head.
 
 ## Metrics and the known gap

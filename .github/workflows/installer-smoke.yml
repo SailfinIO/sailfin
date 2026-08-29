@@ -97,20 +97,44 @@ jobs:
           reason="installer CI for ${GITHUB_EVENT_NAME}"
 
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            # Fail closed on a scope we cannot compute. Empty SHAs would make
+            # the three-dot below resolve to `HEAD...HEAD`, which SUCCEEDS
+            # with an empty diff -- so checking git's exit status alone would
+            # not catch it, and the result would be a silent `installer=false`
+            # skipping every installer job. GitHub reports a skipped job as
+            # success, and unlike `ci.yml` this workflow has no `required-ci`
+            # equivalent to fail closed downstream, so the omission would be
+            # invisible. `ci-scope` guards its own inventory the same way.
+            if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
+              echo "::error::empty pull-request SHAs; refusing to narrow installer scope"
+              exit 1
+            fi
+
             installer=false
             reason="no installer-behaviour path changed"
             # Three-dot, matching `ci.yml`'s `ci-scope`: the changed set is
             # what THIS PR added, not everything `main` moved since the branch
             # point (SFN-484).
+            #
+            # Written to a file and read back rather than consumed from a
+            # process substitution: a process substitution's exit status is
+            # invisible to both `set -e` and `pipefail`, so a failed `git
+            # diff` would read as "no paths changed" and land in the same
+            # silent skip. As a pipeline head, a failure fails the step.
+            git diff --name-only "$BASE_SHA"..."$HEAD_SHA" | tee changed-files.txt
+
             while IFS= read -r path; do
               case "$path" in
-                install.sh|install.ps1|bootstrap.toml                 |.github/workflows/installer-smoke.yml                 |.github/actions/sailfin-build-windows/verify-release-seed.ps1                 |.github/installer-fixtures/*)
+                install.sh | install.ps1 | bootstrap.toml \
+                | .github/workflows/installer-smoke.yml \
+                | .github/actions/sailfin-build-windows/verify-release-seed.ps1 \
+                | .github/installer-fixtures/*)
                   installer=true
                   reason="installer-behaviour path changed: $path"
                   break
                   ;;
               esac
-            done < <(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
+            done < changed-files.txt
           fi
 
           echo "installer=$installer" >> "$GITHUB_OUTPUT"
