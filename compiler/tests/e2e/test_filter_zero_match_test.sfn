@@ -70,13 +70,8 @@ test "test filter: an unfiltered empty suite still exits 0" ![io] {
 }
 
 test "test filter: a matching -k still selects tests and exits 0" ![io] {
-    // `--no-test-cache` is load-bearing, not incidental: the test-bin cache
-    // key does not include the active `-k`/`--tag`, so a filtered compile
-    // could poison a later unfiltered run of identical source under the
-    // same key. Remove once SFN-914 puts the active filters into the
-    // test-bin cache key.
     let dir = _write_fixture("alpha_marker");
-    let r = _run_sfn_test([dir, "-k", "alpha_marker", "--no-test-cache"], "matching-k");
+    let r = _run_sfn_test([dir, "-k", "alpha_marker"], "matching-k");
 
     assert r.exit == 0;
     assert find(r.out, "no tests matched", 0) < 0;
@@ -94,7 +89,7 @@ test "test filter: an unmatched --tag exits non-zero and names the tag selector"
 test "test filter: a selector matching one suite of several still exits 0" ![io] {
     let dir_a = _write_fixture("alpha_marker");
     let dir_b = _write_fixture("beta_other");
-    let r = _run_sfn_test([dir_a, dir_b, "-k", "alpha_marker", "--no-test-cache"], "multi-suite-match");
+    let r = _run_sfn_test([dir_a, dir_b, "-k", "alpha_marker"], "multi-suite-match");
 
     assert r.exit == 0;
     assert find(r.out, "no tests matched", 0) < 0;
@@ -102,7 +97,7 @@ test "test filter: a selector matching one suite of several still exits 0" ![io]
 
 test "test filter: an empty shard with an active filter still exits 0" ![io] {
     let dir = _write_fixture("alpha_marker");
-    let r = _run_sfn_test([dir, "-k", "alpha_marker", "--shard", "2/2", "--no-test-cache"], "empty-shard-filter");
+    let r = _run_sfn_test([dir, "-k", "alpha_marker", "--shard", "2/2"], "empty-shard-filter");
 
     assert r.exit == 0;
     assert find(r.out, "no tests matched", 0) < 0;
