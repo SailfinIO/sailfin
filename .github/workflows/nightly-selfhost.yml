@@ -183,7 +183,7 @@ jobs:
           # this key, so e2e tests that pin a nested build's cwd to their own
           # scratch (`process.run_capture_cwd`) resolve a relative root
           # *inside* that scratch. The cache then publishes a second copy of
-          # every staged module as `<scratch>/build/cache/v2/<key>/ir.sfn-asm`,
+          # every staged module under `<scratch>/build/cache/<schema>/`,
           # which doubles any test that counts `.sfn-asm` under its scratch
           # and mints a cold private store per nested build. The retired
           # Makefile scoped this inline on the compiler build (`cd $(CURDIR)`),

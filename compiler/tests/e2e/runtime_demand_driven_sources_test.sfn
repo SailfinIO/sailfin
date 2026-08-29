@@ -23,11 +23,9 @@
 // under the same isolated root. That is what makes "walk the scratch"
 // a complete audit rather than a partial one.
 //
-// A build can write a THIRD tree into that root: the content-addressed build
-// cache, when its root resolves relative (see `_sfn_asm_files`). Those entries
-// are duplicates of the staged modules, not additional ones, so the count
-// assertions exclude them by basename — a scratch walk that included them
-// would measure the caller's cache configuration rather than the gate.
+// A build can write a THIRD tree into that root — the content-addressed build
+// cache — whose entries duplicate the staged modules rather than adding to
+// them. `_sfn_asm_files` excludes those; see its comment for why.
 //
 // NOTE: assert on captured output with `sfn/strings` predicates — the
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
@@ -74,8 +72,11 @@ fn _collect_leaves(dir: string, acc: string[], depth: int) -> string[] ![io] {
 //
 // A build writes each staged module under `rt-import-context/` named for its
 // module slug, and ALSO publishes it to the build cache as
-// `<cache-root>/v2/<key>/ir.sfn-asm` (`_filename_for_kind`,
-// compiler/src/build_cache.sfn:827). When that cache root resolves inside the
+// `<cache-root>/<key[0..2]>/<key>/ir.sfn-asm` (`cache_artifact_path` +
+// `_filename_for_kind`, compiler/src/build_cache.sfn:827-850 — the entry path
+// is purely digest-addressed and carries no module name, which is why the
+// crypto assertions below, matching on `sfn/crypto`, never saw these entries
+// even before this filter). When that cache root resolves inside the
 // walked scratch, every module appears twice and a count-based assertion
 // doubles. `cache_root_from` (compiler/src/build_cache.sfn:781-788) lands it
 // there whenever the root is relative — an explicit relative
@@ -86,8 +87,13 @@ fn _collect_leaves(dir: string, acc: string[], depth: int) -> string[] ![io] {
 // of the caller's cache configuration.
 //
 // The `ir.sfn-asm` basename is exact, not a heuristic: it is minted only by
-// `_filename_for_kind`, and no runtime source is named `ir.sfn` (staged names
-// carry the module slug — `string.sfn-asm`, `tls_status.sfn-asm`).
+// `_filename_for_kind`. Every staged path in this scratch is
+// `<root>/<slug>.sfn-asm` — the runtime import context and the capsule staging
+// tree alike (`_cr_import_context_root`,
+// compiler/src/capsule_resolver/staging.sfn:193-194) — so only a source
+// literally named `ir.sfn` could collide, and neither the runtime nor any
+// capsule declares one. Staged names carry the module slug: `string.sfn-asm`,
+// `tls_status.sfn-asm`.
 fn _sfn_asm_files(leaves: string[]) -> string[] {
     let mut out: string[] = [];
     let mut i: int = 0;
