@@ -660,6 +660,28 @@ Auto-dispatch (`auto`) is the default because every newly fetched toolchain is v
 
 A project with no `[toolchain]` section is unaffected — the gate is a no-op.
 
+### Installing a toolchain
+
+`sfn toolchain install <version | channel> [--allow-yanked]` fetches, verifies, and stores a toolchain in the host-qualified version store. `<version>` is an exact release semver (e.g. `0.10.6`); `<channel>` is one of `stable`, `rc`, `beta`, `alpha`, or the `latest` alias for `stable`, resolved to an exact release for the current host through the signed toolchain index.
+
+Before any release-specific download, the install command fetches and authenticates the signed index (Ed25519 signature over canonical JSON, a key-transition chain walked from the pinned trust root, and an anti-rollback sequence check — a clock that can't be read refuses rather than being treated as "not expired") and checks the requested version against it:
+
+| Index state | Behavior |
+|---|---|
+| **Revoked** | Refused, with no override. A revoked release or its signing key is unsafe; `--allow-yanked` does not apply. |
+| **Yanked** | Refused unless `--allow-yanked` is passed; the warning is repeated in the install result. An already-installed yanked toolchain still runs. |
+| **Advisory** | Installed normally; the indexed severity, affected range, and fixed version print as a warning. |
+| **Listed, not yanked/revoked** | Installed. The index's asset name and SHA-256 for the current host bind the install; when the index and the release-specific `SHA256SUMS` manifest both name a digest for that asset, they must agree or the install is refused. |
+| **Not listed** | Installed. The index carries live releases, not history, so a version aged out of it falls back to SFEP-0046's release-specific signed-manifest verification alone. |
+
+A revoked identity is additionally recorded in a local, append-only revocation ledger (`<versions_base>/.index/revocations`) that a later index can never un-revoke. A cached-known-revoked toolchain refuses to execute — through `sfn toolchain install`, ordinary pin dispatch, or management routing — even fully offline, since enforcement reads only that local ledger. A ledger that exists on disk but fails to parse is treated as "cannot tell" rather than "nothing is revoked": every command that would consult it refuses instead of proceeding.
+
+The bootstrap seed path (`bootstrap.toml [seed].version`, SFEP-0047) does not consult the signed index — gating the self-host build on index liveness would couple it to the index's expiry.
+
+> **Not yet shipped:** default update tracks, `sfn toolchain update`, opportunistic update notification, `sfn toolchain default`, and `sfn toolchain remove` are designed in SFEP-0073 but not implemented.
+>
+> **Testing boundary:** channel resolution, yank handling, and index-listed asset binding are covered at unit level only — an end-to-end test cannot forge a signature against the pinned release-signing trust root. Offline execution refusal for an already-known-revoked release is covered end-to-end, since it consults only the local ledger and needs no signature to verify.
+
 ### Management-command routing
 
 `sfn toolchain ...` (any leaf) is intercepted as a raw argv prefix before `sfn`'s command tree is built, so an older entry executable on `PATH` can hand a management leaf it was never built to parse to a newer installed payload — the mechanism that lets native lifecycle commands (`list`, `active`, `verify`, `install`, and future leaves) evolve without a package manager needing to overwrite the entry executable.
@@ -676,9 +698,9 @@ executable: /path/to/sfn
 management-protocol: 1-1
 ```
 
-Management routing never reads the project `[toolchain]` pin, so `sfn toolchain ...` commands stay reachable even when ordinary selection (above) is broken or unsatisfiable.
+Management routing never reads the project `[toolchain]` pin, so `sfn toolchain ...` commands stay reachable even when ordinary selection (above) is broken or unsatisfiable. A payload the local revocation ledger knows to be revoked is excluded from the survey, offline included — see [Installing a toolchain](#installing-a-toolchain).
 
-> **Not yet shipped:** `sfn toolchain remove`, the per-user default (`sfn toolchain default`), channel/update discovery (`sfn toolchain update`), and the signed release index with yank/revocation enforcement are designed in SFEP-0073 but not implemented. See [`docs/status.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md) for current per-leaf status.
+> **Not yet shipped:** `sfn toolchain remove`, the per-user default (`sfn toolchain default`), and channel/update discovery (`sfn toolchain update`) are designed in SFEP-0073 but not implemented. See [`docs/status.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md) for current per-leaf status.
 
 ---
 
@@ -758,6 +780,7 @@ These environment variables influence the behavior of `sfn`.
 | `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | Controls the toolchain-pin mismatch response: `auto` (default) fetches + verifies + re-execs the pinned toolchain; `local` verifies only and errors on mismatch; `<version>` forces that dispatch target; `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN_DISPATCHED` | `sfn build`/`run`/`check`/`test` | Set automatically by `sfn` before re-exec'ing a dispatched toolchain (`=<version>`) as a re-entrancy guard; not intended to be set by hand. |
 | `SAILFIN_TOOLCHAIN_MANAGEMENT` | `sfn toolchain ...` | Set automatically by `sfn` before re-exec'ing a routed management payload (`=<version>`) as a re-entrancy guard; not intended to be set by hand. See [Management-command routing](#management-command-routing). |
+| `SAILFIN_TOOLCHAIN_RELEASE_BASE` | `sfn toolchain install` | Override the release host for air-gapped mirrors (signature/digest verification stays mandatory). Also serves the signed toolchain index and its detached signature that `sfn toolchain install <version \| channel>` consults before any release-specific fetch — see [Installing a toolchain](#installing-a-toolchain). |
 | `SAILFIN_CLEAN_KEEP_SEED` | `sfn dev clean build`/`all` | Set to `0` (equivalent to `--include-seed`) to also delete the seed toolchain store. Defaults to `1` (the seed toolchain is preserved). |
 | `SAILFIN_TEST_SCRATCH` | `sfn test` | Override the scratch directory a test's subprocess builds are isolated into. |
 | `SAILFIN_EFFECT_ENFORCE` | `sfn` binary | Control runtime effect-enforcement (the seal, SFEP-0016); partial on macOS arm64 (#613). |
