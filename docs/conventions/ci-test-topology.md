@@ -164,6 +164,115 @@ in the tree, and that is why the test pool now budgets a parent term plus a
 separately-measured per-child reserve rather than sharing the emit
 fan-out's policy.
 
+## Measured macOS shard cost (2026-08-28)
+
+The `[ci-metrics]` lines from run `33215108439` (`macos-arm64`, all eight
+shards, one PR). `test_s` is test-phase wall seconds; `test_bin_hit_rate` is
+the fraction of that shard's tests whose linked binary came from the cache.
+
+| shard | `test_s` | `test_bin_hit_rate` | leg it ran in |
+| --- | ---: | ---: | --- |
+| `e2e-b` | 1566 | 0.00 | `e2e-b` |
+| `e2e-d` | 1289 | 0.00 | `e2e-d+unit-b` |
+| `e2e-a` | 1245 | 0.00 | `e2e-a` |
+| `e2e-c` | 932 | 0.96 | `e2e-c+int-caps` |
+| `unit-a` | 518 | 1.00 | `unit-a+unit-c` |
+| `int-caps` | 498 | 0.00 | `e2e-c+int-caps` |
+| `unit-b` | 406 | 1.00 | `e2e-d+unit-b` |
+| `unit-c` | 299 | 0.00 | `unit-a+unit-c` |
+
+Two things follow, and they point in different directions.
+
+**The five-way packing is stale, but the upside is small.** SFN-873 packed the
+groups when `e2e-b` was the long pole; it no longer is. Current makespan is
+`e2e-d+unit-b` at 1695 s against a 6753 s total, and the LPT-optimal packing of
+these numbers — `e2e-b` | `e2e-c+unit-b` | `unit-a+int-caps+unit-c` | `e2e-d` |
+`e2e-a` — reaches 1566 s. That is a **7.6% (2.15 min) makespan gain, and it is
+the ceiling**: `e2e-b` alone is 1566 s, and no five-way packing of eight
+indivisible shards can beat the largest one. Repacking also saves **zero
+runner-minutes** — total work is unchanged, only the critical path shortens.
+
+So a repack is not worth a CI run on its own: it edits `ci.yml` and
+`seed-test-bin.yml`, and `ci.yml` is in `ci-scope`'s `source` glob, so landing
+it costs a full macOS matrix to save 2.15 min of wall clock per later PR. (For
+scale, the eight `test_s` values above total 112.6 runner-minutes of test phase
+alone, before per-leg setup and before `build-compiler-macos`; the whole-matrix
+figure is larger and is not derivable from this table.) Fold it into the next change that
+already touches `ci.yml` or `compiler/tests/` for another reason.
+
+**Keep the two groupings in sync when you do, because nothing enforces it.**
+`seed-test-bin.yml`'s `seed-macos` is the producer of the same five cache keys
+`build-macos` consumes, and they are matched by hand: no lint parses both
+matrices, and `shard-cover` validates the shard *taxonomy*, not the CI packing.
+Drift is silent — never a red job, only a slower macOS leg:
+
+- **Membership drift** (a shard moves to a different leg on one side only):
+  that shard restores an entry the seeder filled with someone else's binaries
+  and gets nothing. Costs one shard's link time.
+- **Leader swap** (a pair is reordered so the `shard2` becomes the leader):
+  `build-macos` now restores a key `seed-macos` no longer writes at all, so
+  *both* shards in that leg go cold and the seeder's entry is unreachable.
+
+A cross-reference comment in `build-macos`'s own matrix would be the natural
+guard — `ci.yml` is the file people actually edit — but `ci.yml` is in the
+`source` glob, so adding one costs a full macOS matrix. It belongs in the same
+change as the repack.
+
+**The cache misses are real, and traced.** The raw counters behind those
+`0.00`s are genuine misses, not an artifact of the metric: `e2e-b` reports
+`test_bin_hits=0, test_bin_misses=90`, `e2e-a` 0/89, `e2e-d` 0/96, `int-caps`
+0/160, `unit-c` 0/114. (Worth knowing anyway: `_trj_format_hit_rate` returns
+`"0.0000"` for a zero denominator too, so the rate alone cannot distinguish
+"every lookup missed" from "no lookup was attempted" — read the counters.)
+
+**One mechanism explains every observed hit: the shared key.**
+`sailfin-testbin-<target>-<seed>-<freshness>` carried no shard component, so
+every shard leg computed the identical key and raced to publish under it. In
+seeding run `33228066072`, eight macOS legs sharing that key: one save
+succeeded, **five died with "Unable to reserve cache … another job may be
+creating this cache"**, two skipped as already-existing. What survives is not
+the whole-suite archive the key is meant to hold but an arbitrary union
+accumulating one shard per generation. In the measured PR run all five legs
+restored the same 339 MB entry, and it happened to carry `unit-a`, `unit-b`
+and `e2e-c` — exactly the three shards that hit.
+
+That the shared archive is the sole explanation is settled by `unit-b`: it hit
+1.00 while running in the leg whose per-shard key (`test-bin-macOS-e2e-d-`)
+reported `Cache not found for input keys`. No per-shard restore reached it, so
+its binaries can only have come from the shared archive — and an archive
+carrying `unit-b` plainly carried `unit-a` and `e2e-c` too. The per-shard
+restores of stale entries by `unit-a` and `e2e-c` are consistent with their
+hits but cannot be shown to have caused them. `linux-x86_64` has a baseline
+job that masks all of this; `macos-arm64` has none.
+
+The fix is a shard component in that key, placed *before* the seed version so
+the `sailfin-testbin-<target>-<seed>-` restore-key still resolves to the
+whole-suite baseline and can never prefix-match another shard's slice. Legs
+stop racing, each keeps its own slice, and no leg loses the ability to publish
+— which matters because `ci.yml`'s shard legs restore per-shard keys but never
+save one, so the composite's save is the only test-bin publish a PR run does.
+
+**The per-shard keys are a separate, working mechanism.** Run `33228066072`
+saved 8 of 8 `test-bin-macOS-<shard>-<sha>` entries — pre-grouping, one per
+shard. Under the grouping this page describes, `seed-macos` publishes **five**
+entries under the leader shard names, each carrying both of its shards'
+binaries, matching the five keys `build-macos` restores. The `0.00` leader
+shards (`e2e-a`/`e2e-b`/`e2e-d`) missed because at measurement time no entry
+existed for them at any SHA, against either the exact key or the prefix — a
+cold-state transient, not a standing bug.
+
+**Do not size a repack against this.** An earlier reading valued the five
+`0.00` shards at ~82 runner-minutes of avoidable relinking per PR. That was
+unsound for a reason independent of the cold state: `test_s` is compile plus
+link plus *execute*, not link time — `unit-a` hit 1.00 and still took 518 s —
+so a shard's whole wall time was never the recoverable quantity. Whether hit
+rates recover depends on the grouped seeder publishing before `main`'s
+compiler bytes next change, not on anything automatic.
+
+Note this is a single-run sample, and the caveat the section below already
+makes still applies: there is no durable time-series for test-suite wall time,
+so treat these as one measurement, not a baseline.
+
 ## Test-artifact cache (operational)
 
 The design for the content-addressed key derivation lives in
@@ -233,8 +342,12 @@ The design for the content-addressed key derivation lives in
   The gate has one non-path failure mode: a **draft** PR fails it with
   "deferred -- draft pull request". `ci-scope` forces every scope output
   false while a PR is a draft, so only `ci-scope`, `linear-branch-claim` and
-  `required-ci` run at all -- the scarce macOS pool (5 account-wide, against
-  six job-slots per in-scope PR) is not spent on a change that cannot merge.
+  `required-ci` run at all -- the scarce macOS pool (5 account-wide) is not
+  spent on a change that cannot merge. An in-scope PR asks this workflow for
+  six macOS job-slots; before `installer-smoke.yml` gained its own installer
+  scope it could ask for two more, so a PR touching compiler code and
+  `docs/status.md` -- the pairing Stage1 readiness requires -- requested eight
+  against a pool of five and contended with itself.
   `ready_for_review` reruns the full matrix on the same head.
 
 ## Metrics and the known gap

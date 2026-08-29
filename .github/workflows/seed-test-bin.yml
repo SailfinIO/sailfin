@@ -202,11 +202,15 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Per-shard seed legs: run only this OS+shard's tests with the test-bin
-  # cache enabled, so build/cache/test-bin holds exactly this shard's slice,
-  # then save it under the main-scoped `test-bin-<os>-<shard>-<sha>` key
-  # (success-gated `actions/cache/save`). Per-shard isolation keeps each
-  # entry small (a leg never carries another shard's binaries).
+  # Seed legs: run this OS's shard tests with the test-bin cache enabled,
+  # then save `build/cache/test-bin` under the main-scoped
+  # `test-bin-<os>-<shard>-<sha>` key (success-gated `actions/cache/save`).
+  #
+  # `seed-linux` is one leg per shard, so an entry holds exactly that
+  # shard's slice. `seed-macos` is NOT: it groups eight shards into five
+  # legs to match `build-macos`, so a grouped leg's entry deliberately
+  # carries both its shards' binaries under the leader shard's key. See the
+  # comment on that job.
   seed-linux:
     name: Seed test-bin [linux-x86_64 / ${{ matrix.shard }}]
     needs: build-compiler-linux
@@ -309,14 +313,56 @@ jobs:
           key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
 
   seed-macos:
-    name: Seed test-bin [macos-arm64 / ${{ matrix.shard }}]
+    name: Seed test-bin [macos-arm64 / ${{ matrix.shard }}${{ matrix.shard2 && format('+{0}', matrix.shard2) || '' }}]
     needs: build-compiler-macos
     runs-on: macos-26
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      # Five legs, not eight -- the same packing `ci.yml`'s `build-macos`
+      # uses, and for the same reason its SFN-873 comment gives: macOS runner
+      # concurrency is 5 account-wide, so declaring eight entries does not run
+      # eight-wide. Three queue, and the last one *dispatched* sets the
+      # makespan. Total work is fixed; the surplus buys only queueing, and it
+      # buys it on `push: main` -- immediately after a merge, against the pool
+      # the next PR is waiting on.
+      #
+      # Grouping also closes a cache gap. `build-macos` restores only
+      # `test-bin-macOS-<matrix.shard>-`, so under the old ungrouped seeding
+      # the three shards that appear on a PR leg as `shard2` (`unit-b`,
+      # `int-caps`, `unit-c`) had their entries saved under keys no PR leg
+      # ever restored: the per-shard cache contributed nothing for them.
+      # Seeding in the same groups saves one `build/cache/test-bin` per leg
+      # carrying BOTH its shards' binaries, under the leader key a PR leg
+      # actually asks for.
+      #
+      # This does not mean those shards ran cold -- the measured table in
+      # `docs/conventions/ci-test-topology.md` shows `unit-b` at a 1.00
+      # hit rate and the leader shards `e2e-a`/`e2e-b`/`e2e-d` at 0.00. A
+      # second, shard-agnostic restore (the composite's own
+      # `sailfin-testbin-<target>-*` key) overlays the same directory, so
+      # leader-vs-`shard2` does not by itself predict hit rate. What is
+      # fixed here is the structural gap, not the measured hit rates.
+      #
+      # Cost of grouping, stated plainly: the save below is success-gated,
+      # so a failure in EITHER shard now loses both shards' seed for that
+      # leg, where eight independent legs lost only one. `paths:` limits
+      # this workflow to compiler/runtime/bootstrap pushes, so a lost seed
+      # can persist until the next such push. Seeding is warmth-only and
+      # never correctness, and entries self-validate (#1233).
+      #
+      # Keep these groups in step with `build-macos`'s matrix: they are the
+      # producer and consumer of the same five cache keys.
       matrix:
-        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
+        include:
+          - shard: e2e-b
+          - shard: e2e-d
+            shard2: unit-b
+          - shard: e2e-c
+            shard2: int-caps
+          - shard: e2e-a
+          - shard: unit-a
+            shard2: unit-c
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -383,6 +429,21 @@ jobs:
           clang: clang
           seed_version: ${{ steps.seed.outputs.seed_version }}
           shard: ${{ matrix.shard }}
+          shard_test_jobs: "3"
+          package: "false"
+
+      # Same cache dir as the first shard, so the save below carries both.
+      - name: Run second shard tests (populate test-bin cache)
+        if: ${{ matrix.shard2 }}
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: skip-build
+          target: macos-arm64
+          clang: clang
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          shard: ${{ matrix.shard2 }}
           shard_test_jobs: "3"
           package: "false"
 
