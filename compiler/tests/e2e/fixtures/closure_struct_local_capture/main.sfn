@@ -1,0 +1,21 @@
+// compiler/tests/e2e/fixtures/closure_struct_local_capture/main.sfn
+//
+// SFN-1126 regression pin — the ANNOTATED-LOCAL struct capture shape,
+// which already worked before the fix and must keep working: a lambda
+// closes over a struct held in a type-annotated `let` local, not a
+// by-value function parameter (contrast `closure_struct_param_capture`,
+// the shape that was broken).
+//
+// Expected stdout: 42 (3 array elements + tag 39).
+struct Box {
+    inner: int[],
+    tag: int
+}
+
+fn run_it(f: fn () -> int) -> int { return f(); }
+
+fn main() ![io] {
+    let v: int[] = [1, 2, 3];
+    let b: Box = Box { inner: v, tag: 39 };
+    print(run_it(fn () -> int { return b.inner.length + b.tag; }));
+}

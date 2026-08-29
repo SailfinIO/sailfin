@@ -301,18 +301,9 @@ fn _client_body(client_bin: string, run_env: Env, dir: string) -> string ![clock
 // shelling `sleep` per tick; ~10s budget, matching the previous
 // 20-attempts x 0.5s shape.
 fn _client_body_retry(client_bin: string, run_env: Env, dir: string) -> string ![clock, io] {
-    // The closure below must capture an annotated local, never `run_env`
-    // directly. Capturing a by-value struct PARAMETER emits invalid IR: the
-    // parameter arrives as `%Env*`, the capture-env field is the `%Env`
-    // aggregate, and nothing bridges them — clang rejects it with
-    // "'%run_env' defined with type 'ptr' but expected '%Env'". An annotated
-    // local allocas the aggregate and the capture site loads through it, so
-    // both halves agree (SFN-1126). Delete this local and capture `run_env`
-    // directly once that lands.
-    let captured_env: Env = run_env;
     let mut last_body: string = "";
     let _ready = wait_until(fn () -> boolean {
-        let body: string = _client_body(client_bin, captured_env, dir);
+        let body: string = _client_body(client_bin, run_env, dir);
         if body.length > 0 {
             last_body = body;
             return true;
