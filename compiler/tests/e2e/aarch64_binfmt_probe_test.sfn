@@ -15,7 +15,23 @@
 // cannot be called from an `![io]` test like this. Assert on captured stdout
 // with `sfn/strings::contains` instead.
 import { contains } from "sfn/strings";
-import { clean_runner_env, clean_runner_env_without, default_scratch_dir } from "sfn/test";
+import {
+    clean_runner_env,
+    clean_runner_env_without,
+    default_scratch_dir,
+    skip
+} from "sfn/test";
+
+// The subject is a Linux bootstrap script whose probe depends on POSIX shell
+// execution and permission bits. Windows still runs the portable source and
+// workflow assertions above it, but must not turn a failed bash launch into a
+// probe verdict. SFN-1150 owns the exclusion; remove it when the binfmt probe
+// has a host-portable native fixture instead of the Linux shell seam.
+fn _require_linux_binfmt_fixture() -> void ![io] {
+    if env.get("COMSPEC").length > 0 {
+        skip("SFN-1150: Linux binfmt execution requires POSIX shell and permission semantics; remove when the probe has a host-portable native fixture");
+    }
+}
 
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -103,6 +119,7 @@ test "aarch64 bootstrap: self-host passes do not fetch a native seed" ![io] {
 }
 
 test "aarch64 binfmt: enabled x86_64 entry is detected alongside an unreadable register node" ![io] {
+    _require_linux_binfmt_fixture();
     let dir = _test_root("t1");
     fs.writeFile(dir + "/status", "enabled\n");
     fs.writeFile(dir + "/qemu-x86_64", _x86_64_entry());
@@ -117,6 +134,7 @@ test "aarch64 binfmt: enabled x86_64 entry is detected alongside an unreadable r
 }
 
 test "aarch64 binfmt: a disabled x86_64 entry is not usable" ![io] {
+    _require_linux_binfmt_fixture();
     let dir = _test_root("t2");
     fs.writeFile(dir + "/status", "enabled\n");
     fs.writeFile(dir + "/qemu-x86_64", "disabled\ninterpreter /usr/libexec/qemu-binfmt/x86_64-binfmt-P\nflags: OCF\n");
@@ -127,6 +145,7 @@ test "aarch64 binfmt: a disabled x86_64 entry is not usable" ![io] {
 }
 
 test "aarch64 binfmt: a directory with no x86_64 entry is not usable" ![io] {
+    _require_linux_binfmt_fixture();
     let dir = _test_root("t3");
     fs.writeFile(dir + "/status", "enabled\n");
     fs.writeFile(dir + "/python3.12", _decoy_entry());
@@ -137,6 +156,7 @@ test "aarch64 binfmt: a directory with no x86_64 entry is not usable" ![io] {
 }
 
 test "aarch64 binfmt: globally disabled binfmt_misc is not usable" ![io] {
+    _require_linux_binfmt_fixture();
     let dir = _test_root("t4");
     fs.writeFile(dir + "/status", "disabled\n");
     fs.writeFile(dir + "/qemu-x86_64", _x86_64_entry());
@@ -147,6 +167,7 @@ test "aarch64 binfmt: globally disabled binfmt_misc is not usable" ![io] {
 }
 
 test "aarch64 binfmt: an entry is matched by its interpreter path" ![io] {
+    _require_linux_binfmt_fixture();
     let dir = _test_root("t5");
     fs.writeFile(dir + "/status", "enabled\n");
     fs.writeFile(dir + "/qemu-foreign", "enabled\ninterpreter /usr/bin/qemu-x86_64-static\nflags: OCF\n");
