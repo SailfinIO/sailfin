@@ -32,6 +32,17 @@ import { clean_runner_env_without, nested_runner_scratch, sfn_bin_path } from "s
 // inherited outer value cannot shadow it. All legs of one test share
 // `cache_dir` — that sharing is precisely what the regression needs — while
 // each leg gets its own scratch so the runs cannot collide on `test.exe`.
+// One cache root shared by every leg in this FILE. The four fixtures below
+// differ in content and `test_bin_cache_key` folds the source hash, never the
+// path, so their test-bin keys are distinct and each test still exercises its
+// own cold/warm sequence. Sharing reuses only the expensive runtime-object
+// link, which is invariant across them — three private roots paid that link
+// three times for nothing. Still isolated per invocation, since the shared
+// path hangs off this invocation's own scratch.
+fn _shared_cache() -> string ![io] {
+    return nested_runner_scratch("filter-cache-key-shared") + "/cache";
+}
+
 fn _leg_env(cache_dir: string, label: string) -> string[] ![io] {
     let mut e = clean_runner_env_without(nested_runner_scratch("filter-cache-key-"
         + label), ["SAILFIN_BUILD_CACHE_DIR"]);
@@ -92,7 +103,7 @@ fn _write_fixture(root: string, name: string) -> string ![io] {
 // legs run in the opposite order.
 test "test filter cache: a filtered run does not shrink a later unfiltered run" ![io] {
     let root = fs.mkdtemp("sfn-filter-cache-single-");
-    let cache = root + "/cache";
+    let cache = _shared_cache();
     let dir = _write_fixture(root, "single");
 
     let first = _run([dir], cache, "single-unfiltered-cold");
@@ -113,7 +124,7 @@ test "test filter cache: a filtered run does not shrink a later unfiltered run" 
 // sharing a binary would make the second leg report the first leg's count.
 test "test filter cache: two different -k selectors do not share a binary" ![io] {
     let root = fs.mkdtemp("sfn-filter-cache-distinct-");
-    let cache = root + "/cache";
+    let cache = _shared_cache();
     let dir = _write_fixture(root, "distinct");
 
     let narrow = _run([dir, "-k", "alpha_marker"], cache, "distinct-narrow");
@@ -132,7 +143,7 @@ test "test filter cache: two different -k selectors do not share a binary" ![io]
 // Two files keep the runner off the in-process leaf path and on the fan-out.
 test "test filter cache: the pool path also keys on the active filter" ![io] {
     let root = fs.mkdtemp("sfn-filter-cache-pool-");
-    let cache = root + "/cache";
+    let cache = _shared_cache();
     let dir_a = _write_fixture(root, "poola");
     let dir_b = _write_fixture(root, "poolb");
 
