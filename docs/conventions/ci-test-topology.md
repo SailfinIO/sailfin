@@ -218,20 +218,56 @@ guard — `ci.yml` is the file people actually edit — but `ci.yml` is in the
 `source` glob, so adding one costs a full macOS matrix. It belongs in the same
 change as the repack.
 
-**The bigger cost is the cache, not the packing.** Five of eight shards, and
-all three of the most expensive, recorded a `test_bin_hit_rate` of **0.00** on
-a PR whose diff was confined to `.github/` — no `compiler/src` or `runtime/`
-change (it reached the matrix via `ci.yml` being in the `source` glob, so
-"touched no compiler source" is not available as an explanation for the misses).
+**The cache misses are real, and traced.** The raw counters behind those
+`0.00`s are genuine misses, not an artifact of the metric: `e2e-b` reports
+`test_bin_hits=0, test_bin_misses=90`, `e2e-a` 0/89, `e2e-d` 0/96, `int-caps`
+0/160, `unit-c` 0/114. (Worth knowing anyway: `_trj_format_hit_rate` returns
+`"0.0000"` for a zero denominator too, so the rate alone cannot distinguish
+"every lookup missed" from "no lookup was attempted" — read the counters.)
 
-Why is open. Entry keys include the compiler binary's SHA-256 (SFN-545), which
-makes bit-reproducibility of that binary between the seeder run and the PR run
-the obvious suspect — but note the PR leg downloads the compiler built by
-`build-compiler-macos` from the PR's own merge ref, which already contains
-`main`, so "branched behind `main`" does not on its own explain a miss. Treat
-this as a hypothesis to test, not a finding. Whatever the cause, cutting those
-three shards' misses is worth far more than the 2.15 min a repack buys, and it
-is a keying question rather than a packing one. No issue is open for it yet.
+**One mechanism explains every observed hit: the shared key.**
+`sailfin-testbin-<target>-<seed>-<freshness>` carried no shard component, so
+every shard leg computed the identical key and raced to publish under it. In
+seeding run `33228066072`, eight macOS legs sharing that key: one save
+succeeded, **five died with "Unable to reserve cache … another job may be
+creating this cache"**, two skipped as already-existing. What survives is not
+the whole-suite archive the key is meant to hold but an arbitrary union
+accumulating one shard per generation. In the measured PR run all five legs
+restored the same 339 MB entry, and it happened to carry `unit-a`, `unit-b`
+and `e2e-c` — exactly the three shards that hit.
+
+That the shared archive is the sole explanation is settled by `unit-b`: it hit
+1.00 while running in the leg whose per-shard key (`test-bin-macOS-e2e-d-`)
+reported `Cache not found for input keys`. No per-shard restore reached it, so
+its binaries can only have come from the shared archive — and an archive
+carrying `unit-b` plainly carried `unit-a` and `e2e-c` too. The per-shard
+restores of stale entries by `unit-a` and `e2e-c` are consistent with their
+hits but cannot be shown to have caused them. `linux-x86_64` has a baseline
+job that masks all of this; `macos-arm64` has none.
+
+The fix is a shard component in that key, placed *before* the seed version so
+the `sailfin-testbin-<target>-<seed>-` restore-key still resolves to the
+whole-suite baseline and can never prefix-match another shard's slice. Legs
+stop racing, each keeps its own slice, and no leg loses the ability to publish
+— which matters because `ci.yml`'s shard legs restore per-shard keys but never
+save one, so the composite's save is the only test-bin publish a PR run does.
+
+**The per-shard keys are a separate, working mechanism.** Run `33228066072`
+saved 8 of 8 `test-bin-macOS-<shard>-<sha>` entries — pre-grouping, one per
+shard. Under the grouping this page describes, `seed-macos` publishes **five**
+entries under the leader shard names, each carrying both of its shards'
+binaries, matching the five keys `build-macos` restores. The `0.00` leader
+shards (`e2e-a`/`e2e-b`/`e2e-d`) missed because at measurement time no entry
+existed for them at any SHA, against either the exact key or the prefix — a
+cold-state transient, not a standing bug.
+
+**Do not size a repack against this.** An earlier reading valued the five
+`0.00` shards at ~82 runner-minutes of avoidable relinking per PR. That was
+unsound for a reason independent of the cold state: `test_s` is compile plus
+link plus *execute*, not link time — `unit-a` hit 1.00 and still took 518 s —
+so a shard's whole wall time was never the recoverable quantity. Whether hit
+rates recover depends on the grouped seeder publishing before `main`'s
+compiler bytes next change, not on anything automatic.
 
 Note this is a single-run sample, and the caveat the section below already
 makes still applies: there is no durable time-series for test-suite wall time,

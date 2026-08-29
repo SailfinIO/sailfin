@@ -387,13 +387,32 @@ runs:
     # edit (and the baseline job could never publish a fresh entry). They
     # are also folded into the per-test cache key by content
     # (`runtime_link_inputs_identity`), so this is belt-and-braces.
+    #
+    # The key carries a shard component, because the shard legs would
+    # otherwise all compute the SAME key and race to publish under it. The
+    # shardless form belongs to a whole-suite producer; a shard leg holds one
+    # slice. Measured on seed-test-bin run 33228066072, eight macOS legs
+    # sharing one key: a single save succeeded, five died with "Unable to
+    # reserve cache with key ..., another job may be creating this cache", and
+    # two skipped as already-existing. What survived was not a whole-suite
+    # archive but an arbitrary union accumulating one shard per generation, so
+    # which shards a leg could hit was decided by which legs won past races.
+    # `linux-x86_64` has a baseline job that masks this; `macos-arm64` has
+    # none, so there it was the only thing the key ever held.
+    #
+    # The component sits BEFORE the seed version, not after, so the
+    # `sailfin-testbin-<target>-<seed>-` restore-key still resolves to the
+    # whole-suite baseline and can never prefix-match another shard's slice.
+    # A sharded leg therefore tries its own slice first and falls back to the
+    # baseline, which is what `linux-x86_64` legs have always consumed.
     - name: Restore test-bin cache (per-test linked binaries)
       if: ${{ inputs.mode != 'build-only' && inputs.mode != 'build-package' }}
       uses: actions/cache@v4
       with:
         path: build/cache/test-bin
-        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.freshness }}
+        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.shard && format('shard.{0}-', inputs.shard) || '' }}${{ inputs.seed_version }}-${{ steps.layout.outputs.freshness }}
         restore-keys: |
+          sailfin-testbin-${{ inputs.target }}-${{ inputs.shard && format('shard.{0}-', inputs.shard) || '' }}${{ inputs.seed_version }}-
           sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-
           sailfin-testbin-${{ inputs.target }}-
 
