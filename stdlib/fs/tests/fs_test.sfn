@@ -9,6 +9,7 @@ import { find, replace } from "sfn/strings";
 import { skip } from "sfn/test";
 
 import {
+    _mkdtemp_acl_is_private,
     exists,
     get_perms,
     is_directory,
@@ -110,14 +111,13 @@ test "fs: mkdtemp creates a unique directory with mode 0700" ![io] {
     assert path.length > 0;
     assert exists(path);
     if _is_windows() {
-        // Windows has no mode bits — the directory inherits the parent
-        // ACL instead of a POSIX permission mode, and `get_perms`'
-        // Windows leg is a pre-existing `-1` stub (predates SFN-993,
-        // which only adds this skip — mkdtemp itself is fixed there,
-        // not get_perms), so the POSIX 0700 assertion below cannot
-        // hold here. Skip loudly rather than silently pass or weaken
-        // the POSIX assertion.
-        skip("SFN-1195: Windows uses ACLs and get_perms is a -1 stub; remove when the test can assert mkdtemp's current-user ACL contract");
+        // Windows has no POSIX mode bits. Observe its equivalent contract
+        // directly: a protected DACL with one inheritable full-control ACE
+        // for the process token's user SID, rather than calling the
+        // `get_perms` stub.
+        assert _mkdtemp_acl_is_private(path);
+        assert remove_all(path);
+        return;
     }
     // 448 = 0o700 — `mkdtemp(3)` is documented to create the dir
     // with this mode regardless of umask.

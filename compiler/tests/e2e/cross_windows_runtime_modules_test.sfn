@@ -17,7 +17,7 @@ test "cross-windows runtime policy is manifest-owned" ![io] {
     assert expect_contains_str(manifest, "[targets.x86_64-w64-mingw32]").ok;
     assert expect_contains_str(manifest, "sfn-sources-replace").ok;
     assert expect_contains_str(manifest, "sfn-sources-add").ok;
-    assert expect_contains_str(manifest, "link-libs-add = [\"-lbcrypt\", \"-lcrypt32\", \"-lws2_32\"]").ok;
+    assert expect_contains_str(manifest, "link-libs-add = [\"-ladvapi32\", \"-lbcrypt\", \"-lcrypt32\", \"-lws2_32\"]").ok;
     assert expect_contains_str(conditioner, "runtime capsule manifest has no [targets.").ok;
     assert expect_eq_bool(contains(conditioner, "target_condition_runtime_sfn_sources"), false).ok;
     assert expect_eq_bool(contains(target, "process_windows"), false).ok;
@@ -57,6 +57,7 @@ test "cross-windows manifest selects every Win32 runtime sibling" ![io] {
     assert expect_contains_str(manifest, "sfn/platform/strcasestr_windows.sfn").ok;
     assert expect_contains_str(manifest, "sfn/platform/opendir_windows.sfn").ok;
     assert expect_contains_str(manifest, "sfn/platform/mkdtemp_windows.sfn").ok;
+    assert expect_contains_str(manifest, "sfn/platform/mkdtemp_acl.sfn=sfn/platform/mkdtemp_acl_windows.sfn").ok;
 }
 
 test "cross-Darwin manifest selects directory-safe no-clobber rename" ![io] {

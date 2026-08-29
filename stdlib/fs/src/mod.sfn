@@ -11,6 +11,10 @@ export {
     write_bytes
 } from "./bytes";
 
+// Private SFN-1195 test seam. POSIX tests retain the public `get_perms`
+// assertion; Windows reads back the directory's protected DACL.
+extern fn sfn_fs_mkdtemp_acl_is_private(path: *u8) -> bool;
+
 fn read(path: string) -> string ![io] {
     // Read the entire contents of a file as a UTF-8 string. A Sailfin
     // `string` cannot round-trip an interior NUL, so a file containing one
@@ -132,15 +136,20 @@ fn get_perms(path: string) -> int ![io] {
 
 fn mkdtemp(prefix: string) -> string ![io] {
     // Creates a unique directory under `$TMPDIR` (or `/tmp`) with
-    // mode `0700` and returns its absolute path. Uses `mkdtemp(3)`
-    // directly so the kernel guarantees uniqueness. Returns an
-    // empty string on failure.
+    // mode `0700` and returns its absolute path. Windows applies the
+    // equivalent protected, current-user-only DACL. Uses `mkdtemp(3)`
+    // directly on POSIX and an exclusive CreateDirectory retry loop on
+    // Windows. Returns an empty string on failure.
     //
     // If `prefix` contains a `/`, it is treated as a path-prefixed
     // template (the caller picks the parent dir); otherwise the
     // result lives under the system temp dir.
     // TODO: switch to Result<string, IoError> once shipped.
     return fs.mkdtemp(prefix);
+}
+
+fn _mkdtemp_acl_is_private(path: string) -> boolean ![io] {
+    return sfn_fs_mkdtemp_acl_is_private(path as *u8);
 }
 
 fn is_executable(path: string) -> boolean ![io] {

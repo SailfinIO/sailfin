@@ -674,7 +674,7 @@ fn is_world_readable(path: string) -> boolean ![io] {
 
 #### `fs.mkdtemp(prefix: string) -> string ![io]`
 
-Create a unique directory under `$TMPDIR` (or `/tmp` if unset) with mode `0700`, using `mkdtemp(3)` so the kernel guarantees uniqueness. Returns the absolute path, or an empty string on failure.
+Create a unique directory under `$TMPDIR` (or the platform temporary directory if unset). POSIX creates it with mode `0700`; Windows applies the equivalent protected DACL, setting the process token's user SID as owner, granting inheritable full control only to that SID, and inheriting no access entries from the parent. Returns the absolute path, or an empty string on failure.
 
 If `prefix` contains a `/`, it is treated as a path-prefixed template (the caller picks the parent dir); otherwise the result lives under the system temp dir.
 

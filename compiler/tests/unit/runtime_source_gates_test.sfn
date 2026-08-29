@@ -292,14 +292,14 @@ test "runtime source gates: select_runtime_sfn_sources is the identity under run
 // 6. The gate section did not truncate sfn-sources — pins that
 //    `[sfn-source-gates]` stays LAST in the manifest.
 // --------------------------------------------------------------
-test "runtime source gates: sfn-sources still has all 41 entries" ![io] {
+test "runtime source gates: sfn-sources still has all 42 entries" ![io] {
     let manifest = fs.readFile(_runtime_manifest_path);
     let sources = toml_get_sfn_sources(manifest);
-    // 41 since SFN-1143 added `sfn/platform/fs_link_ops.sfn`. The literal is
-    // the point of this test — it fails when `[sfn-source-gates]` stops
-    // being the last table and truncates the list above it, so it must be
-    // updated deliberately whenever a source is genuinely added.
-    assert sources.length == 41;
+    // 42 since SFN-1195 added `sfn/platform/mkdtemp_acl.sfn`. The literal is
+    // the point of this test — it fails when `[sfn-source-gates]` stops being
+    // the last table and truncates the list above it, so it must be updated
+    // deliberately whenever a source is genuinely added.
+    assert sources.length == 42;
 }
 
 // --------------------------------------------------------------
