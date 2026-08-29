@@ -1,0 +1,187 @@
+// Unit coverage for `compiler/src/toolchain/index_cache.sfn` — the
+// accepted-index cache and the monotonic revocation ledger (SFEP-0073
+// §3.7, SFN-1069). Each test gets its own scratch subdirectory — pooled,
+// never shared (`.claude/rules/no-bash-e2e.md`).
+import {
+    ToolchainRevocationRecord,
+    toolchain_index_cache_dir,
+    toolchain_index_cache_read_payload,
+    toolchain_index_cache_read_signature,
+    toolchain_index_cache_store,
+    toolchain_revocation_find,
+    toolchain_revocations_corrupt,
+    toolchain_revocations_merge,
+    toolchain_revocations_path,
+    toolchain_revocations_read
+} from "../../src/toolchain/index_cache";
+
+// Same scratch shape as the sibling `toolchain_layout_test.sfn`.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    dir = dir + "/toolchain-index-cache";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _revocation(kind: string, subject: string, reason: string, recorded_at: string, sequence: int) -> ToolchainRevocationRecord {
+    return ToolchainRevocationRecord {
+        kind: kind,
+        subject: subject,
+        reason: reason,
+        recorded_at: recorded_at,
+        sequence: sequence
+    };
+}
+
+test "toolchain index cache: storing a payload and signature reads both back" ![io] {
+    let base = _scratch_dir() + "/store-read";
+    fs.createDirectory(base, true);
+
+    assert toolchain_index_cache_store(base, "{\"sequence\":1}", "deadbeef");
+
+    assert toolchain_index_cache_read_payload(base) == "{\"sequence\":1}";
+    assert toolchain_index_cache_read_signature(base) == "deadbeef";
+}
+
+test "toolchain index cache: a re-store overwrites both members of the pair" ![io] {
+    let base = _scratch_dir() + "/re-store";
+    fs.createDirectory(base, true);
+
+    assert toolchain_index_cache_store(base, "{\"sequence\":1}", "sig-one");
+    assert toolchain_index_cache_store(base, "{\"sequence\":2}", "sig-two");
+
+    assert toolchain_index_cache_read_payload(base) == "{\"sequence\":2}";
+    assert toolchain_index_cache_read_signature(base) == "sig-two";
+}
+
+test "toolchain index cache: no .index directory reads empty for both" ![io] {
+    let base = _scratch_dir() + "/no-index-dir";
+    fs.createDirectory(base, true);
+
+    assert ! fs.exists(toolchain_index_cache_dir(base));
+    assert toolchain_index_cache_read_payload(base) == "";
+    assert toolchain_index_cache_read_signature(base) == "";
+}
+
+test "toolchain index cache: a signature written with a trailing newline reads back trimmed" ![io] {
+    let base = _scratch_dir() + "/sig-trailing-newline";
+    fs.createDirectory(base, true);
+
+    assert toolchain_index_cache_store(base, "{}", "cafef00d\n");
+
+    assert toolchain_index_cache_read_signature(base) == "cafef00d";
+}
+
+test "toolchain index cache: reading a missing revocations file returns [] and corrupt is false" ![io] {
+    let base = _scratch_dir() + "/revocations-missing";
+    fs.createDirectory(base, true);
+
+    assert ! fs.exists(toolchain_revocations_path(base));
+    assert toolchain_revocations_read(base).length == 0;
+    assert ! toolchain_revocations_corrupt(base);
+}
+
+test "toolchain index cache: merging two records into an empty file then reading them back with fields intact" ![io] {
+    let base = _scratch_dir() + "/merge-into-empty";
+    fs.createDirectory(base, true);
+
+    let incoming: ToolchainRevocationRecord[] = [_revocation("release", "0.10.4", "supply-chain compromise", "2026-08-29T00:00:00Z", 7), _revocation("signing-key", "key-abc123", "key rotation", "2026-08-29T00:00:01Z", 8)];
+    assert toolchain_revocations_merge(base, incoming);
+
+    let records = toolchain_revocations_read(base);
+    assert records.length == 2;
+    let release_idx = toolchain_revocation_find(records, "release", "0.10.4");
+    assert release_idx >= 0;
+    assert records[release_idx].reason == "supply-chain compromise";
+    assert records[release_idx].recorded_at == "2026-08-29T00:00:00Z";
+    assert records[release_idx].sequence == 7;
+    let key_idx = toolchain_revocation_find(records, "signing-key", "key-abc123");
+    assert key_idx >= 0;
+    assert records[key_idx].reason == "key rotation";
+    assert records[key_idx].sequence == 8;
+}
+
+// The monotonicity test: a record already accepted on disk keeps its
+// original reason/sequence even when a later merge carries the same exact
+// identity with different values — first acceptance is durable.
+test "toolchain index cache: merging a different reason and sequence for an existing identity leaves the on-disk record unchanged" ![io] {
+    let base = _scratch_dir() + "/merge-monotonic";
+    fs.createDirectory(base, true);
+
+    assert toolchain_revocations_merge(base, [_revocation("release", "0.10.4", "original reason", "2026-08-29T00:00:00Z", 7)]);
+    assert toolchain_revocations_merge(base, [_revocation("release", "0.10.4", "different reason", "2026-09-01T00:00:00Z", 99)]);
+
+    let records = toolchain_revocations_read(base);
+    assert records.length == 1;
+    let idx = toolchain_revocation_find(records, "release", "0.10.4");
+    assert idx >= 0;
+    assert records[idx].reason == "original reason";
+    assert records[idx].recorded_at == "2026-08-29T00:00:00Z";
+    assert records[idx].sequence == 7;
+}
+
+test "toolchain index cache: merging an empty incoming list removes nothing" ![io] {
+    let base = _scratch_dir() + "/merge-empty-incoming";
+    fs.createDirectory(base, true);
+
+    assert toolchain_revocations_merge(base, [_revocation("release", "0.10.4", "compromised", "2026-08-29T00:00:00Z", 7)]);
+    let empty: ToolchainRevocationRecord[] = [];
+    assert toolchain_revocations_merge(base, empty);
+
+    let records = toolchain_revocations_read(base);
+    assert records.length == 1;
+    assert toolchain_revocation_find(records, "release", "0.10.4") >= 0;
+}
+
+// "a later index cannot un-revoke it": an identity present on disk but
+// absent from a later merge's incoming set survives untouched.
+test "toolchain index cache: a record absent from a later merge survives (a later index cannot un-revoke it)" ![io] {
+    let base = _scratch_dir() + "/merge-survives-absence";
+    fs.createDirectory(base, true);
+
+    assert toolchain_revocations_merge(base, [_revocation("release", "0.10.4", "compromised", "2026-08-29T00:00:00Z", 7)]);
+    assert toolchain_revocations_merge(base, [_revocation("release", "0.10.6", "unrelated", "2026-09-01T00:00:00Z", 9)]);
+
+    let records = toolchain_revocations_read(base);
+    assert records.length == 2;
+    assert toolchain_revocation_find(records, "release", "0.10.4") >= 0;
+    assert toolchain_revocation_find(records, "release", "0.10.6") >= 0;
+}
+
+test "toolchain index cache: a malformed magic line makes corrupt true and read return []" ![io] {
+    let base = _scratch_dir() + "/bad-magic";
+    fs.createDirectory(base, true);
+    fs.createDirectory(toolchain_index_cache_dir(base), true);
+    fs.writeFile(toolchain_revocations_path(base), "not-the-magic 1\n");
+
+    assert toolchain_revocations_corrupt(base);
+    assert toolchain_revocations_read(base).length == 0;
+}
+
+test "toolchain index cache: a record containing a TAB in reason is rejected while the rest of the batch lands" ![io] {
+    let base = _scratch_dir() + "/reject-tab-reason";
+    fs.createDirectory(base, true);
+
+    let incoming: ToolchainRevocationRecord[] = [_revocation("release", "0.10.4", "has\ta tab", "2026-08-29T00:00:00Z", 7), _revocation("release", "0.10.5", "clean reason", "2026-08-29T00:00:01Z", 8)];
+    assert ! toolchain_revocations_merge(base, incoming);
+
+    let records = toolchain_revocations_read(base);
+    assert records.length == 1;
+    assert toolchain_revocation_find(records, "release", "0.10.4") < 0;
+    let idx = toolchain_revocation_find(records, "release", "0.10.5");
+    assert idx >= 0;
+    assert records[idx].reason == "clean reason";
+}
+
+test "toolchain index cache: toolchain_revocation_find hits and misses" ![io] {
+    let base = _scratch_dir() + "/find-hits-misses";
+    fs.createDirectory(base, true);
+
+    assert toolchain_revocations_merge(base, [_revocation("release", "0.10.4", "compromised", "2026-08-29T00:00:00Z", 7)]);
+    let records = toolchain_revocations_read(base);
+
+    assert toolchain_revocation_find(records, "release", "0.10.4") == 0;
+    assert toolchain_revocation_find(records, "release", "0.10.5") < 0;
+    assert toolchain_revocation_find(records, "signing-key", "0.10.4") < 0;
+}

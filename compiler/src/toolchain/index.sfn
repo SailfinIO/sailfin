@@ -1,0 +1,737 @@
+// compiler/src/toolchain/index.sfn
+//
+// Client half of the signed toolchain index: parse, authenticate, and expose
+// the cross-release discovery payload that SFN-1062 publishes. The producer,
+// the canonical encoding, and every field name are specified by
+// docs/reference/toolchain-index-schema.md; the policy this data serves is
+// SFEP-0073 §3.7.
+//
+// The index *chooses* a candidate. It never replaces artifact verification:
+// install.sfn still fetches the release-specific signed SHA256SUMS and
+// compares the archive digest before extraction. Nothing here writes to the
+// store or the network — it is a pure decision function over bytes the caller
+// already has, which is what makes the whole trust boundary unit-testable.
+import { ed25519_verify_utf8 } from "sfn/crypto";
+import { int_to_string } from "sfn/strings";
+
+import { char_code, strings_equal, substring } from "../string_utils";
+import { ToolchainRevocationRecord } from "./index_cache";
+import {
+    JSON_ARRAY,
+    JSON_NUMBER,
+    JSON_OBJECT,
+    JSON_STRING,
+    JsonDoc,
+    json_at,
+    json_int,
+    json_is_null,
+    json_key_at,
+    json_kind,
+    json_len,
+    json_member,
+    json_parse_canonical,
+    json_string
+} from "./index_json";
+
+let TOOLCHAIN_INDEX_SCHEMA = "sailfin-toolchain-index/1";
+let TOOLCHAIN_KEY_TRANSITION_SCHEMA = "sailfin-toolchain-key-transition/1";
+let TOOLCHAIN_KEY_PREFIX = "ed25519:";
+
+// Bounds on an untrusted payload. These are far above any plausible real
+// index (five hosts x four channels, a few dozen live releases) and exist so
+// a hostile endpoint cannot turn a parse into an allocation attack before the
+// signature is ever checked.
+let _INDEX_MAX_RELEASES: int = 4096;
+let _INDEX_MAX_RECORDS: int = 4096;
+let _INDEX_MAX_TRANSITIONS: int = 256;
+
+struct ToolchainIndexHost {
+    host: string;
+    asset: string;
+    sha256: string;
+}
+
+struct ToolchainIndexRelease {
+    version: string;
+    channel: string;
+    manifest_key_id: string;
+    manifest_path: string;
+    manifest_sha256: string;
+    hosts: ToolchainIndexHost[];
+}
+
+struct ToolchainIndexYank {
+    version: string;
+    reason: string;
+    recorded_at: string;
+}
+
+struct ToolchainIndexAdvisory {
+    id: string;
+    severity: string;
+    affected: string;
+    // Nullable in the payload; "" here means "no fixed release named".
+    fixed_version: string;
+    summary: string;
+    url: string;
+}
+
+// `channels` is stored flattened rather than as a map-of-maps: Sailfin has no
+// map type, and a (channel, host) -> version triple is exactly what every
+// caller looks up.
+struct ToolchainIndexChannel {
+    name: string;
+    host: string;
+    version: string;
+}
+
+struct ToolchainKeyTransition {
+    effective_sequence: int;
+    from_key_id: string;
+    to_key_id: string;
+    to_public_key: string;
+    signature: string;
+}
+
+// `ok == false` always carries a non-empty `error`. Callers print it and
+// refuse; there is no partial-trust state in which some fields are usable.
+struct ToolchainIndex {
+    ok: boolean;
+    error: string;
+    sequence: int;
+    generated_at: string;
+    expires_at: string;
+    key_id: string;
+    public_key: string;
+    channels: ToolchainIndexChannel[];
+    releases: ToolchainIndexRelease[];
+    yanks: ToolchainIndexYank[];
+    revocations: ToolchainRevocationRecord[];
+    advisories: ToolchainIndexAdvisory[];
+}
+
+fn _index_failure(reason: string) -> ToolchainIndex {
+    let no_channels: ToolchainIndexChannel[] = [];
+    let no_releases: ToolchainIndexRelease[] = [];
+    let no_yanks: ToolchainIndexYank[] = [];
+    let no_revocations: ToolchainRevocationRecord[] = [];
+    let no_advisories: ToolchainIndexAdvisory[] = [];
+    return ToolchainIndex {
+        ok: false,
+        error: reason,
+        sequence: 0,
+        generated_at: "",
+        expires_at: "",
+        key_id: "",
+        public_key: "",
+        channels: no_channels,
+        releases: no_releases,
+        yanks: no_yanks,
+        revocations: no_revocations,
+        advisories: no_advisories
+    };
+}
+
+fn _is_lower_hex(value: string, expect_len: int) -> boolean {
+    if value.length != expect_len { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let code = char_code(substring(value, i, i + 1));
+        let is_digit = code >= 48 && code <= 57;
+        let is_lower = code >= 97 && code <= 102;
+        if !is_digit && !is_lower { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// A key id is the raw public key with a fixed algorithm prefix. Checking both
+// halves agree is what stops a payload from naming one key and being verified
+// against another.
+fn _is_key_id(value: string) -> boolean {
+    if value.length != TOOLCHAIN_KEY_PREFIX.length + 64 { return false; }
+    if !strings_equal(substring(value, 0, TOOLCHAIN_KEY_PREFIX.length), TOOLCHAIN_KEY_PREFIX) {
+        return false;
+    }
+    return _is_lower_hex(substring(value, TOOLCHAIN_KEY_PREFIX.length, value.length), 64);
+}
+
+fn _key_id_body(value: string) -> string {
+    return substring(value, TOOLCHAIN_KEY_PREFIX.length, value.length);
+}
+
+fn _digits_at(text: string, start: int, count: int) -> int {
+    let mut value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let code = char_code(substring(text, start + i, start + i + 1));
+        if code < 48 || code > 57 { return -1; }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    return value;
+}
+
+fn _char_is(text: string, at: int, expect: string) -> boolean {
+    return strings_equal(substring(text, at, at + 1), expect);
+}
+
+// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's
+// days_from_civil). Only years at or after 1970 are accepted, so the negative
+// era branch of the original algorithm is unreachable and omitted.
+fn _days_from_civil(year: int, month: int, day: int) -> int {
+    let mut y = year;
+    if month <= 2 { y -= 1; }
+    let era = y / 400;
+    let yoe = y - era * 400;
+    let mut mp = month - 3;
+    if month <= 2 { mp = month + 9; }
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+fn _days_in_month(year: int, month: int) -> int {
+    if month == 1 || month == 3 || month == 5 || month == 7 { return 31; }
+    if month == 8 || month == 10 || month == 12 { return 31; }
+    if month == 4 || month == 6 || month == 9 || month == 11 { return 30; }
+    if year % 4 != 0 { return 28; }
+    if year % 100 != 0 { return 29; }
+    if year % 400 != 0 { return 28; }
+    return 29;
+}
+
+// `YYYY-MM-DDTHH:MM:SSZ` — the one timestamp shape the schema permits — to
+// epoch seconds. Returns -1 for anything else, including a shape that merely
+// looks close: an unparseable expiry must fail the index, never be treated as
+// far-future.
+fn toolchain_index_parse_timestamp(text: string) -> int {
+    if text.length != 20 { return -1; }
+    if !_char_is(text, 4, "-") || !_char_is(text, 7, "-") { return -1; }
+    if !_char_is(text, 10, "T") { return -1; }
+    if !_char_is(text, 13, ":") || !_char_is(text, 16, ":") { return -1; }
+    if !_char_is(text, 19, "Z") { return -1; }
+    let year = _digits_at(text, 0, 4);
+    let month = _digits_at(text, 5, 2);
+    let day = _digits_at(text, 8, 2);
+    let hour = _digits_at(text, 11, 2);
+    let minute = _digits_at(text, 14, 2);
+    let second = _digits_at(text, 17, 2);
+    if year < 1970 || month < 1 || month > 12 || day < 1 { return -1; }
+    if day > _days_in_month(year, month) { return -1; }
+    if hour < 0 || hour > 23 || minute < 0 || minute > 59 { return -1; }
+    // Leap seconds are not representable in this schema; 60 is a malformed
+    // timestamp here rather than a value to clamp.
+    if second < 0 || second > 59 { return -1; }
+    return _days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60
+        + second;
+}
+
+// The exact bytes the previous signing key signed to authorize a successor.
+// Reconstruction is safe only because every field is validated to an ASCII
+// charset that canonical JSON encodes verbatim — no escape, no reordering, no
+// Unicode. Validate before calling.
+fn _canonical_transition_bytes(transition: ToolchainKeyTransition) -> string {
+    return "{\"effective_sequence\":" + int_to_string(transition.effective_sequence)
+        + ",\"from_key_id\":\""
+        + transition.from_key_id
+        + "\",\"schema_version\":\""
+        + TOOLCHAIN_KEY_TRANSITION_SCHEMA
+        + "\",\"to_key_id\":\""
+        + transition.to_key_id
+        + "\",\"to_public_key\":\""
+        + transition.to_public_key
+        + "\"}\n";
+}
+
+fn _string_member(doc: JsonDoc, node: int, key: string) -> string {
+    let member = json_member(doc, node, key);
+    if member < 0 { return ""; }
+    if json_kind(doc, member) != JSON_STRING { return ""; }
+    return json_string(doc, member);
+}
+
+// A field the schema declares nullable: absent and explicit null are the same
+// answer, and any non-string is a rejection the caller detects as "".
+fn _nullable_string_member(doc: JsonDoc, node: int, key: string) -> string {
+    let member = json_member(doc, node, key);
+    if member < 0 { return ""; }
+    if json_is_null(doc, member) { return ""; }
+    if json_kind(doc, member) != JSON_STRING { return ""; }
+    return json_string(doc, member);
+}
+
+fn _parse_transitions(doc: JsonDoc, node: int, out_error: string[]) -> ToolchainKeyTransition[] {
+    let mut list: ToolchainKeyTransition[] = [];
+    if json_kind(doc, node) != JSON_ARRAY {
+        out_error.push("key_transitions is not an array");
+        return list;
+    }
+    let count = json_len(doc, node);
+    if count > _INDEX_MAX_TRANSITIONS {
+        out_error.push("key_transitions is implausibly long");
+        return list;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let item = json_at(doc, node, i);
+        if json_kind(doc, item) != JSON_OBJECT {
+            out_error.push("key transition " + int_to_string(i)
+                + " is not an object");
+            return list;
+        }
+        let sequence_node = json_member(doc, item, "effective_sequence");
+        if sequence_node < 0 || json_kind(doc, sequence_node) != JSON_NUMBER {
+            out_error.push("key transition " + int_to_string(i)
+                + " has no effective_sequence");
+            return list;
+        }
+        list.push(ToolchainKeyTransition {
+            effective_sequence: json_int(doc, sequence_node, -1), from_key_id: _string_member(doc, item, "from_key_id"), to_key_id: _string_member(doc, item, "to_key_id"), to_public_key: _string_member(doc, item, "to_public_key"), signature: _string_member(doc, item, "signature")
+        });
+        i += 1;
+    }
+    return list;
+}
+
+// Walk the transition chain from the pinned repository trust root to the key
+// the index claims to be signed by, verifying each hop's proof with the key it
+// replaces. Returns "" and the authenticated public key in `out_key`, or a
+// reason.
+//
+// SFEP-0073 §3.7 and the schema doc make this the *only* way the signer may
+// change: an index signed by an unfamiliar key with no chain to the root is
+// rejected even if it is internally consistent, which is what stops a mirror
+// from minting its own trust.
+fn _resolve_signer(transitions: ToolchainKeyTransition[], trusted_root_hex: string, claimed_key_id: string, sequence: int, out_key: string[]) -> string {
+    let mut current_id = TOOLCHAIN_KEY_PREFIX + trusted_root_hex;
+    let mut current_key = trusted_root_hex;
+    let mut last_sequence: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= transitions.length { break; }
+        let transition = transitions[i];
+        let at = " (key transition " + int_to_string(i) + ")";
+        if transition.effective_sequence <= last_sequence {
+            return "key transitions are not strictly sequence-ordered" + at;
+        }
+        if transition.effective_sequence > sequence {
+            return "a key transition takes effect after the index sequence" + at;
+        }
+        if !_is_key_id(transition.from_key_id) || !_is_key_id(transition.to_key_id) {
+            return "malformed key transition key id" + at;
+        }
+        if !_is_lower_hex(transition.to_public_key, 64) {
+            return "malformed key transition public key" + at;
+        }
+        if !strings_equal(transition.from_key_id, current_id) {
+            return "the key transition chain is not contiguous from the trusted root"
+                + at;
+        }
+        if strings_equal(transition.to_key_id, transition.from_key_id) {
+            return "a key transition replaces a key with itself" + at;
+        }
+        if !strings_equal(_key_id_body(transition.to_key_id), transition.to_public_key) {
+            return "a key transition key id disagrees with its public key" + at;
+        }
+        if !_is_lower_hex(transition.signature, 128) {
+            return "malformed key transition signature" + at;
+        }
+        if !ed25519_verify_utf8(current_key, _canonical_transition_bytes(transition), transition.signature) {
+            return "a key transition is not signed by the key it replaces" + at;
+        }
+        current_id = transition.to_key_id;
+        current_key = transition.to_public_key;
+        last_sequence = transition.effective_sequence;
+        i += 1;
+    }
+    if !strings_equal(claimed_key_id, current_id) {
+        return "the index signer is not the endpoint of the trusted key chain";
+    }
+    out_key.push(current_key);
+    return "";
+}
+
+fn _parse_channels(doc: JsonDoc, node: int, out_error: string[]) -> ToolchainIndexChannel[] {
+    let mut list: ToolchainIndexChannel[] = [];
+    if json_kind(doc, node) != JSON_OBJECT {
+        out_error.push("channels is not an object");
+        return list;
+    }
+    let channel_count = json_len(doc, node);
+    let mut c: int = 0;
+    loop {
+        if c >= channel_count { break; }
+        let name = json_key_at(doc, node, c);
+        let hosts = json_at(doc, node, c);
+        if json_kind(doc, hosts) != JSON_OBJECT {
+            out_error.push("channel " + name + " is not an object");
+            return list;
+        }
+        let host_count = json_len(doc, hosts);
+        let mut h: int = 0;
+        loop {
+            if h >= host_count { break; }
+            let host = json_key_at(doc, hosts, h);
+            let value = json_at(doc, hosts, h);
+            // A channel with no release for this host is `null`, not a missing
+            // key. Skipping it here is what makes "unpublished on this host"
+            // and "unknown host" the same not-found answer to the caller.
+            if !json_is_null(doc, value) {
+                if json_kind(doc, value) != JSON_STRING {
+                    out_error.push("channel " + name + " host " + host
+                        + " is neither a version nor null");
+                    return list;
+                }
+                list.push(ToolchainIndexChannel {
+                    name: name, host: host, version: json_string(doc, value)
+                });
+            }
+            h += 1;
+        }
+        c += 1;
+    }
+    return list;
+}
+
+fn _parse_release_hosts(doc: JsonDoc, node: int, version: string, out_error: string[]) -> ToolchainIndexHost[] {
+    let mut list: ToolchainIndexHost[] = [];
+    if json_kind(doc, node) != JSON_OBJECT {
+        out_error.push("release " + version + " has no hosts object");
+        return list;
+    }
+    let count = json_len(doc, node);
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let host = json_key_at(doc, node, i);
+        let entry = json_at(doc, node, i);
+        if json_kind(doc, entry) != JSON_OBJECT {
+            out_error.push("release " + version + " host " + host
+                + " is not an object");
+            return list;
+        }
+        let asset = _string_member(doc, entry, "asset");
+        let sha256 = _string_member(doc, entry, "sha256");
+        if asset.length == 0 || !_is_lower_hex(sha256, 64) {
+            out_error.push("release " + version + " host " + host
+                + " has no asset name and digest");
+            return list;
+        }
+        list.push(ToolchainIndexHost {
+            host: host, asset: asset, sha256: sha256
+        });
+        i += 1;
+    }
+    return list;
+}
+
+fn _parse_releases(doc: JsonDoc, node: int, out_error: string[]) -> ToolchainIndexRelease[] {
+    let mut list: ToolchainIndexRelease[] = [];
+    if json_kind(doc, node) != JSON_OBJECT {
+        out_error.push("releases is not an object");
+        return list;
+    }
+    let count = json_len(doc, node);
+    if count > _INDEX_MAX_RELEASES {
+        out_error.push("releases is implausibly long");
+        return list;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let key = json_key_at(doc, node, i);
+        let entry = json_at(doc, node, i);
+        if json_kind(doc, entry) != JSON_OBJECT {
+            out_error.push("release " + key + " is not an object");
+            return list;
+        }
+        let version = _string_member(doc, entry, "version");
+        // The map key and the record's own `version` must agree, or a lookup
+        // by key would authenticate a different release's assets.
+        if version.length == 0 || !strings_equal(version, key) {
+            out_error.push("release " + key
+                + " disagrees with its own version field");
+            return list;
+        }
+        let manifest = json_member(doc, entry, "release_manifest");
+        if manifest < 0 || json_kind(doc, manifest) != JSON_OBJECT {
+            out_error.push("release " + key + " has no release_manifest");
+            return list;
+        }
+        let manifest_path = _string_member(doc, manifest, "path");
+        let manifest_sha = _string_member(doc, manifest, "sha256");
+        if manifest_path.length == 0 || !_is_lower_hex(manifest_sha, 64) {
+            out_error.push("release " + key
+                + " has no release-manifest location and digest");
+            return list;
+        }
+        let manifest_key_id = _string_member(doc, entry, "manifest_key_id");
+        if !_is_key_id(manifest_key_id) {
+            out_error.push("release " + key + " has no valid manifest_key_id");
+            return list;
+        }
+        let hosts = _parse_release_hosts(doc, json_member(doc, entry, "hosts"), key, out_error);
+        if out_error.length > 0 { return list; }
+        list.push(ToolchainIndexRelease {
+            version: version, channel: _string_member(doc, entry, "channel"), manifest_key_id: manifest_key_id, manifest_path: manifest_path, manifest_sha256: manifest_sha, hosts: hosts
+        });
+        i += 1;
+    }
+    return list;
+}
+
+fn _parse_yanks(doc: JsonDoc, node: int, out_error: string[]) -> ToolchainIndexYank[] {
+    let mut list: ToolchainIndexYank[] = [];
+    if json_kind(doc, node) != JSON_ARRAY {
+        out_error.push("yanks is not an array");
+        return list;
+    }
+    let count = json_len(doc, node);
+    if count > _INDEX_MAX_RECORDS {
+        out_error.push("yanks is implausibly long");
+        return list;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let entry = json_at(doc, node, i);
+        if json_kind(doc, entry) != JSON_OBJECT {
+            out_error.push("yank " + int_to_string(i) + " is not an object");
+            return list;
+        }
+        let version = _string_member(doc, entry, "version");
+        if version.length == 0 {
+            out_error.push("yank " + int_to_string(i) + " names no version");
+            return list;
+        }
+        list.push(ToolchainIndexYank {
+            version: version, reason: _string_member(doc, entry, "reason"), recorded_at: _string_member(doc, entry, "recorded_at")
+        });
+        i += 1;
+    }
+    return list;
+}
+
+fn _parse_revocations(doc: JsonDoc, node: int, sequence: int, out_error: string[]) -> ToolchainRevocationRecord[] {
+    let mut list: ToolchainRevocationRecord[] = [];
+    if json_kind(doc, node) != JSON_ARRAY {
+        out_error.push("revocations is not an array");
+        return list;
+    }
+    let count = json_len(doc, node);
+    if count > _INDEX_MAX_RECORDS {
+        out_error.push("revocations is implausibly long");
+        return list;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let entry = json_at(doc, node, i);
+        if json_kind(doc, entry) != JSON_OBJECT {
+            out_error.push("revocation " + int_to_string(i)
+                + " is not an object");
+            return list;
+        }
+        let kind = _string_member(doc, entry, "kind");
+        let subject = _string_member(doc, entry, "subject");
+        if !strings_equal(kind, "release") && !strings_equal(kind, "signing-key") {
+            out_error.push("revocation " + int_to_string(i)
+                + " has an unknown kind");
+            return list;
+        }
+        if subject.length == 0 {
+            out_error.push("revocation " + int_to_string(i)
+                + " names no subject");
+            return list;
+        }
+        // `sequence` is the index sequence this revocation was first seen at,
+        // not a payload field: it is what lets local state say how current its
+        // knowledge is when offline (SFEP-0073 §3.7).
+        list.push(ToolchainRevocationRecord {
+            kind: kind, subject: subject, reason: _string_member(doc, entry, "reason"), recorded_at: _string_member(doc, entry, "recorded_at"), sequence: sequence
+        });
+        i += 1;
+    }
+    return list;
+}
+
+fn _parse_advisories(doc: JsonDoc, node: int, out_error: string[]) -> ToolchainIndexAdvisory[] {
+    let mut list: ToolchainIndexAdvisory[] = [];
+    if json_kind(doc, node) != JSON_ARRAY {
+        out_error.push("advisories is not an array");
+        return list;
+    }
+    let count = json_len(doc, node);
+    if count > _INDEX_MAX_RECORDS {
+        out_error.push("advisories is implausibly long");
+        return list;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let entry = json_at(doc, node, i);
+        if json_kind(doc, entry) != JSON_OBJECT {
+            out_error.push("advisory " + int_to_string(i) + " is not an object");
+            return list;
+        }
+        let id = _string_member(doc, entry, "id");
+        let severity = _string_member(doc, entry, "severity");
+        let affected = _string_member(doc, entry, "affected");
+        if id.length == 0 || affected.length == 0 {
+            out_error.push("advisory " + int_to_string(i)
+                + " names no id and affected range");
+            return list;
+        }
+        let known = strings_equal(severity, "low") || strings_equal(severity, "moderate")
+            || strings_equal(severity, "high")
+            || strings_equal(severity, "critical");
+        if !known {
+            out_error.push("advisory " + id + " has an unknown severity");
+            return list;
+        }
+        list.push(ToolchainIndexAdvisory {
+            id: id, severity: severity, affected: affected, fixed_version: _nullable_string_member(doc, entry, "fixed_version"), summary: _string_member(doc, entry, "summary"), url: _string_member(doc, entry, "url")
+        });
+        i += 1;
+    }
+    return list;
+}
+
+// Authenticate `payload` against `signature_hex` and decode it.
+//
+// `min_sequence` is the highest sequence this client has already accepted; a
+// lower one is a rollback and is refused even when correctly signed. Pass 0
+// for a client that has never accepted an index. `now_epoch` is wall-clock
+// seconds; pass a negative value only from a caller that has already failed to
+// read a clock, which is itself a refusal — expired metadata must not be able
+// to claim currency, so an unknown clock cannot be treated as "not yet
+// expired".
+//
+// Ordering is deliberate: shape, then key chain, then signature, then freshness
+// and rollback, then contents. Nothing after the signature check can be
+// influenced by an attacker who does not hold the signing key, and nothing
+// before it allocates more than the fixed bounds above.
+fn toolchain_index_verify(payload: string, signature_hex: string, trusted_root_hex: string, min_sequence: int, now_epoch: int) -> ToolchainIndex {
+    if payload.length == 0 {
+        return _index_failure("the signed index is empty");
+    }
+    if !_is_lower_hex(signature_hex, 128) {
+        return _index_failure("the index signature is not 128 lowercase hex characters");
+    }
+    if !_is_lower_hex(trusted_root_hex, 64) {
+        return _index_failure("the pinned release-signing trust root is malformed");
+    }
+    let doc = json_parse_canonical(payload);
+    if !doc.ok {
+        return _index_failure("the signed index is not canonical JSON: " + doc.error);
+    }
+    let root = 0;
+    if json_kind(doc, root) != JSON_OBJECT {
+        return _index_failure("the signed index is not a JSON object");
+    }
+    if !strings_equal(_string_member(doc, root, "schema_version"), TOOLCHAIN_INDEX_SCHEMA) {
+        return _index_failure("the signed index is not "
+            + TOOLCHAIN_INDEX_SCHEMA);
+    }
+    let sequence_node = json_member(doc, root, "sequence");
+    if sequence_node < 0 || json_kind(doc, sequence_node) != JSON_NUMBER {
+        return _index_failure("the signed index has no sequence");
+    }
+    let sequence = json_int(doc, sequence_node, -1);
+    if sequence < 1 {
+        return _index_failure("the signed index has an invalid sequence");
+    }
+
+    let signing = json_member(doc, root, "signing");
+    if signing < 0 || json_kind(doc, signing) != JSON_OBJECT {
+        return _index_failure("the signed index has no signing block");
+    }
+    let key_id = _string_member(doc, signing, "key_id");
+    let public_key = _string_member(doc, signing, "public_key");
+    if !_is_key_id(key_id) || !_is_lower_hex(public_key, 64) {
+        return _index_failure("the signed index has a malformed signing key");
+    }
+    if !strings_equal(_key_id_body(key_id), public_key) {
+        return _index_failure("the signed index key id disagrees with its public key");
+    }
+
+    let mut chain_error: string[] = [];
+    let transitions = _parse_transitions(doc, json_member(doc, root, "key_transitions"), chain_error);
+    if chain_error.length > 0 { return _index_failure(chain_error[0]); }
+    let mut resolved: string[] = [];
+    let chain_reason = _resolve_signer(transitions, trusted_root_hex, key_id, sequence, resolved);
+    if chain_reason.length > 0 { return _index_failure(chain_reason); }
+    if resolved.length != 1 {
+        return _index_failure("the index signing key could not be resolved");
+    }
+    // Verified against the *authenticated* key, not the payload's self-declared
+    // one. They are equal here only because the chain walk proved it.
+    if !ed25519_verify_utf8(resolved[0], payload, signature_hex) {
+        return _index_failure("the signed index signature does not verify");
+    }
+
+    let generated_at = _string_member(doc, root, "generated_at");
+    let expires_at = _string_member(doc, root, "expires_at");
+    let generated_epoch = toolchain_index_parse_timestamp(generated_at);
+    let expires_epoch = toolchain_index_parse_timestamp(expires_at);
+    if generated_epoch < 0 || expires_epoch < 0 {
+        return _index_failure("the signed index has a malformed generated_at or expires_at");
+    }
+    if expires_epoch <= generated_epoch {
+        return _index_failure("the signed index expires no later than it was generated");
+    }
+    if now_epoch < 0 {
+        return _index_failure("the host clock is unavailable, so index freshness cannot be established");
+    }
+    if now_epoch >= expires_epoch {
+        return _index_failure("the signed index expired at " + expires_at);
+    }
+    if sequence < min_sequence {
+        return _index_failure("the signed index sequence " + int_to_string(sequence)
+            + " is older than the cached sequence "
+            + int_to_string(min_sequence));
+    }
+
+    let mut parse_error: string[] = [];
+    let channels = _parse_channels(doc, json_member(doc, root, "channels"), parse_error);
+    if parse_error.length > 0 { return _index_failure(parse_error[0]); }
+    let releases = _parse_releases(doc, json_member(doc, root, "releases"), parse_error);
+    if parse_error.length > 0 { return _index_failure(parse_error[0]); }
+    let yanks = _parse_yanks(doc, json_member(doc, root, "yanks"), parse_error);
+    if parse_error.length > 0 { return _index_failure(parse_error[0]); }
+    let revocations = _parse_revocations(doc, json_member(doc, root, "revocations"), sequence, parse_error);
+    if parse_error.length > 0 { return _index_failure(parse_error[0]); }
+    let advisories = _parse_advisories(doc, json_member(doc, root, "advisories"), parse_error);
+    if parse_error.length > 0 { return _index_failure(parse_error[0]); }
+
+    return ToolchainIndex {
+        ok: true,
+        error: "",
+        sequence: sequence,
+        generated_at: generated_at,
+        expires_at: expires_at,
+        key_id: key_id,
+        public_key: public_key,
+        channels: channels,
+        releases: releases,
+        yanks: yanks,
+        revocations: revocations,
+        advisories: advisories
+    };
+}
+
+export {
+    ToolchainIndex,
+    ToolchainIndexAdvisory,
+    ToolchainIndexChannel,
+    ToolchainIndexHost,
+    ToolchainIndexRelease,
+    ToolchainIndexYank,
+    ToolchainKeyTransition,
+    toolchain_index_parse_timestamp,
+    toolchain_index_verify
+};

@@ -1,0 +1,198 @@
+// Unit coverage for the canonical-JSON reader for `toolchain-index.json`
+// (`compiler/src/toolchain/index_json.sfn`, SFN-1069). The detached Ed25519
+// signature covers the exact downloaded bytes, so every rejection here
+// exercises a case where trusting the payload before this parser accepts it
+// would be unsafe. Schema: docs/reference/toolchain-index-schema.md.
+import { starts_with } from "../../src/string_utils";
+import {
+    JSON_ARRAY,
+    JSON_BOOL,
+    JSON_NULL,
+    JSON_NUMBER,
+    JSON_OBJECT,
+    JSON_STRING,
+    json_at,
+    json_bool,
+    json_int,
+    json_is_null,
+    json_key_at,
+    json_kind,
+    json_len,
+    json_member,
+    json_parse_canonical,
+    json_string
+} from "../../src/toolchain/index_json";
+
+test "toolchain_index_json: accepts a canonical mixed document and reads every member back" {
+    let doc = json_parse_canonical("{\"a\":1,\"b\":[true,null,\"x\"],\"c\":{}}\n");
+    assert doc.ok == true;
+    assert doc.error == "";
+
+    let root = 0;
+    assert json_kind(doc, root) == JSON_OBJECT;
+    assert json_len(doc, root) == 3;
+    assert json_key_at(doc, root, 0) == "a";
+    assert json_key_at(doc, root, 1) == "b";
+    assert json_key_at(doc, root, 2) == "c";
+
+    let a = json_member(doc, root, "a");
+    assert json_kind(doc, a) == JSON_NUMBER;
+    assert json_int(doc, a, -1) == 1;
+
+    let b = json_member(doc, root, "b");
+    assert json_kind(doc, b) == JSON_ARRAY;
+    assert json_len(doc, b) == 3;
+    let b0 = json_at(doc, b, 0);
+    assert json_kind(doc, b0) == JSON_BOOL;
+    assert json_bool(doc, b0) == true;
+    let b1 = json_at(doc, b, 1);
+    assert json_kind(doc, b1) == JSON_NULL;
+    assert json_is_null(doc, b1) == true;
+    let b2 = json_at(doc, b, 2);
+    assert json_kind(doc, b2) == JSON_STRING;
+    assert json_string(doc, b2) == "x";
+
+    let c = json_member(doc, root, "c");
+    assert json_kind(doc, c) == JSON_OBJECT;
+    assert json_len(doc, c) == 0;
+
+    assert json_member(doc, root, "missing") == -1;
+}
+
+test "toolchain_index_json: accepts an empty object and an empty array" {
+    let obj = json_parse_canonical("{}\n");
+    assert obj.ok == true;
+    assert json_kind(obj, 0) == JSON_OBJECT;
+    assert json_len(obj, 0) == 0;
+
+    let arr = json_parse_canonical("[]\n");
+    assert arr.ok == true;
+    assert json_kind(arr, 0) == JSON_ARRAY;
+    assert json_len(arr, 0) == 0;
+}
+
+test "toolchain_index_json: rejects a missing trailing newline" {
+    let doc = json_parse_canonical("{}");
+    assert doc.ok == false;
+    assert starts_with(doc.error, "missing trailing newline") == true;
+}
+
+test "toolchain_index_json: rejects two trailing newlines as trailing content" {
+    let doc = json_parse_canonical("{}\n\n");
+    assert doc.ok == false;
+    assert starts_with(doc.error, "trailing content after the root value") == true;
+}
+
+test "toolchain_index_json: rejects a space after colon and a space after comma" {
+    let after_colon = json_parse_canonical("{\"a\": 1}\n");
+    assert after_colon.ok == false;
+    assert starts_with(after_colon.error, "noncanonical whitespace") == true;
+
+    let after_comma = json_parse_canonical("{\"a\":1, \"b\":2}\n");
+    assert after_comma.ok == false;
+    assert starts_with(after_comma.error, "noncanonical whitespace") == true;
+}
+
+test "toolchain_index_json: rejects unsorted object keys" {
+    let doc = json_parse_canonical("{\"b\":1,\"a\":2}\n");
+    assert doc.ok == false;
+    assert starts_with(doc.error, "unsorted object keys") == true;
+}
+
+test "toolchain_index_json: rejects a duplicate object key" {
+    let doc = json_parse_canonical("{\"a\":1,\"a\":2}\n");
+    assert doc.ok == false;
+    assert starts_with(doc.error, "duplicate object key") == true;
+}
+
+test "toolchain_index_json: rejects noncanonical numbers" {
+    let leading_zero = json_parse_canonical("01\n");
+    assert leading_zero.ok == false;
+    assert starts_with(leading_zero.error, "noncanonical number") == true;
+
+    let fraction = json_parse_canonical("1.5\n");
+    assert fraction.ok == false;
+    assert starts_with(fraction.error, "noncanonical number") == true;
+
+    let exponent = json_parse_canonical("1e3\n");
+    assert exponent.ok == false;
+    assert starts_with(exponent.error, "noncanonical number") == true;
+
+    let plus = json_parse_canonical("+1\n");
+    assert plus.ok == false;
+    assert starts_with(plus.error, "noncanonical number") == true;
+
+    let neg_zero = json_parse_canonical("-0\n");
+    assert neg_zero.ok == false;
+    assert starts_with(neg_zero.error, "noncanonical number") == true;
+}
+
+test "toolchain_index_json: rejects a raw newline inside a string as a control character" {
+    let doc = json_parse_canonical("\"a\nb\"\n");
+    assert doc.ok == false;
+    assert starts_with(doc.error, "control character in string") == true;
+}
+
+test "toolchain_index_json: rejects a noncanonical unicode escape and accepts a raw space" {
+    let escaped = json_parse_canonical("\"\\u0041\"\n");
+    assert escaped.ok == false;
+    assert starts_with(escaped.error, "noncanonical unicode escape") == true;
+
+    let raw_space = json_parse_canonical("\" \"\n");
+    assert raw_space.ok == true;
+    assert json_string(raw_space, 0) == " ";
+}
+
+test "toolchain_index_json: accepts a raw multi-byte UTF-8 string value unchanged" {
+    let doc = json_parse_canonical("\"Ł\"\n");
+    assert doc.ok == true;
+    assert json_kind(doc, 0) == JSON_STRING;
+    assert json_string(doc, 0).length == 2;
+}
+
+test "toolchain_index_json: rejects nesting past 64 deep" {
+    let mut text: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 70 { break; }
+        text = text + "[";
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= 70 { break; }
+        text = text + "]";
+        i += 1;
+    }
+    text = text + "\n";
+    let doc = json_parse_canonical(text);
+    assert doc.ok == false;
+    assert starts_with(doc.error, "json nesting too deep") == true;
+}
+
+test "toolchain_index_json: reads the real toolchain-index payload shape" {
+    let payload = "{\"advisories\":[],\"channels\":{\"stable\":{\"x86_64-unknown-linux-gnu\":\"0.10.4\"}},\"key_transitions\":[],\"releases\":{\"0.10.4\":{\"channel\":\"stable\",\"hosts\":{\"x86_64-unknown-linux-gnu\":{\"asset\":\"sailfin_0.10.4_linux_x86_64.tar.gz\",\"sha256\":\"aa\"}},\"manifest_key_id\":\"ed25519:bb\",\"release_manifest\":{\"path\":\"v0.10.4/SHA256SUMS\",\"sha256\":\"cc\"},\"version\":\"0.10.4\"}},\"revocations\":[],\"schema_version\":\"sailfin-toolchain-index/1\",\"sequence\":42,\"signing\":{\"key_id\":\"ed25519:dd\",\"public_key\":\"ee\"},\"yanks\":[]}\n";
+    let doc = json_parse_canonical(payload);
+    assert doc.ok == true;
+
+    let root = 0;
+    let schema_version = json_member(doc, root, "schema_version");
+    assert json_string(doc, schema_version) == "sailfin-toolchain-index/1";
+
+    let sequence = json_member(doc, root, "sequence");
+    assert json_int(doc, sequence, -1) == 42;
+
+    let channels = json_member(doc, root, "channels");
+    let stable = json_member(doc, channels, "stable");
+    let stable_host = json_member(doc, stable, "x86_64-unknown-linux-gnu");
+    assert json_string(doc, stable_host) == "0.10.4";
+
+    let releases = json_member(doc, root, "releases");
+    let release = json_member(doc, releases, "0.10.4");
+    let hosts = json_member(doc, release, "hosts");
+    let host_asset = json_member(doc, hosts, "x86_64-unknown-linux-gnu");
+    let asset = json_member(doc, host_asset, "asset");
+    assert json_string(doc, asset) == "sailfin_0.10.4_linux_x86_64.tar.gz";
+    let sha256 = json_member(doc, host_asset, "sha256");
+    assert json_string(doc, sha256) == "aa";
+}
