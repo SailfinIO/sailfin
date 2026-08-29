@@ -23,6 +23,7 @@ import {
 import { starts_with, strings_equal } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import { ToolchainHostIdentity, toolchain_current_host } from "./host";
+import { toolchain_is_valid_install_version } from "./install";
 import { toolchain_verify_executable } from "./integrity";
 import {
     TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX,
@@ -285,15 +286,24 @@ fn _management_exec(candidate: ToolchainManagementCandidate, ctx: CliContext) ->
     print.err("error: failed to route management to the installed toolchain at "
         + candidate.binary);
     print.err("  reinstall it: " + toolchain_manifest_reinstall_hint(candidate.version));
-    return 1;
+    return 2;
+}
+
+// The executable to name in the upgrade guidance. `compiler_path` is set from
+// the driver prefix, which the C-ABI entry point and any embedder do not
+// compose, and the one diagnostic whose whole job is to be actionable must not
+// trail off into an empty path.
+fn _management_entry_path(ctx: CliContext) -> string {
+    if ctx.compiler_path.length > 0 { return ctx.compiler_path; }
+    return "the sfn on your PATH";
 }
 
 // A payload that raises the management protocol beyond this entry's range
-// cannot become the management payload, and quietly using an older one would
-// leave the user managing the wrong toolchain forever. Only replacing the
-// entry executable fixes it, and `sfn` never replaces its own entry.
-fn _management_report_blocked(survey: ToolchainManagementSurvey, running: string, ctx: CliContext) -> int ![io] {
-    print.err("error: the newest installed toolchain " + survey.blocked_version
+// cannot become the management payload. Only replacing the entry executable
+// fixes that, and `sfn` never replaces its own entry. Shared by the refusal
+// and the warning so the two renderings cannot drift apart.
+fn _management_blocked_report(survey: ToolchainManagementSurvey, running: string, ctx: CliContext, lead: string) -> void ![io] {
+    print.err(lead + ": the installed toolchain " + survey.blocked_version
         + " requires management protocol "
         + int_to_string(survey.blocked_protocol));
     print.err("  this entry toolchain (" + running + ") supports protocol "
@@ -304,9 +314,31 @@ fn _management_report_blocked(survey: ToolchainManagementSurvey, running: string
         + "replaces itself");
     print.err("  re-run the bootstrap installer, or upgrade sfn with the "
         + "package manager that owns "
-        + ctx.compiler_path);
-    print.err("  until then: sfn toolchain entry-version reports this entry");
-    return 1;
+        + _management_entry_path(ctx));
+}
+
+// Exit 2, never 1: SFEP-0073 §3.4 reserves 1 for an inspection that completed
+// and emitted an envelope naming an actionable condition, and 2 for a
+// selection or policy failure that may emit none. A refused route is the
+// latter, and a `--json` consumer keys off exactly that difference.
+fn _management_report_blocked(survey: ToolchainManagementSurvey, running: string, ctx: CliContext) -> int ![io] {
+    _management_blocked_report(survey, running, ctx, "error");
+    print.err("  to repair meanwhile: sfn toolchain install <exact-version>");
+    print.err("  to report this entry: sfn toolchain entry-version");
+    return 2;
+}
+
+// `sfn toolchain install <exact-version>` — the single management leaf
+// SFEP-0073 §3.5 keeps in the entry as a repair path for when no compatible
+// payload exists (`entry-version`, the other, never reaches routing at all).
+// The version is validated here rather than deferred to the parser because the
+// exemption covers *exact* installs only: a channel name resolves through the
+// signed index, which is precisely the implementation an outranged entry may
+// be too old to carry.
+fn _management_is_install_repair(args: string[]) -> boolean {
+    if args.length != 3 { return false; }
+    if !strings_equal(args[1], "install") { return false; }
+    return toolchain_is_valid_install_version(args[2]);
 }
 
 // Route `sfn toolchain ...` to the newest compatible installed payload.
@@ -320,24 +352,37 @@ fn toolchain_route_management(args: string[], ctx: CliContext) -> int ![io] {
 
     let running = resolve_compiler_version(ctx.binary_dir);
 
-    // A payload already routed into must run the command rather than route
-    // again. The marker names the payload, so it is compared against what this
-    // process turned out to be: a match means this *is* the routed payload,
-    // and a mismatch means a store entry whose payload is not the version its
-    // directory claims, which would otherwise route forever.
+    // This process was itself dispatched into by an explicit selection or a
+    // project pin — `+<version>`, `sfn toolchain run`, an exact
+    // `SAILFIN_TOOLCHAIN`, or the floor gate. That selection outranks
+    // management routing (SFEP-0073 §3.3 rank 1), so routing away from it
+    // would answer with a toolchain the user did not name.
+    // `ctx.selector_resolved` covers only a selector that resolved *in
+    // process*; one that re-execs arrives here as a fresh process with no such
+    // flag, and the marker ordinary dispatch already sets is what identifies
+    // it. An ordinary dispatch never replays a `toolchain` argv — only
+    // build-like commands reach the floor gate — so this can never suppress a
+    // route the user did want.
+    if env.get("SAILFIN_TOOLCHAIN_DISPATCHED").length > 0 { return 0; }
+
+    // A payload already routed into runs the command rather than routing
+    // again. A marker naming some other version is a labelling discrepancy
+    // rather than a loop — this branch returns before the survey, so nothing
+    // below it can route a second time, and the payload's executable was
+    // hash-verified against its manifest before it was ever exec'd. Refusing
+    // here would turn one stray environment variable into an unrecoverable
+    // failure of every management command against a healthy store, so say so
+    // and answer in-process instead.
     let marker = env.get(TOOLCHAIN_MANAGEMENT_MARKER);
     if marker.length > 0 {
-        if semver_compare(semver_parse(marker), semver_parse(running)) == 0 {
-            return 0;
+        if semver_compare(semver_parse(marker), semver_parse(running)) != 0 {
+            print.err("warning: " + TOOLCHAIN_MANAGEMENT_MARKER + " names "
+                + marker
+                + " but this toolchain reports "
+                + running
+                + "; answering in-process");
         }
-        print.err("error: toolchain management routing loop — the routed toolchain "
-            + marker
-            + " reports itself as "
-            + running);
-        print.err("  the stored toolchain for " + marker
-            + " is the wrong version or corrupt");
-        print.err("  reinstall it: " + toolchain_manifest_reinstall_hint(marker));
-        return 1;
+        return 0;
     }
 
     let versions_base = toolchain_versions_base();
@@ -377,18 +422,30 @@ fn toolchain_route_management(args: string[], ctx: CliContext) -> int ![io] {
         i += 1;
     }
 
-    // An incompatible increase only strands the user when that payload is the
-    // newest management implementation present. One older than this entry, or
-    // than a compatible payload that wins anyway, changes nothing.
+    // An incompatible increase only matters when that payload is the newest
+    // management implementation present. One older than this entry, or than a
+    // compatible payload that wins anyway, changes nothing.
     if survey.blocked_version.length > 0 {
         let blocked: SemVer = semver_parse(survey.blocked_version);
         let mut beats_chosen: boolean = true;
         if chosen.ok {
             beats_chosen = semver_compare(blocked, semver_parse(chosen.version)) > 0;
         }
-        if beats_chosen {
-            if semver_compare(blocked, running_semver) > 0 {
-                return _management_report_blocked(survey, running, ctx);
+        if beats_chosen && semver_compare(blocked, running_semver) > 0 {
+            if chosen.ok {
+                // A compatible payload is still usable, so installing a
+                // release this entry cannot manage must not cost the user the
+                // one that works. Report the unmanageable install and route to
+                // the payload that can still serve the command.
+                _management_blocked_report(survey, running, ctx, "warning");
+                print.err("  managing through " + chosen.version + " instead");
+            } else {
+                // Nothing compatible remains. §3.5 keeps exactly one repair
+                // path in the entry for this case, so that a user whose only
+                // payload is unmanageable can still install one that is not.
+                if !_management_is_install_repair(args) {
+                    return _management_report_blocked(survey, running, ctx);
+                }
             }
         }
     }

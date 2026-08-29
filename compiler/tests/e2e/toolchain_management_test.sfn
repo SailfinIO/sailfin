@@ -361,7 +361,11 @@ test "toolchain management: an incompatible protocol increase fails with upgrade
         + store]), proj);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    assert exit == 1;
+    // 2, not 1: SFEP-0073 §3.4 reserves 1 for an inspection that emitted an
+    // envelope naming an actionable condition, and 2 for a selection or policy
+    // failure. Nothing reaches stdout here, so a `--json` consumer keying off
+    // 1 would try to parse an envelope that was never written.
+    assert exit == 2;
     // Never executed — the blocked payload names a protocol this entry
     // cannot describe, not just an older/incompatible one to skip.
     assert ! contains(out + err, marker);
@@ -370,6 +374,55 @@ test "toolchain management: an incompatible protocol increase fails with upgrade
     assert contains(err, "bootstrap installer");
     assert contains(err, "package manager");
     assert contains(err, "sfn toolchain entry-version");
+}
+
+// SFEP-0073 §3.5 keeps exact-version `toolchain install` in the entry as the
+// repair path for exactly this store shape. Refusing it alongside every other
+// leaf would leave a user whose only payload is unmanageable with no way to
+// install one that is not, short of re-running the bootstrap installer.
+test "toolchain management: a blocked protocol still allows exact install repair" ![io] {
+    let store = _scratch_root() + "/protocol-blocked-repair-store";
+    let proj = _scratch_root() + "/protocol-blocked-repair-proj";
+    let marker = "MANAGEMENT_PROTOCOL_REPAIR_999_1d7f";
+    _seed_stub_protocol(store, "999.0.0", marker, 2);
+    _seed_project(proj, "0.0.1");
+
+    // Offline, so the install itself fails — what is asserted is that it was
+    // the *install* that ran and failed, not the routing refusal above it.
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "install", "0.0.1-nonexistent"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert ! contains(out + err, marker);
+    assert ! contains(err, "bootstrap installer");
+    assert ! contains(err, "protocol 2");
+}
+
+// A release this entry cannot manage must not cost the user the payload that
+// still works: the store gets strictly less usable the moment they install a
+// newer toolchain, which is the opposite of the intent.
+test "toolchain management: a blocked protocol still routes to a usable payload" ![io] {
+    let store = _scratch_root() + "/protocol-blocked-fallback-store";
+    let proj = _scratch_root() + "/protocol-blocked-fallback-proj";
+    let usable_marker = "MANAGEMENT_PROTOCOL_FALLBACK_998_1d7f";
+    let blocked_marker = "MANAGEMENT_PROTOCOL_FALLBACK_999_1d7f";
+    _seed_stub_verified(store, "998.0.0", usable_marker);
+    _seed_stub_protocol(store, "999.0.0", blocked_marker, 2);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management blocked-fallback run", exit, out, err);
+    assert exit == 0;
+    // The compatible payload answered.
+    assert contains(out + err, usable_marker);
+    assert ! contains(out + err, blocked_marker);
+    // And the unmanageable install was still reported, as a warning.
+    assert contains(err, "warning");
+    assert contains(err, "999.0.0");
+    assert contains(err, "998.0.0");
 }
 
 test "toolchain management: an incompatible payload older than the entry is ignored" ![io] {
@@ -462,6 +515,32 @@ test "toolchain management: the loop guard refuses a mismatched marker" ![io] {
     assert exit == 1;
     assert contains(err, "toolchain management routing loop");
     assert ! contains(out + err, marker);
+}
+
+// The in-process case below is the easy half. This is the half that bit: a
+// selector naming a *different* toolchain re-execs, and the child is a fresh
+// process with no `selector_resolved` flag, so nothing but the dispatch marker
+// stops it surveying the store and routing onward to a newer payload — handing
+// the user a management implementation they explicitly did not ask for.
+test "toolchain management: a re-exec'd selector is not re-routed onward" ![io] {
+    let store = _scratch_root() + "/selector-reexec-store";
+    let proj = _scratch_root() + "/selector-reexec-proj";
+    let older_marker = "MANAGEMENT_SELECTOR_REEXEC_998_bb31";
+    let newer_marker = "MANAGEMENT_SELECTOR_REEXEC_999_bb31";
+    _seed_stub_verified(store, "998.0.0", older_marker);
+    _seed_stub_verified(store, "999.0.0", newer_marker);
+    _seed_project(proj, "0.0.1");
+
+    // Both payloads are newer than the entry, so unguarded routing inside the
+    // dispatched child would climb from 998.0.0 to 999.0.0.
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+998.0.0", "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management selector-reexec run", exit, out, err);
+    assert exit == 0;
+    assert contains(out + err, older_marker);
+    assert ! contains(out + err, newer_marker);
 }
 
 test "toolchain management: an exact selector outranks management routing" ![io] {

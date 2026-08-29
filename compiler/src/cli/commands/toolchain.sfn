@@ -215,17 +215,6 @@ fn _toolchain_verify(ctx: CliContext, version: string, all: boolean, as_json: bo
     return _emit_report(report, as_json, true);
 }
 
-// `run` is registered for help text and for usage errors only. A well-formed
-// `sfn toolchain run <version> -- <args...>` is intercepted by the early
-// selector scan in `cli/main.sfn` and dispatched before this tree is built, so
-// the trailing arguments stay opaque to *this* toolchain's parser — that is
-// what lets an older entry hand an unfamiliar command to a newer payload
-// (SFEP-0073 §3.3). The scan declines to peel three shapes, which are exactly
-// the ones that reach this tree: a flag where the version belongs (so
-// `toolchain run --help` renders this leaf's help instead of a version error),
-// a selector with no command after it (a local usage error rather than a
-// dispatch that would fetch a toolchain just to print its usage), and a missing
-// selector (which `parse()` rejects on the required positional).
 // The one management leaf that is never routed (SFEP-0073 §3.5): it reports
 // the identity of *this* executable, so answering it from a routed payload
 // would describe the wrong binary. It is consequently the diagnostic that
@@ -244,6 +233,19 @@ fn _toolchain_entry_version(ctx: CliContext) -> int ![io] {
     return 0;
 }
 
+// `run` is registered for help text and for usage errors only. A well-formed
+// `sfn toolchain run <version> -- <args...>` is intercepted by the early
+// selector scan in `cli/main.sfn` and dispatched before this tree is built, so
+// the trailing arguments stay opaque to *this* toolchain's parser — that is
+// what lets an older entry hand an unfamiliar command to a newer payload
+// (SFEP-0073 §3.3). The scan declines to peel three shapes: a flag where the
+// version belongs (so `toolchain run --help` renders this leaf's help instead
+// of a version error), a selector with no command after it (a local usage
+// error rather than a dispatch that would fetch a toolchain just to print its
+// usage), and a missing selector (which `parse()` rejects on the required
+// positional). Those reach this tree only when management routing (§3.5) also
+// declines — with a routable payload installed, the whole `toolchain` prefix
+// is forwarded and none of them are answered here.
 fn command_def() -> Command {
     let install_cmd = with_arg(command("install", "Download, verify, and store a pinned toolchain"), arg("version", "Toolchain version to install (e.g. 0.8.0-alpha.3)"));
     let run_cmd = with_arg(command("run", "Run a command with an exact toolchain, without changing any configuration"), arg("version", "Exact toolchain version to run (e.g. 0.10.6)"));

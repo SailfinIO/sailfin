@@ -118,9 +118,6 @@ fn toolchain_integrity_name(integrity: int) -> string {
     return "verified";
 }
 
-// Immediate subdirectory names of `dir`, sorted. Non-directories are skipped:
-// the store root also holds the `bin/` alias tree and stray files must never
-// be reported as installed versions.
 // Classify one committed-or-not store directory.
 //
 // `list` verifies in full rather than checking only that recorded paths

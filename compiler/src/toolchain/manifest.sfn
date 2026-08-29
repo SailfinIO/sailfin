@@ -24,7 +24,8 @@ let TOOLCHAIN_MANIFEST_MAX_SCHEMA: int = 1;  // highest this build can read
 // implementation compatibility), deliberately separate from
 // `TOOLCHAIN_MANIFEST_SCHEMA` (this file's own grammar version). This is the
 // value a payload installed by this build records; `management.sfn` routes on
-// the value it reads back out of an installed payload's manifest.
+// the value it reads back out of an installed payload's manifest, against the
+// range below.
 let TOOLCHAIN_MANAGEMENT_PROTOCOL: int = 1;
 // The protocol range this entry can *route to* (SFN-1067), as distinct from
 // the single value above, which is what it *writes* into its own manifest. A
