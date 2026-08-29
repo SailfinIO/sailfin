@@ -449,6 +449,35 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
                 value = extracted;
             }
         }
+        // SFN-1126: bridge a pointer-shaped operand into an aggregate env
+        // field. `closure_field_llvm_type` strips the pointer suffix for a
+        // `by_value` user-struct capture (#1476), so the field is the
+        // aggregate `%T` — but `_resolve_capture_operands` passes a parameter
+        // binding through verbatim, and a struct parameter is `%T*`, leaving
+        // `store %T %p` with `%p : %T*` for clang to reject. An annotated
+        // local escaped this only because the capture site loads it via the
+        // `%l`-prefix heuristic; a parameter has no such prefix.
+        //
+        // Dereferencing here rather than at the capture site closes the hole
+        // for any pointer-shaped operand reaching an aggregate field, not
+        // just the parameter one. Requiring `operand_type` to be exactly
+        // `field.llvm_type + "*"` leaves an operand that is already the
+        // aggregate (an annotated local, the OwnedBuf spawn-env path)
+        // untouched.
+        if starts_with(field.llvm_type, "%") {
+            if !ends_with_pointer_suffix(field.llvm_type) {
+                if operand_type == field.llvm_type + "*" {
+                    let loaded = format_temp_name(current_temp);
+                    current_temp += 1;
+                    lines.push("  " + loaded + " = load " + field.llvm_type
+                        + ", "
+                        + operand_type
+                        + " "
+                        + value);
+                    value = loaded;
+                }
+            }
+        }
         let field_ptr = format_temp_name(current_temp);
         current_temp += 1;
         lines.push("  " + field_ptr + " = getelementptr inbounds " + type_name
