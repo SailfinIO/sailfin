@@ -660,6 +660,26 @@ Auto-dispatch (`auto`) is the default because every newly fetched toolchain is v
 
 A project with no `[toolchain]` section is unaffected — the gate is a no-op.
 
+### Management-command routing
+
+`sfn toolchain ...` (any leaf) is intercepted as a raw argv prefix before `sfn`'s command tree is built, so an older entry executable on `PATH` can hand a management leaf it was never built to parse to a newer installed payload — the mechanism that lets native lifecycle commands (`list`, `active`, `verify`, `install`, and future leaves) evolve without a package manager needing to overwrite the entry executable.
+
+Routing walks the host-qualified version store plus the running entry itself and picks the **newest candidate whose recorded `management_protocol` this entry can speak** — a store entry with no `.install-manifest` (a legacy or pre-SFEP-0073 install) is never a candidate, and a payload no newer than the running entry loses, so routing only ever moves forward. Only the chosen candidate is hash-verified; a verification failure warns and falls through to the next-newest so one corrupt payload can't strand management commands. A payload whose protocol is *above* what this entry can route to can never become the management payload — if a compatible payload also exists the entry warns and routes to it instead; if none does, the entry refuses (exit `2`) with bootstrap-installer / package-manager upgrade guidance, sparing exactly one repair path: `sfn toolchain install <exact-version>`.
+
+`sfn toolchain entry-version` bypasses routing entirely and always answers from the executable actually invoked — it's the diagnostic that still works when routing itself is broken:
+
+```
+$ sfn toolchain entry-version
+version: 0.10.6
+host: x86_64-unknown-linux-gnu
+executable: /path/to/sfn
+management-protocol: 1-1
+```
+
+Management routing never reads the project `[toolchain]` pin, so `sfn toolchain ...` commands stay reachable even when ordinary selection (above) is broken or unsatisfiable.
+
+> **Not yet shipped:** `sfn toolchain remove`, the per-user default (`sfn toolchain default`), channel/update discovery (`sfn toolchain update`), and the signed release index with yank/revocation enforcement are designed in SFEP-0073 but not implemented. See [`docs/status.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md) for current per-leaf status.
+
 ---
 
 ## Build System
@@ -737,6 +757,7 @@ These environment variables influence the behavior of `sfn`.
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `sfn build`/`run`/`check`/`test` | Set to `1` to downgrade a `[toolchain]` pin mismatch from a hard error to a warning for every invocation in the shell/CI job. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | Controls the toolchain-pin mismatch response: `auto` (default) fetches + verifies + re-execs the pinned toolchain; `local` verifies only and errors on mismatch; `<version>` forces that dispatch target; `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN_DISPATCHED` | `sfn build`/`run`/`check`/`test` | Set automatically by `sfn` before re-exec'ing a dispatched toolchain (`=<version>`) as a re-entrancy guard; not intended to be set by hand. |
+| `SAILFIN_TOOLCHAIN_MANAGEMENT` | `sfn toolchain ...` | Set automatically by `sfn` before re-exec'ing a routed management payload (`=<version>`) as a re-entrancy guard; not intended to be set by hand. See [Management-command routing](#management-command-routing). |
 | `SAILFIN_CLEAN_KEEP_SEED` | `sfn dev clean build`/`all` | Set to `0` (equivalent to `--include-seed`) to also delete the seed toolchain store. Defaults to `1` (the seed toolchain is preserved). |
 | `SAILFIN_TEST_SCRATCH` | `sfn test` | Override the scratch directory a test's subprocess builds are isolated into. |
 | `SAILFIN_EFFECT_ENFORCE` | `sfn` binary | Control runtime effect-enforcement (the seal, SFEP-0016); partial on macOS arm64 (#613). |
