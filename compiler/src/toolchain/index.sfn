@@ -374,9 +374,13 @@ fn _resolve_signer(transitions: ToolchainKeyTransition[], trusted_root_hex: stri
     if !strings_equal(claimed_key_id, current_id) {
         return "the index signer is not the endpoint of the trusted key chain";
     }
-    if _index_contains(revoked_key_ids, current_id) {
-        return "the index is signed by a revoked key";
-    }
+    // No endpoint revocation check here, deliberately: it could never fire.
+    // `current_id` is the root when there are no transitions, which the check
+    // above the loop already rejected, and otherwise the last hop's
+    // `to_key_id`, which the in-loop check rejected in that same iteration.
+    // The in-loop check is the load-bearing one — it also catches a revoked
+    // *intermediate* (A -> B -> C with B revoked), which an endpoint-only test
+    // would miss.
     out_key.push(current_key);
     return "";
 }
