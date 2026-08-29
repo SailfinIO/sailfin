@@ -121,11 +121,6 @@ test "match lowering: enum field constraint form is rejected with E1023" ![io] {
     // `MatchCaseStructure` carrier SFN-1061 widened.
     assert diag.span != null;
     assert diag.span.start_line == 12;
-    // The legacy channel must carry the `[fatal]` twin, since an untagged
-    // string is discarded rather than surfaced.
-    assert result.diagnostics.length > 0;
-    assert _contains(result.diagnostics[0], "[fatal]");
-    assert _contains(result.diagnostics[0], "[E1023]");
     // The wrong-branch mechanism itself: no binding may be produced for the
     // field, or the arm would still match every `Result.Ok`.
     assert result.field_bindings.length == 0;

@@ -27,7 +27,12 @@ import {
     TryFrameContext,
     TypeContext
 } from "../types";
-import { extend_diag_array, extend_string_array, trim_text } from "../utils";
+import {
+    extend_diag_array,
+    extend_string_array,
+    lowering_error_diag,
+    trim_text
+} from "../utils";
 import { lower_instruction_range } from "./instructions";
 import { allocate_block_label } from "./instructions_condition";
 import {
@@ -44,7 +49,6 @@ import { collect_mutation_names, find_mutation_for_name } from "./phi";
 // Lower a range-based for loop (e.g., `for i in 0..10`).
 // Returns null if the iterable is not a recognized range pattern.
 fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_target: string, iterable_text: string, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, next_index: int) -> BlockLoweringResult? {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -64,15 +68,12 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         // top-level separator is present, however, array fallback would discard
         // the range parser's precise diagnostic and reinterpret invalid syntax.
         if find_top_level_range_separator(iterable_text) < 0 { return null; }
-        let mut _ci8: int = 0;
-        loop {
-            if _ci8 >= range_parse.diagnostics.length { break; }
-            diagnostics.push("llvm lowering [fatal] [E1004]: invalid `.for` range in `"
-                + function.name
-                + "`: "
-                + range_parse.diagnostics[_ci8]);
-            _ci8 += 1;
+        let mut invalid_range_message = "invalid `.for` range in `" + function.name
+            + "`";
+        if range_parse.diags.length > 0 {
+            invalid_range_message = invalid_range_message + ": " + range_parse.diags[0].message;
         }
+        diags.push(lowering_error_diag("E1004", invalid_range_message, null));
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -80,7 +81,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -92,28 +92,12 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         };
     }
 
-    let mut _ci9: int = 0;
-    loop {
-        if _ci9 >= range_parse.diagnostics.length { break; }
-        diagnostics.push(range_parse.diagnostics[_ci9]);
-        _ci9 += 1;
-    }
-
     let start_result = lower_expression(range_parse.start, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    let mut _ci10: int = 0;
-    loop {
-        if _ci10 >= start_result.diagnostics.length { break; }
-        diagnostics.push(start_result.diagnostics[_ci10]);
-        _ci10 += 1;
-    }
     diags = extend_diag_array(diags, start_result.diags);
     current_lines = start_result.lines;
     current_temp = start_result.temp_index;
 
     if start_result.operand == null {
-        diagnostics.push("llvm lowering: unable to lower `.for` range start in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -121,7 +105,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -134,20 +117,11 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     }
 
     let end_result = lower_expression(range_parse.end, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    let mut _ci11: int = 0;
-    loop {
-        if _ci11 >= end_result.diagnostics.length { break; }
-        diagnostics.push(end_result.diagnostics[_ci11]);
-        _ci11 += 1;
-    }
     diags = extend_diag_array(diags, end_result.diags);
     current_lines = end_result.lines;
     current_temp = end_result.temp_index;
 
     if end_result.operand == null {
-        diagnostics.push("llvm lowering: unable to lower `.for` range end in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -155,7 +129,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -168,19 +141,10 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     }
 
     let start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines, true, null);
-    let mut _ci12: int = 0;
-    loop {
-        if _ci12 >= start_coerced.diagnostics.length { break; }
-        diagnostics.push(start_coerced.diagnostics[_ci12]);
-        _ci12 += 1;
-    }
     diags = extend_diag_array(diags, start_coerced.diags);
     current_lines = start_coerced.lines;
     current_temp = start_coerced.temp_index;
     if start_coerced.operand == null {
-        diagnostics.push("llvm lowering: `.for` start expression must evaluate to `number` in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -188,7 +152,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -202,19 +165,10 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     let start_operand = start_coerced.operand;
 
     let end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines, true, null);
-    let mut _ci13: int = 0;
-    loop {
-        if _ci13 >= end_coerced.diagnostics.length { break; }
-        diagnostics.push(end_coerced.diagnostics[_ci13]);
-        _ci13 += 1;
-    }
     diags = extend_diag_array(diags, end_coerced.diags);
     current_lines = end_coerced.lines;
     current_temp = end_coerced.temp_index;
     if end_coerced.operand == null {
-        diagnostics.push("llvm lowering: `.for` end expression must evaluate to `number` in `"
-            + function.name
-            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -222,7 +176,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -239,20 +192,11 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     let stride_text = trim_text(range_parse.stride);
     if stride_text.length > 0 {
         let stride_result = lower_expression(stride_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci14: int = 0;
-        loop {
-            if _ci14 >= stride_result.diagnostics.length { break; }
-            diagnostics.push(stride_result.diagnostics[_ci14]);
-            _ci14 += 1;
-        }
         diags = extend_diag_array(diags, stride_result.diags);
         current_lines = stride_result.lines;
         current_temp = stride_result.temp_index;
 
         if stride_result.operand == null {
-            diagnostics.push("llvm lowering: `.for` stride expression did not produce a value in `"
-                + function.name
-                + "`");
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -260,7 +204,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
                 bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
-                diagnostics: diagnostics,
                 diags: diags,
                 terminated: false,
                 next_local_id: current_next_local,
@@ -273,19 +216,10 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         }
 
         let stride_coerced = coerce_operand_to_type(stride_result.operand, "double", current_temp, current_lines, true, null);
-        let mut _ci15: int = 0;
-        loop {
-            if _ci15 >= stride_coerced.diagnostics.length { break; }
-            diagnostics.push(stride_coerced.diagnostics[_ci15]);
-            _ci15 += 1;
-        }
         diags = extend_diag_array(diags, stride_coerced.diags);
         current_lines = stride_coerced.lines;
         current_temp = stride_coerced.temp_index;
         if stride_coerced.operand == null {
-            diagnostics.push("llvm lowering: `.for` stride expression must evaluate to `number` in `"
-                + function.name
-                + "`");
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -293,7 +227,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
                 bindings: current_bindings,
                 temp_index: current_temp,
                 block_counter: current_block_counter,
-                diagnostics: diagnostics,
                 diags: diags,
                 terminated: false,
                 next_local_id: current_next_local,
@@ -309,9 +242,10 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         if is_number_literal(stride_text) {
             let normalised_stride = normalise_number_literal(stride_text);
             if normalised_stride == "0.0" {
-                diagnostics.push("llvm lowering [fatal] [E1004]: `.for` stride must not be zero in `"
+                let zero_stride_message = "`.for` stride must not be zero in `"
                     + function.name
-                    + "`");
+                    + "`";
+                diags.push(lowering_error_diag("E1004", zero_stride_message, null));
                 return BlockLoweringResult {
                     lines: current_lines,
                     allocas: current_allocas,
@@ -319,7 +253,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
                     bindings: current_bindings,
                     temp_index: current_temp,
                     block_counter: current_block_counter,
-                    diagnostics: diagnostics,
                     diags: diags,
                     terminated: false,
                     next_local_id: current_next_local,
@@ -378,19 +311,10 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         narrowed_variant: ""
     };
     let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
-    let mut _ci16: int = 0;
-    loop {
-        if _ci16 >= header_load.diagnostics.length { break; }
-        diagnostics.push(header_load.diagnostics[_ci16]);
-        _ci16 += 1;
-    }
     current_lines = header_load.lines;
     current_temp = header_load.temp_index;
 
     if header_load.operand == null {
-        diagnostics.push("llvm lowering: internal error loading `.for` iteration value in `"
-            + function.name
-            + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
         return BlockLoweringResult {
@@ -400,7 +324,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -430,19 +353,10 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     current_temp += 1;
 
     let ascending_comparison = emit_comparison_instruction("<", header_load.operand, end_operand, current_temp, current_lines, false);
-    let mut _ci17: int = 0;
-    loop {
-        if _ci17 >= ascending_comparison.diagnostics.length { break; }
-        diagnostics.push(ascending_comparison.diagnostics[_ci17]);
-        _ci17 += 1;
-    }
     current_lines = ascending_comparison.lines;
     current_temp = ascending_comparison.temp_index;
 
     if ascending_comparison.operand == null {
-        diagnostics.push("llvm lowering: unable to compare `.for` range bounds in `"
-            + function.name
-            + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
         return BlockLoweringResult {
@@ -452,7 +366,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -465,19 +378,10 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     }
 
     let descending_comparison = emit_comparison_instruction(">", header_load.operand, end_operand, current_temp, current_lines, false);
-    let mut _ci18: int = 0;
-    loop {
-        if _ci18 >= descending_comparison.diagnostics.length { break; }
-        diagnostics.push(descending_comparison.diagnostics[_ci18]);
-        _ci18 += 1;
-    }
     current_lines = descending_comparison.lines;
     current_temp = descending_comparison.temp_index;
 
     if descending_comparison.operand == null {
-        diagnostics.push("llvm lowering: unable to compare descending `.for` range bounds in `"
-            + function.name
-            + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
         return BlockLoweringResult {
@@ -487,7 +391,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             bindings: current_bindings,
             temp_index: current_temp,
             block_counter: current_block_counter,
-            diagnostics: diagnostics,
             diags: diags,
             terminated: false,
             next_local_id: current_next_local,
@@ -536,12 +439,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     let body_locals = append_local_binding(current_locals, iteration_binding);
     let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, stacked, try_stack, context, loop_body_scope_id, scope_depth
         + 1, loop_body_label);
-    let mut _ci19: int = 0;
-    loop {
-        if _ci19 >= body_result.diagnostics.length { break; }
-        diagnostics.push(body_result.diagnostics[_ci19]);
-        _ci19 += 1;
-    }
     diags = extend_diag_array(diags, body_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_allocas = body_result.allocas;
@@ -611,12 +508,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     current_lines.push(loop_increment_label + ":");
 
     let increment_load = load_local_operand(iteration_binding, current_temp, current_lines);
-    let mut _ci20: int = 0;
-    loop {
-        if _ci20 >= increment_load.diagnostics.length { break; }
-        diagnostics.push(increment_load.diagnostics[_ci20]);
-        _ci20 += 1;
-    }
     current_lines = increment_load.lines;
     current_temp = increment_load.temp_index;
 
@@ -635,10 +526,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         current_temp += 1;
         current_lines.push("  store double " + next_value_name + ", double* "
             + iteration_pointer);
-    } else {
-        diagnostics.push("llvm lowering: unable to increment `.for` iterator in `"
-            + function.name
-            + "`");
     }
 
     current_lines.push("  br label %" + loop_header_label);
@@ -658,7 +545,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         bindings: current_bindings,
         temp_index: current_temp,
         block_counter: current_block_counter,
-        diagnostics: diagnostics,
         diags: diags,
         terminated: false,
         next_local_id: current_next_local,
@@ -734,7 +620,6 @@ fn build_loop_exit_mutations(collected_mutations: LocalMutation[], locals: Local
         bindings: [],
         temp_index: current_temp,
         block_counter: 0,
-        diagnostics: [],
         diags: [],
         terminated: false,
         next_local_id: 0,

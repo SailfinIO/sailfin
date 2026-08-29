@@ -2,14 +2,19 @@
 //
 // Regression coverage for SFN-532. A failed layout-entry parse must fail
 // closed where the native-IR parser would otherwise drop that entry.
-import { parse_native_artifact } from "sfn/ir";
+import { LoweringDiagnostic, parse_native_artifact } from "sfn/ir";
 import { expect_eq_bool, expect_eq_int } from "sfn/test";
 
-fn _has_diagnostic(diagnostics: string[], expected: string) -> boolean {
+fn _has_diagnostic(diags: LoweringDiagnostic[], expected_code: string, expected_message: string) -> boolean {
     let mut index: int = 0;
     loop {
-        if index >= diagnostics.length { break; }
-        if diagnostics[index] == expected { return true; }
+        if index >= diags.length { break; }
+        let diag = diags[index];
+        if diag.code == expected_code {
+            if diag.message == expected_message {
+                if diag.severity == "error" { return true; }
+            }
+        }
         index += 1;
     }
     return false;
@@ -25,7 +30,7 @@ test "native IR layout gate: malformed struct field is fatal" {
     let result = parse_native_artifact(artifact);
 
     assert expect_eq_int(result.structs.length, 1).ok;
-    assert expect_eq_bool(_has_diagnostic(result.diagnostics, "llvm lowering [fatal] [E1005]: malformed layout field in struct Box: "
+    assert expect_eq_bool(_has_diagnostic(result.diags, "E1005", "malformed layout field in struct Box: "
         + malformed_line), true).ok;
 }
 
@@ -39,7 +44,7 @@ test "native IR layout gate: malformed enum variant is fatal" {
     let result = parse_native_artifact(artifact);
 
     assert expect_eq_int(result.enums.length, 1).ok;
-    assert expect_eq_bool(_has_diagnostic(result.diagnostics, "llvm lowering [fatal] [E1005]: malformed layout variant in enum Option: "
+    assert expect_eq_bool(_has_diagnostic(result.diags, "E1005", "malformed layout variant in enum Option: "
         + malformed_line), true).ok;
 }
 
@@ -54,7 +59,7 @@ test "native IR layout gate: malformed enum payload is fatal" {
     let result = parse_native_artifact(artifact);
 
     assert expect_eq_int(result.enums.length, 1).ok;
-    assert expect_eq_bool(_has_diagnostic(result.diagnostics, "llvm lowering [fatal] [E1005]: malformed layout payload in enum Option: "
+    assert expect_eq_bool(_has_diagnostic(result.diags, "E1005", "malformed layout payload in enum Option: "
         + malformed_line), true).ok;
 }
 
@@ -72,7 +77,7 @@ test "native IR layout gate: well-formed spaced types remain diagnostic-free" {
         + ".endenum\n";
     let result = parse_native_artifact(artifact);
 
-    assert expect_eq_int(result.diagnostics.length, 0).ok;
+    assert expect_eq_int(result.diags.length, 0).ok;
     assert expect_eq_int(result.structs.length, 1).ok;
     assert expect_eq_int(result.enums.length, 1).ok;
 }

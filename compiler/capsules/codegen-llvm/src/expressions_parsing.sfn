@@ -381,7 +381,6 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
 
 fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let trimmed = trim_text(expression);
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
 
     if !starts_with(trimmed, "let ") {
@@ -390,8 +389,7 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
             name: "",
             mutable: false,
             type_annotation: "",
-            initializer: "",
-            diagnostics: diagnostics
+            initializer: ""
         };
     }
 
@@ -406,14 +404,12 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     // Find the = sign
     let assignment = parse_assignment_expression(after_mut);
     if !assignment.success {
-        diagnostics.push("llvm lowering: inline let expression missing initializer");
         return InlineLetParseResult {
             success: false,
             name: "",
             mutable: is_mutable,
             type_annotation: "",
-            initializer: "",
-            diagnostics: diagnostics
+            initializer: ""
         };
     }
 
@@ -431,14 +427,12 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     } else { name = lhs; }
 
     if name.length == 0 {
-        diagnostics.push("llvm lowering: inline let expression missing variable name");
         return InlineLetParseResult {
             success: false,
             name: "",
             mutable: is_mutable,
             type_annotation: type_annotation,
-            initializer: initializer,
-            diagnostics: diagnostics
+            initializer: initializer
         };
     }
 
@@ -447,8 +441,7 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
         name: name,
         mutable: is_mutable,
         type_annotation: type_annotation,
-        initializer: initializer,
-        diagnostics: diagnostics
+        initializer: initializer
     };
 }
 
@@ -456,7 +449,6 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
 // Ternary Expression Parsing
 // =============================================================================
 fn parse_ternary_expression(text: string) -> TernaryParseResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(text);
 
@@ -465,8 +457,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
             success: false,
             condition: "",
             true_value: "",
-            false_value: "",
-            diagnostics: diagnostics
+            false_value: ""
         };
     }
 
@@ -569,8 +560,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
             success: false,
             condition: "",
             true_value: "",
-            false_value: "",
-            diagnostics: diagnostics
+            false_value: ""
         };
     }
 
@@ -582,8 +572,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
         success: true,
         condition: condition,
         true_value: true_value,
-        false_value: false_value,
-        diagnostics: diagnostics
+        false_value: false_value
     };
 }
 
@@ -596,48 +585,40 @@ fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
         return RawAddressParseResult {
             recognized: false,
             success: false,
-            target: "",
-            diagnostics: []
+            target: ""
         };
     }
     if !ends_with(trimmed, ")") {
-        let diagnostics: string[] = ["llvm lowering: raw_address expression missing closing `)`"];
         return RawAddressParseResult {
             recognized: true,
             success: false,
-            target: "",
-            diagnostics: diagnostics
+            target: ""
         };
     }
     let inner = trim_text(substring(trimmed, 12, trimmed.length - 1));
     if inner.length == 0 {
-        let diagnostics: string[] = ["llvm lowering: raw_address expression missing target"];
         return RawAddressParseResult {
             recognized: true,
             success: false,
-            target: "",
-            diagnostics: diagnostics
+            target: ""
         };
     }
     return RawAddressParseResult {
         recognized: true,
         success: true,
-        target: inner,
-        diagnostics: []
+        target: inner
     };
 }
 
 fn parse_cast_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return CastParseResult {
             recognized: false,
             success: false,
             value: "",
-            type_annotation: "",
-            diagnostics: diagnostics
+            type_annotation: ""
         };
     }
 
@@ -757,8 +738,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             recognized: false,
             success: false,
             value: "",
-            type_annotation: "",
-            diagnostics: diagnostics
+            type_annotation: ""
         };
     }
 
@@ -768,21 +748,17 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     if value.length == 0 { _if186 = true; }
     if annotation.length == 0 { _if186 = true; }
     if _if186 {
-        diagnostics.push("llvm lowering: malformed cast expression `" + text
-            + "`");
         return CastParseResult {
             recognized: true,
             success: false,
             value: value,
-            type_annotation: annotation,
-            diagnostics: diagnostics
+            type_annotation: annotation
         };
     }
     return CastParseResult {
         recognized: true,
         success: true,
         value: value,
-        type_annotation: annotation,
-        diagnostics: diagnostics
+        type_annotation: annotation
     };
 }

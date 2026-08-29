@@ -72,7 +72,7 @@ test "emit_runtime_call: string.concat renders SfnString-aggregate call to sfn_s
     assert result.lines[0] == "  %t0 = call {i8*, i64} @sfn_str_concat({i8*, i64} %a, {i8*, i64} %b, ptr null)";
     assert result.temp_index == 1;
     assert result.operand != null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }
 
 test "emit_runtime_call: mark_persistent renders void call with i8* arg" ![io] {
@@ -83,7 +83,7 @@ test "emit_runtime_call: mark_persistent renders void call with i8* arg" ![io] {
     assert result.lines[0] == "  call void @sailfin_runtime_mark_persistent(i8* %ptr)";
     assert result.temp_index == 0;
     assert result.operand == null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }
 
 test "emit_runtime_call: runtime.bounds_check renders void call with two i64 args" ![io] {
@@ -97,7 +97,7 @@ test "emit_runtime_call: runtime.bounds_check renders void call with two i64 arg
     assert result.lines[0] == "  call void @sfn_mem_bounds_check(i64 %idx, i64 %len)";
     assert result.temp_index == 0;
     assert result.operand == null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }
 
 test "emit_runtime_call: string.length renders i64-return call to sfn_str_len" ![io] {
@@ -108,7 +108,7 @@ test "emit_runtime_call: string.length renders i64-return call to sfn_str_len" !
     assert result.lines[0] == "  %t0 = call i64 @sfn_str_len(i8* %s)";
     assert result.temp_index == 1;
     assert result.operand != null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }
 
 test "emit_runtime_call: alloc_struct with noalias return attribute renders attribute before return type" ![io] {
@@ -126,7 +126,7 @@ test "emit_runtime_call: alloc_struct with noalias return attribute renders attr
     assert result.lines[0] == "  %t0 = call noalias i8* @sfn_alloc_struct(i64 %size)";
     assert result.temp_index == 1;
     assert result.operand != null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }
 
 test "emit_runtime_call: alloc_struct without override renders no return attribute" ![io] {
@@ -137,5 +137,5 @@ test "emit_runtime_call: alloc_struct without override renders no return attribu
     assert result.lines[0] == "  %t0 = call i8* @sfn_alloc_struct(i64 %size)";
     assert result.temp_index == 1;
     assert result.operand != null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }

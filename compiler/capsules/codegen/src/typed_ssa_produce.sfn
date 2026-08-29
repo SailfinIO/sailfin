@@ -210,10 +210,10 @@ fn produce_typed_ssa_declarations(parsed: ParseNativeResult, module_name: string
     let mut diagnostics: LoweringDiagnostic[] = [];
     let mut parse_index: int = 0;
     loop {
-        if parse_index >= parsed.diagnostics.length { break; }
+        if parse_index >= parsed.diags.length { break; }
         diagnostics.push(_produce_diag("TSSA100", "module " + module_name
             + ": invalid .sfn-asm: "
-            + parsed.diagnostics[parse_index]));
+            + parsed.diags[parse_index].message));
         parse_index += 1;
     }
     if diagnostics.length > 0 {

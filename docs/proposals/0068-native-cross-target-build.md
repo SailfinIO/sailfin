@@ -127,7 +127,7 @@ The ABI component keys the link decisions that diverge:
 | clang `-target` | `x86_64-pc-windows-msvc` | `x86_64-w64-mingw32` |
 | linker | `-fuse-ld=lld` | `x86_64-w64-mingw32-gcc -static` |
 | GNU link GC (`--gc-sections`, `-Wl,-u`) | off | **on** |
-| link libs | drop POSIX-only libs; add native Windows libs | keep `-lm -lpthread`; add `-lbcrypt -lcrypt32 -lws2_32` |
+| link libs | drop POSIX-only libs; add native Windows libs | keep `-lm -lpthread`; add `-ladvapi32 -lbcrypt -lcrypt32 -lws2_32` |
 | TLS | native | `-femulated-tls` |
 
 **Zero-behaviour contract preserved (#1112).** A non-Windows triple equal to
@@ -202,7 +202,7 @@ sfn-sources-add = [
 sfn-sources-drop = []
 ll-sources-add   = []
 link-libs-drop   = []
-link-libs-add    = ["-lbcrypt", "-lcrypt32", "-lws2_32"]
+link-libs-add    = ["-ladvapi32", "-lbcrypt", "-lcrypt32", "-lws2_32"]
 ```
 
 Because `toml_get_string_array` is **section-scoped**, a top-level

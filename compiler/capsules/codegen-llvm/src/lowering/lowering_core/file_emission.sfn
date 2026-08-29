@@ -63,7 +63,6 @@ fn _failed_llvm_artifact(failure_message: string) -> LLVMArtifactResult {
         artifact_name: "module.ll",
         artifact_format: "llvm-ir-text",
         lines: [],
-        diagnostics: [],
         diags: [],
         failure_message: failure_message
     };
@@ -71,7 +70,6 @@ fn _failed_llvm_artifact(failure_message: string) -> LLVMArtifactResult {
 
 fn _failed_llvm_artifact_from_lowering(failure_message: string, lowered: LoweredLLVMLinesResult) -> LLVMArtifactResult {
     let mut result = _failed_llvm_artifact(failure_message);
-    result.diagnostics = lowered.diagnostics;
     result.diags = lowered.diags;
     return result;
 }
@@ -122,7 +120,6 @@ fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: 
         artifact_name: "module.ll",
         artifact_format: "llvm-ir-text",
         lines: lines,
-        diagnostics: lowered_lines.diagnostics,
         diags: lowered_lines.diags,
         failure_message: ""
     };
@@ -164,7 +161,7 @@ fn native_text_passes_lowering_gate(native_text: string, module_name: string, im
     // record every error so the user sees the underlying cause, then
     // refuse the emit.
     if has_error_diag(lowered_lines.diags) {
-        trace_lowering_error_diags(lowered_lines.diagnostics, lowered_lines.diags);
+        trace_lowering_error_diags(lowered_lines.diags);
         return false;
     }
     // Mirror the remaining non-fatal rejection conditions in

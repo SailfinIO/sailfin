@@ -15,7 +15,7 @@ import {
     RuntimeHelperDescriptor,
     TypeContext
 } from "../../../types";
-import { trim_text } from "../../../utils";
+import { lowering_warning_diag, trim_text } from "../../../utils";
 import { array_pointer_element_type } from "../../arrays";
 import { collect_parameter_types } from "../core_helpers";
 import { future_pointer_type_for_return_type, map_return_type } from "../core_type_mapping";
@@ -36,7 +36,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
     let mut llvm_return: string = "";
     let mut expected_params: string[] = [];
     let mut is_trait_dispatch: boolean = false;
-    let mut result_diagnostics: string[] = [];
     let mut result_diags: LoweringDiagnostic[] = [];
     let mut result_helper = helper_descriptor;
 
@@ -64,9 +63,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             llvm_return: llvm_return,
             expected_params: expected_params,
             is_trait_dispatch: false,
-            diagnostics: result_diagnostics,
             helper_overridden: false,
-            is_closure_dispatch: true
+            is_closure_dispatch: true,
+            diags: result_diags
         };
     }
 
@@ -99,13 +98,13 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                         if sig.name == method_name {
                             llvm_return = map_return_type(context, sig.return_type);
                             if llvm_return.length == 0 {
-                                result_diagnostics.push("llvm lowering: trait `"
+                                result_diags.push(lowering_warning_diag("E1006", "trait `"
                                     + interface_name
                                     + "` method `"
                                     + method_name
                                     + "` has unsupported return type `"
                                     + sig.return_type
-                                    + "`");
+                                    + "`", null));
                             }
                             expected_params = ["i8*"];
                             break;
@@ -146,11 +145,11 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             if function_entry.is_async {
                 let future_return = future_pointer_type_for_return_type(function_entry.return_type);
                 if future_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: async function `"
+                    result_diags.push(lowering_warning_diag("E1006", "async function `"
                         + result_target
                         + "` has unsupported return type `"
                         + function_entry.return_type
-                        + "`");
+                        + "`", null));
                     llvm_return = "i8*";
                 } else { llvm_return = future_return; }
                 // The underlying Sailfin return type is recovered on the let
@@ -160,9 +159,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             } else {
                 llvm_return = map_return_type(context, function_entry.return_type);
                 if llvm_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: unsupported return type in call to `"
+                    result_diags.push(lowering_warning_diag("E1006", "unsupported return type in call to `"
                         + result_target
-                        + "`");
+                        + "`", null));
                     llvm_return = "i8*";
                 }
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
@@ -198,9 +197,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                 llvm_return = map_return_type(context, mirror_sig.return_type);
                 expected_params = collect_parameter_types(context, mirror_sig.parameters, result_target);
             } else {
-                result_diagnostics.push("llvm lowering: call to unknown function `"
+                result_diags.push(lowering_warning_diag("E1006", "call to unknown function `"
                     + result_target
-                    + "`");
+                    + "`", null));
             }
         }
     }
@@ -227,9 +226,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         llvm_return: llvm_return,
         expected_params: expected_params,
         is_trait_dispatch: is_trait_dispatch,
-        diagnostics: result_diagnostics,
         helper_overridden: helper_overridden,
-        is_closure_dispatch: false
+        is_closure_dispatch: false,
+        diags: result_diags
     };
 }
 

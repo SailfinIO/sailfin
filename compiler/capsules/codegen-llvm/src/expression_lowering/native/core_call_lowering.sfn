@@ -116,7 +116,6 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
     // than emitting a call against a fabricated signature.
     if arguments.length != parsed.parameter_types.length { return null; }
 
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
     let mut result_lines = lines;
@@ -147,7 +146,6 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
         let argument_text = trim_text(get_string_at(arguments, index));
         let expected_type = parsed.parameter_types[index];
         let lowered = lower_expression(argument_text, bindings, locals, result_temp, result_lines, functions, context, expected_type);
-        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         result_lines = lowered.lines;
         result_temp = lowered.temp_index;
@@ -157,20 +155,18 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
                 + name
                 + "`";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
         }
         let coerced = coerce_operand_to_type(lowered.operand, expected_type, result_temp, result_lines, false, null);
-        diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
         result_lines = coerced.lines;
         result_temp = coerced.temp_index;
+        diags = extend_diag_array(diags, coerced.diags);
         if coerced.operand != null { arg_operands.push(coerced.operand); } else {
             arg_operands.push(lowered.operand);
         }
@@ -211,7 +207,6 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
             lines: result_lines,
             temp_index: result_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -231,14 +226,12 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
         lines: result_lines,
         temp_index: result_temp + 1,
         operand: call_result,
-        diagnostics: diagnostics,
         string_constants: collected_string_constants,
         diags: diags
     };
 }
 
 fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
     let empty_constants = empty_string_constant_set();
@@ -246,12 +239,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     if trimmed_target.length == 0 {
         let message = "call target missing";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
@@ -339,8 +330,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 success: true,
                 enum_name: enum_name,
                 variant_name: variant_name,
-                fields: fields,
-                diagnostics: []
+                fields: fields
             };
 
             return lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, "", null);
@@ -348,11 +338,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     }
 
     // Phase 1: Resolve method target (fused concat, file-based, parse_member_access)
-    let resolution = resolve_call_method_target(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context, diagnostics, diags, collected_string_constants);
+    let resolution = resolve_call_method_target(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context, diags, collected_string_constants);
     trimmed_target = resolution.trimmed_target;
     let mut current_lines = resolution.current_lines;
     let mut current_temp: int = resolution.current_temp;
-    diagnostics = resolution.diagnostics;
     collected_string_constants = resolution.string_constants;
     let method_operand = resolution.method_operand;
     let mut helper_descriptor = resolution.helper_descriptor;
@@ -378,7 +367,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let mut llvm_return = sig.llvm_return;
     let mut expected_params = sig.expected_params;
     let is_trait_dispatch = sig.is_trait_dispatch;
-    diagnostics = extend_string_array(diagnostics, sig.diagnostics);
+    diags = extend_diag_array(diags, sig.diags);
 
     // Issue #633: when `resolve_call_signature` chose the function
     // entry over a colliding runtime-helper row, drop our own
@@ -431,7 +420,6 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         if argument_text.length == 0 {
             let message = "empty argument in call to `" + trimmed_target + "`";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
         }
         let mut argument_expected_type: string = "";
         let parameter_index = index + injected_argument_count;
@@ -439,7 +427,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
             argument_expected_type = expected_params[parameter_index];
         }
         let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, argument_expected_type);
-        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+        diags = extend_diag_array(diags, lowered.diags);
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -452,7 +440,6 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 + trimmed_target
                 + "`";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
         }
         index += 1;
     }
@@ -486,12 +473,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         let message = "unable to emit call to `" + trimmed_target
             + "` due to argument errors";
         diags.push(lowering_error_diag("E1007", message, null));
-        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -525,10 +510,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 if param.default_value == null { break; }
                 let expected_type = expected_params[param_index];
                 let lowered_default = lower_expression(param.default_value, bindings, locals, current_temp, current_lines, functions, context, expected_type);
-                diagnostics = extend_string_array(diagnostics, lowered_default.diagnostics);
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered_default.string_constants);
                 current_lines = lowered_default.lines;
                 current_temp = lowered_default.temp_index;
+                diags = extend_diag_array(diags, lowered_default.diags);
                 if lowered_default.operand == null {
                     let message = "failed to lower default argument for parameter `"
                         + param.name
@@ -536,7 +521,6 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                         + trimmed_target
                         + "`";
                     diags.push(lowering_warning_diag("E1006", message, null));
-                    diagnostics.push("llvm lowering: " + message);
                     break;
                 }
                 operands.push(lowered_default.operand);
@@ -577,7 +561,6 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                     + self_operand.llvm_type
                                     + "` is incompatible";
                                 diags.push(lowering_warning_diag("E1006", message, null));
-                                diagnostics.push("llvm lowering: " + message);
                             }
                         } else if ends_with_pointer_suffix(expected_self_type) {
                             let method_parse = parse_member_access(trimmed_target);
@@ -626,8 +609,6 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                                 + self_operand.llvm_type
                                                 + "` is incompatible";
                                             diags.push(lowering_warning_diag("E1006", message, null));
-                                            diagnostics.push("llvm lowering: "
-                                                + message);
                                         }
                                     }
                                 }
@@ -653,7 +634,6 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                         + self_operand.llvm_type
                                         + "` is incompatible";
                                     diags.push(lowering_warning_diag("E1006", message, null));
-                                    diagnostics.push("llvm lowering: " + message);
                                 }
                             }
                         } else {
@@ -663,7 +643,6 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                 + self_operand.llvm_type
                                 + "` is incompatible";
                             diags.push(lowering_warning_diag("E1006", message, null));
-                            diagnostics.push("llvm lowering: " + message);
                         }
                     }
                 }
@@ -691,7 +670,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     }
 
     // Phase 4: Coerce operands and emit the call (delegated to core_call_emission)
-    let emitted = coerce_and_emit_call(trimmed_target, operands, operand_source_types, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diagnostics, diags, collected_string_constants, bindings, locals, context);
+    let emitted = coerce_and_emit_call(trimmed_target, operands, operand_source_types, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diags, collected_string_constants, bindings, locals, context);
     if emitted.operand == null { return emitted; }
     if expected_type.length == 0 { return emitted; }
     if function_entry == null { return emitted; }
@@ -722,14 +701,12 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     }
     if !should_coerce_narrow_result { return emitted; }
     let coerced_result = coerce_operand_to_type_with_source(emitted.operand, return_source_type, expected_type, emitted.temp_index, emitted.lines, true, null);
-    let result_diagnostics = extend_string_array(emitted.diagnostics, coerced_result.diagnostics);
     let result_diags = extend_diag_array(emitted.diags, coerced_result.diags);
     if coerced_result.operand == null {
         return ExpressionResult {
             lines: coerced_result.lines,
             temp_index: coerced_result.temp_index,
             operand: emitted.operand,
-            diagnostics: result_diagnostics,
             string_constants: emitted.string_constants,
             diags: result_diags
         };
@@ -738,7 +715,6 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         lines: coerced_result.lines,
         temp_index: coerced_result.temp_index,
         operand: coerced_result.operand,
-        diagnostics: result_diagnostics,
         string_constants: emitted.string_constants,
         diags: result_diags
     };

@@ -10,7 +10,7 @@ import {
     NativeStruct
 } from "sfn/ir";
 import { parse_layout_manifest, parse_native_imports_for_import } from "sfn/ir";
-import { ends_with, starts_with, trim } from "sfn/strings";
+import { ends_with, trim } from "sfn/strings";
 
 fn import_context_root(work_dir: string) -> string {
     if work_dir.length == 0 { return "build/compiler/import-context"; }
@@ -90,25 +90,23 @@ fn import_module_aliases(imports: NativeImport[], current_module_slug: string, r
     return aliases;
 }
 
-fn imported_module_context_from_loaded_data_with_implicit(imports: NativeImport[], current_module_slug: string, root: string, manifests: LayoutManifest[], native_texts: string[], diagnostics: string[], implicit_symbols: ImplicitSymbol[]) -> ImportedModuleContext ![io] {
+fn imported_module_context_from_loaded_data_with_implicit(imports: NativeImport[], current_module_slug: string, root: string, manifests: LayoutManifest[], native_texts: string[], implicit_symbols: ImplicitSymbol[]) -> ImportedModuleContext ![io] {
     return ImportedModuleContext {
         manifests: manifests,
         native_texts: native_texts,
-        diagnostics: diagnostics,
         module_aliases: import_module_aliases(imports, current_module_slug, root),
         implicit_symbols: implicit_symbols
     };
 }
 
-fn imported_module_context_from_loaded_data(imports: NativeImport[], current_module_slug: string, root: string, manifests: LayoutManifest[], native_texts: string[], diagnostics: string[]) -> ImportedModuleContext ![io] {
+fn imported_module_context_from_loaded_data(imports: NativeImport[], current_module_slug: string, root: string, manifests: LayoutManifest[], native_texts: string[]) -> ImportedModuleContext ![io] {
     let empty_implicit: ImplicitSymbol[] = [];
-    return imported_module_context_from_loaded_data_with_implicit(imports, current_module_slug, root, manifests, native_texts, diagnostics, empty_implicit);
+    return imported_module_context_from_loaded_data_with_implicit(imports, current_module_slug, root, manifests, native_texts, empty_implicit);
 }
 
 fn load_imported_module_context_with_implicit(imports: NativeImport[], current_module_slug: string, root: string, implicit_symbols: ImplicitSymbol[]) -> ImportedModuleContext ![io] {
     let mut manifests: LayoutManifest[] = [];
     let mut native_texts: string[] = [];
-    let mut diagnostics: string[] = [];
     let mut module_aliases: ImportModuleAlias[] = [];
     let mut seen: string[] = [];
     let mut queue_paths: string[] = [];
@@ -173,21 +171,6 @@ fn load_imported_module_context_with_implicit(imports: NativeImport[], current_m
             let parsed_manifest = parse_layout_manifest(fs.readFile(manifest_path));
             manifest_structs = parsed_manifest.structs;
             manifest_enums = parsed_manifest.enums;
-        } else {
-            let is_cached_capsule = !starts_with(module_path, "./") && !starts_with(module_path, "../")
-                && !starts_with(module_path, "runtime/")
-                && _context_has_slash(module_path);
-            if is_cached_capsule {
-                diagnostics.push("layout manifest: missing artifact for capsule import `"
-                    + module_path
-                    + "` — ensure imports are inlined before LLVM lowering");
-            } else {
-                diagnostics.push("layout manifest: missing artifact for import `"
-                    + module_path
-                    + "` (expected "
-                    + manifest_path
-                    + ")");
-            }
         }
 
         let mut native_text: string = "";
@@ -198,16 +181,10 @@ fn load_imported_module_context_with_implicit(imports: NativeImport[], current_m
             if depth < max_transitive_depth {
                 native_text_for_discovery = contents;
             }
-        } else if depth == 0 {
-            diagnostics.push("native lowering: missing native text artifact for import `"
-                + module_path
-                + "` (expected "
-                + native_text_path
-                + ")");
         }
 
         manifests.push(LayoutManifest {
-            structs: manifest_structs, enums: manifest_enums, diagnostics: []
+            structs: manifest_structs, enums: manifest_enums
         });
         native_texts.push(native_text);
 
@@ -234,7 +211,6 @@ fn load_imported_module_context_with_implicit(imports: NativeImport[], current_m
     return ImportedModuleContext {
         manifests: manifests,
         native_texts: native_texts,
-        diagnostics: diagnostics,
         module_aliases: module_aliases,
         implicit_symbols: implicit_symbols
     };
@@ -245,21 +221,10 @@ fn load_imported_module_context(imports: NativeImport[], current_module_slug: st
     return load_imported_module_context_with_implicit(imports, current_module_slug, root, empty_implicit);
 }
 
-fn _context_has_slash(text: string) -> boolean {
-    let mut index: int = 0;
-    loop {
-        if index >= text.length { break; }
-        if text[index] == "/" { return true; }
-        index += 1;
-    }
-    return false;
-}
-
 fn empty_imported_module_context() -> ImportedModuleContext {
     return ImportedModuleContext {
         manifests: [],
         native_texts: [],
-        diagnostics: [],
         module_aliases: [],
         implicit_symbols: []
     };

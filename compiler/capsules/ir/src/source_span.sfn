@@ -1,0 +1,18 @@
+// compiler/capsules/ir/src/source_span.sfn
+//
+// Source coordinates, shared by the native IR and the lowering diagnostic
+// contract.
+//
+// This lives in its own module so `lowering_diagnostic` can depend on it
+// without importing `native_ir`, which now imports `lowering_diagnostic` in
+// turn (SFN-916 gave `ParseNativeResult` and the parse-result carriers a
+// structured `diags` channel). The emitter does not diagnose a module cycle —
+// it hangs — so the two modules must never import each other directly.
+struct NativeSourceSpan {
+    start_line: int;
+    start_column: int;
+    end_line: int;
+    end_column: int;
+}
+
+export { NativeSourceSpan };

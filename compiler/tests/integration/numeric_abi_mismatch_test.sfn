@@ -72,14 +72,14 @@ test "coerce_operand_to_type: refuses double → i64 with fatal in boundary mode
     let mut found_fixit: boolean = false;
     let mut i: int = 0;
     loop {
-        if i >= result.diagnostics.length { break; }
-        let diag = result.diagnostics[i];
-        if _diag_contains(diag, "[fatal]") {
-            if _diag_contains(diag, "double") {
-                if _diag_contains(diag, "i64") { found_fatal = true; }
+        if i >= result.diags.length { break; }
+        let diag = result.diags[i];
+        if diag.severity == "error" {
+            if _diag_contains(diag.message, "double") {
+                if _diag_contains(diag.message, "i64") { found_fatal = true; }
             }
         }
-        if _diag_contains(diag, "add `as float` or `as int` to disambiguate") {
+        if _diag_contains(diag.message, "add `as float` or `as int` to disambiguate") {
             found_fixit = true;
         }
         i += 1;
@@ -157,7 +157,7 @@ test "coerce_operand_to_type: same-type passthrough is a no-op in strict mode" !
     let mut lines: string[] = [];
     let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
     assert result.operand != null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }
 
 // -------------------------------------------------------------------
@@ -188,14 +188,14 @@ test "coerce_operand_to_type: refuses i1 → double with fatal + bool fix-it" ![
     let mut found_fixit: boolean = false;
     let mut i: int = 0;
     loop {
-        if i >= result.diagnostics.length { break; }
-        let diag = result.diagnostics[i];
-        if _diag_contains(diag, "[fatal]") {
-            if _diag_contains(diag, "i1") {
-                if _diag_contains(diag, "bool") { found_fatal = true; }
+        if i >= result.diags.length { break; }
+        let diag = result.diags[i];
+        if diag.severity == "error" {
+            if _diag_contains(diag.message, "i1") {
+                if _diag_contains(diag.message, "bool") { found_fatal = true; }
             }
         }
-        if _diag_contains(diag, "add `as int` or `as float` to disambiguate") {
+        if _diag_contains(diag.message, "add `as int` or `as float` to disambiguate") {
             found_fixit = true;
         }
         i += 1;
@@ -212,10 +212,8 @@ test "coerce_operand_to_type: refuses i1 → i64 with fatal in boundary mode" ![
     let mut found_fatal: boolean = false;
     let mut i: int = 0;
     loop {
-        if i >= result.diagnostics.length { break; }
-        if _diag_contains(result.diagnostics[i], "[fatal]") {
-            found_fatal = true;
-        }
+        if i >= result.diags.length { break; }
+        if result.diags[i].severity == "error" { found_fatal = true; }
         i += 1;
     }
     assert found_fatal;
@@ -227,5 +225,5 @@ test "coerce_operand_to_type: i1 → i1 same-type passthrough is a no-op" ![io] 
     let mut lines: string[] = [];
     let result = coerce_operand_to_type(operand, "i1", 0, lines, false, null);
     assert result.operand != null;
-    assert result.diagnostics.length == 0;
+    assert result.diags.length == 0;
 }

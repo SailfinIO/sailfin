@@ -179,4 +179,13 @@ test "windows siblings: mkdtemp_windows.sfn emits and defines mkdtemp" ![io] {
     assert contains(ir, "define i8* @mkdtemp(");
     assert contains(ir, "declare i32 @CreateDirectoryA(");
     assert contains(ir, "declare i32 @GetLastError(");
+    assert contains(ir, "declare i8* @sfn_fs_mkdtemp_security_attributes(");
+}
+
+test "windows siblings: mkdtemp ACL provider emits its protected-DACL seam" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/mkdtemp_acl_windows.sfn", "mkdtemp-acl-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i1 @sfn_fs_mkdtemp_acl_is_private(");
+    assert contains(ir, "declare i32 @ConvertStringSecurityDescriptorToSecurityDescriptorA(");
+    assert contains(ir, "declare i32 @GetNamedSecurityInfoA(");
 }

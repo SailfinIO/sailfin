@@ -1072,8 +1072,8 @@ fn _fs_empty_string() -> *u8 {
 }
 
 // `sfn_fs_mkdtemp(prefix)` — create a unique directory (mode `0700` on
-// POSIX; Windows has no mode bits, the directory inherits the parent
-// ACL) and return its malloc'd path, or an empty malloc'd string on
+// POSIX; Windows uses a protected current-user-only DACL) and return its
+// malloc'd path, or an empty malloc'd string on
 // error. The `$TMPDIR` anchoring + `mkdtemp` template construction is
 // pure Sailfin (epic #1308 fs-runtime flip); the in-place mutation is an
 // ordinary `extern fn mkdtemp` (declared above), satisfied at link time

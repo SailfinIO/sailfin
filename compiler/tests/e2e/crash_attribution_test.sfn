@@ -15,14 +15,16 @@
 // `_is_signal_exit`; this test pins the attribution and the classifier's
 // `crash` arm so neither regresses.
 //
-// (c) is asserted by calling the shared classifier directly rather than
-// through a verdict block, because observing a real crash *through* one
-// required the bash wrapper SFN-726 deleted, and no native verb emits a
-// trailer for `sfn test` yet. The end-to-end form returns once one does.
-// The raw exit code is deliberately not asserted alongside it: POSIX
-// encodes a crash as `128 + signal` while Windows encodes it as a
-// sign-extended NT status, so asserting the classifier's OUTPUT is the one
-// assertion that states the same property on both.
+// (c) is now asserted both ways: directly against the shared classifier,
+// and end-to-end through a real `--verdict` trailer (SFN-1120), which is
+// what lets a real SIGSEGV be observed traveling all the way through a
+// verdict block rather than only proving the classifier maps 139 correctly
+// in isolation. The raw exit code is deliberately not asserted alongside
+// either form: POSIX encodes a crash as `128 + signal` while Windows
+// encodes it as a sign-extended NT status, so asserting the classifier's
+// OUTPUT — and now the trailer's `failure` field, which is derived from the
+// same classifier — is the one assertion that states the same property on
+// both platforms.
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`: drives subprocesses via
 // `process.run_capture` and asserts on captured output with `sfn/strings`.
@@ -86,7 +88,7 @@ test "crash #1206: a fatal fault names the crashed file and classifies as crash"
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/crash_signal_probe.sfn";
         fs.writeFile(src, _crash_fixture_src());
-        let exit = process.run_capture([sfn_bin_path(), "test", src], _child_env());
+        let exit = process.run_capture([sfn_bin_path(), "test", src, "--verdict"], _child_env());
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         let combined = out + err;
@@ -98,6 +100,12 @@ test "crash #1206: a fatal fault names the crashed file and classifies as crash"
         // `test-failure` — see the file header for why the raw exit code
         // itself is not asserted.
         assert verdict_classify(exit, "test") == "crash";
+        // (c), end-to-end: a real SIGSEGV travels all the way through a
+        // `--verdict` block to the trailer's `failure` field, not just
+        // through the classifier in isolation (SFN-1120).
+        assert find(combined, "===SAILFIN-RESULT===", 0) >= 0;
+        assert find(combined, "\"host\":\"sfn test\"", 0) >= 0;
+        assert find(combined, "\"failure\":\"crash\"", 0) >= 0;
         return 0;
     });
     assert code == 0;

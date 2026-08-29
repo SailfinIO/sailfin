@@ -23,8 +23,7 @@ import {
     append_string_lines,
     ensure_intrinsic_declarations,
     extend_diag_array_checked,
-    extend_string_lines,
-    extend_string_lines_checked
+    extend_string_lines
 } from "./lowering_io";
 import {
     get_function_decorators_at,
@@ -64,7 +63,6 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
     }
     let mut all_string_constants: StringConstant[] = module_string_constants;
     let mut function_effects: FunctionEffectEntry[] = [];
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
 
     if trace {
@@ -135,7 +133,6 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
         }
         let lowered = emit_llvm_function(effective_function, context_functions, effective_effects, type_context, module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, imported_decorator_names);
         let _lfn_lines = lowered.lines;
-        let _lfn_diags = lowered.diagnostics;
         diags = extend_diag_array_checked(diags, lowered.diags, "function lowering");
         let _lfn_string_constants = lowered.string_constants;
         if debug_lowering {
@@ -148,7 +145,7 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
                 + " lines="
                 + number_to_string(_lfn_lines.length)
                 + " diagnostics="
-                + number_to_string(_lfn_diags.length));
+                + number_to_string(lowered.diags.length));
             if _lfn_lines.length > 0 {
                 trace_log("test llvm: function first line " + _lfn_lines[0]);
                 trace_log("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
@@ -167,7 +164,6 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
             }
         }
         if safe_function_name == "add" { has_add_function = true; }
-        diagnostics = extend_string_lines_checked(diagnostics, _lfn_diags, "function lowering");
         if trace {
             trace_log("test llvm: function diagnostics merged "
                 + safe_function_name);
@@ -234,9 +230,5 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
     if trace { trace_log("test llvm: intrinsics ensured"); }
     if debug_lowering { trace_log("emit-llvm: phase=intrinsics"); }
 
-    return FunctionLoweringResult {
-        lines: lines,
-        diagnostics: diagnostics,
-        diags: diags
-    };
+    return FunctionLoweringResult { lines: lines, diags: diags };
 }

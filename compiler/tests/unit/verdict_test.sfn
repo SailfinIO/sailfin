@@ -1,0 +1,27 @@
+// Unit coverage for the `--verdict` accumulator's pure surface (SFN-1120).
+//
+// `verdict_classify` is already tabled in `compiler/tests/unit/dev_verify_test.sfn`;
+// what is new here is the verb -> `kind` mapping that decides how a generic
+// nonzero exit reads. It is the one branch that separates a failing
+// `sfn test` (`test-failure`) from a failing build (`compile-error`), so a
+// regression would silently mislabel every failing run of one of the three
+// verbs rather than fail loudly.
+//
+// The funnel's depth guard (`verdict_funnel_enter` / `verdict_funnel_exit`)
+// is deliberately not asserted here: its whole observable effect is printing
+// to stdout, which a unit test cannot capture, and asserting only that the
+// calls return would be coverage without a claim. It is exercised
+// end-to-end by `compiler/tests/e2e/cli_verdict_flag_test.sfn`.
+import { verdict_kind_for_target } from "../../src/cli/verdict";
+
+test "verdict: only the test verb classifies as a test kind" {
+    assert verdict_kind_for_target("test") == "test";
+}
+
+test "verdict: build-shaped targets classify as a build kind" {
+    assert verdict_kind_for_target("build") == "build";
+    assert verdict_kind_for_target("bootstrap-build") == "build";
+    // The fall-through is a build, so a future verb that forgets to add
+    // itself here reports `compile-error` rather than an empty class.
+    assert verdict_kind_for_target("") == "build";
+}

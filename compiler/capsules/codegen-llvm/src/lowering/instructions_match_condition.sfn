@@ -103,15 +103,9 @@ fn _field_constraint_unsupported_diag(field_name: string, owner: string, span_in
 // Emits `br i1 <guard>, label %<body_label>, label %<failure_target>`, so an
 // arm whose guard fails falls through to the next arm rather than being taken.
 fn emit_match_guard_branch(function_name: string, guard_text: string, case_span: NativeSourceSpan?, bindings: ParameterBinding[], locals: LocalBinding[], body_label: string, failure_target: string, temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchGuardEmission {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let lowered = lower_condition_to_i1(function_name, guard_text, bindings, locals, temp_index, lines, functions, context);
-    let mut idx: int = 0;
-    loop {
-        if idx >= lowered.diagnostics.length { break; }
-        diagnostics.push(lowered.diagnostics[idx]);
-        idx += 1;
-    }
+    diags = extend_diag_array(diags, lowered.diags);
     let mut current_lines = lowered.lines;
     if lowered.operand != null {
         current_lines.push("  br i1 " + lowered.operand.value + ", label %"
@@ -123,8 +117,7 @@ fn emit_match_guard_branch(function_name: string, guard_text: string, case_span:
         // leaving the arm an unconditional match on the variant tag. That is a
         // wrong-control-flow bug, not a warning.
         //
-        // Null operand only. `ConditionConversion` has no structured `diags`
-        // channel, and a guard whose sub-expression fails inside
+        // Null operand only. A guard whose sub-expression fails inside
         // `lower_logical_and` returns a constant `false` rather than null, so
         // `a && <unlowerable>` still degrades silently into an arm that is
         // never taken. SFN-1171 tracks giving that path a channel.
@@ -133,20 +126,17 @@ fn emit_match_guard_branch(function_name: string, guard_text: string, case_span:
             + function_name
             + "` could not be lowered to a condition; the arm would match every value of its pattern", case_span);
         diags.push(diag);
-        diagnostics.push(diag_to_legacy_string(diag));
         current_lines.push("  br label %" + failure_target);
     }
     return MatchGuardEmission {
         lines: current_lines,
         temp_index: lowered.temp_index,
-        diagnostics: diagnostics,
         diags: diags,
         string_constants: lowered.string_constants
     };
 }
 
 fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -170,18 +160,9 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
         if _if225 {
             // This is an enum pattern - extract tag and compare
             let enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name);
-            if enum_info == null {
-                diagnostics.push("llvm lowering: match pattern references unknown enum `"
-                    + enum_parse.enum_name
-                    + "`");
-            } else {
+            if enum_info == null { } else {
                 let variant_info = resolve_enum_variant_info(enum_info, enum_parse.variant_name);
-                if variant_info == null {
-                    diagnostics.push("llvm lowering: enum `" + enum_parse.enum_name
-                        + "` has no variant `"
-                        + enum_parse.variant_name
-                        + "`");
-                } else {
+                if variant_info == null { } else {
                     // Map tag type to LLVM integer type
                     let mut tag_llvm_type: string = "i32";
                     if enum_info.tag_type == "i8" { tag_llvm_type = "i8"; }
@@ -243,12 +224,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                     };
 
                     let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines, false);
-                    let mut _ci4: int = 0;
-                    loop {
-                        if _ci4 >= comparison.diagnostics.length { break; }
-                        diagnostics.push(comparison.diagnostics[_ci4]);
-                        _ci4 += 1;
-                    }
                     current_lines = comparison.lines;
                     current_temp = comparison.temp_index;
                     condition_operand = comparison.operand;
@@ -268,7 +243,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                 + "."
                                 + enum_parse.variant_name, case.span);
                             diags.push(constraint_diag);
-                            diagnostics.push(diag_to_legacy_string(constraint_diag));
                         }
                         constraint_idx += 1;
                     }
@@ -353,14 +327,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                     field_name: pattern_field.name, field_type: llvm_field_type, field_offset: found_field.offset
                                 });
                                 field_bindings = updated_fields;
-                            } else {
-                                diagnostics.push("llvm lowering: match pattern field `"
-                                    + pattern_field.name
-                                    + "` not found in variant `"
-                                    + enum_parse.enum_name
-                                    + "."
-                                    + enum_parse.variant_name
-                                    + "`");
                             }
 
                             field_idx += 1;
@@ -399,12 +365,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                             value: number_to_string(null_index)
                         };
                         let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines, false);
-                        let mut _cin: int = 0;
-                        loop {
-                            if _cin >= comparison.diagnostics.length { break; }
-                            diagnostics.push(comparison.diagnostics[_cin]);
-                            _cin += 1;
-                        }
                         current_lines = comparison.lines;
                         current_temp = comparison.temp_index;
                         condition_operand = comparison.operand;
@@ -454,14 +414,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                         value: expected_tag_value
                                     };
                                     let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines, false);
-                                    let mut _ci5: int = 0;
-                                    loop {
-                                        if _ci5 >= comparison.diagnostics.length {
-                                            break;
-                                        }
-                                        diagnostics.push(comparison.diagnostics[_ci5]);
-                                        _ci5 += 1;
-                                    }
                                     current_lines = comparison.lines;
                                     current_temp = comparison.temp_index;
                                     condition_operand = comparison.operand;
@@ -492,34 +444,17 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                                     field_name: pattern_field.name, field_type: field_info.llvm_type, field_index: field_info.index
                                                 });
                                                 union_struct_bindings = updated_structs;
-                                            } else {
-                                                diagnostics.push("llvm lowering: match pattern field `"
-                                                    + pattern_field.name
-                                                    + "` not found in struct `"
-                                                    + struct_parse.type_name
-                                                    + "`");
                                             }
                                         } else {
                                             let constraint_diag = _field_constraint_unsupported_diag(pattern_field.name, struct_parse.type_name, case.span);
                                             diags.push(constraint_diag);
-                                            diagnostics.push(diag_to_legacy_string(constraint_diag));
                                         }
                                         fidx += 1;
                                     }
 
                                     union_variant_index = found_index;
                                     union_struct_info = info;
-                                } else {
-                                    diagnostics.push("llvm lowering: match struct pattern `"
-                                        + struct_parse.type_name
-                                        + "` does not match union type `"
-                                        + subject_operand.llvm_type
-                                        + "`");
                                 }
-                            } else {
-                                diagnostics.push("llvm lowering: match pattern references unknown struct `"
-                                    + struct_parse.type_name
-                                    + "`");
                             }
                         }
                     }
@@ -529,24 +464,13 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
             if condition_operand == null {
                 // Fallback to existing expression-based pattern matching
                 let pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context, "");
-                let mut _ci6: int = 0;
-                loop {
-                    if _ci6 >= pattern_result.diagnostics.length { break; }
-                    diagnostics.push(pattern_result.diagnostics[_ci6]);
-                    _ci6 += 1;
-                }
                 diags = extend_diag_array(diags, pattern_result.diags);
                 current_lines = pattern_result.lines;
                 current_temp = pattern_result.temp_index;
                 collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants);
                 if pattern_result.operand != null {
                     let harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines);
-                    let mut _ci7: int = 0;
-                    loop {
-                        if _ci7 >= harmonised.diagnostics.length { break; }
-                        diagnostics.push(harmonised.diagnostics[_ci7]);
-                        _ci7 += 1;
-                    }
+                    diags = extend_diag_array(diags, harmonised.diags);
                     let mut _if231: boolean = false;
                     if harmonised.left != null {
                         if harmonised.right != null { _if231 = true; }
@@ -555,12 +479,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                         current_lines = harmonised.lines;
                         current_temp = harmonised.temp_index;
                         let comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines, false);
-                        let mut _ci8: int = 0;
-                        loop {
-                            if _ci8 >= comparison.diagnostics.length { break; }
-                            diagnostics.push(comparison.diagnostics[_ci8]);
-                            _ci8 += 1;
-                        }
                         current_lines = comparison.lines;
                         current_temp = comparison.temp_index;
                         condition_operand = comparison.operand;
@@ -568,10 +486,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                         current_lines = harmonised.lines;
                         current_temp = harmonised.temp_index;
                     }
-                } else {
-                    diagnostics.push("llvm lowering: unable to lower match case pattern in `"
-                        + function_name
-                        + "`");
                 }
             }
         }
@@ -601,7 +515,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
         lines: current_lines,
         temp_index: current_temp,
         operand: condition_operand,
-        diagnostics: diagnostics,
         is_default: is_unconditional_default,
         field_bindings: field_bindings,
         enum_info: matched_enum_info,

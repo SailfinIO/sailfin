@@ -134,58 +134,6 @@ fn diag_from_legacy_lowering_error(value: string) -> LoweringDiagnostic? {
     return lowering_error_diag(code, _legacy_lowering_diag_message(value, code), null);
 }
 
-fn append_missing_legacy_lowering_diags(diags: LoweringDiagnostic[], diagnostics: string[]) -> LoweringDiagnostic[] {
-    let mut out = diags;
-    let mut matched: boolean[] = [];
-    let mut match_index: int = 0;
-    loop {
-        if match_index >= out.length { break; }
-        matched.push(false);
-        match_index += 1;
-    }
-    let mut index: int = 0;
-    loop {
-        if index >= diagnostics.length { break; }
-        let legacy = diagnostics[index];
-        if index_of(legacy, "[fatal]") >= 0 {
-            // Match on the canonical rendering as well as the raw string, so
-            // this stays idempotent: a caller may already have converted the
-            // same legacy line earlier (the instruction dispatch does, to
-            // attach a statement span — SFEP-0061 §2.2, Set C fill-down). A
-            // legacy fatal with no inline `[Exxxx]` re-renders *with* an
-            // inferred code, so exact-string matching alone would fail to
-            // recognize that conversion and re-add it as a duplicate.
-            let converted = diag_from_legacy_lowering_error(legacy);
-            let mut canonical = legacy;
-            if converted != null {
-                canonical = diag_to_legacy_string(converted);
-            }
-            let mut found: boolean = false;
-            let mut diag_index: int = 0;
-            loop {
-                if diag_index >= out.length { break; }
-                if !matched[diag_index] {
-                    let rendered = diag_to_legacy_string(out[diag_index]);
-                    if rendered == legacy || rendered == canonical {
-                        matched[diag_index] = true;
-                        found = true;
-                        break;
-                    }
-                }
-                diag_index += 1;
-            }
-            if !found {
-                if converted != null {
-                    out.push(converted);
-                    matched.push(true);
-                }
-            }
-        }
-        index += 1;
-    }
-    return out;
-}
-
 fn stamp_lowering_diag_file_paths(diags: LoweringDiagnostic[], file_path: string) -> LoweringDiagnostic[] {
     let mut out = diags;
     let mut index: int = 0;
@@ -225,13 +173,11 @@ fn first_span(primary: NativeSourceSpan?, fallback: NativeSourceSpan?) -> Native
 // Fold a sub-lowering result's diagnostics into the instruction-scoped set.
 //
 // Expression lowering is structurally span-blind (SFEP-0061 §2.2, Set C): it
-// reports through the legacy `string[]` channel and has no field to carry a
-// span. The instruction dispatch is the nearest frame that knows where the
-// statement is, so it converts those strings to structured diagnostics and
-// stamps its span onto whatever arrives without one.
-fn merge_lowered_diags(diags: LoweringDiagnostic[], sub_diags: LoweringDiagnostic[], legacy: string[], span: NativeSourceSpan?) -> LoweringDiagnostic[] {
-    let mut merged = append_missing_legacy_lowering_diags(sub_diags, legacy);
-    merged = stamp_lowering_diag_spans(merged, span);
+// has no field to carry a span, so the instruction dispatch is the nearest
+// frame that knows where the statement is and stamps its span onto whatever
+// arrives without one.
+fn merge_lowered_diags(diags: LoweringDiagnostic[], sub_diags: LoweringDiagnostic[], span: NativeSourceSpan?) -> LoweringDiagnostic[] {
+    let mut merged = stamp_lowering_diag_spans(sub_diags, span);
     return extend_diag_array(diags, merged);
 }
 

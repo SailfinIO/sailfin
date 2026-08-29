@@ -42,7 +42,6 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         }
     }
     let base_result = lower_expression(base_text, bindings, locals, temp_index, lines, functions, context, "");
-    let mut diagnostics: string[] = base_result.diagnostics;
     let mut diags = base_result.diags;
     let mut collected_string_constants: StringConstant[] = base_result.string_constants;
 
@@ -51,7 +50,6 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
             lines: base_result.lines,
             temp_index: base_result.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -62,12 +60,6 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     let base_operand = base_result.operand;
 
     let index_result = lower_expression(parse.index, bindings, locals, current_temp, current_lines, functions, context, "");
-    let mut _ci0: int = 0;
-    loop {
-        if _ci0 >= index_result.diagnostics.length { break; }
-        diagnostics.push(index_result.diagnostics[_ci0]);
-        _ci0 += 1;
-    }
     diags = extend_diag_array(diags, index_result.diags);
     collected_string_constants = merge_string_constants(collected_string_constants, index_result.string_constants);
     current_lines = index_result.lines;
@@ -76,12 +68,10 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     if index_result.operand == null {
         let message = "index expression produced no value";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -90,24 +80,16 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     let index_operand = index_result.operand;
 
     let index_coercion = coerce_operand_to_type(index_operand, "i64", current_temp, current_lines, true, null);
-    let mut _ci1: int = 0;
-    loop {
-        if _ci1 >= index_coercion.diagnostics.length { break; }
-        diagnostics.push(index_coercion.diagnostics[_ci1]);
-        _ci1 += 1;
-    }
     diags = extend_diag_array(diags, index_coercion.diags);
     current_lines = index_coercion.lines;
     current_temp = index_coercion.temp_index;
     if index_coercion.operand == null {
         let message = "unable to coerce index expression to i64";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -195,12 +177,10 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
             + array_type
             + "`";
         diags.push(lowering_warning_diag("E1006", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -208,24 +188,16 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
 
     if is_string {
         let index_as_double = coerce_operand_to_type(index_operand, "double", current_temp, current_lines, true, null);
-        let mut _ci2: int = 0;
-        loop {
-            if _ci2 >= index_as_double.diagnostics.length { break; }
-            diagnostics.push(index_as_double.diagnostics[_ci2]);
-            _ci2 += 1;
-        }
         diags = extend_diag_array(diags, index_as_double.diags);
         current_lines = index_as_double.lines;
         current_temp = index_as_double.temp_index;
         if index_as_double.operand == null {
             let message = "unable to coerce string index expression to double";
             diags.push(lowering_warning_diag("E1006", message, null));
-            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
-                diagnostics: diagnostics,
                 string_constants: collected_string_constants,
                 diags: diags
             };
@@ -237,12 +209,6 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         // and return_type="i8*".
         let grapheme_operands: LLVMOperand[] = [effective_base_operand, index_as_double.operand];
         let grapheme_result = emit_runtime_call("grapheme_at", grapheme_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _grapheme_di: int = 0;
-        loop {
-            if _grapheme_di >= grapheme_result.diagnostics.length { break; }
-            diagnostics.push(grapheme_result.diagnostics[_grapheme_di]);
-            _grapheme_di += 1;
-        }
         diags = extend_diag_array(diags, grapheme_result.diags);
         current_lines = grapheme_result.lines;
         current_temp = grapheme_result.temp_index;
@@ -250,7 +216,6 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
             lines: current_lines,
             temp_index: current_temp,
             operand: grapheme_result.operand,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -311,12 +276,6 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
             };
             let bc_operands: LLVMOperand[] = [bc_index_operand, bc_length_operand];
             let bc_result = emit_runtime_call("runtime.bounds_check", bc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-            let mut _bc_di: int = 0;
-            loop {
-                if _bc_di >= bc_result.diagnostics.length { break; }
-                diagnostics.push(bc_result.diagnostics[_bc_di]);
-                _bc_di += 1;
-            }
             diags = extend_diag_array(diags, bc_result.diags);
             current_lines = bc_result.lines;
             current_temp = bc_result.temp_index;
@@ -349,7 +308,6 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
             lines: current_lines,
             temp_index: current_temp,
             operand: operand,
-            diagnostics: diagnostics,
             string_constants: collected_string_constants,
             diags: diags
         };
@@ -357,12 +315,10 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
 
     let message = "unsupported array type for indexing: `" + array_type + "`";
     diags.push(lowering_warning_diag("E1006", message, null));
-    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: current_lines,
         temp_index: current_temp,
         operand: null,
-        diagnostics: diagnostics,
         string_constants: collected_string_constants,
         diags: diags
     };

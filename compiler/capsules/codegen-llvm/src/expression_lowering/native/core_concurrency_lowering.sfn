@@ -127,13 +127,11 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
 
     let mut ch_lines: string[] = lines;
     let mut ch_temp: int = temp_index;
-    let mut ch_diag: string[] = [];
     let mut ch_diags: LoweringDiagnostic[] = [];
     let mut ch_constants: StringConstant[] = empty_string_constant_set();
 
     // Lower the channel handle (an opaque i8*).
     let base_lowered = lower_expression(base, bindings, locals, ch_temp, ch_lines, functions, context, "");
-    ch_diag = extend_string_array(ch_diag, base_lowered.diagnostics);
     ch_lines = base_lowered.lines;
     ch_temp = base_lowered.temp_index;
     ch_constants = merge_string_constants(ch_constants, base_lowered.string_constants);
@@ -143,12 +141,10 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
             + base
             + "`";
         ch_diags.push(lowering_warning_diag("E1010", message, null));
-        ch_diag.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: ch_lines,
             temp_index: ch_temp,
             operand: null,
-            diagnostics: ch_diag,
             string_constants: ch_constants,
             diags: ch_diags
         };
@@ -156,7 +152,6 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
     let mut ch_handle = base_lowered.operand;
     if ch_handle.llvm_type != "i8*" {
         let handle_coerced = coerce_operand_to_type(ch_handle, "i8*", ch_temp, ch_lines, true, null);
-        ch_diag = extend_string_array(ch_diag, handle_coerced.diagnostics);
         ch_lines = handle_coerced.lines;
         ch_temp = handle_coerced.temp_index;
         if handle_coerced.operand != null {
@@ -166,7 +161,6 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
 
     if field == "send" {
         let value_lowered = lower_expression(argument_entries[0], bindings, locals, ch_temp, ch_lines, functions, context, "");
-        ch_diag = extend_string_array(ch_diag, value_lowered.diagnostics);
         ch_lines = value_lowered.lines;
         ch_temp = value_lowered.temp_index;
         ch_constants = merge_string_constants(ch_constants, value_lowered.string_constants);
@@ -175,12 +169,10 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
                 + argument_entries[0]
                 + "`";
             ch_diags.push(lowering_warning_diag("E1006", message, null));
-            ch_diag.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: ch_lines,
                 temp_index: ch_temp,
                 operand: null,
-                diagnostics: ch_diag,
                 string_constants: ch_constants,
                 diags: ch_diags
             };
@@ -271,7 +263,6 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
             lines: ch_lines,
             temp_index: ch_temp,
             operand: send_operand,
-            diagnostics: ch_diag,
             string_constants: ch_constants,
             diags: ch_diags
         };
@@ -298,12 +289,10 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
                 + "(`let x: T = <channel>.receive()`) so the channel payload "
                 + "type is known";
             ch_diags.push(lowering_error_diag("E1006", message, null));
-            ch_diag.push("[fatal] llvm lowering: " + message);
             return ExpressionResult {
                 lines: ch_lines,
                 temp_index: ch_temp,
                 operand: null,
-                diagnostics: ch_diag,
                 string_constants: ch_constants,
                 diags: ch_diags
             };
@@ -439,7 +428,6 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
         lines: ch_lines,
         temp_index: ch_temp,
         operand: recv_operand,
-        diagnostics: ch_diag,
         string_constants: ch_constants,
         diags: ch_diags
     };
@@ -499,14 +487,11 @@ fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries:
     let base_lowered = lower_expression(base, bindings, locals, temp_index, lines, functions, context, "");
     if base_lowered.operand == null { return null; }
     let coerced = coerce_operand_to_string(base_lowered.operand, base_lowered.temp_index, base_lowered.lines);
-    let mut ts_diag: string[] = base_lowered.diagnostics;
     let mut ts_diags = base_lowered.diags;
-    ts_diag = extend_string_array(ts_diag, coerced.diagnostics);
     return ExpressionResult {
         lines: coerced.lines,
         temp_index: coerced.temp_index,
         operand: coerced.operand,
-        diagnostics: ts_diag,
         string_constants: base_lowered.string_constants,
         diags: ts_diags
     };
@@ -516,7 +501,6 @@ fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries:
 // pointer-sized (8-byte) monomorphized elements and `owned` = 0. Extracted
 // sibling of `lower_expression`.
 fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let diagnostics: string[] = [];
     let diags: LoweringDiagnostic[] = [];
     let chan_inner = trim_text(substring(stripped, 8, stripped.length));
     // The end index is computed in a standalone statement (not a
@@ -529,12 +513,10 @@ fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBindin
     let empty_chan_constants: StringConstant[] = [];
     let mut chan_lines: string[] = lines;
     let mut chan_temp: int = temp_index;
-    let mut chan_diag: string[] = diagnostics;
     let mut chan_diags = diags;
     let mut cap_llvm: string = "i64 0";
     if cap_text.length > 0 {
         let cap_lowered = lower_expression(cap_text, bindings, locals, chan_temp, chan_lines, functions, context, "");
-        chan_diag = extend_string_array(chan_diag, cap_lowered.diagnostics);
         chan_lines = cap_lowered.lines;
         chan_temp = cap_lowered.temp_index;
         if cap_lowered.operand != null {
@@ -560,7 +542,6 @@ fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBindin
         lines: chan_lines,
         temp_index: chan_temp,
         operand: chan_operand,
-        diagnostics: chan_diag,
         string_constants: empty_chan_constants,
         diags: chan_diags
     };
@@ -570,13 +551,11 @@ fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBindin
 // aggregate width and sets `owned` = 1 only for `channel:OwnedBuf`.
 // Extracted sibling of `lower_expression`.
 fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let diagnostics: string[] = [];
     let diags: LoweringDiagnostic[] = [];
     let paren_pos = index_of(stripped, "(");
     let empty_chantyped_constants: StringConstant[] = [];
     let mut chantyped_lines: string[] = lines;
     let mut chantyped_temp: int = temp_index;
-    let mut chantyped_diag: string[] = diagnostics;
     let mut chantyped_diags = diags;
     let mut typed_cap_llvm: string = "i64 0";
     if paren_pos >= 0 {
@@ -586,7 +565,6 @@ fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[]
         let typed_cap_text = trim_text(substring(stripped, inner_start, inner_end));
         if typed_cap_text.length > 0 {
             let typed_cap_lowered = lower_expression(typed_cap_text, bindings, locals, chantyped_temp, chantyped_lines, functions, context, "");
-            chantyped_diag = extend_string_array(chantyped_diag, typed_cap_lowered.diagnostics);
             chantyped_lines = typed_cap_lowered.lines;
             chantyped_temp = typed_cap_lowered.temp_index;
             if typed_cap_lowered.operand != null {
@@ -658,7 +636,6 @@ fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[]
         lines: chantyped_lines,
         temp_index: chantyped_temp,
         operand: chantyped_operand,
-        diagnostics: chantyped_diag,
         string_constants: empty_chantyped_constants,
         diags: chantyped_diags
     };
@@ -668,14 +645,12 @@ fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[]
 // sibling of `lower_expression`. See the call-site comment for the full
 // runtime contract.
 fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let diagnostics: string[] = [];
     let diags: LoweringDiagnostic[] = [];
     let list_start = index_of(stripped, "[");
     let list_end = find_last_index_of_char(stripped, "]");
     let empty_par_constants: StringConstant[] = [];
     let mut par_lines: string[] = lines;
     let mut par_temp: int = temp_index;
-    let mut par_diag: string[] = diagnostics;
     let mut par_diags = diags;
     // Per-task fn-ptr / ctx values as i64 SSA temps (input order).
     let mut par_fn_addrs: string[] = [];
@@ -691,7 +666,6 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
                     let task_expr = trim_text(task_args[par_index]);
                     if task_expr.length > 0 {
                         let task_lowered = lower_expression(task_expr, bindings, locals, par_temp, par_lines, functions, context, "");
-                        par_diag = extend_string_array(par_diag, task_lowered.diagnostics);
                         par_lines = task_lowered.lines;
                         par_temp = task_lowered.temp_index;
                         if task_lowered.operand != null {
@@ -736,13 +710,10 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
                                     + "`parallel` task — pass the task directly: "
                                     + "`parallel [fn() -> T { ... }]`";
                                 par_diags.push(lowering_error_diag("E1010", par_message, null));
-                                par_diag.push("llvm lowering [fatal]: "
-                                    + par_message);
                                 return ExpressionResult {
                                     lines: par_lines,
                                     temp_index: par_temp,
                                     operand: null,
-                                    diagnostics: par_diag,
                                     string_constants: empty_par_constants,
                                     diags: par_diags
                                 };
@@ -787,7 +758,6 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
             lines: par_lines,
             temp_index: par_temp,
             operand: par_empty_operand,
-            diagnostics: par_diag,
             string_constants: empty_par_constants,
             diags: par_diags
         };
@@ -866,7 +836,6 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
         lines: par_lines,
         temp_index: par_temp,
         operand: par_operand,
-        diagnostics: par_diag,
         string_constants: empty_par_constants,
         diags: par_diags
     };
@@ -945,7 +914,6 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
     // Empty call text (`join_all()`) is a malformed builtin; treat as empty.
     let mut ja_lines: string[] = lines;
     let mut ja_temp: int = temp_index;
-    let mut ja_diag: string[] = [];
     let mut ja_diags: LoweringDiagnostic[] = [];
 
     // Lower the handles argument to its `Task<T>[]` = `{ Future*, i64, i64 }*`
@@ -953,7 +921,6 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
     let handles = lower_expression(arg_text, bindings, locals, ja_temp, ja_lines, functions, context, "");
     ja_lines = handles.lines;
     ja_temp = handles.temp_index;
-    ja_diag = extend_string_array(ja_diag, handles.diagnostics);
 
     let mut handles_type: string = "i8*";
     let mut handles_value: string = "null";
@@ -980,7 +947,6 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
         let message = "`join_all` does not support `Task<" + future_kind
             + ">[]` — results are collected in a pointer-width array (supported result kinds: int, number, string, ptr).";
         ja_diags.push(lowering_error_diag("E1010", message, null));
-        ja_diag.push("[fatal] llvm lowering: " + message);
         let bad = LLVMOperand {
             llvm_type: "{ i8**, i64, i64 }*",
             value: "null"
@@ -989,7 +955,6 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
             lines: ja_lines,
             temp_index: ja_temp,
             operand: bad,
-            diagnostics: ja_diag,
             string_constants: empty_constants,
             diags: ja_diags
         };
@@ -1007,7 +972,6 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
                 + handles_type
                 + "`. Build the array from `spawn` handles (`let mut hs: Task<int>[] = []; hs.push(spawn ...)`), or pass `[]` for an empty join.";
             ja_diags.push(lowering_error_diag("E1010", message, null));
-            ja_diag.push("[fatal] llvm lowering: " + message);
             let bad = LLVMOperand {
                 llvm_type: "{ i8**, i64, i64 }*",
                 value: "null"
@@ -1016,7 +980,6 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
                 lines: ja_lines,
                 temp_index: ja_temp,
                 operand: bad,
-                diagnostics: ja_diag,
                 string_constants: empty_constants,
                 diags: ja_diags
             };
@@ -1080,7 +1043,6 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
         lines: ja_lines,
         temp_index: ja_temp,
         operand: ja_operand,
-        diagnostics: ja_diag,
         string_constants: empty_constants,
         diags: ja_diags
     };
@@ -1091,14 +1053,12 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
 // only the *builtin* `serve` (no user/imported `serve` in scope) reaches
 // here (#1323).
 fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
-    let diagnostics: string[] = [];
     let diags: LoweringDiagnostic[] = [];
     let serve_inner_start = index_of(stripped, "(");
     let serve_inner_end = find_last_index_of_char(stripped, ")");
     let empty_serve_constants: StringConstant[] = [];
     let mut serve_lines: string[] = lines;
     let mut serve_temp: int = temp_index;
-    let mut serve_diag: string[] = diagnostics;
     let mut serve_diags = diags;
     if serve_inner_start >= 0 {
         if serve_inner_end > serve_inner_start {
@@ -1111,7 +1071,6 @@ fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals
                 let handler_text = trim_text(serve_args[0]);
                 if handler_text.length > 0 {
                     let handler_lowered = lower_expression(handler_text, bindings, locals, serve_temp, serve_lines, functions, context, "");
-                    serve_diag = extend_string_array(serve_diag, handler_lowered.diagnostics);
                     serve_lines = handler_lowered.lines;
                     serve_temp = handler_lowered.temp_index;
                     if handler_lowered.operand != null {
@@ -1135,7 +1094,6 @@ fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals
                 let port_text = trim_text(serve_args[1]);
                 if port_text.length > 0 {
                     let port_lowered = lower_expression(port_text, bindings, locals, serve_temp, serve_lines, functions, context, "");
-                    serve_diag = extend_string_array(serve_diag, port_lowered.diagnostics);
                     serve_lines = port_lowered.lines;
                     serve_temp = port_lowered.temp_index;
                     if port_lowered.operand != null {
@@ -1162,7 +1120,6 @@ fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals
         lines: serve_lines,
         temp_index: serve_temp,
         operand: null,
-        diagnostics: serve_diag,
         string_constants: empty_serve_constants,
         diags: serve_diags
     };
@@ -1198,37 +1155,27 @@ fn _is_channel_receive_remainder(remainder: string, bindings: ParameterBinding[]
 // (the `await` prefix followed by space/tab/`(`); the no-operand and
 // fall-through cases stay inline at the call site.
 fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     let remainder = trim_text(substring(stripped, 5, stripped.length));
     if remainder.length == 0 {
         let message = "await expression missing operand";
         diags.push(lowering_warning_diag("E1010", message, null));
-        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: empty_constants,
             diags: diags
         };
     }
     let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
-    let mut _ci0: int = 0;
-    loop {
-        if _ci0 >= lowered.diagnostics.length { break; }
-        diagnostics.push(lowered.diagnostics[_ci0]);
-        _ci0 += 1;
-    }
     diags = extend_diag_array(diags, lowered.diags);
     if lowered.operand == null {
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -1248,7 +1195,6 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: lowered.operand,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -1271,9 +1217,6 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
         let issue_message = "await expects a Future pointer, got `"
             + future_operand.llvm_type
             + "`";
-        let with_issue = append_string(diagnostics, await_prefix
-            + "llvm lowering: "
-            + issue_message);
         let mut with_issue_diags = diags;
         if await_prefix.length > 0 {
             with_issue_diags.push(lowering_error_diag("E1010", issue_message, null));
@@ -1284,7 +1227,6 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
-            diagnostics: with_issue,
             string_constants: lowered.string_constants,
             diags: with_issue_diags
         };
@@ -1310,7 +1252,6 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
             lines: awaited_lines,
             temp_index: cast_fut_idx,
             operand: out_operand,
-            diagnostics: diagnostics,
             string_constants: lowered.string_constants,
             diags: diags
         };
@@ -1418,12 +1359,6 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
                     let free_operands: LLVMOperand[] = [free_operand];
                     let free_result = emit_runtime_call("runtime.free", free_operands, empty_runtime_call_overrides(), lowered.temp_index
                         + 4, awaited_lines2);
-                    let mut _free_di: int = 0;
-                    loop {
-                        if _free_di >= free_result.diagnostics.length { break; }
-                        diagnostics.push(free_result.diagnostics[_free_di]);
-                        _free_di += 1;
-                    }
                     diags = extend_diag_array(diags, free_result.diags);
                     awaited_lines2 = free_result.lines;
                     let out_operand_unboxed = LLVMOperand {
@@ -1434,7 +1369,6 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
                         lines: awaited_lines2,
                         temp_index: lowered.temp_index + 4,
                         operand: out_operand_unboxed,
-                        diagnostics: diagnostics,
                         string_constants: lowered.string_constants,
                         diags: diags
                     };
@@ -1461,7 +1395,6 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
                 lines: awaited_lines2,
                 temp_index: lowered.temp_index + 3,
                 operand: out_operand_boxed,
-                diagnostics: diagnostics,
                 string_constants: lowered.string_constants,
                 diags: diags
             };
@@ -1476,7 +1409,6 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
         lines: awaited_lines2,
         temp_index: lowered.temp_index + 2,
         operand: out_operand2,
-        diagnostics: diagnostics,
         string_constants: lowered.string_constants,
         diags: diags
     };

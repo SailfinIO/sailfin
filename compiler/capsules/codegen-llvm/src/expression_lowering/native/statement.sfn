@@ -149,7 +149,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             + " bindings="
             + number_to_string(current_bindings.length));
     }
-    let mut diagnostics: string[] = detect_suspension_conflicts(expression, current_locals, current_bindings, function_name, null);
     // SFN-915: seed the structured channel from the same detection so a
     // suspension conflict is not dropped at this frame.
     let mut diags: LoweringDiagnostic[] = detect_suspension_conflict_diags(expression, current_locals, current_bindings, function_name, null);
@@ -194,11 +193,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
                 + number_to_string(current_locals.length));
         }
         let binding = find_local_binding(current_locals, trimmed_assign_target);
-        if binding == null {
-            diagnostics.push("llvm lowering: assignment to unknown local `"
-                + trimmed_assign_target
-                + "`");
-        } else {
+        if binding == null { } else {
             // Desugar compound assignments: "x += y" becomes "x = x + y"
             let mut effective_value: string = trimmed_assign_value;
             if parsed_assignment.operator.length > 0 {
@@ -210,23 +205,11 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
 
             let previous_ownership: OwnershipInfo? = binding.ownership;
             let ownership_analysis = analyze_value_ownership(effective_value, null, current_locals, current_bindings);
-            let mut _ci11: int = 0;
-            loop {
-                if _ci11 >= ownership_analysis.diagnostics.length { break; }
-                diagnostics.push(ownership_analysis.diagnostics[_ci11]);
-                _ci11 += 1;
-            }
             let mut assignment_ownership = ownership_analysis.ownership;
             let consumption = ownership_analysis.consumption;
             let mut stored_value: string = default_return_literal(binding.llvm_type);
 
             let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, binding.llvm_type);
-            let mut _ci12: int = 0;
-            loop {
-                if _ci12 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci12]);
-                _ci12 += 1;
-            }
             diags = extend_diag_array(diags, lowered.diags);
             string_constants = lowered.string_constants;
             current_lines = lowered.lines;
@@ -243,15 +226,8 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
                     + "` — the assignment would be dropped";
                 let diag = lowering_error_diag("E1002", message, instruction.span);
                 diags.push(diag);
-                diagnostics.push(diag_to_legacy_string(diag));
             } else {
                 let coerced = coerce_operand_to_type(lowered.operand, binding.llvm_type, current_temp, current_lines, true, null);
-                let mut _ci13: int = 0;
-                loop {
-                    if _ci13 >= coerced.diagnostics.length { break; }
-                    diagnostics.push(coerced.diagnostics[_ci13]);
-                    _ci13 += 1;
-                }
                 diags = extend_diag_array(diags, coerced.diags);
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
@@ -270,7 +246,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
                         + "`";
                     let diag = lowering_error_diag("E1002", message, instruction.span);
                     diags.push(diag);
-                    diagnostics.push(diag_to_legacy_string(diag));
                     current_lines.push("  store " + binding.llvm_type + " "
                         + default_return_literal(binding.llvm_type)
                         + ", "
@@ -360,7 +335,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             temp_index: current_temp,
             locals: current_locals,
             bindings: current_bindings,
-            diagnostics: diagnostics,
             diags: diags,
             lifetime_regions: lifetime_regions,
             lifetime_releases: lifetime_releases,
@@ -371,12 +345,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     }
 
     let ownership_analysis = analyze_value_ownership(expression, null, current_locals, current_bindings);
-    let mut _ci14: int = 0;
-    loop {
-        if _ci14 >= ownership_analysis.diagnostics.length { break; }
-        diagnostics.push(ownership_analysis.diagnostics[_ci14]);
-        _ci14 += 1;
-    }
     let consumption = ownership_analysis.consumption;
 
     let _lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
@@ -407,12 +375,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     // the callee's return type cannot be resolved. Collect those into the
     // statement result so the caller (and the emit-level fatal gate) sees
     // them; otherwise the build silently continues and exits 0.
-    let mut _ci_expr_stmt: int = 0;
-    loop {
-        if _ci_expr_stmt >= _lowered.diagnostics.length { break; }
-        diagnostics.push(_lowered.diagnostics[_ci_expr_stmt]);
-        _ci_expr_stmt += 1;
-    }
     diags = extend_diag_array(diags, _lowered.diags);
     current_temp = recover_temp_from_lines(current_lines, current_temp);
     if consumption != null {
@@ -437,7 +399,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
         temp_index: current_temp,
         locals: current_locals,
         bindings: current_bindings,
-        diagnostics: diagnostics,
         diags: diags,
         lifetime_regions: lifetime_regions,
         lifetime_releases: lifetime_releases,
@@ -448,7 +409,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
 }
 
 fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruction, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], next_region_id: int, scope_id: string, scope_depth: int, functions: NativeFunction[], context: TypeContext, try_stack: TryFrameContext[]) -> ExpressionStatementResult {
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -511,12 +471,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             if _tf_i0 < 0 { break; }
             let _tf0 = try_stack[_tf_i0];
             let _pop0 = emit_runtime_call("sfn_exception_pop_frame", [_tf0.frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
-            let mut _pop0_di: int = 0;
-            loop {
-                if _pop0_di >= _pop0.diagnostics.length { break; }
-                diagnostics.push(_pop0.diagnostics[_pop0_di]);
-                _pop0_di += 1;
-            }
             diags = extend_diag_array(diags, _pop0.diags);
             current_lines = _pop0.lines;
             current_temp = _pop0.temp_index;
@@ -533,7 +487,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
                 + "`";
             let diag = lowering_error_diag("E1002", message, instruction.span);
             diags.push(diag);
-            diagnostics.push(diag_to_legacy_string(diag));
             current_lines.push("  ret " + safe_llvm_return + " "
                 + default_return_literal(safe_llvm_return));
         }
@@ -547,7 +500,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             temp_index: current_temp,
             locals: locals,
             bindings: bindings,
-            diagnostics: diagnostics,
             diags: diags,
             lifetime_regions: lifetime_regions,
             lifetime_releases: lifetime_releases,
@@ -564,17 +516,9 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     if debug_lowering {
         trace_log("emit-llvm: lower_return pre_suspension fn=" + fn_name);
     }
-    let suspension_diagnostics = detect_suspension_conflicts(instr_expression, current_locals, current_bindings, fn_name, null);
     if debug_lowering {
         trace_log("emit-llvm: lower_return post_suspension fn=" + fn_name);
     }
-    let mut _ci16: int = 0;
-    loop {
-        if _ci16 >= suspension_diagnostics.length { break; }
-        diagnostics.push(suspension_diagnostics[_ci16]);
-        _ci16 += 1;
-    }
-    // SFN-915: structured twin of the suspension diagnostics above.
     diags = extend_diag_array(diags, detect_suspension_conflict_diags(instr_expression, current_locals, current_bindings, fn_name, null));
 
     if debug_lowering {
@@ -583,12 +527,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     let ownership_analysis = analyze_value_ownership(instr_expression, null, current_locals, current_bindings);
     if debug_lowering {
         trace_log("emit-llvm: lower_return post_ownership fn=" + fn_name);
-    }
-    let mut _ci17: int = 0;
-    loop {
-        if _ci17 >= ownership_analysis.diagnostics.length { break; }
-        diagnostics.push(ownership_analysis.diagnostics[_ci17]);
-        _ci17 += 1;
     }
     let consumption = ownership_analysis.consumption;
 
@@ -615,12 +553,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     if debug_lowering {
         trace_log("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
     }
-    let mut _ci18: int = 0;
-    loop {
-        if _ci18 >= lowered.diagnostics.length { break; }
-        diagnostics.push(lowered.diagnostics[_ci18]);
-        _ci18 += 1;
-    }
     diags = extend_diag_array(diags, lowered.diags);
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
@@ -644,7 +576,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             + "`";
         let diag = lowering_error_diag("E1002", message, instruction.span);
         diags.push(diag);
-        diagnostics.push(diag_to_legacy_string(diag));
         // M1.5.3: emit chain drops even on the recovery path so a
         // miscompiled return doesn't leak owned RC locals.
         let _no_op_result = emit_drops_for_scope_chain(current_locals, scope_id, _fn_root_scope, true, current_temp);
@@ -666,7 +597,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             temp_index: current_temp,
             locals: current_locals,
             bindings: current_bindings,
-            diagnostics: diagnostics,
             diags: diags,
             lifetime_regions: lifetime_regions,
             lifetime_releases: lifetime_releases,
@@ -684,8 +614,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             + operand.value);
     }
     if safe_llvm_return == "void" {
-        diagnostics.push("llvm lowering: void function `" + fn_name
-            + "` returned a value");
         // M1.5.3: emit chain drops before the ret-void recovery branch.
         let _void_result = emit_drops_for_scope_chain(current_locals, scope_id, _fn_root_scope, true, current_temp);
         let mut _void_i: int = 0;
@@ -701,7 +629,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             temp_index: current_temp,
             locals: current_locals,
             bindings: current_bindings,
-            diagnostics: diagnostics,
             diags: diags,
             lifetime_regions: lifetime_regions,
             lifetime_releases: lifetime_releases,
@@ -718,12 +645,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     if debug_lowering {
         trace_log("emit-llvm: lower_return post_coerce fn=" + fn_name);
     }
-    let mut _ci19: int = 0;
-    loop {
-        if _ci19 >= coerced.diagnostics.length { break; }
-        diagnostics.push(coerced.diagnostics[_ci19]);
-        _ci19 += 1;
-    }
     diags = extend_diag_array(diags, coerced.diags);
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
@@ -739,7 +660,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             + "` — refusing to fabricate a default";
         let diag = lowering_error_diag("E1002", message, instruction.span);
         diags.push(diag);
-        diagnostics.push(diag_to_legacy_string(diag));
         // M1.5.3: emit chain drops even when the coercion failed, so the
         // recovery `ret <default>` still releases owned locals.
         let _coerce_result = emit_drops_for_scope_chain(current_locals, scope_id, _fn_root_scope, true, current_temp);
@@ -763,7 +683,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             temp_index: current_temp,
             locals: current_locals,
             bindings: current_bindings,
-            diagnostics: diagnostics,
             diags: diags,
             lifetime_regions: lifetime_regions,
             lifetime_releases: lifetime_releases,
@@ -780,12 +699,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     if coerced_operand.llvm_type == "i8*" {
         let mp_operands: LLVMOperand[] = [coerced_operand];
         let mp_result = emit_runtime_call("mark_persistent", mp_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _mp_di: int = 0;
-        loop {
-            if _mp_di >= mp_result.diagnostics.length { break; }
-            diagnostics.push(mp_result.diagnostics[_mp_di]);
-            _mp_di += 1;
-        }
         diags = extend_diag_array(diags, mp_result.diags);
         current_lines = mp_result.lines;
     }
@@ -862,12 +775,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
         if _tf_i1 < 0 { break; }
         let _tf1 = try_stack[_tf_i1];
         let _pop1 = emit_runtime_call("sfn_exception_pop_frame", [_tf1.frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _pop1_di: int = 0;
-        loop {
-            if _pop1_di >= _pop1.diagnostics.length { break; }
-            diagnostics.push(_pop1.diagnostics[_pop1_di]);
-            _pop1_di += 1;
-        }
         diags = extend_diag_array(diags, _pop1.diags);
         current_lines = _pop1.lines;
         current_temp = _pop1.temp_index;
@@ -883,7 +790,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
         temp_index: current_temp,
         locals: current_locals,
         bindings: current_bindings,
-        diagnostics: diagnostics,
         diags: diags,
         lifetime_regions: lifetime_regions,
         lifetime_releases: lifetime_releases,
@@ -896,7 +802,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
 fn prepare_parameters(function: NativeFunction, context: TypeContext) -> ParameterPreparation {
     let mut signature: string[] = [];
     let mut bindings: ParameterBinding[] = [];
-    let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut seen_names: string[] = [];
     let mut index: int = 0;
@@ -917,14 +822,6 @@ fn prepare_parameters(function: NativeFunction, context: TypeContext) -> Paramet
         }
         // Default empty types to i8* so LLVM IR is parseable.
         if llvm_type.length == 0 { llvm_type = "i8*"; }
-        if parameter.type_annotation.length == 0 {
-            if !inferred_self_type {
-                diagnostics.push("llvm lowering: parameter `" + parameter.name
-                    + "` missing type annotation; defaulting to `"
-                    + llvm_type
-                    + "`");
-            }
-        }
         let sanitized = sanitize_symbol(parameter.name);
         // Deduplicate parameter names: if this name was already used,
         // append a numeric suffix to make it unique (LLVM requires unique param names).
@@ -941,9 +838,5 @@ fn prepare_parameters(function: NativeFunction, context: TypeContext) -> Paramet
         bindings = append_parameter_binding(bindings, prep_binding);
         index += 1;
     }
-    return ParameterPreparation {
-        signature: signature,
-        bindings: bindings,
-        diagnostics: diagnostics
-    };
+    return ParameterPreparation { signature: signature, bindings: bindings };
 }

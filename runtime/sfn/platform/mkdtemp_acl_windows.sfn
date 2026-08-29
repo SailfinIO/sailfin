@@ -1,0 +1,220 @@
+// Windows provider for `fs.mkdtemp`'s current-user access contract (SFN-1195).
+//
+// POSIX `0700` means the creating user has full directory access and no group
+// or other principal has any. Windows expresses that guarantee with an
+// explicit owner plus a protected DACL whose one inheritable full-control ACE
+// names the process token's TokenUser SID:
+//
+//     O:<TokenUser>D:P(A;OICI;FA;;;<TokenUser>)
+//
+// `P` prevents the parent temp directory's ACL from widening access and `OICI`
+// carries the same restriction into children. Binding both fields to TokenUser
+// is deliberate: Windows' token default owner may legally be a group SID, so
+// the Owner Rights SID (`OW`) is not a current-user guarantee. No SYSTEM or
+// Administrators ACE is added: those principals may still exercise Windows
+// privilege-based recovery, but the directory grants them no discretionary
+// access.
+//
+// The allocation helpers are consumed only by `mkdtemp_windows.sfn`. The
+// exported predicate is a narrow test seam: it reads the actual descriptor
+// back from the filesystem and compares the DACL's canonical SDDL instead of
+// routing through the Windows `get_perms == -1` sentinel.
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+
+extern fn strlen(text: *u8) -> usize;
+
+extern fn GetCurrentProcess() -> i64;
+
+extern fn OpenProcessToken(process: i64, desired_access: i32, token_out: *u8) -> i32;
+
+extern fn GetTokenInformation(token: i64, information_class: i32, information: *u8, information_length: i32, return_length: *u8) -> i32;
+
+extern fn ConvertSidToStringSidA(sid: *u8, text_out: *u8) -> i32;
+
+extern fn CloseHandle(handle: i64) -> i32;
+
+extern fn LocalFree(memory: *u8) -> *u8;
+
+extern fn ConvertStringSecurityDescriptorToSecurityDescriptorA(text: *u8, revision: i32, descriptor_out: *u8, descriptor_size_out: *u8) -> i32;
+
+extern fn ConvertSecurityDescriptorToStringSecurityDescriptorA(descriptor: *u8, revision: i32, security_information: i32, text_out: *u8, text_length_out: *u8) -> i32;
+
+extern fn GetNamedSecurityInfoA(path: *u8, object_type: i32, security_information: i32, owner_out: *u8, group_out: *u8, dacl_out: *u8, sacl_out: *u8, descriptor_out: *u8) -> i32;
+
+fn _mkdtemp_acl_ptr(slot: *u8) -> *u8 {
+    if slot as i64 == 0 { return null; }
+    return sailfin_intrinsic_pointer_read_i64(slot) as *u8;
+}
+
+// Materialize the exact owner + DACL SDDL for the effective process user.
+// The returned C string is malloc-owned. All Win32 out-parameter slots are
+// eight bytes so the pointer writes stay naturally aligned on x86-64.
+fn _mkdtemp_acl_contract() -> *u8 ![io] {
+    let token_slot: *u8 = malloc(8 as usize);
+    if token_slot as i64 == 0 { return null; }
+    let _token_zero = memset(token_slot, 0, 8 as usize);
+    // TOKEN_QUERY = 8.
+    if OpenProcessToken(GetCurrentProcess(), 8, token_slot) == 0 {
+        free(token_slot);
+        return null;
+    }
+    let token: i64 = sailfin_intrinsic_pointer_read_i64(token_slot);
+    free(token_slot);
+
+    let length_slot: *u8 = malloc(8 as usize);
+    if length_slot as i64 == 0 {
+        let _closed = CloseHandle(token);
+        return null;
+    }
+    let _length_zero = memset(length_slot, 0, 8 as usize);
+    // TokenUser = 1. The sizing call is expected to fail while filling the
+    // required DWORD length; a zero result is therefore not itself an error.
+    let _sized = GetTokenInformation(token, 1, null, 0, length_slot);
+    let token_user_length: i64 = sailfin_intrinsic_pointer_read_i32(length_slot) as i64;
+    if token_user_length <= 0 {
+        free(length_slot);
+        let _closed = CloseHandle(token);
+        return null;
+    }
+
+    let token_user: *u8 = malloc(token_user_length as usize);
+    if token_user as i64 == 0 {
+        free(length_slot);
+        let _closed = CloseHandle(token);
+        return null;
+    }
+    let read_user: i32 = GetTokenInformation(token, 1, token_user, token_user_length as i32, length_slot);
+    free(length_slot);
+    let _closed = CloseHandle(token);
+    if read_user == 0 {
+        free(token_user);
+        return null;
+    }
+
+    // TOKEN_USER begins with SID_AND_ATTRIBUTES; its first x86-64 field is
+    // the user SID pointer.
+    let user_sid: *u8 = _mkdtemp_acl_ptr(token_user);
+    let sid_text_slot: *u8 = malloc(8 as usize);
+    if user_sid as i64 == 0 || sid_text_slot as i64 == 0 {
+        if sid_text_slot as i64 != 0 { free(sid_text_slot); }
+        free(token_user);
+        return null;
+    }
+    let _sid_text_zero = memset(sid_text_slot, 0, 8 as usize);
+    let converted_sid: i32 = ConvertSidToStringSidA(user_sid, sid_text_slot);
+    let sid_text: *u8 = _mkdtemp_acl_ptr(sid_text_slot);
+    free(sid_text_slot);
+    free(token_user);
+    if converted_sid == 0 || sid_text as i64 == 0 { return null; }
+
+    let owner_prefix: string = "O:";
+    let dacl_prefix: string = "D:P(A;OICI;FA;;;";
+    let close_ace: string = ")";
+    let sid_length: i64 = strlen(sid_text) as i64;
+    let needed: i64 = owner_prefix.length + sid_length + dacl_prefix.length
+        + sid_length
+        + close_ace.length
+        + 1;
+    let contract: *u8 = malloc(needed as usize);
+    if contract as i64 == 0 {
+        let _released = LocalFree(sid_text);
+        return null;
+    }
+
+    let mut off: i64 = 0;
+    let _owner = memcpy(contract, owner_prefix as *u8, owner_prefix.length as usize);
+    off += owner_prefix.length;
+    let _owner_sid = memcpy(((contract as i64) + off) as *u8, sid_text, sid_length as usize);
+    off += sid_length;
+    let _dacl = memcpy(((contract as i64) + off) as *u8, dacl_prefix as *u8, dacl_prefix.length as usize);
+    off += dacl_prefix.length;
+    let _ace_sid = memcpy(((contract as i64) + off) as *u8, sid_text, sid_length as usize);
+    off += sid_length;
+    let _close = memcpy(((contract as i64) + off) as *u8, close_ace as *u8, close_ace.length as usize);
+    off += close_ace.length;
+    let _nul = memset(((contract as i64) + off) as *u8, 0, 1 as usize);
+    let _released = LocalFree(sid_text);
+    return contract;
+}
+
+// Allocate a 64-bit SECURITY_ATTRIBUTES followed by its LocalAlloc-owned
+// security descriptor. Layout is DWORD + padding + pointer + BOOL + padding.
+// The descriptor pointer lives at offset 8, so the cleanup helper can recover
+// it without a second allocation.
+fn sfn_fs_mkdtemp_security_attributes() -> *u8 ![io] {
+    let attributes: *u8 = malloc(24 as usize);
+    if attributes as i64 == 0 { return null; }
+    let _zero = memset(attributes, 0, 24 as usize);
+
+    let contract: *u8 = _mkdtemp_acl_contract();
+    if contract as i64 == 0 {
+        free(attributes);
+        return null;
+    }
+    let descriptor_out: *u8 = ((attributes as i64) + 8) as *u8;
+    let converted: i32 = ConvertStringSecurityDescriptorToSecurityDescriptorA(contract, 1, descriptor_out, null);
+    free(contract);
+    if converted == 0 {
+        free(attributes);
+        return null;
+    }
+
+    // Store nLength as an aligned eight-byte word. The upper four bytes are
+    // the required x86-64 padding and remain zero.
+    atomic_store(attributes as *i64, 24);
+    return attributes;
+}
+
+fn sfn_fs_mkdtemp_security_attributes_free(attributes: *u8) -> void ![io] {
+    if attributes as i64 == 0 { return; }
+    let descriptor: *u8 = _mkdtemp_acl_ptr(((attributes as i64) + 8) as *u8);
+    if descriptor as i64 != 0 { let _released = LocalFree(descriptor); }
+    free(attributes);
+}
+
+fn sfn_fs_mkdtemp_acl_is_private(path: *u8) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+
+    let descriptor_slot: *u8 = malloc(8 as usize);
+    if descriptor_slot as i64 == 0 { return false; }
+    let _descriptor_zero = memset(descriptor_slot, 0, 8 as usize);
+
+    // SE_FILE_OBJECT = 1; OWNER_SECURITY_INFORMATION = 1;
+    // DACL_SECURITY_INFORMATION = 4.
+    let read_status: i32 = GetNamedSecurityInfoA(path, 1, 5, null, null, null, null, descriptor_slot);
+    let descriptor: *u8 = _mkdtemp_acl_ptr(descriptor_slot);
+    if read_status != 0 || descriptor as i64 == 0 {
+        free(descriptor_slot);
+        return false;
+    }
+
+    let text_slot: *u8 = malloc(8 as usize);
+    if text_slot as i64 == 0 {
+        let _released = LocalFree(descriptor);
+        free(descriptor_slot);
+        return false;
+    }
+    let _text_zero = memset(text_slot, 0, 8 as usize);
+    let rendered: i32 = ConvertSecurityDescriptorToStringSecurityDescriptorA(descriptor, 1, 5, text_slot, null);
+    let text: *u8 = _mkdtemp_acl_ptr(text_slot);
+    let expected: *u8 = _mkdtemp_acl_contract();
+    let mut matches: bool = false;
+    if rendered != 0 && text as i64 != 0 && expected as i64 != 0 {
+        matches = strcmp(text, expected) == 0;
+    }
+
+    if expected as i64 != 0 { free(expected); }
+    if text as i64 != 0 { let _text_released = LocalFree(text); }
+    let _descriptor_released = LocalFree(descriptor);
+    free(text_slot);
+    free(descriptor_slot);
+    return matches;
+}
