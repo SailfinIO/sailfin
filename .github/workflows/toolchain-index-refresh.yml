@@ -1,0 +1,262 @@
+name: Toolchain index refresh
+
+# The canonical signed toolchain index carries an `expires_at`, and
+# `toolchain_index_verify` refuses an expired index on the cached path as well
+# as the fetched one (SFEP-0073 §3.7: expired metadata must not be able to
+# claim a user is current). Until SFN-1204 the only thing that advanced that
+# expiry was a release cut, so a release drought longer than the window bricked
+# every network-backed install and every project-pin auto-fetch. This job
+# advances the window on a cadence far inside it, independent of whether a
+# release was cut, and fails loudly while margin remains.
+#
+# Recovery from an already-expired index: docs/runbooks/toolchain-index-refresh.md
+
+on:
+  schedule:
+    # Wednesday 06:00 UTC. Deliberately off the Monday release-train cadence so
+    # a refresh does not queue behind a release cut on the shared
+    # `release-publication` concurrency group. Weekly against a 35-day window
+    # leaves roughly four missed runs of margin.
+    - cron: "0 6 * * 3"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify a refreshed index without publishing it"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# The canonical index has one global monotonic sequence, so a refresh must
+# never run concurrently with a release publication. This is deliberately the
+# same group `release-tag.yml` uses; `cancel-in-progress: false` so a refresh
+# queues behind a release rather than cancelling it.
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
+env:
+  TOOLCHAIN_INDEX_TAG: toolchain-index-v1
+  # Must stay in step with the window `release-tag.yml` sets on a release cut.
+  REFRESH_WINDOW_DAYS: 35
+  # A refreshed index closer to expiry than this fails the run while there is
+  # still time to intervene, rather than after users are already broken.
+  MIN_MARGIN_DAYS: 14
+
+jobs:
+  refresh:
+    name: Refresh the canonical signed index window
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout publication gate
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .github/release-signing/toolchain-index-state.json
+            scripts/publish-toolchain-index.py
+          sparse-checkout-cone-mode: false
+
+      - name: Fetch the canonical signed index
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist previous
+          if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TOOLCHAIN_INDEX_TAG}" >/dev/null 2>&1; then
+            echo "[index-refresh][error] the canonical index release ${TOOLCHAIN_INDEX_TAG} is absent." >&2
+            echo "[index-refresh][error] A refresh cannot bootstrap signed history. See docs/runbooks/toolchain-index-refresh.md" >&2
+            exit 1
+          fi
+          pair_count="$(gh release view "$TOOLCHAIN_INDEX_TAG" --json assets \
+            --jq '[.assets[].name | select(. == "toolchain-index.json" or . == "toolchain-index.json.sig")] | length')"
+          if [ "$pair_count" -ne 2 ]; then
+            echo "[index-refresh][error] the canonical release has an incomplete public index pair." >&2
+            echo "[index-refresh][error] Repair it through the release path rather than here. See docs/runbooks/toolchain-index-refresh.md" >&2
+            exit 1
+          fi
+          gh release download "$TOOLCHAIN_INDEX_TAG" \
+            --pattern toolchain-index.json \
+            --pattern toolchain-index.json.sig \
+            --dir previous \
+            --clobber
+
+      - name: Report current freshness
+        id: freshness
+        shell: bash
+        run: |
+          set -euo pipefail
+          expires_at="$(jq -r '.expires_at' previous/toolchain-index.json)"
+          sequence="$(jq -r '.sequence' previous/toolchain-index.json)"
+          expires_epoch="$(date -u -d "$expires_at" '+%s')"
+          now_epoch="$(date -u '+%s')"
+          remaining_days=$(( (expires_epoch - now_epoch) / 86400 ))
+          echo "[index-refresh] canonical sequence ${sequence} expires ${expires_at} (${remaining_days} days remaining)"
+          if [ "$remaining_days" -lt "$MIN_MARGIN_DAYS" ]; then
+            echo "::warning::The signed toolchain index expires at ${expires_at}, only ${remaining_days} days away. This run must succeed or user installs break at that deadline."
+          fi
+          echo "remaining_days=${remaining_days}" >> "$GITHUB_OUTPUT"
+          echo "previous_expiry=${expires_at}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the release to restate
+        id: target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A refresh restates a release the index already carries, so the
+          # rebuilt record is byte-identical and only the validity window
+          # moves. Never introduce a new release here: publishing a release
+          # into the index is the release pipeline's decision, not this job's.
+          version="$(jq -r '.releases | keys[]' previous/toolchain-index.json | sort -V | tail -n1)"
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "[index-refresh][error] the canonical index carries no releases to restate" >&2
+            exit 1
+          fi
+          # Read the channel the index already records for this release rather
+          # than re-inferring it from the version string. The rebuilt record
+          # must equal the stored one exactly or the producer refuses with
+          # "release ... already exists with different authenticated metadata".
+          channel="$(jq -r --arg v "$version" '.releases[$v].channel' previous/toolchain-index.json)"
+          if [ -z "$channel" ] || [ "$channel" = "null" ]; then
+            echo "[index-refresh][error] the index records no channel for ${version}" >&2
+            exit 1
+          fi
+          echo "[index-refresh] restating ${version} on channel ${channel}"
+          gh release download "v${version}" \
+            --pattern SHA256SUMS \
+            --pattern SHA256SUMS.sig \
+            --dir dist \
+            --clobber
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and sign the refreshed index
+        shell: bash
+        env:
+          SAILFIN_RELEASE_SIGNING_KEY: ${{ secrets.SAILFIN_RELEASE_SIGNING_KEY }}
+          TARGET_VERSION: ${{ steps.target.outputs.version }}
+          TARGET_CHANNEL: ${{ steps.target.outputs.channel }}
+        run: |
+          set -euo pipefail
+          generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          expires_at="$(date -u -d "${generated_at} +${REFRESH_WINDOW_DAYS} days" '+%Y-%m-%dT%H:%M:%SZ')"
+          # --refresh-window is required: without it the producer treats a
+          # semantically identical index as a no-op, reuses the previous
+          # window and sequence, and the expiry never advances (SFN-1204).
+          python3 scripts/publish-toolchain-index.py \
+            --state .github/release-signing/toolchain-index-state.json \
+            --manifest dist/SHA256SUMS \
+            --version "$TARGET_VERSION" \
+            --channel "$TARGET_CHANNEL" \
+            --generated-at "$generated_at" \
+            --expires-at "$expires_at" \
+            --refresh-window \
+            --previous-index previous/toolchain-index.json \
+            --previous-signature previous/toolchain-index.json.sig \
+            --authenticated-previous-output dist/toolchain-index.previous.json \
+            --authenticated-previous-signature-output dist/toolchain-index.previous.json.sig \
+            --output dist/toolchain-index.json \
+            --signature-output dist/toolchain-index.json.sig
+
+          test -s dist/toolchain-index.json
+          test "$(wc -c < dist/toolchain-index.json.sig | tr -d ' ')" = 128
+          grep -Eq '^[0-9a-f]{128}$' dist/toolchain-index.json.sig
+
+      - name: Assert the refreshed window clears the margin
+        shell: bash
+        env:
+          PREVIOUS_EXPIRY: ${{ steps.freshness.outputs.previous_expiry }}
+        run: |
+          set -euo pipefail
+          new_expiry="$(jq -r '.expires_at' dist/toolchain-index.json)"
+          new_sequence="$(jq -r '.sequence' dist/toolchain-index.json)"
+          old_sequence="$(jq -r '.sequence' previous/toolchain-index.json)"
+          new_epoch="$(date -u -d "$new_expiry" '+%s')"
+          old_epoch="$(date -u -d "$PREVIOUS_EXPIRY" '+%s')"
+          now_epoch="$(date -u '+%s')"
+          remaining_days=$(( (new_epoch - now_epoch) / 86400 ))
+          if [ "$new_sequence" -le "$old_sequence" ]; then
+            echo "[index-refresh][error] sequence did not advance (${old_sequence} -> ${new_sequence}); clients would reject this index" >&2
+            exit 1
+          fi
+          if [ "$new_epoch" -le "$old_epoch" ]; then
+            echo "[index-refresh][error] the refreshed index expires no later than the one it replaces (${PREVIOUS_EXPIRY} -> ${new_expiry})" >&2
+            echo "[index-refresh][error] the validity window did not move; user installs still break at ${PREVIOUS_EXPIRY}" >&2
+            exit 1
+          fi
+          if [ "$remaining_days" -lt "$MIN_MARGIN_DAYS" ]; then
+            echo "[index-refresh][error] the refreshed index expires ${new_expiry}, only ${remaining_days} days away, under the ${MIN_MARGIN_DAYS}-day margin" >&2
+            exit 1
+          fi
+          echo "[index-refresh] sequence ${old_sequence} -> ${new_sequence}; expiry ${PREVIOUS_EXPIRY} -> ${new_expiry} (${remaining_days} days remaining)"
+
+      - name: Publish the refreshed index
+        if: ${{ inputs.dry_run != true }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s dist/toolchain-index.previous.json
+          test -s dist/toolchain-index.previous.json.sig
+          # Same ordering as release-tag.yml: preserve the last authenticated
+          # pair first, so a failed public upload is repairable from the backup.
+          gh release upload "$TOOLCHAIN_INDEX_TAG" \
+            dist/toolchain-index.previous.json \
+            dist/toolchain-index.previous.json.sig \
+            --clobber
+          gh release edit "$TOOLCHAIN_INDEX_TAG" --draft=true
+          gh release upload "$TOOLCHAIN_INDEX_TAG" \
+            dist/toolchain-index.json \
+            dist/toolchain-index.json.sig \
+            --clobber
+          gh release edit "$TOOLCHAIN_INDEX_TAG" \
+            --draft=false --prerelease --latest=false
+
+      - name: Report dry run
+        if: ${{ inputs.dry_run == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[index-refresh] dry run: a refreshed index was built, signed and verified but not published."
+
+  notify-slack-failure:
+    name: Notify Slack when the index window did not advance
+    needs: [refresh]
+    if: ${{ !cancelled() && needs.refresh.result != 'success' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Post Slack notification
+        shell: bash
+        env:
+          SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+          REFRESH_RESULT: ${{ needs.refresh.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
+            exit 0
+          fi
+          python3 - <<'PY' > /tmp/slack-payload.json
+          import json
+          import os
+
+          text = (
+              ":rotating_light: Toolchain index refresh "
+              f"{os.environ['REFRESH_RESULT']}. The signed index expiry did not "
+              "advance. Every network-backed `sfn toolchain install` and "
+              "project-pin auto-fetch fails once it lapses. Runbook: "
+              "docs/runbooks/toolchain-index-refresh.md\n"
+              f"{os.environ['RUN_URL']}"
+          )
+          print(json.dumps({"text": text}))
+          PY
+          curl -sS -X POST -H 'Content-Type: application/json' \
+            --data @/tmp/slack-payload.json "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null

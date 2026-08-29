@@ -194,6 +194,7 @@ def run_publisher(
     authenticated_previous: tuple[Path, Path] | None = None,
     sequence: int | None = None,
     bootstrap: bool = False,
+    refresh_window: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     output = root / f"{stem}.json"
     signature = root / f"{stem}.json.sig"
@@ -258,6 +259,8 @@ def run_publisher(
         command.extend(["--sequence", str(sequence)])
     if bootstrap:
         command.append("--allow-bootstrap")
+    if refresh_window:
+        command.append("--refresh-window")
     environment = dict(os.environ)
     environment.pop("SAILFIN_RELEASE_SIGNING_KEY", None)
     environment["SAILFIN_RELEASE_SIGNING_KEY_FILE"] = str(private)
@@ -409,6 +412,64 @@ def main() -> int:
             raise AssertionError("identical release state changed canonical payload bytes")
         if repeat_signature.read_bytes() != signature_1.read_bytes():
             raise AssertionError("deterministic Ed25519 signing changed detached signature")
+
+        refreshed, refreshed_index, _ = run_publisher(
+            root,
+            normal_state,
+            old_private,
+            manifest_123,
+            "1.2.3",
+            "stable",
+            "normal-refresh",
+            generated_at="2026-08-24T00:00:00Z",
+            expires_at="2026-09-28T00:00:00Z",
+            now="2026-08-24T00:00:00Z",
+            previous=(index_1, signature_1),
+            refresh_window=True,
+        )
+        expect_success(refreshed, "refresh-window advances window fixture")
+        refreshed_payload = json.loads(refreshed_index.read_text(encoding="utf-8"))
+        if refreshed_payload["expires_at"] != "2026-09-28T00:00:00Z":
+            raise AssertionError("--refresh-window did not advance expires_at")
+        if refreshed_payload["generated_at"] != "2026-08-24T00:00:00Z":
+            raise AssertionError("--refresh-window did not advance generated_at")
+        if refreshed_payload["sequence"] != payload_1["sequence"] + 1:
+            raise AssertionError("--refresh-window did not advance sequence")
+
+        norefresh, norefresh_index, _ = run_publisher(
+            root,
+            normal_state,
+            old_private,
+            manifest_123,
+            "1.2.3",
+            "stable",
+            "normal-norefresh",
+            generated_at="2026-08-24T00:00:00Z",
+            expires_at="2026-09-28T00:00:00Z",
+            now="2026-08-24T00:00:00Z",
+            previous=(index_1, signature_1),
+        )
+        expect_success(norefresh, "default rerun without refresh-window fixture")
+        norefresh_payload = json.loads(norefresh_index.read_text(encoding="utf-8"))
+        if norefresh_payload["expires_at"] != payload_1["expires_at"]:
+            raise AssertionError("default rerun without --refresh-window moved the window")
+
+        refresh_bootstrap, _, _ = run_publisher(
+            root,
+            normal_state,
+            old_private,
+            manifest_123,
+            "1.2.3",
+            "stable",
+            "refresh-bootstrap",
+            bootstrap=True,
+            refresh_window=True,
+        )
+        expect_failure(
+            refresh_bootstrap,
+            "cannot be combined",
+            "refresh-window cannot bootstrap fixture",
+        )
 
         malformed = fixture("malformed-host.json")
         malformed_manifest = write_release(
