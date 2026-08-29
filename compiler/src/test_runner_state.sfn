@@ -131,6 +131,17 @@ fn test_filters_active() -> boolean {
     return false;
 }
 
+// The raw filter values. `test_filters_active()` answers "is anything
+// filtered"; these answer "filtered by WHAT", which the test-bin cache key
+// needs: a binary linked under `-k a` holds a different test set than one
+// linked under `-k b`, so the selection is a key input, not just a boolean
+// (SFN-1199). The pool path forwards `-k`/`--tag` on each child argv, so a
+// child re-establishes this state and derives the same key as a matching
+// single-process run.
+fn test_filter_name() -> string { return _filter_name; }
+
+fn test_filter_tag() -> string { return _filter_tag; }
+
 // Unwrap a decorator argument's value to its bare string. `@tag("slow")`
 // normally parses its argument to a `StringLiteral` (already unquoted)
 // via `expression_from_single_token`. The `Raw` branch is a defensive

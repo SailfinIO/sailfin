@@ -29,7 +29,12 @@ import {
     render_start_event,
     render_summary_event
 } from "../../../test_runner_json";
-import { exit_test_runner_mode, test_filters_active } from "../../../test_runner_state";
+import {
+    exit_test_runner_mode,
+    test_filter_name,
+    test_filter_tag,
+    test_filters_active
+} from "../../../test_runner_state";
 import { load_imported_interfaces_from_paths } from "../../../typecheck_import_loader";
 import { resolve_test_bin_identity_for_cache } from "../../../version";
 import { CliContext } from "../../context";
@@ -273,7 +278,11 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         let mut tb_key: CacheKey = CacheKey { digest: "" };
         let mut cache_hit: boolean = false;
         if test_cache_enabled {
-            tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_runtime_identity, tb_flags_canonical, _sanitize_filename_cmd(scratch_root
+            // SFN-1199: the active `-k`/`--tag` are key inputs. The filter cut
+            // runs upstream of emit, so the linked binary holds only the
+            // surviving tests; keying on the selection is what stops a
+            // filtered binary from serving a later unfiltered request.
+            tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_runtime_identity, tb_flags_canonical, test_filter_name(), test_filter_tag(), _sanitize_filename_cmd(scratch_root
                 + "/"
                 + path), tb_target_triple);
             if cache_lookup_artifact(tb_cache_root, tb_key, "test-bin") {

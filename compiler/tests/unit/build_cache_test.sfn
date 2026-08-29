@@ -337,11 +337,11 @@ test "build_cache: cache_key_for matching lengths still yield a valid digest" ![
 // Per-test binary cache (#1230)
 // --------------------------------------------------------------
 test "build_cache: test_bin cache schema + root layout" ![io] {
-    assert test_bin_cache_schema_version() == "v4";
+    assert test_bin_cache_schema_version() == "v5";
     // In-tree default sits beside (not under) the module cache's
     // `<base>/v<N>` tree so the two schema lines age out independently.
-    assert test_bin_cache_root_with_override("") == "build/cache/test-bin/v4";
-    assert test_bin_cache_root_with_override("/shared/cache") == "/shared/cache/test-bin/v4";
+    assert test_bin_cache_root_with_override("") == "build/cache/test-bin/v5";
+    assert test_bin_cache_root_with_override("/shared/cache") == "/shared/cache/test-bin/v5";
 }
 
 test "build_cache: test_bin_cache_key same inputs -> same digest" ![io] {
@@ -351,8 +351,8 @@ test "build_cache: test_bin_cache_key same inputs -> same digest" ![io] {
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     _write_file(dep_ll, "; ModuleID = 'dep'");
     let native_texts: string[] = ["sfn-asm: helper"];
-    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "tbk_det", "x86_64-unknown-linux-gnu");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "tbk_det", "x86_64-unknown-linux-gnu");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_det", "x86_64-unknown-linux-gnu");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_det", "x86_64-unknown-linux-gnu");
     assert key1.digest == key2.digest;
     assert key1.digest.length == 64;
     _cleanup(scratch);
@@ -365,13 +365,13 @@ test "build_cache: test_bin_cache_key changes when a dep .ll hash changes" ![io]
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     let native_texts: string[] = ["sfn-asm: helper"];
     _write_file(dep_ll, "; ModuleID = 'dep'\ndefine i64 @f() { ret i64 1 }");
-    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "tbk_dll_1", "x86_64-unknown-linux-gnu");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_dll_1", "x86_64-unknown-linux-gnu");
     // A changed transitive dep → changed hash → changed key → cache
     // miss. This is the correctness hinge: a stale binary can never be
     // served after a dep edit (acceptance criterion: misses for exactly
     // the transitive importers of an edited compiler/src file).
     _write_file(dep_ll, "; ModuleID = 'dep'\ndefine i64 @f() { ret i64 2 }");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "tbk_dll_2", "x86_64-unknown-linux-gnu");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_dll_2", "x86_64-unknown-linux-gnu");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -382,8 +382,8 @@ test "build_cache: test_bin_cache_key changes when a native_text dep changes" ![
     let dep_ll = scratch + "/dep.ll";
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     _write_file(dep_ll, "; ModuleID = 'dep'");
-    let key1 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: original"], "0.7.0", "rt0", "[\"-O0\"]", "tbk_nt_1", "x86_64-unknown-linux-gnu");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: changed"], "0.7.0", "rt0", "[\"-O0\"]", "tbk_nt_2", "x86_64-unknown-linux-gnu");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: original"], "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_nt_1", "x86_64-unknown-linux-gnu");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: changed"], "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_nt_2", "x86_64-unknown-linux-gnu");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -399,8 +399,8 @@ test "build_cache: test_bin_cache_key invariant under dep_ll order" ![io] {
     _write_file(dep_b, "; beta");
     _write_file(dep_c, "; gamma");
     let nt: string[] = [];
-    let key_abc = test_bin_cache_key(test_src, [dep_a, dep_b, dep_c], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_ord", "x86_64-unknown-linux-gnu");
-    let key_cba = test_bin_cache_key(test_src, [dep_c, dep_b, dep_a], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_ord", "x86_64-unknown-linux-gnu");
+    let key_abc = test_bin_cache_key(test_src, [dep_a, dep_b, dep_c], nt, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_ord", "x86_64-unknown-linux-gnu");
+    let key_cba = test_bin_cache_key(test_src, [dep_c, dep_b, dep_a], nt, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_ord", "x86_64-unknown-linux-gnu");
     assert key_abc.digest == key_cba.digest;
     _cleanup(scratch);
 }
@@ -412,9 +412,9 @@ test "build_cache: test_bin_cache_key changes when test source changes" ![io] {
     _write_file(dep_ll, "; ModuleID = 'dep'");
     let nt: string[] = [];
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
-    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_src_1", "x86_64-unknown-linux-gnu");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_src_1", "x86_64-unknown-linux-gnu");
     _write_file(test_src, "test \"x\" { assert 2 == 2; }");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_src_2", "x86_64-unknown-linux-gnu");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_src_2", "x86_64-unknown-linux-gnu");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -433,8 +433,8 @@ test "build_cache: test_bin_cache_key changes when compiler identity changes" ![
     // Same capsule version, different compiler bytes: the exact
     // cross-compiler poisoning shape from SFN-545 must miss.
     assert identity_a != identity_b;
-    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, identity_a, "rt0", "[\"-O0\"]", "tbk_id_1", "x86_64-unknown-linux-gnu");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, identity_b, "rt0", "[\"-O0\"]", "tbk_id_2", "x86_64-unknown-linux-gnu");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, identity_a, "rt0", "[\"-O0\"]", "", "", "tbk_id_1", "x86_64-unknown-linux-gnu");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, identity_b, "rt0", "[\"-O0\"]", "", "", "tbk_id_2", "x86_64-unknown-linux-gnu");
     assert key1.digest != key2.digest;
     remove_all(bin_a);
     remove_all(bin_b);
@@ -476,8 +476,8 @@ test "build_cache: test_bin_cache_key changes when runtime identity changes" ![i
     let nt: string[] = [];
     // A runtime edit changes the folded runtime identity → busts the key
     // (this is what replaces the former per-commit-stamp backstop).
-    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt-aaa", "[\"-O0\"]", "tbk_rt_1", "x86_64-unknown-linux-gnu");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt-bbb", "[\"-O0\"]", "tbk_rt_2", "x86_64-unknown-linux-gnu");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt-aaa", "[\"-O0\"]", "", "", "tbk_rt_1", "x86_64-unknown-linux-gnu");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt-bbb", "[\"-O0\"]", "", "", "tbk_rt_2", "x86_64-unknown-linux-gnu");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -485,6 +485,89 @@ test "build_cache: test_bin_cache_key changes when runtime identity changes" ![i
 // SFN-676: a cross-target `sfn test` invocation must never serve a
 // binary linked for a different OS/triple. Every other input held
 // fixed, only `target_triple` differs.
+// SFN-1199: the active `-k`/`--tag` selection is a key input. The filter cut
+// runs upstream of emit, so a filtered link produces a binary holding only
+// the surviving tests; a filtered and an unfiltered run of identical source
+// must therefore never share a key. Every other input is held fixed in each
+// case below so only the filter pair can move the digest.
+test "build_cache: test_bin_cache_key changes when a name filter is active" ![io] {
+    let scratch = _test_tmp_root("tbk_filter_name");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let nt: string[] = [];
+    let unfiltered = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_flt_u", "x86_64-unknown-linux-gnu");
+    let filtered = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "alpha", "", "tbk_flt_f", "x86_64-unknown-linux-gnu");
+    assert unfiltered.digest != filtered.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: test_bin_cache_key separates two different name filters" ![io] {
+    let scratch = _test_tmp_root("tbk_filter_two");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let nt: string[] = [];
+    let key_a = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "alpha", "", "tbk_flt_a", "x86_64-unknown-linux-gnu");
+    let key_b = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "beta", "", "tbk_flt_b", "x86_64-unknown-linux-gnu");
+    assert key_a.digest != key_b.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: test_bin_cache_key separates the name and tag filter axes" ![io] {
+    let scratch = _test_tmp_root("tbk_filter_axes");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let nt: string[] = [];
+    // `-k slow` selects by test name, `--tag slow` by decorator: same string,
+    // different selection, so the two must not alias.
+    let by_name = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "slow", "", "tbk_flt_n", "x86_64-unknown-linux-gnu");
+    let by_tag = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "", "slow", "tbk_flt_t", "x86_64-unknown-linux-gnu");
+    assert by_name.digest != by_tag.digest;
+    // The pair is self-delimiting: a split moved across the axis boundary is
+    // a different key, so ("ab", "c") cannot alias ("a", "bc").
+    let split_1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "ab", "c", "tbk_flt_s1", "x86_64-unknown-linux-gnu");
+    let split_2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "a", "bc", "tbk_flt_s2", "x86_64-unknown-linux-gnu");
+    assert split_1.digest != split_2.digest;
+    _cleanup(scratch);
+}
+
+// The common path must not regress: two runs sharing one filter state — the
+// unfiltered case above all, which is every `sfn test <path>` — still agree.
+test "build_cache: test_bin_cache_key is stable for a repeated filter" ![io] {
+    let scratch = _test_tmp_root("tbk_filter_stable");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let nt: string[] = [];
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "alpha", "slow", "tbk_flt_r1", "x86_64-unknown-linux-gnu");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "alpha", "slow", "tbk_flt_r2", "x86_64-unknown-linux-gnu");
+    assert key1.digest == key2.digest;
+    _cleanup(scratch);
+}
+
+// A filter carrying the fold's own separators must not absorb the field that
+// follows it. Folding the axes by value would let this selector alias a
+// different (filter, target) tuple; each axis folds as a fixed-width digest
+// precisely so it cannot.
+test "build_cache: test_bin_cache_key resists a separator-bearing filter" ![io] {
+    let scratch = _test_tmp_root("tbk_filter_sep");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let nt: string[] = [];
+    let crafted = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "a\ntgt1:x86_64-pc-windows-msvc", "", "tbk_flt_sep1", "x86_64-unknown-linux-gnu");
+    let plain = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "a", "", "tbk_flt_sep2", "x86_64-pc-windows-msvc");
+    assert crafted.digest != plain.digest;
+    _cleanup(scratch);
+}
+
 test "build_cache: test_bin_cache_key changes when target triple changes" ![io] {
     let scratch = _test_tmp_root("tbk_target");
     let test_src = scratch + "/foo_test.sfn";
@@ -492,8 +575,8 @@ test "build_cache: test_bin_cache_key changes when target triple changes" ![io] 
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     _write_file(dep_ll, "; ModuleID = 'dep'");
     let nt: string[] = [];
-    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_tgt_1", "x86_64-unknown-linux-gnu");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_tgt_2", "x86_64-pc-windows-msvc");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_tgt_1", "x86_64-unknown-linux-gnu");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "", "", "tbk_tgt_2", "x86_64-pc-windows-msvc");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }

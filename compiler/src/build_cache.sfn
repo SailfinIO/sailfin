@@ -1578,7 +1578,7 @@ fn test_bin_compiler_identity(compiler_version: string, compiler_binary_path: st
 // module `.ll` cache under SFN-677. The schema bump makes every v3
 // entry unreachable once, so a pre-fix entry linked for the wrong
 // target can never false-hit under the new key.
-fn test_bin_cache_schema_version() -> string { return "v4"; }
+fn test_bin_cache_schema_version() -> string { return "v5"; }
 
 // Root for the per-test binary cache: `<base>/test-bin/<schema>`,
 // where `<base>` is `$SAILFIN_BUILD_CACHE_DIR` (when set) or the
@@ -1654,6 +1654,7 @@ fn runtime_obj_cache_root() -> string ![io] {
 //       || runtime_identity             // runtime_link_inputs_identity(...)
 //       || canonical(clang_flags)
 //       || test_bin_cache_schema_version()
+//       || "flt1:" || sha256(name_filter) || sha256(tag_filter)
 //       || "tgt1:" || target_triple
 //   )
 //
@@ -1677,7 +1678,7 @@ fn runtime_obj_cache_root() -> string ![io] {
 // anything derived from it afterward would let a crafted value absorb
 // its own successor and alias a different tuple — the exact defect
 // `cache_key_for`'s docstring records for its own `target_triple` fold.
-fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, runtime_identity: string, flags_canonical: string, unique_suffix: string, target_triple: string) -> CacheKey ![io] {
+fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, runtime_identity: string, flags_canonical: string, name_filter: string, tag_filter: string, unique_suffix: string, target_triple: string) -> CacheKey ![io] {
     let s_hash = _sha256_of_file(test_source_path);
 
     let mut dep_hashes: string[] = [];
@@ -1705,6 +1706,24 @@ fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_t
     }
     let deps_hash = _sha256_of_string(deps_concat, unique_suffix + "_deps");
 
+    // SFN-1199: fold the active `-k` / `--tag` selection. `set_test_filters`
+    // cuts the program's `test:` declarations BEFORE emit, so a filtered link
+    // yields a binary holding only the surviving tests. Without this term a
+    // filtered and an unfiltered run of identical source compute the same
+    // key, and the narrow binary is served to the full request — which then
+    // reports PASS having executed a subset, with no signal.
+    //
+    // Each axis folds as its OWN fixed-width digest rather than by value:
+    // both are raw argv and may contain any byte, including the "\n"
+    // separators used here. Folding by value would let a crafted selector
+    // absorb the field after it and alias a different tuple — the same defect
+    // the `target_triple` note above records. Two concatenated 64-char hex
+    // digests are self-delimiting, so `("ab", "c")` and `("a", "bc")` stay
+    // distinct without a length prefix, and nothing in the pair can absorb
+    // the `tgt1:` marker that follows.
+    let filter_identity = _sha256_of_string(name_filter, unique_suffix + "_fltn")
+        + _sha256_of_string(tag_filter, unique_suffix + "_fltt");
+
     let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_identity
         + "\n"
         + runtime_identity
@@ -1712,6 +1731,8 @@ fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_t
         + flags_canonical
         + "\n"
         + test_bin_cache_schema_version()
+        + "\nflt1:"
+        + filter_identity
         + "\ntgt1:"
         + target_triple;
     let final_digest = _sha256_of_string(final_input, unique_suffix + "_final");

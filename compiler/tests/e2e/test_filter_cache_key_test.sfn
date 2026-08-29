@@ -1,0 +1,135 @@
+// End-to-end regression for SFN-1199: a filtered `sfn test -k <name>` run must
+// not poison the linked-binary cache for a later unfiltered run of the same
+// source.
+//
+// The filter cut (`set_test_filters` -> `_filter_program_tests`) runs upstream
+// of emit, so a filtered link produces a binary holding only the surviving
+// tests. Before the fix, `test_bin_cache_key` folded no filter term, so that
+// narrow binary was stored under the key an unfiltered run computes — and the
+// unfiltered run then reported PASS having executed a subset, with no signal.
+// That is a false green, which is why this is pinned end to end rather than
+// only at the key level: the unit suite
+// (`compiler/tests/unit/build_cache_test.sfn`) proves the digests differ, but
+// only a real three-run sequence proves what the runner actually EXECUTES.
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`. Deliberately does NOT pass
+// `--no-test-cache`: the cache being live is the whole point, since that flag
+// is the workaround this fix retires.
+//
+// Assertions read the `--json` summary's `"passed":N`, which is the executed
+// count — the field that lied before the fix.
+import { find, int_to_string } from "sfn/strings";
+import { clean_runner_env_without, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+
+// Per-leg scratch + a caller-owned cache root, per the nested-runner rule
+// (SFN-401). `SAILFIN_BUILD_CACHE_DIR` is stripped before the push so an
+// inherited outer value cannot shadow it. All legs of one test share `cache_dir`
+// — that sharing is precisely what the regression needs — while each leg gets
+// its own scratch so the three runs cannot collide on `test.exe`.
+fn _leg_env(cache_dir: string, label: string) -> string[] ![io] {
+    let mut e = clean_runner_env_without(nested_runner_scratch("filter-cache-key-"
+        + label), ["SAILFIN_BUILD_CACHE_DIR"]);
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
+    return e;
+}
+
+fn _run(args: string[], cache_dir: string, label: string) -> string ![io] {
+    let mut argv: string[] = [sfn_bin_path(), "test"];
+    let mut i = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i += 1;
+    }
+    argv.push("--json");
+    let exit = process.run_capture(argv, _leg_env(cache_dir, label));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+    print.err("[filter-cache-key] leg=" + label + " cache=" + cache_dir
+        + " child exit="
+        + int_to_string(exit)
+        + " combined output:\n"
+        + log);
+    return log;
+}
+
+// Three distinctly-named tests so a `-k` selector can pick exactly one and the
+// executed count distinguishes filtered (1) from unfiltered (3).
+fn _fixture_body() -> string {
+    return "test \"alpha_marker one\" {\n    assert 1 == 1;\n}\n\ntest \"beta_marker two\" {\n    assert 2 == 2;\n}\n\ntest \"gamma_marker three\" {\n    assert 3 == 3;\n}\n";
+}
+
+fn _write_fixture(root: string, name: string) -> string ![io] {
+    let dir = root + "/" + name;
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/" + name + "_test.sfn", _fixture_body());
+    return dir;
+}
+
+// A filtered run between two unfiltered runs must not change what the second
+// unfiltered run executes. Single-process path (one test file).
+test "test filter cache: a filtered run does not shrink a later unfiltered run" ![io] {
+    let root = fs.mkdtemp("sfn-filter-cache-single-");
+    let cache = root + "/cache";
+    let dir = _write_fixture(root, "single");
+
+    // 1. Cold, unfiltered: the full file runs and populates the cache.
+    let first = _run([dir], cache, "single-unfiltered-cold");
+    assert find(first, "\"passed\":3", 0) >= 0;
+    assert find(first, "\"failed\":0", 0) >= 0;
+
+    // 2. Filtered: exactly one test runs. Before the fix this stored a
+    //    one-test binary under the unfiltered run's key.
+    let filtered = _run([dir, "-k", "alpha_marker"], cache, "single-filtered");
+    assert find(filtered, "\"passed\":1", 0) >= 0;
+    assert find(filtered, "\"failed\":0", 0) >= 0;
+
+    // 3. Unfiltered again, against the now-warm cache. This is the assertion
+    //    that failed before the fix: it read `"passed":1` and exited 0.
+    let second = _run([dir], cache, "single-unfiltered-warm");
+    assert find(second, "\"passed\":3", 0) >= 0;
+    assert find(second, "\"failed\":0", 0) >= 0;
+}
+
+// Two different `-k` values must not serve each other's binaries.
+test "test filter cache: two different -k selectors do not share a binary" ![io] {
+    let root = fs.mkdtemp("sfn-filter-cache-distinct-");
+    let cache = root + "/cache";
+    let dir = _write_fixture(root, "distinct");
+
+    let alpha = _run([dir, "-k", "alpha_marker"], cache, "distinct-alpha");
+    assert find(alpha, "\"passed\":1", 0) >= 0;
+
+    // A different selector selects a different single test. Serving the alpha
+    // binary here would still report `"passed":1`, so the executed count alone
+    // cannot separate them — assert on the RUN test's name instead, which the
+    // JSON stream carries per test.
+    let beta = _run([dir, "-k", "beta_marker"], cache, "distinct-beta");
+    assert find(beta, "\"passed\":1", 0) >= 0;
+    assert find(beta, "beta_marker", 0) >= 0;
+    assert find(beta, "alpha_marker", 0) < 0;
+}
+
+// The same property under the pool path: `_pool_child_argv` forwards
+// `-k`/`--tag` to each child, so a child re-establishes the filter state and
+// must derive the same filter-bearing key its single-process counterpart does.
+// Two files keep the runner off the in-process leaf path and on the fan-out.
+test "test filter cache: the pool path also keys on the active filter" ![io] {
+    let root = fs.mkdtemp("sfn-filter-cache-pool-");
+    let cache = root + "/cache";
+    let dir_a = _write_fixture(root, "poola");
+    let dir_b = _write_fixture(root, "poolb");
+
+    let first = _run([dir_a, dir_b, "--jobs", "2"], cache, "pool-unfiltered-cold");
+    assert find(first, "\"passed\":6", 0) >= 0;
+    assert find(first, "\"failed\":0", 0) >= 0;
+
+    let filtered = _run([dir_a, dir_b, "--jobs", "2", "-k", "alpha_marker"], cache, "pool-filtered");
+    assert find(filtered, "\"passed\":2", 0) >= 0;
+    assert find(filtered, "\"failed\":0", 0) >= 0;
+
+    let second = _run([dir_a, dir_b, "--jobs", "2"], cache, "pool-unfiltered-warm");
+    assert find(second, "\"passed\":6", 0) >= 0;
+    assert find(second, "\"failed\":0", 0) >= 0;
+}
