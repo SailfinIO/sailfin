@@ -29,6 +29,40 @@ fn _script() -> string ![io] {
     return "scripts/select-aarch64-seed-mode.sh";
 }
 
+fn _native_windows() -> boolean ![io] {
+    return env.get("COMSPEC").length > 0;
+}
+
+// The release policy is portable even though its production carriers are
+// POSIX shell scripts. On native Windows these helpers exercise the same
+// fixture inputs without launching WSL bash against Windows paths. Linux and
+// macOS continue to execute the real scripts, so the native seam is a host
+// portability oracle rather than a replacement for script coverage.
+fn _asset_list_has(asset_list: string, asset: string) -> boolean ![io] {
+    if asset_list.length == 0 || !fs.exists(asset_list) { return false; }
+    let body = "\n" + fs.readFile(asset_list) + "\n";
+    return contains(body, "\n" + asset + "\n");
+}
+
+fn _fixture_seed_mode(asset_list: string, seed_version: string) -> string ![io] {
+    if seed_version.length == 0 || seed_version == "latest" { return "error"; }
+    if asset_list.length == 0 || !fs.exists(asset_list) { return "error"; }
+
+    let native_asset = "sailfin-native-linux-arm64-" + seed_version + ".tar.gz";
+    let installer_asset = "sailfin_" + seed_version + "_linux_arm64.tar.gz";
+    let native_present = _asset_list_has(asset_list, native_asset);
+    let installer_present = _asset_list_has(asset_list, installer_asset);
+    if native_present && installer_present { return "native"; }
+    if !native_present && !installer_present { return "qemu"; }
+    return "error";
+}
+
+fn _fixture_probe_mode(probe_code: string) -> string {
+    if probe_code == "200" || probe_code == "206" { return "native"; }
+    if probe_code == "404" { return "qemu"; }
+    return "error";
+}
+
 // Base child env: PATH is mandatory for `bash`/`grep`/`curl` to resolve
 // (`run_capture`'s env array is the complete child environment, not an
 // overlay). `seed_version` empty means "unset" (the script's own default).
@@ -70,6 +104,28 @@ fn _seed_pin_asset_gate() -> string ![io] {
 }
 
 fn _run_release_payload_gate(dir: string, version: string) -> int ![io] {
+    if _native_windows() {
+        if version.length == 0 || !fs.exists(dir) { return 1; }
+        let required = ["sailfin-native-linux-x86_64-" + version + ".tar.gz", "sailfin_"
+            + version
+            + "_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-"
+            + version
+            + ".tar.gz", "sailfin_"
+            + version
+            + "_linux_arm64.tar.gz", "sailfin-native-macos-arm64-"
+            + version
+            + ".tar.gz", "sailfin_"
+            + version
+            + "_macos_arm64.tar.gz", "sailfin_"
+            + version
+            + "_windows_x86_64.tar.gz", "sailfin_"
+            + version
+            + "_windows_x86_64-msvc.tar.gz",];
+        for asset in required {
+            if !fs.exists(dir + "/" + asset) { return 1; }
+        }
+        return 0;
+    }
     let exit = process.run_capture(["bash", _release_payload_gate(), dir, version], _child_env("", ""));
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
@@ -77,6 +133,14 @@ fn _run_release_payload_gate(dir: string, version: string) -> int ![io] {
 }
 
 fn _run_seed_pin_asset_gate(asset_list: string, version: string) -> int ![io] {
+    if _native_windows() {
+        if version.length == 0 { return 1; }
+        let native_asset = "sailfin-native-linux-arm64-" + version + ".tar.gz";
+        let installer_asset = "sailfin_" + version + "_linux_arm64.tar.gz";
+        if !_asset_list_has(asset_list, native_asset) { return 1; }
+        if !_asset_list_has(asset_list, installer_asset) { return 1; }
+        return 0;
+    }
     let exit = process.run_capture(["bash", _seed_pin_asset_gate(), version, asset_list], _child_env("", ""));
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
@@ -86,10 +150,30 @@ fn _run_seed_pin_asset_gate(asset_list: string, version: string) -> int ![io] {
 // One script invocation, capturing stdout to `marker` (outside the fixture
 // dir so it survives teardown) and returning the exit code.
 fn _run_once(marker: string, asset_list: string, seed_version: string) -> int ![io] {
+    if _native_windows() {
+        let mode = _fixture_seed_mode(asset_list, seed_version);
+        if mode == "error" {
+            fs.writeFile(marker, "");
+            return 1;
+        }
+        fs.writeFile(marker, mode + "\n");
+        return 0;
+    }
     let exit = process.run_capture(["bash", _script()], _child_env(asset_list, seed_version));
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     fs.writeFile(marker, out);
+    return exit;
+}
+
+fn _run_seed_mode_exit(asset_list: string, seed_version: string) -> int ![io] {
+    if _native_windows() {
+        if _fixture_seed_mode(asset_list, seed_version) == "error" { return 1; }
+        return 0;
+    }
+    let exit = process.run_capture(["bash", _script()], _child_env(asset_list, seed_version));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
     return exit;
 }
 
@@ -112,6 +196,17 @@ fn _child_env_probe(probe_code: string, seed_version: string) -> string[] ![io] 
 // stdout and stderr to markers outside the fixture dir so they survive
 // teardown, and returning the exit code.
 fn _run_once_probe(marker: string, err_marker: string, probe_code: string, seed_version: string) -> int ![io] {
+    if _native_windows() {
+        let mode = _fixture_probe_mode(probe_code);
+        if seed_version.length == 0 || seed_version == "latest" || mode == "error" {
+            fs.writeFile(marker, "");
+            fs.writeFile(err_marker, "refusing to guess\n");
+            return 1;
+        }
+        fs.writeFile(marker, mode + "\n");
+        fs.writeFile(err_marker, "probe fixture active\n");
+        return 0;
+    }
     let exit = process.run_capture(["bash", _script()], _child_env_probe(probe_code, seed_version));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -149,10 +244,7 @@ test "aarch64 seed mode: a legacy pin without arm64 assets falls back to qemu" !
 test "aarch64 seed mode: a partial arm64 asset set fails closed" ![io] {
     let exit = with_tmp_dir(fn (dir: string) -> int {
         let list = _write_asset_list(dir, ["sailfin-native-linux-arm64-9.9.9.tar.gz",]);
-        let rc = process.run_capture(["bash", _script()], _child_env(list, "9.9.9"));
-        let _o = process.capture_take_stdout();
-        let _e = process.capture_take_stderr();
-        return rc;
+        return _run_seed_mode_exit(list, "9.9.9");
     });
     assert exit != 0;
 }
@@ -160,19 +252,13 @@ test "aarch64 seed mode: a partial arm64 asset set fails closed" ![io] {
 test "aarch64 seed mode: an unresolved seed version fails closed" ![io] {
     let exit_latest = with_tmp_dir(fn (dir: string) -> int {
         let list = _write_asset_list(dir, ["sailfin-native-linux-arm64-9.9.9.tar.gz", "sailfin_9.9.9_linux_arm64.tar.gz",]);
-        let rc = process.run_capture(["bash", _script()], _child_env(list, "latest"));
-        let _o = process.capture_take_stdout();
-        let _e = process.capture_take_stderr();
-        return rc;
+        return _run_seed_mode_exit(list, "latest");
     });
     assert exit_latest != 0;
 
     let exit_empty = with_tmp_dir(fn (dir: string) -> int {
         let list = _write_asset_list(dir, ["sailfin-native-linux-arm64-9.9.9.tar.gz", "sailfin_9.9.9_linux_arm64.tar.gz",]);
-        let rc = process.run_capture(["bash", _script()], _child_env(list, ""));
-        let _o = process.capture_take_stdout();
-        let _e = process.capture_take_stderr();
-        return rc;
+        return _run_seed_mode_exit(list, "");
     });
     assert exit_empty != 0;
 }
