@@ -70,8 +70,57 @@ jobs:
     outputs:
       version: ${{ steps.seed.outputs.seed_version }}
       tag: ${{ steps.seed.outputs.seed_tag }}
+      installer: ${{ steps.scope.outputs.installer }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The workflow-level `paths:` filter has to stay wide because `site`
+      # needs it: `site/**`, `README.md` and `docs/status.md` are install-docs
+      # surface. But those paths cannot change what the installer *does*, and
+      # the installer matrix costs two `macos-26` legs out of an account-wide
+      # pool of five -- the same pool `ci.yml` wants six slots from. A PR that
+      # touches compiler code and updates `docs/status.md` (which Stage1
+      # readiness requires it to) was therefore asking for eight macOS slots
+      # against a pool of five, and self-contending. Narrow the matrix to the
+      # paths that actually decide installer behaviour; `site` stays ungated.
+      - name: Determine installer scope
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          installer=true
+          reason="installer CI for ${GITHUB_EVENT_NAME}"
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            installer=false
+            reason="no installer-behaviour path changed"
+            # Three-dot, matching `ci.yml`'s `ci-scope`: the changed set is
+            # what THIS PR added, not everything `main` moved since the branch
+            # point (SFN-484).
+            while IFS= read -r path; do
+              case "$path" in
+                install.sh|install.ps1|bootstrap.toml                 |.github/workflows/installer-smoke.yml                 |.github/actions/sailfin-build-windows/verify-release-seed.ps1                 |.github/installer-fixtures/*)
+                  installer=true
+                  reason="installer-behaviour path changed: $path"
+                  break
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
+          fi
+
+          echo "installer=$installer" >> "$GITHUB_OUTPUT"
+          echo "[installer-scope] installer=$installer ($reason)"
+          {
+            echo "### Installer scope"
+            echo ""
+            echo "- installer matrix in scope: \`$installer\`"
+            echo "- reason: $reason"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Resolve seed version from bootstrap.toml
         id: seed
@@ -97,6 +146,7 @@ jobs:
   unix-installer:
     name: install (${{ matrix.os }})
     needs: resolve-version
+    if: ${{ needs.resolve-version.outputs.installer == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -215,6 +265,7 @@ jobs:
   windows-installer:
     name: install (windows-latest)
     needs: resolve-version
+    if: ${{ needs.resolve-version.outputs.installer == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -397,6 +448,7 @@ jobs:
   installer-fixtures:
     name: fail-closed fixtures (${{ matrix.os }})
     needs: resolve-version
+    if: ${{ needs.resolve-version.outputs.installer == 'true' }}
     strategy:
       fail-fast: false
       matrix:
