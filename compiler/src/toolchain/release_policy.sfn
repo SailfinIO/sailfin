@@ -36,6 +36,7 @@ import {
     toolchain_index_cache_store,
     toolchain_revocations_merge,
     toolchain_revocations_read,
+    toolchain_sequence_corrupt,
     toolchain_sequence_read,
     toolchain_sequence_record
 } from "./index_cache";
@@ -112,6 +113,14 @@ fn _policy_index_failure(reason: string) -> ToolchainIndex {
 // deliberately does not fall back to the cache: a tampered or expired endpoint
 // must not be able to downgrade a client to stale policy by serving garbage.
 fn toolchain_policy_acquire(versions_base: string, fetched_payload: string, fetched_signature: string, now_epoch: int) -> ToolchainIndex ![io] {
+    // An unreadable floor is not an absent one. Accepting any index here would
+    // hand anyone able to corrupt that one small file a way to switch
+    // anti-rollback off, which is the same "cannot tell read as clean" mistake
+    // the revocation ledger already guards against.
+    if toolchain_sequence_corrupt(versions_base) {
+        return _policy_index_failure("the recorded index sequence is unreadable, so rollback cannot be detected");
+    }
+
     let root = release_signing_public_key_hex();
     let known = toolchain_revocations_read(versions_base);
     // The floor is the highest index sequence ever accepted, not the highest

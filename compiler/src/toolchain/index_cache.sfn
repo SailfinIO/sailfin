@@ -59,6 +59,21 @@ fn toolchain_sequence_read(versions_base: string) -> int ![io] {
     return value;
 }
 
+// Whether a sequence file exists but will not parse.
+//
+// The counterpart to `toolchain_revocations_corrupt`, and for the same reason:
+// `toolchain_sequence_read` cannot distinguish "never recorded a sequence"
+// from "the record is unreadable", because both have to collapse to a single
+// int. Without this a caller cannot tell them apart either, and reading an
+// unreadable floor as zero is no floor at all — anyone able to write garbage
+// here would reset anti-rollback protection.
+fn toolchain_sequence_corrupt(versions_base: string) -> boolean ![io] {
+    let path = _index_cache_sequence_path(versions_base);
+    if path.length == 0 { return false; }
+    if !fs.exists(path) { return false; }
+    return _revocation_parse_uint(_toml_trim_cmd(fs.readFile(path))) < 0;
+}
+
 // Raise the recorded high-water sequence. Monotonic by construction: a lower
 // or equal value is a no-op, so replaying an older signed index can never walk
 // the floor back down.
@@ -434,6 +449,7 @@ export {
     toolchain_revocations_merge,
     toolchain_revocations_path,
     toolchain_revocations_read,
+    toolchain_sequence_corrupt,
     toolchain_sequence_read,
     toolchain_sequence_record
 };

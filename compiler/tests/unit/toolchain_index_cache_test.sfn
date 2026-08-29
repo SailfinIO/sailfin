@@ -1,7 +1,7 @@
 // Unit coverage for `compiler/src/toolchain/index_cache.sfn` — the
-// accepted-index cache and the monotonic revocation ledger (SFEP-0073
-// §3.7, SFN-1069). Each test gets its own scratch subdirectory — pooled,
-// never shared (`.claude/rules/no-bash-e2e.md`).
+// accepted-index cache, the monotonic revocation ledger, and the anti-rollback
+// high-water sequence floor (SFEP-0073 §3.7, SFN-1069). Each test gets its own
+// scratch subdirectory — pooled, never shared (`.claude/rules/no-bash-e2e.md`).
 import {
     ToolchainRevocationRecord,
     toolchain_index_cache_dir,
@@ -12,7 +12,10 @@ import {
     toolchain_revocations_corrupt,
     toolchain_revocations_merge,
     toolchain_revocations_path,
-    toolchain_revocations_read
+    toolchain_revocations_read,
+    toolchain_sequence_corrupt,
+    toolchain_sequence_read,
+    toolchain_sequence_record
 } from "../../src/toolchain/index_cache";
 
 // Same scratch shape as the sibling `toolchain_layout_test.sfn`.
@@ -184,4 +187,81 @@ test "toolchain index cache: toolchain_revocation_find hits and misses" ![io] {
     assert toolchain_revocation_find(records, "release", "0.10.4") == 0;
     assert toolchain_revocation_find(records, "release", "0.10.5") < 0;
     assert toolchain_revocation_find(records, "signing-key", "0.10.4") < 0;
+}
+
+// The anti-rollback high-water sequence (SFN-1069): nothing above covers
+// `toolchain_sequence_read`/`toolchain_sequence_record` directly.
+test "toolchain index cache: an unrecorded sequence reads as zero" ![io] {
+    let base = _scratch_dir() + "/sequence-unrecorded";
+    fs.createDirectory(base, true);
+
+    assert toolchain_sequence_read(base) == 0;
+}
+
+test "toolchain index cache: a recorded sequence reads back" ![io] {
+    let base = _scratch_dir() + "/sequence-record-read";
+    fs.createDirectory(base, true);
+
+    assert toolchain_sequence_record(base, 42);
+    assert toolchain_sequence_read(base) == 42;
+}
+
+test "toolchain index cache: a higher sequence replaces a lower one" ![io] {
+    let base = _scratch_dir() + "/sequence-higher-replaces-lower";
+    fs.createDirectory(base, true);
+
+    assert toolchain_sequence_record(base, 10);
+    assert toolchain_sequence_record(base, 99);
+    assert toolchain_sequence_read(base) == 99;
+}
+
+// The monotonicity guarantee: replaying an older signed index must not walk
+// the floor back down. The no-op still reports success — refusing to lower
+// the floor is not a failure.
+test "toolchain index cache: a lower sequence does not lower the floor" ![io] {
+    let base = _scratch_dir() + "/sequence-lower-does-not-lower-floor";
+    fs.createDirectory(base, true);
+
+    assert toolchain_sequence_record(base, 99);
+    assert toolchain_sequence_record(base, 10);
+    assert toolchain_sequence_read(base) == 99;
+}
+
+test "toolchain index cache: an equal sequence is a no-op" ![io] {
+    let base = _scratch_dir() + "/sequence-equal-is-noop";
+    fs.createDirectory(base, true);
+
+    assert toolchain_sequence_record(base, 7);
+    assert toolchain_sequence_record(base, 7);
+    assert toolchain_sequence_read(base) == 7;
+}
+
+test "toolchain index cache: a negative sequence is refused" ![io] {
+    let base = _scratch_dir() + "/sequence-negative-refused";
+    fs.createDirectory(base, true);
+
+    assert toolchain_sequence_record(base, 5);
+    assert ! toolchain_sequence_record(base, -1);
+    assert toolchain_sequence_read(base) == 5;
+}
+
+// The same shape that made a corrupt revocation ledger read as "nothing is
+// revoked": a malformed sequence file must be distinguishable from an absent
+// one, or an unreadable floor silently becomes no floor.
+test "toolchain index cache: a malformed sequence file reports corrupt" ![io] {
+    let base = _scratch_dir() + "/sequence-corrupt";
+    fs.createDirectory(base, true);
+    fs.createDirectory(toolchain_index_cache_dir(base), true);
+    fs.writeFile(toolchain_index_cache_dir(base) + "/sequence", "not-a-number\n");
+    assert toolchain_sequence_corrupt(base);
+    // Still 0 through the plain reader — which is exactly why the caller must
+    // ask `toolchain_sequence_corrupt` rather than trusting this value.
+    assert toolchain_sequence_read(base) == 0;
+}
+
+test "toolchain index cache: an absent sequence file is not corrupt" ![io] {
+    let base = _scratch_dir() + "/sequence-absent";
+    fs.createDirectory(base, true);
+    assert ! toolchain_sequence_corrupt(base);
+    assert toolchain_sequence_read(base) == 0;
 }
