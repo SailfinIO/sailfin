@@ -2,7 +2,7 @@
 // multi-capture env layout (#1106).
 //
 // Native replacement for the former `test_closure_capture.sh`
-// (test-infra Phase 3, epic #842). Compiles and runs six representative
+// (test-infra Phase 3, epic #842). Compiles and runs representative
 // closure fixtures and asserts each prints its exact expected value:
 //
 //   1. canonical non-capturing two-arg lambda           → 7
@@ -11,6 +11,11 @@
 //   4. two-int capture                                  → 31
 //   5. three-int capture                                → 16
 //   6. mixed string+int two-capture                     → xv42
+//   7. un-annotated inferred-int capture                → 105
+//   8. mutable capture assignment propagation           → 9
+//   9. SFN-1126: by-value struct parameter capture      → 42
+//  10. SFN-1126: annotated struct local capture         → 42
+//  11. SFN-1126: bare-let struct capture                → 42
 //
 // Each fixture lives in its own capsule directory (with a minimal
 // `capsule.toml`) so `discover_project_root` doesn't walk up into
@@ -106,4 +111,22 @@ test "closure: mutable capture assignment propagates to enclosing let" ![io] {
     let r = _run_fixture("compiler/tests/e2e/fixtures/closure_mutable_capture/main.sfn");
     assert r.exit == 0;
     assert r.out == "9";
+}
+
+test "closure: by-value struct parameter capture prints 42" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_struct_param_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "42";
+}
+
+test "closure: annotated struct local capture prints 42" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_struct_local_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "42";
+}
+
+test "closure: bare-let struct capture prints 42" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_struct_bare_let_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "42";
 }

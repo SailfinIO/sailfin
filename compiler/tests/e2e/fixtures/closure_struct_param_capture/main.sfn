@@ -1,0 +1,24 @@
+// compiler/tests/e2e/fixtures/closure_struct_param_capture/main.sfn
+//
+// SFN-1126 acceptance — the by-value-struct-PARAMETER capture shape that
+// was broken: a lambda closes over a struct that arrives as a function's
+// by-value parameter (not a local). This shape emitted the invalid LLVM IR
+// `store %Box %b, %Box* %t4` (a value-typed store into an aggregate slot),
+// which clang rejected outright.
+//
+// Expected stdout: 42 (3 array elements + tag 39).
+struct Box {
+    inner: int[],
+    tag: int
+}
+
+fn run_it(f: fn () -> int) -> int { return f(); }
+
+fn use_box(b: Box) -> int {
+    return run_it(fn () -> int { return b.inner.length + b.tag; });
+}
+
+fn main() ![io] {
+    let v: int[] = [1, 2, 3];
+    print(use_box(Box { inner: v, tag: 39 }));
+}
