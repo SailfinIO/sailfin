@@ -86,6 +86,13 @@ fn _fx_ascii_bytes(text: string) -> int[] {
 // are hand-sorted lexicographically at every nesting level and the payload
 // carries exactly one trailing `\n`, matching `json_parse_canonical`'s
 // strict canonical grammar (`compiler/src/toolchain/index_json.sfn`).
+// No signing-key revocations in these fixtures: the chain-vs-ledger
+// interaction is its own concern and is covered separately.
+fn _fx_no_revoked_keys() -> string[] {
+    let empty: string[] = [];
+    return empty;
+}
+
 fn _fx_payload(sequence: int, generated_at: string, expires_at: string, key_id: string, public_key: string) -> string {
     return "{\"advisories\":[],\"channels\":{\"stable\":{\"x86_64-unknown-linux-gnu\":\"0.10.4\"}},\"expires_at\":\""
         + expires_at
@@ -118,7 +125,7 @@ test "toolchain index: a correctly signed index verifies" {
     let signature_hex = _fx_sign(SEED_A_HEX, payload);
     let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
 
-    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, 0, now_epoch);
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
 
     assert result.ok == true;
     assert result.error == "";
@@ -150,7 +157,7 @@ test "toolchain index: a signature from another key is rejected" {
     let wrong_signature_hex = _fx_sign(SEED_A_HEX, payload);
     let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
 
-    let result = toolchain_index_verify(payload, wrong_signature_hex, PUBLIC_KEY_B, 0, now_epoch);
+    let result = toolchain_index_verify(payload, wrong_signature_hex, PUBLIC_KEY_B, _fx_no_revoked_keys(), 0, now_epoch);
 
     assert result.ok == false;
     assert result.error == "the signed index signature does not verify";
@@ -171,7 +178,7 @@ test "toolchain index: a mutated payload is rejected" {
     let mutated = _fx_payload(1, tampered_generated_at, expires_at, key_id_a, PUBLIC_KEY_A);
     let now_epoch = toolchain_index_parse_timestamp(signed_generated_at) + 1;
 
-    let result = toolchain_index_verify(mutated, signature_hex, PUBLIC_KEY_A, 0, now_epoch);
+    let result = toolchain_index_verify(mutated, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
 
     assert result.ok == false;
     assert result.error == "the signed index signature does not verify";
@@ -185,7 +192,7 @@ test "toolchain index: an expired index is rejected" {
     let signature_hex = _fx_sign(SEED_A_HEX, payload);
     let now_epoch = toolchain_index_parse_timestamp(expires_at);
 
-    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, 0, now_epoch);
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
 
     assert result.ok == false;
     assert result.error == "the signed index expired at " + expires_at;
@@ -199,7 +206,7 @@ test "toolchain index: an index older than the cached sequence is rejected" {
     let signature_hex = _fx_sign(SEED_A_HEX, payload);
     let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
 
-    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, 6, now_epoch);
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 6, now_epoch);
 
     assert result.ok == false;
     assert result.error == "the signed index sequence 5 is older than the cached sequence 6";
@@ -215,7 +222,7 @@ test "toolchain index: an unreadable clock refuses rather than accepting" {
     // Valid signature and an unexpired window at any real clock reading; a
     // broken clock (`now_epoch == -1`) must still refuse, not fall back to
     // treating the index as not-yet-expired.
-    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, 0, -1);
+    let result = toolchain_index_verify(payload, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, -1);
 
     assert result.ok == false;
     assert result.error == "the host clock is unavailable, so index freshness cannot be established";
@@ -237,7 +244,7 @@ test "toolchain index: a non-canonical payload is rejected" {
     let signature_hex = _fx_sign(SEED_A_HEX, noncanonical);
     let now_epoch = toolchain_index_parse_timestamp(generated_at) + 1;
 
-    let result = toolchain_index_verify(noncanonical, signature_hex, PUBLIC_KEY_A, 0, now_epoch);
+    let result = toolchain_index_verify(noncanonical, signature_hex, PUBLIC_KEY_A, _fx_no_revoked_keys(), 0, now_epoch);
 
     assert result.ok == false;
 }

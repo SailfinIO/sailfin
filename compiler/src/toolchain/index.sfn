@@ -306,8 +306,28 @@ fn _parse_transitions(doc: JsonDoc, node: int, out_error: string[]) -> Toolchain
 // change: an index signed by an unfamiliar key with no chain to the root is
 // rejected even if it is internally consistent, which is what stops a mirror
 // from minting its own trust.
-fn _resolve_signer(transitions: ToolchainKeyTransition[], trusted_root_hex: string, claimed_key_id: string, sequence: int, out_key: string[]) -> string {
+fn _index_contains(items: string[], value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        if strings_equal(items[i], value) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Walking the chain without consulting the revocation ledger defeats the one
+// scenario the chain exists for. An attacker holding a compromised
+// intermediate key K can mint `K -> X` and sign a fresh index with X; every
+// structural check passes, and the client's own `signing-key: K` record is
+// never looked at. So each hop and the endpoint are checked against the
+// revoked set, and the pinned root is checked too — a root revocation has to
+// stop the walk before it starts.
+fn _resolve_signer(transitions: ToolchainKeyTransition[], trusted_root_hex: string, revoked_key_ids: string[], claimed_key_id: string, sequence: int, out_key: string[]) -> string {
     let mut current_id = TOOLCHAIN_KEY_PREFIX + trusted_root_hex;
+    if _index_contains(revoked_key_ids, current_id) {
+        return "the pinned release-signing trust root is revoked";
+    }
     let mut current_key = trusted_root_hex;
     let mut last_sequence: int = -1;
     let mut i: int = 0;
@@ -343,6 +363,9 @@ fn _resolve_signer(transitions: ToolchainKeyTransition[], trusted_root_hex: stri
         if !ed25519_verify_utf8(current_key, _canonical_transition_bytes(transition), transition.signature) {
             return "a key transition is not signed by the key it replaces" + at;
         }
+        if _index_contains(revoked_key_ids, transition.to_key_id) {
+            return "a key transition installs a revoked key" + at;
+        }
         current_id = transition.to_key_id;
         current_key = transition.to_public_key;
         last_sequence = transition.effective_sequence;
@@ -350,6 +373,9 @@ fn _resolve_signer(transitions: ToolchainKeyTransition[], trusted_root_hex: stri
     }
     if !strings_equal(claimed_key_id, current_id) {
         return "the index signer is not the endpoint of the trusted key chain";
+    }
+    if _index_contains(revoked_key_ids, current_id) {
+        return "the index is signed by a revoked key";
     }
     out_key.push(current_key);
     return "";
@@ -615,7 +641,7 @@ fn _parse_advisories(doc: JsonDoc, node: int, out_error: string[]) -> ToolchainI
 // and rollback, then contents. Nothing after the signature check can be
 // influenced by an attacker who does not hold the signing key, and nothing
 // before it allocates more than the fixed bounds above.
-fn toolchain_index_verify(payload: string, signature_hex: string, trusted_root_hex: string, min_sequence: int, now_epoch: int) -> ToolchainIndex {
+fn toolchain_index_verify(payload: string, signature_hex: string, trusted_root_hex: string, revoked_key_ids: string[], min_sequence: int, now_epoch: int) -> ToolchainIndex {
     if payload.length == 0 {
         return _index_failure("the signed index is empty");
     }
@@ -663,7 +689,7 @@ fn toolchain_index_verify(payload: string, signature_hex: string, trusted_root_h
     let transitions = _parse_transitions(doc, json_member(doc, root, "key_transitions"), chain_error);
     if chain_error.length > 0 { return _index_failure(chain_error[0]); }
     let mut resolved: string[] = [];
-    let chain_reason = _resolve_signer(transitions, trusted_root_hex, key_id, sequence, resolved);
+    let chain_reason = _resolve_signer(transitions, trusted_root_hex, revoked_key_ids, key_id, sequence, resolved);
     if chain_reason.length > 0 { return _index_failure(chain_reason); }
     if resolved.length != 1 {
         return _index_failure("the index signing key could not be resolved");

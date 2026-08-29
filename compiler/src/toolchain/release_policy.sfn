@@ -125,9 +125,10 @@ fn toolchain_policy_acquire(versions_base: string, fetched_payload: string, fetc
     let mut min_sequence = toolchain_sequence_read(versions_base);
     let ledger_floor = toolchain_known_sequence(known);
     if ledger_floor > min_sequence { min_sequence = ledger_floor; }
+    let revoked_keys = _policy_revoked_key_ids(known);
 
     if fetched_payload.length > 0 && fetched_signature.length > 0 {
-        let fresh = toolchain_index_verify(fetched_payload, fetched_signature, root, min_sequence, now_epoch);
+        let fresh = toolchain_index_verify(fetched_payload, fetched_signature, root, revoked_keys, min_sequence, now_epoch);
         if !fresh.ok { return fresh; }
         let _stored = toolchain_index_cache_store(versions_base, fetched_payload, fetched_signature);
         let _merged = toolchain_revocations_merge(versions_base, fresh.revocations);
@@ -143,7 +144,23 @@ fn toolchain_policy_acquire(versions_base: string, fetched_payload: string, fetc
     if cached_payload.length == 0 || cached_signature.length == 0 {
         return _policy_index_failure("the signed toolchain index could not be fetched and none is cached");
     }
-    return toolchain_index_verify(cached_payload, cached_signature, root, min_sequence, now_epoch);
+    return toolchain_index_verify(cached_payload, cached_signature, root, revoked_keys, min_sequence, now_epoch);
+}
+
+// The `signing-key` subjects the ledger knows. Threaded into
+// `toolchain_index_verify` so a revoked key cannot authenticate the very index
+// that would otherwise be trusted to describe its own revocation.
+fn _policy_revoked_key_ids(known: ToolchainRevocationRecord[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= known.length { break; }
+        if strings_equal(known[i].kind, "signing-key") {
+            out.push(known[i].subject);
+        }
+        i += 1;
+    }
+    return out;
 }
 
 fn _policy_union(known: ToolchainRevocationRecord[], incoming: ToolchainRevocationRecord[]) -> ToolchainRevocationRecord[] {
@@ -223,6 +240,17 @@ fn toolchain_policy_decide(index: ToolchainIndex, known: ToolchainRevocationReco
 
     let release_at = toolchain_index_release_index(index, version);
     if release_at < 0 {
+        // A key revocation is matched through the release's `manifest_key_id`,
+        // which only a listed release carries. With any signing-key revocation
+        // on record we therefore cannot establish whether this release is
+        // covered by it — and "cannot establish" must not read as "clean",
+        // which is exactly how dropping a release from the index would shed a
+        // key revocation while leaving a version-keyed one intact.
+        if _policy_revoked_key_ids(known).length > 0 {
+            return _policy_refusal("cannot establish which signing key covers "
+                + version
+                + ", and a signing key is revoked", "install a release the signed index still describes");
+        }
         // Absent from the index is not a refusal. The index carries live
         // releases, not history, so refusing here would make every release
         // aged out of it uninstallable and would make index availability a

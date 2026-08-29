@@ -253,8 +253,11 @@ test "toolchain install: a bad signature is refused before extraction" ![io] {
     let bootstrap_dir = _scratch_root() + "/badsig-bootstrap";
     assert remove_all(bootstrap_dir);
     _seed_bootstrap_manifest(bootstrap_dir, ver, store);
-    let mut child_env = process.environ();
-    child_env.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base);
+    // Through `_env_with`, not raw `process.environ()`: its synthetic
+    // INSTALL_BASE is what stops an ambient store on the runner deciding what
+    // this leg actually drives. The bootstrap manifest names its own base, so
+    // the two do not conflict.
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base]);
     let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -346,8 +349,11 @@ test "toolchain install: a signed manifest refuses an asset digest mismatch" ![i
     let bootstrap_dir = _scratch_root() + "/digest-mismatch-bootstrap";
     assert remove_all(bootstrap_dir);
     _seed_bootstrap_manifest(bootstrap_dir, ver, install_base);
-    let mut child_env = process.environ();
-    child_env.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base);
+    // Through `_env_with`, not raw `process.environ()`: its synthetic
+    // INSTALL_BASE is what stops an ambient store on the runner deciding what
+    // this leg actually drives. The bootstrap manifest names its own base, so
+    // the two do not conflict.
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base]);
     let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -433,9 +439,11 @@ test "toolchain install: a windows host with no msvc entry falls back to the pla
     let bootstrap_dir = _scratch_root() + "/win-fallback-bootstrap";
     assert remove_all(bootstrap_dir);
     _seed_bootstrap_manifest(bootstrap_dir, ver, store);
-    let mut child_env = process.environ();
-    child_env.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base);
-    child_env.push("SAILFIN_HOST_OS=Windows");
+    // Through `_env_with`, not raw `process.environ()`: its synthetic
+    // INSTALL_BASE is what stops an ambient store on the runner deciding what
+    // this leg actually drives. The bootstrap manifest names its own base, so
+    // the two do not conflict.
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base, "SAILFIN_HOST_OS=Windows"]);
     let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -511,9 +519,11 @@ test "toolchain install: a windows host prefers the msvc entry when the manifest
     let bootstrap_dir = _scratch_root() + "/win-preference-bootstrap";
     assert remove_all(bootstrap_dir);
     _seed_bootstrap_manifest(bootstrap_dir, ver, store);
-    let mut child_env = process.environ();
-    child_env.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base);
-    child_env.push("SAILFIN_HOST_OS=Windows");
+    // Through `_env_with`, not raw `process.environ()`: its synthetic
+    // INSTALL_BASE is what stops an ambient store on the runner deciding what
+    // this leg actually drives. The bootstrap manifest names its own base, so
+    // the two do not conflict.
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base, "SAILFIN_HOST_OS=Windows"]);
     let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
