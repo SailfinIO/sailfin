@@ -22,11 +22,32 @@
 //      via the `SAILFIN_TOOLCHAIN_RELEASE_BASE` mirror override; skipped
 //      when `python3`/`timeout` are unavailable (the tool-probe SKIP
 //      pattern the e2e rules establish).
+//
+// The four server-backed legs below (bad signature, asset digest mismatch,
+// and the two windows msvc-vs-plain asset-selection legs) drive `sfn dev
+// bootstrap fetch` against a scratch `bootstrap.toml`, not `sfn toolchain
+// install`. SFN-1069
+// added a signed-index consult in front of `_toolchain_install`
+// (`compiler/src/toolchain/install.sfn`) that runs before any
+// release-specific download, but only when `qualify_user_store` is true —
+// i.e. only for the `sfn toolchain install` entry point this file otherwise
+// exercises. `toolchain_install_to_base`, the entry point `sfn dev bootstrap
+// fetch` calls, is deliberately exempt (SFEP-0047: a pinned bootstrap seed is
+// a reviewed exact-version pin, not something to gate on index liveness).
+// Both entry points share the identical `_toolchain_install` core, so the
+// signature/digest/asset-selection properties these legs pin are still real
+// coverage of `sfn toolchain install`'s own code path — they are just
+// reached through the index-exempt door. There is no other way to reach
+// them: a signed-index fixture cannot be forged in-repo, because the trust
+// root is the pinned `release_signing_public_key_hex()` and no test can sign
+// against it. This is not a workaround to dodge a failure — see each leg's
+// own comment for why it is pinned this way.
 import { remove_all } from "sfn/fs";
 import { contains } from "sfn/strings";
 import {
     default_scratch_dir,
     first_present_tool,
+    sfn_bin_abs_path,
     sfn_bin_path,
     tool_present
 } from "sfn/test";
@@ -69,6 +90,24 @@ fn _env_with(extra: string[]) -> string[] ![io] {
         e.push("INSTALL_BASE=" + _scratch_root() + "/absent-store");
     }
     return e;
+}
+
+// A minimal `bootstrap.toml` naming `version` and pointing `[store]
+// install_base` at `install_base` — enough to satisfy
+// `parse_bootstrap_manifest`'s required `[seed].version` (every other field
+// carries its schema default: `source = "github-release"`, `policy =
+// "exact"`, `verify.required = true`), so `sfn dev bootstrap fetch` run with
+// `dir` as cwd drives the same index-exempt `_toolchain_install` core the
+// legs below need. See the file header for why these legs go through the
+// bootstrap door instead of `sfn toolchain install`.
+fn _seed_bootstrap_manifest(dir: string, version: string, install_base: string) -> void ![io] {
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/bootstrap.toml", "[seed]\n" + "version = \"" + version
+        + "\"\n\n"
+        + "[store]\n"
+        + "install_base = \""
+        + install_base
+        + "\"\n");
 }
 
 // A store entry is complete only once `.sha256` — written last, after the
@@ -207,9 +246,16 @@ test "toolchain install: a bad signature is refused before extraction" ![io] {
         return;
     }
 
-    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
-        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
-        + base]));
+    // Driven through `sfn dev bootstrap fetch`, not `sfn toolchain install`
+    // — see the file header. `store` doubles as the bootstrap manifest's
+    // `[store] install_base`, the flat `store/<version>` layout
+    // `toolchain_install_to_base` writes.
+    let bootstrap_dir = _scratch_root() + "/badsig-bootstrap";
+    assert remove_all(bootstrap_dir);
+    _seed_bootstrap_manifest(bootstrap_dir, ver, store);
+    let mut child_env = process.environ();
+    child_env.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     // Fail-closed: non-zero exit, an error naming the signature, and NO
@@ -279,14 +325,36 @@ test "toolchain install: a signed manifest refuses an asset digest mismatch" ![i
         return;
     }
 
-    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
-        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
-        + base]));
+    // Driven through `sfn dev bootstrap fetch`, not `sfn toolchain install`
+    // — see the file header.
+    //
+    // The install base is deliberately NOT `store`. `toolchain_install_to_base`
+    // writes the flat `install_base/<version>` layout, which is the very path
+    // the `legacy` entry above occupies, and `_bootstrap_ensure_seed`
+    // short-circuits on `_bootstrap_store_ready` before the install pipeline
+    // runs at all — so sharing the directory made fetch report "already
+    // present" and exit 0 without ever downloading the asset whose digest this
+    // leg exists to check.
+    //
+    // One consequence worth naming: the original "a legacy entry must never
+    // short-circuit a qualified install" property belonged to the user-store
+    // path, and the SFN-1069 index gate now makes that path unreachable in an
+    // e2e test without a signed index fixture. It is not covered here any more.
+    // What the legacy assertions below still prove is that the install stayed
+    // inside its own base and left unrelated store contents alone.
+    let install_base = store + "/bootstrap-base";
+    let bootstrap_dir = _scratch_root() + "/digest-mismatch-bootstrap";
+    assert remove_all(bootstrap_dir);
+    _seed_bootstrap_manifest(bootstrap_dir, ver, install_base);
+    let mut child_env = process.environ();
+    child_env.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
     assert contains(out + err, "digest mismatch");
     assert ! _installed(store, ver);
+    assert ! _installed(install_base, ver);
     assert fs.readFile(legacy + "/sailfin") == legacy_bin_before;
     assert fs.readFile(legacy + "/.sha256") == legacy_sha_before;
 }
@@ -357,9 +425,18 @@ test "toolchain install: a windows host with no msvc entry falls back to the pla
         return;
     }
 
-    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
-        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
-        + base, "SAILFIN_HOST_OS=Windows"]));
+    // Driven through `sfn dev bootstrap fetch`, not `sfn toolchain install`
+    // — see the file header. `store` doubles as the bootstrap manifest's
+    // `[store] install_base`; `SAILFIN_HOST_OS` is honored the same way in
+    // both entry points since `_toolchain_install` calls
+    // `toolchain_current_host()` unconditionally.
+    let bootstrap_dir = _scratch_root() + "/win-fallback-bootstrap";
+    assert remove_all(bootstrap_dir);
+    _seed_bootstrap_manifest(bootstrap_dir, ver, store);
+    let mut child_env = process.environ();
+    child_env.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base);
+    child_env.push("SAILFIN_HOST_OS=Windows");
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
@@ -426,9 +503,18 @@ test "toolchain install: a windows host prefers the msvc entry when the manifest
         return;
     }
 
-    let exit = process.run_capture([sfn_bin_path(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
-        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
-        + base, "SAILFIN_HOST_OS=Windows"]));
+    // Driven through `sfn dev bootstrap fetch`, not `sfn toolchain install`
+    // — see the file header. `store` doubles as the bootstrap manifest's
+    // `[store] install_base`; `SAILFIN_HOST_OS` is honored the same way in
+    // both entry points since `_toolchain_install` calls
+    // `toolchain_current_host()` unconditionally.
+    let bootstrap_dir = _scratch_root() + "/win-preference-bootstrap";
+    assert remove_all(bootstrap_dir);
+    _seed_bootstrap_manifest(bootstrap_dir, ver, store);
+    let mut child_env = process.environ();
+    child_env.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base);
+    child_env.push("SAILFIN_HOST_OS=Windows");
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
