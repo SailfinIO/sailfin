@@ -7,7 +7,6 @@
 // mutates the store: repair and removal are separate explicit commands
 // (SFEP-0073 §3.8).
 import { toolchain_decide } from "../capsule_resolver/toolchain";
-import { _sort_strings_cmd } from "../string_cmd_utils";
 import { strings_equal } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import { toolchain_env_exact_selector } from "./dispatch";
@@ -25,6 +24,7 @@ import {
     toolchain_host_store_base,
     toolchain_resolve_compatible_store_entry,
     toolchain_store_ready,
+    toolchain_store_subdirs,
     toolchain_version_dir,
     toolchain_versions_base
 } from "./store";
@@ -121,21 +121,6 @@ fn toolchain_integrity_name(integrity: int) -> string {
 // Immediate subdirectory names of `dir`, sorted. Non-directories are skipped:
 // the store root also holds the `bin/` alias tree and stray files must never
 // be reported as installed versions.
-fn _inspect_subdirs(dir: string) -> string[] ![io] {
-    let mut names: string[] = [];
-    if !fs.exists(dir) { return names; }
-    if !fs.is_directory(dir) { return names; }
-    let entries = fs.listDirectory(dir);
-    let mut i: int = 0;
-    loop {
-        if i >= entries.length { break; }
-        let name = entries[i];
-        if fs.is_directory(dir + "/" + name) { names.push(name); }
-        i += 1;
-    }
-    return _sort_strings_cmd(names);
-}
-
 // Classify one committed-or-not store directory.
 //
 // `list` verifies in full rather than checking only that recorded paths
@@ -238,7 +223,7 @@ fn toolchain_inspect_entries(versions_base: string, host: ToolchainHostIdentity)
     // host we are.
     if host.triple.length > 0 {
         let qualified_base = toolchain_host_store_base(versions_base, host.triple);
-        let qualified = _inspect_subdirs(qualified_base);
+        let qualified = toolchain_store_subdirs(qualified_base);
         let mut i: int = 0;
         loop {
             if i >= qualified.length { break; }
@@ -257,7 +242,7 @@ fn toolchain_inspect_entries(versions_base: string, host: ToolchainHostIdentity)
     // The legacy tree is flat, and the host-qualified tree is rooted inside
     // it, so `<versions_base>/<triple>` sits alongside the real version
     // directories and must never be reported as a version of its own.
-    let legacy = _inspect_subdirs(versions_base);
+    let legacy = toolchain_store_subdirs(versions_base);
     let mut j: int = 0;
     loop {
         if j >= legacy.length { break; }

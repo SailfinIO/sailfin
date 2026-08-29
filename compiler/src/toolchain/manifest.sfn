@@ -22,9 +22,18 @@ let TOOLCHAIN_MANIFEST_SCHEMA: int = 1;  // what this build writes
 let TOOLCHAIN_MANIFEST_MAX_SCHEMA: int = 1;  // highest this build can read
 // SFEP-0073 §3.5's routing-compatibility integer (command/index/trust
 // implementation compatibility), deliberately separate from
-// `TOOLCHAIN_MANIFEST_SCHEMA` (this file's own grammar version). SFN-1064
-// only records the field; routing on it is SFN-1067.
+// `TOOLCHAIN_MANIFEST_SCHEMA` (this file's own grammar version). This is the
+// value a payload installed by this build records; `management.sfn` routes on
+// the value it reads back out of an installed payload's manifest.
 let TOOLCHAIN_MANAGEMENT_PROTOCOL: int = 1;
+// The protocol range this entry can *route to* (SFN-1067), as distinct from
+// the single value above, which is what it *writes* into its own manifest. A
+// payload outside this range is never the management payload: one below it
+// predates the routing contract, and one above it implements a management
+// surface this entry cannot describe, which only a new entry toolchain from
+// the bootstrap installer or the owning package manager can supply.
+let TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN: int = 1;
+let TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX: int = 1;
 
 // Reader outcome statuses.
 let TOOLCHAIN_MANIFEST_OK: int = 0;
@@ -399,6 +408,8 @@ fn toolchain_manifest_reinstall_hint(version: string) -> string {
 
 export {
     TOOLCHAIN_MANAGEMENT_PROTOCOL,
+    TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX,
+    TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN,
     TOOLCHAIN_MANIFEST_ABSENT,
     TOOLCHAIN_MANIFEST_MAGIC,
     TOOLCHAIN_MANIFEST_MALFORMED,
