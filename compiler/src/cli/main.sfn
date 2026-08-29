@@ -77,6 +77,7 @@ import {
     command_def as toolchain_command_def,
     run as toolchain_run,
     toolchain_env_exact_selector,
+    toolchain_route_management,
     toolchain_select_exact
 } from "./commands/toolchain";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
@@ -508,6 +509,20 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         // lower-ranked `SAILFIN_TOOLCHAIN` cannot override the selector that
         // outranks it, in the command's own gate or in the version path below.
         ctx.selector_resolved = true;
+    }
+
+    // SFEP-0073 §3.5: route `sfn toolchain ...` to the newest compatible
+    // installed payload before the command tree is built, so a management leaf
+    // this entry was never built to parse still reaches an implementation that
+    // has it. Ordinary commands are untouched — the scan returns immediately
+    // unless argv starts with `toolchain`.
+    //
+    // Skipped once a one-shot selector has resolved: the selector outranks
+    // management routing (§3.3 rank 1), so `sfn +<version> toolchain ...` must
+    // stay in the toolchain the user named rather than be re-routed by version.
+    if !ctx.selector_resolved {
+        let mgmt_rc = toolchain_route_management(args, ctx);
+        if mgmt_rc != 0 { return mgmt_rc; }
     }
 
     // Root command, composed from each subcommand's `command_def()`. Built

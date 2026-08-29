@@ -31,6 +31,8 @@ import {
     tool_present
 } from "sfn/test";
 
+import { starts_with } from "../../src/string_utils";
+
 // A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
 // under the parallel pool; `/tmp` is the standalone fallback.
 fn _scratch_root() -> string ![io] {
@@ -46,13 +48,25 @@ fn _timeout_cmd() -> string ![io] {
 // Full parent environment plus the caller's extra `KEY=VALUE` entries
 // (`run_capture`/`spawn_with_env`'s empty env is EMPTY, not "inherit",
 // so the child needs PATH etc. to find `uname` and `tar`).
+//
+// A caller that names no store gets one that cannot exist. The inherited
+// environment carries the developer's real `HOME`, and `sfn toolchain ...` is
+// a management prefix that routes through whatever is installed under it
+// (SFN-1067), so without this an ambient store would decide what these tests
+// are actually driving. The path is never created; management routing and the
+// store walk both fall through on a base that does not exist.
 fn _env_with(extra: string[]) -> string[] ![io] {
     let mut e = process.environ();
     let mut i: int = 0;
+    let mut names_store: boolean = false;
     loop {
         if i >= extra.length { break; }
+        if starts_with(extra[i], "INSTALL_BASE=") { names_store = true; }
         e.push(extra[i]);
         i += 1;
+    }
+    if !names_store {
+        e.push("INSTALL_BASE=" + _scratch_root() + "/absent-store");
     }
     return e;
 }

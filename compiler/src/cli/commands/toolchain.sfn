@@ -19,6 +19,7 @@ import {
     with_subcommand,
     with_usage
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import { render_terminal_diagnostic } from "../../terminal_output";
 import { toolchain_current_host } from "../../toolchain/host";
@@ -36,11 +37,13 @@ import {
 } from "../../toolchain/inspect";
 import { render_toolchains_json } from "../../toolchain/inspect_json";
 import { toolchain_install_to_user_store } from "../../toolchain/install";
+import { TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX, TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN } from "../../toolchain/manifest";
 import {
     toolchain_resolve_compatible_store_entry,
     toolchain_store_diagnostic,
     toolchain_versions_base
 } from "../../toolchain/store";
+import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 
 fn _toolchain_install(version: string, work_root: string) -> int ![io, net] {
@@ -212,17 +215,37 @@ fn _toolchain_verify(ctx: CliContext, version: string, all: boolean, as_json: bo
     return _emit_report(report, as_json, true);
 }
 
+// The one management leaf that is never routed (SFEP-0073 §3.5): it reports
+// the identity of *this* executable, so answering it from a routed payload
+// would describe the wrong binary. It is consequently the diagnostic that
+// still works when routing itself is what is broken, which is why it names the
+// protocol range the routing decision is made against.
+fn _toolchain_entry_version(ctx: CliContext) -> int ![io] {
+    let host = toolchain_current_host();
+    let mut host_name = host.triple;
+    if host_name.length == 0 { host_name = "unknown"; }
+    print("version: " + resolve_compiler_version(ctx.binary_dir));
+    print("host: " + host_name);
+    print("executable: " + ctx.compiler_path);
+    print("management-protocol: " + int_to_string(TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN)
+        + "-"
+        + int_to_string(TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX));
+    return 0;
+}
+
 // `run` is registered for help text and for usage errors only. A well-formed
 // `sfn toolchain run <version> -- <args...>` is intercepted by the early
 // selector scan in `cli/main.sfn` and dispatched before this tree is built, so
 // the trailing arguments stay opaque to *this* toolchain's parser — that is
 // what lets an older entry hand an unfamiliar command to a newer payload
-// (SFEP-0073 §3.3). The scan declines to peel three shapes, which are exactly
-// the ones that reach this tree: a flag where the version belongs (so
-// `toolchain run --help` renders this leaf's help instead of a version error),
-// a selector with no command after it (a local usage error rather than a
-// dispatch that would fetch a toolchain just to print its usage), and a missing
-// selector (which `parse()` rejects on the required positional).
+// (SFEP-0073 §3.3). The scan declines to peel three shapes: a flag where the
+// version belongs (so `toolchain run --help` renders this leaf's help instead
+// of a version error), a selector with no command after it (a local usage
+// error rather than a dispatch that would fetch a toolchain just to print its
+// usage), and a missing selector (which `parse()` rejects on the required
+// positional). Those reach this tree only when management routing (§3.5) also
+// declines — with a routable payload installed, the whole `toolchain` prefix
+// is forwarded and none of them are answered here.
 fn command_def() -> Command {
     let install_cmd = with_arg(command("install", "Download, verify, and store a pinned toolchain"), arg("version", "Toolchain version to install (e.g. 0.8.0-alpha.3)"));
     let run_cmd = with_arg(command("run", "Run a command with an exact toolchain, without changing any configuration"), arg("version", "Exact toolchain version to run (e.g. 0.10.6)"));
@@ -232,7 +255,9 @@ fn command_def() -> Command {
     let mut verify_cmd = with_arg(command("verify", "Verify an installed toolchain against its recorded install manifest"), arg_optional("version", "Toolchain version to verify (default: the selected toolchain)", ""));
     verify_cmd = with_flag(verify_cmd, flag("all", "Verify every complete store entry"));
     verify_cmd = with_flag(verify_cmd, flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
+    let entry_version_cmd = command("entry-version", "Report this entry toolchain's identity and management-protocol range, without dispatch");
     let mut cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
+    cmd = with_subcommand(cmd, entry_version_cmd);
     cmd = with_subcommand(cmd, run_cmd_full);
     cmd = with_subcommand(cmd, list_cmd);
     cmd = with_subcommand(cmd, active_cmd);
@@ -253,6 +278,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         print("usage: sfn toolchain run <version> -- <command> [args...]");
         return 2;
     }
+    if sub == "entry-version" { return _toolchain_entry_version(ctx); }
     if sub == "list" {
         return _toolchain_list(ctx, has_flag(matches, "json"));
     }
@@ -262,7 +288,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if sub == "verify" {
         return _toolchain_verify(ctx, get(matches, "version"), has_flag(matches, "all"), has_flag(matches, "json"));
     }
-    print("usage: sfn toolchain <install|list|active|verify|run>");
+    print("usage: sfn toolchain <install|list|active|verify|run|entry-version>");
     return 2;
 }
 
@@ -273,6 +299,8 @@ export {
     toolchain_gate_or_dispatch,
     toolchain_select_exact
 } from "../../toolchain/dispatch";
+
+export { toolchain_route_management } from "../../toolchain/management";
 
 export { toolchain_install_to_base, toolchain_is_valid_install_version } from "../../toolchain/install";
 

@@ -1,0 +1,464 @@
+// compiler/src/toolchain/management.sfn
+//
+// Management-command routing (SFEP-0073 §3.5, SFN-1067). `sfn toolchain ...`
+// is intercepted as a raw argv prefix before the command tree is built, so an
+// entry toolchain can forward a management leaf it was never built to parse to
+// a newer installed payload that implements it. That is what lets native
+// lifecycle commands evolve without overwriting a package-manager-owned entry
+// executable.
+//
+// Nothing here reads the project pin. Management routing is deliberately
+// independent of ordinary selection (§3.3), so a project whose ordinary
+// selection is broken or whose pinned toolchain is missing can still be
+// managed — which is the one situation where managing it matters most.
+import { int_to_string } from "sfn/strings";
+
+import { CliContext } from "../cli/context";
+import {
+    SemVer,
+    semver_compare,
+    semver_is_valid,
+    semver_parse
+} from "../semver";
+import { starts_with, strings_equal } from "../string_utils";
+import { resolve_compiler_version } from "../version";
+import { ToolchainHostIdentity, toolchain_current_host } from "./host";
+import { toolchain_is_valid_install_version } from "./install";
+import { toolchain_verify_executable } from "./integrity";
+import {
+    TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX,
+    TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN,
+    TOOLCHAIN_MANIFEST_OK,
+    toolchain_manifest_read,
+    toolchain_manifest_reinstall_hint
+} from "./manifest";
+import {
+    toolchain_binary_path,
+    toolchain_host_store_base,
+    toolchain_store_ready,
+    toolchain_store_subdirs,
+    toolchain_version_dir,
+    toolchain_versions_base
+} from "./store";
+
+// Marks the payload this entry routed into, so it runs the command instead of
+// routing again. Deliberately not `SAILFIN_TOOLCHAIN_DISPATCHED`: that guards
+// ordinary floor dispatch, and one marker serving both axes would let a
+// management route satisfy an ordinary dispatch guard for a selection it never
+// made.
+let TOOLCHAIN_MANAGEMENT_MARKER: string = "SAILFIN_TOOLCHAIN_MANAGEMENT";
+
+// One installed payload considered as the management implementation.
+// `ok` is false for a directory that did not qualify, which keeps every
+// rejection on one code path rather than spread across sentinel values.
+struct ToolchainManagementCandidate {
+    ok: boolean;
+    version: string;
+    host: string;
+    dir: string;
+    binary: string;
+    protocol: int;
+}
+
+// The store as management routing sees it. `compatible` is newest-first, so
+// selection is a walk from the front. `blocked_version` names the newest
+// payload whose protocol is above this entry's range — recorded rather than
+// dropped, because silently falling back to an older implementation is exactly
+// the stranding §3.5 requires an actionable error for.
+struct ToolchainManagementSurvey {
+    compatible: ToolchainManagementCandidate[];
+    blocked_version: string;
+    blocked_protocol: int;
+}
+
+fn _management_none() -> ToolchainManagementCandidate {
+    return ToolchainManagementCandidate {
+        ok: false,
+        version: "",
+        host: "",
+        dir: "",
+        binary: "",
+        protocol: 0
+    };
+}
+
+// Versions the local cache knows to be revoked. The signed index that records
+// revocation is SFEP-0073 §3.9 slice 4 and lands with SFN-1069; until then
+// nothing on disk records one, so this list is empty and excludes nothing.
+// SFN-1069 replaces the body with the cached-index read and this comment.
+fn _management_known_revoked() -> string[] {
+    let empty: string[] = [];
+    return empty;
+}
+
+fn _management_contains(items: string[], value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        if strings_equal(items[i], value) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// The host store bases to enumerate, in resolution order. Native Windows
+// prefers the MSVC payload but can still run the historical MinGW one, which
+// is the same order `toolchain_resolve_compatible_store_entry` applies to a
+// single version.
+fn _management_host_triples(host: ToolchainHostIdentity) -> string[] {
+    let mut out: string[] = [];
+    if host.triple.length == 0 { return out; }
+    out.push(host.triple);
+    if strings_equal(host.release_os, "windows") {
+        out.push("x86_64-w64-mingw32");
+    }
+    return out;
+}
+
+// Qualify one store directory as a management candidate.
+//
+// Only the manifest is read here, never the payload's bytes: a store may hold
+// many entries, and hashing all of them to answer one `sfn toolchain` command
+// would make routing cost proportional to installed bytes. The full check runs
+// on the single candidate actually chosen, immediately before it is executed.
+fn _management_candidate(base: string, host_triple: string, version: string) -> ToolchainManagementCandidate ![io] {
+    let dir = toolchain_version_dir(base, version);
+    let mut out = _management_none();
+    out.version = version;
+    out.host = host_triple;
+    out.dir = dir;
+
+    // `.sha256` is written last, so a directory without it is a partial or
+    // abandoned install rather than a management implementation.
+    if !toolchain_store_ready(dir) { return out; }
+
+    let manifest = toolchain_manifest_read(dir);
+    // Anything but OK disqualifies. ABSENT is SFN-1064's legacy boundary: such
+    // an entry still runs ordinary commands, but it records no protocol at all,
+    // and claiming it speaks protocol 1 is precisely what §3.5 forbids.
+    // MALFORMED and TOO_NEW are corrupt or unreadable and fail closed.
+    if manifest.status != TOOLCHAIN_MANIFEST_OK { return out; }
+
+    // A payload whose manifest disagrees with where it is stored has no
+    // trustworthy identity, whatever its bytes hash to — the digests would
+    // verify a payload against records for some other release or host.
+    if !strings_equal(manifest.meta.version, version) { return out; }
+    if !strings_equal(manifest.meta.host, host_triple) { return out; }
+
+    // Selection is "newest", so an unorderable version cannot participate.
+    if !semver_is_valid(semver_parse(version)) { return out; }
+
+    out.ok = true;
+    out.binary = toolchain_binary_path(dir);
+    out.protocol = manifest.meta.management_protocol;
+    return out;
+}
+
+// Insertion sort, newest first. Store entries number in the single digits, so
+// the quadratic shape costs nothing and keeps the ordering rule in one place.
+fn _management_sort_desc(items: ToolchainManagementCandidate[]) -> ToolchainManagementCandidate[] {
+    let mut out: ToolchainManagementCandidate[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        let candidate = items[i];
+        let parsed: SemVer = semver_parse(candidate.version);
+        let mut merged: ToolchainManagementCandidate[] = [];
+        let mut placed: boolean = false;
+        let mut j: int = 0;
+        loop {
+            if j >= out.length { break; }
+            if !placed {
+                if semver_compare(parsed, semver_parse(out[j].version)) > 0 {
+                    merged.push(candidate);
+                    placed = true;
+                }
+            }
+            merged.push(out[j]);
+            j += 1;
+        }
+        if !placed { merged.push(candidate); }
+        out = merged;
+        i += 1;
+    }
+    return out;
+}
+
+// Survey every host-qualified store entry for the current host.
+//
+// The flat legacy tree is never surveyed: a legacy entry carries no install
+// manifest by definition, so it can never record a management protocol, and
+// admitting it would mean guessing one.
+fn toolchain_management_survey(versions_base: string, host: ToolchainHostIdentity) -> ToolchainManagementSurvey ![io] {
+    let mut compatible: ToolchainManagementCandidate[] = [];
+    let mut blocked = _management_none();
+    let mut seen: string[] = [];
+    let revoked = _management_known_revoked();
+    let triples = _management_host_triples(host);
+
+    let mut t: int = 0;
+    loop {
+        if t >= triples.length { break; }
+        let triple = triples[t];
+        let base = toolchain_host_store_base(versions_base, triple);
+        let names = toolchain_store_subdirs(base);
+        let mut i: int = 0;
+        loop {
+            if i >= names.length { break; }
+            let version = names[i];
+            // A version present under two host keys resolves to the first,
+            // matching per-version store resolution.
+            if !_management_contains(seen, version) {
+                seen.push(version);
+                if !_management_contains(revoked, version) {
+                    let candidate = _management_candidate(base, triple, version);
+                    if candidate.ok {
+                        if candidate.protocol > TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX {
+                            let beats = semver_compare(semver_parse(candidate.version), semver_parse(blocked.version));
+                            if !blocked.ok || beats > 0 { blocked = candidate; }
+                        } else {
+                            if candidate.protocol >= TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN {
+                                compatible.push(candidate);
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        t += 1;
+    }
+
+    return ToolchainManagementSurvey {
+        compatible: _management_sort_desc(compatible),
+        blocked_version: blocked.version,
+        blocked_protocol: blocked.protocol
+    };
+}
+
+// Whether this argv is a management invocation to route.
+//
+// A raw prefix scan, never a parse: the whole point is to accept a leaf this
+// toolchain has never heard of so a newer payload can answer it. Adding a
+// management leaf therefore needs no change to a protocol-1 entry's command
+// tree.
+fn toolchain_is_management_prefix(args: string[]) -> boolean {
+    if args.length == 0 { return false; }
+    if !strings_equal(args[0], "toolchain") { return false; }
+    // `entry-version` reports *this* executable's identity, so routing it
+    // would answer with the wrong binary — it is entry-only by definition.
+    if args.length >= 2 {
+        if strings_equal(args[1], "entry-version") { return false; }
+    }
+    return true;
+}
+
+// Build the routed payload's environment. Any inherited marker is dropped so
+// the one appended here is the only one the payload sees, rather than relying
+// on every path above having returned early on a set marker.
+fn _management_child_env(version: string) -> string[] ![io] {
+    let source = process.environ();
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= source.length { break; }
+        let entry = source[i];
+        if !starts_with(entry, TOOLCHAIN_MANAGEMENT_MARKER + "=") {
+            out.push(entry);
+        }
+        i += 1;
+    }
+    out.push(TOOLCHAIN_MANAGEMENT_MARKER + "=" + version);
+    return out;
+}
+
+fn _management_exec(candidate: ToolchainManagementCandidate, ctx: CliContext) -> int ![io] {
+    let mut exec_argv: string[] = [candidate.binary];
+    let mut i: int = 0;
+    loop {
+        if i >= ctx.orig_args.length { break; }
+        exec_argv.push(ctx.orig_args[i]);
+        i += 1;
+    }
+    // `process.exec` replaces this image, which is what preserves the routed
+    // payload's exit code and terminating signal exactly.
+    let _rc = process.exec(exec_argv, _management_child_env(candidate.version));
+    print.err("error: failed to route management to the installed toolchain at "
+        + candidate.binary);
+    print.err("  reinstall it: " + toolchain_manifest_reinstall_hint(candidate.version));
+    return 2;
+}
+
+// The executable to name in the upgrade guidance. `compiler_path` is set from
+// the driver prefix, which the C-ABI entry point and any embedder do not
+// compose, and the one diagnostic whose whole job is to be actionable must not
+// trail off into an empty path.
+fn _management_entry_path(ctx: CliContext) -> string {
+    if ctx.compiler_path.length > 0 { return ctx.compiler_path; }
+    return "the sfn on your PATH";
+}
+
+// A payload that raises the management protocol beyond this entry's range
+// cannot become the management payload. Only replacing the entry executable
+// fixes that, and `sfn` never replaces its own entry. Shared by the refusal
+// and the warning so the two renderings cannot drift apart.
+fn _management_blocked_report(survey: ToolchainManagementSurvey, running: string, ctx: CliContext, lead: string) -> void ![io] {
+    print.err(lead + ": the installed toolchain " + survey.blocked_version
+        + " requires management protocol "
+        + int_to_string(survey.blocked_protocol));
+    print.err("  this entry toolchain (" + running + ") supports protocol "
+        + int_to_string(TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN)
+        + " through "
+        + int_to_string(TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX));
+    print.err("  managing it needs a newer entry toolchain, which sfn never "
+        + "replaces itself");
+    print.err("  re-run the bootstrap installer, or upgrade sfn with the "
+        + "package manager that owns "
+        + _management_entry_path(ctx));
+}
+
+// Exit 2, never 1: SFEP-0073 §3.4 reserves 1 for an inspection that completed
+// and emitted an envelope naming an actionable condition, and 2 for a
+// selection or policy failure that may emit none. A refused route is the
+// latter, and a `--json` consumer keys off exactly that difference.
+fn _management_report_blocked(survey: ToolchainManagementSurvey, running: string, ctx: CliContext) -> int ![io] {
+    _management_blocked_report(survey, running, ctx, "error");
+    print.err("  to repair meanwhile: sfn toolchain install <exact-version>");
+    print.err("  to report this entry: sfn toolchain entry-version");
+    return 2;
+}
+
+// `sfn toolchain install <exact-version>` — the single management leaf
+// SFEP-0073 §3.5 keeps in the entry as a repair path for when no compatible
+// payload exists (`entry-version`, the other, never reaches routing at all).
+// The version is validated here rather than deferred to the parser because the
+// exemption covers *exact* installs only: a channel name resolves through the
+// signed index, which is precisely the implementation an outranged entry may
+// be too old to carry.
+fn _management_is_install_repair(args: string[]) -> boolean {
+    if args.length != 3 { return false; }
+    if !strings_equal(args[1], "install") { return false; }
+    return toolchain_is_valid_install_version(args[2]);
+}
+
+// Route `sfn toolchain ...` to the newest compatible installed payload.
+//
+// Returns 0 when this entry should answer the command in-process — no store,
+// no compatible payload newer than this entry, or this process *is* the routed
+// payload — and non-zero when routing refused, with the reason already
+// printed. A successful route replaces this image and never returns.
+fn toolchain_route_management(args: string[], ctx: CliContext) -> int ![io] {
+    if !toolchain_is_management_prefix(args) { return 0; }
+
+    let running = resolve_compiler_version(ctx.binary_dir);
+
+    // This process was itself dispatched into by an explicit selection or a
+    // project pin — `+<version>`, `sfn toolchain run`, an exact
+    // `SAILFIN_TOOLCHAIN`, or the floor gate. That selection outranks
+    // management routing (SFEP-0073 §3.3 rank 1), so routing away from it
+    // would answer with a toolchain the user did not name.
+    // `ctx.selector_resolved` covers only a selector that resolved *in
+    // process*; one that re-execs arrives here as a fresh process with no such
+    // flag, and the marker ordinary dispatch already sets is what identifies
+    // it. An ordinary dispatch never replays a `toolchain` argv — only
+    // build-like commands reach the floor gate — so this can never suppress a
+    // route the user did want.
+    if env.get("SAILFIN_TOOLCHAIN_DISPATCHED").length > 0 { return 0; }
+
+    // A payload already routed into runs the command rather than routing
+    // again. A marker naming some other version is a labelling discrepancy
+    // rather than a loop — this branch returns before the survey, so nothing
+    // below it can route a second time, and the payload's executable was
+    // hash-verified against its manifest before it was ever exec'd. Refusing
+    // here would turn one stray environment variable into an unrecoverable
+    // failure of every management command against a healthy store, so say so
+    // and answer in-process instead.
+    let marker = env.get(TOOLCHAIN_MANAGEMENT_MARKER);
+    if marker.length > 0 {
+        if semver_compare(semver_parse(marker), semver_parse(running)) != 0 {
+            print.err("warning: " + TOOLCHAIN_MANAGEMENT_MARKER + " names "
+                + marker
+                + " but this toolchain reports "
+                + running
+                + "; answering in-process");
+        }
+        return 0;
+    }
+
+    let versions_base = toolchain_versions_base();
+    // No resolvable store, or a host this build cannot name, leaves nothing to
+    // route through. That is the entry-fallback case, not an error: exact
+    // install repair and `entry-version` are exactly what still has to work.
+    if versions_base.length == 0 { return 0; }
+    let host = toolchain_current_host();
+    if host.triple.length == 0 { return 0; }
+
+    let survey = toolchain_management_survey(versions_base, host);
+    let running_semver: SemVer = semver_parse(running);
+
+    // Walk newest-first and verify only the one about to run. A candidate that
+    // fails its manifest is corrupt and therefore not a candidate at all, so
+    // the walk continues rather than stranding management on it.
+    let mut chosen = _management_none();
+    let mut i: int = 0;
+    loop {
+        if i >= survey.compatible.length { break; }
+        let candidate = survey.compatible[i];
+        // Sorted newest-first, so the first candidate that is not newer than
+        // this entry means no remaining one is either. This entry is itself a
+        // protocol-compatible management implementation; routing to an older
+        // payload would be a downgrade, not an upgrade.
+        if semver_compare(semver_parse(candidate.version), running_semver) <= 0 {
+            break;
+        }
+        let outcome = toolchain_verify_executable(candidate.dir);
+        if outcome.ok {
+            chosen = candidate;
+            break;
+        }
+        print.err("warning: skipping management candidate " + candidate.version
+            + " — "
+            + outcome.detail);
+        i += 1;
+    }
+
+    // An incompatible increase only matters when that payload is the newest
+    // management implementation present. One older than this entry, or than a
+    // compatible payload that wins anyway, changes nothing.
+    if survey.blocked_version.length > 0 {
+        let blocked: SemVer = semver_parse(survey.blocked_version);
+        let mut beats_chosen: boolean = true;
+        if chosen.ok {
+            beats_chosen = semver_compare(blocked, semver_parse(chosen.version)) > 0;
+        }
+        if beats_chosen && semver_compare(blocked, running_semver) > 0 {
+            if chosen.ok {
+                // A compatible payload is still usable, so installing a
+                // release this entry cannot manage must not cost the user the
+                // one that works. Report the unmanageable install and route to
+                // the payload that can still serve the command.
+                _management_blocked_report(survey, running, ctx, "warning");
+                print.err("  managing through " + chosen.version + " instead");
+            } else {
+                // Nothing compatible remains. §3.5 keeps exactly one repair
+                // path in the entry for this case, so that a user whose only
+                // payload is unmanageable can still install one that is not.
+                if !_management_is_install_repair(args) {
+                    return _management_report_blocked(survey, running, ctx);
+                }
+            }
+        }
+    }
+
+    if !chosen.ok { return 0; }
+    return _management_exec(chosen, ctx);
+}
+
+export {
+    TOOLCHAIN_MANAGEMENT_MARKER,
+    ToolchainManagementCandidate,
+    ToolchainManagementSurvey,
+    toolchain_is_management_prefix,
+    toolchain_management_survey,
+    toolchain_route_management
+};

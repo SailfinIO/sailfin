@@ -1,0 +1,583 @@
+// compiler/tests/e2e/toolchain_management_test.sfn
+//
+// End-to-end coverage for `sfn toolchain <leaf>` management-command routing
+// (SFEP-0073 §3.5, SFN-1067). Native (no-bash) `*_test.sfn` per
+// `.claude/rules/no-bash-e2e.md`: it drives the compiler-under-test as a
+// subprocess against a pre-seeded stub store and asserts on the captured
+// output. Ground truth: `compiler/src/toolchain/management.sfn`.
+//
+// `toolchain_route_management` intercepts a raw `sfn toolchain ...` argv
+// prefix before the command tree parses and re-execs into the newest
+// installed, complete, manifest-verified, protocol-compatible store payload
+// strictly newer than the running entry. This file duplicates the fixture
+// helpers from `toolchain_dispatch_test.sfn` / `toolchain_inspect_json_test.sfn`
+// rather than sharing them, matching this repo's per-file e2e fixture
+// convention.
+//
+// What it pins:
+//   1. the newest verified compatible payload wins the routing walk.
+//   2. an unknown leaf this entry never heard of still forwards to the
+//      chosen payload verbatim — adding a management leaf needs no entry
+//      change.
+//   3. a payload with no install manifest (the legacy/unverified boundary)
+//      is never a candidate.
+//   4. a corrupt (hash-mismatched) payload is skipped and the walk falls
+//      through to the next-newest candidate, with a named warning.
+//   5. an incomplete (`.sha256`-less) payload is never a candidate.
+//   6. a payload whose protocol is above this entry's range fails closed
+//      with upgrade guidance, at exit 2, when it is the only candidate.
+//   7. that refusal still spares exact-version `toolchain install`, the one
+//      repair path SFEP-0073 §3.5 keeps in the entry for this case.
+//   8. a blocked payload does not discard a compatible one — it warns and
+//      routes to the payload that still works.
+//   9. the same incompatible protocol is silently ignored when it is older
+//      than the running entry.
+//   10. an empty store leaves the entry answering in-process.
+//   11. `toolchain entry-version` reports the entry's own identity and is
+//       never routed.
+//   12. management routing is independent of the ordinary project pin —
+//       an unsatisfiable pin does not block it.
+//   13. a mismatched routed-payload marker warns and answers in-process
+//       rather than failing closed.
+//   14. a selector that re-execs is not routed onward by the child it
+//       dispatched into — the toolchain the user named is the one that
+//       answers.
+//   15. an exact `+<version>` selector resolving in-process outranks
+//       management routing entirely.
+import { remove_all } from "sfn/fs";
+import { contains, split, trim } from "sfn/strings";
+import {
+    clean_runner_env,
+    clean_runner_env_without,
+    default_scratch_dir,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_abs_path,
+    sfn_bin_path
+} from "sfn/test";
+
+import { host_exe_name } from "../../src/build/target";
+import { toolchain_current_host } from "../../src/toolchain/host";
+import { toolchain_build_records } from "../../src/toolchain/integrity";
+import {
+    TOOLCHAIN_MANAGEMENT_PROTOCOL,
+    TOOLCHAIN_MANIFEST_SCHEMA,
+    ToolchainManifestMeta,
+    toolchain_manifest_write
+} from "../../src/toolchain/manifest";
+import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
+
+// A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
+// under the parallel pool; `/tmp` is the standalone fallback.
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    return dir + "/sfn-toolchain-management-e2e";
+}
+
+// The store entry's binary name. `toolchain_store_ready`
+// (`compiler/src/toolchain/store.sfn`) probes `host_exe_name(dir +
+// "/sailfin")`, so a suffix-less name on Windows would read as NOT ready.
+fn _stub_bin(dir: string) -> string ![io] {
+    return host_exe_name(dir + "/sailfin");
+}
+
+// Clean child environment plus the caller's extra `KEY=VALUE` entries.
+// Every key this fixture controls is stripped before the extras are pushed:
+// libc `getenv` returns the first duplicate, so an ambient value otherwise
+// defeats the test's later override.
+fn _env_with(extra: string[]) -> string[] ![io] {
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-management-child"), ["INSTALL_BASE", "SAILFIN_HOME", "SAILFIN_TOOLCHAIN", "SAILFIN_TOOLCHAIN_MANAGEMENT"]);
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    return e;
+}
+
+// Build a native Sailfin stub that prints `marker` and exits 0, regardless
+// of the argv it is re-exec'd with. Compiling the fixture exercises the
+// same compiler-under-test that later launches it.
+fn _write_marker_stub(dir: string, marker: string) -> string ![io] {
+    let src_dir = _scratch_root() + "/stub-src";
+    fs.createDirectory(src_dir, true);
+    let src = src_dir + "/" + marker + ".sfn";
+    fs.writeFile(src, "fn main() -> int ![io] {\n" + "    print(\"" + marker
+        + "\");\n"
+        + "    return 0;\n"
+        + "}\n");
+    let bin = _stub_bin(dir);
+    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch("toolchain-management-stub")));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management stub build", exit, out, err);
+    assert exit == 0;
+    assert fs.exists(bin);
+    return bin;
+}
+
+// A stub that echoes its own argv, one `argv:<token>` line per element
+// (argv[0] is the stub's own path, matching the synthesized `@main(argc,
+// argv)` prologue's contract), so a forwarded command line can be asserted
+// on. Single caller in this file, so a fixed source filename is safe.
+fn _write_argv_stub(dir: string) -> string ![io] {
+    let src_dir = _scratch_root() + "/stub-src";
+    fs.createDirectory(src_dir, true);
+    let src = src_dir + "/argv_stub.sfn";
+    fs.writeFile(src, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    let mut i: int = 0;\n"
+        + "    loop {\n"
+        + "        if i >= argv.length { break; }\n"
+        + "        print(\"argv:\" + argv[i]);\n"
+        + "        i += 1;\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n");
+    let bin = _stub_bin(dir);
+    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch("toolchain-management-argv-stub")));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management argv-stub build", exit, out, err);
+    assert exit == 0;
+    assert fs.exists(bin);
+    return bin;
+}
+
+// Seed a host-qualified store entry `<store>/<host>/<ver>/sailfin` as a stub
+// that prints `marker` and exits 0. When `complete` is true the `.sha256`
+// completeness marker is written last (the installer's commit-point
+// contract), so the entry reads as ready; when false it is left partial.
+fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> void ![io] {
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    let _ = _write_marker_stub(dir, marker);
+    if complete {
+        fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+    }
+}
+
+// (Re-)derive and write an install manifest for whatever payload already
+// sits in `dir`, recording `TOOLCHAIN_MANAGEMENT_PROTOCOL` (this build's own
+// writing value) as the management protocol.
+fn _write_verified_manifest(dir: string, ver: string) -> void ![io] {
+    let records = toolchain_build_records(dir);
+    assert records.length > 0;
+    let meta = ToolchainManifestMeta {
+        schema: TOOLCHAIN_MANIFEST_SCHEMA,
+        management_protocol: TOOLCHAIN_MANAGEMENT_PROTOCOL,
+        version: ver,
+        host: toolchain_current_host().triple,
+        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    };
+    assert toolchain_manifest_write(dir, meta, records);
+}
+
+// `_seed_stub` plus a real install manifest covering the seeded payload —
+// exercises the SFEP-0073 §3.8 integrity gate `_management_candidate` reads.
+// Returns the host-qualified store entry directory.
+fn _seed_stub_verified(store: string, ver: string, marker: string) -> string ![io] {
+    _seed_stub(store, ver, marker, true);
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    _write_verified_manifest(dir, ver);
+    return dir;
+}
+
+// Like `_write_verified_manifest`, but takes the `management_protocol`
+// explicitly rather than the build's own `TOOLCHAIN_MANAGEMENT_PROTOCOL`, so
+// a payload can claim a protocol this entry does not implement.
+fn _write_manifest_protocol(dir: string, ver: string, protocol: int) -> void ![io] {
+    let records = toolchain_build_records(dir);
+    assert records.length > 0;
+    let meta = ToolchainManifestMeta {
+        schema: TOOLCHAIN_MANIFEST_SCHEMA,
+        management_protocol: protocol,
+        version: ver,
+        host: toolchain_current_host().triple,
+        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    };
+    assert toolchain_manifest_write(dir, meta, records);
+}
+
+// `_seed_stub_verified` sibling that records an explicit management
+// protocol instead of this build's own.
+fn _seed_stub_protocol(store: string, ver: string, marker: string, protocol: int) -> string ![io] {
+    _seed_stub(store, ver, marker, true);
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    _write_manifest_protocol(dir, ver, protocol);
+    return dir;
+}
+
+// A verified store entry whose payload echoes its own argv rather than a
+// fixed marker, so a forwarded (unrecognized) command line can be observed.
+fn _seed_argv_stub(store: string, ver: string) -> void ![io] {
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    let _ = _write_argv_stub(dir);
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+    _write_verified_manifest(dir, ver);
+}
+
+// Seed a project whose `[toolchain]` pin is `pin_ver`. Returns the root.
+// Management routing consults none of this — it exists only for the "an
+// unsatisfiable ordinary pin does not block management" test, and as a
+// deterministic cwd for the CLI-selector test.
+fn _seed_project(root: string, pin_ver: string) -> string ![io] {
+    assert remove_all(root);
+    fs.createDirectory(root, true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\nname = \"management-e2e\"\nversion = \"0.0.1\"\n\n[toolchain]\nsfn = \""
+        + pin_ver
+        + "\"\n");
+    return root;
+}
+
+// The exact version string this compiler-under-test reports for itself,
+// build metadata included. `toolchain_select_exact` decides "the selector
+// named the running toolchain" by comparing the raw normalized strings, not
+// by semver precedence, so a dev build's `+dev.<hash>` suffix must survive:
+// stripping it makes `+0.10.6` name a *store* entry that does not exist, and
+// the selector dispatches (and then fetches) instead of resolving in-process.
+// `+` is a valid install-version character, so the full string round-trips.
+fn _running_version() -> string ![io] {
+    let exit = process.run_capture([sfn_bin_abs_path(), "--version"], _env_with([]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management running-version probe", exit, out, err);
+    assert exit == 0;
+    let parts = split(trim(out), " ");
+    assert parts.length >= 2;
+    return parts[1];
+}
+
+test "toolchain management: the newest verified compatible payload wins" ![io] {
+    let store = _scratch_root() + "/newest-wins-store";
+    let proj = _scratch_root() + "/newest-wins-proj";
+    let older_marker = "MANAGEMENT_OLDER_998_3b1a";
+    let newer_marker = "MANAGEMENT_NEWER_999_3b1a";
+    _seed_stub_verified(store, "998.0.0", older_marker);
+    _seed_stub_verified(store, "999.0.0", newer_marker);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management newest-wins run", exit, out, err);
+    assert contains(out + err, newer_marker);
+    assert ! contains(out + err, older_marker);
+}
+
+test "toolchain management: an unknown leaf forwards to the payload" ![io] {
+    let store = _scratch_root() + "/unknown-leaf-store";
+    let proj = _scratch_root() + "/unknown-leaf-proj";
+    _seed_argv_stub(store, "999.0.0");
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "future-leaf", "--some-flag"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management unknown-leaf run", exit, out, err);
+    assert exit == 0;
+    // The forwarded argv (index 0 is the payload's own path) carries the
+    // whole unrecognized command line verbatim.
+    assert contains(out, "argv:toolchain");
+    assert contains(out, "argv:future-leaf");
+    assert contains(out, "argv:--some-flag");
+    // Never THIS entry's own usage error for an unrecognized subcommand.
+    assert ! contains(err, "usage:");
+}
+
+test "toolchain management: a payload with no install manifest is never a candidate" ![io] {
+    let store = _scratch_root() + "/no-manifest-store";
+    let proj = _scratch_root() + "/no-manifest-proj";
+    let marker = "MANAGEMENT_NO_MANIFEST_999_7a2d";
+    // Complete (has `.sha256`) but NO install manifest — the legacy/unverified
+    // boundary `_management_candidate` refuses by construction.
+    _seed_stub(store, "999.0.0", marker, true);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management no-manifest run", exit, out, err);
+    // The entry answered in-process — no route occurred.
+    assert exit == 0;
+    assert ! contains(out + err, marker);
+}
+
+test "toolchain management: a corrupt payload falls through to the next newest" ![io] {
+    let store = _scratch_root() + "/corrupt-fallthrough-store";
+    let proj = _scratch_root() + "/corrupt-fallthrough-proj";
+    let older_marker = "MANAGEMENT_CORRUPT_FALLBACK_998_5e91";
+    let newer_marker = "MANAGEMENT_CORRUPT_NEWEST_999_5e91";
+    _seed_stub_verified(store, "998.0.0", older_marker);
+    let newer_dir = _seed_stub_verified(store, "999.0.0", newer_marker);
+
+    // Overwrite the newest entry's binary with different bytes AFTER its
+    // manifest was written against the original — a hash mismatch the
+    // pre-exec verify must catch, never execute.
+    fs.writeFile(_stub_bin(newer_dir), "tampered-not-the-original-management-stub-bytes");
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management corrupt-fallthrough run", exit, out, err);
+    assert contains(out + err, older_marker);
+    assert ! contains(out + err, newer_marker);
+    assert contains(err, "999.0.0");
+}
+
+test "toolchain management: a partial payload is never a candidate" ![io] {
+    let store = _scratch_root() + "/partial-store";
+    let proj = _scratch_root() + "/partial-proj";
+    let marker = "MANAGEMENT_PARTIAL_999_c48e";
+    // Binary present but NO `.sha256` marker — a partial install.
+    _seed_stub(store, "999.0.0", marker, false);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The stub never ran: routing declined the partial entry.
+    assert ! contains(out + err, marker);
+    // What answered instead is this entry's own `list`, which reports a
+    // partial entry as E0619 and exits 1 (SFN-1066). That non-zero exit is
+    // the proof the command stayed in-process — a routed stub prints its
+    // marker and exits 0 — so it is asserted rather than tolerated.
+    assert exit == 1;
+    assert contains(out, "999.0.0");
+    assert contains(out, "partial");
+    assert contains(err, "E0619");
+}
+
+test "toolchain management: an incompatible protocol increase fails with upgrade guidance" ![io] {
+    let store = _scratch_root() + "/protocol-blocked-store";
+    let proj = _scratch_root() + "/protocol-blocked-proj";
+    let marker = "MANAGEMENT_PROTOCOL_BLOCKED_999_1d7f";
+    _seed_stub_protocol(store, "999.0.0", marker, 2);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // 2, not 1: SFEP-0073 §3.4 reserves 1 for an inspection that emitted an
+    // envelope naming an actionable condition, and 2 for a selection or policy
+    // failure. Nothing reaches stdout here, so a `--json` consumer keying off
+    // 1 would try to parse an envelope that was never written.
+    assert exit == 2;
+    // Never executed — the blocked payload names a protocol this entry
+    // cannot describe, not just an older/incompatible one to skip.
+    assert ! contains(out + err, marker);
+    assert contains(err, "999.0.0");
+    assert contains(err, "protocol 2");
+    assert contains(err, "bootstrap installer");
+    assert contains(err, "package manager");
+    assert contains(err, "sfn toolchain entry-version");
+}
+
+// SFEP-0073 §3.5 keeps exact-version `toolchain install` in the entry as the
+// repair path for exactly this store shape. Refusing it alongside every other
+// leaf would leave a user whose only payload is unmanageable with no way to
+// install one that is not, short of re-running the bootstrap installer.
+test "toolchain management: a blocked protocol still allows exact install repair" ![io] {
+    let store = _scratch_root() + "/protocol-blocked-repair-store";
+    let proj = _scratch_root() + "/protocol-blocked-repair-proj";
+    let marker = "MANAGEMENT_PROTOCOL_REPAIR_999_1d7f";
+    _seed_stub_protocol(store, "999.0.0", marker, 2);
+    _seed_project(proj, "0.0.1");
+
+    // Offline, so the install itself fails — what is asserted is that it was
+    // the *install* that ran and failed, not the routing refusal above it.
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "install", "0.0.1-nonexistent"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert ! contains(out + err, marker);
+    assert ! contains(err, "bootstrap installer");
+    assert ! contains(err, "protocol 2");
+}
+
+// A release this entry cannot manage must not cost the user the payload that
+// still works: the store gets strictly less usable the moment they install a
+// newer toolchain, which is the opposite of the intent.
+test "toolchain management: a blocked protocol still routes to a usable payload" ![io] {
+    let store = _scratch_root() + "/protocol-blocked-fallback-store";
+    let proj = _scratch_root() + "/protocol-blocked-fallback-proj";
+    let usable_marker = "MANAGEMENT_PROTOCOL_FALLBACK_998_1d7f";
+    let blocked_marker = "MANAGEMENT_PROTOCOL_FALLBACK_999_1d7f";
+    _seed_stub_verified(store, "998.0.0", usable_marker);
+    _seed_stub_protocol(store, "999.0.0", blocked_marker, 2);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management blocked-fallback run", exit, out, err);
+    assert exit == 0;
+    // The compatible payload answered.
+    assert contains(out + err, usable_marker);
+    assert ! contains(out + err, blocked_marker);
+    // And the unmanageable install was still reported, as a warning.
+    assert contains(err, "warning");
+    assert contains(err, "999.0.0");
+    assert contains(err, "998.0.0");
+}
+
+test "toolchain management: an incompatible payload older than the entry is ignored" ![io] {
+    let store = _scratch_root() + "/protocol-older-store";
+    let proj = _scratch_root() + "/protocol-older-proj";
+    let marker = "MANAGEMENT_PROTOCOL_OLDER_001_8b3a";
+    _seed_stub_protocol(store, "0.0.1", marker, 2);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management protocol-older run", exit, out, err);
+    // Older than the running entry, so it never strands anything — the
+    // entry answers normally, with no upgrade error at all.
+    assert exit == 0;
+    assert ! contains(out + err, marker);
+    assert ! contains(err, "requires management protocol");
+}
+
+test "toolchain management: an empty store leaves the entry answering" ![io] {
+    let store = _scratch_root() + "/empty-store";
+    let proj = _scratch_root() + "/empty-proj";
+    assert remove_all(store);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management empty-store run", exit, out, err);
+    assert exit == 0;
+    assert ! contains(err, "routing loop");
+    assert ! contains(err, "requires management protocol");
+}
+
+test "toolchain management: entry-version reports the entry without dispatch" ![io] {
+    let store = _scratch_root() + "/entry-version-store";
+    let proj = _scratch_root() + "/entry-version-proj";
+    let marker = "MANAGEMENT_ENTRY_VERSION_999_44af";
+    _seed_stub_verified(store, "999.0.0", marker);
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "entry-version"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management entry-version run", exit, out, err);
+    assert exit == 0;
+    // Proves no route occurred — the marker never printed.
+    assert ! contains(out, marker);
+    assert contains(out, "version:");
+    assert contains(out, "host:");
+    assert contains(out, "executable:");
+    assert contains(out, "management-protocol:");
+}
+
+test "toolchain management: routing is independent of a broken ordinary selection" ![io] {
+    let store = _scratch_root() + "/broken-pin-store";
+    let proj = _scratch_root() + "/broken-pin-proj";
+    let marker = "MANAGEMENT_BROKEN_PIN_999_2f60";
+    // The project pins a toolchain that is NOT installed anywhere — an
+    // unsatisfiable ordinary selection.
+    _seed_project(proj, "997.0.0");
+    _seed_stub_verified(store, "999.0.0", marker);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management broken-pin run", exit, out, err);
+    // Management routing consults no project pin, so it still succeeds.
+    assert contains(out + err, marker);
+}
+
+// A set marker stops the survey whether or not it agrees with the running
+// version. A mismatch is a labelling discrepancy, not a loop — this process
+// cannot route again either way — so it must not be fatal: refusing would let
+// one stray exported variable brick every management command against a
+// perfectly healthy store, with no override.
+test "toolchain management: a mismatched marker warns and answers in-process" ![io] {
+    let store = _scratch_root() + "/loop-guard-store";
+    let proj = _scratch_root() + "/loop-guard-proj";
+    let marker = "MANAGEMENT_LOOP_GUARD_999_9e14";
+    _seed_stub_verified(store, "999.0.0", marker);
+    _seed_project(proj, "0.0.1");
+
+    // The marker names 999.0.0, but THIS process reports something else, and
+    // 999.0.0 is a verified payload the survey would otherwise route to.
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN_MANAGEMENT=999.0.0"]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management marker-mismatch run", exit, out, err);
+    assert exit == 0;
+    assert contains(err, "warning");
+    assert contains(err, "SAILFIN_TOOLCHAIN_MANAGEMENT");
+    // The stub never ran: the marker suppressed routing rather than causing it.
+    assert ! contains(out + err, marker);
+    // And the entry's own list still answered.
+    assert contains(out, "999.0.0");
+}
+
+// The in-process case below is the easy half. This is the half that bit: a
+// selector naming a *different* toolchain re-execs, and the child is a fresh
+// process with no `selector_resolved` flag, so nothing but the dispatch marker
+// stops it surveying the store and routing onward to a newer payload — handing
+// the user a management implementation they explicitly did not ask for.
+test "toolchain management: a re-exec'd selector is not re-routed onward" ![io] {
+    let store = _scratch_root() + "/selector-reexec-store";
+    let proj = _scratch_root() + "/selector-reexec-proj";
+    let older_marker = "MANAGEMENT_SELECTOR_REEXEC_998_bb31";
+    let newer_marker = "MANAGEMENT_SELECTOR_REEXEC_999_bb31";
+    _seed_stub_verified(store, "998.0.0", older_marker);
+    _seed_stub_verified(store, "999.0.0", newer_marker);
+    _seed_project(proj, "0.0.1");
+
+    // Both payloads are newer than the entry, so unguarded routing inside the
+    // dispatched child would climb from 998.0.0 to 999.0.0.
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+998.0.0", "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management selector-reexec run", exit, out, err);
+    assert exit == 0;
+    assert contains(out + err, older_marker);
+    assert ! contains(out + err, newer_marker);
+}
+
+test "toolchain management: an exact selector outranks management routing" ![io] {
+    let store = _scratch_root() + "/selector-outranks-store";
+    let proj = _scratch_root() + "/selector-outranks-proj";
+    let marker_a = "MANAGEMENT_SELECTOR_OUTRANKS_A_999_af02";
+    let marker_b = "MANAGEMENT_SELECTOR_OUTRANKS_B_998_af02";
+    _seed_stub_verified(store, "999.0.0", marker_a);
+    _seed_stub_verified(store, "998.0.0", marker_b);
+    _seed_project(proj, "0.0.1");
+    let running = _running_version();
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+" + running, "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management selector-outranks run", exit, out, err);
+    assert exit == 0;
+    // The selector resolved in-process — neither store stub ever ran.
+    assert ! contains(out + err, marker_a);
+    assert ! contains(out + err, marker_b);
+}
