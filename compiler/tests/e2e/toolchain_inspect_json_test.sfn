@@ -260,8 +260,9 @@ test "toolchain: list --json renders the null contract and empty collections" ![
     // `default` and `update` are unshipped in this slice and locked as null.
     assert find(out, "\"default\":null", 0) >= 0;
     assert find(out, "\"update\":null", 0) >= 0;
-    // Exact project pins are SFEP-0073 Slice 2 and unshipped; the
-    // unpinned project also means `requirement.version` reads null here.
+    // `requirement.version` reads null because this fixture root is
+    // unpinned, not because the field is unshipped — SFN-1070 populates it
+    // for a root carrying `[toolchain] version`.
     assert find(out, "\"version\":null", 0) >= 0;
     // A single seeded entry with no manifest holds no role and the run has
     // no actionable finding — both render as an empty array, never null.

@@ -72,9 +72,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     // Strip `+dev.<hash>` build metadata so a scaffold from an in-tree dev
     // binary is born with a clean pin (`0.8.0-alpha.3`, not
     // `0.8.0-alpha.3+dev.<hash>`); the floor check ignores build metadata
-    // either way (semver §10).
+    // either way (semver §10). The same stripped string is written as both
+    // the `sfn` floor and the exact `version` selection (SFEP-0073 §3.2 rule
+    // 7): a new project is born reproducible while retaining an explicit
+    // floor that can diverge later.
     let toolchain_version = _strip_build_metadata(resolve_compiler_version(ctx.binary_dir));
-    let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn", toolchain_version);
+    let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn", toolchain_version, toolchain_version);
     fs.writeFile("capsule.toml", toml_text);
     if !fs.exists("src") { fs.createDirectory("src", true); }
     if !fs.exists("src/main.sfn") {

@@ -159,6 +159,13 @@ fn _toolchain_active(ctx: CliContext, as_json: boolean) -> int ![io] {
             + report.requirement.source
             + ")");
     }
+    // Printed beside the floor rather than instead of it (SFEP-0073 §3.2): the
+    // two are independent requirements, and a reader debugging a selection
+    // needs to see that the exact field, not the minimum, is what chose the
+    // toolchain above.
+    if report.requirement.version.length > 0 {
+        print("exact:        " + report.requirement.version);
+    }
     if report.requirement.channel.length > 0 {
         print("channel:      " + report.requirement.channel);
     }
@@ -298,7 +305,8 @@ export { command_def, run };
 export {
     toolchain_env_exact_selector,
     toolchain_gate_or_dispatch,
-    toolchain_select_exact
+    toolchain_select_exact,
+    toolchain_select_project_exact
 } from "../../toolchain/dispatch";
 
 export { toolchain_route_management } from "../../toolchain/management";

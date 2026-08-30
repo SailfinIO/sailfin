@@ -70,10 +70,10 @@ struct ToolchainSelection {
     integrity: int;
 }
 
-// The project's `[toolchain]` requirement. `version` is the exact-pin field
-// from SFEP-0073 §3.2 and stays "" until Slice 2 ships it; `minimum` is
-// today's floor semantics. Reporting an unshipped field as `null` rather than
-// omitting it is what keeps the envelope's shape constant across slices.
+// The project's `[toolchain]` requirement. `version` is the exact selection
+// from SFEP-0073 §3.2 and is "" for a floor-only root; `minimum` is the
+// SFEP-0046 floor. Both are reported, because they are independent
+// requirements: changing the exact selection never raises the floor.
 struct ToolchainRequirement {
     minimum: string;
     version: string;
@@ -293,11 +293,12 @@ fn toolchain_fetch_policy() -> string ![io] {
 // rank 2 (an exact `SAILFIN_TOOLCHAIN`), rank 3 (the project pin), and rank 5
 // (the entry toolchain itself).
 //
-// The project pin is a floor in this slice, not an exact version, so it only
-// names a different toolchain when the running one fails to satisfy it — a
-// satisfied floor selects the entry, and reporting `source: "workspace.toml"`
-// there would claim the project chose a version it merely permitted.
-fn toolchain_resolve_selection(versions_base: string, host: ToolchainHostIdentity, entry_version: string, entry_path: string, env_selector: string, decision_pinned: boolean, decision_satisfied: boolean, pin_sfn: string, pin_source: string) -> ToolchainSelection ![io] {
+// A root names a different toolchain two ways, resolved in that order below.
+// Its exact `version` names one unconditionally. Its floor names one only once
+// the running toolchain fails to satisfy it — a satisfied floor selects the
+// entry, and reporting `source: "workspace.toml"` there would claim the
+// project chose a version it merely permitted.
+fn toolchain_resolve_selection(versions_base: string, host: ToolchainHostIdentity, entry_version: string, entry_path: string, env_selector: string, decision_pinned: boolean, decision_satisfied: boolean, pin_sfn: string, pin_source: string, pin_version: string, version_source: string) -> ToolchainSelection ![io] {
     let mut sel = ToolchainSelection {
         version: entry_version,
         path: entry_path,
@@ -311,11 +312,22 @@ fn toolchain_resolve_selection(versions_base: string, host: ToolchainHostIdentit
         wanted = env_selector;
         sel.source = "environment";
     } else {
-        if decision_pinned {
-            if !decision_satisfied {
-                if pin_sfn.length > 0 {
-                    wanted = pin_sfn;
-                    sel.source = pin_source;
+        // SFEP-0073 §3.3 rank 3, reported in the same order it is applied: the
+        // root's exact `version` selects unconditionally, so it outranks the
+        // floor branch below, which only names a target once the running
+        // toolchain has already failed the minimum. Reporting them in the
+        // other order would make `active` — the authoritative explanation
+        // surface — name a version the project does not actually run.
+        if pin_version.length > 0 {
+            wanted = pin_version;
+            sel.source = version_source;
+        } else {
+            if decision_pinned {
+                if !decision_satisfied {
+                    if pin_sfn.length > 0 {
+                        wanted = pin_sfn;
+                        sel.source = pin_source;
+                    }
                 }
             }
         }
@@ -412,14 +424,21 @@ fn _assemble_report(operation: string, binary_dir: string, compiler_path: string
 
     let mut raw: ToolchainInspectEntry[] = [];
     if walk_store { raw = toolchain_inspect_entries(versions_base, host); }
-    let selection = toolchain_resolve_selection(versions_base, host, entry_version, compiler_path, env_selector, decision.pinned, decision.satisfied, decision.pin_sfn, decision.pin_source);
-    let entries = toolchain_assign_roles(raw, entry_version, selection.version, decision.pin_sfn);
+    let selection = toolchain_resolve_selection(versions_base, host, entry_version, compiler_path, env_selector, decision.pinned, decision.satisfied, decision.pin_sfn, decision.pin_source, decision.pin_version, decision.version_source);
+    // The `project` role marks the version the root asks for: the exact
+    // `version` when it has one, and otherwise the floor, which is what this
+    // marker meant before exact roots existed. Marking a floor does tag an
+    // entry the root may never run, but dropping the fallback would silently
+    // un-mark every floor-only project.
+    let mut project_role_version = decision.pin_version;
+    if project_role_version.length == 0 {
+        project_role_version = decision.pin_sfn;
+    }
+    let entries = toolchain_assign_roles(raw, entry_version, selection.version, project_role_version);
 
     let requirement = ToolchainRequirement {
         minimum: decision.pin_sfn,
-        // Exact project pins are SFEP-0073 Slice 2; the field is locked in the
-        // envelope now and stays null until that slice lands.
-        version: "",
+        version: decision.pin_version,
         channel: decision.pin_channel,
         source: decision.pin_source
     };
