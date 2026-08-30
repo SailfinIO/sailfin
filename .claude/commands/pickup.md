@@ -123,22 +123,89 @@ shipped features, runtime experiments) skip this phase entirely.
 
 ---
 
-## Phase 2: CLAIM AND BRANCH
+## Phase 2: CLAIM, REFRESH, AND BRANCH
 
-Claim the issue in Linear and create the branch:
+Claim the issue in Linear:
 
 ```
 mcp__Linear__save_issue id="SFN-<N>" state="In Progress" assignee="me"
 ```
 
+### Branch off `origin/main`, never off local `HEAD`
+
+The local checkout is routinely stale — a container that has been alive for a
+while, or a primary checkout still sitting on the last session's `claude/*`
+branch. Branching off whatever `HEAD` happens to be silently bases the work on
+old `main`, or worse on an unrelated feature branch, and the divergence only
+surfaces as conflicts at PR time.
+
+Fetch first and name the base explicitly. Never `git checkout main && git pull`
+— that mutates the primary checkout and still leaves the base implicit:
+
 ```bash
-# Branch name embeds the Linear ID so Linear's GitHub integration auto-links
-# the PR to the issue: claude/sfn-<N>-<slugified-title>
-git checkout -b claude/sfn-<N>-<slug>
+git fetch origin main
 ```
+
+### Create a worktree
+
+Work in a dedicated worktree, not in the primary checkout. Sessions run
+concurrently against one clone; a shared working tree means two agents fighting
+over `build/`, and `sfn dev bootstrap build` in one session silently rebuilding
+the binary the other is testing against. `.claude/worktrees/` is already
+gitignored and `git worktree` is already allowlisted.
+
+```bash
+# --git-common-dir resolves to the *primary* checkout's .git even when this
+# command runs from inside an existing worktree, so a pickup that follows
+# another pickup nests nothing.
+PRIMARY="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+WT="$PRIMARY/.claude/worktrees/sfn-<N>"
+git worktree add --no-track -b claude/sfn-<N>-<slug> "$WT" origin/main
+cd "$WT"
+```
+
+`git worktree add -b <branch> <path> origin/main` fetches nothing, mutates
+nothing, and bases the branch on the just-fetched remote ref in one step — so a
+stale local `main` cannot become the base no matter what the primary checkout
+is doing.
+
+`--no-track` is not optional. Without it git sets the new branch's upstream to
+`refs/heads/main`, so a bare `git push` on the work branch targets `main` —
+exactly the thing the Constraints forbid. With it the base is still
+`origin/main` and the branch has no upstream until the Phase 5
+`git push -u origin claude/sfn-<N>-<slug>` sets the right one.
 
 The `sfn-<N>` branch prefix is load-bearing — it is how Linear associates the
 branch/PR with `SFN-<N>` and advances the issue on merge. Keep it lowercase.
+
+Share the seed store so the worktree does not re-download it. `bootstrap.toml`
+resolves `[store] install_base` **relative to the checkout**, so a fresh
+worktree has no seed at all; symlinking the primary's store reuses the already
+fetched, signature-verified binary:
+
+```bash
+mkdir -p "$WT/build"
+ln -s "$PRIMARY/build/toolchains" "$WT/build/toolchains"
+export PATH="$WT/build/bin:$WT/build/toolchains/seed/bin:$PATH"
+```
+
+Export `PATH` explicitly: the SessionStart hook ran against the primary
+checkout, so its exports point at the wrong tree. `build/bin/sfn` itself is
+**not** shared — each worktree self-hosts its own compiler, which is the
+isolation this phase exists to buy. Expect a `sfn dev bootstrap build` before
+the first targeted test.
+
+**Branch in place only when the checkout is already single-purpose** — a
+fresh ephemeral clone that belongs to this session alone (a remote or CI
+container), where a worktree buys isolation that already exists and costs a
+second bootstrap build. The fetch-and-base-on-`origin/main` rule is **not**
+conditional; it applies either way:
+
+```bash
+git checkout --no-track -b claude/sfn-<N>-<slug> origin/main
+```
+
+### Read the issue
 
 Read the full issue body to extract Goal, Scope (In/Out), Acceptance criteria,
 Files affected (advisory map), Verification commands, and Type (routes the
@@ -291,6 +358,7 @@ Never mark an SFEP `Implemented` for "parsed but not enforced".
 - Issue worked: SFN-<N> — <title>
 - PR opened: <URL>
 - Branch: `claude/sfn-<N>-<slug>`
+- Worktree: `.claude/worktrees/sfn-<N>` (or "branched in place — single-purpose checkout")
 - Verification results
 - Seed freshness: if a predecessor was accepted via the Phase 1.5 content
   fallback (merge SHA orphaned but content present in the seed), note it — a
@@ -313,6 +381,14 @@ Surface any deferral or mid-flight scope adjustment explicitly.
   drift is not scope growth — reconcile and proceed, recording it in the PR.
 - **Never declare done with unchecked acceptance criteria.**
 - **Never push to `main`.** Work on `claude/sfn-<N>-<slug>` and open a PR.
+- **Always base the branch on freshly fetched `origin/main`** — never on local
+  `HEAD`, and never by checking out and pulling `main` in the primary checkout.
+- **Leave the worktree in place until the PR merges.** It holds the branch and
+  its self-hosted `build/bin/sfn`; a later session driving CI on the same PR
+  reuses both. Reclaim it after merge with
+  `git worktree remove .claude/worktrees/sfn-<N> && git worktree prune`, and
+  prune stale entries whenever `git worktree list` shows worktrees for branches
+  already merged.
 - **Never skip Phase 1.5** when the issue lists `## Required in pinned seed`.
 - **Never surface an archived issue as a candidate.** Archived is terminal for
   pickup regardless of the status field.
