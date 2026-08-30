@@ -12,7 +12,7 @@ import {
 } from "./paths";
 import { _cr_resolve_dedupe_filtered } from "./reachability";
 import { _cr_srchash_path, _cr_stage_cache_hit, stage_capsule_imports } from "./staging";
-import { CheckCapsuleResolution, ResolverConsumer } from "./types";
+import { CapsuleSource, CheckCapsuleResolution, ResolverConsumer } from "./types";
 
 // A previously staged project entry is useful as a best-effort provider
 // inventory for E0420 import suggestions. Never stage it on behalf of an
@@ -46,6 +46,35 @@ fn _check_project_entry_artifact(entry_paths: string[], work_dir: string) -> str
     return "";
 }
 
+// SFN-686: the deduped spec set the analyzer checks capsule imports against.
+// `CapsuleSource.spec` is already canonical `<scope>/<name>` at every
+// construction site (a manifest dep key, or the canonicalised spec the
+// workspace/cache implicit locators pass to `_cr_collect_capsule_sources`), so
+// no further canonicalisation is needed here; the analyzer canonicalises the
+// import side before lookup.
+fn _check_resolved_capsule_specs(sources: CapsuleSource[]) -> string[] {
+    let mut out: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= sources.length { break; }
+        let spec = sources[index].spec;
+        index += 1;
+        if spec.length == 0 { continue; }
+        let mut seen: boolean = false;
+        let mut j: int = 0;
+        loop {
+            if j >= out.length { break; }
+            if out[j] == spec {
+                seen = true;
+                break;
+            }
+            j += 1;
+        }
+        if !seen { out.push(spec); }
+    }
+    return out;
+}
+
 fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> CheckCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let project_entry_artifact = _check_project_entry_artifact(entry_paths, work_dir);
@@ -59,7 +88,9 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
             implicit_provider_asm_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
-            capabilities_required: resolved.capabilities_required
+            capabilities_required: resolved.capabilities_required,
+            resolved_capsule_specs: empty_paths,
+            capsule_specs_known: false
         };
     }
     if resolved.sources.length == 0 {
@@ -72,7 +103,9 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
             implicit_provider_asm_paths: empty_paths,
             capsule_count: 0,
             staging_failed: false,
-            capabilities_required: resolved.capabilities_required
+            capabilities_required: resolved.capabilities_required,
+            resolved_capsule_specs: empty_paths,
+            capsule_specs_known: true
         };
     }
 
@@ -93,7 +126,9 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
             implicit_provider_asm_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
-            capabilities_required: resolved.capabilities_required
+            capabilities_required: resolved.capabilities_required,
+            resolved_capsule_specs: empty_paths,
+            capsule_specs_known: false
         };
     }
 
@@ -127,7 +162,9 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         implicit_provider_asm_paths: implicit_provider_asm_paths,
         capsule_count: resolved.sources.length as int,
         staging_failed: false,
-        capabilities_required: resolved.capabilities_required
+        capabilities_required: resolved.capabilities_required,
+        resolved_capsule_specs: _check_resolved_capsule_specs(resolved.sources),
+        capsule_specs_known: true
     };
 }
 

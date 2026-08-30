@@ -1,9 +1,10 @@
 // compiler/capsules/analyzer/src/import_resolution_check.sfn
 //
-// Pure import-resolution analysis for `sfn check` (#1953). The driver resolves
-// relative module paths on disk into an `ImportResolutionContext`; the
-// analyzer consumes that value to diagnose unresolved modules (E0430) and
-// names absent from the staged import closure (E0431). Sailfin
+// Pure import-resolution analysis for `sfn check` (#1953, SFN-686). The driver
+// resolves relative module paths on disk and records which capsule specs the
+// resolver located, producing an `ImportResolutionContext`; the analyzer
+// consumes that value to diagnose unresolved modules (E0430) and names absent
+// from the staged import closure (E0431). Sailfin
 // resolves imported symbols globally by name — a module may legally import
 // a symbol from a module that does not itself declare it, as long as some
 // module in the link defines it — so E0431 checks closure-wide existence,
@@ -11,10 +12,20 @@
 // the analyzer facade used by `sfn check`, never in the build/self-host emit
 // path, so it cannot affect code generation.
 //
-// Scope is deliberately narrow: only specs beginning with `./` or `../`
-// are checked. Scoped/capsule imports (`sfn/...`), runtime imports
-// (`runtime/...`), and bare names resolve through other mechanisms and are
-// skipped entirely, so they can never false-positive here.
+// Two spec classes are checked: relative specs (`./`, `../`), against the
+// driver's on-disk probe, and capsule specs (`<scope>/<name>[/...]`), against
+// the set of specs the check resolver actually located.
+//
+// Two classes are deliberately left unchecked, because the check-time closure
+// structurally omits them and diagnosing against it could only false-positive:
+//
+//   * `runtime/...` — `collect_scoped_import_specs`
+//     (`compiler/src/capsule_import_scan.sfn`) excludes runtime-prefixed specs
+//     from the resolver's edge set, and `sfn check` resolves with an empty
+//     `runtime_root` (`compiler/src/capsule_resolver/check.sfn`), so runtime
+//     modules are never staged into the closure this check reads.
+//   * bare names (no `/`) — not a capsule spec; they resolve through
+//     mechanisms that leave no record in the resolved-spec set.
 import { strings_equal, substring } from "sfn/strings";
 import { Program } from "sfn/syntax";
 
@@ -34,10 +45,21 @@ struct ClosureSymbolSet {
 
 // Driver-resolved import input for one parsed source file. The analyzer owns
 // the semantic decision and diagnostic data, while the driver owns the
-// filesystem probe needed to populate `resolved_relative_specs`.
+// filesystem probe needed to populate `resolved_relative_specs` and the
+// resolver pass that populates `resolved_capsule_specs`.
+//
+// `resolved_capsule_specs` holds canonical `<scope>/<name>` specs; a submodule
+// import (`sfn/http/client`) is canonicalised before lookup, matching how the
+// resolver itself records the entry (`compiler/src/capsule_resolver/implicit.sfn`).
+// `capsule_specs_known` gates E0430 for capsule specs the same way
+// `ClosureSymbolSet.complete` gates E0431: it is false whenever no resolver
+// pass produced the set (the standalone `check_source` adapter), where an
+// empty list means "unknown", not "nothing resolved".
 struct ImportResolutionContext {
     closure_symbols: ClosureSymbolSet;
     resolved_relative_specs: string[];
+    resolved_capsule_specs: string[];
+    capsule_specs_known: boolean;
 }
 
 fn _irc_starts_with(text: string, prefix: string) -> boolean {
@@ -65,9 +87,43 @@ fn _irc_is_relative(spec: string) -> boolean {
     return false;
 }
 
-// Walk a parsed program's `import` declarations and emit E0430 for a relative
-// spec absent from the driver-resolved set, or E0431 for a named specifier
-// defined nowhere in the staged import closure.
+fn _irc_has_slash(spec: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= spec.length { break; }
+        if strings_equal(substring(spec, i, i + 1), "/") { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// A capsule spec is any non-relative, non-runtime spec carrying a `/`.
+fn _irc_is_capsule(spec: string) -> boolean {
+    if _irc_is_relative(spec) { return false; }
+    if _irc_starts_with(spec, "runtime/") { return false; }
+    return _irc_has_slash(spec);
+}
+
+// Trim a capsule spec to its canonical `<scope>/<name>`, dropping any
+// submodule suffix, so `sfn/http/client` matches the `sfn/http` entry the
+// resolver recorded.
+fn _irc_canonical_capsule_spec(spec: string) -> string {
+    let mut seen: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= spec.length { break; }
+        if strings_equal(substring(spec, i, i + 1), "/") {
+            seen += 1;
+            if seen == 2 { return substring(spec, 0, i); }
+        }
+        i += 1;
+    }
+    return spec;
+}
+
+// Walk a parsed program's `import` declarations and emit E0430 for a spec the
+// driver could not resolve, or E0431 for a named specifier defined nowhere in
+// the staged import closure.
 // Sailfin resolves imported symbols globally by name (see
 // `ClosureSymbolSet`), so E0431 checks closure-wide existence, not
 // per-module export. It is suppressed unless `closure.complete` — an
@@ -81,31 +137,42 @@ fn collect_import_resolution_findings(program: Program, file_path: string, conte
     loop {
         if i >= program.statements.length { break; }
         let statement = program.statements[i];
-        if statement.variant == "ImportDeclaration" {
-            let spec_path = statement.source;
-            if _irc_is_relative(spec_path) {
-                if !_irc_specs_contains(context.resolved_relative_specs, spec_path) {
-                    let mut d = make_cannot_find_module_diagnostic(spec_path);
-                    d.file_path = file_path;
-                    out.push(d);
-                } else {
-                    if context.closure_symbols.complete {
-                        let mut s: int = 0;
-                        loop {
-                            if s >= statement.import_specifiers.length { break; }
-                            let importer = statement.import_specifiers[s];
-                            if !_irc_names_contains(context.closure_symbols.names, importer.name) {
-                                let mut nd = make_symbol_not_exported_diagnostic(importer.name, spec_path);
-                                nd.file_path = file_path;
-                                out.push(nd);
-                            }
-                            s += 1;
-                        }
-                    }
-                }
-            }
-        }
         i += 1;
+        if statement.variant != "ImportDeclaration" { continue; }
+        let spec_path = statement.source;
+
+        let relative = _irc_is_relative(spec_path);
+        let capsule = _irc_is_capsule(spec_path);
+        // `runtime/...` and bare names: unchecked, see the header comment.
+        if !relative && !capsule { continue; }
+        // No resolver pass ran, so an absent spec proves nothing.
+        if capsule && !context.capsule_specs_known { continue; }
+
+        let mut resolved: boolean = false;
+        if relative {
+            resolved = _irc_specs_contains(context.resolved_relative_specs, spec_path);
+        } else {
+            resolved = _irc_specs_contains(context.resolved_capsule_specs, _irc_canonical_capsule_spec(spec_path));
+        }
+        if !resolved {
+            let mut d = make_cannot_find_module_diagnostic(spec_path);
+            d.file_path = file_path;
+            out.push(d);
+            continue;
+        }
+        if !context.closure_symbols.complete { continue; }
+        let mut s: int = 0;
+        loop {
+            if s >= statement.import_specifiers.length { break; }
+            let importer = statement.import_specifiers[s];
+            s += 1;
+            if _irc_names_contains(context.closure_symbols.names, importer.name) {
+                continue;
+            }
+            let mut nd = make_symbol_not_exported_diagnostic(importer.name, spec_path);
+            nd.file_path = file_path;
+            out.push(nd);
+        }
     }
     return out;
 }

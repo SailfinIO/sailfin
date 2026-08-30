@@ -61,7 +61,7 @@ test "check: analyzer facade accepts resolved parsed input without authority" {
     let resolved_specs: string[] = [];
     let result = analyze_program(AnalyzerInput {
         program: Program { statements: statements }, file_path: "clean.sfn", imported_interfaces: interfaces, imported_symbols: empty_import_symbols(), prelude_globals: globals, capabilities_required: capabilities, import_context: ImportResolutionContext {
-            closure_symbols: ClosureSymbolSet { names: names, complete: true }, resolved_relative_specs: resolved_specs
+            closure_symbols: ClosureSymbolSet { names: names, complete: true }, resolved_relative_specs: resolved_specs, resolved_capsule_specs: [], capsule_specs_known: false
         }, intrinsic_effects: empty_intrinsic_effects(), allow_bare_assert: false, effect_severity: "error", implicit_symbols: []
     });
     assert result.diagnostics.length == 0;
