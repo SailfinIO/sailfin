@@ -1086,7 +1086,11 @@ here.
   deliberately not — the resolver drops runtime-prefixed edges and
   `sfn check` resolves with an empty runtime root, so diagnosing them could
   only produce false positives. Checked only in `sfn check`, not the build
-  path.
+  path. **Consequence:** a project whose dependencies have not been fetched
+  now fails `sfn check` with an `E0430` per unresolved capsule import, where
+  previously every non-relative spec was skipped and the check passed. Run
+  `sfn add` (or restore the lockfile) before the cheapest rung; the resolver
+  already names the missing spec on stderr.
 - **Five more check≠build divergences closed (SFN-385, SFN-562, SFN-584).** A method call on a
   primitive receiver that resolves to no primitive method and no in-scope
   free function (`E0012`, e.g. `field.to_uppercase()` on a `string`), an
