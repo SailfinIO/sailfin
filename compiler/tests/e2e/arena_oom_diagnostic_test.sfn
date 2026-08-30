@@ -1,0 +1,258 @@
+// E2E test pinning the arena page-allocation OOM diagnostic
+// (`runtime/sfn/memory/arena.sfn::sfn_arena_global`, SFN-1133).
+//
+// When the process-global arena cannot allocate its first 4 MiB page,
+// `sfn_arena_global` used to `abort()` with no output at all. `abort()`
+// raises `0xC0000409` on Windows (exit -1073740791), one digit from
+// `0xC0000005` (access violation, exit -1073741819), so a silent abort
+// made an out-of-memory condition indistinguishable from a segfault.
+//
+// Contracts pinned here:
+//
+//   1. The failure path emits an identifiable `[sailfin-oom]` line to
+//      stderr naming the arena page allocation and the requested bytes.
+//   2. The line appears EXACTLY once. This is the recursion guard: the
+//      diagnostic is primed *before* the fallible allocation
+//      (`_arena_oom_msg_prime`) precisely so the failure path allocates
+//      nothing. A message built on the failure path would re-enter
+//      `sfn_arena_global` via `sfn_alloc_struct` and recurse until the
+//      stack overflowed, printing the line repeatedly before dying. A
+//      count of exactly 1 pins both halves of that contract.
+//
+// Two legs, two different reasons the recursion guard needs pinning twice:
+//
+//   - The RLIMIT_AS sweep below forces the real failure end to end
+//     (`sfn emit` under a starved cap) but the window that starves it is
+//     host-dependent (base binary/libc mapping size) and Linux-only
+//     (`RLIMIT_AS` is a no-op on Darwin,
+//     `.claude/rules/compiler-safety.md`), so it is inherently
+//     non-deterministic across hosts and unavailable on macOS.
+//   - The C-harness leg mirrors `runtime_memory_arena_test.sfn`'s
+//     `_env_harness_c` pattern: it drives the re-entrancy guard directly
+//     by mimicking `mem.sfn`'s `sfn_alloc_struct` arena-vs-calloc routing
+//     against the real emitted `sfn_arena_enabled` / `sfn_arena_global` /
+//     `sfn_arena_alloc`, with no cap and no host dependence. It cannot
+//     force the *page-allocation* failure (that still needs a starved
+//     process), but it is a deterministic, portable pin that the
+//     provisional-disable guard around the primed message does not
+//     regress into the recursion `_arena_oom_msg_prime`'s header
+//     describes. It runs on every host, including Darwin.
+//
+// Forcing the failure needs a cap that is in force *from exec*, so
+// `process.run_capture_rlimit_as` (SFN-45) is the vehicle rather than
+// `SAILFIN_MEM_LIMIT`: the self-cap installs inside `fn main`, by which
+// point early string work has already created the arena successfully, so
+// no `SAILFIN_MEM_LIMIT` value can starve the *first* page. No
+// `bash -c "ulimit -v"` vehicle (`.claude/rules/no-bash-e2e.md`).
+//
+// The window is narrow and host-dependent: the cap must leave less than
+// one 4 MiB page of headroom at arena-creation time but still admit the
+// binary and libc mappings. Below it the process dies earlier in
+// `sfn_alloc_struct`; above it the 4 MiB page fits and the starvation
+// lands somewhere later. The test therefore sweeps a range rather than
+// pinning one magic number, and skips when no cap in the sweep reaches
+// the arena path (a host whose base mappings sit outside the range) —
+// measured on Linux x86_64 the window is ~10-12 MB. The sweep runs once
+// and both stderr contracts (identifiable line, exactly-once) are
+// asserted against the single shared result, instead of re-running the
+// up-to-26-child sweep per contract.
+//
+// Below the window, `process.run_capture_rlimit_as` lowers the parent's
+// soft RLIMIT_AS across the spawn before `posix_spawnp` runs
+// (`runtime/sfn/process.sfn:1027-1029`), so an 8-20 MB cap can make
+// `posix_spawnp` itself fail with ENOMEM — returning exit -1 with empty
+// stderr, indistinguishable at the string level from "no window found on
+// this host". `_emit_under_cap` returns the exit code alongside stderr so
+// the skip reason can report the last observed exit code, making a
+// permanently-dormant sweep leg diagnosable instead of silently green.
+//
+// Linux-only: `RLIMIT_AS` is a no-op on Darwin
+// (`.claude/rules/compiler-safety.md`), so the failure cannot be forced
+// there and the sweep leg skips via `skip()` (SFN-815) rather than a bare
+// `return` — a bare `return` after a no-op body is recorded `pass`, the
+// exact anti-pattern that let SFN-807 survive a release cycle behind an
+// always-empty probe (`capsules/sfn/test/src/skip.sfn`).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. Assert on the captured
+// stderr with `sfn/strings` predicates instead. (#842.)
+import { contains, count, int_to_string } from "sfn/strings";
+import {
+    c_math_link_flags,
+    clean_runner_env_without,
+    default_scratch_dir,
+    run_external_c_oracle,
+    sfn_bin_path,
+    skip
+} from "sfn/test";
+
+// The marker the runtime writes on the arena page-allocation failure.
+// Must stay in sync with `_arena_oom_msg_prime` in `arena.sfn`.
+let _OOM_MARKER: string = "arena page allocation failed";
+
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["SAILFIN_MEM_LIMIT"]);
+}
+
+// True on Linux, where RLIMIT_AS is honored and the cap can actually
+// starve the arena page allocation.
+fn _is_linux() -> boolean ![io] { return fs.exists("/proc/self/status"); }
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    return ".";
+}
+
+fn _arena_path() -> string ![io] {
+    return _repo_root() + "/runtime/sfn/memory/arena.sfn";
+}
+
+struct CapRun {
+    exit: int;
+    stderr: string;
+}
+
+// Run `sfn emit llvm` on a trivial source file under a per-child
+// `RLIMIT_AS` of `cap_bytes`. `emit` (not `version`) is the reproduction
+// from SFN-1133: it is the first command that drives a real arena
+// allocation.
+fn _emit_under_cap(label: string, cap_bytes: int) -> CapRun ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    let out = dir + "/" + label + ".ll";
+    fs.writeFile(src, "fn main() -> int {\n    return 0;\n}\n");
+
+    let e = _child_env();
+    let exit = process.run_capture_rlimit_as([sfn_bin_path(), "emit", "-o", out, "llvm", src], e, cap_bytes);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CapRun { exit: exit, stderr: err };
+}
+
+// Sweep caps upward until one starves the arena's first page. Returns the
+// captured stderr for that run, or "" (with the last observed exit code)
+// when no cap in the range reaches the arena path on this host —
+// `process.run_capture_rlimit_as` lowers the parent's soft RLIMIT_AS
+// across the spawn before `posix_spawnp` runs, so a cap can starve
+// `posix_spawnp` itself (exit -1, empty stderr) rather than the arena
+// path, and the exit code is how that distinction stays diagnosable.
+fn _stderr_from_starved_arena(label: string) -> CapRun ![io] {
+    let mut mb = 8;
+    let mut last_exit = 0;
+    loop {
+        if mb > 20 { break; }
+        let run = _emit_under_cap(label + "_" + int_to_string(mb), mb * 1048576);
+        if contains(run.stderr, _OOM_MARKER) { return run; }
+        last_exit = run.exit;
+        mb += 1;
+    }
+    return CapRun { exit: last_exit, stderr: "" };
+}
+
+test "arena: page-allocation failure reports OOM exactly once, not aborting silently" ![io] {
+    if !_is_linux() { skip("RLIMIT_AS is a no-op on non-Linux hosts"); }
+    let run = _stderr_from_starved_arena("arena_oom_sweep");
+    let err = run.stderr;
+    if err.length == 0 {
+        // No cap in the 8-20 MB sweep reached the arena path on this
+        // host; report the last child's exit code so a permanently-dormant
+        // leg is diagnosable (a -1 with empty stderr means the cap starved
+        // `posix_spawnp` itself rather than reaching the arena page
+        // allocation).
+        skip("no cap in the 8-20 MB sweep starved the arena page allocation on this host (last child exit code "
+            + int_to_string(run.exit)
+            + ")");
+    }
+
+    assert contains(err, "[sailfin-oom]");
+    assert contains(err, _OOM_MARKER);
+    assert contains(err, "4194304");
+    // The recursion guard: a message built on the failure path would
+    // re-enter `sfn_arena_global` and recurse, printing this line
+    // repeatedly before the stack overflowed.
+    assert count(err, _OOM_MARKER) == 1;
+}
+
+// C harness mirroring `runtime_memory_arena_test.sfn`'s `_env_harness_c`
+// pattern: drives `mem.sfn`'s `sfn_alloc_struct` arena-vs-calloc routing
+// against the real emitted `sfn_arena_enabled` / `sfn_arena_global` /
+// `sfn_arena_alloc`, so materialising the primed OOM message re-enters
+// `sfn_arena_global` exactly as it would inside the real compiler. No
+// cap, no host-dependent window, no Linux gate — deterministic pin for
+// the provisional-disable guard `_arena_oom_msg_prime` documents.
+fn _reentrancy_harness_c() -> string {
+    return "#include <stddef.h>\n" + "#include <stdlib.h>\n"
+        + "#include <string.h>\n"
+        + "#include <stdio.h>\n"
+        + "/* i1 return -> declare _Bool so the upper bits of the return register are\n"
+        + " * not read as garbage (an `int` decl makes every value read as true). */\n"
+        + "extern _Bool sfn_arena_enabled(void);\n"
+        + "extern void *sfn_arena_global(void);\n"
+        + "extern void *sfn_arena_alloc(void *arena, size_t size, size_t align);\n"
+        + "void sailfin_runtime_mark_persistent(void *p) { (void)p; }\n"
+        + "void sfn_type_register(void *d) { (void)d; }\n"
+        + "/* Mirror mem.sfn's sfn_alloc_struct arena-vs-calloc routing. The string\n"
+        + " * literal _arena_oom_msg_prime materialises lowers to a call here; without\n"
+        + " * the provisional-disable guard this re-enters sfn_arena_global with the\n"
+        + " * handle still 0 and recurses until the stack overflows. */\n"
+        + "void *sfn_alloc_struct(long n) {\n"
+        + "    if (sfn_arena_enabled()) {\n"
+        + "        void *p = sfn_arena_alloc(sfn_arena_global(), (size_t)n, 8);\n"
+        + "        if (p) memset(p, 0, (size_t)n);\n"
+        + "        return p;\n"
+        + "    }\n"
+        + "    return calloc(1, (size_t)n);\n"
+        + "}\n"
+        + "int main(void) { return sfn_arena_global() ? 0 : 1; }\n";
+}
+
+fn _emit_arena_ll() -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/arena_oom_reentrancy.ll";
+    if !fs.exists(ll) {
+        let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _arena_path()], _child_env());
+        let _o = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        assert exit == 0;
+    }
+    return ll;
+}
+
+test "arena: re-entrancy guard survives sfn_alloc_struct routing (C harness via clang)" ![io] {
+    let dir = _scratch_dir();
+    let ll = _emit_arena_ll();
+
+    let harness = dir + "/arena_oom_reentrancy_harness.c";
+    fs.writeFile(harness, _reentrancy_harness_c());
+
+    let bin = dir + "/arena_oom_reentrancy";
+    // `-lm` has no MSVC counterpart; `c_math_link_flags()` answers the
+    // empty list on a Windows host (SFN-1114).
+    let mut clang_argv: string[] = ["-Wno-override-module", harness, ll, "-o", bin];
+    let math_flags = c_math_link_flags();
+    let mut mf = 0;
+    loop {
+        if mf >= math_flags.length { break; }
+        clang_argv.push(math_flags[mf]);
+        mf += 1;
+    }
+    let clang_exit = run_external_c_oracle(clang_argv);
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if clang_exit != 0 {
+        skip("clang unavailable or the arena re-entrancy harness failed to link");
+    }
+
+    let run_exit = process.run_capture([bin], _child_env());
+    let _ro = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+}
