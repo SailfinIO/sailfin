@@ -45,7 +45,7 @@ Agent teams (enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) are spawned in 
 
 - **Feature build-out:** `compiler-architect` (designs) → hand the plan to an implementer, with `code-reviewer` + `test-runner` validating and `docs-updater` syncing docs in parallel once code lands.
 - **Self-hosting break:** `seed-stabilizer` (root-cause) leads; `compiler-explorer` traces the affected stage in parallel to confirm the surface area.
-- **Pre-release sweep:** `test-runner` (full suite) + `code-reviewer` (diff audit) + `docs-updater` (status/roadmap) run concurrently.
+- **Pre-release sweep:** `test-runner` (full suite) + `code-reviewer` (diff audit) run concurrently; `/status-sweep` reconciles `docs/status.md` (it dispatches `docs-updater` in sweep mode itself — don't dispatch that agent for status separately, it declines outside a sweep).
 
 Don't fan out wider than the work warrants.
 

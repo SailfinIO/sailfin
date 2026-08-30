@@ -346,8 +346,10 @@ The design for the content-addressed key derivation lives in
   spent on a change that cannot merge. An in-scope PR asks this workflow for
   six macOS job-slots; before `installer-smoke.yml` gained its own installer
   scope it could ask for two more, so a PR touching compiler code and
-  `docs/status.md` -- the pairing Stage1 readiness requires -- requested eight
-  against a pool of five and contended with itself.
+  `docs/status.md` -- a pairing Stage1 readiness required at the time --
+  requested eight against a pool of five and contended with itself. Stage1
+  readiness no longer requires it: `docs/status.md` is reconciled on the release
+  cadence, so that pairing is now rare rather than routine.
   `ready_for_review` reruns the full matrix on the same head.
 
 ## Metrics and the known gap

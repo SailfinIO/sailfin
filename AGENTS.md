@@ -39,7 +39,7 @@
 ## Commit & Pull Request Guidelines
 
 - History mixes imperative commits and Conventional Commit prefixes; favor `feat(compiler): …`, `fix(runtime): …`, `docs(sfep): …`, etc., for clarity.
-- Keep commits atomic, mention touched capsules/passes, and co-author docs/status/spec changes in the same PR as behavior changes.
+- Keep commits atomic, mention touched capsules/passes, and co-author spec/roadmap changes in the same PR as behavior changes. `docs/status.md` is the exception — it is reconciled on the release cadence, never bundled with a behaviour change.
 - Pull requests should summarize scope, link issues/SFEPs, list verification commands, and attach screenshots or trace snippets when behavior shifts.
 
 ## Codex Workflow Notes

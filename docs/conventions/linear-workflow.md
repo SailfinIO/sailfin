@@ -140,7 +140,8 @@ External-contributor GitHub issues mirror into `Triage` and go through the same
    Linear's GitHub integration links the PR and advances the issue to `Done` on
    merge. The skill flips `Ready → In Progress → In Review` via the Linear MCP.
 5. **Graduate:** when the epic ships, flip its SFEP to `Implemented` and update
-   `docs/status.md`.
+   the spec chapter. Leave `docs/status.md` to the release-cadence
+   `/status-sweep` — it is not part of the epic's PR.
 
 ---
 

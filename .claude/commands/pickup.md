@@ -160,9 +160,25 @@ gitignored and `git worktree` is already allowlisted.
 # another pickup nests nothing.
 PRIMARY="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 WT="$PRIMARY/.claude/worktrees/sfn-<N>"
+
+# Pre-flight. The path is keyed on <N> alone while the branch carries
+# <N>-<slug>, so a re-pickup of the same issue — a died session, or the same
+# issue under a different slug — collides. Clear a stale registration first;
+# `git worktree remove` is the supported spelling, and `rm -rf` is deny-listed
+# precisely so half-removed state gets fixed this way instead.
+git worktree prune
+git worktree list | grep -q "$WT" && git worktree remove "$WT" --force
+
 git worktree add --no-track -b claude/sfn-<N>-<slug> "$WT" origin/main
 cd "$WT"
 ```
+
+If `worktree add` still fails with *a branch named … already exists*, an earlier
+attempt on this issue left the branch behind. Inspect it (`git log
+claude/sfn-<N>-<slug>`) and either resume it by dropping `-b` and naming the
+existing branch, or delete it if it holds nothing worth keeping — do not invent
+a second slug to route around the collision, which leaves two branches claiming
+one issue.
 
 `git worktree add -b <branch> <path> origin/main` fetches nothing, mutates
 nothing, and bases the branch on the just-fetched remote ref in one step — so a
@@ -170,10 +186,13 @@ stale local `main` cannot become the base no matter what the primary checkout
 is doing.
 
 `--no-track` is not optional. Without it git sets the new branch's upstream to
-`refs/heads/main`, so a bare `git push` on the work branch targets `main` —
-exactly the thing the Constraints forbid. With it the base is still
-`origin/main` and the branch has no upstream until the Phase 5
-`git push -u origin claude/sfn-<N>-<slug>` sets the right one.
+`refs/heads/main`. Under the default `push.default=simple` that does not push to
+`main` — git refuses outright — but it does make `git pull` merge `main` into
+the work branch, and it makes every `@{upstream}` comparison meaningless,
+including the unpushed-commit count the session's git-context hook reports. With
+`--no-track` the base is still `origin/main` and the branch has no upstream
+until the Phase 5 `git push -u origin claude/sfn-<N>-<slug>` sets the right
+one.
 
 The `sfn-<N>` branch prefix is load-bearing — it is how Linear associates the
 branch/PR with `SFN-<N>` and advances the issue on merge. Keep it lowercase.
@@ -185,9 +204,13 @@ fetched, signature-verified binary:
 
 ```bash
 mkdir -p "$WT/build"
-ln -s "$PRIMARY/build/toolchains" "$WT/build/toolchains"
+ln -sfn "$PRIMARY/build/toolchains" "$WT/build/toolchains"
 export PATH="$WT/build/bin:$WT/build/toolchains/seed/bin:$PATH"
 ```
+
+`-sfn`, not `-s`: if `$WT/build/toolchains` already exists as a directory, plain
+`ln -s` silently creates `toolchains/toolchains` inside it rather than failing,
+and the seed then resolves nowhere.
 
 Export `PATH` explicitly: the SessionStart hook ran against the primary
 checkout, so its exports point at the wrong tree. `build/bin/sfn` itself is
@@ -202,8 +225,34 @@ second bootstrap build. The fetch-and-base-on-`origin/main` rule is **not**
 conditional; it applies either way:
 
 ```bash
-git checkout --no-track -b claude/sfn-<N>-<slug> origin/main
+git switch -c claude/sfn-<N>-<slug> --no-track origin/main
 ```
+
+`git switch -c`, not `git checkout --no-track -b`: the settings deny-list
+carries `Bash(git checkout --*)` (aimed at `git checkout -- <path>`), deny beats
+allow, so the `checkout` spelling is unrunnable in exactly the sandboxed
+container this fallback exists for. Keep `--no-track` after the branch name so
+the command still matches the `Bash(git switch -c claude/*)` allow prefix.
+
+### Pass the worktree to every subagent
+
+`cd` and `export` bind only this shell. A dispatched subagent starts fresh, with
+its working directory at the **primary** checkout and the SessionStart `PATH`
+pointing at the primary's `build/bin`. Left implicit, `compiler-explorer` reads
+the primary's tree, `implementer` edits the primary's files, and `test-runner`
+builds the primary's compiler — while this session believes all of it is
+happening in the worktree. That silently reintroduces the contention the
+worktree was created to remove, and it is invisible until two sessions disagree.
+
+So state the absolute worktree path in **every** subagent prompt, and say that
+paths are relative to it:
+
+> Work in `<absolute $WT>`. Every path in this task is relative to that
+> directory, not the primary checkout. Use `<absolute $WT>/build/bin/sfn` for
+> compiler invocations.
+
+Same for any `Bash` command you run after a subagent returns — prefer absolute
+paths under `$WT` over relying on an inherited `cd`.
 
 ### Read the issue
 

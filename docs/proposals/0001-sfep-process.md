@@ -204,8 +204,10 @@ the design maps `Draft` → ungroomed, `Accepted` → design gate passed, and
 
 **The bar for `Implemented`** is the Stage1 Readiness Checklist in `CLAUDE.md`:
 parses → type/effect-checks → emits `.sfn-asm` → lowers to LLVM IR → has
-regression coverage → self-hosts → passes `sfn fmt --check` → documented in
-`docs/status.md` and the spec. **"Parsed but not enforced" is not Implemented** —
+regression coverage → self-hosts → passes `sfn fmt --check` → documented in the
+spec chapter. (`docs/status.md` is deliberately not part of that bar; it is
+reconciled on the release cadence by `/status-sweep`.)
+**"Parsed but not enforced" is not Implemented** —
 it stays `Accepted`. Do not mark a safety feature Implemented until it is
 enforced end-to-end.
 
@@ -282,7 +284,8 @@ meet is written down (§6), uniform, and independent of authorship.
 
 **Implementing:** land the work behind the proposal; when it clears the Stage1
 bar (§4), set `status: Implemented`, bump `updated`, and ensure `graduates-to`
-points at the shipped spec chapter (and `docs/status.md` reflects it).
+points at the shipped spec chapter. Do not edit `docs/status.md` to match — the
+next `/status-sweep` picks the graduation up on the release cadence.
 
 **Graduating to user docs:** a `language`/`runtime` SFEP's user-facing surface
 lives on the docs site — `reference/preview/` while planned, moving to
