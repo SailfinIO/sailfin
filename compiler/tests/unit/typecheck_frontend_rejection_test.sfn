@@ -476,17 +476,40 @@ test "frontend-rejection: string[] into string[] is the accepted baseline (no E0
 // unsubstituted `T[]` as `struct:T` and fire a false positive against the
 // `Diag[]` actual (SFN-910).
 test "frontend-rejection: generic struct field annotation stays silent (no E0310)" ![io] {
+    // The INFERRED form `Box { ... }` is the one that exercises the guard: an
+    // explicitly parameterized `Box<T> { ... }` parses to the single type-name
+    // segment `Box<T>`, which `_struct_field_expected_type` fails to resolve,
+    // so the check bails on a null expected type before the guard is read
+    // (SFN-910).
     let source = "struct T { value: int; } struct Diag { code: string; } "
         + "struct Box<T> { items: T[]; } "
         + "fn main() -> int { let ds: Diag[] = []; "
-        + "let b: Box<T> = Box<T> { items: ds }; return 0; }";
+        + "let b = Box { items: ds }; return 0; }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0310");
 }
 
 test "frontend-rejection: a scoped type-parameter element stays silent (no E0310)" ![io] {
-    let source = "fn f<T>(xs: T[]) -> int { let ys: T[] = xs; return 0; }";
+    // A top-level `struct T` plus a DIFFERING expected class is what makes
+    // this bite: without the type-parameter gate the scoped `T` would resolve
+    // against that struct declaration and conflict with `string[]`. Same-class
+    // or no-such-struct shapes pass whether the gate runs or not (SFN-910).
+    let source = "struct T { value: int; } "
+        + "fn f<T>(xs: T[]) -> int { let ss: string[] = xs; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: a member read off a generic instantiation stays silent (no E0310)" ![io] {
+    // `_struct_field_annotation_text` refuses a receiver whose declared struct
+    // carries type arguments: `Pair<string>` still declares `first: T[]`, and
+    // reading that unsubstituted `T[]` against the top-level `struct T` would
+    // fire a false positive on correct code (SFN-910).
+    let source = "struct T { value: int; } struct Pair<T> { first: T[]; } "
+        + "fn use_pair(p: Pair<string>) -> int { "
+        + "let ss: string[] = p.first; return 0; }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0310");

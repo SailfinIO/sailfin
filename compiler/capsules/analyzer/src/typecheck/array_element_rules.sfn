@@ -229,7 +229,13 @@ fn check_array_element_assignment(expression: Expression, ctx: TypeckCtx) -> Dia
     if target_text.length == 0 { return []; }
     let display = _lvalue_display(expression.target);
     if display.length == 0 { return []; }
+    // `Assignment.span` covers only the operator token
+    // (`parser/expressions/mod.sfn:417`), so anchoring there would point the
+    // caret at the `=` rather than at either operand. Prefer the rvalue's own
+    // span, matching Hook A's `_value_anchor_span(field.value)` (SFN-910).
+    let mut anchor_span = _value_anchor_span(expression.rhs);
+    if anchor_span == null { anchor_span = expression.span; }
     return check_array_element_type(expression.rhs, TypeAnnotation {
         text: target_text
-    }, ctx, "assignment to `" + display + "`", display, expression.span);
+    }, ctx, "assignment to `" + display + "`", display, anchor_span);
 }
