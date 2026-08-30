@@ -48,9 +48,9 @@ struct ClosureSymbolSet {
 // filesystem probe needed to populate `resolved_relative_specs` and the
 // resolver pass that populates `resolved_capsule_specs`.
 //
-// `resolved_capsule_specs` holds canonical `<scope>/<name>` specs; a submodule
-// import (`sfn/http/client`) is canonicalised before lookup, matching how the
-// resolver itself records the entry (`compiler/src/capsule_resolver/implicit.sfn`).
+// `resolved_capsule_specs` holds the specs the resolver recorded verbatim; an
+// import matches an entry exactly or as a submodule beneath it, so neither
+// side needs canonicalising (see `_irc_capsule_spec_resolved`).
 // `capsule_specs_known` gates E0430 for capsule specs the same way
 // `ClosureSymbolSet.complete` gates E0431: it is false whenever no resolver
 // pass produced the set (the standalone `check_source` adapter), where an
@@ -104,21 +104,28 @@ fn _irc_is_capsule(spec: string) -> boolean {
     return _irc_has_slash(spec);
 }
 
-// Trim a capsule spec to its canonical `<scope>/<name>`, dropping any
-// submodule suffix, so `sfn/http/client` matches the `sfn/http` entry the
-// resolver recorded.
-fn _irc_canonical_capsule_spec(spec: string) -> string {
-    let mut seen: int = 0;
+// Is `spec` covered by a capsule the resolver located? An entry matches the
+// spec itself, or any submodule beneath it (`sfn/http` covers
+// `sfn/http/client`). Prefix matching rather than truncating the spec to two
+// segments: a capsule name may itself carry more than two segments
+// (`is_safe_scope_name` in `../../../src/capsule_artifact.sfn` validates every
+// `/`-separated segment, and `_cr_enumerate_host_capsule_sources` names
+// `acme/router/middleware/auth` as a live shape), so a fixed truncation would
+// miss the recorded entry and mint a spurious E0430. The trailing `/` keeps
+// `sfn/httpx` from matching an `sfn/http` entry. Mirrors the prefix test
+// `_cr_source_imports_host` (`../../../src/capsule_import_scan.sfn`) already
+// uses for the same question.
+fn _irc_capsule_spec_resolved(specs: string[], spec: string) -> boolean {
     let mut i: int = 0;
     loop {
-        if i >= spec.length { break; }
-        if strings_equal(substring(spec, i, i + 1), "/") {
-            seen += 1;
-            if seen == 2 { return substring(spec, 0, i); }
-        }
+        if i >= specs.length { break; }
+        let entry = specs[i];
         i += 1;
+        if entry.length == 0 { continue; }
+        if strings_equal(entry, spec) { return true; }
+        if _irc_starts_with(spec, entry + "/") { return true; }
     }
-    return spec;
+    return false;
 }
 
 // Walk a parsed program's `import` declarations and emit E0430 for a spec the
@@ -155,7 +162,7 @@ fn collect_import_resolution_findings(program: Program, file_path: string, conte
         if relative {
             resolved = _irc_specs_contains(context.resolved_relative_specs, spec_path);
         } else {
-            resolved = _irc_specs_contains(context.resolved_capsule_specs, _irc_canonical_capsule_spec(spec_path));
+            resolved = _irc_capsule_spec_resolved(context.resolved_capsule_specs, spec_path);
         }
         if !resolved {
             let mut d = make_cannot_find_module_diagnostic(spec_path);

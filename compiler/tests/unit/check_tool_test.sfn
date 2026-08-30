@@ -37,14 +37,18 @@
 import { AnalyzerInput, analyze_program } from "sfn/analyzer";
 import { EffectRequirement } from "sfn/analyzer/effect_checker/types";
 import { empty_import_symbols } from "sfn/analyzer/effect_imports";
-import { ClosureSymbolSet, ImportResolutionContext } from "sfn/analyzer/import_resolution_check";
+import {
+    ClosureSymbolSet,
+    ImportResolutionContext,
+    collect_import_resolution_findings
+} from "sfn/analyzer/import_resolution_check";
 import {
     append_intrinsic_effects,
     empty_intrinsic_effects,
     intrinsic_effects_for_callee_target
 } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
-import { Program, Statement } from "sfn/syntax";
+import { ImportSpecifier, Program, Statement } from "sfn/syntax";
 
 import { code_for_missing_effect, join_effects } from "../../src/diagnostics_render";
 import { CheckSummary, render_summary } from "../../src/tools/check";
@@ -369,4 +373,96 @@ test "check: W0001 and W0002 are distinct codes" {
 test "check: W01xx codes do not collide with E0xxx error ranges" {
     assert ! strings_equal("W0001", "E0001");
     assert ! strings_equal("W0002", "E0301");
+}
+
+// -------------------------------------------------------------------
+// Import-resolution findings (SFN-686) — pure, no driver, no filesystem
+// -------------------------------------------------------------------
+fn _ir_import(name: string, source: string) -> Statement {
+    let spec = ImportSpecifier { name: name, alias: null };
+    return Statement.ImportDeclaration {
+        import_specifiers: [spec],
+        source: source
+    };
+}
+
+// `resolved_capsule_specs` is what the check resolver located;
+// `closure_names` is the staged closure's symbol surface.
+fn _ir_findings(source: string, name: string, resolved_capsule_specs: string[], closure_names: string[], capsule_specs_known: boolean, prelude_globals: string[]) -> int {
+    let relative_specs: string[] = [];
+    let context = ImportResolutionContext {
+        closure_symbols: ClosureSymbolSet {
+            names: closure_names,
+            complete: true
+        },
+        resolved_relative_specs: relative_specs,
+        resolved_capsule_specs: resolved_capsule_specs,
+        capsule_specs_known: capsule_specs_known
+    };
+    let program = Program { statements: [_ir_import(name, source)] };
+    let findings = collect_import_resolution_findings(program, "consumer.sfn", context, prelude_globals);
+    return findings.length as int;
+}
+
+fn _ir_first_code(source: string, name: string, resolved_capsule_specs: string[], closure_names: string[]) -> string {
+    let relative_specs: string[] = [];
+    let no_globals: string[] = [];
+    let context = ImportResolutionContext {
+        closure_symbols: ClosureSymbolSet {
+            names: closure_names,
+            complete: true
+        },
+        resolved_relative_specs: relative_specs,
+        resolved_capsule_specs: resolved_capsule_specs,
+        capsule_specs_known: true
+    };
+    let program = Program { statements: [_ir_import(name, source)] };
+    let findings = collect_import_resolution_findings(program, "consumer.sfn", context, no_globals);
+    if findings.length == 0 { return ""; }
+    return findings[0].code;
+}
+
+test "import resolution: unresolved capsule spec is E0430" {
+    assert strings_equal(_ir_first_code("sfn/not-a-capsule", "x", ["sfn/strings"], ["x"]), "E0430");
+}
+
+test "import resolution: symbol absent from the closure is E0431" {
+    assert strings_equal(_ir_first_code("sfn/strings", "nope", ["sfn/strings"], ["find"]), "E0431");
+}
+
+test "import resolution: submodule import matches its capsule entry" {
+    assert _ir_findings("sfn/http/client", "get", ["sfn/http"], ["get"], true, []) == 0;
+}
+
+// SFN-686 regression: a capsule name may carry more than two segments, so a
+// fixed truncation to `<scope>/<name>` misses the recorded entry and mints a
+// spurious E0430 on a capsule that resolved perfectly.
+test "import resolution: multi-segment capsule name resolves" {
+    assert _ir_findings("acme/router/middleware/auth", "verify", ["acme/router/middleware/auth"], ["verify"], true, []) == 0;
+}
+
+// The prefix match must not spill across a name boundary.
+test "import resolution: a capsule entry does not match a longer sibling name" {
+    assert strings_equal(_ir_first_code("sfn/httpx", "get", ["sfn/http"], ["get"]), "E0430");
+}
+
+// A prelude global lives in `runtime/prelude.sfn`, never in a staged
+// artifact, so it is absent from the closure surface while the link defines
+// it. Importing one from a capsule is legal under global-by-name resolution.
+test "import resolution: a prelude global imported from a capsule is exempt" {
+    assert _ir_findings("sfn/strings", "strings_equal", ["sfn/strings"], [], true, ["strings_equal"]) == 0;
+}
+
+test "import resolution: runtime specs are never diagnosed" {
+    assert _ir_findings("runtime/sfn/string", "whatever", [], [], true, []) == 0;
+}
+
+test "import resolution: bare-name specs are never diagnosed" {
+    assert _ir_findings("barename", "whatever", [], [], true, []) == 0;
+}
+
+// Without a resolver pass an empty spec set means "unknown", not "resolved
+// nothing" — the standalone `check_source` adapter has no pass.
+test "import resolution: capsule specs are unchecked when no resolver pass ran" {
+    assert _ir_findings("sfn/not-a-capsule", "x", [], [], false, []) == 0;
 }
