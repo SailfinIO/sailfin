@@ -5,6 +5,7 @@
 // default, a member `capsule.toml` pin overrides it per field — and decides
 // whether the running compiler satisfies it. Unpinned projects are a no-op,
 // so the feature stays additive.
+import { _cwd_cmd } from "../build/fs";
 import {
     SemVer,
     semver_is_exact_release,
@@ -29,15 +30,25 @@ import { discover_workspace_root } from "./workspace";
 // `SAILFIN_SKIP_TOOLCHAIN_CHECK`, and `SAILFIN_TOOLCHAIN=off` downgrade a
 // mismatch to a warning and proceed. Returns 0 to proceed, 1 on an enforced
 // mismatch.
-fn _toolchain_start_dir(hint: string) -> string {
-    if hint.length == 0 { return "."; }
-    let n = hint.length;
+fn _toolchain_start_dir(hint: string) -> string ![io] {
+    let mut start: string = hint;
+    let n = start.length;
     if n > 4 {
-        if strings_equal(substring(hint, n - 4, n), ".sfn") {
-            return _cr_dirname(hint);
+        if strings_equal(substring(start, n - 4, n), ".sfn") {
+            start = _cr_dirname(start);
         }
     }
-    return hint;
+    // `discover_project_root`/`discover_workspace_root` ascend with
+    // `_cr_dirname`, which maps "." to "." — so the walk terminates after
+    // testing the starting directory itself and can never reach an ancestor
+    // `workspace.toml`. Three ordinary invocations land on that "." start: an
+    // empty hint (every early selection, since naming the entry file requires
+    // a parse that has not run yet), `sfn build` with no path, and a bare
+    // relative `main.sfn`. Resolving to a concrete directory first is what
+    // lets a command run from inside a workspace member discover the
+    // workspace it belongs to (SFN-1070).
+    if start.length == 0 || strings_equal(start, ".") { return _cwd_cmd(); }
+    return start;
 }
 
 fn _toolchain_leading_id(prerelease: string) -> string {
