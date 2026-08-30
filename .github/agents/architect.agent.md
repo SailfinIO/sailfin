@@ -32,7 +32,7 @@ You are the Sailfin Architect agent. Your role is to review design decisions, ev
 - Evaluate whether the change moves toward or away from the 1.0 goal (pure Sailfin toolchain)
 - Consider effect system implications — does the change respect capability boundaries?
 - Check for ownership/borrowing implications (move-by-default, `Affine<T>`, `Linear<T>`)
-- Ensure documentation updates are included (`docs/status.md` → language spec at `site/src/content/docs/docs/reference/spec/` or `.../reference/preview/` → `site/src/pages/roadmap.astro`)
+- Ensure documentation updates are included (language spec at `site/src/content/docs/docs/reference/spec/` or `.../reference/preview/` → `site/src/pages/roadmap.astro`); `docs/status.md` is reconciled on the release cadence, not in the feature PR
 
 ## Key Documents to Reference
 

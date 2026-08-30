@@ -35,7 +35,8 @@ repository.
      rebuild.
 3. **Testing expectations**
    - Add or update unit tests under `compiler/tests/` for compiler changes.
-   - Reflect behaviour updates in `docs/status.md` and the relevant module docs.
+   - Reflect behaviour updates in the relevant module docs and spec chapter.
+     Leave `docs/status.md` alone — it is reconciled on the release cadence.
    - Run `build/bin/sfn test` before submitting.
 
 ### Optional Pre-Commit Hook
@@ -73,11 +74,10 @@ per-change record.
 
 When behaviour, coverage, or roadmap status changes:
 
-1. Update `docs/status.md` first — keep the feature matrix authoritative.
-2. Sync the language spec at `site/src/content/docs/docs/reference/spec/`
+1. Sync the language spec at `site/src/content/docs/docs/reference/spec/`
    (update the relevant §N chapter) and add/amend design notes under
    `.../reference/preview/` if the feature is not yet shipped.
-3. Adjust planning in Linear for sequencing changes. Update the reviewed public
+2. Adjust planning in Linear for sequencing changes. Update the reviewed public
    roadmap snapshot only when the Project meets
    `docs/conventions/public-roadmap.md`.
 4. Touch the relevant folder README (e.g., `compiler/README.md`,

@@ -55,7 +55,9 @@ self-host gate; a green `sfn check` is not a build guarantee (#1389). -->
 - [ ] Parses, type-checks, and effect-checks
 - [ ] Emits valid `.sfn-asm` and lowers to LLVM IR
 - [ ] Effect enforcement wired end-to-end (not annotation-only)
-- [ ] `docs/status.md` and the relevant spec §N chapter updated
+- [ ] The relevant spec §N chapter updated
+<!-- Not docs/status.md: it is reconciled on the release cadence by a
+maintainer sweep, not by this PR. -->
 
 ## Notes for reviewers
 

@@ -38,8 +38,10 @@ documentation lives on the docs site.**
 
 When behaviour, coverage, or roadmap status changes:
 
-1. Refresh `docs/status.md` once behaviour or coverage changes.
-2. Update the language spec on the site under
+1. Update the language spec on the site under
    `site/src/content/docs/docs/reference/spec/` (the appropriate §N chapter)
    or `.../reference/preview/` for planned features.
-3. Cross-link roadmap items and proposals to the relevant source files or tests.
+2. Cross-link roadmap items and proposals to the relevant source files or tests.
+
+`docs/status.md` is not in that list: it is reconciled on the release cadence
+by `/status-sweep` rather than by the change that moves a status.

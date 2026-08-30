@@ -32,7 +32,8 @@ You are Opus: spend yourself on judgment (orchestration, design, diagnosis, the 
 | Build fails, wrong output, perf/memory regression — **genuine** hard diagnosis | `seed-stabilizer` | opus |
 | Review a change before commit (correctness, self-host, effects, IR) | `code-reviewer` | opus |
 | Run tests safely + first-pass failure triage (classify trivial vs. genuine) | `test-runner` | sonnet |
-| Sync `docs/status.md`, spec chapters, roadmap after a change | `docs-updater` | sonnet |
+| Sync spec chapters and roadmap after a change | `docs-updater` | sonnet |
+| Reconcile `docs/status.md` on the release cadence (**never** in a feature PR) | `/status-sweep` → `docs-updater` | sonnet |
 
 **Spend Opus where it counts.** Don't grep the tree yourself on Opus — dispatch `compiler-explorer` for surface maps. Don't type routine changes yourself — author a precise spec and hand it to the Sonnet `implementer`, then gate its diff with the Opus `code-reviewer` (mechanical `sfn fmt --check`/`sfn check` pass first, so Opus only adjudicates subtle correctness). Keep implementation on Opus only when the change is novel, cross-cutting, or entangled with design. A failing build goes to the Sonnet `test-runner` to classify first — escalate to the Opus `seed-stabilizer` only for genuine miscompiles/IR errors, not fmt errors or missing imports.
 

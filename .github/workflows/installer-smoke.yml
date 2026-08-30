@@ -81,10 +81,18 @@ jobs:
       # surface. But those paths cannot change what the installer *does*, and
       # the installer matrix costs two `macos-26` legs out of an account-wide
       # pool of five -- the same pool `ci.yml` wants six slots from. A PR that
-      # touches compiler code and updates `docs/status.md` (which Stage1
-      # readiness requires it to) was therefore asking for eight macOS slots
-      # against a pool of five, and self-contending. Narrow the matrix to the
-      # paths that actually decide installer behaviour; `site` stays ungated.
+      # touches compiler code and also touched `docs/status.md` was therefore
+      # asking for eight macOS slots against a pool of five, and
+      # self-contending. Narrow the matrix to the paths that actually decide
+      # installer behaviour; `site` stays ungated.
+      #
+      # The `docs/status.md` half of that pressure is now structural rather
+      # than incidental: feature PRs no longer write that file at all, since it
+      # is reconciled on the release cadence by `/status-sweep`. It stays in
+      # `paths:` because a sweep genuinely is install-docs surface -- but it now
+      # arrives roughly once a release instead of on a third of all commits.
+      # The narrowing below is still load-bearing for `site/**` and `README.md`,
+      # so it stays.
       - name: Determine installer scope
         id: scope
         shell: bash

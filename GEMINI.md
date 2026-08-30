@@ -85,10 +85,16 @@ transitively.
 
 Before calling a feature shipped: parses → type/effect-checks → emits valid
 `.sfn-asm` → lowers to LLVM IR → has regression coverage → self-hosts → passes
-`sfn fmt --check` → documented in `docs/status.md` and the spec chapter.
+`sfn fmt --check` → documented in the spec chapter.
 
 **"Parsed but not enforced" is not shipped** — never market or document an
 unenforced feature.
+
+`docs/status.md` is deliberately **not** on that list. A feature PR does not
+touch it; it is reconciled on the release cadence by `/status-sweep`, which
+applies this same bar in batch. The distinction is contention, not rigour: a
+spec chapter is per-feature and never collides, while the status matrix is one
+global file that a third of all PRs were editing at once.
 
 ## Design judgment
 
@@ -157,7 +163,9 @@ Gemini/Antigravity workspace skills are located under `.agents/skills/`:
 
 ## Source of truth
 
-1. **`docs/status.md`** — what ships today, and the runtime migration tracker
+1. **`docs/status.md`** — what ships today, and the runtime migration tracker.
+   Reconciled per release by `/status-sweep`, so it may lag `main` by one cut;
+   for work that merged since, the PR and Linear issue are authoritative
 2. **Language spec** — `site/src/content/docs/docs/reference/spec/` (shipped) and
    `.../reference/preview/` (design previews)
 3. **Linear** Initiatives/Projects/Cycles — planning; `sailfin.dev/roadmap` is

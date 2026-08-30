@@ -403,7 +403,7 @@ if (resolve(process.argv[1] ?? "") === scriptPath) {
       console.error(`- [${failure.category}] ${failure.message}`);
     }
     console.error(
-      "Update docs/status.md first for behavior changes, then update the fixture and public claim together.",
+      "Update the spec chapter for behavior changes, then update the fixture and public claim together. docs/status.md is reconciled on the release cadence — do not edit it here.",
     );
     process.exit(1);
   }

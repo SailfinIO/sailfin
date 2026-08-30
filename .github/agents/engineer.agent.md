@@ -27,7 +27,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 3. Add tests in `compiler/tests/` (unit, integration, or e2e as appropriate)
 4. Run `sfn dev bootstrap build` when compiler sources changed to verify self-hosting
 5. Run targeted `sfn test <path>` coverage; use the full workspace `sfn test` only when the issue or risk requires it
-6. Update docs: `docs/status.md` first, then the language spec (`site/src/content/docs/docs/reference/spec/` or `.../reference/preview/`) and `site/src/pages/roadmap.astro` (the [roadmap](https://sailfin.dev/roadmap))
+6. Update docs: the language spec (`site/src/content/docs/docs/reference/spec/` or `.../reference/preview/`) and `site/src/pages/roadmap.astro` (the [roadmap](https://sailfin.dev/roadmap)). Not `docs/status.md` — it is reconciled on the release cadence.
 
 ## Adding a Language Feature
 
@@ -37,7 +37,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 4. Extend `compiler/capsules/codegen-llvm/src/lowering/` for LLVM IR generation
 5. Add regression tests to `compiler/tests/`
 6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter file if shipped, or `.../reference/preview/*.md` page if planned
-7. Update `docs/status.md` with implementation status
+7. Leave `docs/status.md` to the release-cadence sweep — do not edit it here
 
 ## Coding Conventions
 

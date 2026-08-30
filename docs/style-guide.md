@@ -350,11 +350,12 @@ export { parse_expression } from "./expressions";
 
 ## Documentation Alignment
 
-- Update `docs/status.md` first whenever behavior changes.
-- Follow up with the language spec
+- Update the language spec
   (`site/src/content/docs/docs/reference/spec/` for shipped features,
   `.../reference/preview/` for planned) and the
   [roadmap](https://sailfin.dev/roadmap) as needed.
+- Leave `docs/status.md` alone. It is reconciled on the release cadence by
+  `/status-sweep`; a per-PR edit there collides with every other in-flight PR.
 - Record non-trivial designs as SFEPs under `docs/proposals/`
   (`.claude/rules/proposals.md` has the always-loaded summary).
 - Narrow, single-topic conventions (usually born from an incident) live under

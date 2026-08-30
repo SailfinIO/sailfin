@@ -40,7 +40,7 @@ sfn dev verify                   # Full gate only for shipped/release/structural
 - [ ] E2E tests in `compiler/tests/e2e/` (if user-facing behavior)
 
 ### 3. Documentation
-- [ ] `docs/status.md` updated if feature status changed
+- [ ] `docs/status.md` **not** touched (it is reconciled on the release cadence, not per-PR)
 - [ ] Language spec updated if syntax or semantics changed — `site/src/content/docs/docs/reference/spec/NN-*.md` for shipped features, `.../reference/preview/` for planned
 - [ ] [Roadmap](https://sailfin.dev/roadmap) (`site/src/pages/roadmap.astro`) updated if priorities shifted
 
