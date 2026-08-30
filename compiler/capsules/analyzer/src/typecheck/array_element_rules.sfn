@@ -1,0 +1,235 @@
+// compiler/capsules/analyzer/src/typecheck/array_element_rules.sfn
+//
+// E0310: array element type mismatch. Assigning `T[]` where `U[]` is declared
+// (struct-literal field init, annotated `let`, or plain assignment) is a
+// silent miscompile today — the backend emits a descriptor bitcast and every
+// reader treats the pointee as whatever the declared element type says
+// (SFN-910). This module proves the mismatch conservatively: the actual side
+// is resolved ONLY through declaration metadata (never inference), and any
+// gate that cannot prove both sides' element class stays silent by
+// construction (mirrors E0309's discipline, `primitive_rules.sfn:59-65`).
+import { ends_with, find, substring } from "sfn/strings";
+import { Expression, SourceSpan, TypeAnnotation } from "sfn/syntax";
+
+import { FixSuggestion } from "../diagnostic";
+import { Diagnostic } from "../typecheck_types";
+import { classify_declared_primitive } from "../typecheck_types/annotation_shape_checks";
+import { bound_base_name } from "../typecheck_types/generic_bounds";
+import { SymbolEntry, find_value_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { token_from_name, trim_text } from "../typecheck_types/text_utils";
+import { TypeckCtx } from "./context";
+import { _find_struct_declaration } from "./field_access";
+import { _string_list_has } from "./symbols";
+
+// `false` for anything not a bare word: empty, or containing compound-type
+// punctuation or a space. Character-scan shaped like
+// `classify_declared_primitive` (`annotation_shape_checks.sfn:368-381`).
+fn _element_text_is_bare(element: string) -> boolean {
+    if element.length == 0 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= element.length { break; }
+        let ch = element[i];
+        if strings_equal(ch, "[") { return false; }
+        if strings_equal(ch, "]") { return false; }
+        if strings_equal(ch, "<") { return false; }
+        if strings_equal(ch, ">") { return false; }
+        if strings_equal(ch, "?") { return false; }
+        if strings_equal(ch, "*") { return false; }
+        if strings_equal(ch, "(") { return false; }
+        if strings_equal(ch, ")") { return false; }
+        if strings_equal(ch, "&") { return false; }
+        if strings_equal(ch, ".") { return false; }
+        if strings_equal(ch, ",") { return false; }
+        if strings_equal(ch, ":") { return false; }
+        if strings_equal(ch, "|") { return false; }
+        if strings_equal(ch, " ") { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// The proven element class an array annotation's text denotes:
+// `"prim:<kind>"`, `"struct:<Name>"`, or `""` when unproven. Type parameters
+// are excluded BEFORE the struct lookup, mirroring `_declared_struct_annotation`
+// (`typecheck/symbols.sfn:319-329`) — a scoped type parameter must never be
+// misread as a struct name that happens to share it.
+fn _array_element_class(annotation_text: string, ctx: TypeckCtx) -> string {
+    let text = trim_text(annotation_text);
+    if !ends_with(text, "[]") { return ""; }
+    let element = trim_text(substring(text, 0, text.length - 2));
+    if !_element_text_is_bare(element) { return ""; }
+    let prim = classify_declared_primitive(element);
+    if prim.length > 0 { return "prim:" + prim; }
+    if _string_list_has(ctx.type_params, element) { return ""; }
+    if _find_struct_declaration(ctx.declarations, element) != null {
+        return "struct:" + element;
+    }
+    return "";
+}
+
+// Whether two proven element classes conflict. Either side unproven, or the
+// two classes equal, is not a conflict. Otherwise ANY two distinct proven
+// classes conflict — deliberately including `prim:int` vs `prim:float`. This
+// looks like it contradicts `_primitive_types_compatible`
+// (`primitive_rules.sfn:240-247`), which permits scalar `int`<->`float`; it
+// does not. That allowance exists because scalar lowering emits a real
+// coercion. There is no element-wise coercion for arrays — the store is a
+// descriptor bitcast, so an `int[]` read as `float[]` reinterprets `i64` bit
+// patterns as doubles (SFN-910). Keep this three-line shape so a future
+// narrowing (if one is ever proven safe) is a one-line removal, not a rewrite.
+fn _element_classes_conflict(expected_class: string, actual_class: string) -> boolean {
+    if expected_class.length == 0 { return false; }
+    if actual_class.length == 0 { return false; }
+    if strings_equal(expected_class, actual_class) { return false; }
+    return true;
+}
+
+// Same two-table resolution `unknown_field_diagnostics` documents
+// (`field_access.sfn:66-69`): local bindings first, then top-level.
+fn _resolve_value_entry(name: string, ctx: TypeckCtx) -> SymbolEntry? {
+    let mut entry = find_value_symbol(ctx.bindings, name);
+    if entry == null { entry = find_value_symbol(ctx.top_level, name); }
+    return entry;
+}
+
+// The declared annotation text of `field_name` on the struct
+// `entry.declared_struct` resolves to, or `""` when unproven.
+fn _struct_field_annotation_text(entry: SymbolEntry, field_name: string, ctx: TypeckCtx) -> string {
+    if entry.declared_struct.length == 0 { return ""; }
+    // A generic instantiation's field annotation may name an unsubstituted
+    // type parameter (e.g. `Box<Diag>` still declares `items: T[]`) — stay
+    // silent rather than misclassify `T[]` against the instantiation.
+    if find(entry.declared_struct, "<", 0) >= 0 { return ""; }
+    let declaration = _find_struct_declaration(ctx.declarations, bound_base_name(entry.declared_struct));
+    if declaration == null { return ""; }
+    let mut i: int = 0;
+    loop {
+        if i >= declaration.fields.length { break; }
+        let field = declaration.fields[i];
+        if strings_equal(field.name, field_name) {
+            return field.type_annotation.text;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// The declared array-element annotation text of `expression`, proven ONLY for
+// a bare `Identifier` or a single-level `Member` on a bare identifier
+// receiver — declaration metadata only, never inference. Every other shape,
+// crucially including the empty array literal `[]`, falls through to `""`
+// and stays silent BY CONSTRUCTION: an array literal carries no declared
+// element type, and the empty literal `[]` is the universal bottom the
+// backend materializes as a zeroed `double*` descriptor and bitcasts to the
+// target type — length and capacity are 0, the element pointer is never
+// dereferenced, so it is not a miscompile (SFN-910; the only such bitcasts in
+// the self-hosted tree are the 8 empty-literal bottoms in
+// `ir/src/typed_ssa.sfn:1080-1097`).
+fn _actual_array_annotation(expression: Expression?, ctx: TypeckCtx) -> string {
+    if expression == null { return ""; }
+    if strings_equal(expression.variant, "Identifier") {
+        let entry = _resolve_value_entry(expression.name, ctx);
+        if entry == null { return ""; }
+        // Function rows carry a SIGNATURE in `declared_type`, not a value
+        // type (`typecheck/symbols.sfn:128`) — only a value binding proves an
+        // element class here.
+        if strings_equal(entry.kind, "variable") {
+            return entry.declared_type;
+        }
+        if strings_equal(entry.kind, "parameter") {
+            return entry.declared_type;
+        }
+        return "";
+    }
+    if strings_equal(expression.variant, "Member") {
+        let object = expression.object;
+        if !strings_equal(object.variant, "Identifier") { return ""; }
+        let entry = _resolve_value_entry(object.name, ctx);
+        if entry == null { return ""; }
+        return _struct_field_annotation_text(entry, expression.member, ctx);
+    }
+    return "";
+}
+
+// The display name for an lvalue anchor: `Identifier` -> its name, a single-
+// level `Member` on a bare identifier -> `<object>.<field>`, else `""`.
+fn _lvalue_display(target: Expression) -> string {
+    if strings_equal(target.variant, "Identifier") { return target.name; }
+    if strings_equal(target.variant, "Member") {
+        let object = target.object;
+        if strings_equal(object.variant, "Identifier") {
+            return object.name + "." + target.member;
+        }
+        return "";
+    }
+    return "";
+}
+
+// The anchor span for an E0310 diagnostic. Analogue of `_arith_operand_span`
+// (`typecheck/arithmetic_rules.sfn:68-75`): the node itself has no span, so
+// borrow one from an operand that has one (`Identifier`/`Member`); `null`
+// when neither does.
+fn _value_anchor_span(expression: Expression?) -> SourceSpan? {
+    if expression == null { return null; }
+    if strings_equal(expression.variant, "Identifier") {
+        return expression.span;
+    }
+    if strings_equal(expression.variant, "Member") { return expression.span; }
+    return null;
+}
+
+fn _make_array_element_mismatch_diagnostic(expected_text: string, actual_text: string, position: string, anchor_name: string, span: SourceSpan?) -> Diagnostic {
+    let fix = FixSuggestion {
+        message: "Sailfin arrays are invariant — build a new `"
+            + expected_text
+            + "` from the elements rather than assigning `"
+            + actual_text
+            + "` directly",
+        edits: []
+    };
+    return Diagnostic {
+        code: "E0310",
+        severity: "error",
+        message: "array element type mismatch in " + position + ": expected `"
+            + expected_text
+            + "`, found `"
+            + actual_text
+            + "`",
+        file_path: "",
+        primary: token_from_name(anchor_name, span),
+        suggestion: fix
+    };
+}
+
+// Proves an array-element mismatch between `expected` (the declared
+// annotation) and `actual` (the source expression), firing E0310 only when
+// both sides resolve to distinct proven element classes (`_element_classes_conflict`).
+// Any unproven gate returns `[]` silently.
+fn check_array_element_type(actual: Expression?, expected: TypeAnnotation?, ctx: TypeckCtx, position: string, anchor_name: string, span: SourceSpan?) -> Diagnostic[] {
+    if expected == null { return []; }
+    let expected_text = trim_text(expected.text);
+    let expected_class = _array_element_class(expected_text, ctx);
+    if expected_class.length == 0 { return []; }
+    let actual_text = trim_text(_actual_array_annotation(actual, ctx));
+    if actual_text.length == 0 { return []; }
+    let actual_class = _array_element_class(actual_text, ctx);
+    if actual_class.length == 0 { return []; }
+    if !_element_classes_conflict(expected_class, actual_class) { return []; }
+    return [_make_array_element_mismatch_diagnostic(expected_text, actual_text, position, anchor_name, span)];
+}
+
+// The assignment-expression entry point (Hook C, `x = v` / `x.f = v`). Reuses
+// `_actual_array_annotation` for the TARGET as well as the rvalue: lvalue and
+// rvalue need identical resolution, so one function serves both sides.
+fn check_array_element_assignment(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    // Compound ops (`+=` etc) stay on the existing E0307 path.
+    if !strings_equal(expression.operator, "=") { return []; }
+    let target_text = _actual_array_annotation(expression.target, ctx);
+    if target_text.length == 0 { return []; }
+    let display = _lvalue_display(expression.target);
+    if display.length == 0 { return []; }
+    return check_array_element_type(expression.rhs, TypeAnnotation {
+        text: target_text
+    }, ctx, "assignment to `" + display + "`", display, expression.span);
+}
