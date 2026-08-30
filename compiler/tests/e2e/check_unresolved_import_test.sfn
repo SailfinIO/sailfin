@@ -178,17 +178,41 @@ test "check: nonexistent capsule spec is E0430" ![io] {
 
 // SFN-686 guards against the false-positive risk that scoped the original
 // check to relative specs: a real symbol from a real capsule must still pass.
+// `find` is declared by `stdlib/strings/src/mod.sfn` itself.
 test "check: valid capsule import passes" ![io] {
     let marker = _marker("capsule-valid-import");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { find } from \"sfn/strings\";\n"
+            + "fn use_it() -> int { return find(\"hello\", \"ell\", 0); }\n");
+        return _check(srcpath, marker);
+    });
+    let _combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit == 0;
+}
+
+// SFN-686 regression: a prelude global imported from a capsule must pass.
+// `strings_equal` is defined by `runtime/prelude.sfn`, not by
+// `stdlib/strings/src/mod.sfn`, so it never appears in the staged closure
+// symbol set even though the link defines it — legal under Sailfin's
+// global-by-name import resolution. The compiler's own analyzer sources
+// import it from `sfn/strings` exactly this way. This case false-positived
+// until prelude globals were exempted; a large closure hides the bug because
+// some staged module carries the name as an `.import` specifier, so the
+// fixture is deliberately a lone file whose closure is small.
+test "check: capsule import of a prelude global passes" ![io] {
+    let marker = _marker("capsule-prelude-global");
     let exit = with_tmp_dir(fn (dir: string) -> int {
         let srcpath = dir + "/consumer.sfn";
         fs.writeFile(srcpath, "import { strings_equal } from \"sfn/strings\";\n"
             + "fn use_it() -> boolean { return strings_equal(\"a\", \"a\"); }\n");
         return _check(srcpath, marker);
     });
-    let _combined = fs.readFile(marker);
+    let combined = fs.readFile(marker);
     if fs.exists(marker) { fs.deleteFile(marker); }
     assert exit == 0;
+    assert find(combined, "E0431", 0) < 0;
 }
 
 // SFN-686: `runtime/...` is the documented exclusion. Runtime modules never

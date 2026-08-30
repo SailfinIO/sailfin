@@ -141,7 +141,7 @@ fn analyze_program(input: AnalyzerInput) -> AnalyzerResult {
         reexport_index += 1;
     }
 
-    let import_findings = collect_import_resolution_findings(program, input.file_path, input.import_context);
+    let import_findings = collect_import_resolution_findings(program, input.file_path, input.import_context, input.prelude_globals);
     let mut import_index: int = 0;
     loop {
         if import_index >= import_findings.length { break; }

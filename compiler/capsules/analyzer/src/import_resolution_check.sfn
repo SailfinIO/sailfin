@@ -131,7 +131,10 @@ fn _irc_canonical_capsule_spec(spec: string) -> string {
 // might not list a genuinely-defined name, and a false positive is worse
 // than a missed one. E0430 still fires for a standalone single-file check
 // because its driver adapter populates the resolved-spec set.
-fn collect_import_resolution_findings(program: Program, file_path: string, context: ImportResolutionContext) -> Diagnostic[] {
+// `prelude_globals` is the second exemption: those names are defined by the
+// runtime prelude rather than any staged artifact, so they never appear in
+// the closure symbol set even though the link defines them.
+fn collect_import_resolution_findings(program: Program, file_path: string, context: ImportResolutionContext, prelude_globals: string[] = []) -> Diagnostic[] {
     let mut out: Diagnostic[] = [];
     let mut i: int = 0;
     loop {
@@ -169,6 +172,15 @@ fn collect_import_resolution_findings(program: Program, file_path: string, conte
             if _irc_names_contains(context.closure_symbols.names, importer.name) {
                 continue;
             }
+            // A prelude global is defined by the runtime prelude, not by any
+            // staged artifact, so it is absent from the closure symbol set
+            // while still being defined in the link. `sfn/strings` re-exports
+            // several (`strings_equal` is `runtime/prelude.sfn`'s, not its
+            // own), and importing one from a capsule is legal under
+            // global-by-name resolution. Without this it false-positives in
+            // any closure small enough that no staged module happens to carry
+            // the name as an `.import`/`.export` specifier.
+            if _irc_names_contains(prelude_globals, importer.name) { continue; }
             let mut nd = make_symbol_not_exported_diagnostic(importer.name, spec_path);
             nd.file_path = file_path;
             out.push(nd);
