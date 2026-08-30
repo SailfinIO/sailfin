@@ -260,6 +260,20 @@ fn toolchain_select_exact(selector: string, source_label: string, entry_hint: st
 // it selected this very toolchain), and non-zero on a refused selection. A
 // successful dispatch replaces the image and never returns.
 fn toolchain_select_project_exact(ctx: CliContext, argv_skip: boolean, version_query: boolean) -> int ![clock, io, net] {
+    // §3.2 rules 2 and 4 are checked before any stand-down below, because
+    // manifest validity is not a version mismatch: the escape hatches exist to
+    // override a *disagreement* between a valid requirement and the running
+    // toolchain, and there is no such disagreement to override here — the
+    // requirement itself is unusable, and no installed toolchain could satisfy
+    // it. Letting a hatch suppress this would turn a typo in a manifest into
+    // silence for anyone who habitually sets one.
+    let decision: ToolchainDecision = toolchain_decide("", ctx.binary_dir);
+    if decision.version_error.length > 0 {
+        toolchain_print_version_error(decision);
+        return 2;
+    }
+    if decision.pin_version.length == 0 { return 0; }
+
     // A dispatch already happened, so this process *is* somebody's selection
     // and the marker names their target, not this root's field. Re-selecting
     // would let a rank-3 field override the rank-1 or rank-2 selector that
@@ -288,17 +302,6 @@ fn toolchain_select_project_exact(ctx: CliContext, argv_skip: boolean, version_q
     let knob = env.get("SAILFIN_TOOLCHAIN");
     if strings_equal(knob, "off") || strings_equal(knob, "0") { return 0; }
     if argv_skip || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK") { return 0; }
-
-    let decision: ToolchainDecision = toolchain_decide("", ctx.binary_dir);
-    // §3.2 rules 2 and 4: an exact field that is malformed, or below the root's
-    // own floor or stability constraint, fails here — before the store lookup
-    // and before any fetch. Exit 2 is SFEP-0003's policy/setup failure; there
-    // is no version to run and no network request worth making.
-    if decision.version_error.length > 0 {
-        toolchain_print_version_error(decision);
-        return 2;
-    }
-    if decision.pin_version.length == 0 { return 0; }
 
     // Naming the manifest that supplied the field, not merely the field, so a
     // per-field workspace/member merge is legible in the diagnostic.

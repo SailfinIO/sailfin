@@ -269,6 +269,35 @@ test "toolchain gate: a v-prefixed version is rejected before fetch" ![io] {
     assert find(out + err, "install", 0) < 0;
 }
 
+// SFEP-0073 §3.2 rules 2 and 4 are unconditional: they describe a manifest
+// that is invalid, not a running toolchain that disagrees with a valid one.
+// The escape hatches exist to override that disagreement, so none of them may
+// suppress this — otherwise a typo in `version` goes silent for anyone who
+// habitually sets one, and the only report of it is an exit code nobody reads.
+// Regression for SFN-1070: an earlier revision ordered the hatch stand-down
+// ahead of the manifest check and swallowed the diagnostic.
+test "toolchain gate: no escape hatch suppresses an invalid exact version" ![io] {
+    let dir = _make_project("ver-hatch-no-suppress", "[toolchain]\nsfn = \"0.0.1\"\nversion = \"stable\"\n");
+
+    let off_exit = _run_check_cwd(dir, ["SAILFIN_TOOLCHAIN=off"]);
+    let off_out = process.capture_take_stdout();
+    let off_err = process.capture_take_stderr();
+    assert off_exit != 0;
+    assert find(off_out + off_err, "invalid [toolchain] version", 0) >= 0;
+
+    let zero_exit = _run_check_cwd(dir, ["SAILFIN_TOOLCHAIN=0"]);
+    let zero_out = process.capture_take_stdout();
+    let zero_err = process.capture_take_stderr();
+    assert zero_exit != 0;
+    assert find(zero_out + zero_err, "invalid [toolchain] version", 0) >= 0;
+
+    let skip_env_exit = _run_check_cwd(dir, ["SAILFIN_SKIP_TOOLCHAIN_CHECK=1"]);
+    let skip_env_out = process.capture_take_stdout();
+    let skip_env_err = process.capture_take_stderr();
+    assert skip_env_exit != 0;
+    assert find(skip_env_out + skip_env_err, "invalid [toolchain] version", 0) >= 0;
+}
+
 // SFEP-0073 §3.2 rule 4: an exact version below the project's own `sfn`
 // floor is invalid and must fail before any fetch.
 test "toolchain gate: an exact version below the project's own sfn floor is rejected" ![io] {
