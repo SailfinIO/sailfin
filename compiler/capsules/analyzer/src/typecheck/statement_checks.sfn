@@ -47,6 +47,7 @@ import {
     check_intersection_value_type_annotation,
     check_object_literal_target
 } from "../typecheck_types/value_and_object_checks";
+import { check_array_element_type } from "./array_element_rules";
 import { void_value_diagnostics } from "./call_signature";
 import {
     TypeckCtx,
@@ -179,6 +180,9 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         let primitive_diags = check_expected_primitive_type(statement.initializer, statement.type_annotation, primitive_bindings, "initializer for `"
             + statement.name
             + "`", statement.name, statement.initializer_span);
+        let array_element_diags = check_array_element_type(statement.initializer, statement.type_annotation, ctx, "initializer for `"
+            + statement.name
+            + "`", statement.name, statement.initializer_span);
         // SFN-812: lowering already fails closed on a void initializer
         // (E1002), but only after the whole module has lowered. Reject it at
         // `sfn check` so the error names the callee rather than the slot type.
@@ -187,7 +191,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             + "`");
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags).concat(void_diags)
+            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags).concat(array_element_diags).concat(void_diags)
         };
     }
     if statement.variant == "FunctionDeclaration" {

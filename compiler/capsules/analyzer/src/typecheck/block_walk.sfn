@@ -26,6 +26,7 @@ import {
     register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
+import { check_array_element_type } from "./array_element_rules";
 import { await_receive_result_kind } from "./concurrency_rules";
 import {
     TypeckCtx,
@@ -156,7 +157,10 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         let primitive_diags = check_expected_primitive_type(statement.initializer, statement.type_annotation, ctx.bindings, "initializer for `"
             + statement.name
             + "`", statement.name, statement.initializer_span);
-        return init_diags.concat(annotation_diags).concat(array_diags2).concat(unknown_diags2).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags);
+        let array_element_diags = check_array_element_type(statement.initializer, statement.type_annotation, ctx, "initializer for `"
+            + statement.name
+            + "`", statement.name, statement.initializer_span);
+        return init_diags.concat(annotation_diags).concat(array_diags2).concat(unknown_diags2).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags).concat(array_element_diags);
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = walk_expression(statement.condition, ctx);
