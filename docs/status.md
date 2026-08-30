@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-29 (SFN-1069, SFN-1067, SFN-1120, SFN-1066, SFN-1065, SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
+Updated: 2026-08-30 (SFN-910, SFN-1069, SFN-1067, SFN-1120, SFN-1066, SFN-1065, SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
 SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726, SFN-916). Seed pinned to `0.10.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
@@ -1106,6 +1106,23 @@ here.
   existing numeric compatibility boundaries: `int`/`float` coercions remain
   accepted here, while the established lowering gate continues to own
   boolean-to-numeric `E0537` and its explicit-cast fix-it.
+- **Array element type mismatch diagnostic (SFN-910).** Assigning an array
+  whose element type provably differs from the declared array element type —
+  at a struct-literal field, an annotated `let` initializer, or an `=`
+  assignment to an identifier or single-level member target — is now rejected
+  as `E0310`, closing a silent-miscompile class: the backend previously
+  emitted a descriptor bitcast, so every reader of the field treated a struct
+  pointer as a NUL-terminated `i8*`. The rule is fail-open like `E0309`: it
+  fires only on a proven mismatch (bare identifiers or single-level member
+  access with a resolvable element type) and stays silent for the empty
+  array literal `[]`, non-empty array literals, call results, generics
+  (type-parameter elements, generic-struct instantiations and fields), type
+  aliases/interfaces/enums/unresolved names, element types declared in
+  another module, and nested/optional/pointer/fn-type/qualified elements.
+  `SfnString`/`string` and integer/float width aliases remain accepted;
+  `int[]`/`float[]` is rejected despite scalar `int`/`float` coercion being
+  allowed, because an array store is a raw descriptor bitcast rather than a
+  coercion.
 - **Unresolvable field access diagnostic (SFN-543).** A field read naming a
   member the receiver's type does not declare now surfaces as a frontend
   `E0015` instead of passing `sfn check` and failing only at LLVM lowering —

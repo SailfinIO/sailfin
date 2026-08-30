@@ -46,6 +46,11 @@ import {
     mixed_arithmetic_diagnostics,
     primitive_method_diagnostics
 } from "./arithmetic_rules";
+import {
+    _value_anchor_span,
+    check_array_element_assignment,
+    check_array_element_type
+} from "./array_element_rules";
 import { walk_block_expressions } from "./block_walk";
 import {
     call_arity_diagnostics,
@@ -72,7 +77,7 @@ import {
     make_undefined_value_diagnostic,
     serve_argument_type_diagnostics
 } from "./primitive_rules";
-import { _declared_struct_annotation } from "./symbols";
+import { _declared_struct_annotation, _string_list_has } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
 
@@ -261,12 +266,28 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     }
     if expression.variant == "Struct" {
         let mut diagnostics: Diagnostic[] = [];
+        let mut struct_name: string = "";
+        if expression.type_name.length > 0 {
+            struct_name = expression.type_name[expression.type_name.length - 1];
+        }
+        // A generic struct's field annotation (`_struct_field_expected_type`
+        // below) returns the declaration's `T[]` verbatim, and `ctx.type_params`
+        // here are the CALLER's, not the struct's — so the type-parameter gate
+        // in `_array_element_class` would not fire on an unsubstituted `T[]`.
+        // Skip E0310 entirely for a generic struct's literal, matching the
+        // E0833 `generic_struct_names` precedent (SFN-910).
+        let is_generic_struct = _string_list_has(ctx.generic_struct_names, struct_name);
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
             let field = expression.fields[index];
             let field_expected = _struct_field_expected_type(expression.type_name, field.name, ctx);
             diagnostics = diagnostics.concat(walk_expression(field.value, ctx_with_expected_type(ctx, field_expected)));
+            if !is_generic_struct {
+                diagnostics = diagnostics.concat(check_array_element_type(field.value, field_expected, ctx, "field `"
+                    + field.name
+                    + "`", field.name, _value_anchor_span(field.value)));
+            }
             index += 1;
         }
         return diagnostics;
@@ -373,6 +394,14 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut diagnostics = walk_expression(expression.target, ctx_with_expected_type(ctx, null));
         let rhs_expected = _assignment_expected_type(expression.target, ctx);
         diagnostics = diagnostics.concat(walk_expression(expression.rhs, ctx_with_expected_type(ctx, rhs_expected)));
+        // E0310: `_assignment_expected_type` above stays `Identifier`-only on
+        // purpose — widening it to `Member` targets would install
+        // `ctx.expected_type` on the RHS of every `x.f = v` tree-wide,
+        // affecting two unrelated consumers (the array-literal element
+        // recursion above and `check_named_fn_value_compatibility`). Route
+        // the Member-target array-element check through its own narrow path
+        // instead (SFN-910).
+        diagnostics = diagnostics.concat(check_array_element_assignment(expression, ctx));
         // SFN-812: `s.a = print(...)` / `arr[0] = print(...)` / `*p = print(...)`
         // compiled clean and dropped the store entirely — the complex-lvalue
         // arms of `statement_assignment.sfn` emit no store when the value

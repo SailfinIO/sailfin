@@ -1,0 +1,77 @@
+// compiler/tests/e2e/array_element_mismatch_diagnostic_test.sfn
+//
+// SFN-910: proven array-element-type mismatch (`Diag[]` into `string[]`) must
+// fail in the frontend with a diagnostic anchored on the field, in both
+// `check` and `build`.
+//
+// Acceptance criterion 3 for SFN-910 is "no bitcast between array-of-struct
+// and array-of-string element types is reachable from accepted source." This
+// file does NOT assert on IR text — benign bitcasts (the empty-literal
+// bottom, `%Foo*` -> `i8*` at FFI boundaries) are everywhere in valid output,
+// so any IR pattern is a function of LLVM version and descriptor layout,
+// neither a contract this issue owns. The credible discharge is
+// REACHABILITY: the bitcast is only emitted from source the frontend
+// accepts, so proving frontend rejection here proves unreachability from
+// this source. Precedents: struct_arithmetic_diagnostic_test.sfn /
+// array_arithmetic_diagnostic_test.sfn for the frontend-rejection shape, and
+// check_build_agree_module_global_test.sfn for the check/build agreement
+// half.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+
+fn _source() -> string {
+    return "struct Diag {\n" + "    code: string;\n" + "}\n\n"
+        + "struct Holder {\n"
+        + "    labels: string[];\n"
+        + "}\n\n"
+        + "struct Source {\n"
+        + "    diags: Diag[];\n"
+        + "}\n\n"
+        + "fn main() {\n"
+        + "    let src: Source = Source { diags: [] };\n"
+        + "    let h: Holder = Holder { labels: src.diags };\n"
+        + "}\n";
+}
+
+fn _run(command: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-array-element-");
+    let source_path = dir + "/array-element-mismatch.sfn";
+    let binary_path = dir + "/program";
+    fs.writeFile(source_path, _source());
+    let mut args = [sfn_bin_path(), command];
+    if command == "build" {
+        args.push("-o");
+        args.push(binary_path);
+    }
+    args.push(source_path);
+    let child_env = clean_runner_env(nested_runner_scratch("sfn910-" + command));
+    let exit = process.run_capture(args, child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let binary_exists = fs.exists(binary_path);
+    let mut result = out + err;
+    if exit == 0 { result = "unexpected zero exit\n" + result; }
+    if binary_exists { result = "unexpected binary\n" + result; }
+    fs.deleteFile(source_path);
+    if binary_exists { fs.deleteFile(binary_path); }
+    fs.removeDirectory(dir);
+    return result;
+}
+
+fn _assert_frontend_rejection(output: string, location: string) {
+    assert find(output, "unexpected zero exit", 0) < 0;
+    assert find(output, "unexpected binary", 0) < 0;
+    assert find(output, "error[E0310]:", 0) >= 0;
+    assert find(output, location, 0) >= 0;
+    assert find(output, "llvm lowering [fatal]", 0) < 0;
+    assert find(output, "invalid operand type for instruction", 0) < 0;
+    assert find(output, "internal compiler error", 0) < 0;
+}
+
+test "array element mismatch: check rejects Diag[] into string[] at the field" ![io] {
+    _assert_frontend_rejection(_run("check"), "array-element-mismatch.sfn:15:42");
+}
+
+test "array element mismatch: build agrees with check before lowering" ![io] {
+    _assert_frontend_rejection(_run("build"), "array-element-mismatch:15:42");
+}
