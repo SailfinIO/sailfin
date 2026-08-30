@@ -7,6 +7,12 @@
 // `.claude/rules/no-bash-e2e.md`: the child cwd is supplied directly to
 // `run_capture_cwd`; the assertions are pure `sfn/strings::find` over the
 // emitted manifest.
+//
+// SFN-1070 / SFEP-0073 §3.2: `sfn init` also writes the exact `version`
+// selection alongside `sfn`. `[capsule]` emits its own `version = "0.1.0"`
+// line, so a bare `find(manifest, "version =", 0)` would pass even without
+// the `[toolchain]` field; assertions below are scoped to the substring at
+// and after the `[toolchain]` header.
 import { find } from "sfn/strings";
 import { default_scratch_dir, sfn_bin_abs_path } from "sfn/test";
 
@@ -40,6 +46,13 @@ test "sfn init: scaffolds a [toolchain] pin in the generated capsule.toml" ![io]
     assert exit == 0;
 
     let manifest = fs.readFile(manifest_path);
-    assert find(manifest, "[toolchain]", 0) >= 0;
-    assert find(manifest, "sfn =", 0) >= 0;
+    let stanza_at = find(manifest, "[toolchain]", 0);
+    assert stanza_at >= 0;
+    let stanza = substring(manifest, stanza_at, manifest.length);
+    assert find(stanza, "sfn =", 0) >= 0;
+    assert find(stanza, "version = \"", 0) >= 0;
+    // The written selectors are the release string with build metadata
+    // stripped (SFEP-0073 §3.2 rule 7); a dev binary's `+dev.<hash>` must
+    // never leak into a scaffolded manifest.
+    assert find(stanza, "+", 0) < 0;
 }
