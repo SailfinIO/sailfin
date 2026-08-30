@@ -280,6 +280,24 @@ fn _seed_stub_verified(store: string, ver: string, marker: string) -> string ![i
     return dir;
 }
 
+// Seed a host-qualified store entry with a REAL COPY of the
+// compiler-under-test, not a marker stub (SFN-1070). A marker stub prints
+// and exits without ever calling `toolchain_select_project_exact`, so it is
+// structurally blind to whether the DISPATCHED CHILD's own rank-3 standdown
+// (`SAILFIN_TOOLCHAIN_DISPATCHED`, `dispatch.sfn`) holds when that child
+// re-parses the SAME project this dispatch came from and finds its own
+// exact `[toolchain] version` disagreeing with the target that dispatched
+// it. Only a real, running compiler can re-enter that check at all.
+fn _seed_real_stub(store: string, ver: string) -> void ![io] {
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    let bin = _stub_bin(dir);
+    assert copy(sfn_bin_abs_path(), bin);
+    assert fs.set_perms(bin, 493);
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+}
+
 // Seed a project whose `[toolchain]` pin is `pin_ver` and a trivial
 // source file the gate's entry hint points at. Returns the source path.
 fn _seed_project(root: string, pin_ver: string) -> string ![io] {
@@ -970,17 +988,26 @@ test "toolchain dispatch: a CLI selector (rank 1) outranks the project's exact v
     let store = _scratch_root() + "/rank1-over-rank3-store";
     let proj = _scratch_root() + "/rank1-over-rank3-proj";
     let a_marker = "DISPATCH_RANK3_A_777_2b91";
-    let b_marker = "DISPATCH_RANK1_B_888_2b91";
+    // A (777.0.0, the project's own rank-3 pin) must never be selected, so
+    // a marker stub is enough for it. B (888.0.0, the rank-1 CLI target) is
+    // a real compiler copy (`_seed_real_stub`) so the dispatched child
+    // actually re-derives rank 3 against this same project and exercises
+    // the SFN-1070 standdown: without it, the child's own
+    // `toolchain_select_project_exact` would find its pin (777.0.0)
+    // disagreeing with the target that dispatched it (888.0.0) and die with
+    // a bogus "toolchain dispatch loop".
     _seed_stub(store, "777.0.0", a_marker, true);
-    _seed_stub(store, "888.0.0", b_marker, true);
+    _seed_real_stub(store, "888.0.0");
     let src = _seed_project_exact(proj, "0.0.1", "777.0.0");
+    let run_env = _env_with(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"]);
 
-    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+888.0.0", "check", src], _env_with(["INSTALL_BASE="
-        + store]), proj);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+888.0.0", "check", src], run_env, proj);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("toolchain-dispatch rank1-over-rank3 run", exit, out, err);
-    assert contains(out + err, b_marker);
+    assert ! contains(out + err, "dispatch loop");
     assert ! contains(out + err, a_marker);
     assert exit == 0;
 }
@@ -988,54 +1015,112 @@ test "toolchain dispatch: a CLI selector (rank 1) outranks the project's exact v
 // `toolchain_select_project_exact` stands down immediately
 // (`toolchain_env_exact_selector().length > 0`) when an exact
 // `SAILFIN_TOOLCHAIN` is set, leaving rank 2 to be applied downstream by
-// `toolchain_gate_or_dispatch`/`check`'s own gate — confirmed empirically
-// before writing this test (see the session report) rather than assumed.
+// `toolchain_gate_or_dispatch`/`check`'s own gate (SFEP-0073 §3.3, SFN-1070).
 test "toolchain dispatch: an exact env knob (rank 2) outranks the project's exact version (rank 3)" ![io] {
     let store = _scratch_root() + "/rank2-over-rank3-store";
     let proj = _scratch_root() + "/rank2-over-rank3-proj";
     let a_marker = "DISPATCH_RANK3_A_777_5d02";
-    let b_marker = "DISPATCH_RANK2_B_888_5d02";
+    // Same shape as the rank-1 test above: A stays a marker stub, but B
+    // (the rank-2 env-knob target) is a real compiler copy so the
+    // dispatched child actually re-derives rank 3 against this project and
+    // exercises the SFN-1070 standdown, catching the same bogus
+    // "toolchain dispatch loop" a marker-only stub could never reach.
     _seed_stub(store, "777.0.0", a_marker, true);
-    _seed_stub(store, "888.0.0", b_marker, true);
+    _seed_real_stub(store, "888.0.0");
     let src = _seed_project_exact(proj, "0.0.1", "777.0.0");
+    let run_env = _env_with(["INSTALL_BASE=" + store, "SAILFIN_TOOLCHAIN=888.0.0", "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"]);
 
-    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], _env_with(["INSTALL_BASE="
-        + store, "SAILFIN_TOOLCHAIN=888.0.0"]), proj);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], run_env, proj);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("toolchain-dispatch rank2-over-rank3 run", exit, out, err);
-    assert contains(out + err, b_marker);
+    assert ! contains(out + err, "dispatch loop");
     assert ! contains(out + err, a_marker);
     assert exit == 0;
 }
 
 test "toolchain dispatch: selecting the running version via the project's exact field is a no-op" ![io] {
+    let store = _scratch_root() + "/exact-noop-store";
     let proj = _scratch_root() + "/exact-noop-proj";
     let running = _running_version();
+    let marker = "DISPATCH_EXACT_NOOP_SHOULD_NOT_RUN_a41f";
+    // Seed a store entry AT the running version itself, carrying a marker.
+    // The no-op check in `toolchain_select_exact` returns before ever
+    // touching the store, so the marker's absence is what proves the no-op
+    // fired — a bare `exit == 0` alone would also pass with rank 3 deleted
+    // entirely, since this project's floor (`sfn = "0.0.1"`) is trivially
+    // satisfied regardless.
+    _seed_stub(store, running, marker, true);
     let src = _seed_project_exact(proj, "0.0.1", running);
 
-    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], _env_with([]), proj);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]), proj);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("toolchain-dispatch exact-noop run", exit, out, err);
-    // No store was seeded at all; a dispatch attempt would have to fail
-    // (nothing to exec), so a clean pass proves this stayed in-process.
     assert exit == 0;
     assert ! contains(out + err, "invalid [toolchain] version");
+    assert ! contains(out + err, marker);
 }
 
-// `SAILFIN_TOOLCHAIN=off` and `--skip-toolchain-check` must not themselves
-// block a valid rank-3 dispatch. This is deliberately NOT the
-// self-inconsistent-manifest scenario (an exact `version` that fails its own
-// `sfn`/`channel` requirement, SFEP-0073 §3.2 rule 4): that check
-// (`toolchain_decide`'s `version_error`) is unconditional and has no hatch
-// override — confirmed empirically: `--skip-toolchain-check` against a
-// manifest pinning `sfn = "999.0.0"` / `version = "0.0.1"` still exits 2 with
-// the same "invalid [toolchain] version" text, hatch or not. See the session
-// report for the discrepancy against the original spec's "proceeds with a
-// warning" framing for that case; this test instead pins down the behavior
-// the source actually has.
-test "toolchain dispatch: off does not block a valid exact project-version dispatch" ![io] {
+// A dev-stamped running version (`<version>+dev.<hash>`, `build_stamp.sfn`)
+// must strip build metadata before the no-op comparison
+// (`toolchain_select_exact`, dispatch.sfn), or a project scaffolded by a dev
+// build fetches the RELEASED build of its own version on the next command.
+// `build/bin/sfn` carries no `.build-stamp` of its own, so a dev-stamped
+// running version cannot be observed on the compiler-under-test directly —
+// this copies it into a fresh directory and writes the same `.build-stamp`
+// file `build.sh` would, the exact mechanism `resolve_compiler_version`
+// (version.sfn) reads ahead of capsule.toml.
+test "toolchain dispatch: a dev-stamped running version treats its stripped release as a no-op" ![io] {
+    let scratch = _scratch_root() + "/dev-stamp-noop";
+    assert remove_all(scratch);
+    fs.createDirectory(scratch, true);
+    let copied_bin = _stub_bin(scratch);
+    assert copy(sfn_bin_abs_path(), copied_bin);
+    assert fs.set_perms(copied_bin, 493);
+    let base_version = _running_version();
+    fs.writeFile(scratch + "/.build-stamp", base_version + "+dev.deadbeef\n");
+
+    let store = _scratch_root() + "/dev-stamp-noop-store";
+    let proj = _scratch_root() + "/dev-stamp-noop-proj";
+    let marker = "DISPATCH_DEV_STAMP_NOOP_SHOULD_NOT_RUN_9e13";
+    // Seeded at the STRIPPED release version, not the `+dev` build. Without
+    // the strip, "<base_version>+dev.deadbeef" never equals a project pin of
+    // plain `base_version`, and the dispatcher would fetch/dispatch this
+    // stub instead of treating the dev build as itself.
+    _seed_stub(store, base_version, marker, true);
+    let src = _seed_project_exact(proj, "0.0.1", base_version);
+    let run_env = _env_with(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"]);
+
+    let exit = process.run_capture_cwd([copied_bin, "check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch dev-stamp-noop run", exit, out, err);
+    assert exit == 0;
+    assert ! contains(out + err, marker);
+}
+
+// SFEP-0073 §3.3's mode table gives `off`/`0`/`--skip-toolchain-check`/
+// `SAILFIN_SKIP_TOOLCHAIN_CHECK` one meaning at rank 3: *decline to select*,
+// not "dispatch anyway". Rank 3 stands down under all four spellings
+// (`toolchain_select_project_exact`, dispatch.sfn) and the command runs
+// in-process on the entry toolchain, so the seeded target's marker must be
+// ABSENT — the inverse of what these hatches mean everywhere else in this
+// file (a floor-mismatch *recovery* hatch that downgrades to a warning and
+// proceeds). This is deliberately NOT the self-inconsistent-manifest
+// scenario (an exact `version` that fails its own `sfn`/`channel`
+// requirement, SFEP-0073 §3.2 rule 4): that check (`toolchain_decide`'s
+// `version_error`) is unconditional and has no hatch override — a manifest
+// pinning `sfn = "999.0.0"` / `version = "0.0.1"` still exits 2 with the
+// same "invalid [toolchain] version" text regardless of any hatch. The
+// projects below instead pin a floor (`sfn = "0.0.1"`) the running toolchain
+// already satisfies, so nothing but rank 3 itself is in play.
+test "toolchain dispatch: off declines an exact project-version selection" ![io] {
     let store = _scratch_root() + "/exact-hatch-off-store";
     let proj = _scratch_root() + "/exact-hatch-off-proj";
     let marker = "DISPATCH_EXACT_HATCH_OFF_007_c81a";
@@ -1047,11 +1132,43 @@ test "toolchain dispatch: off does not block a valid exact project-version dispa
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("toolchain-dispatch exact-hatch-off run", exit, out, err);
-    assert contains(out + err, marker);
+    assert ! contains(out + err, marker);
     assert exit == 0;
 }
 
-test "toolchain dispatch: --skip-toolchain-check does not block a valid exact project-version dispatch" ![io] {
+test "toolchain dispatch: SAILFIN_TOOLCHAIN=0 declines an exact project-version selection" ![io] {
+    let store = _scratch_root() + "/exact-hatch-zero-store";
+    let proj = _scratch_root() + "/exact-hatch-zero-proj";
+    let marker = "DISPATCH_EXACT_HATCH_ZERO_007_c81a";
+    _seed_stub(store, "0.0.7", marker, true);
+    let src = _seed_project_exact(proj, "0.0.1", "0.0.7");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN=0"]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch exact-hatch-zero run", exit, out, err);
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: SAILFIN_SKIP_TOOLCHAIN_CHECK declines an exact project-version selection" ![io] {
+    let store = _scratch_root() + "/exact-hatch-skip-env-store";
+    let proj = _scratch_root() + "/exact-hatch-skip-env-proj";
+    let marker = "DISPATCH_EXACT_HATCH_SKIP_ENV_007_c81a";
+    _seed_stub(store, "0.0.7", marker, true);
+    let src = _seed_project_exact(proj, "0.0.1", "0.0.7");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_SKIP_TOOLCHAIN_CHECK=1"]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch exact-hatch-skip-env run", exit, out, err);
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: --skip-toolchain-check declines an exact project-version selection" ![io] {
     let store = _scratch_root() + "/exact-hatch-skip-store";
     let proj = _scratch_root() + "/exact-hatch-skip-proj";
     let marker = "DISPATCH_EXACT_HATCH_SKIP_007_c81a";
@@ -1063,7 +1180,7 @@ test "toolchain dispatch: --skip-toolchain-check does not block a valid exact pr
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("toolchain-dispatch exact-hatch-skip run", exit, out, err);
-    assert contains(out + err, marker);
+    assert ! contains(out + err, marker);
     assert exit == 0;
 }
 
@@ -1107,4 +1224,27 @@ test "toolchain dispatch: dev is never project-dispatched" ![io] {
     let err = process.capture_take_stderr();
     assert exit == 0;
     assert ! contains(out + err, marker);
+}
+
+// `_assemble_report` (toolchain/inspect.sfn) now prefers `decision.pin_version`
+// over `decision.pin_sfn` for the `project` role marker. The floor (`sfn`)
+// and the exact pin (`version`) name DIFFERENT seeded versions here, so the
+// `[project]` role landing on the exact pin rather than the floor is
+// unambiguous — `sfn toolchain list` renders roles as a `[...]` suffix
+// (`_render_roles`, `cli/commands/toolchain.sfn`).
+test "toolchain dispatch: sfn toolchain list marks the exact project version, not the floor" ![io] {
+    let store = _scratch_root() + "/list-project-role-store";
+    let proj = _scratch_root() + "/list-project-role-proj";
+    _seed_stub(store, "0.0.5", "unused-floor-marker", true);
+    _seed_stub(store, "0.0.7", "unused-exact-marker", true);
+    let _ = _seed_project_exact(proj, "0.0.5", "0.0.7");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch list-project-role run", exit, out, err);
+    assert contains(out, "0.0.7  complete  unverified [selected,project]");
+    assert ! contains(out, "0.0.5  complete  unverified [project]");
+    assert ! contains(out, "0.0.5  complete  unverified [selected,project]");
 }

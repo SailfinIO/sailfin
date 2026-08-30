@@ -254,6 +254,21 @@ test "toolchain gate: a channel alias version is rejected before fetch" ![io] {
     assert find(out + err, "install", 0) < 0;
 }
 
+// SFN-1070 / SFEP-0073 §3.2 rule 2: `semver_is_exact_release` (semver.sfn)
+// reserves a leading `v`/`V` for the floor field's legacy tolerance and
+// refuses to admit it as a second spelling of one release's exact store
+// identity.
+test "toolchain gate: a v-prefixed version is rejected before fetch" ![io] {
+    let dir = _make_project("ver-v-prefixed", "[toolchain]\nsfn = \"0.0.1\"\nversion = \"v0.10.6\"\n");
+    let exit = _run_check_cwd(dir, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "is not an exact release version", 0) >= 0;
+    assert find(out + err, "install", 0) < 0;
+}
+
 // SFEP-0073 §3.2 rule 4: an exact version below the project's own `sfn`
 // floor is invalid and must fail before any fetch.
 test "toolchain gate: an exact version below the project's own sfn floor is rejected" ![io] {
