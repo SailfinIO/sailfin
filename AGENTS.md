@@ -4,7 +4,7 @@
 
 - `compiler/src/` carries the compiler driver and orchestration sources, while `compiler/capsules/` carries role-oriented private implementation capsules; the **self-hosted native compiler** (legacy internal path name: stage2) is the primary toolchain.
 - `runtime/prelude.sfn` and `runtime/sfn/` host the Sailfin-native runtime. The former C runtime under `runtime/native/` has been deleted; do not add C runtime startup/linkage workarounds.
-- `docs/` has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), and engineering references. The language specification, grammar, and keyword references live on the docs site under `site/src/content/docs/docs/reference/` and are published at [sailfin.dev/docs/reference/](https://sailfin.dev/docs/reference/). Linear Initiatives/Projects/Cycles are the planning source of truth; [sailfin.dev/roadmap](https://sailfin.dev/roadmap) is the reviewed public projection governed by `docs/conventions/public-roadmap.md`. Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
+- `docs/` has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), and engineering references. The language specification, grammar, and keyword references live on the docs site under `site/src/content/docs/docs/reference/` and are published at [sailfin.dev/docs/reference/](https://sailfin.dev/docs/reference/). Linear Initiatives/Projects/Cycles are the planning source of truth; [sailfin.dev/roadmap](https://sailfin.dev/roadmap) is the reviewed public projection governed by `docs/conventions/public-roadmap.md`. The status matrix is reconciled on the release cadence by `/status-sweep`, not by the PR that changes behaviour; a behaviour change updates the spec/roadmap and leaves `docs/status.md` to the sweep.
 - `docs/proposals/` is the Sailfin Enhancement Proposal (SFEP) registry. Use `docs/proposals/0001-sfep-process.md` and `docs/proposals/template.md` for forward-looking language, runtime/ABI, toolchain, or roadmap-epic design work. Keep single-issue design notes in `docs/proposals/design-notes/`.
 
 ## Build, Test, and Development Commands
@@ -33,13 +33,13 @@
 - Align terminology with the language spec at `site/src/content/docs/docs/reference/spec/` (capsule, fleet, provenance card) and note currency or latency literals as comments until syntax support arrives.
 - Before committing touched `.sfn` files under `compiler/src/`, `compiler/capsules/`, or `runtime/`, run `sfn fmt --write <files>` and then `sfn fmt --check <files>` (or the equivalent `build/bin/sfn` commands).
 - Stage regression tests beside related coverage in `compiler/tests/`; prefer Sailfin-native tests and slim fixtures over recorded generated output. For issue verification, list the narrowest relevant `build/bin/sfn test <path>` / `-k <name>` command rather than a full-suite target unless the issue is explicitly a full-gate, release, determinism, or structural-change task.
-- When adding language surface or runtime behavior, extend coverage and update `docs/status.md` first, then the relevant spec/preview page and roadmap if needed.
+- When adding language surface or runtime behavior, extend coverage and update the relevant spec/preview page and roadmap if needed. Do **not** update `docs/status.md` — it is reconciled in batch on the release cadence by `/status-sweep`, so a per-PR edit there conflicts with every other in-flight PR.
 - For non-trivial design changes, create or update an SFEP under `docs/proposals/` rather than burying design in issues or PR prose. Do not mark an SFEP `Implemented` until the feature meets the Stage1 readiness bar end-to-end and self-hosts.
 
 ## Commit & Pull Request Guidelines
 
 - History mixes imperative commits and Conventional Commit prefixes; favor `feat(compiler): …`, `fix(runtime): …`, `docs(sfep): …`, etc., for clarity.
-- Keep commits atomic, mention touched capsules/passes, and co-author docs/status/spec changes in the same PR as behavior changes.
+- Keep commits atomic, mention touched capsules/passes, and co-author spec/roadmap changes in the same PR as behavior changes. `docs/status.md` is the exception — it is reconciled on the release cadence, never bundled with a behaviour change.
 - Pull requests should summarize scope, link issues/SFEPs, list verification commands, and attach screenshots or trace snippets when behavior shifts.
 
 ## Codex Workflow Notes

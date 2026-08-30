@@ -41,7 +41,7 @@ verification on the new review-stable revision.
 
 ## SFEP and docs coupling
 
-- Behavior/status changes update `docs/status.md` first, then the relevant spec/preview page and roadmap if applicable.
+- Behavior/status changes update the relevant spec/preview page and roadmap if applicable. `docs/status.md` is reconciled on the release cadence by `/status-sweep`, not by the change itself.
 - Forward-looking design work belongs in an SFEP under `docs/proposals/`; do not mark SFEPs `Implemented` before Stage1 readiness and self-hosting are complete.
 
 ## Reporting

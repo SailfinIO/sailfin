@@ -115,7 +115,7 @@ Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effe
 4. Extend `compiler/capsules/codegen-llvm/src/lowering/entrypoints.sfn` for LLVM
 5. Add regression tests to `compiler/tests/`
 6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter if shipped, `.../reference/preview/*.md` page if planned
-7. Update `docs/status.md` with implementation status
+7. Leave `docs/status.md` alone — it is reconciled on the release cadence
 
 ## Testing
 
@@ -142,10 +142,12 @@ While iterating, run `sfn check <the-files-you-touched>` for immediate parse / t
 
 Update documents in this order when behaviour changes:
 
-1. `docs/status.md` — keep the feature matrix authoritative
-2. Language spec — `site/src/content/docs/docs/reference/spec/NN-*.md` for shipped features, `.../reference/preview/*.md` for planned
-3. `site/src/pages/roadmap.astro` — adjust the [roadmap](https://sailfin.dev/roadmap) for sequencing changes
-4. Relevant folder `README` (`compiler/README.md`, `runtime/README.md`, etc.)
+1. Language spec — `site/src/content/docs/docs/reference/spec/NN-*.md` for shipped features, `.../reference/preview/*.md` for planned
+2. `site/src/pages/roadmap.astro` — adjust the [roadmap](https://sailfin.dev/roadmap) for sequencing changes
+3. Relevant folder `README` (`compiler/README.md`, `runtime/README.md`, etc.)
+
+`docs/status.md` is not in that list. It is reconciled on the release cadence by
+a maintainer sweep; a per-PR edit collides with every other in-flight PR.
 
 ## Commit & Pull Request Guidelines
 

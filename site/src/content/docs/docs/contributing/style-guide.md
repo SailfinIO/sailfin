@@ -52,6 +52,8 @@ tools/             # Developer tooling
 ## Documentation Updates
 
 When changing language behavior, update in order:
-1. `docs/status.md` — What ships today
-2. Language spec under `site/src/content/docs/docs/reference/spec/` (shipped) or `.../reference/preview/` (planned)
-3. The [roadmap](/roadmap) — If it affects planned work
+1. Language spec under `site/src/content/docs/docs/reference/spec/` (shipped) or `.../reference/preview/` (planned)
+2. The [roadmap](/roadmap) — If it affects planned work
+
+`docs/status.md` still answers "what ships today", but your change does not edit
+it — a maintainer sweep reconciles it on the release cadence.

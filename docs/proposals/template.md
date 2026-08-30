@@ -64,7 +64,8 @@ Track each item from the `CLAUDE.md` Stage1 Readiness Checklist:
 - [ ] Regression coverage
 - [ ] Self-hosts
 - [ ] `sfn fmt --check` clean
-- [ ] Documented in `docs/status.md` + spec
+- [ ] Documented in the spec chapter (`docs/status.md` is reconciled
+      separately by `/status-sweep` — not a checkbox for this SFEP)
 
 ## 8. Test plan
 

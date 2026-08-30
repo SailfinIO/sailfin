@@ -66,7 +66,8 @@ number (or, for a not-yet-numbered draft, the slug).
    - **Implemented** — only if the work clears the `CLAUDE.md` Stage1 Readiness
      Checklist end-to-end and self-hosts. "Parsed but not enforced" is **not**
      Implemented; keep it Accepted. Prefer `/sfep graduate <N>` for this — it
-     also wires the spec/preview + status.md.
+     also wires the spec/preview page. It does not touch `docs/status.md`,
+     which the release-cadence `/status-sweep` reconciles.
    - **Superseded** — set `superseded-by: <new SFEP>` and move the file to
      `docs/proposals/archive/` (`git mv`).
    - **Withdrawn / Rejected** — move to `docs/proposals/archive/`.
@@ -91,8 +92,9 @@ the `status … Implemented` transition plus the user-facing doc wiring.
 2. Set `status: Implemented`, bump `updated:`, and ensure `graduates-to:` points
    at the shipped chapter under `site/src/content/docs/docs/reference/` (a
    `spec/NN-*.md` chapter once shipped; `preview/*.md` while still planned).
-3. Hand off the user-facing docs to **docs-updater** (status.md → spec → roadmap)
-   so the spec chapter and `docs/status.md` reflect the shipped feature.
+3. Hand off the user-facing docs to **docs-updater** (spec → roadmap) so the
+   spec chapter reflects the shipped feature. Not `docs/status.md` — the
+   release-cadence `/status-sweep` picks the graduation up in batch.
 4. Update the registry row to `Implemented`.
 5. Report what graduated and the spec destination.
 

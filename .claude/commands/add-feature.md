@@ -82,13 +82,15 @@ with failing tests.
 
 ## Phase 5: DOCUMENT
 
-Spawn the **docs-updater** agent to update documentation in this order:
-1. `docs/status.md` — update the feature matrix
-2. Language spec:
+Spawn the **docs-updater** agent to update documentation in this order.
+`docs/status.md` is deliberately absent — it is reconciled on the release
+cadence by `/status-sweep`, not by this PR:
+
+1. Language spec:
    - If fully shipped: update or add content in the appropriate `site/src/content/docs/docs/reference/spec/NN-*.md` chapter
    - If partial/planned: update or add a page under `site/src/content/docs/docs/reference/preview/`
-3. `site/src/pages/roadmap.astro` — update progress markers on the [roadmap](https://sailfin.dev/roadmap)
-4. **Graduate the SFEP** — if the feature fully shipped and clears the Stage1 bar, run `/sfep graduate <N>` to flip the proposal to `Implemented`, set `graduates-to`, and sync the registry. If only partially shipped, leave it `Accepted`.
+2. `site/src/pages/roadmap.astro` — update progress markers on the [roadmap](https://sailfin.dev/roadmap)
+3. **Graduate the SFEP** — if the feature fully shipped and clears the Stage1 bar, run `/sfep graduate <N>` to flip the proposal to `Implemented`, set `graduates-to`, and sync the registry. If only partially shipped, leave it `Accepted`.
 
 ---
 

@@ -49,14 +49,16 @@ git checkout -b feature/my-feature main
 3. Update the emitter (`compiler/capsules/codegen/src/emit_native.sfn`)
 4. Extend LLVM lowering (`compiler/capsules/codegen-llvm/src/lowering/`)
 5. Add regression tests (`compiler/tests/`)
-6. Update `docs/status.md`, the source of truth for shipped behavior
-7. Update the language spec (`site/src/content/docs/docs/reference/spec/NN-*.md`
+6. Update the language spec (`site/src/content/docs/docs/reference/spec/NN-*.md`
    or `.../reference/preview/*.md`) and then adjust roadmap and public claims
 
 ### Guarding public claims
 
-Behavior-changing work updates `docs/status.md` first. Public examples and
-claims are adjusted only after that source of truth is current. Before
+`docs/status.md` remains the source of truth for shipped behavior, but your PR
+does not edit it — it is reconciled on the release cadence by a maintainer
+sweep, so contributors do not compete for one file. Public examples and claims
+are adjusted only after that source of truth is current, which means a claim
+about something that merged this week cites the PR, not the status matrix. Before
 submitting changes to the homepage, onboarding docs, README, installer copy, or
 release templates, run:
 

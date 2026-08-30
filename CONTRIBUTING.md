@@ -35,7 +35,8 @@ repository.
      rebuild.
 3. **Testing expectations**
    - Add or update unit tests under `compiler/tests/` for compiler changes.
-   - Reflect behaviour updates in `docs/status.md` and the relevant module docs.
+   - Reflect behaviour updates in the relevant module docs and spec chapter.
+     Leave `docs/status.md` alone — it is reconciled on the release cadence.
    - Run `build/bin/sfn test` before submitting.
 
 ### Optional Pre-Commit Hook
@@ -73,16 +74,20 @@ per-change record.
 
 When behaviour, coverage, or roadmap status changes:
 
-1. Update `docs/status.md` first — keep the feature matrix authoritative.
-2. Sync the language spec at `site/src/content/docs/docs/reference/spec/`
+1. Sync the language spec at `site/src/content/docs/docs/reference/spec/`
    (update the relevant §N chapter) and add/amend design notes under
    `.../reference/preview/` if the feature is not yet shipped.
-3. Adjust planning in Linear for sequencing changes. Update the reviewed public
+2. Adjust planning in Linear for sequencing changes. Update the reviewed public
    roadmap snapshot only when the Project meets
    `docs/conventions/public-roadmap.md`.
-4. Touch the relevant folder README (e.g., `compiler/README.md`,
+3. Touch the relevant folder README (e.g., `compiler/README.md`,
    `runtime/README.md`, `examples/README.md`) so local guidance stays accurate.
-5. For a forward-looking design decision, record it as an **SFEP** (see below).
+4. For a forward-looking design decision, record it as an **SFEP** (see below).
+
+`docs/status.md` is deliberately absent from that list. It remains the source of
+truth for what ships today, but it is reconciled on the release cadence by a
+maintainer sweep rather than by your PR — so contributors never compete for one
+file.
 
 Please reference the updated documents in your pull request description.
 
@@ -144,12 +149,12 @@ Each PR should include:
 
 - Summary of the change and impacted areas.
 - Verification commands (`sfn test`, targeted runs, etc.).
-- Notes on documentation updates (status/spec/roadmap).
+- Notes on documentation updates (spec/roadmap).
 
 Reviewers will check for:
 
 - Test coverage and passing CI.
-- Alignment with docs/status and roadmap.
+- Alignment with the spec chapter and roadmap.
 - Clear rollback path if needed.
 
 ## 6. Code Style

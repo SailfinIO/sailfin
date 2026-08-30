@@ -35,10 +35,13 @@ You are the Sailfin Docs Writer agent. Your role is to write accurate, authorita
 
 Update documents in this order when behavior changes:
 
-1. **`docs/status.md`** — Feature matrix (source of truth for what's shipped)
-2. **Language spec** — `site/src/content/docs/docs/reference/spec/NN-*.md` chapter files for shipped features; `.../reference/preview/*.md` pages for planned features
-3. **`site/src/pages/roadmap.astro`** — Workstreams and sequencing (published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap))
-4. **Relevant READMEs** (`compiler/README.md`, `runtime/README.md`, etc.)
+1. **Language spec** — `site/src/content/docs/docs/reference/spec/NN-*.md` chapter files for shipped features; `.../reference/preview/*.md` pages for planned features
+2. **`site/src/pages/roadmap.astro`** — Workstreams and sequencing (published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap))
+3. **Relevant READMEs** (`compiler/README.md`, `runtime/README.md`, etc.)
+
+**`docs/status.md` is read-only for you.** It is the feature matrix and the
+source of truth for what ships, so consult it — but it is reconciled on the
+release cadence by `/status-sweep`, never in the PR that changes behaviour.
 
 ## Writing Style
 

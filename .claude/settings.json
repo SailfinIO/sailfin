@@ -9,6 +9,7 @@
       "Write",
       "Bash(sfn *)",
       "Bash(mkdir *)",
+      "Bash(ln -sfn *)",
       "Bash(cp *)",
       "Bash(mv *)",
       "Bash(touch *)",
