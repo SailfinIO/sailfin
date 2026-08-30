@@ -198,7 +198,7 @@ channel = "stable"   # optional: reject a lower-stability selected toolchain
 
 1. A one-shot CLI selector — `sfn +<version> <command> ...` (equivalently `sfn toolchain run <version> -- <command> ...`).
 2. An explicit `SAILFIN_TOOLCHAIN=<version>` (a mode word like `auto`/`local`/`off` does not count as a selector here).
-3. This root's exact `[toolchain] version`, resolved from the current working directory before any command is parsed — it applies uniformly to `version`, `init`, `fmt`, `check`, `build`, `run`, `test`, `emit`, `bench`, and `package`. (`sfn dev ...` and `sfn toolchain ...` are never project-dispatched, so the management/repair surface stays reachable even when a selection is broken.)
+3. This root's exact `[toolchain] version`, resolved from the current working directory before any command is parsed — it applies to every ordinary command whose output can vary with the compiler (`version`, `init`, `fmt`, `check`, `build`, `run`, `test`, `emit`, `bench`, `package`, and the capsule-management commands), plus commands this toolchain does not recognize. (`sfn dev ...`, `sfn toolchain ...`, `sfn config`, `sfn login`, and `sfn completion` are never project-dispatched, so the self-hosting driver, the management/repair surface, and the entry-level configuration commands all keep working even when a selection is broken.)
 4. The entry toolchain found on `PATH`.
 
 Every selected candidate — however it was chosen — still has to clear this root's `sfn` floor and `channel` constraint; the three existing escape hatches below are the only way past a failing check.

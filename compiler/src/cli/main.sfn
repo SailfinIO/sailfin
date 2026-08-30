@@ -564,8 +564,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     if !ctx.selector_resolved {
         if _v2_project_selection_applies(args) {
             let proj_version_query = _v2_is_version_query(args);
-            let proj_rc = toolchain_select_project_exact(ctx, _v2_argv_has_skip_flag(args)
-                || proj_version_query, proj_version_query);
+            let proj_rc = toolchain_select_project_exact(ctx, _v2_argv_has_skip_flag(args), proj_version_query);
             if proj_rc != 0 { return proj_rc; }
         }
     }

@@ -40,6 +40,15 @@ members = [
 # workspace-wide. `channel = "alpha"` is the lowest rank (stable > rc > beta >
 # alpha), so it never rejects a running toolchain today — it documents the
 # minimum stability contract and tightens only if raised to `beta`/`rc`/`stable`.
+# Do NOT add an exact `version` here without first making the `dev` exclusion
+# survive a process boundary. `cli/main.sfn::_v2_project_selection_applies`
+# keeps `sfn dev ...` out of SFEP-0073 §3.3 rank-3 selection, but the
+# self-host drivers spawn their children as plain `build`/`selfhost` argv
+# (`cli/commands/dev.sfn`, `cli_selfhost.sfn`, `cli/commands/dev_verify.sfn`,
+# `build/determinism.sfn`) with this directory as cwd. Those children would
+# select on a `version` field here and compile the working tree with a
+# released payload — silently, and in the determinism case by making the two
+# passes incomparable rather than failing (SFN-1070).
 [toolchain]
 sfn = "0.10.6"
 channel = "alpha"
