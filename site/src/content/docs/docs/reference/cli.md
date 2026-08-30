@@ -231,7 +231,7 @@ sfn check --quiet compiler/src   # suppress diagnostic output; exit code only
 **What gets checked:**
 
 1. **Parse** — `parse_program()` builds the AST (parser recovers from most errors; a future enhancement will surface parse-stage diagnostics).
-2. **Type check** — `typecheck_diagnostics()` reports duplicate symbols (`E0001`), unresolved value identifiers in checked function-body expressions (`E0014`), an unresolvable field access naming a member the receiver's proven type does not declare (`E0015`), missing interface members (`E0301`), interface type-argument mismatches (`E0302`), proven primitive mismatches (`E0309`), and scope violations.
+2. **Type check** — `typecheck_diagnostics()` reports duplicate symbols (`E0001`), unresolved value identifiers in checked function-body expressions (`E0014`), an unresolvable field access naming a member the receiver's proven type does not declare (`E0015`), missing interface members (`E0301`), interface type-argument mismatches (`E0302`), proven primitive mismatches (`E0309`), proven array element type mismatches (`E0310`), and scope violations.
 3. **Effect check** — `validate_effects()` reports routines that call effectful APIs (`print.*`, `fs.*`, `http.*`, `sleep`, `@logExecution`, …) without declaring the matching `![...]` effect.
 
 All three passes run regardless of earlier failures — you see every diagnostic in one pass rather than fix-one / rerun cycles.
@@ -252,7 +252,7 @@ checked 120 files: 3 errors
 | `E0400` | Function calls effectful APIs without declaring `![...]` |
 | `E0401` | Decorator (`@trace`, `@logExecution`) requires `![io]` but function doesn't declare it |
 
-Typecheck codes (`E0001`, `E0014`, `E0015`, `E0301`, `E0302`, `E0309`) are shared with the regular compilation pipeline.
+Typecheck codes (`E0001`, `E0014`, `E0015`, `E0301`, `E0302`, `E0309`, `E0310`) are shared with the regular compilation pipeline.
 
 **Exit codes:**
 
