@@ -29,13 +29,24 @@ import { ProcessOutput, env_empty, env_set } from "sfn/os";
 import { find } from "sfn/strings";
 
 import {
+    bash_path,
     clean_runner_env,
+    host_is_windows,
     nested_runner_scratch,
     scratch_root,
     with_cwd,
     with_env,
     with_tmp_dir
 } from "../src/mod";
+
+test "bash_path: POSIX paths pass through unchanged" ![io] {
+    assert bash_path("/tmp/fixture root/with spaces") == "/tmp/fixture root/with spaces";
+}
+
+test "bash_path: Win32 drive, backslashes, and spaces become an MSYS path" ![io] {
+    if !host_is_windows() { return; }
+    assert bash_path("C:\\fixture root\\with spaces\\probe.sfn") == "/c/fixture root/with spaces/probe.sfn";
+}
 
 // A fresh marker-file path for `name`, with any stale value from a prior
 // run removed so each test starts clean.

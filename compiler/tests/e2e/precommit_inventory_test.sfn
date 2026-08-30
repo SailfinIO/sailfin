@@ -6,7 +6,13 @@
 // the opt-in fast-check hook even though the deleted path is absent from the
 // live workspace inventory emitted by the compiler.
 import { remove_all, set_perms } from "sfn/fs";
-import { clean_runner_env, nested_runner_scratch, skip } from "sfn/test";
+import {
+    bash_path,
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure_pending,
+    skip
+} from "sfn/test";
 
 fn _require_posix_shell() -> bool ![io] {
     if env.get("COMSPEC").length == 0 { return true; }
@@ -23,8 +29,7 @@ fn _repo_root() -> string ![io] {
 
 fn _run_cwd(argv: string[], child_env: string[], cwd: string) -> int ![io] {
     let exit = process.run_capture_cwd(argv, child_env, cwd);
-    let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    report_child_failure_pending("precommit-inventory child", exit);
     return exit;
 }
 
@@ -46,17 +51,17 @@ fn _deletion_triggers(label: string, deleted_path: string) -> void ![io] {
         + "exit 1\n");
     assert set_perms(scratch + "/build/bin/sfn", 493);
 
-    let child_env = clean_runner_env(scratch + "/test-scratch");
+    let child_env = clean_runner_env(bash_path(scratch + "/test-scratch"));
     assert _run_cwd(["git", "init", "-q"], child_env, scratch) == 0;
     assert _run_cwd(["git", "config", "user.email", "test@sailfin.dev"], child_env, scratch) == 0;
     assert _run_cwd(["git", "config", "user.name", "Sailfin Test"], child_env, scratch) == 0;
     assert _run_cwd(["git", "add", "."], child_env, scratch) == 0;
     assert _run_cwd(["git", "commit", "-qm", "baseline"], child_env, scratch) == 0;
-    assert _run_cwd(["bash", "scripts/install_precommit.sh"], child_env, scratch) == 0;
+    assert _run_cwd(["bash", bash_path("scripts/install_precommit.sh")], child_env, scratch) == 0;
 
     fs.deleteFile(scratch + "/" + deleted_path);
     assert _run_cwd(["git", "add", "-u"], child_env, scratch) == 0;
-    assert _run_cwd(["bash", ".git/hooks/pre-commit"], child_env, scratch) == 0;
+    assert _run_cwd(["bash", bash_path(".git/hooks/pre-commit")], child_env, scratch) == 0;
     assert fs.exists(scratch + "/hook-ran");
     assert remove_all(scratch);
 }
