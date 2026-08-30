@@ -2,7 +2,7 @@
 // Parsing + validity coverage for compiler/src/semver.sfn (SFN-169 / SFEP-0046).
 import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
 
-import { semver_is_valid, semver_parse } from "../../src/semver";
+import { semver_is_exact_release, semver_is_valid, semver_parse } from "../../src/semver";
 
 test "semver_parse: plain release 1.2.3" ![pure] {
     let v = semver_parse("1.2.3");
@@ -107,4 +107,16 @@ test "semver_parse: rejects a core field too large for i64" ![pure] {
     assert expect_eq_bool(semver_is_valid(semver_parse("12345678901234567890.0.0")), false).ok;
     // 18 digits is accepted.
     assert expect_eq_bool(semver_is_valid(semver_parse("123456789012345678.0.0")), true).ok;
+}
+
+test "semver: exact release rejects build metadata and partial versions" ![pure] {
+    assert expect_eq_bool(semver_is_exact_release("0.10.6"), true).ok;
+    assert expect_eq_bool(semver_is_exact_release("0.10.6-alpha.3"), true).ok;
+    assert expect_eq_bool(semver_is_exact_release("0.10.6+dev.abc123"), false).ok;
+    assert expect_eq_bool(semver_is_exact_release("0.10.6-alpha.3+dev.abc123"), false).ok;
+    assert expect_eq_bool(semver_is_exact_release("0.10"), false).ok;
+    assert expect_eq_bool(semver_is_exact_release("1"), false).ok;
+    assert expect_eq_bool(semver_is_exact_release("stable"), false).ok;
+    assert expect_eq_bool(semver_is_exact_release("latest"), false).ok;
+    assert expect_eq_bool(semver_is_exact_release(""), false).ok;
 }

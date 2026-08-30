@@ -258,7 +258,7 @@ test "toolchain: resolve_selection an exact env selector wins with source enviro
     let base = _scratch_dir() + "/env-selector";
     assert remove_all(base);
     fs.createDirectory(base, true);
-    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "9.9.9", false, false, "", "");
+    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "9.9.9", false, false, "", "", "", "");
     assert sel.version == "9.9.9";
     assert sel.source == "environment";
     assert sel.installed == false;
@@ -268,7 +268,7 @@ test "toolchain: resolve_selection an unpinned project falls through to source e
     let base = _scratch_dir() + "/unpinned";
     assert remove_all(base);
     fs.createDirectory(base, true);
-    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "", false, false, "", "");
+    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "", false, false, "", "", "", "");
     assert sel.version == "1.0.0";
     assert sel.source == "entry";
     assert sel.path == "/entry/path";
@@ -279,7 +279,7 @@ test "toolchain: resolve_selection a satisfied floor also yields source entry" !
     let base = _scratch_dir() + "/satisfied-floor";
     assert remove_all(base);
     fs.createDirectory(base, true);
-    let sel = toolchain_resolve_selection(base, _host(), "1.5.0", "/entry/path", "", true, true, "1.0.0", "workspace.toml");
+    let sel = toolchain_resolve_selection(base, _host(), "1.5.0", "/entry/path", "", true, true, "1.0.0", "workspace.toml", "", "");
     assert sel.version == "1.5.0";
     assert sel.source == "entry";
 }
@@ -288,7 +288,7 @@ test "toolchain: resolve_selection an unsatisfied floor yields the pin version a
     let base = _scratch_dir() + "/unsatisfied-floor";
     assert remove_all(base);
     fs.createDirectory(base, true);
-    let sel = toolchain_resolve_selection(base, _host(), "0.5.0", "/entry/path", "", true, false, "1.0.0", "workspace.toml");
+    let sel = toolchain_resolve_selection(base, _host(), "0.5.0", "/entry/path", "", true, false, "1.0.0", "workspace.toml", "", "");
     assert sel.version == "1.0.0";
     assert sel.source == "workspace.toml";
     assert sel.installed == false;

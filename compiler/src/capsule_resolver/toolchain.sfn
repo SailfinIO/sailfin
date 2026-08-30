@@ -7,12 +7,17 @@
 // so the feature stays additive.
 import {
     SemVer,
+    semver_is_exact_release,
     semver_is_valid,
     semver_parse,
     semver_satisfies_floor
 } from "../semver";
 import { substring } from "../string_utils";
-import { toml_get_toolchain_channel, toml_get_toolchain_sfn } from "../toml_parser";
+import {
+    toml_get_toolchain_channel,
+    toml_get_toolchain_sfn,
+    toml_get_toolchain_version
+} from "../toml_parser";
 import { resolve_compiler_version } from "../version";
 import { _cr_dirname, _cr_path_join, discover_project_root } from "./paths";
 import { discover_workspace_root } from "./workspace";
@@ -112,6 +117,21 @@ struct ToolchainDecision {
     pin_desc: string;
     pin_source: string;
     running_str: string;
+    // SFEP-0073 §3.2, the additive exact selection. `pin_version` is the
+    // root's `[toolchain] version` verbatim and is empty when absent, so an
+    // SFEP-0046 manifest keeps its floor-only behavior untouched.
+    // `version_source` names the manifest that supplied it, separately from
+    // `pin_source`, because the exact field and the floor may come from
+    // different files under per-field merging.
+    //
+    // `version_error` is the reason the field is unusable — malformed
+    // (§3.2 rule 2) or below the root's own `sfn`/`channel` (§3.2 rule 4).
+    // Carried rather than raised because discovery has no error channel; the
+    // selection caller reports it and refuses *before* any fetch, so a
+    // manifest never resolves a version it forbids itself.
+    pin_version: string;
+    version_source: string;
+    version_error: string;
 }
 
 // Discover the manifest `[toolchain]` pin and evaluate the running toolchain
@@ -130,16 +150,20 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
     // one field of a workspace.toml default.
     let mut pin_sfn: string = "";
     let mut pin_channel: string = "";
+    let mut pin_version: string = "";
     let mut sfn_source: string = "";
     let mut channel_source: string = "";
+    let mut version_source: string = "";
     if workspace_root.length > 0 {
         let ws_path = _cr_path_join(workspace_root, "workspace.toml");
         if fs.exists(ws_path) {
             let ws_text = fs.readFile(ws_path);
             pin_sfn = toml_get_toolchain_sfn(ws_text);
             pin_channel = toml_get_toolchain_channel(ws_text);
+            pin_version = toml_get_toolchain_version(ws_text);
             if pin_sfn.length > 0 { sfn_source = "workspace.toml"; }
             if pin_channel.length > 0 { channel_source = "workspace.toml"; }
+            if pin_version.length > 0 { version_source = "workspace.toml"; }
         }
     }
     if project_root.length > 0 {
@@ -148,6 +172,7 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
             let cap_text = fs.readFile(cap_path);
             let m_sfn = toml_get_toolchain_sfn(cap_text);
             let m_channel = toml_get_toolchain_channel(cap_text);
+            let m_version = toml_get_toolchain_version(cap_text);
             if m_sfn.length > 0 {
                 pin_sfn = m_sfn;
                 sfn_source = "capsule.toml";
@@ -155,6 +180,10 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
             if m_channel.length > 0 {
                 pin_channel = m_channel;
                 channel_source = "capsule.toml";
+            }
+            if m_version.length > 0 {
+                pin_version = m_version;
+                version_source = "capsule.toml";
             }
         }
     }
@@ -166,12 +195,23 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
         pin_channel: "",
         pin_desc: "",
         pin_source: "",
-        running_str: ""
+        running_str: "",
+        pin_version: "",
+        version_source: "",
+        version_error: ""
     };
-    if pin_sfn.length == 0 && pin_channel.length == 0 { return d; }
-    d.pinned = true;
+    if pin_sfn.length == 0 && pin_channel.length == 0 && pin_version.length == 0 {
+        return d;
+    }
+    // `pinned` keeps its SFEP-0046 meaning — a floor and/or channel
+    // requirement exists — so an exact-only root does not start reporting a
+    // mismatch against a requirement it never stated. The exact field rides
+    // alongside it and is consulted by selection, not by the floor gate.
+    d.pinned = pin_sfn.length > 0 || pin_channel.length > 0;
     d.pin_sfn = pin_sfn;
     d.pin_channel = pin_channel;
+    d.pin_version = pin_version;
+    d.version_source = version_source;
 
     let running_str = resolve_compiler_version(binary_dir);
     let running = semver_parse(running_str);
@@ -218,10 +258,64 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
             }
         }
     }
+    // Captured before the exact field joins the attribution below. The
+    // "exact version is below its own minimum" diagnostic has to name where
+    // that *minimum* came from; folding the version's own file into the string
+    // first would point the reader at the manifest supplying the value being
+    // rejected rather than the requirement rejecting it.
+    let requirement_source = pin_source;
+
+    // The exact field is a third contributor to the same requirement, so it
+    // joins the attribution: under per-field merging a root can take its floor
+    // from `workspace.toml` and its exact version from `capsule.toml`, and a
+    // diagnostic naming only one of them sends the reader to the wrong file.
+    if version_source.length > 0 {
+        if pin_source.length == 0 { pin_source = version_source; } else {
+            if !strings_equal(pin_source, version_source) {
+                pin_source = pin_source + " + " + version_source;
+            }
+        }
+    }
     if pin_source.length == 0 { pin_source = "capsule.toml"; }
     d.pin_source = pin_source;
 
+    // SFEP-0073 §3.2 rules 2 and 4. Validated here, at discovery, so an
+    // unusable exact field is refused before selection reaches the network:
+    // a manifest must never fetch a version its own floor or stability
+    // constraint forbids. A malformed *floor* still only warns (above) — that
+    // is SFEP-0046 behavior this slice must not change — but the exact field
+    // is new surface with no compatibility debt, so it fails closed.
+    if pin_version.length > 0 {
+        if !semver_is_exact_release(pin_version) {
+            d.version_error = "is not an exact release version"
+                + " (a complete release semver, no build metadata, no channel alias)";
+        } else {
+            if !_toolchain_evaluate(pin_sfn, pin_channel, semver_parse(pin_version)) {
+                let mut req_src = requirement_source;
+                if req_src.length == 0 { req_src = "capsule.toml"; }
+                d.version_error = "does not satisfy the project's own requirement "
+                    + pin_desc
+                    + " ("
+                    + req_src
+                    + " [toolchain])";
+            }
+        }
+    }
+
     return d;
+}
+
+// The fail-closed diagnostic for an unusable exact `[toolchain] version`
+// (SFEP-0073 §3.2 rules 2 and 4). Separate from `toolchain_print_mismatch`:
+// that one reports a *running* toolchain failing a valid requirement, this one
+// reports a requirement that is itself invalid, which no installed toolchain
+// could satisfy.
+fn toolchain_print_version_error(d: ToolchainDecision) -> void ![io] {
+    print.err("error: invalid [toolchain] version");
+    print.err("  " + d.version_source + " sets version = \"" + d.pin_version
+        + "\", which "
+        + d.version_error);
+    print.err("  correct the manifest, or select a toolchain explicitly: sfn +<version> <command>");
 }
 
 // Evaluate an explicitly *selected* version against the same pin the running

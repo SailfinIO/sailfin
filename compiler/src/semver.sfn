@@ -169,6 +169,23 @@ fn semver_parse(text: string) -> SemVer ![pure] {
     };
 }
 
+// SFEP-0073 §3.2 rule 2: the shape a project manifest's exact `[toolchain]
+// version` must have — a complete release semver, optionally with prerelease
+// identifiers, never carrying build metadata and never a moving alias such as
+// `stable`. Two signed artifacts must never collapse onto one exact store
+// identity, so `semver_parse`'s tolerant build-metadata stripping is rejected
+// here rather than silently normalized away.
+//
+// Deliberately stricter than `toolchain_is_valid_install_version`
+// (toolchain/install.sfn), which admits `+dev.<hash>` so a developer can name
+// their own in-tree build as a one-shot CLI selector. A manifest field is not
+// a CLI selector.
+fn semver_is_exact_release(text: string) -> boolean ![pure] {
+    if text.length == 0 { return false; }
+    if find_char(text, "+", 0) >= 0 { return false; }
+    return semver_is_valid(semver_parse(text));
+}
+
 // Compare a single prerelease identifier per semver §11: numeric identifiers
 // rank numerically and always below any alphanumeric identifier;
 // alphanumeric identifiers rank by ASCII lexical order.
