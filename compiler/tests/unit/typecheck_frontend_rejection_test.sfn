@@ -8,6 +8,8 @@
 //   instead of the canonical `int[]` / `string[]`).
 // - E0306 — arithmetic mixing a proven `int` and `float` operand.
 // - E0308 — arithmetic on two named, explicitly typed struct operands.
+// - E0310 — an array assignment (struct-literal field init, annotated `let`,
+//   or plain assignment) whose two sides prove distinct element classes.
 //
 // These parse a small `.sfn` source through `parse_program` and run
 // `typecheck_diagnostics` end-to-end, asserting on the `Diagnostic.code`
@@ -312,4 +314,260 @@ test "frontend-rejection: captured outer primitive stays silent (no E0012)" ![io
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0012");
+}
+
+// -------------------------------------------------------------------
+// E0310 — array element type mismatch (SFN-910).
+// -------------------------------------------------------------------
+test "frontend-rejection: rejects struct-literal field init with Member actual (E0310)" ![io] {
+    let source = "struct Diag { code: string; } struct Holder { labels: string[]; } struct Source { diags: Diag[]; } "
+        + "fn main() -> int { let src: Source = Source { diags: [] }; "
+        + "let h: Holder = Holder { labels: src.diags }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects struct-literal field init in the reverse direction (E0310)" ![io] {
+    let source = "struct Diag { code: string; } struct Holder { labels: string[]; } struct Source { diags: Diag[]; } "
+        + "fn main() -> int { let h: Holder = Holder { labels: [] }; "
+        + "let src: Source = Source { diags: h.labels }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects annotated let with Identifier actual (E0310)" ![io] {
+    let source = "struct Diag { code: string; } "
+        + "fn main() -> int { let ds: Diag[] = []; let strs: string[] = ds; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects member-target array assignment (E0310)" ![io] {
+    let source = "struct Diag { code: string; } struct Holder { labels: string[]; } struct Source { diags: Diag[]; } "
+        + "fn main() -> int { let h: Holder = Holder { labels: [] }; "
+        + "let src: Source = Source { diags: [] }; h.labels = src.diags; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects identifier-target array assignment (E0310)" ![io] {
+    let source = "struct Diag { code: string; } "
+        + "fn main() -> int { let mut strs: string[] = []; let structs: Diag[] = []; "
+        + "strs = structs; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects a parameter as the mismatched actual (E0310)" ![io] {
+    let source = "struct Diag { code: string; } struct Holder { labels: string[]; } "
+        + "fn f(ds: Diag[]) -> Holder { return Holder { labels: ds }; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects struct A array assigned where struct B array is declared (E0310)" ![io] {
+    let source = "struct A { x: int; } struct B { y: int; } "
+        + "fn main() -> int { let mut a: A[] = []; let b: B[] = []; a = b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects int[] assigned where string[] is declared (E0310)" ![io] {
+    let source = "fn main() -> int { let n: int[] = []; let s: string[] = n; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects a lambda-body let mismatch (E0310)" ![io] {
+    let source = "struct Diag { code: string; } "
+        + "fn main() -> int { let f = fn() -> int { "
+        + "let ds: Diag[] = []; let ss: string[] = ds; return 0; }; return f(); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
+}
+
+// The empty array literal `[]` is the universal bottom the backend
+// materializes as a zeroed `double*` descriptor and bitcasts to the target
+// type; every reader below pins the exemption load-bearing for the
+// self-hosted tree's own empty-literal bottoms (`ir/src/typed_ssa.sfn:1080-1097`).
+test "frontend-rejection: empty array literal stays silent on an annotated let (no E0310)" ![io] {
+    let source = "fn main() -> int { let labels: string[] = []; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: empty array literal stays silent on a member-target assignment (no E0310)" ![io] {
+    let source = "struct Holder { labels: string[]; } "
+        + "fn main() -> int { let h: Holder = Holder { labels: [] }; h.labels = []; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: empty array literal stays silent on a struct-literal field (no E0310)" ![io] {
+    let source = "struct Holder { labels: string[]; } "
+        + "fn main() -> int { let h: Holder = Holder { labels: [] }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: non-empty array literal actual stays silent (no E0310)" ![io] {
+    let source = "struct Holder { labels: string[]; } "
+        + "fn main() -> int { let h: Holder = Holder { labels: [\"x\"] }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: call actual stays silent (no E0310)" ![io] {
+    let source = "struct Diag { code: string; } struct Holder { labels: string[]; } "
+        + "fn make_diags() -> Diag[] { return []; } "
+        + "fn main() -> int { let h: Holder = Holder { labels: make_diags() }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: unannotated binding actual stays silent (no E0310)" ![io] {
+    let source = "struct Diag { code: string; } struct Holder { labels: string[]; } "
+        + "fn make_diags() -> Diag[] { return []; } "
+        + "fn main() -> int { let ds = make_diags(); let h: Holder = Holder { labels: ds }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: SfnString[] into string[] is accepted (no E0310)" ![io] {
+    let source = "fn main() -> int { let a: SfnString[] = []; let b: string[] = a; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: i64[] into int[] is accepted (no E0310)" ![io] {
+    let source = "fn main() -> int { let a: i64[] = []; let b: int[] = a; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: string[] into string[] is the accepted baseline (no E0310)" ![io] {
+    let source = "fn main() -> int { let a: string[] = []; let b: string[] = a; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+// `Box<T>`'s declared field annotation is the unsubstituted `T[]`, and a
+// program-level struct named `T` (shadowing the type-parameter name, mirroring
+// the E0308 precedent at line 264) proves a REAL struct class for that bare
+// name. Without the `generic_struct_names` guard this would misclassify the
+// unsubstituted `T[]` as `struct:T` and fire a false positive against the
+// `Diag[]` actual (SFN-910).
+test "frontend-rejection: generic struct field annotation stays silent (no E0310)" ![io] {
+    // The INFERRED form `Box { ... }` is the one that exercises the guard: an
+    // explicitly parameterized `Box<T> { ... }` parses to the single type-name
+    // segment `Box<T>`, which `_struct_field_expected_type` fails to resolve,
+    // so the check bails on a null expected type before the guard is read
+    // (SFN-910).
+    let source = "struct T { value: int; } struct Diag { code: string; } "
+        + "struct Box<T> { items: T[]; } "
+        + "fn main() -> int { let ds: Diag[] = []; "
+        + "let b = Box { items: ds }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: a scoped type-parameter element stays silent (no E0310)" ![io] {
+    // A top-level `struct T` plus a DIFFERING expected class is what makes
+    // this bite: without the type-parameter gate the scoped `T` would resolve
+    // against that struct declaration and conflict with `string[]`. Same-class
+    // or no-such-struct shapes pass whether the gate runs or not (SFN-910).
+    let source = "struct T { value: int; } "
+        + "fn f<T>(xs: T[]) -> int { let ss: string[] = xs; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: a member read off a generic instantiation stays silent (no E0310)" ![io] {
+    // `_struct_field_annotation_text` refuses a receiver whose declared struct
+    // carries type arguments: `Pair<string>` still declares `first: T[]`, and
+    // reading that unsubstituted `T[]` against the top-level `struct T` would
+    // fire a false positive on correct code (SFN-910).
+    let source = "struct T { value: int; } struct Pair<T> { first: T[]; } "
+        + "fn use_pair(p: Pair<string>) -> int { "
+        + "let ss: string[] = p.first; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: an element type with no declaration stays silent (no E0310)" ![io] {
+    let source = "struct Diag { code: string; } "
+        + "fn main() -> int { let ds: Diag[] = []; let bogus: Bogus[] = ds; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: nested Diag[][] into string[][] stays silent (no E0310)" ![io] {
+    let source = "struct Diag { code: string; } "
+        + "fn main() -> int { let a: Diag[][] = []; let b: string[][] = a; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: optional element Diag?[] into string?[] stays silent (no E0310)" ![io] {
+    let source = "struct Diag { code: string; } "
+        + "fn main() -> int { let a: Diag?[] = []; let b: string?[] = a; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: a type-alias element stays silent (no E0310)" ![io] {
+    let source = "type Str = string; "
+        + "fn main() -> int { let a: Str[] = []; let b: string[] = a; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: an enum element stays silent (no E0310)" ![io] {
+    let source = "enum Choice { A, B } "
+        + "fn main() -> int { let a: Choice[] = []; let b: string[] = a; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: compound array assignment stays off E0310" ![io] {
+    let source = "struct Diag { code: string; } struct Holder { labels: string[]; } struct Source { diags: Diag[]; } "
+        + "fn main() -> int { let h: Holder = Holder { labels: [] }; "
+        + "let src: Source = Source { diags: [] }; h.labels += src.diags; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0310");
+}
+
+test "frontend-rejection: rejects a top-level (module-global) let as the actual (E0310)" ![io] {
+    let source = "struct Diag { code: string; } let ds: Diag[] = []; "
+        + "fn main() -> int { let ss: string[] = ds; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0310");
 }
