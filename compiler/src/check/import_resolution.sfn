@@ -4,6 +4,11 @@
 // Path behavior mirrors the capsule resolver, including `./dir` ->
 // `dir/mod.sfn`; semantic E0430/E0431 decisions remain in
 // `import_resolution_check.sfn`.
+//
+// SFN-686: capsule specs need no probe here — the resolver pass already
+// recorded which ones it located, so the caller threads that set through.
+// The defaults leave capsule imports unchecked for callers with no resolver
+// pass (the standalone `check_source` adapter in `../tools/check`).
 import { ClosureSymbolSet, ImportResolutionContext } from "sfn/analyzer/import_resolution_check";
 import { Program } from "sfn/syntax";
 
@@ -81,7 +86,7 @@ fn _cir_resolve_existing(base_dir: string, spec: string) -> string ![io] {
     return "";
 }
 
-fn resolve_import_context(program: Program, file_path: string, closure: ClosureSymbolSet) -> ImportResolutionContext ![io] {
+fn resolve_import_context(program: Program, file_path: string, closure: ClosureSymbolSet, resolved_capsule_specs: string[] = [], capsule_specs_known: boolean = false) -> ImportResolutionContext ![io] {
     let mut resolved_relative_specs: string[] = [];
     let base_dir = _cir_dirname(file_path);
     let mut index: int = 0;
@@ -100,7 +105,9 @@ fn resolve_import_context(program: Program, file_path: string, closure: ClosureS
     }
     return ImportResolutionContext {
         closure_symbols: closure,
-        resolved_relative_specs: resolved_relative_specs
+        resolved_relative_specs: resolved_relative_specs,
+        resolved_capsule_specs: resolved_capsule_specs,
+        capsule_specs_known: capsule_specs_known
     };
 }
 

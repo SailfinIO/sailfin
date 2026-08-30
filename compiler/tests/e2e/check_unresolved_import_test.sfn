@@ -1,7 +1,13 @@
-// End-to-end regression tests for #1953 — `sfn check` diagnoses unresolved
-// imports instead of silently accepting them: a relative module path that
-// resolves to no file on disk is E0430 ("cannot find module"), and a symbol
-// imported from a module that never defines it is E0431.
+// End-to-end regression tests for #1953 and SFN-686 — `sfn check` diagnoses
+// unresolved imports instead of silently accepting them: a module path that
+// resolves to nothing is E0430 ("cannot find module"), and a symbol
+// imported from a module that never defines it is E0431. Both codes cover
+// relative specs (#1953) and capsule specs (SFN-686).
+//
+// SFN-686 also pins the deliberate exclusion: a `runtime/...` spec is never
+// diagnosed, because runtime modules are structurally absent from the
+// check-time closure (see the header of
+// `compiler/capsules/analyzer/src/import_resolution_check.sfn`).
 //
 // Native `*_test.sfn` per `.claude/rules/no-bash-e2e.md` — drives the
 // compiler subprocess via `process.run_capture`, mirroring the
@@ -115,4 +121,116 @@ test "check: wrong import-path depth is caught (PR #1952 regression)" ![io] {
     if fs.exists(marker) { fs.deleteFile(marker); }
     assert exit != 0;
     assert find(combined, "E0430", 0) >= 0;
+}
+
+// SFN-686: before this, every non-relative spec was skipped outright, so a
+// bogus export name from a real capsule passed `sfn check` clean and only
+// surfaced as an uncoded lowering `[fatal]` at build. The symbol is never
+// referenced here — the diagnostic must come from the import statement
+// itself, not from a use site.
+test "check: capsule import of a symbol defined nowhere is E0431" ![io] {
+    let marker = _marker("capsule-missing-symbol");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { definitely_not_a_real_export } from \"sfn/strings\";\n"
+            + "fn use_it() -> int { return 1; }\n");
+        return _check(srcpath, marker);
+    });
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit != 0;
+    assert find(combined, "E0431", 0) >= 0;
+}
+
+// SFN-686: the same diagnostic must fire when the bogus name is actually
+// called. E0420 ("undefined function") was expected to catch this case and
+// measurably did not, so this is a distinct regression from the one above.
+test "check: capsule import of a symbol defined nowhere is E0431 when called" ![io] {
+    let marker = _marker("capsule-missing-symbol-called");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { definitely_not_a_real_export } from \"sfn/strings\";\n"
+            + "fn use_it() -> int { return definitely_not_a_real_export(1); }\n");
+        return _check(srcpath, marker);
+    });
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit != 0;
+    assert find(combined, "E0431", 0) >= 0;
+}
+
+// SFN-686: a capsule spec the resolver located nothing for is E0430, the
+// same code a nonexistent relative path mints.
+test "check: nonexistent capsule spec is E0430" ![io] {
+    let marker = _marker("capsule-missing-module");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { anything } from \"sfn/definitely-not-a-capsule\";\n"
+            + "fn use_it() -> int { return 1; }\n");
+        return _check(srcpath, marker);
+    });
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit != 0;
+    assert find(combined, "E0430", 0) >= 0;
+    assert find(combined, "cannot find module", 0) >= 0;
+}
+
+// SFN-686 guards against the false-positive risk that scoped the original
+// check to relative specs: a real symbol from a real capsule must still pass.
+// `find` is declared by `stdlib/strings/src/mod.sfn` itself.
+test "check: valid capsule import passes" ![io] {
+    let marker = _marker("capsule-valid-import");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { find } from \"sfn/strings\";\n"
+            + "fn use_it() -> int { return find(\"hello\", \"ell\", 0); }\n");
+        return _check(srcpath, marker);
+    });
+    let _combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit == 0;
+}
+
+// SFN-686 regression: a prelude global imported from a capsule must pass.
+// `strings_equal` is defined by `runtime/prelude.sfn`, not by
+// `stdlib/strings/src/mod.sfn`, so it never appears in the staged closure
+// symbol set even though the link defines it — legal under Sailfin's
+// global-by-name import resolution. The compiler's own analyzer sources
+// import it from `sfn/strings` exactly this way. This case false-positived
+// until prelude globals were exempted; a large closure hides the bug because
+// some staged module carries the name as an `.import` specifier, so the
+// fixture is deliberately a lone file whose closure is small.
+test "check: capsule import of a prelude global passes" ![io] {
+    let marker = _marker("capsule-prelude-global");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { strings_equal } from \"sfn/strings\";\n"
+            + "fn use_it() -> boolean { return strings_equal(\"a\", \"a\"); }\n");
+        return _check(srcpath, marker);
+    });
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit == 0;
+    assert find(combined, "E0431", 0) < 0;
+}
+
+// SFN-686: `runtime/...` is the documented exclusion. Runtime modules never
+// enter the check-time closure (the resolver drops runtime-prefixed edges and
+// `sfn check` resolves with an empty runtime root), so checking them could
+// only false-positive. A bogus runtime symbol must stay undiagnosed — this
+// test fails if that exclusion is ever quietly dropped.
+test "check: runtime import spec is not diagnosed" ![io] {
+    let marker = _marker("runtime-spec-excluded");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { definitely_not_a_runtime_export } from \"runtime/sfn/string\";\n"
+            + "fn use_it() -> int { return 1; }\n");
+        return _check(srcpath, marker);
+    });
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit == 0;
+    assert find(combined, "E0430", 0) < 0;
+    assert find(combined, "E0431", 0) < 0;
 }

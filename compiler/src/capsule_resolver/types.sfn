@@ -295,6 +295,13 @@ struct CheckCapsuleResolution {
     // capability cross-check"; non-empty as "fail E0403 on any
     // function declaring an effect outside this surface."
     capabilities_required: string[];
+    // SFN-686: the canonical `<scope>/<name>` specs this resolver pass
+    // located. The analyzer mints E0430 for a capsule import naming a spec
+    // outside this set. `capsule_specs_known` distinguishes "the pass ran and
+    // resolved nothing" from "no pass ran", where an empty set proves nothing;
+    // it is false on every bail-out return below.
+    resolved_capsule_specs: string[];
+    capsule_specs_known: boolean;
 }
 
 // Result of a test-mode resolver pass: same workspace + manifest +
