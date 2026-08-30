@@ -9,7 +9,7 @@
 // `sfn/strings::find` (the `![pure]` `expect_*` matchers can't be called from
 // an `![io]` test).
 import { find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { default_scratch_dir, sfn_bin_abs_path, sfn_bin_path } from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the vars the
 // nested `check` needs for a writable scratch under the parallel pool. No PATH
@@ -64,6 +64,24 @@ fn _make_workspace(tag: string, workspace_toolchain_body: string, member_toolcha
     fs.writeFile(member + "/capsule.toml", manifest);
     fs.writeFile(member + "/src/main.sfn", "fn main() ![io] {\n    print(\"hi\");\n}\n");
     return member;
+}
+
+// SFEP-0073 §3.3 rank 3 (`toolchain_select_project_exact`) resolves the root
+// from the CURRENT WORKING DIRECTORY, not the entry-hint argument — unlike
+// the floor gate above, which discovers from the `check <src>` argument. Its
+// `toolchain_print_version_error` diagnostic (SFN-1070, SFEP-0073 §3.2 rules
+// 2/4) is only reachable on that cwd-resolved path, so every exact-`version`
+// assertion below must run with `dir` as cwd via `sfn_bin_abs_path()` — a
+// relative `sfn_bin_path()` would break once cwd shifts off the repo root.
+fn _run_check_cwd(dir: string, extra_env: string[]) -> int ![io] {
+    let mut e = _child_env();
+    let mut i: int = 0;
+    loop {
+        if i >= extra_env.length { break; }
+        e.push(extra_env[i]);
+        i += 1;
+    }
+    return process.run_capture_cwd([sfn_bin_abs_path(), "check", "src/main.sfn"], e, dir);
 }
 
 test "workspace toolchain floor: an unsatisfiable workspace pin hard-errors" ![io] {
@@ -180,4 +198,123 @@ test "toolchain gate: channel = stable rejects a prerelease toolchain" ![io] {
         // A stable running toolchain satisfies `channel = "stable"`.
         assert find(out + err, "toolchain mismatch", 0) < 0;
     }
+}
+
+// SFN-1070 / SFEP-0073 §3.2 rule 1: `sfn` retains its SFEP-0046 floor
+// semantics unchanged, so a manifest with no `version` field must never grow
+// the new exact-selection diagnostic.
+test "toolchain gate: an unversioned manifest retains byte-compatible floor behavior" ![io] {
+    let dir = _make_project("byte-compat", "[toolchain]\nsfn = \"0.0.1\"\n");
+    let exit = process.run_capture([sfn_bin_path(), "check", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "toolchain mismatch", 0) < 0;
+    assert find(out + err, "invalid [toolchain] version", 0) < 0;
+}
+
+// SFEP-0073 §3.2 rule 2: build metadata makes an exact `version` unusable —
+// two signed artifacts must never collapse onto one exact store identity.
+test "toolchain gate: a version with build metadata is rejected before fetch" ![io] {
+    let dir = _make_project("ver-build-meta", "[toolchain]\nsfn = \"0.0.1\"\nversion = \"0.10.6+dev.abc123\"\n");
+    let exit = _run_check_cwd(dir, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "is not an exact release version", 0) >= 0;
+    // The failure is the manifest error itself, not a store/download error —
+    // this diagnostic never reaches the fetch path at all.
+    assert find(out + err, "install", 0) < 0;
+}
+
+// SFEP-0073 §3.2 rule 2: an incomplete semver is not a complete release
+// version.
+test "toolchain gate: an incomplete version is rejected before fetch" ![io] {
+    let dir = _make_project("ver-incomplete", "[toolchain]\nsfn = \"0.0.1\"\nversion = \"0.10\"\n");
+    let exit = _run_check_cwd(dir, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "is not an exact release version", 0) >= 0;
+    assert find(out + err, "install", 0) < 0;
+}
+
+// SFEP-0073 §3.2 rule 2: a channel alias is a moving target and must never
+// become a floating project field.
+test "toolchain gate: a channel alias version is rejected before fetch" ![io] {
+    let dir = _make_project("ver-alias", "[toolchain]\nsfn = \"0.0.1\"\nversion = \"stable\"\n");
+    let exit = _run_check_cwd(dir, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "is not an exact release version", 0) >= 0;
+    assert find(out + err, "install", 0) < 0;
+}
+
+// SFEP-0073 §3.2 rule 4: an exact version below the project's own `sfn`
+// floor is invalid and must fail before any fetch.
+test "toolchain gate: an exact version below the project's own sfn floor is rejected" ![io] {
+    let dir = _make_project("ver-below-sfn", "[toolchain]\nsfn = \"9.9.9\"\nversion = \"1.0.0\"\n");
+    let exit = _run_check_cwd(dir, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "does not satisfy the project's own requirement", 0) >= 0;
+}
+
+// SFEP-0073 §3.2 rule 4, the channel variant: an exact version below the
+// project's own stability constraint is invalid the same way.
+test "toolchain gate: an exact version below the project's own channel constraint is rejected" ![io] {
+    let dir = _make_project("ver-below-channel", "[toolchain]\nchannel = \"stable\"\nversion = \"1.0.0-alpha.1\"\n");
+    let exit = _run_check_cwd(dir, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "does not satisfy the project's own requirement", 0) >= 0;
+}
+
+// SFEP-0073 §3.2 rule 5: per-field workspace/member merge, provenance case 1
+// — a workspace-supplied `version` with no member override attributes the
+// diagnostic to `workspace.toml`.
+test "toolchain gate: a workspace-only exact version error attributes workspace.toml" ![io] {
+    let member = _make_workspace("ws-ver-source", "[toolchain]\nversion = \"stable\"\n", "");
+    let exit = _run_check_cwd(member, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "workspace.toml sets version", 0) >= 0;
+}
+
+// Provenance case 2 — a member `capsule.toml version` overriding a workspace
+// `version` attributes the diagnostic to `capsule.toml`, proving per-field
+// override rather than workspace-wins.
+test "toolchain gate: a member exact version override attributes capsule.toml" ![io] {
+    let member = _make_workspace("member-ver-source", "[toolchain]\nversion = \"1.0.0\"\n", "[toolchain]\nversion = \"stable\"\n");
+    let exit = _run_check_cwd(member, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "capsule.toml sets version", 0) >= 0;
+}
+
+// Provenance case 3 — the mixed merge: the workspace supplies `sfn`, the
+// member supplies `version`. The two fields merge independently, so the
+// error names the member as the version's source while still evaluating it
+// against the workspace-supplied floor.
+test "toolchain gate: workspace sfn plus member version merge validates against the merged floor" ![io] {
+    let member = _make_workspace("mixed-merge", "[toolchain]\nsfn = \"9.9.9\"\n", "[toolchain]\nversion = \"1.0.0\"\n");
+    let exit = _run_check_cwd(member, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "invalid [toolchain] version", 0) >= 0;
+    assert find(out + err, "does not satisfy the project's own requirement", 0) >= 0;
+    assert find(out + err, "capsule.toml sets version", 0) >= 0;
 }
