@@ -126,6 +126,29 @@ d. **Require explicit override if anything is open.** Ask the user:
 For uncurated cuts (`channel=alpha bump=prerelease`), skip the gate entirely
 and proceed to dispatch.
 
+### 4.5. Reconcile `docs/status.md` (curated cuts)
+
+`docs/status.md` is reconciled on the release cadence rather than per-PR, so a
+curated cut is the moment it is meant to be brought current — the release ships
+the file describing what that release contains.
+
+Check how far behind it is:
+
+```bash
+git log -1 --format='%h %ad' --date=short origin/main -- docs/status.md
+```
+
+If merged work in the window plausibly moved a status, run `/status-sweep`
+before dispatching. Its PR must merge to `main` first — the cut takes whatever
+`main` holds.
+
+Advisory, like the tracking gate above: say how stale the file is and let the
+user decide. A stale status doc is not a reason to block a hotfix.
+
+The weekly automated train (`release-train.yml`) has no agent in the loop and
+cannot run this step, so the sweep runs on its own cadence ahead of the Monday
+train rather than as part of it.
+
 ### 5. Dispatch the workflow
 
 Use the GitHub MCP tool to dispatch `release.yml` on `main`:
