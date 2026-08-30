@@ -144,7 +144,8 @@ Pins the `sfn` toolchain this capsule requires. See [Toolchain Pinning](#toolcha
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `sfn` | string | no | A semver floor — the running `sfn` must be `>=` this version. |
+| `sfn` | string | no | A semver floor — the running/selected `sfn` must be `>=` this version. |
+| `version` | string | no | An exact release version this root selects — `0.10.4` is not satisfied by `0.10.5`. Independent of `sfn`; must itself satisfy `sfn`/`channel`. |
 | `channel` | string | no | Minimum acceptable stability channel: `"stable"`, `"rc"`, `"beta"`, or `"alpha"`. |
 
 ## Capability Declarations
@@ -180,15 +181,27 @@ The `[toolchain]` section declares which `sfn` toolchain builds this capsule —
 
 ```toml
 [toolchain]
-sfn = "0.8.0-alpha.3"     # floor: the running toolchain must be >= this
-channel = "alpha"          # optional: reject a lower-stability running toolchain
+sfn = "0.10.4"       # compatibility floor: the selected toolchain must be >= this
+version = "0.10.4"   # exact compiler this root selects (independent of the floor)
+channel = "stable"   # optional: reject a lower-stability selected toolchain
 ```
 
-**Floor semantics (Go-style, not exact-pin).** `sfn` is a minimum version, not an exact match — the running `sfn` must be `>=` the pinned version, ordered by semver precedence (build metadata after `+` is ignored for comparison). A pin of `0.8.0-alpha.2` is satisfied by `0.8.0-alpha.2`, `0.8.0-alpha.3`, `0.8.0`, or `0.9.0`, and is rejected by `0.8.0-alpha.1` or any `0.7.x` toolchain.
+**`sfn` is a compatibility floor, not an exact pin (Go-style).** The selected `sfn` must be `>=` the stated version, ordered by semver precedence (build metadata after `+` is ignored for comparison). A floor of `0.8.0-alpha.2` is satisfied by `0.8.0-alpha.2`, `0.8.0-alpha.3`, `0.8.0`, or `0.9.0`, and is rejected by `0.8.0-alpha.1` or any `0.7.x` toolchain.
 
-**`channel`** additionally requires a minimum stability level, ranked `stable` > `rc` > `beta` > `alpha`. `channel = "stable"` rejects any `-alpha`/`-beta`/`-rc` running toolchain regardless of its core version number. It is independent of (and additive to) the `sfn` floor.
+**`version` is an exact selection, independent of the floor (SFEP-0073 §3.2).** Unlike `sfn`, `version` must match exactly — a selected `0.10.4` is *not* satisfied by `0.10.5`. It answers a different question than the floor: `sfn` states the oldest compiler this capsule is intended to support; `version` states the exact compiler this root actually builds with today. Changing one never raises or lowers the other. `version` must be a complete release semver, optionally with prerelease identifiers — build metadata (`0.10.4+dev.abc123`), an incomplete version (`0.10`), and a moving channel alias (`stable`, `latest`) are all rejected with `invalid [toolchain] version` before any fetch is attempted. An exact `version` that does not itself satisfy this root's own `sfn` floor or `channel` constraint is also a manifest error, reported the same way, before any network access.
 
-**Workspace vs. member precedence.** In a multi-capsule project, a `workspace.toml` `[toolchain]` pin is the default for every member; a member's own `capsule.toml` `[toolchain]` overrides it **per field** (a member can override just `sfn`, just `channel`, or both). See [Workspaces](./workspaces#toolchain-pinning).
+**`channel`** additionally requires a minimum stability level, ranked `stable` > `rc` > `beta` > `alpha`. `channel = "stable"` rejects any `-alpha`/`-beta`/`-rc` selected toolchain regardless of its core version number. It is independent of (and additive to) the `sfn` floor, and an exact `version` must also clear it.
+
+**Workspace vs. member precedence.** In a multi-capsule project, a `workspace.toml` `[toolchain]` pin is the default for every member; a member's own `capsule.toml` `[toolchain]` overrides it **per field** (a member can override just `sfn`, just `version`, just `channel`, or any combination). See [Workspaces](./workspaces#toolchain-pinning).
+
+**Selection precedence.** When more than one toolchain input applies, the highest-ranked one wins:
+
+1. A one-shot CLI selector — `sfn +<version> <command> ...` (equivalently `sfn toolchain run <version> -- <command> ...`).
+2. An explicit `SAILFIN_TOOLCHAIN=<version>` (a mode word like `auto`/`local`/`off` does not count as a selector here).
+3. This root's exact `[toolchain] version`, resolved from the current working directory before any command is parsed — it applies uniformly to `version`, `init`, `fmt`, `check`, `build`, `run`, `test`, `emit`, `bench`, and `package`. (`sfn dev ...` and `sfn toolchain ...` are never project-dispatched, so the management/repair surface stays reachable even when a selection is broken.)
+4. The entry toolchain found on `PATH`.
+
+Every selected candidate — however it was chosen — still has to clear this root's `sfn` floor and `channel` constraint; the three existing escape hatches below are the only way past a failing check.
 
 **The gate.** `sfn build`, `sfn run`, `sfn check`, and `sfn test` verify the pin after resolving the project/workspace root, before doing any other work. On a satisfied pin, the command proceeds silently. On a mismatch, the default behavior (`SAILFIN_TOOLCHAIN=auto`) is to transparently fetch (if not already in the version store) and re-exec the pinned toolchain — a fresh clone plus `sfn build` just works with no manual install step. Under `SAILFIN_TOOLCHAIN=local`, or when auto-dispatch itself can't proceed (offline with nothing stored), the command instead fails with a non-zero exit and a diagnostic:
 
@@ -201,9 +214,11 @@ error: toolchain mismatch
 
 Override the gate for a single invocation with `--skip-toolchain-check`, or for a whole shell/CI job with `SAILFIN_SKIP_TOOLCHAIN_CHECK=1` or `SAILFIN_TOOLCHAIN=off` (`=0` also works) — any of the three downgrade the hard error to a one-line warning and let the build proceed on the running toolchain, without dispatching. See the [CLI reference](/docs/reference/cli#toolchain-pinning-flags) for the full flag/env list and the `SAILFIN_TOOLCHAIN` knob modes (`auto`/`local`/`<version>`/`off`).
 
-**`sfn init` scaffolding.** `sfn init` writes a `[toolchain]` stanza pinned to the version of the `sfn` binary doing the scaffolding, so a freshly created capsule is born pinning the toolchain it was created with — matching `cargo new` stamping the edition and `go mod init` writing the `go` line.
+**`sfn init` scaffolding.** `sfn init` writes both `sfn` and `version` to the release version of the `sfn` binary doing the scaffolding (stripping any local `+dev.<hash>` build stamp), so a freshly created capsule is born with an explicit floor *and* pinned to the exact toolchain it was created with — matching `cargo new` stamping the edition and `go mod init` writing the `go` line. No command besides `sfn init` writes `version` into a manifest yet; editing it by hand is the only other way in.
 
-**Current status:** declare, verify, and fetch + re-exec dispatch (SFEP-0046 §3.1–3.5) are all implemented — a version mismatch under the default `auto` mode now resolves itself. The proposal itself stays `Accepted` rather than `Implemented`, since it tracks a handful of adjacent issues beyond dispatch.
+**Inspecting the selection.** `sfn toolchain active` prints an `exact:` line naming this root's `version` field (beside the `requires:` floor line) when one is set, and the `sailfin-toolchains/1` JSON envelope's `requirement.version` carries the same value — see the [CLI reference](/docs/reference/cli#installing-a-toolchain).
+
+**Current status:** declare, verify, and fetch + re-exec dispatch for the `sfn` floor (SFEP-0046 §3.1–3.5) are all implemented, as is exact project-root selection via `version` (SFEP-0073 §§3.2–3.3, "exact roots" slice). Not yet shipped: channel selectors/`latest` resolution in a project `version` field, the per-user default (`sfn toolchain default`), and `sfn toolchain update`. The proposal itself stays `Accepted` rather than `Implemented` until every slice lands — see `docs/status.md` for the current per-slice breakdown.
 
 ## Dependencies
 

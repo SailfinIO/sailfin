@@ -505,7 +505,7 @@ Sailfin ships with package-management commands that target a default public regi
 
 ### `sfn init`
 
-Scaffold a new Sailfin capsule in the current directory. Writes a `capsule.toml` manifest (with the capsule name inferred from the directory) and a starter `src/main.sfn`. The generated manifest includes a `[toolchain] sfn = "<version>"` pin set to the version of the `sfn` binary running `init` — see [Toolchain Pinning Flags](#toolchain-pinning-flags).
+Scaffold a new Sailfin capsule in the current directory. Writes a `capsule.toml` manifest (with the capsule name inferred from the directory) and a starter `src/main.sfn`. The generated manifest includes both `[toolchain] sfn = "<version>"` (the compatibility floor) and `version = "<version>"` (the exact toolchain selected for this root) set to the release version of the `sfn` binary running `init`, with any local `+dev.<hash>` build stamp stripped — see [Toolchain Pinning Flags](#toolchain-pinning-flags).
 
 **Usage:**
 
@@ -624,7 +624,7 @@ Or put it in `~/.sfn/config.toml` once per workstation with `sfn config set regi
 
 ## Toolchain Pinning Flags
 
-`sfn build`, `sfn run`, `sfn check`, and `sfn test` all verify a project's `[toolchain]` manifest pin (`capsule.toml` / `workspace.toml`) before doing any other work — floor semver + optional stability `channel`, with a member `capsule.toml` overriding a `workspace.toml` pin per field. See [Capsules & Packages → Toolchain Pinning](/docs/advanced/capsules#toolchain-pinning) for the manifest syntax and gate semantics. `sfn init` writes the pin for you (see [`sfn init`](#sfn-init) above).
+`sfn build`, `sfn run`, `sfn check`, and `sfn test` all verify a project's `[toolchain]` manifest floor (`capsule.toml` / `workspace.toml`) before doing any other work — floor semver + optional stability `channel`, with a member `capsule.toml` overriding a `workspace.toml` pin per field. See [Capsules & Packages → Toolchain Pinning](/docs/advanced/capsules#toolchain-pinning) for the manifest syntax and gate semantics. `sfn init` writes the floor (and the exact `version` below) for you (see [`sfn init`](#sfn-init) above).
 
 On a mismatch, the command exits non-zero with a diagnostic of this shape:
 
@@ -659,6 +659,32 @@ Auto-dispatch (`auto`) is the default because every newly fetched toolchain is v
 | `SAILFIN_TOOLCHAIN=off` (or `=0`) | Every `sfn` invocation in the current shell/CI job |
 
 A project with no `[toolchain]` section is unaffected — the gate is a no-op.
+
+### Exact toolchain selection
+
+Alongside the `sfn` compatibility floor, `[toolchain]` accepts an optional exact `version` field (SFEP-0073 §3.2):
+
+```toml
+[toolchain]
+sfn = "0.10.4"       # compatibility floor (minimum), unchanged
+version = "0.10.4"   # exact compiler this root selects
+channel = "stable"   # minimum stability, unchanged
+```
+
+`version` is exact, not a floor — a selected `0.10.4` is not satisfied by `0.10.5`. It is independent of `sfn`: changing `version` never raises or lowers the floor, and vice versa. `version` must be a complete release semver, optionally with prerelease identifiers; build metadata (`0.10.4+dev.abc123`), an incomplete version (`0.10`), and a channel alias (`stable`, `latest`) are all rejected as `invalid [toolchain] version` before any fetch. An exact `version` that does not itself satisfy this root's own `sfn` floor or `channel` is rejected the same way. Workspace/member precedence is per-field, same as `sfn`/`channel`.
+
+Selection is resolved once, from the current working directory, before the full command tree is parsed — so it applies uniformly to `version`, `init`, `fmt`, `check`, `build`, `run`, `test`, `emit`, `bench`, and `package`, including a command a given toolchain doesn't recognize. `sfn dev ...` and `sfn toolchain ...` are never project-dispatched: `dev` is the self-hosting driver, and `toolchain` has to stay reachable to repair a broken or missing selected payload. Highest precedence first:
+
+1. A one-shot CLI selector: `sfn +<version> <command> ...` (equivalently `sfn toolchain run <version> [--] <command> ...`).
+2. An explicit `SAILFIN_TOOLCHAIN=<version>` (a mode word — `auto`/`local`/`off`/`0` — does not count as a selector here; see the table above).
+3. The active root's exact `[toolchain] version`.
+4. The entry toolchain on `PATH`.
+
+Whichever candidate wins still has to satisfy this root's `sfn` floor and `channel` constraint — an explicitly selected compiler below the floor is a hard error unless one of the [escape hatches](#toolchain-pinning-flags) downgrades it to a warning. Dispatch works in both directions: a newer entry toolchain re-execs an older exact `version`, and an older entry hands the command to a newer one.
+
+`sfn toolchain active` reports the resolved exact field as an `exact:` line (alongside the `requires:` floor line) when this root sets one, and the `sailfin-toolchains/1` JSON envelope's `requirement.version` carries the same value (see [`docs/reference/toolchains-json-schema.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/reference/toolchains-json-schema.md)).
+
+No command besides `sfn init` writes `version` into a manifest today — `sfn toolchain update`, channel selectors resolving into a project `version`, and the per-user default are later SFEP-0073 slices, not shipped.
 
 ### Installing a toolchain
 
