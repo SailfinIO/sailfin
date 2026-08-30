@@ -10,12 +10,13 @@ import {
     ToolchainDecision,
     toolchain_decide,
     toolchain_print_mismatch,
+    toolchain_print_version_error,
     toolchain_selection_satisfies
 } from "../capsule_resolver/toolchain";
 import { CliContext } from "../cli/context";
 import { starts_with, strings_equal, substring } from "../string_utils";
 import { render_terminal_diagnostic } from "../terminal_output";
-import { resolve_compiler_version } from "../version";
+import { _strip_build_metadata, resolve_compiler_version } from "../version";
 import { toolchain_known_sequence, toolchain_known_sequence_note } from "./channel";
 import { toolchain_current_host } from "./host";
 import {
@@ -221,7 +222,16 @@ fn toolchain_select_exact(selector: string, source_label: string, entry_hint: st
     // `sfn +<running-version> ...` free of a pointless image replacement, and
     // free of a store lookup that could otherwise fetch a released build which
     // only shares a version number with a local dev binary.
-    let running = _dispatch_normalize_ver(resolve_compiler_version(ctx.binary_dir));
+    //
+    // The build stamp is stripped for that comparison. An in-tree binary
+    // resolves as `<version>+dev.<hash>` (`build_stamp.sfn`), while every
+    // selector it could be compared against is a bare release: `sfn init`
+    // strips the stamp before writing (SFEP-0073 §3.2 rule 2), and
+    // `semver_is_exact_release` rejects a manifest field carrying one. Without
+    // the strip, a project scaffolded by a dev build fetches the *released*
+    // build of its own version on the very next command — the outcome the
+    // paragraph above says this check exists to prevent.
+    let running = _dispatch_normalize_ver(_strip_build_metadata(resolve_compiler_version(ctx.binary_dir)));
     if strings_equal(target, running) { return 0; }
 
     // `local` selects but never downloads (SFEP-0073 §3.3 mode table). It
@@ -229,6 +239,77 @@ fn toolchain_select_exact(selector: string, source_label: string, entry_hint: st
     // much as to its own knob.
     let allow_fetch = !strings_equal(knob_now, "local");
     return _dispatch_exec_target(target, ctx, allow_fetch, version_query);
+}
+
+// SFEP-0073 §3.3 rank 3 — the active root's exact `[toolchain] version`.
+//
+// Resolved from the working directory before the command tree is built, so it
+// reaches every ordinary command uniformly: `fmt`, `emit`, `bench`, `package`
+// and `init` never call the floor gate, and a future command this toolchain
+// cannot parse has no gate to call. Threading the field through each command's
+// gate instead would cover only the four commands wired to
+// `toolchain_gate_or_dispatch` today and could never cover one that does not
+// exist yet.
+//
+// The working directory, not the entry file, is the resolution root. That is
+// what §3.4 specifies for `active`, and it is forced anyway: naming the entry
+// file requires the parse this runs ahead of. The floor gate keeps its own
+// entry-hint discovery, so SFEP-0046 enforcement is unchanged by this path.
+//
+// Returns 0 when the caller should keep running in-process (no exact field, or
+// it selected this very toolchain), and non-zero on a refused selection. A
+// successful dispatch replaces the image and never returns.
+fn toolchain_select_project_exact(ctx: CliContext, argv_skip: boolean, version_query: boolean) -> int ![clock, io, net] {
+    // §3.2 rules 2 and 4 are checked before any stand-down below, because
+    // manifest validity is not a version mismatch: the escape hatches exist to
+    // override a *disagreement* between a valid requirement and the running
+    // toolchain, and there is no such disagreement to override here — the
+    // requirement itself is unusable, and no installed toolchain could satisfy
+    // it. Letting a hatch suppress this would turn a typo in a manifest into
+    // silence for anyone who habitually sets one.
+    let decision: ToolchainDecision = toolchain_decide("", ctx.binary_dir);
+    if decision.version_error.length > 0 {
+        toolchain_print_version_error(decision);
+        return 2;
+    }
+    if decision.pin_version.length == 0 { return 0; }
+
+    // A dispatch already happened, so this process *is* somebody's selection
+    // and the marker names their target, not this root's field. Re-selecting
+    // would let a rank-3 field override the rank-1 or rank-2 selector that
+    // chose this toolchain — and since the marker no longer matches the field,
+    // `toolchain_select_exact` would report a dispatch loop against a
+    // perfectly healthy store. The forwarded argv cannot carry the evidence
+    // itself: the selector token is stripped before re-exec, and an exact
+    // `SAILFIN_TOOLCHAIN` is dropped from the child environment, so the marker
+    // is the only surviving record that a higher rank already chose. Ordinary
+    // management routing stands down on the same signal (`management.sfn`).
+    if env.get("SAILFIN_TOOLCHAIN_DISPATCHED").length > 0 { return 0; }
+
+    // Rank 2 outranks this field. It is applied downstream by
+    // `toolchain_gate_or_dispatch` and the `version` path, which hold the entry
+    // hint its floor check is measured against; standing down here rather than
+    // racing them is what keeps the documented precedence order intact.
+    if toolchain_env_exact_selector().length > 0 { return 0; }
+
+    // SFEP-0073 §3.3's mode table gives `off`/`0` one meaning: *do not
+    // dispatch*, and run the entry toolchain. The two skip flags are
+    // documented alongside it as proceeding on the running toolchain without
+    // dispatching. They are not floor overrides here — there is no mismatch to
+    // override, since an exact field selects unconditionally — so honoring
+    // them has to mean declining to select at all. This is also the escape
+    // hatch a deliberate seed transition depends on (`compiler/capsule.toml`).
+    let knob = env.get("SAILFIN_TOOLCHAIN");
+    if strings_equal(knob, "off") || strings_equal(knob, "0") { return 0; }
+    if argv_skip || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK") { return 0; }
+
+    // Naming the manifest that supplied the field, not merely the field, so a
+    // per-field workspace/member merge is legible in the diagnostic.
+    let source_label = decision.version_source + " [toolchain] version";
+    // `version_query` doubles as the skip flag: reporting a version is not
+    // running a build, so a floor mismatch warns and still answers rather than
+    // refusing. Every other hatch already returned above.
+    return toolchain_select_exact(decision.pin_version, source_label, "", ctx, version_query, version_query);
 }
 
 fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![clock, io, net] {
@@ -417,5 +498,6 @@ fn _dispatch_exec_target(target: string, ctx: CliContext, allow_fetch: boolean, 
 export {
     toolchain_env_exact_selector,
     toolchain_gate_or_dispatch,
-    toolchain_select_exact
+    toolchain_select_exact,
+    toolchain_select_project_exact
 };

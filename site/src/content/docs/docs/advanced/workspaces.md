@@ -10,7 +10,7 @@ A **workspace** is a collection of related capsules that are developed, built, a
 
 A workspace is defined by a `workspace.toml` file at the root of the repository. Each member capsule retains its own `capsule.toml` for its own metadata and dependencies.
 
-**Note:** `[workspace] members` (including multi-line arrays and trailing-`/*` globs) and the `[toolchain]` floor are **shipped and enforced today** — `sfn build`/`run`/`check`/`test` gate on the toolchain floor. The `[policies.*]` capability envelope, `[shared-dependencies]` inheritance, and the `sfn workspace` subcommand are **designed and specified but not yet enforced**; the format shown for those sections is the target design.
+**Note:** `[workspace] members` (including multi-line arrays and trailing-`/*` globs) and the `[toolchain]` floor and exact `version` are **shipped and enforced today** — `sfn build`/`run`/`check`/`test` gate on the toolchain floor, and an exact `version` is resolved and dispatched before the command tree parses. The `[policies.*]` capability envelope, `[shared-dependencies]` inheritance, and the `sfn workspace` subcommand are **designed and specified but not yet enforced**; the format shown for those sections is the target design.
 
 ## When to Use a Workspace
 
@@ -56,7 +56,8 @@ members = ["core", "api", "cli"]
 resolver = "v1"
 
 [toolchain]
-sfn = "0.8.0-alpha.3"
+sfn = "0.10.4"
+version = "0.10.4"
 
 [policies.unsafe]
 allowed_capsules = ["core"]
@@ -84,11 +85,12 @@ allowed_capsules = ["api"]
 
 #### `[toolchain]`
 
-Pins the `sfn` toolchain for every member capsule by default. Same fields and floor semantics as a capsule's own `[toolchain]` (see [Toolchain Pinning](./capsules#toolchain-pinning)):
+Pins the `sfn` toolchain for every member capsule by default. Same fields and semantics as a capsule's own `[toolchain]` (see [Toolchain Pinning](./capsules#toolchain-pinning)):
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `sfn` | string | no | A semver floor — the running `sfn` must be `>=` this version. |
+| `sfn` | string | no | A semver floor — the selected `sfn` must be `>=` this version. |
+| `version` | string | no | An exact release version every member selects by default — independent of the `sfn` floor; must itself satisfy `sfn`/`channel`. |
 | `channel` | string | no | Minimum acceptable stability channel: `"stable"`, `"rc"`, `"beta"`, or `"alpha"`. |
 
 #### `[policies.<capability>]`
@@ -150,22 +152,23 @@ allowed_capsules = ["api"]
 
 ## Toolchain Pinning
 
-A `workspace.toml` `[toolchain]` pin is the default for every member capsule. A member's own `capsule.toml` `[toolchain]` section overrides the workspace pin **per field**: a member can override just `sfn`, just `channel`, or both, and any field it doesn't set falls back to the workspace value.
+A `workspace.toml` `[toolchain]` pin is the default for every member capsule. A member's own `capsule.toml` `[toolchain]` section overrides the workspace pin **per field**: a member can override just `sfn`, just `version`, just `channel`, or any combination, and any field it doesn't set falls back to the workspace value.
 
 ```toml
 # workspace.toml
 [toolchain]
-sfn = "0.8.0-alpha.3"
-channel = "alpha"
+sfn = "0.10.0"
+version = "0.10.3"
+channel = "stable"
 ```
 
 ```toml
-# api/capsule.toml — overrides only `sfn`; inherits `channel = "alpha"` from the workspace
+# api/capsule.toml — overrides only `version`; inherits `sfn`/`channel` from the workspace
 [toolchain]
-sfn = "0.8.0"
+version = "0.10.4"
 ```
 
-`sfn build`/`run`/`check`/`test` resolve both the project root and the workspace root and apply this precedence before comparing against the running toolchain; see [Toolchain Pinning](./capsules#toolchain-pinning) for the gate behavior and escape hatches.
+`sfn build`/`run`/`check`/`test` resolve both the project root and the workspace root and apply this per-field precedence before comparing against the selected toolchain; see [Toolchain Pinning](./capsules#toolchain-pinning) for the floor gate, exact-selection precedence, and escape hatches. A diagnostic for either field names whichever manifest actually supplied it — `workspace.toml` and `capsule.toml` can each contribute different fields to the same effective requirement.
 
 ## Shared Dependencies
 
@@ -349,7 +352,7 @@ This configuration enforces:
 |---|---|
 | Workspace root | Directory containing `workspace.toml` |
 | Members | `[workspace] members = ["core", "api", "cli"]` |
-| Toolchain pin | `[toolchain] sfn = "<floor>"`; a member `capsule.toml` overrides per field |
+| Toolchain pin | `[toolchain] sfn = "<floor>"` / `version = "<exact>"`; a member `capsule.toml` overrides per field |
 | Capability restriction | `[policies.unsafe] allowed_capsules = ["core"]` |
 | Shared dependency | `[shared-dependencies] "sfn/log" = "^0.1"` |
 | Intra-workspace dep | `"core" = { path = "../core" }` in capsule's `[dependencies]` |

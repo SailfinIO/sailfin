@@ -1,7 +1,9 @@
 # `sfn toolchain --json` Schema (`sailfin-toolchains/1`)
 
 Status: Locked at `sailfin-toolchains/1`. Shipped in SFN-1066
-(`docs/proposals/0073-toolchain-lifecycle.md` §3.4).
+(`docs/proposals/0073-toolchain-lifecycle.md` §3.4). `requirement.version` is
+populated as of SFN-1070 (§3.9 slice 2) — no schema bump, since the field was
+already reserved and `null`.
 
 `sfn toolchain list --json`, `sfn toolchain active --json`, and
 `sfn toolchain verify --json` emit a single UTF-8 JSON document on stdout.
@@ -48,7 +50,7 @@ guards the field set so a silent leak fails CI before it lands.
   },
   "requirement": {
     "minimum": "0.10.0",
-    "version": null,
+    "version": "0.10.3",
     "channel": "stable",
     "source": "workspace.toml"
   },
@@ -98,7 +100,7 @@ guards the field set so a silent leak fails CI before it lands.
 | Field | Type | Notes |
 |---|---|---|
 | `minimum` | string \| null | The project's floor version (today's pin semantics). `null` when the project declares no requirement. |
-| `version` | string \| null | The project's *exact* pin. Always `null` in this slice — exact project pins are SFEP-0073 Slice 2 and unshipped. |
+| `version` | string \| null | The project's *exact* `[toolchain] version` (SFEP-0073 §3.2, SFN-1070). Independent of `minimum` — an exact `0.10.3` is not satisfied by `0.10.4`. `null` when the project declares no exact version. |
 | `channel` | string \| null | The project's declared update channel, if any. |
 | `source` | string \| null | Which file supplied the requirement (e.g. `"workspace.toml"`). `null` when there is no requirement. |
 

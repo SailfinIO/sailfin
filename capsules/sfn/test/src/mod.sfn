@@ -419,6 +419,10 @@ export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compi
 // its own value for a key the outer environment may also carry — `getenv`
 // returns the first match, so an inherited entry would shadow the push.
 export {
+    // `bash_path(path)` (SFN-1151) is the explicit Win32-to-MSYS bridge for
+    // fixtures that intentionally validate Bash scripts. Callers retain the
+    // native spelling for Win32 filesystem APIs and child cwd parameters.
+    bash_path,
     clean_runner_env,
     clean_runner_env_without,
     // `host_is_windows()` (SFN-1114) is for a test whose EXPECTED VALUE differs

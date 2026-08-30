@@ -78,7 +78,8 @@ import {
     run as toolchain_run,
     toolchain_env_exact_selector,
     toolchain_route_management,
-    toolchain_select_exact
+    toolchain_select_exact,
+    toolchain_select_project_exact
 } from "./commands/toolchain";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
@@ -398,6 +399,46 @@ fn _v2_is_version_query(args: string[]) -> boolean {
     return strings_equal(args[0], "-V");
 }
 
+// Whether SFEP-0073 §3.3 rank 3 — the root's exact `[toolchain] version` —
+// applies to this invocation. Five prefixes are held back from it: the two
+// §3.5 names outright, plus the "minimal configuration prefixes" §3.3 places
+// on the same side of the line.
+//
+// `dev` is the self-hosting driver: it builds *this* checkout with *this*
+// binary, so dispatching it to a released payload would compile the working
+// tree with a compiler the tree is not the source of. `toolchain` is the
+// repair surface (§3.5) — a missing or broken selected payload has to stay
+// fixable, which it is not if reaching the fix requires the payload.
+//
+// `config` and `login` write per-user state that outlives the project, so
+// routing them by whichever directory the user happens to be standing in
+// would let an older payload's schema rewrite a global file. `completion` is
+// the sharpest of the three: `eval "$(sfn completion bash)"` in a shell
+// startup file would otherwise reach `_dispatch_exec_target` with fetching
+// enabled, so opening a terminal inside a project whose pinned payload is not
+// installed would block on a compiler download.
+//
+// Note the guard is process-local. It keeps `sfn dev ...` itself from
+// dispatching, but the self-host drivers spawn their children as plain
+// `build`/`selfhost` argv, which this cannot see — see the note on
+// `workspace.toml`'s `[toolchain]` block.
+//
+// A bare flag (`--help`, `--color=...`) is answered by the entry for the same
+// reason §3.5 intercepts help prefixes. `--version`/`-V` are the exception:
+// §3.3 names `version` among the commands selection applies to, and the query
+// stays network-silent through `version_query`.
+fn _v2_project_selection_applies(args: string[]) -> boolean {
+    if args.length == 0 { return false; }
+    if _v2_is_version_query(args) { return true; }
+    if starts_with(args[0], "-") { return false; }
+    let head = args[0];
+    if strings_equal(head, "dev") { return false; }
+    if strings_equal(head, "toolchain") { return false; }
+    if strings_equal(head, "config") { return false; }
+    if strings_equal(head, "login") { return false; }
+    return !strings_equal(head, "completion");
+}
+
 // Whether the parsed command tree is rooted at `name` — the single gate every
 // dispatch block below uses.
 //
@@ -523,6 +564,28 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     if !ctx.selector_resolved {
         let mgmt_rc = toolchain_route_management(args, ctx);
         if mgmt_rc != 0 { return mgmt_rc; }
+    }
+
+    // SFEP-0073 §3.3 rank 3: the active root's exact `[toolchain] version`.
+    // Placed after management routing so `sfn toolchain ...` still reaches an
+    // implementation when the selected payload is the thing that is broken,
+    // and before the command tree is built so a command *this* toolchain
+    // cannot parse is still forwarded to the version the root selects — the
+    // upward direction of §3.9 slice 2's bidirectional dispatch. The downward
+    // direction needs nothing extra: the selection is an exact match rather
+    // than a floor, so a newer entry re-execs an older payload on the same
+    // path.
+    //
+    // A one-shot selector outranks the field (rank 1) and an exact
+    // `SAILFIN_TOOLCHAIN` outranks it too (rank 2, applied downstream where the
+    // entry hint is known), so this runs only when neither claimed the
+    // selection.
+    if !ctx.selector_resolved {
+        if _v2_project_selection_applies(args) {
+            let proj_version_query = _v2_is_version_query(args);
+            let proj_rc = toolchain_select_project_exact(ctx, _v2_argv_has_skip_flag(args), proj_version_query);
+            if proj_rc != 0 { return proj_rc; }
+        }
     }
 
     // Root command, composed from each subcommand's `command_def()`. Built

@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-30 (SFN-910, SFN-1069, SFN-1067, SFN-1120, SFN-1066, SFN-1065, SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
+Updated: 2026-08-30 (SFN-1070, SFN-910, SFN-1069, SFN-1067, SFN-1120, SFN-1066, SFN-1065, SFN-1064, SFN-777, SFN-943, SFN-1063, SFN-1107, SFN-1040, SFN-1086, SFN-1035,
 SFN-1034, SFN-1033, SFN-1039, SFN-1026, SFN-808, SFN-1024, SFN-726, SFN-916). Seed pinned to `0.10.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
@@ -403,12 +403,52 @@ here.
   (`sfn toolchain default`, the envelope's `default` field) is SFN-1068 and
   unshipped — the field is always `null`; update checks / channel discovery
   (`sfn toolchain update`, the envelope's `update` field) are SFEP-0073 slice
-  4 and unshipped — always `null`; exact project pins
-  (`requirement.version`) are SFEP-0073 slice 2 and unshipped — always
-  `null`, so today's project `[toolchain]` pin remains floor semantics (`sfn
-  >=`); `sfn toolchain remove` is not shipped (SFN-1068). `entry-version` and
-  management-protocol routing ship separately (SFN-1067, below). SFEP-0073
+  4 and unshipped — always `null`; `sfn toolchain remove` is not shipped
+  (SFN-1068). `entry-version` and management-protocol routing ship separately
+  (SFN-1067, below). Exact project pins (`requirement.version`) shipped as
+  slice 2 (SFN-1070, below) — the field is no longer always `null`. SFEP-0073
   stays `Accepted`, not `Implemented`.
+- **Exact project toolchain roots — `[toolchain] version`** (SFEP-0073 §§3.2–
+  3.3 slice 2, SFN-1070). `capsule.toml`/`workspace.toml` gain an optional
+  exact `version` field alongside the existing `sfn` floor and `channel`
+  constraint: `sfn` keeps SFEP-0046 floor semantics (running/selected `>=`
+  pin) unchanged, and `version` is a distinct exact requirement — a selected
+  `0.10.4` is not satisfied by `0.10.5` — so changing one never raises the
+  other. `toml_get_toolchain_version` (`toml_parser.sfn`) reads the field;
+  `ToolchainDecision.pin_version`/`version_source`/`version_error`
+  (`capsule_resolver/toolchain.sfn::toolchain_decide`) carry it through the
+  same per-field workspace/member merge as `sfn`/`channel`, so a diagnostic
+  names whichever manifest actually supplied the exact field. `version` must
+  be a complete release semver via `semver_is_exact_release` — build metadata
+  (`+dev.<hash>`), an incomplete version (`0.10`), and a channel alias
+  (`stable`) are all rejected with `invalid [toolchain] version` before any
+  fetch; an exact version that fails the root's own `sfn` floor or `channel`
+  constraint is rejected the same way (`does not satisfy the project's own
+  requirement`), both fail-closed ahead of the store lookup. Selection:
+  `toolchain_select_project_exact` (`toolchain/dispatch.sfn`) resolves the
+  field from the current working directory in `cli/main.sfn`
+  (`_v2_project_selection_applies`) before the command tree is parsed, so it
+  applies uniformly to `version`, `init`, `fmt`, `check`, `build`, `run`,
+  `test`, `emit`, `bench`, `package`, and any command this toolchain does not
+  recognize — `sfn dev ...`, `sfn toolchain ...`, `sfn config`, `sfn login`,
+  and `sfn completion` are excluded by design
+  (§3.5). It ranks below a `+<version>`/`toolchain run` one-shot selector and
+  an exact `SAILFIN_TOOLCHAIN` (both already shipped, SFN-1065) and above the
+  entry toolchain, and reuses `toolchain_select_exact` for the actual
+  dispatch, so downward (newer entry to older pinned) and upward (older entry
+  to newer pinned) re-exec both work. `sfn init` now scaffolds `sfn` and
+  `version` from the same stripped release version (`init.sfn`, via
+  `toml_generate`'s new second toolchain argument). `sfn toolchain active`
+  reports the exact field as a new `exact:` line beside `requires:`, and the
+  `sailfin-toolchains/1` envelope's `requirement.version`
+  (`docs/reference/toolchains-json-schema.md`) is populated instead of always
+  `null` — no schema version bump, since the field was already reserved.
+  Still unshipped: channel selectors/`latest` resolution in a project
+  `version` field (slice 4, needs the signed index), the per-user default and
+  `sfn toolchain remove` (slice 3, SFN-1068), and any command that writes
+  `version` into a manifest other than `sfn init` — `sfn toolchain update` is
+  slice 4 and does not exist yet. SFEP-0073 stays `Accepted`, not
+  `Implemented`.
 - **Management-protocol routing + `sfn toolchain entry-version`** (SFEP-0073
   §3.5/§3.9 slice 3, SFN-1067). `sfn toolchain ...` is intercepted as a raw
   argv prefix in `cli/main.sfn`, right after the one-shot selector peel and
@@ -1619,7 +1659,8 @@ here.
 | Toolchain pinning (`[toolchain]` manifest + version/channel gate) | **Shipped (Phase 1)** | SFEP-0046 §3.1–3.4, SFN-167: floor-semver + channel gate on `sfn build`/`run`/`check`/`test`; `sfn init` scaffolds the pin; `--skip-toolchain-check` / `SAILFIN_SKIP_TOOLCHAIN_CHECK` / `SAILFIN_TOOLCHAIN=off` escape hatches. Root `workspace.toml` `[toolchain]` floor adopted repo-wide (SFEP-0051 Phase 2, SFN-414): default floor for every member, member `capsule.toml` overrides per field. |
 | Native toolchain install (`sfn toolchain install`) | **Shipped (Phase 2 acquire)** | SFEP-0046 §3.5, SFN-168/SFN-660: native fetch + fail-closed Ed25519-signature + binary-safe in-process SHA-256 verification into the version store, including native Windows; `SAILFIN_TOOLCHAIN_RELEASE_BASE` mirror override. Extraction is in-process via `sfn/archive`'s `targz_extract` (SFEP-0071, SFN-898) — no `tar` subprocess remains on this path; a rejected/malformed archive is `E0615`. On Windows, asset resolution now prefers the `-msvc` asset over the legacy mingw one, falling back to the latter only when the former is absent (`compiler/src/cli/commands/toolchain.sfn`, SFN-1033; see Installer below) — matched by `install.ps1`/`install.sh`. |
 | Toolchain install-manifest recording + verification (`.install-manifest`) | **Shipped (slice 1)** | SFEP-0073 §3.8 (records §3.5's `management_protocol` field), SFN-1064: `compiler/src/toolchain/manifest.sfn` (schema/writer/reader) + `integrity.sfn` (payload hashing/verification). `toolchain_lay_out_store_entry` writes `.install-manifest` before `.sha256` for every store entry; `sfn toolchain install` forces an uncached full verification before the atomic commit; dispatch verifies the selected executable and bundled runtime/capsule inputs before `process.exec`/any build-like command, fail-closed with the exact reinstall command. Legacy/pre-manifest entries report `unverified` and still run (SFEP-0046 boundary). `sfn toolchain verify`/`list`/`active` ship on top of this manifest (SFN-1066); `management_protocol` routing on this field ships separately (SFN-1067, below). SFEP-0073 stays `Accepted`. |
-| Toolchain inspection (`sfn toolchain list`/`active`/`verify`) | **Shipped (slice 1)** | SFEP-0073 §3.9 slice 1, SFN-1066: `list [--json]` enumerates every store entry (host-qualified tree + read-only legacy flat tree) with `state`/`integrity`/`roles`; `active [--json]` explains the current directory's selection (no network request); `verify [<version> \| --all] [--json]` runs full uncached payload verification against the SFN-1064 manifest. Shared `sailfin-toolchains/1` envelope (`docs/reference/toolchains-json-schema.md`), schema-locked by `compiler/tests/e2e/toolchain_inspect_json_test.sfn`; exit `0`/`1`/`2` per finding/setup-failure. New diagnostics `E0618` (corrupt entry), `E0619` (partial install), `E0620` (selected toolchain not installed). The envelope's `default` (SFN-1068) and `update` (SFEP-0073 slice 4) fields, and `requirement.version` (slice 2), are always `null` in this slice; `sfn toolchain remove` is unshipped (SFN-1068). SFEP-0073 stays `Accepted`, not `Implemented`. |
+| Toolchain inspection (`sfn toolchain list`/`active`/`verify`) | **Shipped (slice 1)** | SFEP-0073 §3.9 slice 1, SFN-1066: `list [--json]` enumerates every store entry (host-qualified tree + read-only legacy flat tree) with `state`/`integrity`/`roles`; `active [--json]` explains the current directory's selection (no network request); `verify [<version> \| --all] [--json]` runs full uncached payload verification against the SFN-1064 manifest. Shared `sailfin-toolchains/1` envelope (`docs/reference/toolchains-json-schema.md`), schema-locked by `compiler/tests/e2e/toolchain_inspect_json_test.sfn`; exit `0`/`1`/`2` per finding/setup-failure. New diagnostics `E0618` (corrupt entry), `E0619` (partial install), `E0620` (selected toolchain not installed). The envelope's `default` (SFN-1068) and `update` (SFEP-0073 slice 4) fields are always `null` in this slice; `requirement.version` shipped as slice 2 (SFN-1070, below); `sfn toolchain remove` is unshipped (SFN-1068). SFEP-0073 stays `Accepted`, not `Implemented`. |
+| Exact project toolchain roots (`[toolchain] version`) | **Shipped (slice 2)** | SFEP-0073 §§3.2–3.3 slice 2, SFN-1070: optional exact `version` field in `capsule.toml`/`workspace.toml`, independent of the `sfn` floor (`0.10.4` is not satisfied by `0.10.5`); rejects build metadata, incomplete semver, and channel aliases, and rejects an exact version that fails the root's own `sfn`/`channel` constraint, both before any fetch (`capsule_resolver/toolchain.sfn::toolchain_decide`). Resolved from the working directory before the command tree parses (`toolchain_select_project_exact`, `toolchain/dispatch.sfn`), so it applies uniformly to `version`, `init`, `fmt`, `check`, `build`, `run`, `test`, `emit`, `bench`, `package`, and unrecognized future commands (`dev`, `toolchain`, `config`, `login`, and `completion` excluded by design — the self-hosting driver, the repair surface, and the entry-level configuration commands, `completion` notably because it is commonly run from a shell startup file); ranks below `+<version>`/`SAILFIN_TOOLCHAIN` and above the entry toolchain, and dispatches both downward and upward. `sfn init` now scaffolds `sfn` and `version` together; `sfn toolchain active` reports a new `exact:` line; the JSON envelope's `requirement.version` is populated instead of always `null`. Per-field workspace/member precedence matches `sfn`/`channel`. Still unshipped: channel selectors in a project `version` field, the per-user default/`remove` (slice 3, SFN-1068), and any command that writes `version` other than `sfn init` (`sfn toolchain update` is slice 4). SFEP-0073 stays `Accepted`, not `Implemented`. |
 | Management-protocol routing + `sfn toolchain entry-version` | **Shipped (slice 3, routing half)** | SFEP-0073 §3.5/§3.9 slice 3, SFN-1067: `sfn toolchain ...` is intercepted as a raw argv prefix in `cli/main.sfn` (after the one-shot selector peel, before the command tree builds) and routes to the newest verified, host-store-qualified payload whose `management_protocol` falls in `[TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN, _MAX]` (both `1`, `compiler/src/toolchain/manifest.sfn`); an entry with no manifest, or one not strictly newer than the running entry, is never a candidate. A payload above the routable range refuses with upgrade guidance and exit `2` unless a compatible payload also exists, in which case it warns and routes there; the sole repair path kept in the entry is exact-version `sfn toolchain install <version>`. New leaf `sfn toolchain entry-version` (never itself routed) reports this executable's version/host/path/protocol-range. Guarded by `SAILFIN_TOOLCHAIN_DISPATCHED` (an outranking §3.3 selection already won) and the new `SAILFIN_TOOLCHAIN_MANAGEMENT=<version>` re-entrancy marker. Revocation exclusion is **not implemented** — `_management_known_revoked` is an empty stub pending SFEP-0073 §3.9 slice 4 (SFN-1069). SFEP-0073 stays `Accepted`, not `Implemented`. |
 | Toolchain re-exec dispatch (`SAILFIN_TOOLCHAIN=auto`/`local`/`<version>`/`off`) | **Shipped** | SFEP-0046 §3.5, SFN-172: on a `[toolchain]` floor-check failure, `sfn build`/`run`/`check`/`test` fetch (if needed, `auto`, default) + verify + re-exec the pinned toolchain with the original argv; re-entrancy guard `SAILFIN_TOOLCHAIN_DISPATCHED`; offline falls back to the install hint. SFEP-0046 tracks six issues (SFN-167–172); it stays `Accepted` pending the remainder. |
 | `workspace.lock` (`sfn lock` write + resolver consume) | **Shipped** | Explicit `sfn lock` writes the root lockfile (#1070); `sfn lock --work-dir DIR` sets the workspace-discovery start dir so the command can run against a workspace without `cd`. Resolver prefers `workspace → workspace.lock → capsule.lock → cache → registry` for external deps, sibling-first untouched (#1071). Roots own lockfiles; library capsules don't commit them. Committing the root `workspace.lock` is #1050, gated on a seed embedding #1071 (satisfied at `v0.7.0-alpha.31`) |

@@ -16,68 +16,97 @@
 // never drift apart, or PR CI is stranded on a permanently cold cache.
 import { remove_all } from "sfn/fs";
 import { contains } from "sfn/strings";
-import { clean_runner_env, sfn_bin_abs_path } from "sfn/test";
+import {
+    bash_path,
+    clean_runner_env_without,
+    default_scratch_dir,
+    report_child_failure,
+    sfn_bin_abs_path
+} from "sfn/test";
 
 import { copy_tree } from "../../src/build/fs_tree";
 
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
 fn _repo_root() -> string ![io] {
-    let mut repo = env.get("SAILFIN_REPO_ROOT");
-    if repo.length == 0 { repo = env.get("PWD"); }
-    if repo.length == 0 { repo = "."; }
-    return repo;
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    let resolved: *u8 = realpath("." as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    let pwd = env.get("PWD");
+    if pwd.length > 0 { return pwd; }
+    return ".";
 }
 
 // `run_capture`'s env is empty, not inherited — the script needs
 // `sha256sum`/`shasum`, `find`, and `sort` on `PATH`. Derived by
 // subtraction via `clean_runner_env` (SFN-1114); no nested scratch is
 // threaded through this helper.
-fn _script_env() -> string[] ![io] { return clean_runner_env(""); }
+fn _script_env() -> string[] ![io] {
+    let temp = default_scratch_dir() + "/sfn-module-layout bash temp";
+    fs.createDirectory(temp, true);
+    let mut child_env = clean_runner_env_without("", ["TMPDIR"]);
+    child_env.push("TMPDIR=" + bash_path(temp));
+    return child_env;
+}
 
 fn _fingerprint(root: string) -> string ![io] {
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
-    let _exit = process.run_capture(["bash", script, root], _script_env());
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
+    let exit = process.run_capture(["bash", script, bash_path(root)], _script_env());
     let output = process.capture_take_stdout();
-    let _error = process.capture_take_stderr();
+    let error = process.capture_take_stderr();
+    report_child_failure("module-layout-fingerprint", exit, output, error);
     return output;
 }
 
 fn _default_fingerprint(root: string) -> string ![io] {
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
-    let _exit = process.run_capture_cwd(["bash", script], _script_env(), root);
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
+    let exit = process.run_capture_cwd(["bash", script], _script_env(), root);
     let output = process.capture_take_stdout();
-    let _error = process.capture_take_stderr();
+    let error = process.capture_take_stderr();
+    report_child_failure("module-layout-fingerprint", exit, output, error);
     return output;
 }
 
 fn _freshness_fingerprint(root: string) -> string ![io] {
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
-    let _exit = process.run_capture_cwd(["bash", script, "--freshness"], _script_env(), root);
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
+    let exit = process.run_capture_cwd(["bash", script, "--freshness"], _script_env(), root);
     let output = process.capture_take_stdout();
-    let _error = process.capture_take_stderr();
+    let error = process.capture_take_stderr();
+    report_child_failure("module-layout-fingerprint --freshness", exit, output, error);
     return output;
 }
 
 fn _ci_freshness_fingerprint(root: string) -> string ![io] {
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
-    let _exit = process.run_capture_cwd(["bash", script, "--ci-freshness"], _script_env(), root);
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
+    let exit = process.run_capture_cwd(["bash", script, "--ci-freshness"], _script_env(), root);
     let output = process.capture_take_stdout();
-    let _error = process.capture_take_stderr();
+    let error = process.capture_take_stderr();
+    report_child_failure("module-layout-fingerprint --ci-freshness", exit, output, error);
     return output;
 }
 
 fn _inventory_view(root: string, view: string) -> string ![io] {
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
-    let _exit = process.run_capture_cwd(["bash", script, view], _script_env(), root);
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
+    let exit = process.run_capture_cwd(["bash", script, view], _script_env(), root);
     let output = process.capture_take_stdout();
-    let _error = process.capture_take_stderr();
+    let error = process.capture_take_stderr();
+    report_child_failure("module-layout-fingerprint " + view, exit, output, error);
     return output;
 }
 
 fn _member_manifest(root: string, name: string) -> string ![io] {
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
-    let _exit = process.run_capture_cwd(["bash", script, "--member-manifest", name], _script_env(), root);
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
+    let exit = process.run_capture_cwd(["bash", script, "--member-manifest", name], _script_env(), root);
     let output = process.capture_take_stdout();
-    let _error = process.capture_take_stderr();
+    let error = process.capture_take_stderr();
+    report_child_failure("module-layout-fingerprint --member-manifest", exit, output, error);
     return output;
 }
 
@@ -148,10 +177,12 @@ test "module layout fingerprint: explicit overlapping roots preserve v1 multipli
     fs.createDirectory(scratch, true);
     fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
     let once = _fingerprint(scratch);
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
-    let _exit = process.run_capture(["bash", script, scratch, scratch], _script_env());
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
+    let exit = process.run_capture(["bash", script, bash_path(scratch), bash_path(scratch)], _script_env());
     let twice = process.capture_take_stdout();
-    let _error = process.capture_take_stderr();
+    let error = process.capture_take_stderr();
+    report_child_failure("module-layout-fingerprint overlapping roots", exit, twice, error);
     assert once != twice;
     assert remove_all(scratch);
 }
@@ -233,10 +264,14 @@ test "module layout fingerprint: freshness is checkout-root independent and igno
 test "module layout fingerprint: duplicate canonical members fail every inventory view" ![io] {
     let root = _repo_root()
         + "/compiler/tests/unit/fixtures/repository_topology/duplicate_name";
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
     let exit = process.run_capture_cwd(["bash", script, "--member-records"], _script_env(), root);
-    let _output = process.capture_take_stdout();
+    let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
+    if !contains(error, "duplicate workspace capsule name") {
+        report_child_failure("module-layout-fingerprint --member-records", exit, output, error);
+    }
     assert exit != 0;
     assert contains(error, "duplicate workspace capsule name");
 }
@@ -284,10 +319,14 @@ test "module layout fingerprint: missing declared entry fails closed" ![io] {
     fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"compiler\"]\n");
     fs.writeFile(scratch + "/compiler/capsule.toml", "[capsule]\nname = \"sfn/compiler\"\n\n[build]\nkind = \"binary\"\nentry = \"src/missing.sfn\"\n");
     fs.writeFile(scratch + "/compiler/src/other.sfn", "fn other() -> int { return 1; }\n");
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
     let exit = process.run_capture_cwd(["bash", script], _script_env(), scratch);
-    let _output = process.capture_take_stdout();
+    let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
+    if !contains(error, "missing declared entry") {
+        report_child_failure("module-layout-fingerprint missing entry", exit, output, error);
+    }
     assert exit != 0;
     assert contains(error, "missing declared entry");
     assert remove_all(scratch);
@@ -311,10 +350,14 @@ test "module layout fingerprint: non-runtime IR is outside the layout" ![io] {
 test "module layout fingerprint: missing member source fails closed" ![io] {
     let root = _repo_root()
         + "/compiler/tests/unit/fixtures/repository_topology/missing_source";
-    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
     let exit = process.run_capture_cwd(["bash", script], _script_env(), root);
-    let _output = process.capture_take_stdout();
+    let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
+    if !contains(error, "member has no Sailfin source input") {
+        report_child_failure("module-layout-fingerprint missing source", exit, output, error);
+    }
     assert exit != 0;
     assert contains(error, "member has no Sailfin source input");
 }
