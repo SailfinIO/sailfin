@@ -19,7 +19,8 @@ import {
 } from "sfn/archive";
 import { contains, int_to_string } from "sfn/strings";
 import {
-    clean_runner_env,
+    bash_path,
+    clean_runner_env_without,
     default_scratch_dir,
     skip,
     with_tmp_dir
@@ -46,7 +47,13 @@ fn _scratch_marker(name: string) -> string ![io] {
 
 // The child environment for the `bash` subprocess: derived by subtraction
 // from the real environment rather than a hand-rolled allowlist (SFN-1114).
-fn _child_env() -> string[] ![io] { return clean_runner_env(""); }
+fn _child_env() -> string[] ![io] {
+    let temp = default_scratch_dir() + "/sfn-payload-closure bash temp";
+    fs.createDirectory(temp, true);
+    let mut child_env = clean_runner_env_without("", ["TMPDIR"]);
+    child_env.push("TMPDIR=" + bash_path(temp));
+    return child_env;
+}
 
 fn _fixed_opts() -> CreateOptions {
     return CreateOptions {
@@ -61,7 +68,7 @@ fn _fixed_opts() -> CreateOptions {
 // (outside the fixture dir so it survives teardown) and returning the exit
 // code.
 fn _run_once(marker: string, tarball: string) -> int ![io] {
-    let exit = process.run_capture(["bash", "scripts/verify-payload-dep-closure.sh", tarball], _child_env());
+    let exit = process.run_capture(["bash", bash_path("scripts/verify-payload-dep-closure.sh"), bash_path(tarball)], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     // Unconditional, not `report_child_failure`-style: callers expect exit

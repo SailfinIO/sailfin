@@ -29,7 +29,7 @@
 // C runtime surface is introduced.
 import { remove_all } from "sfn/fs";
 import { Env, ProcessOutput, run_capture } from "sfn/os";
-import { find } from "sfn/strings";
+import { find, replace, to_lower } from "sfn/strings";
 
 // Create a fresh temporary directory, hand its absolute path to `body`,
 // and recursively remove the whole tree on scope exit — on both the
@@ -228,6 +228,27 @@ fn nested_runner_scratch(label: string) -> string ![io] {
 fn host_is_windows() -> boolean ![io] {
     if env.get("SystemRoot").length > 0 { return true; }
     return fs.exists("NUL");
+}
+
+// Translate a host-native path into the spelling expected by Bash-backed
+// fixtures. Git Bash consumes MSYS drive paths (`/c/work/...`), while the
+// native test runner and its filesystem/process APIs produce Win32 paths
+// (`C:\\work\\...`). Keep this bridge explicit at each shell boundary: a
+// native child cwd still needs the Win32 spelling, and POSIX hosts need no
+// translation at all.
+//
+// This deliberately does not invoke `bash` or `cygpath`. Shell-provider
+// selection is a separate fixture concern, and launching the wrong `bash`
+// (notably the Windows WSL app alias) merely to translate an argv path would
+// make the bridge circular. Drive-rooted paths are the form emitted by the
+// Windows runner; relative paths are separator-normalized and remain relative.
+fn bash_path(path: string) -> string ![io] {
+    if !host_is_windows() { return path; }
+    let normalized = replace(path, "\\", "/");
+    if normalized.length >= 3 && normalized[1] == ":" && normalized[2] == "/" {
+        return "/" + to_lower(normalized[0]) + substring(normalized, 2, normalized.length);
+    }
+    return normalized;
 }
 
 // Build a clean top-level child environment for spawning a nested `sfn test`
