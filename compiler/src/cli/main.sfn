@@ -79,7 +79,8 @@ import {
     toolchain_env_exact_selector,
     toolchain_route_management,
     toolchain_select_exact,
-    toolchain_select_project_exact
+    toolchain_select_project_exact,
+    toolchain_select_user_default
 } from "./commands/toolchain";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
@@ -585,6 +586,15 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
             let proj_version_query = _v2_is_version_query(args);
             let proj_rc = toolchain_select_project_exact(ctx, _v2_argv_has_skip_flag(args), proj_version_query);
             if proj_rc != 0 { return proj_rc; }
+
+            // Rank 4. Reached only when no higher rank named a version, so a
+            // root that pins one keeps its selection and the per-user default
+            // is what answers for a root that does not (SFEP-0073 §3.3). It
+            // shares this block's gating because a default is a selection like
+            // any other: the commands whose behaviour cannot vary with the
+            // compiler must not dispatch for it either.
+            let def_rc = toolchain_select_user_default(ctx, _v2_argv_has_skip_flag(args), proj_version_query);
+            if def_rc != 0 { return def_rc; }
         }
     }
 

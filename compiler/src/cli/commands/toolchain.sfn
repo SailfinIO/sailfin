@@ -306,7 +306,8 @@ export {
     toolchain_env_exact_selector,
     toolchain_gate_or_dispatch,
     toolchain_select_exact,
-    toolchain_select_project_exact
+    toolchain_select_project_exact,
+    toolchain_select_user_default
 } from "../../toolchain/dispatch";
 
 export { toolchain_route_management } from "../../toolchain/management";
