@@ -95,6 +95,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
             capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             resolved_capsule_specs: empty_paths,
             capsule_specs_known: false
         };
@@ -119,6 +120,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
             staging_failed: false,
             capabilities_required: resolved.capabilities_required,
             capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             resolved_capsule_specs: empty_paths,
             capsule_specs_known: true
         };
@@ -143,6 +145,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
             capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             resolved_capsule_specs: empty_paths,
             capsule_specs_known: false
         };
@@ -180,6 +183,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         staging_failed: false,
         capabilities_required: resolved.capabilities_required,
         capabilities_declared: resolved.capabilities_declared,
+        capabilities_dev_required: resolved.capabilities_dev_required,
         resolved_capsule_specs: _check_resolved_capsule_specs(resolved.sources),
         capsule_specs_known: true
     };

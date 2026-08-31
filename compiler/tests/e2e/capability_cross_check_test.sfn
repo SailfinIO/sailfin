@@ -197,3 +197,31 @@ test "capability cross-check: an unreadable manifest is E0407, not full authorit
     assert r.exit != 0;
     assert find(r.out, "E0407", 0) >= 0;
 }
+
+// ---- SFN-1216: dev-required widens the ceiling for tests only --------
+//
+// The forcing case is `sfn/crypto`: six timing and X.509-validity tests
+// declare `![clock]` on a capsule that deliberately reads no ambient
+// time. Without this key those tests would push `clock` into the shipped
+// surface, which SFEP-0016 turns into a syscall mask.
+test "capability cross-check: dev-required grants a test block" ![io] {
+    let fixture = _stage_raw("dev-required-test", _manifest("[capabilities]\nrequired = [\"io\"]\ndev-required = [\"clock\"]\n"), "timing.sfn", "test \"budget holds\" ![clock] {\n"
+        + "    assert true;\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit == 0;
+    assert find(r.out, "E0403", 0) < 0;
+}
+
+test "capability cross-check: dev-required does not grant shipped code" ![io] {
+    // The other half, and the one that matters: a dev-only effect must
+    // still fail on a shipped `fn`, or `dev-required` would just be a
+    // wider `required` with a friendlier name.
+    let fixture = _stage_raw("dev-required-shipped", _manifest("[capabilities]\nrequired = [\"io\"]\ndev-required = [\"clock\"]\n"), "tick.sfn", "fn tick() ![clock] {\n"
+        + "    return;\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit != 0;
+    assert find(r.out, "E0403", 0) >= 0;
+    assert find(r.out, "clock", 0) >= 0;
+}

@@ -626,6 +626,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
             capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             runtime_demand: resolved.runtime_demand
         };
     }
@@ -638,6 +639,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             staging_failed: false,
             capabilities_required: resolved.capabilities_required,
             capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             runtime_demand: resolved.runtime_demand
         };
     }
@@ -673,6 +675,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
             capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             runtime_demand: resolved.runtime_demand
         };
     }
@@ -705,6 +708,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
             capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             runtime_demand: resolved.runtime_demand
         };
     }
@@ -717,6 +721,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
         staging_failed: false,
         capabilities_required: resolved.capabilities_required,
         capabilities_declared: resolved.capabilities_declared,
+        capabilities_dev_required: resolved.capabilities_dev_required,
         runtime_demand: resolved.runtime_demand
     };
 }

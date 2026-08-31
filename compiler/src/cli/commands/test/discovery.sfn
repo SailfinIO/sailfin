@@ -138,6 +138,7 @@ struct TestGroup {
     // an `E0403` diagnostic.
     capabilities_required: string[];
     capabilities_declared: boolean;
+    capabilities_dev_required: string[];
     // SFN-882: carried from the group's resolver pass to the link site so both
     // use one demand set. See `TestCapsuleResolution.runtime_demand`.
     runtime_demand: string[];
@@ -324,7 +325,7 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
             let empty_caps: string[] = [];
             let empty_implicit: ImplicitSymbol[] = [];
             groups.push(TestGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, runtime_demand: runtime_demand_all()
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, runtime_demand: runtime_demand_all()
             });
             idx = groups.length - 1;
         }
@@ -432,6 +433,7 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
         // body declaring an effect outside the surface.
         groups[gi].capabilities_required = resolution.capabilities_required;
         groups[gi].capabilities_declared = resolution.capabilities_declared;
+        groups[gi].capabilities_dev_required = resolution.capabilities_dev_required;
         // SFN-882: `sfn test` opts OUT of demand-driven selection entirely, on
         // both sides — this is deliberate and load-bearing, not an oversight.
         //

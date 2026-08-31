@@ -42,6 +42,7 @@ struct AnalyzerInput {
     prelude_globals: string[];
     capabilities_required: string[];
     capabilities_declared: boolean;
+    capabilities_dev_required: string[];
     import_context: ImportResolutionContext;
     allow_bare_assert: boolean;
     effect_severity: string;
@@ -109,7 +110,7 @@ fn analyze_program(input: AnalyzerInput) -> AnalyzerResult {
     let type_diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit(program, input.imported_interfaces, analysis_symbols, input.prelude_globals, input.implicit_symbols);
     let ownership_findings = check_ownership_with_imports(program, analysis_symbols);
     let effect_violations = validate_effects_with_imports_api(program, analysis_symbols);
-    let capability_violations = validate_capsule_capabilities_api(program, input.capabilities_required, input.capabilities_declared);
+    let capability_violations = validate_capsule_capabilities_api(program, input.capabilities_required, input.capabilities_declared, input.capabilities_dev_required);
     let unrecognized_effects = validate_recognized_effects_api(program);
 
     let mut diagnostics: Diagnostic[] = [];

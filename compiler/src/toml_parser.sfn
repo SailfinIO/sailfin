@@ -739,6 +739,20 @@ fn toml_get_capabilities_required(text: string) -> string[] {
     return _toml_split_lines_into_array(toml_get_string_array(text, "capabilities", "required"));
 }
 
+// SFN-1216: `[capabilities] dev-required = [...]`, the test-time half of
+// the ceiling. Unioned into the surface only when checking a
+// `TestDeclaration`, never for shipped code, so a capsule whose tests
+// need an effect it does not ship keeps that effect out of its shipped
+// surface — and out of the syscall mask SFEP-0016 derives from it.
+//
+// Absent means empty, so a manifest without the key behaves exactly as
+// before. The precedent is `sfn add`, which already excludes dev
+// dependencies' capabilities from a consumer's runtime surface
+// (`cli/commands/add.sfn`).
+fn toml_get_capabilities_dev_required(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "capabilities", "dev-required"));
+}
+
 // SFEP-0051 Phase 4a: workspace capability-envelope getters. Read the
 // `[workspace.capabilities]` effect lists from a workspace.toml. Parsing
 // only — envelope validation (canonical-effect membership, alphabetical

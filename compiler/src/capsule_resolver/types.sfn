@@ -300,6 +300,7 @@ struct CheckCapsuleResolution {
     // ceiling that fails E0403 on every declared effect (SFN-764).
     capabilities_required: string[];
     capabilities_declared: boolean;
+    capabilities_dev_required: string[];
     // SFN-686: the canonical `<scope>/<name>` specs this resolver pass
     // located. The analyzer mints E0430 for a capsule import naming a spec
     // outside this set. `capsule_specs_known` distinguishes "the pass ran and
@@ -335,6 +336,7 @@ struct TestCapsuleResolution {
     // produces an `E0403` diagnostic.
     capabilities_required: string[];
     capabilities_declared: boolean;
+    capabilities_dev_required: string[];
     // SFN-882: the demand set this resolution used. The test-link path MUST
     // narrow its runtime capsule with this exact value, not with its own
     // independently-derived one. `sfn test` threads a non-empty `runtime_root`,

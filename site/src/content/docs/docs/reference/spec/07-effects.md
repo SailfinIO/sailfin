@@ -45,6 +45,16 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 
    **Scope of the cross-check.** Unlike the in-module and cross-module gates in item 2, `E0403` is enforced by `sfn check` and `sfn test`, which resolve the manifest surface, and not yet by `sfn build` / `sfn run`, whose module path validates effects without a capability surface. `E0407` is raised by the resolver and so does apply on every path. Do not read "every build path" in item 2 as covering the capsule ceiling
 
+   **Test-time capabilities.** `[capabilities] dev-required = [...]` widens the ceiling for `test` blocks only; shipped functions and struct methods are always measured against `required` alone. It exists so a capsule whose tests exercise an effect it never ships need not name that effect in its shipped surface — which SFEP-0016 turns into a syscall mask. Absent `dev-required` means empty, so a manifest without the key behaves exactly as one written before the key existed. This mirrors `sfn add`, which already excludes dev-dependencies' capabilities from a consumer's runtime surface:
+
+   ```toml
+   [capabilities]
+   required = ["io", "rand"]      # the shipped surface, and the derived mask
+   dev-required = ["clock"]       # timing assertions in `test` blocks only
+   ```
+
+   An effect that appears only in `dev-required` still fails `E0403` on a shipped `fn`
+
 **Sub-effect refinements** (SFEP-0017, shipped): sub-effects are dotted-name
 refinements *within* the locked six roots — `io.fs ⊑ io` — never a seventh
 canonical effect. The target-neutral intrinsic registry detects four families: `fs.*`

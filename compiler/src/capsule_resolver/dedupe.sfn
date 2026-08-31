@@ -72,6 +72,7 @@ struct ResolverDedupeResult {
     // decides whether the E0403 cross-check runs (SFN-764).
     capabilities_required: string[];
     capabilities_declared: boolean;
+    capabilities_dev_required: string[];
     // SFN-764: a `capsule.toml` the resolver accepted as this project's
     // manifest but which yielded no `[capsule] name` — a truncated write,
     // conflict markers, a misspelled header. Carries the offending path;
@@ -210,6 +211,7 @@ fn _cr_resolver_graph_error(workspace_root: string) -> ResolverDedupeResult {
         has_collision: true,
         capabilities_required: empty_strings,
         capabilities_declared: false,
+        capabilities_dev_required: empty_strings,
         manifest_unreadable: "",
         manifest_dep_specs: empty_strings,
         workspace_root: workspace_root,
@@ -240,6 +242,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             has_collision: false,
             capabilities_required: empty_caps,
             capabilities_declared: false,
+            capabilities_dev_required: empty_caps,
             manifest_unreadable: "",
             manifest_dep_specs: empty_specs,
             workspace_root: "",
@@ -422,6 +425,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     let mut covered_specs: string[] = [];
     let mut capabilities_required: string[] = [];
     let mut capabilities_declared: boolean = false;
+    let mut capabilities_dev_required: string[] = [];
     let mut manifest_unreadable: string = "";
     // SFN-882: `[build] full-runtime = true` opts this artifact out of
     // demand-driven runtime source selection entirely. Set on
@@ -463,6 +467,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             // deny-all ceiling (SFN-764).
             capabilities_required = toml_get_capabilities_required(manifest_text);
             capabilities_declared = toml_has_capabilities_section(manifest_text);
+            capabilities_dev_required = toml_get_capabilities_dev_required(manifest_text);
             // E0407: the manifest exists but yielded no `[capsule] name`.
             // Without this the scanner's empty read is indistinguishable
             // from "no capabilities declared", which is precisely the
@@ -634,6 +639,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             has_collision: false,
             capabilities_required: capabilities_required,
             capabilities_declared: capabilities_declared,
+            capabilities_dev_required: capabilities_dev_required,
             manifest_unreadable: manifest_unreadable,
             manifest_dep_specs: covered_specs,
             workspace_root: workspace_root,
@@ -673,6 +679,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                         has_collision: true,
                         capabilities_required: capabilities_required,
                         capabilities_declared: capabilities_declared,
+                        capabilities_dev_required: capabilities_dev_required,
                         manifest_unreadable: manifest_unreadable,
                         manifest_dep_specs: covered_specs,
                         workspace_root: workspace_root,
@@ -821,6 +828,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         has_collision: false,
         capabilities_required: capabilities_required,
         capabilities_declared: capabilities_declared,
+        capabilities_dev_required: capabilities_dev_required,
         manifest_unreadable: manifest_unreadable,
         manifest_dep_specs: covered_specs,
         workspace_root: workspace_root,
