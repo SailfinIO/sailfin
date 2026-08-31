@@ -377,6 +377,22 @@ fn toolchain_select_user_default(ctx: CliContext, argv_skip: boolean, version_qu
         return 0;
     }
 
+    // A standing default that cannot satisfy this root's floor is not an
+    // error here — it is simply not the answer. SFEP-0073 §3.3 scopes the
+    // below-the-minimum refusal to "a one-shot or environment-selected
+    // compiler", both of which are a deliberate act naming a version for this
+    // invocation. A default is neither: the user recorded it once, globally,
+    // and a project they clone later that needs a newer floor should still
+    // dispatch to that floor the way it did before any default existed.
+    // Refusing instead would take a working `sfn build` and break it on every
+    // machine that ever ran `toolchain default`, and the refusal's own advice
+    // (`--skip-toolchain-check`) would then build below the floor rather than
+    // fetch it. Standing down hands the decision to `toolchain_gate_or_dispatch`,
+    // which fetches and re-execs the floor version as it always has.
+    if !toolchain_selection_satisfies(decision, _dispatch_normalize_ver(recorded.version)) {
+        return 0;
+    }
+
     return toolchain_select_exact(recorded.version, "the per-user toolchain default", "", ctx, version_query, version_query);
 }
 

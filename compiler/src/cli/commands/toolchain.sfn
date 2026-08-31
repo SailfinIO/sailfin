@@ -40,6 +40,7 @@ import {
 } from "../../toolchain/inspect";
 import { render_toolchains_json } from "../../toolchain/inspect_json";
 import { toolchain_install_to_user_store, toolchain_is_valid_install_version } from "../../toolchain/install";
+import { TOOLCHAIN_ENTRY_DIR_MARKER, TOOLCHAIN_ENTRY_VERSION_MARKER } from "../../toolchain/management";
 import { TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX, TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN } from "../../toolchain/manifest";
 import {
     toolchain_remove_store_entry,
@@ -352,10 +353,9 @@ fn _toolchain_remove(ctx: CliContext, requested: string, force: boolean) -> int 
     }
 
     // SFEP-0073 §3.4's one absolute protection: the running toolchain can
-    // never be removed, `--force` included. Two ways it can be the running
-    // image: the requested version is the entry toolchain's own version, or
-    // this process is a dispatched payload executing out of the very
-    // directory being removed.
+    // never be removed, `--force` included. Nor may the entry toolchain on
+    // `PATH`, which SFEP-0073 §3.4 protects by name and which the bootstrap
+    // installer publishes as an ordinary store entry.
     // Build metadata is stripped before comparing because a development build
     // reports `<version>+dev.<hash>`, and the store is keyed by the release
     // version alone — an unstripped compare would miss the match entirely.
@@ -364,9 +364,29 @@ fn _toolchain_remove(ctx: CliContext, requested: string, force: boolean) -> int 
     // directory, so a bare prefix test also matches a sibling whose name
     // merely extends it (removing `0.10.6` while running `0.10.60`), which
     // would refuse a removal that is perfectly safe.
+    // `remove` is management-routed, so this process is usually the routed
+    // payload rather than the executable on `PATH`. The entry toolchain's
+    // identity therefore has to arrive through the markers the router sets:
+    // read from `ctx` alone a routed child sees only itself, and would delete
+    // the very entry the bootstrap installer symlinked `PATH` at, leaving no
+    // working `sfn` to repair with. Unrouted the markers are absent and this
+    // process *is* the entry, so it falls back to its own identity.
+    let mut entry_version = _strip_build_metadata(env.get(TOOLCHAIN_ENTRY_VERSION_MARKER));
+    if entry_version.length == 0 { entry_version = running_version; }
+    let mut entry_dir = env.get(TOOLCHAIN_ENTRY_DIR_MARKER);
+    if entry_dir.length == 0 { entry_dir = ctx.binary_dir; }
+
+    // The separator is part of the prefix on purpose. `entry.dir` is a
+    // directory, so a bare prefix test also matches a sibling whose name
+    // merely extends it (removing `0.10.6` while running `0.10.60`), which
+    // would refuse a removal that is perfectly safe.
     let inside_entry = strings_equal(ctx.binary_dir, entry.dir) || starts_with(ctx.binary_dir, entry.dir
+        + "/")
+        || strings_equal(entry_dir, entry.dir)
+        || starts_with(entry_dir, entry.dir
         + "/");
-    if strings_equal(requested, running_version) || inside_entry {
+    if strings_equal(requested, running_version) || strings_equal(requested, entry_version)
+        || inside_entry {
         print.err("error: the toolchain currently running cannot be removed: "
             + requested);
         print.err("  --force does not override this");

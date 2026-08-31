@@ -1,0 +1,397 @@
+// compiler/tests/e2e/toolchain_default_remove_test.sfn
+//
+// End-to-end coverage for the `sfn toolchain default` and `sfn toolchain
+// remove` leaves (SFEP-0073 §3.4, SFN-1068). Native (no-bash) `*_test.sfn`
+// per `.claude/rules/no-bash-e2e.md`: drives the compiler-under-test as a
+// subprocess against a pre-seeded store and a per-user config directory,
+// and asserts on the captured output plus the on-disk record.
+//
+// `_toolchain_remove` consults the active project's pin via
+// `toolchain_decide("", ctx.binary_dir)`, which resolves from the CURRENT
+// WORKING DIRECTORY (empty entry_hint), exactly like the project-exact rank
+// in `toolchain_dispatch_test.sfn`. Every `remove` test below therefore runs
+// with an explicit cwd via `process.run_capture_cwd` — either a bare scratch
+// directory carrying no capsule.toml (so no ambient project pin can leak in
+// from wherever the test runner itself happens to sit), or a seeded project
+// when the test is specifically about the project-pin protection.
+import { remove_all } from "sfn/fs";
+import { contains, split, trim } from "sfn/strings";
+import {
+    clean_runner_env_without,
+    default_scratch_dir,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_abs_path,
+    sfn_bin_path
+} from "sfn/test";
+
+import { toolchain_current_host } from "../../src/toolchain/host";
+import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
+
+// A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
+// under the parallel pool; `/tmp` is the standalone fallback.
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    return dir + "/sfn-toolchain-default-remove-e2e";
+}
+
+// An always-empty per-user config location, for a test that wants "no
+// default recorded" rather than a seeded one. Rank 4 (SFEP-0073 §3.3) reads
+// a recorded default out of `SAILFIN_CONFIG_DIR`, falling back to the real
+// `~/.sfn` — so without this every test in this file would read whatever
+// default the developer running it happens to have set.
+fn _no_user_config_dir(label: string) -> string ![io] {
+    let dir = _scratch_root() + "/" + label + "-no-cfg";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _env_with(extra: string[]) -> string[] ![io] {
+    return _env_with_cfg(extra, _no_user_config_dir("default"));
+}
+
+fn _env_with_cfg(extra: string[], config_dir: string) -> string[] ![io] {
+    let host_os = env.get("SAILFIN_HOST_OS");
+    let target_os = env.get("SAILFIN_TARGET_OS");
+    // A distinct label from `toolchain_dispatch_test.sfn`'s nested scratch so
+    // the two files never share a nested build cache under the parallel pool.
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-default-remove-child"), ["INSTALL_BASE", "SAILFIN_RUNTIME_ROOT", "SAILFIN_TOOLCHAIN", "SAILFIN_TOOLCHAIN_DISPATCHED"]);
+    e.push("SAILFIN_CONFIG_DIR=" + config_dir);
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    if host_os.length > 0 { e.push("SAILFIN_HOST_OS=" + host_os); }
+    if target_os.length > 0 { e.push("SAILFIN_TARGET_OS=" + target_os); }
+    return e;
+}
+
+// A bare directory with no capsule.toml/workspace.toml, so
+// `toolchain_decide`'s project/workspace discovery finds nothing when a
+// `remove` test runs with this as its cwd.
+fn _neutral_cwd(label: string) -> string ![io] {
+    let dir = _scratch_root() + "/" + label + "-cwd";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _stub_bin_path(dir: string) -> string { return dir + "/sailfin"; }
+
+// Seed a host-qualified store entry as "installed" without compiling
+// anything: `toolchain_store_ready` only checks that the binary path exists
+// and `.sha256` is non-empty, and none of the `default`/`remove` tests below
+// ever execute the seeded payload, so a placeholder file is enough and far
+// cheaper than `sfn build`-ing a real stub per entry.
+fn _seed_installed(store: string, ver: string) -> string ![io] {
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    fs.writeFile(_stub_bin_path(dir), "not-a-real-toolchain-binary");
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+    return dir;
+}
+
+// Write the per-host user-default record `user_default.sfn` reads, as
+// literal text rather than through the module's writer, so the test pins
+// the on-disk grammar itself (mirrors `toolchain_dispatch_test.sfn`'s
+// `_seed_user_default`).
+fn _seed_user_default(config_dir: string, ver: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/toolchain-default", "sailfin-toolchain-default 1\n"
+        + toolchain_current_host().triple
+        + ".version = "
+        + ver
+        + "\n");
+}
+
+// `_seed_user_default` sibling that also records an update track, for the
+// "reports a track independently" case.
+fn _seed_user_default_with_track(config_dir: string, ver: string, track: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/toolchain-default", "sailfin-toolchain-default 1\n"
+        + toolchain_current_host().triple
+        + ".version = "
+        + ver
+        + "\n"
+        + toolchain_current_host().triple
+        + ".track = "
+        + track
+        + "\n");
+}
+
+fn _record_path(config_dir: string) -> string {
+    return config_dir + "/toolchain-default";
+}
+
+// Seed a project pinning an exact `[toolchain] version` (SFEP-0073 §3.2),
+// mirroring `toolchain_dispatch_test.sfn`'s `_seed_project_exact`.
+fn _seed_project_exact(root: string, pin_ver: string, exact_ver: string) -> string ![io] {
+    assert remove_all(root);
+    fs.createDirectory(root, true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\nname = \"default-remove-e2e\"\nversion = \"0.0.1\"\n\n[toolchain]\nsfn = \""
+        + pin_ver
+        + "\"\nversion = \""
+        + exact_ver
+        + "\"\n");
+    let src = root + "/main.sfn";
+    fs.writeFile(src, "fn main() -> int { return 0; }\n");
+    return src;
+}
+
+// The exact version string this compiler-under-test reports for itself, so
+// the "refuses the running toolchain" test can be constructed without
+// hardcoding a version that would drift out of sync with the binary under
+// test. Mirrors `toolchain_dispatch_test.sfn`'s `_running_version`.
+fn _running_version() -> string ![io] {
+    let exit = process.run_capture([sfn_bin_abs_path(), "--version"], _env_with([]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("default-remove running-version probe", exit, out, err);
+    assert exit == 0;
+    let parts = split(trim(out), " ");
+    assert parts.length >= 2;
+    return parts[1];
+}
+
+// ---------------------------------------------------------------------------
+// `sfn toolchain default`
+// ---------------------------------------------------------------------------
+test "toolchain default: reports nothing when no default is recorded" ![io] {
+    let store = _scratch_root() + "/default-none-store";
+    let cfg = _scratch_root() + "/default-none-cfg";
+    _seed_installed(store, "301.0.0");
+    fs.createDirectory(cfg, true);
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store], cfg);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "default"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-default none run", exit, out, err);
+    assert exit == 0;
+    assert contains(out, "no per-user default is recorded for ");
+    assert ! fs.exists(_record_path(cfg));
+}
+
+test "toolchain default: records an installed exact version, and reports it back" ![io] {
+    let store = _scratch_root() + "/default-set-store";
+    let cfg = _scratch_root() + "/default-set-cfg";
+    let ver = "302.0.0";
+    _seed_installed(store, ver);
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store], cfg);
+
+    let set_exit = process.run_capture([sfn_bin_path(), "toolchain", "default", ver], run_env);
+    let set_out = process.capture_take_stdout();
+    let set_err = process.capture_take_stderr();
+    report_child_failure("toolchain-default set run", set_exit, set_out, set_err);
+    assert set_exit == 0;
+
+    let read_exit = process.run_capture([sfn_bin_path(), "toolchain", "default"], run_env);
+    let read_out = process.capture_take_stdout();
+    let read_err = process.capture_take_stderr();
+    report_child_failure("toolchain-default read run", read_exit, read_out, read_err);
+    assert read_exit == 0;
+    assert contains(read_out, ver);
+    assert fs.exists(_record_path(cfg));
+}
+
+test "toolchain default: records no implicit update track" ![io] {
+    let store = _scratch_root() + "/default-no-track-store";
+    let cfg = _scratch_root() + "/default-no-track-cfg";
+    let ver = "303.0.0";
+    _seed_installed(store, ver);
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store], cfg);
+
+    let set_exit = process.run_capture([sfn_bin_path(), "toolchain", "default", ver], run_env);
+    let set_out = process.capture_take_stdout();
+    let set_err = process.capture_take_stderr();
+    report_child_failure("toolchain-default no-track set run", set_exit, set_out, set_err);
+    assert set_exit == 0;
+
+    let read_exit = process.run_capture([sfn_bin_path(), "toolchain", "default"], run_env);
+    let read_out = process.capture_take_stdout();
+    let read_err = process.capture_take_stderr();
+    report_child_failure("toolchain-default no-track read run", read_exit, read_out, read_err);
+    assert read_exit == 0;
+    // An exact spelling must not create an implicit update track
+    // (SFEP-0073 §3.4): the report is exactly the version, nothing else.
+    assert trim(read_out) == ver;
+    assert ! contains(fs.readFile(_record_path(cfg)), ".track");
+}
+
+test "toolchain default: reports a track independently when one is recorded" ![io] {
+    let cfg = _scratch_root() + "/default-track-cfg";
+    let ver = "304.0.0";
+    let track = "stable";
+    _seed_user_default_with_track(cfg, ver, track);
+    let run_env = _env_with_cfg([], cfg);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "default"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-default track run", exit, out, err);
+    assert exit == 0;
+    assert contains(out, ver);
+    assert contains(out, track);
+}
+
+test "toolchain default: rejects a channel selector" ![io] {
+    let run_env = _env_with([]);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "default", "stable"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(out + err, "channel selectors");
+    assert contains(out + err, "not available yet");
+}
+
+test "toolchain default: local mode refuses a missing default without fetching" ![io] {
+    let store = _scratch_root() + "/default-local-refuse-store";
+    let cfg = _scratch_root() + "/default-local-refuse-cfg";
+    let ver = "305.0.0";
+    fs.createDirectory(cfg, true);
+    // `ver` is deliberately never seeded in the store — this pins that
+    // `local` mode never falls through to a fetch to satisfy it.
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_TOOLCHAIN=local"], cfg);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "default", ver], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(out + err, "sfn toolchain install " + ver);
+    // Nothing was recorded.
+    assert ! fs.exists(_record_path(cfg));
+}
+
+// ---------------------------------------------------------------------------
+// `sfn toolchain remove`
+// ---------------------------------------------------------------------------
+test "toolchain remove: removes an installed, unprotected version" ![io] {
+    let store = _scratch_root() + "/remove-ok-store";
+    let cwd = _neutral_cwd("remove-ok");
+    let keep_ver = "401.0.0";
+    let remove_ver = "402.0.0";
+    _seed_installed(store, keep_ver);
+    let removed_dir = _seed_installed(store, remove_ver);
+    let run_env = _env_with(["INSTALL_BASE=" + store]);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", remove_ver], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-remove ok run", exit, out, err);
+    assert exit == 0;
+    assert ! fs.exists(removed_dir);
+    assert contains(out + err, "another checkout may reinstall it");
+    let kept_dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), keep_ver);
+    assert fs.exists(kept_dir);
+}
+
+test "toolchain remove: refuses the running toolchain even with --force" ![io] {
+    let store = _scratch_root() + "/remove-running-store";
+    let cwd = _neutral_cwd("remove-running");
+    let running = _running_version();
+    _seed_installed(store, running);
+    let run_env = _env_with(["INSTALL_BASE=" + store]);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", running], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(out + err, "the toolchain currently running cannot be removed");
+
+    let force_exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", running, "--force"], run_env, cwd);
+    let force_out = process.capture_take_stdout();
+    let force_err = process.capture_take_stderr();
+    assert force_exit == 2;
+    assert contains(force_out + force_err, "--force does not override this");
+}
+
+test "toolchain remove: refuses the user default; --force overrides it" ![io] {
+    let store = _scratch_root() + "/remove-default-store";
+    let cfg = _scratch_root() + "/remove-default-cfg";
+    let cwd = _neutral_cwd("remove-default");
+    let ver = "403.0.0";
+    let dir = _seed_installed(store, ver);
+    _seed_user_default(cfg, ver);
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", ver], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(out + err, "the per-user default toolchain");
+
+    let force_exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", ver, "--force"], run_env, cwd);
+    let force_out = process.capture_take_stdout();
+    let force_err = process.capture_take_stderr();
+    report_child_failure("toolchain-remove default force run", force_exit, force_out, force_err);
+    assert force_exit == 0;
+    assert ! fs.exists(dir);
+}
+
+test "toolchain remove: refuses the active project's exact requirement; --force overrides it" ![io] {
+    let store = _scratch_root() + "/remove-project-store";
+    let proj = _scratch_root() + "/remove-project-proj";
+    let ver = "404.0.0";
+    let dir = _seed_installed(store, ver);
+    let src = _seed_project_exact(proj, "0.0.1", ver);
+    let run_env = _env_with(["INSTALL_BASE=" + store]);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", ver], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(out + err, "the active project's exact toolchain requirement");
+
+    let force_exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", ver, "--force"], run_env, proj);
+    let force_out = process.capture_take_stdout();
+    let force_err = process.capture_take_stderr();
+    report_child_failure("toolchain-remove project force run", force_exit, force_out, force_err);
+    assert force_exit == 0;
+    assert ! fs.exists(dir);
+    // `src` was scaffolded but never built — referenced only so the project
+    // fixture is unambiguously the trivial one `_seed_project_exact` writes.
+    assert fs.exists(src);
+}
+
+test "toolchain remove: refuses a version named by an exact SAILFIN_TOOLCHAIN" ![io] {
+    let store = _scratch_root() + "/remove-env-store";
+    let cwd = _neutral_cwd("remove-env");
+    let ver = "405.0.0";
+    _seed_installed(store, ver);
+    let run_env = _env_with(["INSTALL_BASE=" + store, "SAILFIN_TOOLCHAIN=" + ver]);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", ver], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(out + err, "is named by SAILFIN_TOOLCHAIN");
+}
+
+test "toolchain remove: refuses a version that is not installed" ![io] {
+    let store = _scratch_root() + "/remove-missing-store";
+    let cwd = _neutral_cwd("remove-missing");
+    let ver = "406.0.0";
+    let run_env = _env_with(["INSTALL_BASE=" + store]);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", ver], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(out + err, "is not installed");
+}
+
+test "toolchain remove: rejects a non-exact version" ![io] {
+    let cwd = _neutral_cwd("remove-channel");
+    let run_env = _env_with([]);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", "stable"], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(out + err, "channel selectors");
+    assert contains(out + err, "not available yet");
+}
