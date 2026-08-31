@@ -11,10 +11,12 @@ import { capsule_artifact_layout_from_specs } from "../capsule_artifact";
 import { enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
 import {
     toml_get_build_full_runtime,
+    toml_get_capabilities_dev_required,
     toml_get_capabilities_required,
     toml_get_dependencies,
     toml_get_entry,
-    toml_get_name
+    toml_get_name,
+    toml_has_capabilities_section
 } from "../toml_parser";
 import { workspace_member_capability_gate } from "./capability";
 import { _cr_enumerate_host_capsule_sources, enumerate_capsule_sources } from "./discovery";
@@ -64,12 +66,22 @@ struct ResolverDedupeResult {
     sources: CapsuleSource[];
     has_collision: boolean;
     // Phase F (`docs/proposals/0008-effect-validation.md` §5): the
-    // project manifest's `[capabilities] required = [...]` list.
-    // Empty when no manifest is present (standalone .sfn files
-    // outside any capsule) — the effect-checker treats that as
-    // "no capability surface to compare against" and skips the
-    // E0403 cross-check.
+    // project manifest's `[capabilities] required = [...]` list. Empty
+    // for three different reasons — no manifest, no `[capabilities]`
+    // section, or an explicit/malformed empty `required` — so it is
+    // never read without `capabilities_declared` below, which is what
+    // decides whether the E0403 cross-check runs (SFN-764).
     capabilities_required: string[];
+    capabilities_declared: boolean;
+    capabilities_dev_required: string[];
+    // SFN-764: a `capsule.toml` the resolver accepted as this project's
+    // manifest but which yielded no `[capsule] name` — a truncated write,
+    // conflict markers, a misspelled header. Carries the offending path;
+    // empty when the manifest read fine. A capsule whose manifest cannot
+    // be read is not a capsule, so callers abort rather than proceeding
+    // with an undeclared surface, which would hand it full authority
+    // through the very fail-open path this issue closed one tier down.
+    manifest_unreadable: string;
     // Stage D PR2: every declared `[dependencies]` key from the
     // project's `capsule.toml`. `prepare_project_capsules` passes
     // this through `enumerate_runtime_capsule_artifacts` so the
@@ -199,6 +211,9 @@ fn _cr_resolver_graph_error(workspace_root: string) -> ResolverDedupeResult {
         sources: empty_sources,
         has_collision: true,
         capabilities_required: empty_strings,
+        capabilities_declared: false,
+        capabilities_dev_required: empty_strings,
+        manifest_unreadable: "",
         manifest_dep_specs: empty_strings,
         workspace_root: workspace_root,
         root_source_paths: empty_strings,
@@ -227,6 +242,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             sources: empty_sources,
             has_collision: false,
             capabilities_required: empty_caps,
+            capabilities_declared: false,
+            capabilities_dev_required: empty_caps,
+            manifest_unreadable: "",
             manifest_dep_specs: empty_specs,
             workspace_root: "",
             root_source_paths: empty_roots,
@@ -407,6 +425,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     }
     let mut covered_specs: string[] = [];
     let mut capabilities_required: string[] = [];
+    let mut capabilities_declared: boolean = false;
+    let mut capabilities_dev_required: string[] = [];
+    let mut manifest_unreadable: string = "";
     // SFN-882: `[build] full-runtime = true` opts this artifact out of
     // demand-driven runtime source selection entirely. Set on
     // `compiler/capsule.toml`, whose binary is the runtime provider surface
@@ -437,13 +458,33 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             let manifest_text = fs.readFile(manifest_path);
             let deps_text = toml_get_dependencies(manifest_text);
             covered_specs = _cr_dep_specs_from_text(deps_text);
-            // Phase F: extract `[capabilities] required = [...]` so
-            // the effect-checker can compare every function's
-            // declared effects against the manifest-allowed surface.
-            // Empty list (no [capabilities] section, or `required =
-            // []`) tells the checker to skip the cross-check —
-            // that's the right call for projects mid-migration.
+            // Phase F: extract `[capabilities] required = [...]` so the
+            // effect-checker can compare every function's declared effects
+            // against the manifest-allowed surface, and record separately
+            // whether the section exists at all. The list cannot carry that:
+            // an absent section, an explicit `required = []`, and a
+            // malformed `required` all read as empty. Only the absent case
+            // skips the cross-check; an explicit empty surface is a
+            // deny-all ceiling (SFN-764).
             capabilities_required = toml_get_capabilities_required(manifest_text);
+            capabilities_declared = toml_has_capabilities_section(manifest_text);
+            capabilities_dev_required = toml_get_capabilities_dev_required(manifest_text);
+            // E0407: the manifest exists but yielded no `[capsule] name`.
+            // Without this the scanner's empty read is indistinguishable
+            // from "no capabilities declared", which is precisely the
+            // fail-open bypass the deny-all rule above would otherwise sit
+            // on top of.
+            if toml_get_name(manifest_text).length == 0 {
+                manifest_unreadable = manifest_path;
+                print.err("error[E0407]: capsule manifest at \"" + manifest_path
+                    + "\" is present but not readable as a manifest"
+                    + " (`[capsule] name` is missing or empty)");
+                print.err("  = note: a capsule whose manifest cannot be read has no"
+                    + " declared capability surface, so it is rejected rather than"
+                    + " granted every effect");
+                print.err("  = suggestion: restore the `[capsule]` section with a"
+                    + " `name` key, or delete the file if this directory is not a capsule");
+            }
             project_full_runtime = toml_get_build_full_runtime(manifest_text);
         }
         let dep_sources = enumerate_capsule_sources(project_root, consumer.runtime_root, implicit_specs, members);
@@ -598,6 +639,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             sources: empty_sources,
             has_collision: false,
             capabilities_required: capabilities_required,
+            capabilities_declared: capabilities_declared,
+            capabilities_dev_required: capabilities_dev_required,
+            manifest_unreadable: manifest_unreadable,
             manifest_dep_specs: covered_specs,
             workspace_root: workspace_root,
             root_source_paths: empty_roots,
@@ -635,6 +679,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                         sources: empty_sources,
                         has_collision: true,
                         capabilities_required: capabilities_required,
+                        capabilities_declared: capabilities_declared,
+                        capabilities_dev_required: capabilities_dev_required,
+                        manifest_unreadable: manifest_unreadable,
                         manifest_dep_specs: covered_specs,
                         workspace_root: workspace_root,
                         root_source_paths: empty_roots,
@@ -781,6 +828,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         sources: resolved,
         has_collision: false,
         capabilities_required: capabilities_required,
+        capabilities_declared: capabilities_declared,
+        capabilities_dev_required: capabilities_dev_required,
+        manifest_unreadable: manifest_unreadable,
         manifest_dep_specs: covered_specs,
         workspace_root: workspace_root,
         root_source_paths: root_source_paths,

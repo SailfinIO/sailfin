@@ -303,7 +303,14 @@ test "clock-reader: unix public surface is scoped to sfn/time" ![io] {
     assert contains(time_manifest, "version = \"0.2.0\"");
     assert contains(time_manifest, "required = [\"clock\"]");
     assert ! contains(crypto_source, "unix_millis");
-    assert ! contains(crypto_manifest, "\"clock\"");
+    // The boundary is about the SHIPPED surface, so pin that line rather
+    // than the manifest text: `clock` is legitimately present under
+    // `dev-required`, which is unioned in only for `test` blocks and
+    // never reaches the artifact's ceiling (SFN-1216). Note a bare
+    // substring test cannot express this — `dev-required = ["clock"]`
+    // contains `required = ["clock"]` — hence the leading newline.
+    assert contains(crypto_manifest, "\nrequired = [\"io\", \"rand\"]");
+    assert contains(crypto_manifest, "dev-required = [\"clock\"]");
 }
 
 test "clock-reader: internal unix adapter cannot bypass clock effect" ![io] {

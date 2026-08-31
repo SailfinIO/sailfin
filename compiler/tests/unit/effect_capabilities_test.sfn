@@ -1,15 +1,20 @@
-// Unit tests for compiler/src/effect_checker.sfn's Phase F
-// (`docs/proposals/0008-effect-validation.md` §5) capability cross-check
-// path: `validate_capsule_capabilities(program, capabilities) ->
+// Unit tests for the Phase F capability cross-check
+// (`docs/proposals/0008-effect-validation.md` §5) in
+// `compiler/capsules/analyzer/src/effect_checker/validations.sfn`:
+// `validate_capsule_capabilities(program, capabilities, declared) ->
 // CapabilityViolation[]`.
 //
-// Phase F flips the capsule manifest's
-// `[capabilities] required = [...]` into a real compile-time
-// contract: any function declaring an effect outside the manifest's
-// allowed surface fails with diagnostic code `E0403`. Empty
-// `capabilities_required` means "no manifest in scope" and the
-// checker degrades to a no-op so standalone .sfn files outside any
-// capsule keep working unchanged.
+// Phase F flips the capsule manifest's `[capabilities] required = [...]`
+// into a real compile-time contract: any function declaring an effect
+// outside the allowed surface fails with diagnostic code `E0403`.
+//
+// The third argument is the discriminator, and the list length is NOT
+// (SFN-764). `declared = false` means no `[capabilities]` section was
+// present, so the checker degrades to a no-op and standalone .sfn files
+// outside any capsule keep working. `declared = true` runs the check
+// even when the surface is empty: an explicit `required = []` asserts
+// "this capsule needs no capability" and is enforced as a deny-all
+// ceiling. Conflating the two is the defect these tests pin.
 //
 // Tests construct AST values via small helper functions to stay
 // flat — some seed compilers previously segfaulted on deeply nested
@@ -73,30 +78,74 @@ fn _function_declaring(name: string, effects: string[], span_line: int) -> State
 }
 
 // -------------------------------------------------------------------
-// Empty-capabilities short-circuit (no manifest in scope)
+// Undeclared surface: no `[capabilities]` section in scope
 // -------------------------------------------------------------------
-test "capabilities: empty list skips the check entirely" {
-    // Standalone .sfn outside any capsule: even with effectful
-    // function declarations, the empty capability surface signals
-    // "no manifest constraint to enforce" and produces zero
-    // violations. This is the contract that lets `sfn check` of a
-    // bare file path keep working pre-manifest.
+test "capabilities: an undeclared surface skips the check entirely" {
+    // Standalone .sfn outside any capsule: even with effectful function
+    // declarations, `declared = false` signals "no manifest constraint
+    // to enforce" and produces zero violations. This is the contract
+    // that lets `sfn check` of a bare file path keep working
+    // pre-manifest.
     let stmt = _function_declaring("dangerous", ["io", "net", "model"], 1);
     let program = Program { statements: [stmt] };
     let no_caps: string[] = [];
-    let violations = validate_capsule_capabilities(program, no_caps);
+    let violations = validate_capsule_capabilities(program, no_caps, false, []);
     assert violations.length == 0;
 }
 
-test "capabilities: empty list skips the check even on an empty program" {
-    // The fast-path early-return for empty `capabilities_required`
-    // happens before the program walk; pin it so a refactor that
-    // moves the check inside the loop can't accidentally start
-    // emitting violations for bare modules.
+test "capabilities: an undeclared surface skips the check even on an empty program" {
+    // The early return happens before the program walk; pin it so a
+    // refactor that moves the check inside the loop can't accidentally
+    // start emitting violations for bare modules.
     let no_stmts: Statement[] = [];
     let program = Program { statements: no_stmts };
     let no_caps: string[] = [];
-    let violations = validate_capsule_capabilities(program, no_caps);
+    let violations = validate_capsule_capabilities(program, no_caps, false, []);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Declared-empty surface: `required = []` is a deny-all ceiling
+// -------------------------------------------------------------------
+test "capabilities: a declared empty surface denies every declared effect" {
+    // The SFN-764 defect, pinned at the unit level: the surface and the
+    // program are byte-identical to the first test above, and ONLY the
+    // declared flag differs. Before the fix both produced zero
+    // violations, so a capsule asserting `required = []` received full
+    // authority. Now one effect in, one violation out.
+    let stmt = _function_declaring("dangerous", ["io", "net", "model"], 1);
+    let program = Program { statements: [stmt] };
+    let no_caps: string[] = [];
+    let violations = validate_capsule_capabilities(program, no_caps, true, []);
+    assert violations.length == 1;
+    // One violation per routine, carrying every unauthorized effect, so
+    // the E0403 render names all three rather than only the first.
+    assert violations[0].excess_effects.length == 3;
+    assert violations[0].routine_name == "dangerous";
+}
+
+test "capabilities: a declared empty surface still finds nothing in an empty program" {
+    // Deny-all denies effects, not modules. A capsule that declares
+    // `required = []` and ships no effectful routine is conforming, and
+    // must stay silent — otherwise the 15 in-tree capsules that already
+    // declare an empty surface would all start failing.
+    let no_stmts: Statement[] = [];
+    let program = Program { statements: no_stmts };
+    let no_caps: string[] = [];
+    let violations = validate_capsule_capabilities(program, no_caps, true, []);
+    assert violations.length == 0;
+}
+
+test "capabilities: pure survives a declared empty surface" {
+    // `pure` is the empty effect set, not a capability, so the deny-all
+    // ceiling must not reject it — otherwise every `![pure]` function in
+    // a conforming capsule would fail E0403. Guards the carve-out in
+    // `_analyze_routine_capabilities` against a refactor that reads a
+    // deny-all surface as "reject every effect token".
+    let stmt = _function_declaring("calc", ["pure"], 1);
+    let program = Program { statements: [stmt] };
+    let no_caps: string[] = [];
+    let violations = validate_capsule_capabilities(program, no_caps, true, []);
     assert violations.length == 0;
 }
 
@@ -106,7 +155,7 @@ test "capabilities: empty list skips the check even on an empty program" {
 test "capabilities: in-bounds function produces no violation" {
     let stmt = _function_declaring("read_log", ["io"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 0;
 }
 
@@ -115,7 +164,7 @@ test "capabilities: in-bounds with multiple effects passes" {
     // doesn't have to use every capability the manifest grants.
     let stmt = _function_declaring("with_timing", ["io", "clock"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io", "clock", "rand"]);
+    let violations = validate_capsule_capabilities(program, ["io", "clock", "rand"], true, []);
     assert violations.length == 0;
 }
 
@@ -126,7 +175,7 @@ test "capabilities: function with no declared effects passes regardless" {
     // `E0403` on every undecorated function in a clean tree.
     let stmt = _function_declaring("pure_helper", [], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 0;
 }
 
@@ -138,7 +187,7 @@ test "capabilities: out-of-bounds function produces one violation per excess eff
     // E0403 fires with `excess_effects = ["net"]`.
     let stmt = _function_declaring("fetch_orders", ["net"], 7);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 1;
     let v = violations[0];
     assert v.routine_name == "fetch_orders";
@@ -157,7 +206,7 @@ test "capabilities: violation carries signature_token from name_span" {
     // location-only rendering.
     let stmt = _function_declaring("noisy", ["model"], 42);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 1;
     let v = violations[0];
     assert v.signature_token != null;
@@ -175,7 +224,7 @@ test "capabilities: mixed in-bounds + out-of-bounds collapses to excess only" {
     // produce a confusing "5 effects outside surface" diagnostic.
     let stmt = _function_declaring("partial_overflow", ["io", "net"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 1;
     let v = violations[0];
     assert v.excess_effects.length == 1;
@@ -188,7 +237,7 @@ test "capabilities: multiple out-of-bounds effects all surface" {
     // the user gets the full surface mismatch in one diagnostic.
     let stmt = _function_declaring("very_dangerous", ["net", "model"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 1;
     let v = violations[0];
     assert v.excess_effects.length == 2;
@@ -214,7 +263,7 @@ test "capabilities: test declaration with out-of-bounds effect surfaces violatio
         decorators: empty_decorators
     };
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 1;
     let v = violations[0];
     assert v.routine_name == "test exercises network";
@@ -250,7 +299,7 @@ test "capabilities: struct method with out-of-bounds effect surfaces violation" 
         decorators: struct_decorators
     };
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 1;
     let v = violations[0];
     assert v.routine_name == "Mailer.send";
@@ -264,7 +313,7 @@ test "capabilities: multiple offending functions produce separate violations" {
     let one = _function_declaring("a", ["net"], 1);
     let two = _function_declaring("b", ["model"], 2);
     let program = Program { statements: [one, two] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 2;
     assert violations[0].routine_name == "a";
     assert violations[0].excess_effects[0] == "net";
@@ -279,7 +328,7 @@ test "capabilities: a coarse grant authorizes a narrower dotted requirement" {
     // required=["io"], function declares ![io.fs] — io subsumes io.fs.
     let stmt = _function_declaring("read_file", ["io.fs"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 0;
 }
 
@@ -288,7 +337,7 @@ test "capabilities: a tightened manifest rejects the general root effect" {
     // subsume io, so the coarser declaration is out of bounds.
     let stmt = _function_declaring("read_anything", ["io"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io.fs"]);
+    let violations = validate_capsule_capabilities(program, ["io.fs"], true, []);
     assert violations.length == 1;
 }
 
@@ -297,7 +346,7 @@ test "capabilities: a sibling sub-effect outside the grant is rejected" {
     // are unordered, so io.fs does not subsume io.console.
     let stmt = _function_declaring("log_stdout", ["io.console"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io.fs"]);
+    let violations = validate_capsule_capabilities(program, ["io.fs"], true, []);
     assert violations.length == 1;
 }
 
@@ -306,14 +355,14 @@ test "capabilities: a deeper refinement inside the grant passes" {
     // subsumes its own deeper refinement.
     let stmt = _function_declaring("read_only", ["io.fs.read"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io.fs"]);
+    let violations = validate_capsule_capabilities(program, ["io.fs"], true, []);
     assert violations.length == 0;
 }
 
 test "capabilities: a coarse net grant authorizes net.http" {
     let stmt = _function_declaring("fetch", ["net.http"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["net"]);
+    let violations = validate_capsule_capabilities(program, ["net"], true, []);
     assert violations.length == 0;
 }
 
@@ -323,13 +372,13 @@ test "capabilities: a coarse net grant authorizes net.http" {
 test "effect capabilities: a ![gpu] function outside a gpu manifest violates E0403" {
     let stmt = _function_declaring("matmul_f64", ["gpu"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["io"]);
+    let violations = validate_capsule_capabilities(program, ["io"], true, []);
     assert violations.length == 1;
 }
 
 test "effect capabilities: a ![gpu] function inside a gpu manifest is clean" {
     let stmt = _function_declaring("matmul_f64", ["gpu"], 5);
     let program = Program { statements: [stmt] };
-    let violations = validate_capsule_capabilities(program, ["gpu"]);
+    let violations = validate_capsule_capabilities(program, ["gpu"], true, []);
     assert violations.length == 0;
 }

@@ -671,12 +671,17 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
 // seed the runtime sources they can execute (SFEP-0070 §3.6, SFN-894).
 fn _cr_resolve_dedupe_filtered(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, bundled_workspace_start);
-    if resolved.has_collision { return resolved; }
+    if resolved.has_collision || resolved.manifest_unreadable.length > 0 {
+        return resolved;
+    }
     let filtered = _cr_filter_reachable_sources(resolved.sources, resolved.root_source_paths, entry_paths, consumer.runtime_root, resolved.runtime_demand);
     return ResolverDedupeResult {
         sources: filtered,
         has_collision: resolved.has_collision,
         capabilities_required: resolved.capabilities_required,
+        capabilities_declared: resolved.capabilities_declared,
+        capabilities_dev_required: resolved.capabilities_dev_required,
+        manifest_unreadable: resolved.manifest_unreadable,
         manifest_dep_specs: resolved.manifest_dep_specs,
         workspace_root: resolved.workspace_root,
         root_source_paths: resolved.root_source_paths,

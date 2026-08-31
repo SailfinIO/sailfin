@@ -289,12 +289,18 @@ struct CheckCapsuleResolution {
     capsule_count: int;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision or stage-write failure
     // Phase F (`docs/proposals/0008-effect-validation.md` §5): the
-    // project manifest's `[capabilities] required = [...]`. Empty
-    // when no manifest is present (standalone .sfn files outside
-    // any capsule). The effect-checker treats empty as "skip
-    // capability cross-check"; non-empty as "fail E0403 on any
-    // function declaring an effect outside this surface."
+    // project manifest's `[capabilities] required = [...]`, and
+    // whether a `[capabilities]` section was declared at all.
+    //
+    // Read them together, never the list alone: an absent section, an
+    // explicit `required = []`, and a malformed `required` key all
+    // produce an empty list. `capabilities_declared` is the
+    // discriminator — false skips the cross-check, true enforces it,
+    // and an empty surface under `declared = true` is a deny-all
+    // ceiling that fails E0403 on every declared effect (SFN-764).
     capabilities_required: string[];
+    capabilities_declared: boolean;
+    capabilities_dev_required: string[];
     // SFN-686: the canonical `<scope>/<name>` specs this resolver pass
     // located. The analyzer mints E0430 for a capsule import naming a spec
     // outside this set. `capsule_specs_known` distinguishes "the pass ran and
@@ -329,6 +335,8 @@ struct TestCapsuleResolution {
     // body declaring an effect the capsule manifest doesn't grant
     // produces an `E0403` diagnostic.
     capabilities_required: string[];
+    capabilities_declared: boolean;
+    capabilities_dev_required: string[];
     // SFN-882: the demand set this resolution used. The test-link path MUST
     // narrow its runtime capsule with this exact value, not with its own
     // independently-derived one. `sfn test` threads a non-empty `runtime_root`,

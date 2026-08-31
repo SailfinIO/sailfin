@@ -83,13 +83,19 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
     // import closure, using the same fail-open verification as build; check's
     // empty runtime root correctly excludes modules needed only for linking.
     let resolved = _cr_resolve_dedupe_filtered(entry_paths, consumer, binary_dir);
-    if resolved.has_collision {
+    // E0407 (SFN-764) aborts here alongside a slug collision: both are
+    // setup errors already reported at the manifest read, and continuing
+    // past an unreadable manifest would analyze the capsule with no
+    // declared surface — i.e. grant it everything.
+    if resolved.has_collision || resolved.manifest_unreadable.length > 0 {
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
             implicit_provider_asm_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
+            capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             resolved_capsule_specs: empty_paths,
             capsule_specs_known: false
         };
@@ -113,6 +119,8 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
             capsule_count: 0,
             staging_failed: false,
             capabilities_required: resolved.capabilities_required,
+            capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             resolved_capsule_specs: empty_paths,
             capsule_specs_known: true
         };
@@ -136,6 +144,8 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
             capsule_count: 0,
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
+            capabilities_declared: resolved.capabilities_declared,
+            capabilities_dev_required: resolved.capabilities_dev_required,
             resolved_capsule_specs: empty_paths,
             capsule_specs_known: false
         };
@@ -172,6 +182,8 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         capsule_count: resolved.sources.length as int,
         staging_failed: false,
         capabilities_required: resolved.capabilities_required,
+        capabilities_declared: resolved.capabilities_declared,
+        capabilities_dev_required: resolved.capabilities_dev_required,
         resolved_capsule_specs: _check_resolved_capsule_specs(resolved.sources),
         capsule_specs_known: true
     };

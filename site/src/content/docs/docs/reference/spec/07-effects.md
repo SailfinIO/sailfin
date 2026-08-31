@@ -31,7 +31,29 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 2. Enforcement runs on every build path (`sfn dev bootstrap build`, `sfn build`, `sfn run`, `sfn test`, `sfn check`); the `SAILFIN_EFFECT_ENFORCE` env var lets capsule authors opt into `=warning` (telemetry-only) or `=off` (build-path bypass; `sfn check` still validates)
 3. Tests follow the same rules as functions
 4. **Cross-module call-graph propagation** (Phase E, shipped): if A imports B and calls it, A must declare every effect B declares. Diagnostic code `E0402`. Aliased imports (`import { foo as bar }`) resolve under the local name. `Member`-callee resolution (`mod.fn()`) is a Phase E2 follow-up
-5. **Capsule capability cross-check** (Phase F, shipped): every function's declared effects must be a subset of the capsule manifest's `[capabilities] required = [...]` surface. Diagnostic code `E0403`. Empty surface (no `[capabilities]` section, or standalone .sfn outside any capsule) skips the cross-check so pre-Phase-F projects keep building
+5. **Capsule capability cross-check** (Phase F, shipped): every function's declared effects must be a subset of the capsule manifest's `[capabilities] required = [...]` surface. Diagnostic code `E0403`. Whether the check runs is decided by whether a `[capabilities]` section was **declared**, never by whether the resulting surface is empty:
+
+   | Manifest state | Behaviour |
+   |---|---|
+   | No `capsule.toml` in scope (standalone `.sfn`) | skipped — nothing declared a surface |
+   | `capsule.toml` present, no `[capabilities]` section | skipped, so pre-Phase-F projects keep building |
+   | `[capabilities]` present, `required = []` | **deny-all** — every declared effect is `E0403` |
+   | `[capabilities]` present, `required` missing or malformed | **deny-all** — same path |
+   | `[capabilities]` present, `required = [...]` non-empty | subset check against the listed surface |
+
+   An explicit `required = []` therefore *asserts* "this capsule needs no capability" and is enforced as a deny-all ceiling; it does not disable the check. Only an **absent** section is an exemption. A deny-all surface renders in the diagnostic as `![]`, and `![pure]` standing alone still passes, since `pure` is the empty effect set rather than a capability. A `capsule.toml` that exists but has no readable `[capsule] name` is a hard error (`E0407`) — an unreadable manifest never degrades to "allow everything".
+
+   **Scope of the cross-check.** Unlike the in-module and cross-module gates in item 2, `E0403` is enforced by `sfn check` and `sfn test`, which resolve the manifest surface, and not yet by `sfn build` / `sfn run`, whose module path validates effects without a capability surface. `E0407` is raised by the resolver and so does apply on every path. Do not read "every build path" in item 2 as covering the capsule ceiling
+
+   **Test-time capabilities.** `[capabilities] dev-required = [...]` widens the ceiling for `test` blocks only; shipped functions and struct methods are always measured against `required` alone. It exists so a capsule whose tests exercise an effect it never ships need not name that effect in its shipped surface — which SFEP-0016 turns into a syscall mask. Absent `dev-required` means empty, so a manifest without the key behaves exactly as one written before the key existed. This mirrors `sfn add`, which already excludes dev-dependencies' capabilities from a consumer's runtime surface:
+
+   ```toml
+   [capabilities]
+   required = ["io", "rand"]      # the shipped surface, and the derived mask
+   dev-required = ["clock"]       # timing assertions in `test` blocks only
+   ```
+
+   An effect that appears only in `dev-required` still fails `E0403` on a shipped `fn`
 
 **Sub-effect refinements** (SFEP-0017, shipped): sub-effects are dotted-name
 refinements *within* the locked six roots — `io.fs ⊑ io` — never a seventh

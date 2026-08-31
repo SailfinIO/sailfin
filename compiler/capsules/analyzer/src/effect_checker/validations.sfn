@@ -14,19 +14,80 @@ import { _collect_nested_fns_in_block } from "./scope";
 import { CapabilityViolation, UnrecognizedEffectViolation } from "./types";
 import { _any_subsumes, _token_from_signature, append_unique_effect } from "./utils";
 
-fn validate_capsule_capabilities(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
+// Phase F entry: cross-check every routine's *declared* effects against
+// the capsule manifest's `[capabilities] required = [...]` surface. Any
+// effect on the signature that is not in the surface produces a
+// `CapabilityViolation`, rendered downstream as `E0403`.
+//
+// Whether the check runs is decided by `capabilities_declared` — whether
+// a `[capabilities]` section exists — and never by the surface's length.
+// The two say different things and only one of them is the author's
+// intent:
+//
+//   declared = false  no section, or no manifest at all. Nothing was
+//                     asserted, so skip; standalone `.sfn` files and
+//                     projects predating the manifest contract keep
+//                     building. SFEP-0016's ladder flips this via the
+//                     `W0403` ramp allocated in SFEP-0008 6.6.
+//   declared = true   the author asserted a ceiling. An empty
+//                     `required` is a deny-all ceiling, so every
+//                     declared effect is a violation. A `required` key
+//                     that is missing or unparseable lands here too, and
+//                     that is deliberate: it surfaces as a storm of
+//                     E0403s naming exactly the effects the author
+//                     expected to be granted, rather than as silent full
+//                     authority.
+//
+// Keying on `.length == 0` conflated the two and let an explicit
+// `required = []` — a capsule asserting it needs nothing — receive
+// everything (SFN-764).
+//
+// `dev-required` widens the ceiling for `test` blocks only. Without it a
+// capsule whose tests exercise an effect it never ships would have to
+// name that effect in its shipped surface — which SFEP-0016 turns into a
+// syscall mask. `sfn/crypto` is the case that forced it: six timing and
+// X.509-validity tests need `![clock]`, while the capsule deliberately
+// reads no ambient time (SFN-1216).
+//
+// One caveat on "every declared effect": the walk below visits
+// top-level functions, tests and struct methods, not `fn`s declared
+// inside another function's body. An uncalled nested `fn` therefore
+// escapes the ceiling — a called one does not, since propagation
+// pushes its effects onto its top-level parent. SFN-1218 closes the
+// asymmetry with `validate_recognized_effects`, which does descend.
+fn validate_capsule_capabilities(program: Program, capabilities_required: string[], capabilities_declared: boolean, capabilities_dev_required: string[]) -> CapabilityViolation[] {
     let mut violations: CapabilityViolation[] = [];
-    if capabilities_required.length == 0 { return violations; }
+    if !capabilities_declared { return violations; }
+    // The test-time ceiling is the shipped surface widened by
+    // `dev-required`. Computed once here rather than per statement.
+    let mut test_surface: string[] = [];
+    let mut c: int = 0;
+    loop {
+        if c >= capabilities_required.length { break; }
+        test_surface = append_unique_effect(test_surface, capabilities_required[c]);
+        c += 1;
+    }
+    let mut d: int = 0;
+    loop {
+        if d >= capabilities_dev_required.length { break; }
+        test_surface = append_unique_effect(test_surface, capabilities_dev_required[d]);
+        d += 1;
+    }
     let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
-        violations = _append_capability_violations(violations, _analyze_statement_capabilities(program.statements[index], capabilities_required));
+        violations = _append_capability_violations(violations, _analyze_statement_capabilities(program.statements[index], capabilities_required, test_surface));
         index += 1;
     }
     return violations;
 }
 
-fn _analyze_statement_capabilities(statement: Statement, capabilities: string[]) -> CapabilityViolation[] {
+// `capabilities` is the shipped surface; `test_capabilities` is that
+// surface widened by `[capabilities] dev-required`. Shipped code — free
+// functions and struct methods — is measured against the former, `test`
+// blocks against the latter, so a test-only effect never enters the
+// surface an artifact ships with (SFN-1216).
+fn _analyze_statement_capabilities(statement: Statement, capabilities: string[], test_capabilities: string[]) -> CapabilityViolation[] {
     if statement.variant == "FunctionDeclaration" {
         return _analyze_routine_capabilities(statement.signature, statement.signature.name, capabilities);
     }
@@ -46,7 +107,7 @@ fn _analyze_statement_capabilities(statement: Statement, capabilities: string[])
             name_span: statement.name_span
         };
         let qualified = "test " + statement.name;
-        return _analyze_routine_capabilities(signature, qualified, capabilities);
+        return _analyze_routine_capabilities(signature, qualified, test_capabilities);
     }
     if statement.variant == "StructDeclaration" {
         let mut issues: CapabilityViolation[] = [];
@@ -237,8 +298,8 @@ fn _append_unrecognized_violations(violations: UnrecognizedEffectViolation[], ne
     return result;
 }
 
-fn validate_capsule_capabilities_api(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
-    return validate_capsule_capabilities(program, capabilities_required);
+fn validate_capsule_capabilities_api(program: Program, capabilities_required: string[], capabilities_declared: boolean, capabilities_dev_required: string[]) -> CapabilityViolation[] {
+    return validate_capsule_capabilities(program, capabilities_required, capabilities_declared, capabilities_dev_required);
 }
 
 fn validate_recognized_effects_api(program: Program) -> UnrecognizedEffectViolation[] {

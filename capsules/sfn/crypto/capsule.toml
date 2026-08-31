@@ -10,7 +10,25 @@ description = "Cryptographic hashing and digest functions for Sailfin"
 "sfn/strings" = "*"
 
 [capabilities]
-required = []
+# The complete shipped surface, and deliberately nothing more. `io` reads
+# a CA bundle from disk (`src/trust_store.sfn`); `rand` backs
+# `random_bytes` over `getentropy` (`src/rand.sfn`).
+#
+# `clock` is deliberately NOT here. This capsule reads no ambient time:
+# callers supply `now_ms` and the X.509 code does a window comparison
+# (SFN-504), which is what keeps the clock surface scoped to `sfn/time`.
+# `compiler/tests/e2e/clock_gettime_reader_test.sfn` pins that boundary.
+# Under SFEP-0016 this list becomes a syscall mask, so on the most
+# security-sensitive capsule in the tree it stays exactly as wide as the
+# code that ships.
+required = ["io", "rand"]
+
+# Test-time only, unioned into the ceiling when checking a `test` block
+# and never for shipped code (SFN-1216). Six tests measure verification
+# timing budgets and X.509 validity windows and so declare `![clock]`;
+# without this key they would force `clock` into `required` above, which
+# is precisely the trade the boundary above exists to refuse.
+dev-required = ["clock"]
 
 [build]
 entry = "src/mod.sfn"

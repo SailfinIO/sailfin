@@ -47,7 +47,7 @@ fn effect_severity_for_check(file_path: string) -> string ![io] {
 // Driver-side constructor for the facade contract. Parsed syntax and staged
 // interfaces arrive from the caller; all remaining authority-bearing inputs
 // are resolved here before the pure `analyze_program` call.
-fn analyzer_input_for_check(program: Program, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean, implicit_symbols: ImplicitSymbol[] = [], resolved_capsule_specs: string[] = [], capsule_specs_known: boolean = false) -> AnalyzerInput ![io] {
+fn analyzer_input_for_check(program: Program, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], capabilities_declared: boolean, capabilities_dev_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean, implicit_symbols: ImplicitSymbol[] = [], resolved_capsule_specs: string[] = [], capsule_specs_known: boolean = false) -> AnalyzerInput ![io] {
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let import_context = resolve_import_context(program, file_path, closure_symbols, resolved_capsule_specs, capsule_specs_known);
     return AnalyzerInput {
@@ -58,6 +58,8 @@ fn analyzer_input_for_check(program: Program, file_path: string, imported_interf
         intrinsic_effects: intrinsic_effect_table(),
         prelude_globals: prelude_globals,
         capabilities_required: capabilities_required,
+        capabilities_declared: capabilities_declared,
+        capabilities_dev_required: capabilities_dev_required,
         import_context: import_context,
         allow_bare_assert: allow_bare_assert,
         effect_severity: effect_severity_for_check(file_path),
@@ -91,15 +93,16 @@ fn check_source(source: string, file_path: string) -> CheckResult ![io] {
     let imported_interfaces: Statement[] = [];
     let capabilities_required: string[] = [];
     let closure_symbols = ClosureSymbolSet { names: [], complete: false };
-    return check_source_with_imports(source, file_path, imported_interfaces, empty_import_symbols(), capabilities_required, closure_symbols, false);
+    let capabilities_dev_required: string[] = [];
+    return check_source_with_imports(source, file_path, imported_interfaces, empty_import_symbols(), capabilities_required, false, capabilities_dev_required, closure_symbols, false);
 }
 
 // Backwards-compatible source adapter retained for existing tool consumers.
 // New analyzer-only consumers parse independently and call `analyze_program`
 // with an `AnalyzerInput`, avoiding every driver/LLVM dependency in this file.
-fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean) -> CheckResult ![io] {
+fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], capabilities_declared: boolean, capabilities_dev_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean) -> CheckResult ![io] {
     let program = parse_program(source);
-    let input = analyzer_input_for_check(program, file_path, imported_interfaces, imported_symbols, capabilities_required, closure_symbols, allow_bare_assert);
+    let input = analyzer_input_for_check(program, file_path, imported_interfaces, imported_symbols, capabilities_required, capabilities_declared, capabilities_dev_required, closure_symbols, allow_bare_assert);
     return check_result_from_analysis(analyze_program(input), source);
 }
 

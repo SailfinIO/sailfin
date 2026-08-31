@@ -4,7 +4,8 @@
 // Contract: a function declaring an effect outside the capsule
 // manifest's `[capabilities] required = [...]` surface must fail with
 // diagnostic `E0403`. The logic lives in
-// `validate_capsule_capabilities` (`compiler/src/effect_checker.sfn`,
+// `validate_capsule_capabilities`
+// (`compiler/capsules/analyzer/src/effect_checker/validations.sfn`,
 // Phase F) and renders via `compiler/src/diagnostics_render.sfn`; both
 // are already shipped and unit-tested
 // (`compiler/tests/unit/effect_capabilities_test.sfn`). This test closes
@@ -57,18 +58,29 @@ fn _scratch(tag: string) -> string ![io] {
     return dir;
 }
 
-// Stage a one-fixture capsule with `[capabilities] required = ["io"]`.
-// Returns the absolute path to the staged fixture for `sfn check`.
-fn _stage_capsule(tag: string, fixture_name: string, fixture_body: string) -> string ![io] {
+// Stage a one-fixture capsule under a verbatim manifest. Callers own the
+// whole `capsule.toml` text so a test can express manifest states that
+// have no valid `[capabilities]` shape at all (SFN-764).
+fn _stage_raw(tag: string, manifest: string, fixture_name: string, fixture_body: string) -> string ![io] {
     let dir = _scratch(tag);
-    fs.writeFile(dir + "/capsule.toml", "[capsule]\n"
-        + "name = \"cross_check_fixture\"\n"
-        + "version = \"0.0.0\"\n\n"
-        + "[capabilities]\n"
-        + "required = [\"io\"]\n");
+    fs.writeFile(dir + "/capsule.toml", manifest);
     let fixture_path = dir + "/src/" + fixture_name;
     fs.writeFile(fixture_path, fixture_body);
     return fixture_path;
+}
+
+// A well-formed manifest header, with `caps` appended verbatim so each
+// test picks its own `[capabilities]` state.
+fn _manifest(caps: string) -> string {
+    return "[capsule]\n" + "name = \"cross_check_fixture\"\n"
+        + "version = \"0.0.0\"\n\n"
+        + caps;
+}
+
+// Stage a one-fixture capsule with `[capabilities] required = ["io"]`.
+// Returns the absolute path to the staged fixture for `sfn check`.
+fn _stage_capsule(tag: string, fixture_name: string, fixture_body: string) -> string ![io] {
+    return _stage_raw(tag, _manifest("[capabilities]\nrequired = [\"io\"]\n"), fixture_name, fixture_body);
 }
 
 struct CheckRun {
@@ -108,4 +120,108 @@ test "capability cross-check: accepts effect within manifest surface" ![io] {
     let r = _check(fixture);
     assert r.exit == 0;
     assert find(r.out, "E0403", 0) < 0;
+}
+
+// ---- SFN-764: the three manifest states --------------------------------
+//
+// The bug these pin: `capabilities_required` alone cannot tell "declared
+// nothing" from "declared an empty set", so an explicit `required = []`
+// used to disable the cross-check outright — a capsule asserting it
+// needed no capability silently received full authority. Presence of the
+// section now decides whether the check runs; its contents decide what
+// passes.
+// State: `[capabilities]` present, `required = []` → deny-all.
+// This is the whole point of SFN-764 and fails against the old compiler.
+test "capability cross-check: an explicit empty surface denies every effect" ![io] {
+    let fixture = _stage_raw("declared-empty", _manifest("[capabilities]\nrequired = []\n"), "touch.sfn", "fn touch() ![io] {\n"
+        + "    print.info(\"denied\");\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit != 0;
+    assert find(r.out, "E0403", 0) >= 0;
+    // The effect the author actually declared must be named, so the
+    // diagnostic is actionable rather than just "something is wrong".
+    assert find(r.out, "io", 0) >= 0;
+}
+
+// State: no `[capabilities]` section → still skipped.
+// The decisive control. Merging this state with the one above would break
+// every capsule that has not yet written a manifest surface, which is why
+// the flag tracks section PRESENCE and not list length.
+test "capability cross-check: an absent capabilities section still skips" ![io] {
+    let fixture = _stage_raw("absent-section", _manifest(""), "touch.sfn", "fn touch() ![io] {\n"
+        + "    print.info(\"allowed\");\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit == 0;
+    assert find(r.out, "E0403", 0) < 0;
+}
+
+// State: `[capabilities]` present but no readable `required` key.
+// Fail-closed turns what was silent full authority into a loud E0403
+// naming exactly the effect the author expected to have been granted.
+test "capability cross-check: a section with no required key fails closed" ![io] {
+    let fixture = _stage_raw("missing-key", _manifest("[capabilities]\n"), "touch.sfn", "fn touch() ![io] {\n"
+        + "    print.info(\"denied\");\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit != 0;
+    assert find(r.out, "E0403", 0) >= 0;
+}
+
+// `pure` is the empty effect set, not a capability, so it must survive a
+// deny-all ceiling. Guards the carve-out in `_analyze_routine_capabilities`
+// against a future refactor that treats the deny-all surface as "reject
+// every effect token".
+test "capability cross-check: pure passes under a deny-all surface" ![io] {
+    let fixture = _stage_raw("pure-under-deny", _manifest("[capabilities]\nrequired = []\n"), "calc.sfn", "fn calc(x: number) -> number ![pure] {\n"
+        + "    return x + 1;\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit == 0;
+    assert find(r.out, "E0403", 0) < 0;
+}
+
+// ---- SFN-764: E0407, an unreadable manifest ----------------------------
+//
+// A manifest the resolver accepts but the scanner extracts nothing from
+// (truncated write, conflict markers, a misspelled section header) used to
+// degrade to "no capabilities declared, allow everything" — a fail-open
+// bypass sitting underneath the fail-closed rule above. A capsule whose
+// manifest cannot be read is not a capsule.
+test "capability cross-check: an unreadable manifest is E0407, not full authority" ![io] {
+    let fixture = _stage_raw("unreadable-manifest", "<<<<<<< HEAD\nname = \"clobbered\"\n=======\n>>>>>>> other\n", "touch.sfn", "fn touch() ![io] {\n"
+        + "    print.info(\"should not be authorized\");\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit != 0;
+    assert find(r.out, "E0407", 0) >= 0;
+}
+
+// ---- SFN-1216: dev-required widens the ceiling for tests only --------
+//
+// The forcing case is `sfn/crypto`: six timing and X.509-validity tests
+// declare `![clock]` on a capsule that deliberately reads no ambient
+// time. Without this key those tests would push `clock` into the shipped
+// surface, which SFEP-0016 turns into a syscall mask.
+test "capability cross-check: dev-required grants a test block" ![io] {
+    let fixture = _stage_raw("dev-required-test", _manifest("[capabilities]\nrequired = [\"io\"]\ndev-required = [\"clock\"]\n"), "timing.sfn", "test \"budget holds\" ![clock] {\n"
+        + "    assert true;\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit == 0;
+    assert find(r.out, "E0403", 0) < 0;
+}
+
+test "capability cross-check: dev-required does not grant shipped code" ![io] {
+    // The other half, and the one that matters: a dev-only effect must
+    // still fail on a shipped `fn`, or `dev-required` would just be a
+    // wider `required` with a friendlier name.
+    let fixture = _stage_raw("dev-required-shipped", _manifest("[capabilities]\nrequired = [\"io\"]\ndev-required = [\"clock\"]\n"), "tick.sfn", "fn tick() ![clock] {\n"
+        + "    return;\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit != 0;
+    assert find(r.out, "E0403", 0) >= 0;
+    assert find(r.out, "clock", 0) >= 0;
 }

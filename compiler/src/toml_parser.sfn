@@ -689,23 +689,68 @@ fn toml_get_string_array(text: string, section: string, key: string) -> string {
     return "";
 }
 
+// Does the manifest declare `[section]` at all? Section presence is
+// deliberately separate from any value read out of it: a section that
+// exists but is empty is a declaration, not an absence. A commented-out
+// header does not count, since `#` lines are skipped before the header
+// test — matching every other section scan in this file.
+fn _toml_has_section(text: string, section: string) -> boolean {
+    let lines = _toml_split_lines(text);
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] != "[" { continue; }
+        let close = find_char_local(line, "]", 0);
+        if close <= 0 { continue; }
+        if strings_equal(_toml_trim(substring(line, 1, close)), section) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// SFN-764: the *declared* half of the capability surface, kept apart
+// from the list below. An explicit `[capabilities]` section means the
+// author asserted a ceiling, so an empty `required` denies every effect
+// rather than disabling the cross-check. Callers must key the
+// cross-check on this, never on the list's length.
+fn toml_has_capabilities_section(text: string) -> boolean {
+    return _toml_has_section(text, "capabilities");
+}
+
 // Phase F: read `[capabilities] required = [...]` from a capsule
 // manifest. Returns the parsed list of capability names as a real
 // `string[]` (not newline-joined like `toml_get_string_array`) so
 // downstream consumers can pass it straight into the effect-checker
 // `validate_capsule_capabilities` call without round-tripping
-// through `_split_lines`. An empty list means either:
-//   - the manifest declares `required = []` (no capabilities granted)
-//   - the manifest has no `[capabilities]` section at all
-//   - the input text isn't a capsule manifest (e.g. caller passed
-//     "" because the file wasn't on disk)
-// All three resolve to the same caller behaviour: skip the
-// capability cross-check, since there's no surface to compare
-// against. The effect-checker treats "no capabilities declared"
-// as "all capabilities allowed" — `compiler/capsule.toml` and the
-// stdlib capsules opt in by listing their required set explicitly.
+// through `_split_lines`.
+//
+// The list alone cannot say whether a surface was declared: an absent
+// `[capabilities]` section, an explicit `required = []`, and a malformed
+// `required` key all yield an empty list. Pair it with
+// `toml_has_capabilities_section` — an explicit empty surface denies
+// every effect (`E0403`); only an absent section skips the check
+// (SFN-764; spec 07-effects.md item 5).
 fn toml_get_capabilities_required(text: string) -> string[] {
     return _toml_split_lines_into_array(toml_get_string_array(text, "capabilities", "required"));
+}
+
+// SFN-1216: `[capabilities] dev-required = [...]`, the test-time half of
+// the ceiling. Unioned into the surface only when checking a
+// `TestDeclaration`, never for shipped code, so a capsule whose tests
+// need an effect it does not ship keeps that effect out of its shipped
+// surface — and out of the syscall mask SFEP-0016 derives from it.
+//
+// Absent means empty, so a manifest without the key behaves exactly as
+// before. The precedent is `sfn add`, which already excludes dev
+// dependencies' capabilities from a consumer's runtime surface
+// (`cli/commands/add.sfn`).
+fn toml_get_capabilities_dev_required(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "capabilities", "dev-required"));
 }
 
 // SFEP-0051 Phase 4a: workspace capability-envelope getters. Read the

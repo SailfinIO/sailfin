@@ -568,7 +568,7 @@ fn _filter_program_tests(program: Program) -> Program {
     return Program { statements: kept };
 }
 
-fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[], implicit_symbols: ImplicitSymbol[]) -> boolean ![io] {
+fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[], imported_capabilities_declared: boolean, imported_capabilities_dev_required: string[], implicit_symbols: ImplicitSymbol[]) -> boolean ![io] {
     let trace = test_runner_trace();
     if trace { print.err("test compiler (imports): parse_program start"); }
     let mut program: Program = parse_program(source);
@@ -602,7 +602,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     // capability list = standalone test outside any capsule = skip
     // E0403 cross-check; the tests in `compiler/tests/unit/` run
     // without a manifest in scope today and rely on this fallback.
-    if validate_and_render_effects_with_capabilities(program, source, module_name, imported_function_effects, imported_capabilities_required) > 0 {
+    if validate_and_render_effects_with_capabilities(program, source, module_name, imported_function_effects, imported_capabilities_required, imported_capabilities_declared, imported_capabilities_dev_required) > 0 {
         return false;
     }
     // E4 ownership pass (#1213): dormant Phase R0 gate.
