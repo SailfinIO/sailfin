@@ -16,6 +16,31 @@
 // Drives the script as a subprocess (no bash e2e scripts — see
 // .claude/rules/no-bash-e2e.md) and asserts on captured stdout/stderr.
 import { contains } from "sfn/strings";
+import { bash_path, host_is_windows, scratch_root } from "sfn/test";
+
+// Native Windows resolves a bare `bash` through CreateProcess rather than the
+// GitHub Actions step-shell selection that points at Git Bash. Prefer the Git
+// for Windows provider the runner installs, then retain PATH lookup for custom
+// hosts. The WSL app alias is not equivalent: it consumes `/mnt/c/...` paths,
+// while these Bash-backed repository fixtures use the MSYS `/c/...` bridge.
+fn _bash_tool() -> string ![io] {
+    if !host_is_windows() { return "bash"; }
+    let program_files = env.get("ProgramFiles");
+    if program_files.length > 0 {
+        let system_git_bash = program_files + "\\Git\\bin\\bash.exe";
+        if fs.exists(system_git_bash) { return system_git_bash; }
+    }
+    let local_app_data = env.get("LOCALAPPDATA");
+    if local_app_data.length > 0 {
+        let user_git_bash = local_app_data + "\\Programs\\Git\\bin\\bash.exe";
+        if fs.exists(user_git_bash) { return user_git_bash; }
+    }
+    return "bash.exe";
+}
+
+fn _fixture_dir(name: string) -> string ![io] {
+    return scratch_root() + "/perf-history-compare-test/" + name;
+}
 
 // The append/compare paths are pure shell/awk with no gh dependency, so bash
 // plus the two coreutils they call (`awk` and `wc`) is all the child needs —
@@ -26,9 +51,9 @@ fn _child_env() -> string[] ![io] {
     let path = env.get("PATH");
     if path.length > 0 { e.push("PATH=" + path); }
     let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
+    if home.length > 0 { e.push("HOME=" + bash_path(home)); }
     let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    if tmpdir.length > 0 { e.push("TMPDIR=" + bash_path(tmpdir)); }
     return e;
 }
 
@@ -52,13 +77,13 @@ fn _prior_rows(seed: string) -> string {
 }
 
 fn _run_compare(dir: string) -> int ![io] {
-    return process.run_capture(["bash", "scripts/perf_history.sh", "compare", "--data-dir", dir, "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--out", dir
-        + "/out.tsv"], _child_env());
+    return process.run_capture([_bash_tool(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--out", bash_path(dir
+        + "/out.tsv")], _child_env());
 }
 
 fn _run_compare_budget(dir: string, budget: string) -> int ![io] {
-    return process.run_capture(["bash", "scripts/perf_history.sh", "compare", "--data-dir", dir, "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--budget", budget, "--out", dir
-        + "/out.tsv"], _child_env());
+    return process.run_capture([_bash_tool(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--budget", budget, "--out", bash_path(dir
+        + "/out.tsv")], _child_env());
 }
 
 // A `build.csv` whose only row is the current run, so the whole-build budget
@@ -77,7 +102,7 @@ fn _write_budget_fixture(dir: string, wall: string, budget: string) -> void ![io
 }
 
 test "perf-history: a seed bump resets baselines and files no regressions" ![io] {
-    let dir = "build/perf-history-compare-test/seedbump";
+    let dir = _fixture_dir("seedbump");
     fs.createDirectory(dir, true);
     // Prior runs under 0.7.0; current run under the bumped 0.8.0 with every
     // module 2x slower and 2x peak — a cross-seed comparison WOULD flag the
@@ -99,7 +124,7 @@ test "perf-history: a seed bump resets baselines and files no regressions" ![io]
 }
 
 test "perf-history: a same-seed regression is still caught" ![io] {
-    let dir = "build/perf-history-compare-test/sameseed";
+    let dir = _fixture_dir("sameseed");
     fs.createDirectory(dir, true);
     // Same seed throughout; foo jumps 1.0 -> 1.5 (+50%) while bar and every
     // peak_kb stay flat, so exactly one regression line (foo/time_s) is
@@ -120,7 +145,7 @@ test "perf-history: a same-seed regression is still caught" ![io] {
 // here keeps the two from drifting apart: a gate that failed where compare filed
 // nothing (or the reverse) would contradict itself inside one job summary.
 test "perf-history: wall time one second over the budget files a budget row" ![io] {
-    let dir = "build/perf-history-compare-test/budget-over";
+    let dir = _fixture_dir("budget-over");
     _write_budget_fixture(dir, "301", "300");
     let exit = _run_compare_budget(dir, "300");
     let out = process.capture_take_stdout();
@@ -134,7 +159,7 @@ test "perf-history: wall time one second over the budget files a budget row" ![i
 }
 
 test "perf-history: wall time exactly at the budget files nothing" ![io] {
-    let dir = "build/perf-history-compare-test/budget-at";
+    let dir = _fixture_dir("budget-at");
     _write_budget_fixture(dir, "300", "300");
     let exit = _run_compare_budget(dir, "300");
     let out = process.capture_take_stdout();
@@ -179,8 +204,8 @@ fn _write_consumer_fixture(dir: string, priors: int, current: string) -> void ![
 }
 
 fn _run_compare_consumer(dir: string) -> int ![io] {
-    return process.run_capture(["bash", "scripts/perf_history.sh", "compare", "--data-dir", dir, "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--count-threshold-pct", "0", "--out", dir
-        + "/out.tsv"], _child_env());
+    return process.run_capture([_bash_tool(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--count-threshold-pct", "0", "--out", bash_path(dir
+        + "/out.tsv")], _child_env());
 }
 
 // The reason the derived counts get their own threshold. 32 -> 35 constructors
@@ -188,7 +213,7 @@ fn _run_compare_consumer(dir: string) -> int ![io] {
 // jitter, and therefore invisible if the counts shared it. `cold_s` is held
 // flat so the row cannot have come from the timing metric.
 test "perf-history: a consumer constructor rise inside the wall-time band is still caught" ![io] {
-    let dir = "build/perf-history-compare-test/consumer-ctors";
+    let dir = _fixture_dir("consumer-ctors");
     _write_consumer_fixture(dir, 8, "48.70,1.76,386848,35,34,68,68,0,ok,0.9.5,Linux x86_64");
     let exit = _run_compare_consumer(dir);
     let out = process.capture_take_stdout();
@@ -205,7 +230,7 @@ test "perf-history: a consumer constructor rise inside the wall-time band is sti
 // A standing gate is only useful if it stays quiet while its history is thin —
 // a series that alerts on its first nights gets muted before it is ever right.
 test "perf-history: a consumer series on thin history no-ops rather than alerting" ![io] {
-    let dir = "build/perf-history-compare-test/consumer-coldstart";
+    let dir = _fixture_dir("consumer-coldstart");
     // Three prior runs against --min-runs 7, and a current run doubled on every
     // metric: still nothing, because three points are not a baseline.
     _write_consumer_fixture(dir, 3, "99.00,1.76,773696,64,68,68,68,0,ok,0.9.5,Linux x86_64");
@@ -221,7 +246,7 @@ test "perf-history: a consumer series on thin history no-ops rather than alertin
 // a signal (docs/perf/consumer-baseline.md). Comparing it would fire on changes
 // the epic does not care about and dilute the metrics that do move.
 test "perf-history: consumer binary growth alone files nothing" ![io] {
-    let dir = "build/perf-history-compare-test/consumer-size";
+    let dir = _fixture_dir("consumer-size");
     _write_consumer_fixture(dir, 8, "48.70,1.76,773696,32,34,68,68,0,ok,0.9.5,Linux x86_64");
     let exit = _run_compare_consumer(dir);
     let out = process.capture_take_stdout();
@@ -233,7 +258,7 @@ test "perf-history: consumer binary growth alone files nothing" ![io] {
 // A metric the harness could not derive is written as -1. Unavailable is not a
 // measurement, so it must not alert.
 test "perf-history: a consumer metric the harness could not derive does not alert" ![io] {
-    let dir = "build/perf-history-compare-test/consumer-noctor";
+    let dir = _fixture_dir("consumer-noctor");
     _write_consumer_fixture(dir, 8, "48.70,1.76,-1,-1,34,68,68,0,ok+nostrip+noctor,0.9.5,Linux x86_64");
     let exit = _run_compare_consumer(dir);
     let out = process.capture_take_stdout();
@@ -250,7 +275,7 @@ test "perf-history: a consumer metric the harness could not derive does not aler
 // would be full and the jump would be compared against a baseline holding a
 // non-measurement.
 test "perf-history: an underived consumer sample does not count toward the window" ![io] {
-    let dir = "build/perf-history-compare-test/consumer-noctor-window";
+    let dir = _fixture_dir("consumer-noctor-window");
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/consumer.csv", _consumer_header()
         + _consumer_prior_rows(6)
@@ -268,7 +293,7 @@ test "perf-history: an underived consumer sample does not count toward the windo
 // still have its whole-build wall time judged. A per-module cold start
 // swallowing a real budget breach is the SFN-421 failure with an extra step.
 test "perf-history: a budget breach files even when the compile bench wrote no CSV" ![io] {
-    let dir = "build/perf-history-compare-test/budget-no-compile";
+    let dir = _fixture_dir("budget-no-compile");
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/build.csv", "run_sha,run_date,build_wall_s,budget_s\n"
         + "cur,2026-07-12,301,300\n");
@@ -286,7 +311,7 @@ test "perf-history: a budget breach files even when the compile bench wrote no C
 // another. `perf-history.yml` counts findings as distinct (kind, name) pairs
 // off exactly this output.
 test "perf-history: three comparison kinds coexist without masking one another" ![io] {
-    let dir = "build/perf-history-compare-test/all-kinds";
+    let dir = _fixture_dir("all-kinds");
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/compile.csv", _header() + _prior_rows("0.8.0")
         + "cur,2026-07-12,foo,1.5,10000,500,OK,0.8.0\n"
@@ -310,14 +335,14 @@ test "perf-history: three comparison kinds coexist without masking one another" 
 }
 
 fn _run_append_consumer(dir: string, raw: string) -> int ![io] {
-    return process.run_capture(["bash", "scripts/perf_history.sh", "append", "--data-dir", dir, "--sha", "cur", "--date", "2026-08-12", "--consumer", raw], _child_env());
+    return process.run_capture([_bash_tool(), bash_path("scripts/perf_history.sh"), "append", "--data-dir", bash_path(dir), "--sha", "cur", "--date", "2026-08-12", "--consumer", bash_path(raw)], _child_env());
 }
 
 // Re-running the nightly against an already-recorded commit must leave the
 // series byte-identical, or the rolling median silently weights that commit
 // twice and the same run alerts a second time.
 test "perf-history: re-appending a commit's consumer rows is a no-op" ![io] {
-    let dir = "build/perf-history-compare-test/consumer-append";
+    let dir = _fixture_dir("consumer-append");
     fs.createDirectory(dir, true);
     let raw = dir + "/raw.csv";
     let row = "hello,48.70,1.76,386848,32,34,68,68,0,ok,0.9.5,Linux x86_64\n";
