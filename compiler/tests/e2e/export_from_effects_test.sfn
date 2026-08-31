@@ -1,0 +1,128 @@
+// End-to-end regression test for SFN-1202 — effect propagation across an
+// inline `export { X } from "./Y"` re-export edge.
+//
+// The Reach pillar's claim is that the compiler derives a capability
+// manifest and proves it *complete* (`CLAUDE.md`). A facade re-export that
+// dropped its origin's effects would falsify that by construction: any
+// function reachable only through a barrel could under-report its reach,
+// and this repo uses facade re-exports deliberately and widely
+// (`docs/conventions/barrel-imports.md`). The propagation holds today, so
+// what this file buys is a guard against it silently ceasing to.
+//
+// Silently is the operative word, and it is why the coverage is worth its
+// runtime. An effect requirement that fails to reach a caller raises
+// nothing: `_propagate_imported_callee_effects`
+// (`compiler/capsules/analyzer/src/effect_checker/collector.sfn`) returns
+// its accumulated requirements unchanged when a callee does not resolve,
+// so "this callee has no effects" and "this callee was never found" are
+// the same observable outcome — a clean `sfn check`. A regression here
+// does not announce itself; it just stops rejecting things.
+//
+// That failure mode was confirmed against these fixtures rather than
+// assumed. With that propagation suppressed, all three under-declared
+// callers below check `ok` and the three negative cases fail, while the
+// positive control still passes — so the suite discriminates the
+// behaviour it names instead of merely reacting to a broken compiler.
+//
+// SFN-1202 was filed believing the propagation was already broken, on the
+// strength of a field case (SFN-1069) where three callers of a re-exported
+// `![clock, io, net]` function kept declaring `![io, net]` and shipped
+// green. That reproduces correctly on this compiler — restoring the
+// narrow signatures yields `E0402 ... missing required effects: ![clock]`
+// — so the original diagnosis did not survive, and `partial_caller.sfn`
+// preserves that exact shape as the case most likely to matter.
+//
+// Note the code is E0402, not the E0400 the issue predicted: a
+// cross-module callee promotes the in-module E0400 to E0402
+// (`effect_diagnostics.sfn::code_for_missing_effect_data`), which is the
+// correct code for every case here.
+//
+// Distinct from `export_from_test.sfn`, which builds and runs the same
+// re-export shape to cover the *linker* shim (#508), and from
+// `reexport_check_test.sfn`, which covers the bare `export { X };` form.
+//
+// Effects are a check-time property, so these cases drive `sfn check`
+// rather than a full build: no IR is emitted, nothing is linked, and the
+// `program.ll` build-cache collision that `export_from_test.sfn` guards
+// against does not arise. The child still gets `clean_runner_env` +
+// `nested_runner_scratch` (SFN-401) so it cannot bind to the parent
+// pool's orchestration state.
+import { find } from "sfn/strings";
+import {
+    clean_runner_env,
+    expect_contains_str,
+    expect_eq_int,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
+
+// Fixture entry modules under `compiler/tests/e2e/fixtures/export_from_effects/`.
+// Each is checked on its own so the resolved closure contains exactly the
+// chain that case is about; the fixture carries its own `capsule.toml` to
+// stop `discover_project_root` walking up into `compiler/capsule.toml`.
+fn _fixture(name: string) -> string {
+    return "compiler/tests/e2e/fixtures/export_from_effects/" + name;
+}
+
+// The outcome of one spawned `sfn check`: the child's exit status and its
+// combined stdout+stderr, since the diagnostic body is what these cases
+// assert on and the renderer is free to choose a stream.
+struct _CheckRun {
+    exit: int;
+    output: string;
+}
+
+fn _run_check(entry: string) -> _CheckRun ![io] {
+    let child_env = clean_runner_env(nested_runner_scratch("export-from-effects"));
+    let exit = process.run_capture([sfn_bin_path(), "check", _fixture(entry)], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return _CheckRun { exit: exit, output: out + err };
+}
+
+// A rejected case must fail for the *stated* reason. Asserting only a
+// non-zero exit would let an unrelated breakage (a parse error in the
+// fixture, a missing binary) keep the test green while the effect check
+// itself regressed, so the diagnostic code and the specific missing effect
+// are both required.
+fn _assert_rejected(entry: string, missing: string) -> int ![io] {
+    let run = _run_check(entry);
+    // A non-zero status alone would also be produced by a fixture that
+    // failed to parse, so the status is only the first of three.
+    assert run.exit != 0;
+    assert expect_contains_str(run.output, "E0402").ok;
+    assert expect_contains_str(run.output, "missing required effects: !["
+        + missing
+        + "]").ok;
+    return 0;
+}
+
+test "export-from-effects: a caller under-declaring a facade-reached effect is rejected" ![io] {
+    // The one-hop shape: `undeclared_caller` -> `facade` -> `origin`, with
+    // the caller declaring no effects against an `![io]` origin.
+    let _r = _assert_rejected("undeclared_caller.sfn", "io");
+}
+
+test "export-from-effects: a narrower effect row through a facade is rejected" ![io] {
+    // The SFN-1069 shape verbatim: the caller declares a non-empty but
+    // narrower row (`![io, net]`) than the facade-reached callee
+    // (`![clock, io, net]`). A containment check that degraded into a
+    // non-empty check would pass this while admitting the real defect.
+    let _r = _assert_rejected("partial_caller.sfn", "clock");
+}
+
+test "export-from-effects: effects survive a chain of re-exports" ![io] {
+    // Two hops: `chain_caller` -> `chain` -> `facade` -> `origin`. The
+    // bare-name fallback is hop-count independent, but the closure staging
+    // it depends on is transitive, so the extra edge is worth pinning.
+    let _r = _assert_rejected("chain_caller.sfn", "io");
+}
+
+test "export-from-effects: a correctly-declared caller through a facade checks clean" ![io] {
+    // Positive control. Without it the three negative cases above would
+    // still pass if `sfn check` rejected every fixture for some unrelated
+    // reason — the failure mode a negative-only suite cannot see.
+    let run = _run_check("declared_caller.sfn");
+    assert expect_eq_int(run.exit, 0).ok;
+    assert find(run.output, "E0402", 0) < 0;
+}

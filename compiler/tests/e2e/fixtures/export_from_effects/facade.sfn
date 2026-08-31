@@ -1,0 +1,3 @@
+// One-hop facade: the inline `export { X } from "./Y"` re-export whose
+// effect propagation SFN-1202 pins.
+export { effect_probe_io, effect_probe_multi } from "./origin";

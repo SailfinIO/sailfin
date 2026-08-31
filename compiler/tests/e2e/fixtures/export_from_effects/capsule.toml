@@ -1,0 +1,4 @@
+[capsule]
+name = "fixture/export-from-effects"
+version = "0.0.0"
+description = "Isolated capsule manifest for the SFN-1202 effect-propagation fixture, so `discover_project_root` does not walk up into compiler/capsule.toml and drag the native runtime into a check that only needs the analyzer."
