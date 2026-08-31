@@ -85,6 +85,11 @@ struct CheckGroup {
     // instead of surviving to a lowering `[fatal]` at build.
     resolved_capsule_specs: string[];
     capsule_specs_known: boolean;
+    // SFN-1161: struct declarations reconstructed from imported `.sfn-asm`
+    // artifacts, sourced from the same per-group resolver pass that
+    // populates `interfaces`. Trailing for pinned-seed positional layout
+    // stability.
+    structs: Statement[];
 }
 
 fn _emit_check_header(path: string, quiet: boolean) ![io] {
@@ -296,8 +301,9 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
                 complete: false
             };
             let empty_specs: string[] = [];
+            let empty_structs: Statement[] = [];
             groups.push(CheckGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, closure_symbols: empty_closure, resolved_capsule_specs: empty_specs, capsule_specs_known: false
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, closure_symbols: empty_closure, resolved_capsule_specs: empty_specs, capsule_specs_known: false, structs: empty_structs
             });
             idx = groups.length - 1;
         }
@@ -378,6 +384,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
             return 2;
         }
         groups[gi].interfaces = load.interfaces;
+        groups[gi].structs = load.structs;
         groups[gi].implicit_symbols = load.implicit_symbols;
         // Phase E: stash the cross-module function-effect table so
         // the per-file analysis loop below can hand it to
@@ -465,7 +472,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
         let program = parse_program(source);
-        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].capabilities_declared, groups[group_idx].capabilities_dev_required, groups[group_idx].closure_symbols, allow_bare_assert, groups[group_idx].implicit_symbols, groups[group_idx].resolved_capsule_specs, groups[group_idx].capsule_specs_known);
+        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].capabilities_declared, groups[group_idx].capabilities_dev_required, groups[group_idx].closure_symbols, allow_bare_assert, groups[group_idx].implicit_symbols, groups[group_idx].resolved_capsule_specs, groups[group_idx].capsule_specs_known, groups[group_idx].structs);
         let result = check_result_from_analysis(analyze_program(analyzer_input), source);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually
@@ -505,7 +512,8 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         skipped_paths: aggregate_skipped,
         native_texts: empty_texts,
         implicit_symbols: empty_implicit,
-        implicit_diagnostics: []
+        implicit_diagnostics: [],
+        structs: empty_interfaces
     };
 
     if json {

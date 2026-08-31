@@ -36,6 +36,7 @@ import {
     find_value_symbol,
     is_function_kind,
     make_fn_value_position_diagnostic,
+    make_imported_fn_value_diagnostic,
     register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { trim_text } from "../typecheck_types/text_utils";
@@ -281,10 +282,24 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         loop {
             if index >= expression.fields.length { break; }
             let field = expression.fields[index];
-            let field_expected = _struct_field_expected_type(expression.type_name, field.name, ctx);
+            let local_expected = _struct_field_expected_type(expression.type_name, field.name, ctx);
+            let mut field_expected = local_expected;
+            if field_expected == null {
+                field_expected = _imported_struct_field_expected_type(expression.type_name, field.name, ctx);
+            }
             diagnostics = diagnostics.concat(walk_expression(field.value, ctx_with_expected_type(ctx, field_expected)));
             if !is_generic_struct {
-                diagnostics = diagnostics.concat(check_array_element_type(field.value, field_expected, ctx, "field `"
+                // `local_expected`, deliberately, not `field_expected`
+                // (SFN-1161). `ctx.expected_type` is read in exactly two
+                // places — `_array_element_expected_type` and the fn-value
+                // gate — so routing an imported annotation only into
+                // `ctx_with_expected_type` cannot raise anything but the
+                // fn-value verdict this fix exists to correct. Passing it
+                // here would additionally open E0310 on imported struct
+                // fields, and `.sfn-asm` carries no struct type parameters,
+                // so `is_generic_struct` above could not suppress an
+                // unsubstituted `T[]` field on an imported `Box<T>`.
+                diagnostics = diagnostics.concat(check_array_element_type(field.value, local_expected, ctx, "field `"
                     + field.name
                     + "`", field.name, _value_anchor_span(field.value)));
             }
@@ -565,7 +580,12 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                         // Import/prelude placeholders do not carry a complete
                         // callable signature. Fail closed until parameter,
                         // generic, async, and ABI metadata cross this boundary.
-                        return [make_fn_value_position_diagnostic(expression.name, expression.span)];
+                        //
+                        // E0843, not E0808 (SFN-1161): the restriction here is
+                        // missing import metadata, not the C ABI, so the
+                        // generic "take its address with `as * u8`" advice
+                        // sent readers to an unrelated escape hatch.
+                        return [make_imported_fn_value_diagnostic(expression.name, expression.span)];
                     }
                 }
             }
@@ -582,7 +602,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                         if ctx.expected_type != null {
                             let expected = parse_fn_type_text(ctx.expected_type.text);
                             if expected.ok {
-                                return check_named_fn_value_compatibility(expression.name, entry, ctx.expected_type.text, expression.span);
+                                return check_named_fn_value_compatibility(expression.name, entry, ctx.expected_type.text, expression.span, _struct_type_names(ctx));
                             }
                         }
                     }
@@ -672,6 +692,73 @@ fn _struct_field_expected_type(type_name: string[], field_name: string, ctx: Typ
     loop {
         if declaration_index >= ctx.declarations.length { break; }
         let declaration = ctx.declarations[declaration_index];
+        if declaration.variant == "StructDeclaration" {
+            if declaration.name == name {
+                let mut field_index: int = 0;
+                loop {
+                    if field_index >= declaration.fields.length { break; }
+                    if declaration.fields[field_index].name == field_name {
+                        return declaration.fields[field_index].type_annotation;
+                    }
+                    field_index += 1;
+                }
+            }
+        }
+        declaration_index += 1;
+    }
+    return null;
+}
+
+// Names of every struct type in scope — local declarations plus the imported
+// channel (SFN-1161). Feeds the parameter-position ABI relaxation in
+// `check_named_fn_value_compatibility`: a named user struct is `%T*` under the
+// boxed-struct ABI and so is pointer-width, unlike `string`.
+//
+// Built from actual `StructDeclaration`s only, never from `ctx.known_types` —
+// that list also carries interfaces, which lower to a `{i8*, i8*}` pair and
+// must keep failing the pointer-width test.
+//
+// Computed at the call site rather than carried on `TypeckCtx`: it is needed
+// only when a bare function name meets a `fn(...)` expectation, which is rare,
+// and every `TypeckCtx` field is indexed positionally by the seed.
+fn _struct_type_names(ctx: TypeckCtx) -> string[] {
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= ctx.declarations.length { break; }
+        if ctx.declarations[index].variant == "StructDeclaration" {
+            names.push(ctx.declarations[index].name);
+        }
+        index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= ctx.imported_structs.length { break; }
+        if ctx.imported_structs[index].variant == "StructDeclaration" {
+            names.push(ctx.imported_structs[index].name);
+        }
+        index += 1;
+    }
+    return names;
+}
+
+// The imported half of the struct-literal field lookup (SFN-1161). Consulted
+// only after `_struct_field_expected_type` misses, so a local declaration
+// always wins a name collision — the same precedence the interface merge in
+// `typecheck/mod.sfn` gives locals.
+//
+// These declarations are reconstructed from `.sfn-asm` artifacts, so they
+// carry field names and annotation text but no method bodies and no type
+// parameters. That is sufficient here (the field's `fn(...)` annotation
+// round-trips verbatim) and is precisely why the result must not reach any
+// check that reasons about methods or generic substitution.
+fn _imported_struct_field_expected_type(type_name: string[], field_name: string, ctx: TypeckCtx) -> TypeAnnotation? {
+    if type_name.length == 0 { return null; }
+    let name = type_name[type_name.length - 1];
+    let mut declaration_index: int = 0;
+    loop {
+        if declaration_index >= ctx.imported_structs.length { break; }
+        let declaration = ctx.imported_structs[declaration_index];
         if declaration.variant == "StructDeclaration" {
             if declaration.name == name {
                 let mut field_index: int = 0;

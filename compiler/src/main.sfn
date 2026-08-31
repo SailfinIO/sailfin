@@ -8,7 +8,7 @@ import {
     typecheck_diagnostics,
     typecheck_diagnostics_with_import_symbols,
     typecheck_diagnostics_with_import_symbols_prelude,
-    typecheck_diagnostics_with_import_symbols_prelude_implicit,
+    typecheck_diagnostics_with_import_symbols_prelude_implicit_structs,
     typecheck_diagnostics_with_imports,
     typecheck_diagnostics_with_prelude,
     typecheck_has_errors,
@@ -568,7 +568,7 @@ fn _filter_program_tests(program: Program) -> Program {
     return Program { statements: kept };
 }
 
-fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[], imported_capabilities_declared: boolean, imported_capabilities_dev_required: string[], implicit_symbols: ImplicitSymbol[]) -> boolean ![io] {
+fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[], imported_capabilities_declared: boolean, imported_capabilities_dev_required: string[], implicit_symbols: ImplicitSymbol[], imported_structs: Statement[]) -> boolean ![io] {
     let trace = test_runner_trace();
     if trace { print.err("test compiler (imports): parse_program start"); }
     let mut program: Program = parse_program(source);
@@ -580,7 +580,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     // the harness is never synthesized empty.
     if test_filters_active() { program = _filter_program_tests(program); }
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
-    let diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols);
+    let diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit_structs(program, imported_interfaces, imported_structs, imported_function_effects, prelude_globals, implicit_symbols);
     let mut has_errors: boolean = false;
     let mut di: int = 0;
     loop {
@@ -890,7 +890,7 @@ fn compile_to_llvm_file_with_module_import_context_root_and_implicit(source: str
     let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
         || _legacy_flag_file(skip_typecheck_probe);
     if !skip_typecheck {
-        let diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit(program, loaded.interfaces, loaded.function_effects, prelude_globals, loaded.implicit_symbols);
+        let diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit_structs(program, loaded.interfaces, loaded.structs, loaded.function_effects, prelude_globals, loaded.implicit_symbols);
         if diagnostics.length > 0 {
             _emit_typecheck_diagnostics(diagnostics, source, module_name);
             return false;

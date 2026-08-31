@@ -381,6 +381,27 @@ fn make_fn_value_position_diagnostic(name: string, span: SourceSpan?) -> Diagnos
     };
 }
 
+// E0843 — an imported or prelude name in a function-value slot (SFN-1161).
+// Distinct from E0808: the obstacle is not the C ABI but the cross-module
+// import table, which carries a name, arity, and effects but no parameter
+// types, async-ness, or generic-ness — so the signature cannot be proved
+// compatible with the expected `fn(...)` type. E0808's `as * u8` advice named
+// an unrelated escape hatch here, so this states the real restriction and the
+// two spellings that do work.
+fn make_imported_fn_value_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0843",
+        severity: "error",
+        message: "imported function `" + name
+            + "` cannot fill a function-value slot: the cross-module import table carries effects and arity but not parameter types, async-ness, or generic-ness, so its signature cannot be proved compatible; wrap it in a module-local function or a `fn (...) => "
+            + name
+            + "(...)` lambda",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
 // E0809 — `<fn> as * u8` where the function cannot be reduced to a
 // single C-ABI code pointer: a generic function (no monomorphized
 // symbol exists) or one whose signature is not C-ABI-compatible.
