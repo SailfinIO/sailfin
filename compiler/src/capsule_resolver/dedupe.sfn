@@ -65,11 +65,11 @@ struct ResolverDedupeResult {
     sources: CapsuleSource[];
     has_collision: boolean;
     // Phase F (`docs/proposals/0008-effect-validation.md` §5): the
-    // project manifest's `[capabilities] required = [...]` list.
-    // Empty when no manifest is present (standalone .sfn files
-    // outside any capsule) — the effect-checker treats that as
-    // "no capability surface to compare against" and skips the
-    // E0403 cross-check.
+    // project manifest's `[capabilities] required = [...]` list. Empty
+    // for three different reasons — no manifest, no `[capabilities]`
+    // section, or an explicit/malformed empty `required` — so it is
+    // never read without `capabilities_declared` below, which is what
+    // decides whether the E0403 cross-check runs (SFN-764).
     capabilities_required: string[];
     capabilities_declared: boolean;
     // SFN-764: a `capsule.toml` the resolver accepted as this project's

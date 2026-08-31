@@ -41,7 +41,9 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
    | `[capabilities]` present, `required` missing or malformed | **deny-all** — same path |
    | `[capabilities]` present, `required = [...]` non-empty | subset check against the listed surface |
 
-   An explicit `required = []` therefore *asserts* "this capsule needs no capability" and is enforced as a deny-all ceiling; it does not disable the check. Only an **absent** section is an exemption. A deny-all surface renders in the diagnostic as `![]`, and `![pure]` standing alone still passes, since `pure` is the empty effect set rather than a capability. A `capsule.toml` that exists but has no readable `[capsule] name` is a hard error (`E0407`) — an unreadable manifest never degrades to "allow everything"
+   An explicit `required = []` therefore *asserts* "this capsule needs no capability" and is enforced as a deny-all ceiling; it does not disable the check. Only an **absent** section is an exemption. A deny-all surface renders in the diagnostic as `![]`, and `![pure]` standing alone still passes, since `pure` is the empty effect set rather than a capability. A `capsule.toml` that exists but has no readable `[capsule] name` is a hard error (`E0407`) — an unreadable manifest never degrades to "allow everything".
+
+   **Scope of the cross-check.** Unlike the in-module and cross-module gates in item 2, `E0403` is enforced by `sfn check` and `sfn test`, which resolve the manifest surface, and not yet by `sfn build` / `sfn run`, whose module path validates effects without a capability surface. `E0407` is raised by the resolver and so does apply on every path. Do not read "every build path" in item 2 as covering the capsule ceiling
 
 **Sub-effect refinements** (SFEP-0017, shipped): sub-effects are dotted-name
 refinements *within* the locked six roots — `io.fs ⊑ io` — never a seventh

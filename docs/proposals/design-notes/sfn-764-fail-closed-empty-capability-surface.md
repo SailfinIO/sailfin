@@ -16,7 +16,7 @@ recorded here rather than as a new SFEP.
   §6.6; forward-referenced by SFEP-0016 (`../0016-capability-sealed-runtime.md`)
   §3.2.
 - **Author:** agent:compiler-architect
-- **Status:** Draft — awaiting design-gate approval
+- **Status:** Accepted — design gate passed 2026-08-21; implemented under SFN-764
 - **Date:** 2026-08-21
 
 **Could not verify:** the Linear issue body. No `mcp__Linear__*` tool was

@@ -41,6 +41,13 @@ import { _any_subsumes, _token_from_signature, append_unique_effect } from "./ut
 // Keying on `.length == 0` conflated the two and let an explicit
 // `required = []` — a capsule asserting it needs nothing — receive
 // everything (SFN-764).
+//
+// One caveat on "every declared effect": the walk below visits
+// top-level functions, tests and struct methods, not `fn`s declared
+// inside another function's body. An uncalled nested `fn` therefore
+// escapes the ceiling — a called one does not, since propagation
+// pushes its effects onto its top-level parent. SFN-1218 closes the
+// asymmetry with `validate_recognized_effects`, which does descend.
 fn validate_capsule_capabilities(program: Program, capabilities_required: string[], capabilities_declared: boolean) -> CapabilityViolation[] {
     let mut violations: CapabilityViolation[] = [];
     if !capabilities_declared { return violations; }

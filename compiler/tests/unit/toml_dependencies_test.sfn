@@ -1,8 +1,9 @@
 // Regression tests for toml_get_dependencies() and capsule dependency
 // resolution helpers used by compile-time dependency resolution.
 import {
-    toml_get_dependencies,
     toml_get_capabilities_required,
+    toml_get_dependencies,
+    toml_has_capabilities_section,
     toml_merge_capabilities_required
 } from "../../src/toml_parser";
 
@@ -171,4 +172,74 @@ test "merge caps: dependency surface preserved through write round-trip" {
     assert _contains(deps, "sfn/http=0.3.0");
     let caps = toml_get_capabilities_required(merged);
     assert caps.length == 2;
+}
+
+// -------------------------------------------------------------------
+// SFN-764: section presence, independent of section contents
+// -------------------------------------------------------------------
+// `toml_get_capabilities_required` returns an empty list for three
+// different manifests, so it cannot answer "did the author declare a
+// ceiling?". These pin the predicate that can. The header-recognition
+// edges live here rather than in an e2e because they are pure string
+// scanning — driving a subprocess to test `#` handling would be absurd.
+test "capabilities section: an explicit empty required is still declared" {
+    // The case the whole issue turns on. Both calls see an empty list;
+    // only the predicate distinguishes the deny-all ceiling from an
+    // absent section.
+    let toml = "[capsule]\nname = \"app\"\n\n[capabilities]\nrequired = []\n";
+    assert toml_has_capabilities_section(toml);
+    assert toml_get_capabilities_required(toml).length == 0;
+}
+
+test "capabilities section: absent when the manifest has no such section" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.sfn\"\n";
+    assert ! toml_has_capabilities_section(toml);
+    assert toml_get_capabilities_required(toml).length == 0;
+}
+
+test "capabilities section: declared when required is present and non-empty" {
+    let toml = "[capsule]\nname = \"app\"\n\n[capabilities]\nrequired = [\"io\", \"net\"]\n";
+    assert toml_has_capabilities_section(toml);
+    assert toml_get_capabilities_required(toml).length == 2;
+}
+
+test "capabilities section: declared even when the required key is missing" {
+    // Fail-closed depends on this: a section whose `required` key never
+    // parsed must still count as declared, so the ceiling denies rather
+    // than silently granting everything.
+    let toml = "[capsule]\nname = \"app\"\n\n[capabilities]\n\n[build]\nentry = \"src/main.sfn\"\n";
+    assert toml_has_capabilities_section(toml);
+    assert toml_get_capabilities_required(toml).length == 0;
+}
+
+test "capabilities section: a commented-out header does not count" {
+    // `#` lines are skipped before the header test, matching every other
+    // section scan in the parser. A reader who comments the section out
+    // has removed it, and must not get a surprise deny-all ceiling.
+    let toml = "[capsule]\nname = \"app\"\n\n# [capabilities]\n# required = []\n";
+    assert ! toml_has_capabilities_section(toml);
+}
+
+test "capabilities section: a differently-scoped header does not count" {
+    // `[workspace.capabilities]` is the SFEP-0051 envelope, a different
+    // tier; `[capsule.capabilities]` is a plausible misspelling. Neither
+    // is this capsule's ceiling, so both read as absent — the residue
+    // E0407 exists to catch when the manifest is unreadable outright.
+    let ws = "[capsule]\nname = \"app\"\n\n[workspace.capabilities]\nallow = [\"io\"]\n";
+    assert ! toml_has_capabilities_section(ws);
+    let misspelled = "[capsule]\nname = \"app\"\n\n[capsule.capabilities]\nrequired = [\"io\"]\n";
+    assert ! toml_has_capabilities_section(misspelled);
+}
+
+test "capabilities section: header recognition tolerates whitespace and comments" {
+    // Same trimming and first-`]` scan `toml_get_string_array` uses, so
+    // the two can never disagree about whether a section exists.
+    assert toml_has_capabilities_section("  [capabilities]  \nrequired = []\n");
+    assert toml_has_capabilities_section("[ capabilities ]\nrequired = []\n");
+    assert toml_has_capabilities_section("[capabilities] # the ceiling\nrequired = []\n");
+}
+
+test "capabilities section: absent from an empty or non-manifest text" {
+    assert ! toml_has_capabilities_section("");
+    assert ! toml_has_capabilities_section("this is not a manifest at all\n");
 }
