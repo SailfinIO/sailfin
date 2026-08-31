@@ -17,6 +17,7 @@ import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
 import { AssertFailure, _empty_assert_failure } from "../../src/assert_failure";
+import { _trj_per_test_duration } from "../../src/cli/commands/test/reporting";
 import {
     TEST_RUNNER_JSON_SCHEMA_VERSION,
     TestEntry,
@@ -96,21 +97,21 @@ test "test_runner_json: summary cache hit_rate saturated and cold" {
 test "test_runner_json: test event pass shape omits assertion" {
     let effects: string[] = ["io"];
     let nothing = _empty_assert_failure();
-    let line = render_test_event("answer", "foo_test.sfn", 3, "pass", 12, effects, nothing, "");
-    assert line == "{\"event\":\"test\",\"name\":\"answer\",\"file\":\"foo_test.sfn\",\"line\":3,\"status\":\"pass\",\"duration_ms\":12,\"effects\":[\"io\"]}";
+    let line = render_test_event("answer", "foo_test.sfn", 3, "pass", 12, 24, effects, nothing, "");
+    assert line == "{\"event\":\"test\",\"name\":\"answer\",\"file\":\"foo_test.sfn\",\"line\":3,\"status\":\"pass\",\"duration_ms\":12,\"file_elapsed_ms\":24,\"effects\":[\"io\"]}";
 }
 
 test "test_runner_json: test event with empty effects renders []" {
     let nothing = _empty_assert_failure();
-    let line = render_test_event("plain", "bar_test.sfn", 1, "pass", 0, _empty_effects(), nothing, "");
-    assert line == "{\"event\":\"test\",\"name\":\"plain\",\"file\":\"bar_test.sfn\",\"line\":1,\"status\":\"pass\",\"duration_ms\":0,\"effects\":[]}";
+    let line = render_test_event("plain", "bar_test.sfn", 1, "pass", 0, 0, _empty_effects(), nothing, "");
+    assert line == "{\"event\":\"test\",\"name\":\"plain\",\"file\":\"bar_test.sfn\",\"line\":1,\"status\":\"pass\",\"duration_ms\":0,\"file_elapsed_ms\":0,\"effects\":[]}";
 }
 
 test "test_runner_json: test event with multiple effects preserves order" {
     let effects: string[] = ["io", "net", "clock"];
     let nothing = _empty_assert_failure();
-    let line = render_test_event("multi", "x.sfn", 5, "pass", 1, effects, nothing, "");
-    assert line == "{\"event\":\"test\",\"name\":\"multi\",\"file\":\"x.sfn\",\"line\":5,\"status\":\"pass\",\"duration_ms\":1,\"effects\":[\"io\",\"net\",\"clock\"]}";
+    let line = render_test_event("multi", "x.sfn", 5, "pass", 1, 3, effects, nothing, "");
+    assert line == "{\"event\":\"test\",\"name\":\"multi\",\"file\":\"x.sfn\",\"line\":5,\"status\":\"pass\",\"duration_ms\":1,\"file_elapsed_ms\":3,\"effects\":[\"io\",\"net\",\"clock\"]}";
 }
 
 // --------------------------------------------------------------
@@ -118,8 +119,8 @@ test "test_runner_json: test event with multiple effects preserves order" {
 // --------------------------------------------------------------
 test "test_runner_json: test event fail shape attaches assertion" {
     let failure = _failure("foo_test.sfn", 8, 12, "expected x == 42");
-    let line = render_test_event("breaks", "foo_test.sfn", 7, "fail", 3, _empty_effects(), failure, "");
-    assert line == "{\"event\":\"test\",\"name\":\"breaks\",\"file\":\"foo_test.sfn\",\"line\":7,\"status\":\"fail\",\"duration_ms\":3,\"effects\":[],\"assertion\":{\"file\":\"foo_test.sfn\",\"line\":8,\"col\":12,\"message\":\"expected x == 42\"}}";
+    let line = render_test_event("breaks", "foo_test.sfn", 7, "fail", 3, 9, _empty_effects(), failure, "");
+    assert line == "{\"event\":\"test\",\"name\":\"breaks\",\"file\":\"foo_test.sfn\",\"line\":7,\"status\":\"fail\",\"duration_ms\":3,\"file_elapsed_ms\":9,\"effects\":[],\"assertion\":{\"file\":\"foo_test.sfn\",\"line\":8,\"col\":12,\"message\":\"expected x == 42\"}}";
 }
 
 // --------------------------------------------------------------
@@ -127,22 +128,42 @@ test "test_runner_json: test event fail shape attaches assertion" {
 // --------------------------------------------------------------
 test "test_runner_json: declared skip carries skip_kind and the reason" {
     let reason = _failure("net_test.sfn", 0, 0, "no outbound network");
-    let line = render_test_event("dl", "net_test.sfn", 4, "skip", 0, _empty_effects(), reason, "declared");
-    assert line == "{\"event\":\"test\",\"name\":\"dl\",\"file\":\"net_test.sfn\",\"line\":4,\"status\":\"skip\",\"skip_kind\":\"declared\",\"duration_ms\":0,\"effects\":[],\"assertion\":{\"file\":\"net_test.sfn\",\"line\":0,\"col\":0,\"message\":\"no outbound network\"}}";
+    let line = render_test_event("dl", "net_test.sfn", 4, "skip", 0, 0, _empty_effects(), reason, "declared");
+    assert line == "{\"event\":\"test\",\"name\":\"dl\",\"file\":\"net_test.sfn\",\"line\":4,\"status\":\"skip\",\"skip_kind\":\"declared\",\"duration_ms\":0,\"file_elapsed_ms\":0,\"effects\":[],\"assertion\":{\"file\":\"net_test.sfn\",\"line\":0,\"col\":0,\"message\":\"no outbound network\"}}";
 }
 
 test "test_runner_json: involuntary skip kinds stay distinct from declared" {
     let nothing = _empty_assert_failure();
-    let after = render_test_event("t2", "x.sfn", 9, "skip", 0, _empty_effects(), nothing, "after_failure");
-    assert after == "{\"event\":\"test\",\"name\":\"t2\",\"file\":\"x.sfn\",\"line\":9,\"status\":\"skip\",\"skip_kind\":\"after_failure\",\"duration_ms\":0,\"effects\":[]}";
-    let not_run = render_test_event("t3", "x.sfn", 11, "skip", 0, _empty_effects(), nothing, "not_run");
-    assert not_run == "{\"event\":\"test\",\"name\":\"t3\",\"file\":\"x.sfn\",\"line\":11,\"status\":\"skip\",\"skip_kind\":\"not_run\",\"duration_ms\":0,\"effects\":[]}";
+    let after = render_test_event("t2", "x.sfn", 9, "skip", 0, 0, _empty_effects(), nothing, "after_failure");
+    assert after == "{\"event\":\"test\",\"name\":\"t2\",\"file\":\"x.sfn\",\"line\":9,\"status\":\"skip\",\"skip_kind\":\"after_failure\",\"duration_ms\":0,\"file_elapsed_ms\":0,\"effects\":[]}";
+    let not_run = render_test_event("t3", "x.sfn", 11, "skip", 0, 0, _empty_effects(), nothing, "not_run");
+    assert not_run == "{\"event\":\"test\",\"name\":\"t3\",\"file\":\"x.sfn\",\"line\":11,\"status\":\"skip\",\"skip_kind\":\"not_run\",\"duration_ms\":0,\"file_elapsed_ms\":0,\"effects\":[]}";
 }
 
 test "test_runner_json: empty skip_kind omits the field entirely" {
     let nothing = _empty_assert_failure();
-    let line = render_test_event("q", "y.sfn", 2, "pass", 0, _empty_effects(), nothing, "");
-    assert line == "{\"event\":\"test\",\"name\":\"q\",\"file\":\"y.sfn\",\"line\":2,\"status\":\"pass\",\"duration_ms\":0,\"effects\":[]}";
+    let line = render_test_event("q", "y.sfn", 2, "pass", 0, 0, _empty_effects(), nothing, "");
+    assert line == "{\"event\":\"test\",\"name\":\"q\",\"file\":\"y.sfn\",\"line\":2,\"status\":\"pass\",\"duration_ms\":0,\"file_elapsed_ms\":0,\"effects\":[]}";
+}
+
+// --------------------------------------------------------------
+// `file_elapsed_ms` vs `duration_ms` (SFN-1222)
+// --------------------------------------------------------------
+test "test_runner_json: file_elapsed_ms matches across 1-test and 4-test files while duration_ms scales with the count" {
+    let nothing = _empty_assert_failure();
+    // Two files with equal elapsed time (100ms) but different test counts:
+    // file A has 1 test, file B has 4. Derive duration_ms from the real
+    // per-test quotient (_trj_per_test_duration) rather than hardcoding it,
+    // so the test counts are load-bearing and the quotient math itself is
+    // pinned, not just its stringified output. file_elapsed_ms must be
+    // identical on both; duration_ms must differ in the 4:1 ratio implied
+    // by the test counts.
+    let duration_a = _trj_per_test_duration(100, 1);
+    let duration_b = _trj_per_test_duration(100, 4);
+    let a = render_test_event("only", "a_test.sfn", 1, "pass", duration_a, 100, _empty_effects(), nothing, "");
+    let b = render_test_event("one_of_four", "b_test.sfn", 1, "pass", duration_b, 100, _empty_effects(), nothing, "");
+    assert a == "{\"event\":\"test\",\"name\":\"only\",\"file\":\"a_test.sfn\",\"line\":1,\"status\":\"pass\",\"duration_ms\":100,\"file_elapsed_ms\":100,\"effects\":[]}";
+    assert b == "{\"event\":\"test\",\"name\":\"one_of_four\",\"file\":\"b_test.sfn\",\"line\":1,\"status\":\"pass\",\"duration_ms\":25,\"file_elapsed_ms\":100,\"effects\":[]}";
 }
 
 // --------------------------------------------------------------

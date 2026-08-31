@@ -4,8 +4,16 @@ Source: local sweep sidecars build/agent-test.shard-e2e-{a,b}.jsonl.
 Coverage: e2e-a complete + e2e-b partial = 157 of 326 e2e files. Total 1578s.
 The sweep died before e2e-c/e2e-d ran; this is NOT a complete ranking.
 
-NOTE: the sidecar's duration_ms is PER-FILE, stamped identically on every
-test row in that file. It is not per-test.
+NOTE: this document was derived from the sidecar's duration_ms field, which
+was believed at the time to be PER-FILE. That belief was wrong (SFN-1222):
+duration_ms is the row's even-distribution per-test slice (the file's
+elapsed time divided by its test count), not the file's whole elapsed time.
+A separate file_elapsed_ms field now carries the true per-file value.
+
+WARNING: the rankings below understate every multi-test file by roughly its
+test count, because they were computed from the divided value. Do not use
+this document for target selection; regenerate against file_elapsed_ms
+instead. Retained for its historical elapsed-time data with this caveat.
 
 rank file                                                   elapsed    share
 1    dep_closure_prewarm_test.sfn                            205.4s    13.0%

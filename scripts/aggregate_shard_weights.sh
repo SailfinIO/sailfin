@@ -14,10 +14,19 @@
 # gap. A raw-milliseconds table would mis-partition whichever target is
 # slower. Preserve this if you touch the formula.
 #
-# The sidecar's `duration_ms` is PER FILE, stamped identically onto every
-# test row in that file — so rows are deduplicated by path, never summed.
-# Summing them multiplies a file's weight by its test count, which is the
-# one mistake that silently produces a plausible-looking wrong table.
+# Each sidecar `test` row carries two distinct duration fields (SFN-1222):
+#
+#   duration_ms      the row's even-distribution per-test slice — the
+#                     file's elapsed time divided by its test count, so it
+#                     is a FRACTION of the file's cost, not the file's cost.
+#   file_elapsed_ms  the file's whole elapsed wall time, stamped identically
+#                     on every row belonging to that file.
+#
+# This script needs per-FILE cost, so it reads `file_elapsed_ms` and dedupes
+# rows by path (deduping is correct precisely because the field really is
+# per-file). Reading `duration_ms` here — the original bug — records one
+# Nth of each file's true cost and silently produces a plausible-looking
+# wrong table.
 #
 # Usage: aggregate_shard_weights.sh <artifacts-dir> [output-tsv]
 set -euo pipefail
@@ -59,14 +68,21 @@ for d in "$art_dir"/ci-test-timing-*; do
     for f in "$d"/agent-test.shard-*.jsonl; do
         [ -f "$f" ] || continue
         found_any=1
-        # One (target, path, duration_ms) row per test row; deduped below.
-        sed -n 's/.*"file":"\([^"]*\)".*"duration_ms":\([0-9][0-9]*\).*/\1\t\2/p' \
+        # One (target, path, file_elapsed_ms) row per test row; deduped below.
+        sed -n 's/.*"file":"\([^"]*\)".*"file_elapsed_ms":\([0-9][0-9]*\).*/\1\t\2/p' \
             "$f" | awk -v t="$target" -F'\t' '{print t"\t"$1"\t"$2}' >> "$pairs"
     done
 done
 
 if [ "$found_any" -eq 0 ]; then
     echo "error: no timing sidecars found under $art_dir" >&2
+    exit 1
+fi
+
+if [ ! -s "$pairs" ]; then
+    echo "error: sidecars parsed but yielded no (target, path, file_elapsed_ms)" \
+        "rows — likely cause: sidecars generated before SFN-1222 carry no" \
+        "file_elapsed_ms field" >&2
     exit 1
 fi
 

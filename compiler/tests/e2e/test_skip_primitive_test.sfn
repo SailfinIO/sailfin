@@ -13,14 +13,44 @@
 // summary's `"skipped":1` agrees with the single skip event, and the
 // whole nested run still exits 0.
 //
+// It also pins SFN-1222's per-file timing field: nothing else in the tree
+// exercises the two production call sites in `reporting.sfn` that feed
+// `duration_ms` and `file_elapsed_ms` on a `test` row, so this reuses the
+// same three-test fixture and captured output to assert `file_elapsed_ms`
+// is nonzero, identical across the file's rows, and strictly greater than
+// `duration_ms` — the shape that only holds when the two slots are fed
+// different values.
+//
 // Native e2e per `.claude/rules/no-bash-e2e.md`.
-import { find } from "sfn/strings";
+import { find, parse_int, split } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
     report_child_failure,
     sfn_bin_path
 } from "sfn/test";
+
+// Extract the integer value of `"field":N` from a single jsonl line.
+// Returns -1 when the field is absent or its value fails to parse.
+fn _extract_int_field(line: string, field: string) -> int {
+    let marker = "\"" + field + "\":";
+    let start = find(line, marker, 0);
+    if start < 0 { return -1; }
+    let after = start + marker.length;
+    let n = line.length;
+    let mut end = after;
+    loop {
+        if end >= n { break; }
+        let ch = line[end];
+        if ch == "," || ch == "}" { break; }
+        end += 1;
+    }
+    match parse_int(substring(line, after, end)) {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return -1; }
+    }
+    return -1;
+}
 
 // pass / declared skip / pass — the middle test is the primitive under
 // test; the third proves a skip does not unwind the whole file.
@@ -74,4 +104,38 @@ test "skip primitive: declared skip reports skip_kind, reason, and does not fail
     // — so a pass event's `status` field is immediately followed by
     // `duration_ms` with nothing in between when the field is absent.
     assert find(out, "\"status\":\"pass\",\"duration_ms\":", 0) >= 0;
+
+    // 6. SFN-1222: `file_elapsed_ms` is the file's whole elapsed wall time
+    // and must be identical across all three `test` rows from this one
+    // fixture file, nonzero (so the following comparison can't degenerate
+    // to 0 == 0), and strictly greater than each row's `duration_ms` — the
+    // even-distribution per-test slice. That gap only holds if the two
+    // slots are fed different values; re-merging them back into one value
+    // (the SFN-1222 regression) would collapse it.
+    let lines = split(out, "\n");
+    let mut test_rows: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if find(line, "\"event\":\"test\"", 0) >= 0 {
+            test_rows.push(line);
+        }
+        i += 1;
+    }
+    assert test_rows.length == 3;
+
+    let first_file_elapsed = _extract_int_field(test_rows[0], "file_elapsed_ms");
+    assert first_file_elapsed > 0;
+
+    let mut j: int = 0;
+    loop {
+        if j >= test_rows.length { break; }
+        let row = test_rows[j];
+        let file_elapsed = _extract_int_field(row, "file_elapsed_ms");
+        let duration = _extract_int_field(row, "duration_ms");
+        assert file_elapsed == first_file_elapsed;
+        assert duration < file_elapsed;
+        j += 1;
+    }
 }

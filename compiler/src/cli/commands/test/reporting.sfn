@@ -142,7 +142,7 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
                     event_failure = _record_assert_failure(test_path, r);
                 }
             }
-            print(render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure, skip_kind));
+            print(render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, elapsed_ms, entry.effects, event_failure, skip_kind));
             idx += 1;
         }
     } else {
@@ -371,7 +371,7 @@ fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> int
                 }
             }
         }
-        let line = render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure, skip_kind);
+        let line = render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, outcome.elapsed_ms, entry.effects, event_failure, skip_kind);
         print(line);
         idx += 1;
     }

@@ -162,13 +162,15 @@ Four event kinds, schema-versioned:
 
 // One per test, in source order.
 {"event":"test","name":"answer is 42","file":"path/to/foo_test.sfn",
- "line":3,"status":"pass","duration_ms":12,"effects":["io"]}
+ "line":3,"status":"pass","duration_ms":12,"file_elapsed_ms":48,
+ "effects":["io"]}
 
 // `assertion` is attached when status == "fail" or when the runner
 // synthesised a skip/fail reason (compile failure, link failure,
 // process aborted before this test ran).
 {"event":"test","name":"breaks","file":"path/to/foo_test.sfn",
- "line":7,"status":"fail","duration_ms":3,"effects":[],
+ "line":7,"status":"fail","duration_ms":3,"file_elapsed_ms":12,
+ "effects":[],
  "assertion":{"file":"path/to/foo_test.sfn","line":8,"col":12,
               "message":"expected x == 42, got 41"}}
 
@@ -195,6 +197,7 @@ Four event kinds, schema-versioned:
 | `test`    | `line`           | integer   | 1-based source line of the `test` keyword.                      |
 | `test`    | `status`         | string    | `"pass"`, `"fail"`, or `"skip"`.                                |
 | `test`    | `duration_ms`    | integer   | Wall-clock time approximation; see *Timing approximation* below.|
+| `test`    | `file_elapsed_ms`| integer   | The file's whole elapsed wall time; see *Timing approximation* below.|
 | `test`    | `effects`        | string[]  | Effects declared on the test, e.g. `["io", "net"]`.             |
 | `test`    | `assertion`      | object?   | Present on `"fail"` and on synthesised `"skip"` reasons.        |
 | `summary` | `passed`         | integer   | Tests with `status == "pass"`.                                  |
@@ -250,10 +253,20 @@ that:
 `duration_ms` on a `test` event is the file's wall-clock execution time
 divided evenly across the file's tests. Per-test wall time is not
 directly observable today because every test in a file runs inside one
-process; consumers should treat `duration_ms` as an indication of
-roughly-balanced cost rather than a precise per-test measurement. The
-`summary.duration_ms` field is the total wall time of the `sfn test --json`
-invocation and is exact.
+process, so `duration_ms` is an even-distribution slice, not a precise
+per-test measurement — every test in a file gets the same value regardless
+of how much of the file's runtime it actually consumed.
+
+`file_elapsed_ms` on a `test` event is the file's whole elapsed wall time,
+identical across every test row from that file. A consumer that needs
+per-file cost — e.g. shard-weight aggregation — MUST read `file_elapsed_ms`,
+never `duration_ms`: summing `duration_ms` across a file's tests reproduces
+the same file total, but summing it across *files* double-counts nothing
+only by chance, and comparing `duration_ms` between files of different test
+counts silently understates the larger file's actual cost (SFN-1222).
+
+The `summary.duration_ms` field is the total wall time of the
+`sfn test --json` invocation and is exact.
 
 ### Schema version policy
 
