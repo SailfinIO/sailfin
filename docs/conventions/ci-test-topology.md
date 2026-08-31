@@ -38,9 +38,12 @@ Two independent partitioning mechanisms exist, at different layers:
   Since SFN-863 these are **time-weighted**, not file-count-balanced: each
   shard's `I/N` partition is greedy LPT (longest processing time) over a
   per-file weight, not the plain stride. Measured macOS e2e shard totals
-  under the old stride were 3716 / 1746 / 3146 / 2243 s (2.13x skew); the LPT
-  partition over the same files simulates to 2776 / 2583 / 2760 / 2732 s
-  (1.07x, ~25% shorter critical path).
+  under the old stride were 3716 / 1746 / 3146 / 2243 s (2.13x skew).
+  Treat *simulated* balance as no evidence at all: SFN-883's table modeled
+  its four legs balanced to 32 parts in 268,000 — 0.01% predicted imbalance
+  — and those legs measured 1.48x-1.85x across two runs. Only measured
+  wall-clock counts
+  (`docs/measurements/e2e-shard-weights-2026-08-31.md`).
 
 `sfn dev shard run <name>` re-parses the shard's roots into an ordinary
 `sfn test <roots> --shard I/N --shard-weights <table>` invocation and runs it
@@ -58,13 +61,27 @@ disagree about which files a shard owns.
 
 ```
 path	weight
-compiler/tests/e2e/aarch64_binfmt_probe_test.sfn	473
+compiler/tests/e2e/aarch64_binfmt_probe_test.sfn	816
 ```
 
 `weight = round(1e6 * max over targets of (file_elapsed / suite_total))` — a
-target-neutral *share* of one target's suite time, not a raw duration, so the
-same table balances hosts running at different absolute speeds (e.g.
-macOS-arm64 vs. Linux-arm64). A discovered file absent from the table gets
+*share* of one target's suite time, not a raw duration, so the same table
+balances hosts running at different absolute speeds (macOS-arm64 measured
+8565 s against Linux-arm64's 5088 s on run 33407348555 — 1.68x). Each
+target's measured suite total is printed in the generated header, so that gap
+is re-derived on every refresh rather than quoted from memory.
+
+**It is a ranking signal, not a per-file cost model**, and SFN-863's
+"target-neutral by construction" wording overstated it. Measured on run
+33407348555 (SFN-1223), a file's share differs *between* the two targets by
+p10-p90 = 0.83x-1.66x, and the same file's weight moves *between runs* by
+p10-p90 = 0.66x-1.51x once the suite-growth median shift is divided out (raw,
+0.575x-1.314x), with one file in ten moving more than 2x. So `max over
+targets` picks whichever target gave that file the larger share of its own
+suite — not whichever host is slower, which the normalisation cancels. The
+table reliably separates a
+100,000-weight file from a 500-weight one; it does not tell you what any
+single file costs. A discovered file absent from the table gets
 the fixed default weight 2136 (`_shard_default_weight` in
 `compiler/src/cli/commands/test/arg_and_jobs.sfn`) rather than 0, so a newly
 added test still lands in a plausible LPT slot instead of always sorting
@@ -90,20 +107,41 @@ it ran.
 
 `linux-x86_64` legs deliberately emit **no** sidecar: they keep the
 byte-identical human output path so one leg still exercises it
-(`sailfin-build/action.yml:410-414`). Weights are a target-neutral *share*,
-so the two arm64 targets are sufficient to build the table — see SFN-862
-before changing that.
+(`sailfin-build/action.yml:410-414`). The two arm64 targets therefore build
+the whole table, and **every `linux-x86_64` weight is an extrapolation**
+across exactly the cross-target gap measured above — expect its partition to
+balance less well than the targets that were measured. See SFN-862 before
+changing that.
 
-**Refreshing it.** Pull an existing run's JSONL sidecars from the artifacts
-above (or re-run a CI job with `SAILFIN_AGENT_REPORT=1`), dedupe each
-file's `file_elapsed_ms` per target (rows for the same file all carry the
-same value, so summing rather than deduping would multiply the weight by
-the test count), divide by that target's suite total, take the max share
-across targets, scale by `1e6` and round, and regenerate the table with
-the new weights (plus the median default for any file with no observed
-duration). There is no automated refresh job yet — a stale table only
-costs balance, per the fail-open guarantee above, so refreshing is a
-manual maintenance task rather than a release gate.
+**Refreshing it.** Do not re-derive the arithmetic by hand — run the script
+CI already runs, so the applied table and the CI candidate are produced by
+one implementation:
+
+```bash
+gh run download <run-id> -R SailfinIO/sailfin -p 'ci-test-timing-*' -D ci-timing
+scripts/aggregate_shard_weights.sh ci-timing compiler/tests/shard_weights.tsv
+```
+
+It dedupes each file's `file_elapsed_ms` per target (rows for the same file
+all carry the same value, so summing rather than deduping would multiply the
+weight by the test count), divides by that target's suite total, takes the
+max share across targets, and scales by `1e6`. It also prints each target's
+measured suite total into the header. Two provenance lines are **not**
+generated and must be re-added by hand, as the committed table carries them:
+`# Source: run <id> JSONL sidecars (<date>) ...` and
+`# Refresh procedure: docs/conventions/ci-test-topology.md.` Do not hand-add
+a median: a derived number nothing recomputes is how the previous header's
+"median (282)" became a stale authority.
+
+Every run's `shard-weights-candidate` job (`ci.yml`) runs the same script on
+that run's sidecars and uploads the result plus a drift summary, so a
+candidate usually already exists — check it before downloading anything. A
+regeneration that disagrees with the candidate for the same run is a bug in
+one of the two, not a judgement call.
+
+There is no automated refresh job — a stale table only costs balance, per the
+fail-open guarantee above, so refreshing is a manual maintenance task rather
+than a release gate.
 
 `sfn dev shard run <name>` builds the compiler first if the binary is
 missing, and honors `SAILFIN_AGENT_REPORT=1` to tee JSONL to

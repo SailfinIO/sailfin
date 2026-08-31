@@ -15,6 +15,12 @@ test count, because they were computed from the divided value. Do not use
 this document for target selection; regenerate against file_elapsed_ms
 instead. Retained for its historical elapsed-time data with this caveat.
 
+SUPERSEDED by docs/measurements/e2e-shard-weights-2026-08-31.md, which
+re-ranks the e2e heavy tail from corrected file_elapsed_ms across both arm64
+targets and rules on which of the targets below survive. The full 880-file
+ranking lives in compiler/tests/shard_weights.tsv. Use those for target
+selection (SFN-1223).
+
 rank file                                                   elapsed    share
 1    dep_closure_prewarm_test.sfn                            205.4s    13.0%
 2    work_dir_parity_test.sfn                                169.1s    10.7%
