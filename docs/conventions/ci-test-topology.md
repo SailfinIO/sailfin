@@ -83,8 +83,10 @@ run.
 **Where the per-file timing lives.** Every `macos-arm64` and `linux-arm64`
 shard leg uploads its JSONL sidecar as a run artifact named
 `ci-test-timing-<target>-<shard>`, retained 90 days (SFN-866). Download those
-from any run to get `duration_ms` per file without re-running anything. A
-grouped macOS leg (SFN-873) contributes one sidecar per shard it ran.
+from any run to get `file_elapsed_ms` per file without re-running anything —
+not `duration_ms`, which is only that row's even-distribution per-test slice
+(SFN-1222). A grouped macOS leg (SFN-873) contributes one sidecar per shard
+it ran.
 
 `linux-x86_64` legs deliberately emit **no** sidecar: they keep the
 byte-identical human output path so one leg still exercises it
@@ -93,13 +95,15 @@ so the two arm64 targets are sufficient to build the table — see SFN-862
 before changing that.
 
 **Refreshing it.** Pull an existing run's JSONL sidecars from the artifacts
-above (or re-run a CI job with `SAILFIN_AGENT_REPORT=1`), sum each file's `duration_ms` per target,
-divide by that target's suite total, take the max share across targets, scale
-by `1e6` and round, and regenerate the table with the new weights (plus the
-median default for any file with no observed duration). There is no
-automated refresh job yet — a stale table only costs balance, per the
-fail-open guarantee above, so refreshing is a manual maintenance task rather
-than a release gate.
+above (or re-run a CI job with `SAILFIN_AGENT_REPORT=1`), dedupe each
+file's `file_elapsed_ms` per target (rows for the same file all carry the
+same value, so summing rather than deduping would multiply the weight by
+the test count), divide by that target's suite total, take the max share
+across targets, scale by `1e6` and round, and regenerate the table with
+the new weights (plus the median default for any file with no observed
+duration). There is no automated refresh job yet — a stale table only
+costs balance, per the fail-open guarantee above, so refreshing is a
+manual maintenance task rather than a release gate.
 
 `sfn dev shard run <name>` builds the compiler first if the binary is
 missing, and honors `SAILFIN_AGENT_REPORT=1` to tee JSONL to

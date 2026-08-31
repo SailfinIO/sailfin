@@ -1130,9 +1130,11 @@ jobs:
       # SFN-866: the per-file JSONL sidecar is already produced on this leg
       # (`SAILFIN_AGENT_REPORT=1`, sailfin-build action.yml:410-414) and was
       # then read once for `test_bin_hit_rate` and discarded with the runner.
-      # Its `duration_ms` per file is the only per-file timing this repo
-      # generates, and refreshing `compiler/tests/shard_weights.tsv` requires
-      # it — the current table is still derived from run 31704192414, which
+      # Its `file_elapsed_ms` per file (SFN-1222; `duration_ms` is an
+      # even-distribution per-test slice, not per-file) is the per-file
+      # timing this repo generates, and refreshing
+      # `compiler/tests/shard_weights.tsv` requires it — the current table
+      # is still derived from run 31704192414, which
       # predates SFN-861 and SFN-875. Uploading is purely additive: no extra
       # run, no extra runner time, no change to any leg's output contract.
       # `always()` so a red shard still yields its timing, which is exactly

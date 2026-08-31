@@ -9,9 +9,14 @@
 //
 //   {"event":"start","total":N,"schema_version":1}
 //   {"event":"test","name":"...","file":"...","line":N,
-//    "status":"pass"|"fail"|"skip","duration_ms":N,"effects":[...],
-//    "assertion":{...}?}
+//    "status":"pass"|"fail"|"skip","duration_ms":N,"file_elapsed_ms":N,
+//    "effects":[...],"assertion":{...}?}
 //   {"event":"summary","passed":N,"failed":N,"skipped":N,"duration_ms":N}
+//
+// `duration_ms` on a `test` row is an even-distribution per-test slice, not
+// the file's cost; `file_elapsed_ms` is the file's whole elapsed wall time
+// and is what per-file consumers must read instead — see render_test_event
+// below for the full field semantics (SFN-1222).
 //
 // Issue #368 (P6 — sfn test --json event stream).
 //
@@ -212,7 +217,14 @@ fn render_start_event(total: int) -> string {
 // The latter three are involuntary and synthesized by the runner. Adding
 // this optional field is non-breaking under the schema-version policy
 // above, so `TEST_RUNNER_JSON_SCHEMA_VERSION` is unchanged.
-fn render_test_event(name: string, file: string, line: int, status: string, duration_ms: int, effects: string[], failure: AssertFailure, skip_kind: string) -> string {
+//
+// `file_elapsed_ms` (SFN-1222) is the file's whole elapsed wall time,
+// stamped identically on every row belonging to that file — unlike
+// `duration_ms`, which is only that file's even-distribution per-test
+// slice. Emitted unconditionally (including zero) so a consumer can tell
+// "field absent, pre-SFN-1222 sidecar" apart from "field present, value
+// zero". Also additive, so no schema-version bump.
+fn render_test_event(name: string, file: string, line: int, status: string, duration_ms: int, file_elapsed_ms: int, effects: string[], failure: AssertFailure, skip_kind: string) -> string {
     let mut parts: string[] = [];
     parts.push(_trj_string_field("event", "test"));
     parts.push(_trj_string_field("name", name));
@@ -223,6 +235,7 @@ fn render_test_event(name: string, file: string, line: int, status: string, dura
         parts.push(_trj_string_field("skip_kind", skip_kind));
     }
     parts.push(_trj_number_field("duration_ms", duration_ms));
+    parts.push(_trj_number_field("file_elapsed_ms", file_elapsed_ms));
     parts.push(_trj_field("effects", _trj_render_string_array(effects)));
     if failure.present {
         parts.push(_trj_field("assertion", render_assert_failure_json(failure)));
