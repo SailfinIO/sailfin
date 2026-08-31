@@ -25,7 +25,12 @@
 // `run.ll`/`.o`/binary stay isolated per child), asserting every child
 // builds and prints its own marker with no cross-contamination.
 import { contains } from "sfn/strings";
-import { default_scratch_dir, report_child_failure, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env_without,
+    default_scratch_dir,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _scratch_base() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
@@ -39,45 +44,27 @@ fn _scratch_base() -> string ![io] {
 // concurrently (each with its OWN per-child scratch), and assert each
 // child exits 0 and prints its own marker with no cross-contamination.
 fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
-    // Build the `bash -c` vehicle: launch N `sfn run`s in the background,
-    // each with a distinct SAILFIN_TEST_SCRATCH, then `wait`. Concurrent
-    // cold runtime compiles are what this stresses.
+    // Launch every child before draining or waiting on any of them.
+    // Concurrent cold runtime compiles are what this stresses.
     let bin = sfn_bin_path();
-    let mut script = "";
+    let mut handles: int[] = [];
     let mut k = 0;
     loop {
         if k >= n { break; }
         let tag = number_to_string(round) + "_" + number_to_string(k);
         let marker = "OBJKEY_MARK_" + tag;
         let src = base + "/m_" + tag + ".sfn";
-        let outp = base + "/o_" + tag + ".txt";
         let child_scratch = base + "/s_" + tag;
         fs.createDirectory(child_scratch, true);
         fs.writeFile(src, "fn main() ![io] {\n    print.info(\"" + marker
             + "\");\n}\n");
         // Each child gets its own scratch so run.ll/.o/binary are isolated;
         // the runtime object cache they populate is the only shared state.
-        script = script + "( export SAILFIN_TEST_SCRATCH='" + child_scratch
-            + "'; '"
-            + bin
-            + "' run '"
-            + src
-            + "' > '"
-            + outp
-            + "' 2>&1 ) &\n";
+        let child_env = clean_runner_env_without(child_scratch, []);
+        let handle = process.spawn_with_env([bin, "run", src], child_env);
+        if handle != 0 { process.handle_close_stdin(handle); }
+        handles.push(handle);
         k += 1;
-    }
-    script = script + "wait\n";
-
-    let exit = process.run_capture(["bash", "-c", script], process.environ());
-    let o = process.capture_take_stdout();
-    let e = process.capture_take_stderr();
-    if exit != 0 {
-        // Surface the child output so a re-fire in the macOS nightly is
-        // diagnosable (OOM/SIGABRT vs. a genuine cache-key race) — these
-        // background `sfn run`s otherwise swallow their stderr (#1462).
-        report_child_failure("objkey-race round " + number_to_string(round), exit, o, e);
-        return false;
     }
 
     // Verify every child produced exactly its own marker.
@@ -87,12 +74,22 @@ fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
         if j >= n { break; }
         let tag = number_to_string(round) + "_" + number_to_string(j);
         let marker = "OBJKEY_MARK_" + tag;
-        let outp = base + "/o_" + tag + ".txt";
-        if !fs.exists(outp) {
-            print.err("[objkey-race] missing child output " + outp);
+        let handle = handles[j];
+        if handle == 0 {
+            print.err("[objkey-race] failed to spawn child " + tag);
             ok = false;
         } else {
-            let got = fs.readFile(outp);
+            // The whole-stream read drains stdout and stderr concurrently,
+            // stashing stderr until its matching read, so a noisy compiler
+            // child cannot deadlock on a full pipe.
+            let out = process.handle_read_stdout(handle);
+            let err = process.handle_read_stderr(handle);
+            let exit = process.handle_wait(handle);
+            if exit != 0 {
+                report_child_failure("objkey-race child " + tag, exit, out, err);
+                ok = false;
+            }
+            let got = out + err;
             // Own marker present...
             if !contains(got, marker) {
                 print.err("[objkey-race] child " + tag

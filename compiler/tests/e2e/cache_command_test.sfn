@@ -13,7 +13,7 @@
 // the mtime-on-hit test drives a real `sfn build` twice because the
 // touch only fires on a genuine cache hit.
 import { remove_all } from "sfn/fs";
-import { find } from "sfn/strings";
+import { find, repeat } from "sfn/strings";
 import {
     clean_runner_env_without,
     host_is_windows,
@@ -105,16 +105,7 @@ fn _seed_entry(cache_base: string, prefix: string, key: string) ![io] {
 fn _seed_big_entry(cache_base: string, prefix: string, key: string) ![io] {
     let dir = cache_base + "/v2/" + prefix + "/" + key;
     fs.createDirectory(dir, true);
-    if host_is_windows() {
-        let exit = _run_powershell("[IO.File]::WriteAllBytes($args[0], (New-Object byte[] 200000))", [dir
-            + "/mod.o"]);
-        assert exit == 0;
-    } else {
-        let exit = process.run(["bash", "-c", "head -c 200000 /dev/zero > '"
-            + dir
-            + "/mod.o'"]);
-        assert exit == 0;
-    }
+    fs.writeFile(dir + "/mod.o", repeat("x", 200000));
 }
 
 // Build `src` to `out` with the scratch cache root and the full child env
