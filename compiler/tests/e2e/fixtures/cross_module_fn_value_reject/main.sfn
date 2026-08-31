@@ -1,0 +1,15 @@
+// The struct is declared LOCALLY, so its field shape is known here and the
+// staging deferral does not apply — this reference reaches the real verdict.
+// The function is imported, and the import table carries no parameter types,
+// so the reference fails closed under E0843 (SFN-1161).
+import { imported_one } from "./lib";
+
+struct LocalEntry {
+    name: string;
+    run: fn (int) -> int ![io];
+}
+
+fn main() -> int ![io] {
+    let e: LocalEntry = LocalEntry { name: "imported-fn", run: imported_one };
+    return 0;
+}

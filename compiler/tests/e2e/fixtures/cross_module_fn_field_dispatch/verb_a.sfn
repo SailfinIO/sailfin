@@ -1,0 +1,14 @@
+// Bare function name into an IMPORTED struct's fn-typed field, with the
+// function declared locally — the exact shape SFN-1161 reported.
+import { Verb } from "./registry";
+
+fn a_run(x: int) -> int ![io] {
+    print("a-ok");
+    return x + 1;
+}
+
+fn a_verb() -> Verb ![io] {
+    return Verb { name: "a", run: a_run };
+}
+
+export { a_verb }

@@ -1,0 +1,81 @@
+// compiler/tests/e2e/cross_module_fn_field_dispatch_test.sfn
+//
+// SFN-1161: a bare function name populating an IMPORTED struct's fn-typed
+// field. Before this, the reference was rejected with E0808 ("take its
+// address with `<fn> as * u8`") whenever the struct type crossed a module
+// boundary — the identical literal against a locally declared struct was
+// accepted, so the C-ABI advice named a restriction that was not the real one.
+//
+// Why this must build AND run, not merely `check`. Two distinct passes decide
+// this program, and only one of them is `check`:
+//
+//   1. Capsule staging emits each module's `.sfn-asm` standalone and
+//      order-independently, so a dependency module is typechecked with no
+//      import context — an imported struct's name is known but its field
+//      shape is not. The walk defers its fn-value verdict there rather than
+//      guessing "reject". That deferral is what `sfn check main.sfn` below
+//      exercises: `main.sfn` is the entry, so `verb_a`/`verb_b` are staged as
+//      dependencies.
+//   2. The per-module compile then renders the real verdict with the shape in
+//      hand, and lowering resolves the field to a function pointer using the
+//      imported layout.
+//
+// A `check`-only assertion would pass on a deferral alone and prove nothing
+// about (2). Printing from inside each callee is the part that proves the
+// field carries the real target rather than a null or a mismatched closure
+// pair, which `check` cannot observe (#1389: green `check` is not a build
+// guarantee).
+//
+// `verb_b` additionally covers the E0840 pointer-width relaxation: its field
+// signature takes a named struct, which is `%T*` under the boxed-struct ABI
+// and so genuinely pointer-width. `string` stays rejected and return position
+// stays gated — pinned by the unit tests in
+// `compiler/tests/unit/fn_reference_typecheck_test.sfn`.
+import { find, trim_right } from "sfn/strings";
+import {
+    clean_runner_env,
+    expect_eq_int,
+    expect_eq_str,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
+
+fn _fixture_dir() -> string {
+    return "compiler/tests/e2e/fixtures/cross_module_fn_field_dispatch";
+}
+
+fn _entry() -> string { return _fixture_dir() + "/main.sfn"; }
+
+struct RunOutcome {
+    exit: int;
+    output: string;
+}
+
+// The fixture carries its own `capsule.toml`, so `discover_project_root` stops
+// there instead of inheriting the compiler's own capsule (whose
+// `native_driver.c` would contribute a second `int main`).
+fn _run_sfn(command: string, label: string) -> RunOutcome ![io] {
+    let args = [sfn_bin_path(), command, _entry()];
+    let child_env = clean_runner_env(nested_runner_scratch(label));
+    let exit = process.run_capture(args, child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return RunOutcome { exit: exit, output: trim_right(out + err) };
+}
+
+test "cross-module fn field: bare imported-struct field initializer runs end to end" ![io] {
+    let outcome = _run_sfn("run", "sfn1161-run");
+    expect_eq_int(outcome.exit, 0);
+    // Both callees announce themselves, so the assertion fails if a field
+    // dispatches to the wrong target rather than merely type-checking.
+    expect_eq_str(outcome.output, "a-ok\nb-ok\nrc_a=42\nrc_b=7");
+}
+
+test "cross-module fn field: check agrees with build on the same fixture" ![io] {
+    let outcome = _run_sfn("check", "sfn1161-check");
+    expect_eq_int(outcome.exit, 0);
+    // The staging deferral must not leak the old advice for a program that
+    // builds and runs cleanly.
+    assert find(outcome.output, "E0808", 0) < 0;
+    assert find(outcome.output, "as * u8", 0) < 0;
+}

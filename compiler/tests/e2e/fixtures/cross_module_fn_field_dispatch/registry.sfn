@@ -1,0 +1,23 @@
+// compiler/tests/e2e/fixtures/cross_module_fn_field_dispatch/registry.sfn
+//
+// SFN-1161: the struct types live here so every reference site below is a
+// genuine cross-module import — the condition that used to reject a bare
+// function name in a fn-typed field with E0808.
+struct Ctx {
+    id: int;
+}
+
+// `run` is pointer-width on both sides of the boundary.
+struct Verb {
+    name: string;
+    run: fn (int) -> int ![io];
+}
+
+// `run` takes a named struct: pointer-width only under the boxed-struct ABI,
+// which E0840's allowlist predated.
+struct StructVerb {
+    name: string;
+    run: fn (Ctx) -> int ![io];
+}
+
+export { Ctx, StructVerb, Verb }

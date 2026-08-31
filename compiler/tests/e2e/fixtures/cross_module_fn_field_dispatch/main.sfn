@@ -1,0 +1,17 @@
+// Dispatches through both imported structs' fn-typed fields. Printing from
+// inside each callee proves the field carries the real target, not a null or
+// a wrong closure pair — `check` alone would not.
+import { Ctx } from "./registry";
+import { a_verb } from "./verb_a";
+import { b_verb } from "./verb_b";
+
+fn main() -> int ![io] {
+    let va = a_verb();
+    let rc_a = va.run(41);
+    let vb = b_verb();
+    let c: Ctx = Ctx { id: 7 };
+    let rc_b = vb.run(c);
+    print("rc_a=" + rc_a);
+    print("rc_b=" + rc_b);
+    return 0;
+}

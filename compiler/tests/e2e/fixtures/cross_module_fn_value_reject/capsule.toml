@@ -1,0 +1,4 @@
+[capsule]
+name = "fixture/cross-module-fn-value-reject"
+version = "0.0.0"
+description = "Isolated capsule manifest for the SFN-1161 E0843 fixture so that `discover_project_root` doesn't walk up into compiler/capsule.toml."
