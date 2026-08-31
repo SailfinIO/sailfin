@@ -58,10 +58,16 @@ struct TypeckCtx {
     // own field check.
     in_callee_position: boolean;
     // SFN-1161: struct declarations reconstructed from imported `.sfn-asm`
-    // artifacts (`typecheck_imports.sfn::structs_from_native`). Not yet
-    // consulted anywhere in the walk — this is plumbing for a later step
-    // that resolves a struct-literal field's expected type against an
-    // imported struct's field shape.
+    // artifacts (`typecheck_imports.sfn::structs_from_native`). Read by the
+    // `Struct` arm to resolve a struct-literal field's expected type against
+    // an imported struct's field shape, and by the parameter-position ABI
+    // relaxation in `check_named_fn_value_compatibility`.
+    //
+    // Empty on the capsule-staging path, which typechecks each module
+    // standalone by design — the `Struct` arm defers its fn-value verdict
+    // there rather than guessing. Carries no methods and no type parameters
+    // (artifacts record neither), so it must never feed a check that reasons
+    // about either.
     imported_structs: Statement[];
 }
 

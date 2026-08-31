@@ -278,6 +278,29 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // Skip E0310 entirely for a generic struct's literal, matching the
         // E0833 `generic_struct_names` precedent (SFN-910).
         let is_generic_struct = _string_list_has(ctx.generic_struct_names, struct_name);
+        // SFN-1161. Capsule staging emits each module's `.sfn-asm` standalone,
+        // deliberately order-independent — `build/runtime_objs.sfn` and
+        // `main.sfn`'s `write_native_text_file_with_module_gated` header both
+        // state the invariant, and the parallel emit fan-out plus the
+        // source-only stage cache key depend on it. So a dependency module is
+        // typechecked with no import context: an imported struct's *name* is
+        // known (`_collect_imported_call_symbols` puts every import specifier
+        // in `ctx.known_types`) but its *shape* is not.
+        //
+        // In that state this pass cannot render the fn-value verdict, and
+        // guessing "reject" is what made a bare function name in an imported
+        // struct's field fail the build. Defer instead: drop E0808 for that
+        // one shape and let the pass that does have the shape decide —
+        // `main.sfn`'s per-module compile for build/run/test, or
+        // `check/engine.sfn` when the module is a named check entry. Both run
+        // over the same module before any binary exists.
+        //
+        // Deferring, not disabling: the guards below keep every other
+        // rejection intact, and the native resolve gate already defers to LLVM
+        // lowering on the same grounds.
+        let shape_unresolvable = !_struct_shape_is_resolvable(expression.type_name, ctx);
+        let name_is_imported = _struct_name_is_imported(expression.type_name, ctx);
+        let defer_fn_value_verdict = shape_unresolvable && name_is_imported;
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
@@ -287,7 +310,10 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             if field_expected == null {
                 field_expected = _imported_struct_field_expected_type(expression.type_name, field.name, ctx);
             }
-            diagnostics = diagnostics.concat(walk_expression(field.value, ctx_with_expected_type(ctx, field_expected)));
+            let field_diagnostics = walk_expression(field.value, ctx_with_expected_type(ctx, field_expected));
+            if defer_fn_value_verdict && field.value.variant == "Identifier" {
+                diagnostics = diagnostics.concat(_without_code(field_diagnostics, "E0808"));
+            } else { diagnostics = diagnostics.concat(field_diagnostics); }
             if !is_generic_struct {
                 // `local_expected`, deliberately, not `field_expected`
                 // (SFN-1161). `ctx.expected_type` is read in exactly two
@@ -707,6 +733,59 @@ fn _struct_field_expected_type(type_name: string[], field_name: string, ctx: Typ
         declaration_index += 1;
     }
     return null;
+}
+
+// Drop diagnostics carrying `code`, preserving every other diagnostic and
+// their order (SFN-1161).
+fn _without_code(diagnostics: Diagnostic[], code: string) -> Diagnostic[] {
+    let mut kept: Diagnostic[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= diagnostics.length { break; }
+        if !strings_equal(diagnostics[index].code, code) {
+            kept.push(diagnostics[index]);
+        }
+        index += 1;
+    }
+    return kept;
+}
+
+// True when this module can see the struct's field list — declared locally, or
+// reconstructed from a staged import artifact (SFN-1161). False means the
+// fn-value verdict for its fields is not this pass's to render.
+fn _struct_shape_is_resolvable(type_name: string[], ctx: TypeckCtx) -> boolean {
+    if type_name.length == 0 { return false; }
+    let name = type_name[type_name.length - 1];
+    let mut index: int = 0;
+    loop {
+        if index >= ctx.declarations.length { break; }
+        if ctx.declarations[index].variant == "StructDeclaration" {
+            if ctx.declarations[index].name == name { return true; }
+        }
+        index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= ctx.imported_structs.length { break; }
+        if ctx.imported_structs[index].variant == "StructDeclaration" {
+            if ctx.imported_structs[index].name == name { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// True when the literal names a type this module explicitly imported
+// (SFN-1161). `ctx.known_types` carries every import specifier via
+// `_collect_imported_call_symbols`, so a misspelled or undeclared struct name
+// is *not* in it and keeps its normal rejection.
+//
+// The single-segment guard excludes qualified enum-variant literals such as
+// `Result.Ok { ... }`, whose trailing segment is a variant rather than a
+// struct — those keep their normal verdict too.
+fn _struct_name_is_imported(type_name: string[], ctx: TypeckCtx) -> boolean {
+    if type_name.length != 1 { return false; }
+    return _string_list_has(ctx.known_types, type_name[0]);
 }
 
 // Names of every struct type in scope — local declarations plus the imported
