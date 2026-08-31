@@ -271,7 +271,9 @@ fn _report_with_findings(findings: ToolchainFinding[]) -> ToolchainInspectReport
         requirement: requirement,
         fetch_policy: "auto",
         entries: [],
-        findings: findings
+        findings: findings,
+        default_version: "",
+        default_track: ""
     };
 }
 
