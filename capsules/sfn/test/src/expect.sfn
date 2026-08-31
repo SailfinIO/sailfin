@@ -29,11 +29,15 @@
 //      the fluent sugar is a drop-in follow-up once the ABI bug lands.
 //
 // The throwing matchers run a thunk (`fn() -> int`) under `try`/`catch`.
-// A thunk cannot be stored in a struct field and called (another
-// frontend gap), but a free function calling its `fn`-typed parameter
-// works, and `try`/`catch`/`throw` are effect-free, so these stay
-// `![pure]`. Test bodies that need to throw `return 0` after the
-// throwing call; the return value is ignored.
+// A thunk in a struct field is stored and called fine (SFN-674, proven by
+// `compiler/tests/e2e/fn_field_dispatch_test.sfn`); the residual limit is
+// cross-module and narrower than this comment used to claim (SFN-1161): an
+// *imported* function cannot be named directly in a fn-typed field — that is
+// `E0843` — though a module-local wrapper or a `fn (...) => <name>(...)`
+// lambda can. A free function calling its `fn`-typed parameter works either
+// way, and `try`/`catch`/`throw` are effect-free, so these stay `![pure]`.
+// Test bodies that need to throw `return 0` after the throwing call; the
+// return value is ignored.
 import { find } from "sfn/strings";
 
 import {

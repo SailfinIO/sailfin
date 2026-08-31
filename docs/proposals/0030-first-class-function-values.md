@@ -357,8 +357,22 @@ body per concrete type, giving each the *natural* ABI for its shape) or a
   capture set.
 - **Gated (rejected with a diagnostic, not miscompiled):** any `fn(...)` value
   whose **signature** carries a non-pointer-width aggregate argument or return
-  (`fn(string) -> string`, `fn(Point) -> Point`). These wait on generic
-  constraints + monomorphization.
+  (`fn(string) -> string`). These wait on generic constraints +
+  monomorphization.
+- **Named-struct parameters are supported** (SFN-1161). `fn(Point) -> int` is
+  accepted: under the boxed-struct ABI a user struct maps to `%T*`, so it is
+  genuinely pointer-width, and the E0840 allowlist simply predated that ABI.
+  The **return** half stays gated — `fn(int) -> Point` is still rejected —
+  because `_compute_function_pointer_type` can diverge from the real `define`
+  ABI for struct-returning functions (sret adjustments it does not model), and
+  that needs its own audit. `string` stays gated in both positions: it maps to
+  `{i8*, i64}`, a real two-eightbyte aggregate, so the rejection is correct.
+- **Cross-module reach** (SFN-1161). A named function value may populate an
+  **imported** struct's fn-typed field and dispatch through it end-to-end. An
+  **imported function** in that position stays rejected, now under `E0843`
+  naming the real restriction: the import table carries effects and arity but
+  not parameter types, async-ness, or generic-ness. A module-local wrapper or a
+  `fn (...) => <name>(...)` lambda is the supported spelling.
 
 **Relationship to SFEP-0012 and SFEP-0028.** All three wait on the **same**
 foundation — generic type constraints + monomorphization:
