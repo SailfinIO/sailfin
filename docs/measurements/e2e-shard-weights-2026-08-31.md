@@ -6,11 +6,14 @@ settles three questions the SFN-863 / SFN-883 / SFN-891 / SFN-1220 chain left
 open: what the old weights actually encoded, whether the corrected weights are
 partition-invariant, and whether SFN-869's target list survives.
 
-**Headline.** Repartitioning this run's own *measured* e2e work by the
-corrected table takes linux-arm64 from **1.74x to 1.06x** and macos-arm64 from
-**1.27x to 1.14x**, with total work conserved. The weights are **not**
-partition-invariant — neither across targets nor across runs — so SFN-863's
-"target-neutral by construction" claim is downgraded here to *ranking signal*.
+**Headline.** Measured out-of-sample on the first CI run carrying the
+corrected table, the e2e leg spread falls on every target: linux-arm64
+**1.85x -> 1.26x**, linux-x86_64 **1.73x -> 1.44x**, macos-arm64
+**1.21x -> 1.10x**, cutting 20% / 30% / 11% off each target's e2e critical
+path (section 5). The weights are nonetheless **not** partition-invariant —
+neither across targets nor across runs — so SFN-863's "target-neutral by
+construction" claim is downgraded here to *ranking signal*, and 1.0x is not
+reachable by repartitioning alone.
 
 ## Provenance
 
@@ -125,6 +128,8 @@ orders of magnitude once already; it does not get cited again.
 | linux-x86_64 | 1275 s | 1768 s | 1074 s | 1025 s | **1.73x** |
 | linux-arm64 | 963 s | 1317 s | 841 s | 710 s | **1.85x** |
 
+These are the numbers section 5 measures the corrected table against.
+
 SFN-1223's stated baseline was 1.60x / 1.48x from an earlier run. The same
 table measured on this run gives 1.73x / 1.85x — so the imbalance itself is not
 stable run to run, and any single-run baseline is one sample. Both figures are
@@ -185,7 +190,7 @@ repartitioning alone.
    directly: weights move with a p10-p90 band of 0.66x-1.51x between runs, so
    expect the realised spread to land above 1.06x.
 2. **`macos-arm64` keeps a 1.14x residual** even in-sample, and that is the
-   price of one shared table: sections 2's cross-target disagreement means a
+   price of one shared table: section 2's cross-target disagreement means a
    partition that balances linux cannot also balance macos.
 
 **Prediction, to be checked out-of-sample on the first run carrying this
@@ -196,7 +201,44 @@ out-of-sample weight drift measured in section 2.
 sidecars, so every one of its weights is extrapolated from the two arm64
 targets, across exactly the cross-target gap section 2 measured.
 
-## 5. Rulings on dependent issues
+## 5. Out-of-sample result
+
+Run [33418715318](https://github.com/SailfinIO/sailfin/actions/runs/33418715318)
+is the first CI run carrying the regenerated table. It is a different run from
+the one the weights were derived from, so this is the real test — everything in
+section 4 was retrodiction.
+
+| target | old table (33407348555) | spread | **new table (33418715318)** | **spread** | critical path |
+| --- | --- | ---: | --- | ---: | ---: |
+| linux-x86_64 | 1275 / 1768 / 1074 / 1025 s | 1.73x | 1209 / 1130 / 854 / 1233 s | **1.44x** | 1768 -> 1233 s (**-30%**) |
+| linux-arm64 | 963 / 1317 / 841 / 710 s | 1.85x | 1057 / 985 / 840 / 877 s | **1.26x** | 1317 -> 1057 s (**-20%**) |
+| macos-arm64 | 1703 / 1904 / 1827 / 2069 s | 1.21x | 1788 / 1837 / 1775 / 1670 s | **1.10x** | 2069 -> 1837 s (**-11%**) |
+
+Against SFN-1223's stated 1.60x / 1.48x baseline, both linux targets now come
+in under it (1.44x and 1.26x). `macos-arm64` legs are grouped with other shards
+(SFN-873), so its figures cover more than e2e and are not directly comparable
+to the arm64 e2e-only numbers — the direction still agrees.
+
+**The prediction held.** Section 4 predicted linux-arm64 at 1.2x-1.4x, floored
+near 1.18x by the work-to-wall conversion; it measured **1.26x**. It also
+predicted `linux-x86_64` would improve by less because every one of its weights
+is extrapolated from the arm64 targets; it did (1.44x against 1.26x). The
+in-sample 1.06x did not survive contact with a new run, exactly as caveat 1
+said it would not.
+
+linux-arm64's `Test shard` step spread is 1.27x against a 1.26x leg spread,
+confirming these legs remain test-dominated and that the residual is in the
+tests, not in leg overhead.
+
+**Where the remaining 1.26x lives.** Roughly 1.18x of it is the work-to-wall
+conversion (section 4) — pooling and tail effects inside a leg, not
+misallocation between legs. The rest is the run-to-run weight drift of section
+2. Neither is addressable by re-partitioning, which is the negative half of
+this result: the weight table has now done nearly all it can do, and further
+e2e critical-path reduction has to come from making the heavy files cheaper
+(SFN-869, SFN-1221) rather than from moving them around.
+
+## 6. Rulings on dependent issues
 
 **SFN-869** (per-file dedup on the e2e heavy tail) — **strategy survives,
 target list does not.** Its approach is independent of this bug. Its targets
