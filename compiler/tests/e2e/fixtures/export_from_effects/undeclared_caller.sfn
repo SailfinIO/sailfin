@@ -1,0 +1,7 @@
+// Declares no effects at all while calling an `![io]` function reached
+// through a one-hop facade. Must be rejected.
+import { effect_probe_io } from "./facade";
+
+export fn calls_through_facade(value: int) -> int {
+    return effect_probe_io(value);
+}

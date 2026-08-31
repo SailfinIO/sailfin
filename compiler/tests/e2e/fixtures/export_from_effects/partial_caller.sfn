@@ -1,0 +1,7 @@
+// The SFN-1069 shape verbatim: the caller declares a non-empty but
+// narrower effect set than the facade-reached callee, missing `![clock]`.
+import { effect_probe_multi } from "./facade";
+
+export fn calls_with_narrow_effects(value: int) -> int ![io, net] {
+    return effect_probe_multi(value);
+}

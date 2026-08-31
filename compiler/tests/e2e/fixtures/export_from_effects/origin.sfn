@@ -1,0 +1,16 @@
+// Origin module for the SFN-1202 effect-propagation regression test.
+//
+// Defines the two effectful shapes a facade re-export must not launder:
+// a single-effect function, and a multi-effect function that mirrors the
+// `toolchain_install_to_base` signature which exposed the concern.
+fn effect_probe_io(value: int) -> int ![io] {
+    print("probe");
+    return value + 1;
+}
+
+fn effect_probe_multi(value: int) -> int ![clock, io, net] {
+    print("probe-multi");
+    return value + 2;
+}
+
+export { effect_probe_io, effect_probe_multi };

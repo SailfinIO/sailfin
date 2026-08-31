@@ -1,0 +1,4 @@
+[capsule]
+name = "fixture/export-from-effects"
+version = "0.0.0"
+description = "Isolated capsule manifest for the SFN-1202 effect-propagation fixture. Without it `discover_project_root` walks up to `compiler/`, and `_check_project_entry_artifact` (compiler/src/capsule_resolver/check.sfn) then probes for a cached `compiler/src/main.sfn` artifact and splices it into this check's provider inventory on a cache hit — and only on a cache hit. That would make the fixture's resolved symbol closure depend on whether the compiler build cache happens to be warm, which is exactly the nondeterminism a regression fixture must not have."

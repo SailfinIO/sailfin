@@ -1,0 +1,6 @@
+// Same under-declaration, but two re-export hops from the definition.
+import { effect_probe_io } from "./chain";
+
+export fn calls_through_chain(value: int) -> int {
+    return effect_probe_io(value);
+}

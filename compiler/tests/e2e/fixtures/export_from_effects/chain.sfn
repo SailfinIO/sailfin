@@ -1,0 +1,2 @@
+// Second hop, so the chain is caller -> chain -> facade -> origin.
+export { effect_probe_io } from "./facade";

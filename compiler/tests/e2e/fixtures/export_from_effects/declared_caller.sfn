@@ -1,0 +1,7 @@
+// Positive control: a correctly-declared caller through the same facade
+// must check clean, so the negative cases cannot pass for the wrong reason.
+import { effect_probe_io } from "./facade";
+
+export fn calls_correctly(value: int) -> int ![io] {
+    return effect_probe_io(value);
+}
