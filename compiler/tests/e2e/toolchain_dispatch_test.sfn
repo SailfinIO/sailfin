@@ -1414,6 +1414,34 @@ test "toolchain dispatch: SAILFIN_TOOLCHAIN=off suppresses the user default" ![i
     assert exit == 0;
 }
 
+// SFN-1068 / workspace.toml's `dev` exclusion note: a self-host driver
+// spawns its children as plain argv, invisible to the `sfn dev ...`
+// exclusion, so a recorded per-user default (rank 4) would otherwise select
+// inside a driver-shaped child. Appending `--skip-toolchain-check` to that
+// child's argv (as every driver spawn site now does) is what stands rank 4
+// down — this pins that a driver-shaped invocation carrying the flag never
+// selects the recorded default, exactly like the CLI/env escape hatches
+// already covered above.
+test "toolchain dispatch: a driver child's skip flag suppresses the user default" ![io] {
+    let store = _scratch_root() + "/rank4-driver-skip-store";
+    let proj = _scratch_root() + "/rank4-driver-skip-proj";
+    let cfg = _scratch_root() + "/rank4-driver-skip-cfg";
+    let marker = "DISPATCH_RANK4_DRIVER_SKIP_SHOULD_NOT_RUN_5e2a";
+    _seed_stub(store, "777.0.0", marker, true);
+    let src = _seed_project(proj, "0.0.1");
+    _seed_user_default(cfg, "777.0.0");
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", "--skip-toolchain-check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank4-driver-skip run", exit, out, err);
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
 test "toolchain dispatch: an unreadable user-default record refuses to build" ![io] {
     let store = _scratch_root() + "/rank4-corrupt-store";
     let proj = _scratch_root() + "/rank4-corrupt-proj";

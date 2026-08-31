@@ -50,7 +50,13 @@ import { CliContext } from "../context";
 // `with_subcommand`. `--signing-key` prints the embedded release-signing
 // public key instead of the version.
 fn command_def() -> Command {
-    return with_usage(with_flag(command("version", "Print the compiler version"), flag("signing-key", "Print the embedded release-signing public key (hex) instead of the version")), "meta", "sfn version", "show version (also --version)");
+    let mut cmd: Command = command("version", "Print the compiler version");
+    cmd = with_flag(cmd, flag("signing-key", "Print the embedded release-signing public key (hex) instead of the version"));
+    // SFN-1068 / SFEP-0073 §3.3: registered so a freshly built binary's
+    // smoke checks (`dev.sfn`'s `... version --skip-toolchain-check`) parse
+    // without tripping per-user default dispatch (rank 4).
+    cmd = with_flag(cmd, flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation"));
+    return with_usage(cmd, "meta", "sfn version", "show version (also --version)");
 }
 
 // Print the resolved compiler version, or the embedded release-signing public

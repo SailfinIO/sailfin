@@ -980,6 +980,11 @@ fn _bootstrap_compiler_build_argv(seed_bin: string, build_args: string[]) -> str
         argv.push(build_args[i]);
         i += 1;
     }
+    // The driver has already resolved the exact seed binary to run; it must
+    // not let that child re-select a different toolchain (a recorded user
+    // default, SFEP-0073 §3.3 rank 4, or an exact project pin) out from under
+    // it. See workspace.toml's `dev` exclusion note.
+    argv.push("--skip-toolchain-check");
     return argv;
 }
 
@@ -1081,7 +1086,9 @@ fn _dev_bootstrap_build(force: boolean, build_args: string[]) -> int ![clock, io
     // would wedge every later build into "up to date" against it, escapable
     // only via --force. Verifying the source artifact keeps a failed build
     // purely additive: the previously installed compiler is untouched.
-    let smoke_rc = process.run([built_program_path(), "version"]);
+    // SFN-1068 / SFEP-0073 §3.3: prove the freshly built binary runs, not
+    // that its per-user default toolchain resolves.
+    let smoke_rc = process.run([built_program_path(), "version", "--skip-toolchain-check"]);
     if smoke_rc != 0 {
         fs.deleteFile(pending_fingerprint_path());
         print.err("error: the compiler built at " + built_program_path()
@@ -1213,7 +1220,9 @@ fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) ->
     // canonical fingerprint transaction below isolated so installing onto
     // PATH cannot make a stale repo-local compiler pass the next build gate.
     if !canonical {
-        let smoke_rc = process.run([src, "version"]);
+        // SFN-1068 / SFEP-0073 §3.3: prove the freshly built binary runs, not
+        // that its per-user default toolchain resolves.
+        let smoke_rc = process.run([src, "version", "--skip-toolchain-check"]);
         if smoke_rc != 0 {
             print.err("error: the compiler at " + src
                 + " failed its smoke check (exit "
@@ -1344,7 +1353,9 @@ fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) ->
     // build that produced an unrunnable binary leaves the previously
     // installed compiler intact rather than swapping a working toolchain for
     // a broken one. See `_dev_bootstrap_build` for the full rationale.
-    let smoke_rc = process.run([src, "version"]);
+    // SFN-1068 / SFEP-0073 §3.3: prove the freshly built binary runs, not
+    // that its per-user default toolchain resolves.
+    let smoke_rc = process.run([src, "version", "--skip-toolchain-check"]);
     if smoke_rc != 0 {
         fs.deleteFile(pending_path);
         print.err("error: the compiler at " + src
@@ -1403,7 +1414,9 @@ fn _dev_bootstrap_check() -> int ![clock, io, net] {
         print.err("error: build did not produce " + built);
         return 1;
     }
-    let smoke_rc = process.run([built, "version"]);
+    // SFN-1068 / SFEP-0073 §3.3: prove the freshly built binary runs, not
+    // that its per-user default toolchain resolves.
+    let smoke_rc = process.run([built, "version", "--skip-toolchain-check"]);
     if smoke_rc != 0 {
         print.err("error: the built compiler failed its smoke check (exit "
             + int_to_string(smoke_rc)

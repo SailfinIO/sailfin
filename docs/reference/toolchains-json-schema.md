@@ -92,7 +92,7 @@ guards the field set so a silent leak fails CI before it lands.
 |---|---|---|
 | `version` | string \| null | The version the current directory resolves to. `null` only if resolution failed entirely. |
 | `path` | string \| null | The selected executable's path. `null` when the selected version is not installed. |
-| `source` | string | Where the selection came from: `"entry"`, `"environment"` (`SAILFIN_TOOLCHAIN`), or the project pin's source (e.g. `"workspace.toml"`). Never empty. |
+| `source` | string | Where the selection came from: `"entry"`, `"environment"` (`SAILFIN_TOOLCHAIN`), `"user default"` (the per-host record set by `sfn toolchain default`), or the project pin's source (e.g. `"workspace.toml"`). Never empty. |
 | `installed` | boolean | Whether the selected version has a ready store entry. |
 | `integrity` | string | One of `"verified"`, `"unverified"`, `"failed"`. See the `integrity` vocabulary below. |
 

@@ -315,8 +315,12 @@ fn _selfhost_stage_env(parent_env: string[], scratch_dir: string) -> string[] {
 // The argv for one stage build. `run_capture` hands this straight to
 // `execve`, so the arguments are literal — none of the shell quoting the
 // former `sh -c` command string needed.
+// `--skip-toolchain-check`: this stage has already resolved the exact
+// driver binary to run and must not let this child re-select a different
+// toolchain (a recorded user default, SFEP-0073 §3.3 rank 4, or an exact
+// project pin). See workspace.toml's `dev` exclusion note.
 fn _selfhost_stage_argv(driver_bin: string, work_subdir: string, out_bin: string) -> string[] {
-    return [driver_bin, "build", "--no-cache", "-p", "compiler", "--work-dir", work_subdir, "-o", out_bin];
+    return [driver_bin, "build", "--no-cache", "-p", "compiler", "--work-dir", work_subdir, "-o", out_bin, "--skip-toolchain-check"];
 }
 
 // Re-emit a captured child stream so stage output still reaches the
@@ -632,7 +636,9 @@ fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: s
 // so a wedged seedcheck binary hangs this gate. SFN-619 restores a bound
 // via the spawn/poll/kill handle API.
 fn _selfhost_smoke(seedcheck_bin: string) -> boolean ![io] {
-    let argv: string[] = [seedcheck_bin, "run", "examples/basics/hello-world.sfn"];
+    // --skip-toolchain-check: the seedcheck binary is the exact artifact
+    // under test and must not re-select a different toolchain to run this.
+    let argv: string[] = [seedcheck_bin, "run", "examples/basics/hello-world.sfn", "--skip-toolchain-check"];
     let _ = process.run_capture(argv, process.environ());
     let combined = process.capture_take_stdout() + process.capture_take_stderr();
     return _selfhost_contains(combined, "Hello, Sailfin!");
@@ -651,7 +657,12 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
             return 0;
         } else if strings_equal(arg, "--json") { cfg.json = true; } else if strings_equal(arg, "--no-promote") {
             cfg.no_promote = true;
-        } else if strings_equal(arg, "--strict") { cfg.strict = true; } else if strings_equal(arg, "--work-dir") {
+        } else if strings_equal(arg, "--strict") { cfg.strict = true; } else if strings_equal(arg, "--skip-toolchain-check") {
+            // Accepted and ignored: `cli/main.sfn::_v2_argv_has_skip_flag`
+            // already stood rank 4 (per-user default dispatch) down on this
+            // flag before this parser ran (SFN-1068 / SFEP-0073 §3.3). This
+            // parser's only job is to not reject it.
+        } else if strings_equal(arg, "--work-dir") {
             argi += 1;
             if argi >= args.length {
                 print.err("[selfhost] --work-dir requires a value");

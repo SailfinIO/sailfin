@@ -49,6 +49,7 @@ import {
     toolchain_versions_base
 } from "../../toolchain/store";
 import {
+    toolchain_user_default_clear,
     toolchain_user_default_corrupt,
     toolchain_user_default_path,
     toolchain_user_default_read,
@@ -306,7 +307,12 @@ fn _toolchain_default(ctx: CliContext, requested: string) -> int ![clock, io, ne
     }
 
     let entry = toolchain_resolve_compatible_store_entry(toolchain_versions_base(), host, requested);
-    if !entry.ready {
+    // A legacy flat entry is never an installed candidate for `default`
+    // (SFEP-0073 §3.5): its archive marker does not authenticate the extracted
+    // files, so recording one would route every later command through an
+    // unverified payload. Treating it as missing sends it down the normal
+    // online path, which installs a freshly verified host asset instead.
+    if !entry.ready || entry.legacy {
         let mode = env.get("SAILFIN_TOOLCHAIN");
         if strings_equal(mode, "local") {
             print.err("error: toolchain " + requested + " is not installed");
@@ -334,7 +340,10 @@ fn _toolchain_default(ctx: CliContext, requested: string) -> int ![clock, io, ne
 // doing so would remove the toolchain this process is running as, and — absent
 // `--force` — when another role (the per-user default or the active project
 // pin) currently names it.
-fn _toolchain_remove(ctx: CliContext, requested: string, force: boolean) -> int ![clock, io, net] {
+// No `![clock, net]`: every step is a local store or manifest read. Declaring
+// reach this function does not have is exactly what the derived capability
+// manifest must never do.
+fn _toolchain_remove(ctx: CliContext, requested: string, force: boolean) -> int ![io] {
     if !toolchain_is_valid_install_version(requested) {
         return _toolchain_reject_inexact(requested, "sfn toolchain remove 0.10.6");
     }
@@ -349,6 +358,18 @@ fn _toolchain_remove(ctx: CliContext, requested: string, force: boolean) -> int 
     if !entry.ready {
         print.err("error: toolchain " + requested
             + " is not installed in this host's store");
+        return 2;
+    }
+
+    // The pre-SFEP-0073 flat tree is host-agnostic, so one directory there can
+    // serve several hosts sharing a home — the very case the host-qualified
+    // store exists to separate. Deleting it on one host would take it from the
+    // others, so only a host-qualified entry is removable here.
+    if entry.legacy {
+        print.err("error: " + requested
+            + " is a pre-SFEP-0073 flat store entry and is not removable here: "
+            + entry.dir);
+        print.err("  it is shared by every host using this home directory");
         return 2;
     }
 
@@ -432,12 +453,30 @@ fn _toolchain_remove(ctx: CliContext, requested: string, force: boolean) -> int 
         }
     }
 
+    // Clearing before deleting: a record naming a version that is gone makes
+    // rank 4 attempt a network install on every ordinary command in every
+    // directory, and fail on each one offline. Only `--force` can reach here
+    // holding the default, since the unforced path refuses it outright.
+    let recorded_now = toolchain_user_default_read(host.triple);
+    let cleared_default = strings_equal(recorded_now.version, requested);
+    if cleared_default {
+        if !toolchain_user_default_clear(host.triple) {
+            print.err("error: failed to clear the per-user toolchain default: "
+                + toolchain_user_default_path());
+            print.err("  the toolchain was not removed");
+            return 2;
+        }
+    }
+
     if !toolchain_remove_store_entry(entry.dir) {
         print.err("error: failed to remove the toolchain store entry: " + entry.dir);
         return 2;
     }
     print("removed toolchain " + requested + ": " + entry.dir);
     print("  another checkout may reinstall it automatically if it still pins this version");
+    if cleared_default {
+        print("  the per-user default was cleared; set a new one with: sfn toolchain default <version>");
+    }
     return 0;
 }
 

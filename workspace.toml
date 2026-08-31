@@ -40,15 +40,27 @@ members = [
 # workspace-wide. `channel = "alpha"` is the lowest rank (stable > rc > beta >
 # alpha), so it never rejects a running toolchain today — it documents the
 # minimum stability contract and tightens only if raised to `beta`/`rc`/`stable`.
-# Do NOT add an exact `version` here without first making the `dev` exclusion
-# survive a process boundary. `cli/main.sfn::_v2_project_selection_applies`
-# keeps `sfn dev ...` out of SFEP-0073 §3.3 rank-3 selection, but the
-# self-host drivers spawn their children as plain `build`/`selfhost` argv
-# (`cli/commands/dev.sfn`, `cli_selfhost.sfn`, `cli/commands/dev_verify.sfn`,
-# `build/determinism.sfn`) with this directory as cwd. Those children would
-# select on a `version` field here and compile the working tree with a
-# released payload — silently, and in the determinism case by making the two
-# passes incomparable rather than failing (SFN-1070).
+# Do NOT add an exact `version` here without confirming every self-host
+# driver spawn site still stands down. `cli/main.sfn::_v2_project_selection_applies`
+# keeps `sfn dev ...` out of SFEP-0073 §3.3 rank-3/rank-4 selection, but the
+# self-host drivers spawn their children as plain `build`/`run`/`selfhost`
+# argv (`cli/commands/dev.sfn`, `cli_selfhost.sfn`, `build/determinism.sfn`)
+# with this directory as cwd — invisible to the `dev` exclusion, which only
+# sees the directly typed command. Those drivers now pass
+# `--skip-toolchain-check` on the children they spawn (SFN-1068), which is
+# what keeps a recorded per-user default (rank 4) and any future exact
+# `version` field here from selecting inside a self-host child; without it
+# a released payload would compile the working tree — silently, and in the
+# determinism case by making the two passes incomparable rather than failing
+# (SFN-1070). `version` now registers the flag (`cli/commands/version.sfn`)
+# and `handle_selfhost_command`'s top-level `selfhost` verb
+# (`cli_selfhost.sfn`) accepts and ignores it, so every `cli/commands/dev.sfn`
+# and `cli/commands/dev_verify.sfn` spawn site can carry it; `dev bootstrap
+# build` is the one exception, left bare because `dev` is already excluded
+# from selection above and does not register the flag. Anyone adding a NEW
+# driver spawn site must do the same — and check first that the invoked
+# subcommand actually registers/accepts the flag, since an unregistered flag
+# is rejected outright.
 [toolchain]
 sfn = "0.10.6"
 channel = "alpha"

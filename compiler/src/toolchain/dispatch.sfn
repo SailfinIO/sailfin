@@ -393,7 +393,15 @@ fn toolchain_select_user_default(ctx: CliContext, argv_skip: boolean, version_qu
         return 0;
     }
 
-    return toolchain_select_exact(recorded.version, "the per-user toolchain default", "", ctx, version_query, version_query);
+    let rc = toolchain_select_exact(recorded.version, "the per-user toolchain default", "", ctx, version_query, version_query);
+    if rc == 2 {
+        // The record is user-editable, so a non-exact value lands in
+        // `toolchain_select_exact`'s parse error, whose hint names a `+<version>`
+        // one-shot. That does not repair the record, which is what is actually
+        // wrong here.
+        print.err("  re-record it with sfn toolchain default <version>");
+    }
+    return rc;
 }
 
 fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![clock, io, net] {

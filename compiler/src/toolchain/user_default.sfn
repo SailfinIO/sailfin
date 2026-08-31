@@ -191,6 +191,23 @@ fn toolchain_user_default_parse(text: string, host_triple: string) -> ToolchainU
 // cannot tell apart from "the record is unreadable" unless corruption is
 // surfaced separately — otherwise anyone able to write garbage here would
 // silently reset the default to unset.
+// The header's schema, or `0` when there is no well-formed header. Separate
+// from parsing because the *writer* needs it: rendering always stamps this
+// build's schema, so writing over a record produced by a newer build would
+// silently relabel that build's body as schema 1 and let it misread its own
+// record afterwards. The forward-compatible reader only protects the read
+// half; refusing the write is what makes the seam bidirectional.
+fn toolchain_user_default_text_schema(text: string) -> int {
+    if _toml_trim_cmd(text).length == 0 { return 0; }
+    let lines = _user_default_split_lines(text);
+    if lines.length == 0 { return 0; }
+    let magic_prefix = TOOLCHAIN_USER_DEFAULT_MAGIC + " ";
+    if !starts_with(lines[0], magic_prefix) { return 0; }
+    let schema = _user_default_parse_uint(substring(lines[0], magic_prefix.length, lines[0].length));
+    if schema < 1 { return 0; }
+    return schema;
+}
+
 fn toolchain_user_default_text_corrupt(text: string) -> boolean {
     if _toml_trim_cmd(text).length == 0 { return false; }
     let lines = _user_default_split_lines(text);
@@ -252,6 +269,13 @@ fn toolchain_user_default_write(host_triple: string, version: string, track: str
     if path.length == 0 { return false; }
     let mut current: string = "";
     if fs.exists(path) { current = fs.readFile(path); }
+    // Never write over a record a newer build wrote. Rendering stamps this
+    // build's schema unconditionally, so proceeding would downgrade the header
+    // while leaving that build's body intact — the one shape neither reader
+    // can interpret correctly afterwards.
+    if toolchain_user_default_text_schema(current) > TOOLCHAIN_USER_DEFAULT_MAX_SCHEMA {
+        return false;
+    }
     let text = toolchain_user_default_render(current, host_triple, version, track);
 
     let tmp = _mktemp_sibling_cmd(path);
@@ -280,5 +304,6 @@ export {
     toolchain_user_default_read,
     toolchain_user_default_render,
     toolchain_user_default_text_corrupt,
+    toolchain_user_default_text_schema,
     toolchain_user_default_write
 };
