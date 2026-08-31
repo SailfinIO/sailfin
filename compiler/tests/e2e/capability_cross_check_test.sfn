@@ -72,8 +72,7 @@ fn _stage_raw(tag: string, manifest: string, fixture_name: string, fixture_body:
 // A well-formed manifest header, with `caps` appended verbatim so each
 // test picks its own `[capabilities]` state.
 fn _manifest(caps: string) -> string {
-    return "[capsule]\n"
-        + "name = \"cross_check_fixture\"\n"
+    return "[capsule]\n" + "name = \"cross_check_fixture\"\n"
         + "version = \"0.0.0\"\n\n"
         + caps;
 }
@@ -81,8 +80,7 @@ fn _manifest(caps: string) -> string {
 // Stage a one-fixture capsule with `[capabilities] required = ["io"]`.
 // Returns the absolute path to the staged fixture for `sfn check`.
 fn _stage_capsule(tag: string, fixture_name: string, fixture_body: string) -> string ![io] {
-    return _stage_raw(tag, _manifest("[capabilities]\nrequired = [\"io\"]\n"),
-        fixture_name, fixture_body);
+    return _stage_raw(tag, _manifest("[capabilities]\nrequired = [\"io\"]\n"), fixture_name, fixture_body);
 }
 
 struct CheckRun {
@@ -132,12 +130,10 @@ test "capability cross-check: accepts effect within manifest surface" ![io] {
 // needed no capability silently received full authority. Presence of the
 // section now decides whether the check runs; its contents decide what
 // passes.
-
 // State: `[capabilities]` present, `required = []` → deny-all.
 // This is the whole point of SFN-764 and fails against the old compiler.
 test "capability cross-check: an explicit empty surface denies every effect" ![io] {
-    let fixture = _stage_raw("declared-empty", _manifest("[capabilities]\nrequired = []\n"),
-        "touch.sfn", "fn touch() ![io] {\n"
+    let fixture = _stage_raw("declared-empty", _manifest("[capabilities]\nrequired = []\n"), "touch.sfn", "fn touch() ![io] {\n"
         + "    print.info(\"denied\");\n"
         + "}\n");
     let r = _check(fixture);
@@ -153,8 +149,7 @@ test "capability cross-check: an explicit empty surface denies every effect" ![i
 // every capsule that has not yet written a manifest surface, which is why
 // the flag tracks section PRESENCE and not list length.
 test "capability cross-check: an absent capabilities section still skips" ![io] {
-    let fixture = _stage_raw("absent-section", _manifest(""),
-        "touch.sfn", "fn touch() ![io] {\n"
+    let fixture = _stage_raw("absent-section", _manifest(""), "touch.sfn", "fn touch() ![io] {\n"
         + "    print.info(\"allowed\");\n"
         + "}\n");
     let r = _check(fixture);
@@ -166,8 +161,7 @@ test "capability cross-check: an absent capabilities section still skips" ![io] 
 // Fail-closed turns what was silent full authority into a loud E0403
 // naming exactly the effect the author expected to have been granted.
 test "capability cross-check: a section with no required key fails closed" ![io] {
-    let fixture = _stage_raw("missing-key", _manifest("[capabilities]\n"),
-        "touch.sfn", "fn touch() ![io] {\n"
+    let fixture = _stage_raw("missing-key", _manifest("[capabilities]\n"), "touch.sfn", "fn touch() ![io] {\n"
         + "    print.info(\"denied\");\n"
         + "}\n");
     let r = _check(fixture);
@@ -180,8 +174,7 @@ test "capability cross-check: a section with no required key fails closed" ![io]
 // against a future refactor that treats the deny-all surface as "reject
 // every effect token".
 test "capability cross-check: pure passes under a deny-all surface" ![io] {
-    let fixture = _stage_raw("pure-under-deny", _manifest("[capabilities]\nrequired = []\n"),
-        "calc.sfn", "fn calc(x: number) -> number ![pure] {\n"
+    let fixture = _stage_raw("pure-under-deny", _manifest("[capabilities]\nrequired = []\n"), "calc.sfn", "fn calc(x: number) -> number ![pure] {\n"
         + "    return x + 1;\n"
         + "}\n");
     let r = _check(fixture);
@@ -197,9 +190,7 @@ test "capability cross-check: pure passes under a deny-all surface" ![io] {
 // bypass sitting underneath the fail-closed rule above. A capsule whose
 // manifest cannot be read is not a capsule.
 test "capability cross-check: an unreadable manifest is E0407, not full authority" ![io] {
-    let fixture = _stage_raw("unreadable-manifest",
-        "<<<<<<< HEAD\nname = \"clobbered\"\n=======\n>>>>>>> other\n",
-        "touch.sfn", "fn touch() ![io] {\n"
+    let fixture = _stage_raw("unreadable-manifest", "<<<<<<< HEAD\nname = \"clobbered\"\n=======\n>>>>>>> other\n", "touch.sfn", "fn touch() ![io] {\n"
         + "    print.info(\"should not be authorized\");\n"
         + "}\n");
     let r = _check(fixture);

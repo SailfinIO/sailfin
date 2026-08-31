@@ -83,7 +83,11 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
     // import closure, using the same fail-open verification as build; check's
     // empty runtime root correctly excludes modules needed only for linking.
     let resolved = _cr_resolve_dedupe_filtered(entry_paths, consumer, binary_dir);
-    if resolved.has_collision {
+    // E0407 (SFN-764) aborts here alongside a slug collision: both are
+    // setup errors already reported at the manifest read, and continuing
+    // past an unreadable manifest would analyze the capsule with no
+    // declared surface — i.e. grant it everything.
+    if resolved.has_collision || resolved.manifest_unreadable.length > 0 {
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
             implicit_provider_asm_paths: empty_paths,

@@ -108,15 +108,22 @@ fn validate_and_render_effects(program: Program, source: string, file_path: stri
 
 // Phase F entry — accepts the project manifest's
 // `[capabilities] required = [...]` surface in addition to the Phase E
-// import table. Empty `capabilities_required` means "no capability
-// surface to compare against" (standalone .sfn outside any capsule);
-// the function then degrades to the Phase B/C/D/E behavior — only
-// in-module + cross-module effect validation runs.
+// import table, plus `capabilities_declared`: whether a `[capabilities]`
+// section existed at all.
 //
-// On a capsule with a non-empty surface, `validate_capsule_capabilities`
-// also runs, emitting `E0403` for any function declaring an effect
-// outside the manifest-allowed set. Both violation streams flow
-// through the same `SAILFIN_EFFECT_ENFORCE` severity contract.
+// `capabilities_declared = false` means no manifest declared a surface
+// (a standalone .sfn outside any capsule, or a capsule that has not
+// written the section). The function degrades to Phase B/C/D/E
+// behaviour — only in-module + cross-module effect validation runs.
+//
+// When it is true, `validate_capsule_capabilities` runs and emits
+// `E0403` for any function declaring an effect outside the allowed set,
+// **including when that set is empty** — an explicit `required = []` is
+// a deny-all ceiling, not an opt-out (SFN-764). The surface length is
+// therefore never the discriminator; only the flag is. Both violation
+// streams flow through the same `SAILFIN_EFFECT_ENFORCE` severity
+// contract, so `=warning` remains the ramp for a project this rule
+// newly surprises.
 fn validate_and_render_effects_with_capabilities(program: Program, source: string, file_path: string, imports: ImportSymbolTable, capabilities_required: string[], capabilities_declared: boolean) -> int ![io] {
     let raw = read_effect_enforcement_env(file_path);
     let severity = resolve_effect_enforcement(raw);
@@ -150,8 +157,9 @@ fn validate_and_render_effects_with_capabilities(program: Program, source: strin
         i += 1;
     }
 
-    // Phase F: capsule capability cross-check. Skipped when no
-    // manifest provided a surface (empty `capabilities_required`).
+    // Phase F: capsule capability cross-check. Skipped only when no
+    // manifest declared a `[capabilities]` section; an explicit but
+    // empty surface denies every effect (SFN-764).
     let capability_violations = validate_capsule_capabilities(program, capabilities_required, capabilities_declared);
     let mut k: int = 0;
     loop {

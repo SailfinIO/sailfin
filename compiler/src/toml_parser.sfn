@@ -706,7 +706,9 @@ fn _toml_has_section(text: string, section: string) -> boolean {
         if line[0] != "[" { continue; }
         let close = find_char_local(line, "]", 0);
         if close <= 0 { continue; }
-        if strings_equal(_toml_trim(substring(line, 1, close)), section) { return true; }
+        if strings_equal(_toml_trim(substring(line, 1, close)), section) {
+            return true;
+        }
     }
     return false;
 }

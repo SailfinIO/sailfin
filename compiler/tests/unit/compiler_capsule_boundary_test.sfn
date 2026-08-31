@@ -23,8 +23,8 @@ import {
     toml_get_capabilities_required,
     toml_get_dependencies,
     toml_get_publish,
-    toml_get_string,
-    toml_get_version
+    toml_get_version,
+    toml_has_capabilities_section
 } from "../../src/toml_parser";
 
 let ROLE_SYNTAX: string = "syntax";
@@ -350,10 +350,14 @@ fn _collect_stdlib_sources(members: WorkspaceMember[]) -> string[] ![io] {
     return out;
 }
 
+// "Declared, and declared empty" — the state this audit wants each
+// compiler-internal capsule to be in. Anchored on
+// `toml_has_capabilities_section` rather than a raw-text `!= "[]"` probe
+// so there is exactly one implementation of "was a surface declared" in
+// the tree; a second, divergent answer to that question is the shape of
+// the defect SFN-764 fixed.
 fn _has_empty_capability_ceiling(manifest: string) -> boolean {
-    if trim(toml_get_string(manifest, "capabilities", "required")) != "[]" {
-        return false;
-    }
+    if !toml_has_capabilities_section(manifest) { return false; }
     return toml_get_capabilities_required(manifest).length == 0;
 }
 

@@ -326,9 +326,10 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     // check-only facade, rooted in the explicitly requested files rather than
     // build's runtime/link roots (SFEP-0070 §3.6).
     let resolved = _cr_resolve_dedupe_filtered(entry_paths, consumer, binary_dir);
-    if resolved.has_collision {
-        // Slug collision is a setup error (already reported by
-        // `_cr_resolve_and_dedupe`), not a "no deps" build.
+    if resolved.has_collision || resolved.manifest_unreadable.length > 0 {
+        // A slug collision or an unreadable manifest (E0407, SFN-764) is a
+        // setup error (already reported by `_cr_resolve_and_dedupe`), not a
+        // "no deps" build.
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             entry_import_asm_paths: empty_paths,
@@ -561,7 +562,9 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
 fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_dir: string) -> boolean ![io] {
     let entry_paths: string[] = [entry_path];
     let resolved = _cr_resolve_and_dedupe(entry_paths, empty_resolver_consumer(), "");
-    if resolved.has_collision { return false; }
+    if resolved.has_collision || resolved.manifest_unreadable.length > 0 {
+        return false;
+    }
     // No declared capsule dependencies → nothing to stage. A bare
     // runtime/prelude emit (no consumer manifest) lands here untouched.
     if resolved.manifest_dep_specs.length == 0 { return true; }
@@ -614,7 +617,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // staging failures are setup-time concerns, not manifest
     // semantics — the gate still needs to know the capability
     // surface to render `E0403` correctly on a clean retry.
-    if resolved.has_collision {
+    if resolved.has_collision || resolved.manifest_unreadable.length > 0 {
         return TestCapsuleResolution {
             asm_paths: empty_paths,
             implicit_provider_asm_paths: empty_paths,

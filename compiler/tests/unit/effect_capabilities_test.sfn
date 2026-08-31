@@ -1,15 +1,20 @@
-// Unit tests for compiler/src/effect_checker.sfn's Phase F
-// (`docs/proposals/0008-effect-validation.md` §5) capability cross-check
-// path: `validate_capsule_capabilities(program, capabilities) ->
+// Unit tests for the Phase F capability cross-check
+// (`docs/proposals/0008-effect-validation.md` §5) in
+// `compiler/capsules/analyzer/src/effect_checker/validations.sfn`:
+// `validate_capsule_capabilities(program, capabilities, declared) ->
 // CapabilityViolation[]`.
 //
-// Phase F flips the capsule manifest's
-// `[capabilities] required = [...]` into a real compile-time
-// contract: any function declaring an effect outside the manifest's
-// allowed surface fails with diagnostic code `E0403`. Empty
-// `capabilities_required` means "no manifest in scope" and the
-// checker degrades to a no-op so standalone .sfn files outside any
-// capsule keep working unchanged.
+// Phase F flips the capsule manifest's `[capabilities] required = [...]`
+// into a real compile-time contract: any function declaring an effect
+// outside the allowed surface fails with diagnostic code `E0403`.
+//
+// The third argument is the discriminator, and the list length is NOT
+// (SFN-764). `declared = false` means no `[capabilities]` section was
+// present, so the checker degrades to a no-op and standalone .sfn files
+// outside any capsule keep working. `declared = true` runs the check
+// even when the surface is empty: an explicit `required = []` asserts
+// "this capsule needs no capability" and is enforced as a deny-all
+// ceiling. Conflating the two is the defect these tests pin.
 //
 // Tests construct AST values via small helper functions to stay
 // flat — some seed compilers previously segfaulted on deeply nested
@@ -73,14 +78,14 @@ fn _function_declaring(name: string, effects: string[], span_line: int) -> State
 }
 
 // -------------------------------------------------------------------
-// Empty-capabilities short-circuit (no manifest in scope)
+// Undeclared surface: no `[capabilities]` section in scope
 // -------------------------------------------------------------------
-test "capabilities: empty list skips the check entirely" {
-    // Standalone .sfn outside any capsule: even with effectful
-    // function declarations, the empty capability surface signals
-    // "no manifest constraint to enforce" and produces zero
-    // violations. This is the contract that lets `sfn check` of a
-    // bare file path keep working pre-manifest.
+test "capabilities: an undeclared surface skips the check entirely" {
+    // Standalone .sfn outside any capsule: even with effectful function
+    // declarations, `declared = false` signals "no manifest constraint
+    // to enforce" and produces zero violations. This is the contract
+    // that lets `sfn check` of a bare file path keep working
+    // pre-manifest.
     let stmt = _function_declaring("dangerous", ["io", "net", "model"], 1);
     let program = Program { statements: [stmt] };
     let no_caps: string[] = [];
@@ -88,15 +93,59 @@ test "capabilities: empty list skips the check entirely" {
     assert violations.length == 0;
 }
 
-test "capabilities: empty list skips the check even on an empty program" {
-    // The fast-path early-return for empty `capabilities_required`
-    // happens before the program walk; pin it so a refactor that
-    // moves the check inside the loop can't accidentally start
-    // emitting violations for bare modules.
+test "capabilities: an undeclared surface skips the check even on an empty program" {
+    // The early return happens before the program walk; pin it so a
+    // refactor that moves the check inside the loop can't accidentally
+    // start emitting violations for bare modules.
     let no_stmts: Statement[] = [];
     let program = Program { statements: no_stmts };
     let no_caps: string[] = [];
     let violations = validate_capsule_capabilities(program, no_caps, false);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Declared-empty surface: `required = []` is a deny-all ceiling
+// -------------------------------------------------------------------
+test "capabilities: a declared empty surface denies every declared effect" {
+    // The SFN-764 defect, pinned at the unit level: the surface and the
+    // program are byte-identical to the first test above, and ONLY the
+    // declared flag differs. Before the fix both produced zero
+    // violations, so a capsule asserting `required = []` received full
+    // authority. Now one effect in, one violation out.
+    let stmt = _function_declaring("dangerous", ["io", "net", "model"], 1);
+    let program = Program { statements: [stmt] };
+    let no_caps: string[] = [];
+    let violations = validate_capsule_capabilities(program, no_caps, true);
+    assert violations.length == 1;
+    // One violation per routine, carrying every unauthorized effect, so
+    // the E0403 render names all three rather than only the first.
+    assert violations[0].excess_effects.length == 3;
+    assert violations[0].routine_name == "dangerous";
+}
+
+test "capabilities: a declared empty surface still finds nothing in an empty program" {
+    // Deny-all denies effects, not modules. A capsule that declares
+    // `required = []` and ships no effectful routine is conforming, and
+    // must stay silent — otherwise the 15 in-tree capsules that already
+    // declare an empty surface would all start failing.
+    let no_stmts: Statement[] = [];
+    let program = Program { statements: no_stmts };
+    let no_caps: string[] = [];
+    let violations = validate_capsule_capabilities(program, no_caps, true);
+    assert violations.length == 0;
+}
+
+test "capabilities: pure survives a declared empty surface" {
+    // `pure` is the empty effect set, not a capability, so the deny-all
+    // ceiling must not reject it — otherwise every `![pure]` function in
+    // a conforming capsule would fail E0403. Guards the carve-out in
+    // `_analyze_routine_capabilities` against a refactor that reads a
+    // deny-all surface as "reject every effect token".
+    let stmt = _function_declaring("calc", ["pure"], 1);
+    let program = Program { statements: [stmt] };
+    let no_caps: string[] = [];
+    let violations = validate_capsule_capabilities(program, no_caps, true);
     assert violations.length == 0;
 }
 

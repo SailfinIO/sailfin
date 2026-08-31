@@ -14,9 +14,36 @@ import { _collect_nested_fns_in_block } from "./scope";
 import { CapabilityViolation, UnrecognizedEffectViolation } from "./types";
 import { _any_subsumes, _token_from_signature, append_unique_effect } from "./utils";
 
+// Phase F entry: cross-check every routine's *declared* effects against
+// the capsule manifest's `[capabilities] required = [...]` surface. Any
+// effect on the signature that is not in the surface produces a
+// `CapabilityViolation`, rendered downstream as `E0403`.
+//
+// Whether the check runs is decided by `capabilities_declared` — whether
+// a `[capabilities]` section exists — and never by the surface's length.
+// The two say different things and only one of them is the author's
+// intent:
+//
+//   declared = false  no section, or no manifest at all. Nothing was
+//                     asserted, so skip; standalone `.sfn` files and
+//                     projects predating the manifest contract keep
+//                     building. SFEP-0016's ladder flips this via the
+//                     `W0403` ramp allocated in SFEP-0008 6.6.
+//   declared = true   the author asserted a ceiling. An empty
+//                     `required` is a deny-all ceiling, so every
+//                     declared effect is a violation. A `required` key
+//                     that is missing or unparseable lands here too, and
+//                     that is deliberate: it surfaces as a storm of
+//                     E0403s naming exactly the effects the author
+//                     expected to be granted, rather than as silent full
+//                     authority.
+//
+// Keying on `.length == 0` conflated the two and let an explicit
+// `required = []` — a capsule asserting it needs nothing — receive
+// everything (SFN-764).
 fn validate_capsule_capabilities(program: Program, capabilities_required: string[], capabilities_declared: boolean) -> CapabilityViolation[] {
     let mut violations: CapabilityViolation[] = [];
-    if capabilities_required.length == 0 { return violations; }
+    if !capabilities_declared { return violations; }
     let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
