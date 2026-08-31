@@ -24,7 +24,7 @@
 // cannot be called from an `![io]` test like this. Assert on captured stdout
 // with `sfn/strings::contains` instead.
 import { contains } from "sfn/strings";
-import { scratch_root } from "sfn/test";
+import { bash_path, host_is_windows, scratch_root } from "sfn/test";
 
 // The pin every fixture below writes into its scratch `bootstrap.toml`.
 // Deliberately not a real release: nothing here may reach the network.
@@ -36,6 +36,25 @@ fn _hook() -> string ![io] {
     return ".claude/hooks/session-start.sh";
 }
 
+// Native Windows resolves a bare `bash` through CreateProcess, where the WSL
+// app alias is not equivalent to the Git Bash shell these repository hooks
+// target. Prefer the Git for Windows provider installed on CI, then retain a
+// PATH lookup for custom hosts.
+fn _bash_tool() -> string ![io] {
+    if !host_is_windows() { return "bash"; }
+    let program_files = env.get("ProgramFiles");
+    if program_files.length > 0 {
+        let system_git_bash = program_files + "\\Git\\bin\\bash.exe";
+        if fs.exists(system_git_bash) { return system_git_bash; }
+    }
+    let local_app_data = env.get("LOCALAPPDATA");
+    if local_app_data.length > 0 {
+        let user_git_bash = local_app_data + "\\Programs\\Git\\bin\\bash.exe";
+        if fs.exists(user_git_bash) { return user_git_bash; }
+    }
+    return "bash.exe";
+}
+
 // A fresh scratch project root. `mkdtemp` returns "" on failure; an empty root
 // would be threaded through as `CLAUDE_PROJECT_DIR=`, silently pointing the
 // hook at the real repository and making these cases destructive.
@@ -45,47 +64,31 @@ fn _project_root(tag: string) -> string ![io] {
     return dir;
 }
 
-fn _plain_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    return e;
-}
-
-fn _chmod_x(path: string) -> void ![io] {
-    let exit = process.run_capture(["chmod", "+x", path], _plain_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    // Asserted, not discarded: a `noexec` scratch mount or a failed chmod
+fn _make_executable(path: string) -> void ![io] {
+    // Asserted, not discarded: a `noexec` scratch mount or failed mode update
     // leaves every candidate non-executable, `command -v sfn` then resolves
     // the host's REAL compiler, and the hook fetches against a bootstrap.toml
     // pinning 9.9.9 — a live network call for a release that does not exist.
-    assert exit == 0;
+    assert fs.set_perms(path, 493);
 }
 
 // `run_capture`'s env array is the complete child environment, not an overlay,
 // so PATH is mandatory for `bash`/`awk`/`timeout` to resolve at all.
 fn _hook_env(project: string, probe_only: boolean) -> string[] ![io] {
     let mut e: string[] = [];
-    // A fixture-owned `bin/` is prepended so `_any_sfn`'s PATH fallback can
-    // only ever resolve inside the scratch project. The parent PATH carries
-    // the real compiler (this hook exports build/bin onto it), and the
-    // fixture's bootstrap.toml pins a version that does not exist, so an
-    // escape here would mean a live fetch for a bogus release.
-    let path = env.get("PATH");
-    e.push("PATH=" + project + "/fixture-bin:" + path);
+    // The fixture-owned bin and the shell provider's own tool directories are
+    // the complete Bash PATH. Excluding the parent PATH makes it impossible to
+    // escape to the real compiler and fetch the fixture's bogus 9.9.9 pin.
+    e.push("PATH=" + bash_path(project + "/fixture-bin")
+        + ":/usr/bin:/bin:/mingw64/bin");
     let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
+    if home.length > 0 { e.push("HOME=" + bash_path(home)); }
     let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    if tmpdir.length > 0 { e.push("TMPDIR=" + bash_path(tmpdir)); }
     // CLAUDE_ENV_FILE is deliberately absent: the hook appends a PATH export
     // to it, and threading the real one would have these cases write into the
     // live session environment.
-    e.push("CLAUDE_PROJECT_DIR=" + project);
+    e.push("CLAUDE_PROJECT_DIR=" + bash_path(project));
     if probe_only { e.push("SAILFIN_SESSION_SEED_PROBE_ONLY=1"); }
     return e;
 }
@@ -94,28 +97,34 @@ fn _hook_env(project: string, probe_only: boolean) -> string[] ![io] {
 // hook's PATH fallback rejects it rather than reaching outside the fixture.
 fn _write_path_guard(project: string) -> void ![io] {
     fs.createDirectory(project + "/fixture-bin", true);
-    fs.writeFile(project + "/fixture-bin/sfn",
-        "#!/usr/bin/env bash\necho 'fixture guard: no sfn outside the scratch project' >&2\nexit 127\n");
-    _chmod_x(project + "/fixture-bin/sfn");
+    fs.writeFile(project + "/fixture-bin/sfn", "#!/usr/bin/env bash\necho 'fixture guard: no sfn outside the scratch project' >&2\nexit 127\n");
+    _make_executable(project + "/fixture-bin/sfn");
 }
 
 fn _write_manifest(project: string) -> void ![io] {
-    fs.writeFile(project + "/bootstrap.toml",
-        "[seed]\nversion = \"" + _pin() + "\"\n"
+    fs.writeFile(project + "/bootstrap.toml", "[seed]\nversion = \"" + _pin()
+        + "\"\n"
         + "repo = \"SailfinIO/sailfin\"\nasset_prefix = \"sailfin\"\n\n"
-        + "[store]\ninstall_base = \"" + _install_base() + "\"\n"
-        + "bin_dir = \"" + _bin_dir() + "\"\n");
+        + "[store]\ninstall_base = \""
+        + _install_base()
+        + "\"\n"
+        + "bin_dir = \""
+        + _bin_dir()
+        + "\"\n");
 }
 
 // A stub `sfn` reporting `version` and exiting `fetch_rc` for
 // `dev bootstrap fetch` — the two subcommands the hook drives.
 fn _write_sfn(path: string, version: string, fetch_rc: string) -> void ![io] {
-    fs.writeFile(path,
-        "#!/usr/bin/env bash\n"
-        + "if [ \"$1\" = \"version\" ]; then echo \"sfn " + version + "\"; exit 0; fi\n"
-        + "if [ \"$1\" = \"dev\" ]; then exit " + fetch_rc + "; fi\n"
+    fs.writeFile(path, "#!/usr/bin/env bash\n"
+        + "if [ \"$1\" = \"version\" ]; then echo \"sfn "
+        + version
+        + "\"; exit 0; fi\n"
+        + "if [ \"$1\" = \"dev\" ]; then exit "
+        + fetch_rc
+        + "; fi\n"
         + "exit 0\n");
-    _chmod_x(path);
+    _make_executable(path);
 }
 
 // A stub installer that touches `marker` and installs a seed reporting
@@ -140,15 +149,18 @@ fn _write_installer(project: string, marker: string, installs: string, ok: boole
     let mut body: string = "#!/usr/bin/env bash\nset -eu\n";
     body = body + "printf '%s\\n' \"";
     body = body + _env_default("SAILFIN_BOOTSTRAP_SEED_STORE", "0");
-    body = body + "\" > \"" + marker + "\"\n";
+    body = body + "\" > \"" + bash_path(marker) + "\"\n";
     if ok {
         // Mirrors install.sh's own branch: the flat store only when the seam
         // is set, otherwise the host-triple layout the native bootstrap
         // cannot see.
-        body = body + "stub() { printf '#!/usr/bin/env bash\\nif [ \"$1\" = \"version\" ]; then echo \"sfn ";
+        body = body
+            + "stub() { printf '#!/usr/bin/env bash\\nif [ \"$1\" = \"version\" ]; then echo \"sfn ";
         body = body + installs;
-        body = body + "\"; exit 0; fi\\nexit 0\\n' > \"$1\"; chmod +x \"$1\"; }\n";
-        body = body + "mkdir -p \"$GLOBAL_BIN_DIR\"\nstub \"$GLOBAL_BIN_DIR/sfn\"\n";
+        body = body
+            + "\"; exit 0; fi\\nexit 0\\n' > \"$1\"; chmod +x \"$1\"; }\n";
+        body = body
+            + "mkdir -p \"$GLOBAL_BIN_DIR\"\nstub \"$GLOBAL_BIN_DIR/sfn\"\n";
         body = body + "if [ \"";
         body = body + _env_default("SAILFIN_BOOTSTRAP_SEED_STORE", "0");
         body = body + "\" = \"1\" ]; then\n";
@@ -159,19 +171,24 @@ fn _write_installer(project: string, marker: string, installs: string, ok: boole
         body = body + "echo 'stub installer refusing to install' >&2\nexit 1\n";
     }
     fs.writeFile(project + "/install.sh", body);
-    _chmod_x(project + "/install.sh");
+    _make_executable(project + "/install.sh");
 }
 
 fn _install_base() -> string { return "build/toolchains/seed/versions"; }
+
 fn _bin_dir() -> string { return "build/toolchains/seed/bin"; }
-fn _seed_bin_dir(project: string) -> string { return project + "/" + _bin_dir(); }
+
+fn _seed_bin_dir(project: string) -> string {
+    return project + "/" + _bin_dir();
+}
+
 // The flat path `sfn dev bootstrap build` spawns — NOT the bin_dir alias.
 fn _flat_store_bin(project: string) -> string {
     return project + "/" + _install_base() + "/" + _pin() + "/sailfin";
 }
 
 fn _run_hook(project: string, probe_only: boolean) -> int ![io] {
-    return process.run_capture(["bash", _hook()], _hook_env(project, probe_only));
+    return process.run_capture([_bash_tool(), bash_path(_hook())], _hook_env(project, probe_only));
 }
 
 test "session-start seed: a failing native fetch falls back to the installer" ![io] {
