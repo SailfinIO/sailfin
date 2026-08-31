@@ -311,22 +311,6 @@ fn _suppress_shadowing_params(imports: ImportSymbolTable, parameters: Parameter[
     return table;
 }
 
-// Phase F entry: cross-check every function's *declared* effects
-// against the capsule manifest's `[capabilities] required = [...]`
-// surface. Any effect on the function signature that isn't in the
-// surface produces a `CapabilityViolation`, rendered as `E0403`
-// downstream.
-//
-// Empty `capabilities_required` means "no manifest declared a
-// capability surface" (standalone .sfn outside any capsule, or a
-// manifest mid-migration). The checker treats that as "skip the
-// cross-check entirely" rather than "no capabilities allowed" —
-// otherwise every function would fail E0403, breaking every
-// project that hasn't opted into the new manifest contract yet.
-//
-// Capsules that opt in by listing `required = [...]` get the
-// strict check: a function declaring `![net]` inside a capsule
-// whose manifest lists only `["io"]` fails, with a fix-it hint
 // Hoist functions declared directly in this block, shadowing same-named
 // entries from enclosing scopes (SFEP-0042).
 fn _hoist_block_local_fns(imports: ImportSymbolTable, block: Block) -> ImportSymbolTable {

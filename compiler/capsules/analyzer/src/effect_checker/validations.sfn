@@ -14,7 +14,7 @@ import { _collect_nested_fns_in_block } from "./scope";
 import { CapabilityViolation, UnrecognizedEffectViolation } from "./types";
 import { _any_subsumes, _token_from_signature, append_unique_effect } from "./utils";
 
-fn validate_capsule_capabilities(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
+fn validate_capsule_capabilities(program: Program, capabilities_required: string[], capabilities_declared: boolean) -> CapabilityViolation[] {
     let mut violations: CapabilityViolation[] = [];
     if capabilities_required.length == 0 { return violations; }
     let mut index: int = 0;
@@ -237,8 +237,8 @@ fn _append_unrecognized_violations(violations: UnrecognizedEffectViolation[], ne
     return result;
 }
 
-fn validate_capsule_capabilities_api(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
-    return validate_capsule_capabilities(program, capabilities_required);
+fn validate_capsule_capabilities_api(program: Program, capabilities_required: string[], capabilities_declared: boolean) -> CapabilityViolation[] {
+    return validate_capsule_capabilities(program, capabilities_required, capabilities_declared);
 }
 
 fn validate_recognized_effects_api(program: Program) -> UnrecognizedEffectViolation[] {

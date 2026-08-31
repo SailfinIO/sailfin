@@ -73,6 +73,7 @@ struct CheckGroup {
     // the analyzer so any function declaring an
     // effect outside the surface produces an `E0403` diagnostic.
     capabilities_required: string[];
+    capabilities_declared: boolean;
     // #1953: the set of every symbol name defined in this group's staged
     // import closure. Threaded into the analyzer so a
     // relative import of a nonexistent module (E0430) or a symbol defined
@@ -295,7 +296,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
             };
             let empty_specs: string[] = [];
             groups.push(CheckGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, closure_symbols: empty_closure, resolved_capsule_specs: empty_specs, capsule_specs_known: false
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, closure_symbols: empty_closure, resolved_capsule_specs: empty_specs, capsule_specs_known: false
             });
             idx = groups.length - 1;
         }
@@ -387,6 +388,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         // so any function declaring an effect outside the surface
         // produces an `E0403` diagnostic.
         groups[gi].capabilities_required = resolution.capabilities_required;
+        groups[gi].capabilities_declared = resolution.capabilities_declared;
         // #1953: build the global symbol set for this group's staged
         // closure so the per-file loop can diagnose an import of a symbol
         // defined nowhere in the closure (E0431). The nonexistent-module
@@ -461,7 +463,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
         let program = parse_program(source);
-        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].closure_symbols, allow_bare_assert, groups[group_idx].implicit_symbols, groups[group_idx].resolved_capsule_specs, groups[group_idx].capsule_specs_known);
+        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].capabilities_declared, groups[group_idx].closure_symbols, allow_bare_assert, groups[group_idx].implicit_symbols, groups[group_idx].resolved_capsule_specs, groups[group_idx].capsule_specs_known);
         let result = check_result_from_analysis(analyze_program(analyzer_input), source);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually

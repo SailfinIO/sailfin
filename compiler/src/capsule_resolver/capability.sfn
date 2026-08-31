@@ -23,6 +23,7 @@ import {
     toml_get_workspace_capabilities_grant,
     toml_get_workspace_capabilities_mode,
     toml_get_workspace_package_version,
+    toml_has_capabilities_section,
     toml_value_is_workspace_inherit
 } from "../toml_parser";
 import {
@@ -42,7 +43,9 @@ import { load_workspace_members } from "./workspace";
 fn workspace_member_capability_gate(member: WorkspaceMember) -> int ![io] {
     let manifest = _cr_path_join(_cr_dirname(member.src_dir), "capsule.toml");
     if !fs.exists(manifest) { return 0; }
-    let required = toml_get_capabilities_required(fs.readFile(manifest));
+    let manifest_text = fs.readFile(manifest);
+    let required = toml_get_capabilities_required(manifest_text);
+    let declared = toml_has_capabilities_section(manifest_text);
     let files = _collect_sfn_files_cmd(member.src_dir, 64);
     let mut errors: int = 0;
     let mut fi: int = 0;
@@ -53,7 +56,7 @@ fn workspace_member_capability_gate(member: WorkspaceMember) -> int ![io] {
         if !fs.exists(path) { continue; }
         let source = fs.readFile(path);
         let program = parse_program(source);
-        let violations = validate_capsule_capabilities(program, required);
+        let violations = validate_capsule_capabilities(program, required, declared);
         let lines = split_source_lines(source);
         let mut vi: int = 0;
         loop {
@@ -335,8 +338,11 @@ fn workspace_capability_audit(workspace_root: string) -> CapabilityDriftReport !
         mi += 1;
         let manifest = _cr_path_join(_cr_path_join(workspace_root, m.member_path), "capsule.toml");
         let mut required: string[] = [];
+        let mut declared: boolean = false;
         if fs.exists(manifest) {
-            required = toml_get_capabilities_required(fs.readFile(manifest));
+            let manifest_text = fs.readFile(manifest);
+            required = toml_get_capabilities_required(manifest_text);
+            declared = toml_has_capabilities_section(manifest_text);
         }
         let grant = toml_get_workspace_capabilities_grant(ws_text, m.name);
 

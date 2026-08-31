@@ -9,6 +9,11 @@ description = "Concurrency and synchronization primitives for Sailfin"
 # Empty by design: this capsule has no code, so it needs no capability.
 # A manifest that over-claims on an empty capsule undercuts the Reach
 # pillar's claim that Sailfin manifests are tight (SFEP-0063 Phase 0).
+#
+# As of SFN-764 this is enforced rather than merely asserted: an explicit
+# `[capabilities]` section is a deny-all ceiling, so any effect added to
+# this capsule fails `E0403` until it is declared here. Deleting the
+# section would silently restore full authority — keep it.
 required = []
 
 [build]

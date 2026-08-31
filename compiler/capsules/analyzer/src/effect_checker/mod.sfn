@@ -28,8 +28,8 @@ fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -
     return validate_effects_with_imports_api(program, with_intrinsic_effects(imports, intrinsic_effect_table()));
 }
 
-fn validate_capsule_capabilities(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
-    return validate_capsule_capabilities_api(program, capabilities_required);
+fn validate_capsule_capabilities(program: Program, capabilities_required: string[], capabilities_declared: boolean) -> CapabilityViolation[] {
+    return validate_capsule_capabilities_api(program, capabilities_required, capabilities_declared);
 }
 
 fn validate_recognized_effects(program: Program) -> UnrecognizedEffectViolation[] {

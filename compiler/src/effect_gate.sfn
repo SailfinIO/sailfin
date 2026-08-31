@@ -103,7 +103,7 @@ fn read_effect_enforcement_env(unique_key: string) -> string ![io] {
 // propagation) revisits the path-plumbing question.
 fn validate_and_render_effects(program: Program, source: string, file_path: string, imports: ImportSymbolTable) -> int ![io] {
     let no_caps: string[] = [];
-    return validate_and_render_effects_with_capabilities(program, source, file_path, imports, no_caps);
+    return validate_and_render_effects_with_capabilities(program, source, file_path, imports, no_caps, false);
 }
 
 // Phase F entry — accepts the project manifest's
@@ -117,7 +117,7 @@ fn validate_and_render_effects(program: Program, source: string, file_path: stri
 // also runs, emitting `E0403` for any function declaring an effect
 // outside the manifest-allowed set. Both violation streams flow
 // through the same `SAILFIN_EFFECT_ENFORCE` severity contract.
-fn validate_and_render_effects_with_capabilities(program: Program, source: string, file_path: string, imports: ImportSymbolTable, capabilities_required: string[]) -> int ![io] {
+fn validate_and_render_effects_with_capabilities(program: Program, source: string, file_path: string, imports: ImportSymbolTable, capabilities_required: string[], capabilities_declared: boolean) -> int ![io] {
     let raw = read_effect_enforcement_env(file_path);
     let severity = resolve_effect_enforcement(raw);
     if severity == "off" {
@@ -152,7 +152,7 @@ fn validate_and_render_effects_with_capabilities(program: Program, source: strin
 
     // Phase F: capsule capability cross-check. Skipped when no
     // manifest provided a surface (empty `capabilities_required`).
-    let capability_violations = validate_capsule_capabilities(program, capabilities_required);
+    let capability_violations = validate_capsule_capabilities(program, capabilities_required, capabilities_declared);
     let mut k: int = 0;
     loop {
         if k >= capability_violations.length { break; }

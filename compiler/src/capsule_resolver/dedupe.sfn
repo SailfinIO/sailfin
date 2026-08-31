@@ -14,7 +14,8 @@ import {
     toml_get_capabilities_required,
     toml_get_dependencies,
     toml_get_entry,
-    toml_get_name
+    toml_get_name,
+    toml_has_capabilities_section
 } from "../toml_parser";
 import { workspace_member_capability_gate } from "./capability";
 import { _cr_enumerate_host_capsule_sources, enumerate_capsule_sources } from "./discovery";
@@ -70,6 +71,7 @@ struct ResolverDedupeResult {
     // "no capability surface to compare against" and skips the
     // E0403 cross-check.
     capabilities_required: string[];
+    capabilities_declared: boolean;
     // Stage D PR2: every declared `[dependencies]` key from the
     // project's `capsule.toml`. `prepare_project_capsules` passes
     // this through `enumerate_runtime_capsule_artifacts` so the
@@ -199,6 +201,7 @@ fn _cr_resolver_graph_error(workspace_root: string) -> ResolverDedupeResult {
         sources: empty_sources,
         has_collision: true,
         capabilities_required: empty_strings,
+        capabilities_declared: false,
         manifest_dep_specs: empty_strings,
         workspace_root: workspace_root,
         root_source_paths: empty_strings,
@@ -227,6 +230,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             sources: empty_sources,
             has_collision: false,
             capabilities_required: empty_caps,
+            capabilities_declared: false,
             manifest_dep_specs: empty_specs,
             workspace_root: "",
             root_source_paths: empty_roots,
@@ -407,6 +411,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     }
     let mut covered_specs: string[] = [];
     let mut capabilities_required: string[] = [];
+    let mut capabilities_declared: boolean = false;
     // SFN-882: `[build] full-runtime = true` opts this artifact out of
     // demand-driven runtime source selection entirely. Set on
     // `compiler/capsule.toml`, whose binary is the runtime provider surface
@@ -444,6 +449,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             // []`) tells the checker to skip the cross-check —
             // that's the right call for projects mid-migration.
             capabilities_required = toml_get_capabilities_required(manifest_text);
+            capabilities_declared = toml_has_capabilities_section(manifest_text);
             project_full_runtime = toml_get_build_full_runtime(manifest_text);
         }
         let dep_sources = enumerate_capsule_sources(project_root, consumer.runtime_root, implicit_specs, members);
@@ -598,6 +604,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             sources: empty_sources,
             has_collision: false,
             capabilities_required: capabilities_required,
+            capabilities_declared: capabilities_declared,
             manifest_dep_specs: covered_specs,
             workspace_root: workspace_root,
             root_source_paths: empty_roots,
@@ -635,6 +642,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                         sources: empty_sources,
                         has_collision: true,
                         capabilities_required: capabilities_required,
+                        capabilities_declared: capabilities_declared,
                         manifest_dep_specs: covered_specs,
                         workspace_root: workspace_root,
                         root_source_paths: empty_roots,
@@ -781,6 +789,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         sources: resolved,
         has_collision: false,
         capabilities_required: capabilities_required,
+        capabilities_declared: capabilities_declared,
         manifest_dep_specs: covered_specs,
         workspace_root: workspace_root,
         root_source_paths: root_source_paths,

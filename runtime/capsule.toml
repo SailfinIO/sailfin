@@ -4,10 +4,19 @@ version = "0.5.10-alpha.4"
 description = "Sailfin-native runtime (runtime/sfn + prelude) linked into every Sailfin compiler binary"
 
 [capabilities]
-# The runtime modules carry no Sailfin-effect surface that gates the
-# link. Effects are a language feature; they don't gate clang/llvm-as
-# invocations.
-required = []
+# The runtime is the trusted computing base: `runtime/sfn/` is where
+# `clock`, `io`, `net` and `rand` are *implemented*, so this ceiling is
+# the canonical taxonomy by construction and therefore constrains
+# nothing. That is stated rather than left implicit, so no reader infers
+# a tightness that is not here. What actually confines runtime authority
+# is provenance, not this list — SFEP-0016 §3.4 class 2 treats owned
+# runtime objects as their own class.
+#
+# Listed honestly rather than left empty because an explicit
+# `[capabilities]` section now denies every effect it omits (SFN-764);
+# the previous `required = []` read as "no effect surface", which was
+# false for 213 effect-declaring routines.
+required = ["clock", "io", "net", "rand"]
 
 [build]
 kind = "runtime"
@@ -293,8 +302,8 @@ link-libs-add = ["-ladvapi32"]
 # `cert_roots.sfn` is deliberately NOT gated. It reads the PLATFORM TRUST
 # STORE, which is a filesystem/OS operation rather than a networking one, and
 # its only consumer is `capsules/sfn/crypto` (`src/trust_store.sfn` externs
-# `sfn_cert_roots_blob`) — a capsule whose manifest declares
-# `required = []`. Gating it on `net` therefore made the gate premise false:
+# `sfn_cert_roots_blob`) — a capsule whose manifest declares no `net`
+# capability. Gating it on `net` therefore made the gate premise false:
 # a build could stage `sfn/crypto` without demanding `net`, drop the defining
 # module, and leave the extern unresolved. ELF dead-strips that dangling
 # reference; COFF diagnoses it, so on msvc it was a hard

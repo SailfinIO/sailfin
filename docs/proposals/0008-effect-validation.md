@@ -596,7 +596,18 @@ For each capsule with `capsule.toml`:
   <required>`.
 
 This is enforced at the capsule boundary: a capsule cannot declare
-effects beyond its manifest. Combined with cross-module propagation
+effects beyond its manifest.
+
+> **Amended by SFN-764.** The rule above is stated with no empty-list
+> carve-out, and that is now what ships. The original implementation
+> keyed its early return on `capabilities_required.length == 0`, which
+> could not distinguish "no `[capabilities]` section" from an explicit
+> `required = []`, so a capsule asserting it needed no capability
+> silently received full authority. Presence of the section is now
+> tracked separately from its contents: an explicit `required = []` is a
+> deny-all ceiling, and only an absent section skips the cross-check.
+> The absent-section case remains fail-open and is owned by SFEP-0016's
+> ladder via the `W0403` ramp allocated in §6.6. Combined with cross-module propagation
 (Phase E), this means a downstream consumer of a capsule sees only
 the effects the capsule manifest authorized.
 

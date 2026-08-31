@@ -622,6 +622,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             capsule_count: 0,
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
+            capabilities_declared: resolved.capabilities_declared,
             runtime_demand: resolved.runtime_demand
         };
     }
@@ -633,6 +634,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             capsule_count: 0,
             staging_failed: false,
             capabilities_required: resolved.capabilities_required,
+            capabilities_declared: resolved.capabilities_declared,
             runtime_demand: resolved.runtime_demand
         };
     }
@@ -667,6 +669,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             capsule_count: 0,
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
+            capabilities_declared: resolved.capabilities_declared,
             runtime_demand: resolved.runtime_demand
         };
     }
@@ -698,6 +701,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             capsule_count: resolved.sources.length as int,
             staging_failed: true,
             capabilities_required: resolved.capabilities_required,
+            capabilities_declared: resolved.capabilities_declared,
             runtime_demand: resolved.runtime_demand
         };
     }
@@ -709,6 +713,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
         capsule_count: resolved.sources.length as int,
         staging_failed: false,
         capabilities_required: resolved.capabilities_required,
+        capabilities_declared: resolved.capabilities_declared,
         runtime_demand: resolved.runtime_demand
     };
 }

@@ -677,6 +677,7 @@ fn _cr_resolve_dedupe_filtered(entry_paths: string[], consumer: ResolverConsumer
         sources: filtered,
         has_collision: resolved.has_collision,
         capabilities_required: resolved.capabilities_required,
+        capabilities_declared: resolved.capabilities_declared,
         manifest_dep_specs: resolved.manifest_dep_specs,
         workspace_root: resolved.workspace_root,
         root_source_paths: resolved.root_source_paths,
