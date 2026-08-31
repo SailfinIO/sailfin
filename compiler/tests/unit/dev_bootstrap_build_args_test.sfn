@@ -1,6 +1,9 @@
 // Regression coverage for SFN-1076: `sfn dev bootstrap build -- <args...>`
 // preserves the seed build's fixed prefix and forwards the trailing arguments
-// byte-for-byte and in command-line order.
+// byte-for-byte and in command-line order. The prefix carries
+// `--skip-toolchain-check` (SFN-1068) so the spawned seed cannot re-select a
+// toolchain; the forwarded tail must still come last, which is what pins the
+// flag to the prefix rather than the end of the argv.
 import {
     parse,
     parse_is_ok,
@@ -16,11 +19,11 @@ test "dev-bootstrap: build tail reaches the seed argv verbatim" {
     assert expect_eq_bool(parse_is_ok(parsed), true).ok;
 
     let argv = _bootstrap_compiler_build_argv("/seed/sfn", positionals(parse_matches(parsed), "build-arg"));
-    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--no-cache", "--cache-trace"]).ok;
+    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check", "--no-cache", "--cache-trace"]).ok;
 }
 
 test "dev-bootstrap: bare build argv is unchanged" {
     let no_build_args: string[] = [];
     let argv = _bootstrap_compiler_build_argv("/seed/sfn", no_build_args);
-    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler"]).ok;
+    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check"]).ok;
 }

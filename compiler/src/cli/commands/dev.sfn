@@ -973,18 +973,21 @@ fn _dev_bootstrap_fetch() -> int ![clock, io, net] {
 // needed because the invoked binary IS the seed (its core version satisfies
 // the pin, so its own gate is a no-op).
 fn _bootstrap_compiler_build_argv(seed_bin: string, build_args: string[]) -> string[] {
-    let mut argv: string[] = [seed_bin, "build", "-p", "compiler"];
+    // `--skip-toolchain-check` belongs to the fixed prefix, not after the
+    // forwarded tail: the driver has already resolved the exact seed binary to
+    // run and must not let that child re-select a different toolchain (a
+    // recorded user default, SFEP-0073 §3.3 rank 4, or an exact project pin)
+    // out from under it — see workspace.toml's `dev` exclusion note — while
+    // SFN-1076 requires the caller's trailing arguments to reach the seed
+    // last and byte-for-byte. Appending it after them would satisfy the first
+    // and quietly break the second.
+    let mut argv: string[] = [seed_bin, "build", "-p", "compiler", "--skip-toolchain-check"];
     let mut i: int = 0;
     loop {
         if i >= build_args.length { break; }
         argv.push(build_args[i]);
         i += 1;
     }
-    // The driver has already resolved the exact seed binary to run; it must
-    // not let that child re-select a different toolchain (a recorded user
-    // default, SFEP-0073 §3.3 rank 4, or an exact project pin) out from under
-    // it. See workspace.toml's `dev` exclusion note.
-    argv.push("--skip-toolchain-check");
     return argv;
 }
 

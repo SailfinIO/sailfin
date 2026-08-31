@@ -42,15 +42,19 @@ fn _empty_ctx() -> CliContext {
     };
 }
 
-test "version command: command_def is a 'version' subcommand with the signing-key flag" {
+test "version command: command_def is a 'version' subcommand with its two flags" {
     let def = command_def();
     assert strings_equal(def.name, "version");
     assert def.description.length > 0;
-    // `version` takes no positionals; its only flag is `--signing-key`
-    // (prints the embedded release-signing public key, SFN-171).
+    // `version` takes no positionals. It carries `--signing-key` (prints the
+    // embedded release-signing public key, SFN-171) and
+    // `--skip-toolchain-check`, which the self-host driver's smoke checks pass
+    // so a freshly built binary answers for itself instead of dispatching to a
+    // recorded per-user default (SFN-1068, SFEP-0073 §3.3 rank 4).
     assert def.args.length == 0;
-    assert def.flags.length == 1;
+    assert def.flags.length == 2;
     assert strings_equal(def.flags[0].long_name, "signing-key");
+    assert strings_equal(def.flags[1].long_name, "skip-toolchain-check");
 }
 
 test "version command: 'sfn version' routes to the version subcommand" ![io] {
