@@ -1,0 +1,284 @@
+// compiler/src/toolchain/user_default.sfn
+//
+// Per-user default toolchain record: configuration naming an exact store
+// entry plus an optional update track, keyed by host triple (SFEP-0073 §3.5,
+// SFN-1068). Mutable timestamps are NOT stored here — those belong to a
+// later cache/state file, out of scope for this record. Pure
+// parsing/rendering lives here so the grammar is unit-testable with no
+// filesystem, matching `manifest.sfn`'s split.
+import { int_to_string } from "sfn/strings";
+
+import {
+    _atomic_rename_into_place,
+    _mktemp_sibling_cmd,
+    _set_perms_or_skip,
+    _toml_trim_cmd
+} from "../build/fs";
+import { ensure_dir_p } from "../build/fs_tree";
+import { _get_home_cmd } from "../build_flags";
+import {
+    char_code_at_text,
+    index_of,
+    starts_with,
+    substring
+} from "../string_utils";
+
+let TOOLCHAIN_USER_DEFAULT_MAGIC: string = "sailfin-toolchain-default";
+let TOOLCHAIN_USER_DEFAULT_SCHEMA: int = 1;  // what this build writes
+let TOOLCHAIN_USER_DEFAULT_MAX_SCHEMA: int = 1;  // highest this build reads
+
+struct ToolchainUserDefault {
+    version: string;  // "" when this host has no recorded default
+    track: string;  // "" when no update track was recorded
+}
+
+fn _user_default_empty() -> ToolchainUserDefault {
+    return ToolchainUserDefault { version: "", track: "" };
+}
+
+fn _user_default_split_lines(text: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut start: int = 0;
+    let length = text.length;
+    let mut i: int = 0;
+    loop {
+        if i >= length { break; }
+        if char_code_at_text(text, i) == 10 {
+            lines.push(substring(text, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start <= length { lines.push(substring(text, start, length)); }
+    return lines;
+}
+
+// Strict, no partial parse: any non-digit byte, or an empty string, fails.
+// Mirrors `manifest.sfn::_manifest_parse_uint`'s discipline (module-private
+// there, so not reused across the module boundary).
+fn _user_default_parse_uint(s: string) -> int {
+    if s.length == 0 || s.length > 18 { return -1; }
+    let mut value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let code = char_code_at_text(s, i);
+        if code < 48 || code > 57 { return -1; }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    return value;
+}
+
+// Pure. `text` is the CURRENT full file text (`""` when absent); returns the
+// new full file text with `host_triple`'s record set. Every other host's
+// lines are preserved verbatim and in order. `version == ""` is the clear
+// path: both of this host's lines are dropped regardless of `track`. A
+// `.track` line is only ever emitted when `track.length > 0`.
+fn toolchain_user_default_render(text: string, host_triple: string, version: string, track: string) -> string {
+    let clearing = version.length == 0;
+    let want_track = !clearing && track.length > 0;
+    let version_key = host_triple + ".version";
+    let track_key = host_triple + ".track";
+
+    let mut body_lines: string[] = [];
+    if text.length > 0 {
+        let lines = _user_default_split_lines(text);
+        let magic_prefix = TOOLCHAIN_USER_DEFAULT_MAGIC + " ";
+        let mut start: int = 0;
+        if lines.length > 0 && starts_with(lines[0], magic_prefix) { start = 1; }
+        let mut i: int = start;
+        loop {
+            if i >= lines.length { break; }
+            if lines[i].length > 0 { body_lines.push(lines[i]); }
+            i += 1;
+        }
+    }
+
+    let mut out_lines: string[] = [];
+    let mut version_emitted: boolean = false;
+    let mut track_emitted: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= body_lines.length { break; }
+        let line = body_lines[i];
+        let eq = index_of(line, " = ");
+        if eq >= 0 {
+            let key = substring(line, 0, eq);
+            if key == version_key {
+                if !clearing {
+                    out_lines.push(version_key + " = " + version);
+                    version_emitted = true;
+                }
+                i += 1;
+                continue;
+            }
+            if key == track_key {
+                if want_track {
+                    out_lines.push(track_key + " = " + track);
+                    track_emitted = true;
+                }
+                i += 1;
+                continue;
+            }
+        }
+        out_lines.push(line);
+        i += 1;
+    }
+    if !clearing && !version_emitted {
+        out_lines.push(version_key + " = " + version);
+    }
+    if want_track && !track_emitted {
+        out_lines.push(track_key + " = " + track);
+    }
+
+    let mut out: string = TOOLCHAIN_USER_DEFAULT_MAGIC + " " + int_to_string(TOOLCHAIN_USER_DEFAULT_SCHEMA)
+        + "\n";
+    let mut j: int = 0;
+    loop {
+        if j >= out_lines.length { break; }
+        out = out + out_lines[j] + "\n";
+        j += 1;
+    }
+    return out;
+}
+
+// Pure. Returns `{"", ""}` when `text` is empty, the header is
+// missing/wrong, the schema is above `TOOLCHAIN_USER_DEFAULT_MAX_SCHEMA`, or
+// `host_triple` has no record. Unknown keys and unknown trailing fields are
+// ignored, not errors — the same forward-compatibility seam
+// `manifest.sfn::toolchain_manifest_parse` implements for SFEP-0073 §3.5.
+fn toolchain_user_default_parse(text: string, host_triple: string) -> ToolchainUserDefault {
+    if _toml_trim_cmd(text).length == 0 { return _user_default_empty(); }
+    let lines = _user_default_split_lines(text);
+    if lines.length == 0 { return _user_default_empty(); }
+    let magic_prefix = TOOLCHAIN_USER_DEFAULT_MAGIC + " ";
+    if !starts_with(lines[0], magic_prefix) { return _user_default_empty(); }
+    let schema = _user_default_parse_uint(substring(lines[0], magic_prefix.length, lines[0].length));
+    if schema < 1 || schema > TOOLCHAIN_USER_DEFAULT_MAX_SCHEMA {
+        return _user_default_empty();
+    }
+
+    let version_key = host_triple + ".version";
+    let track_key = host_triple + ".track";
+    let mut version: string = "";
+    let mut track: string = "";
+    let mut i: int = 1;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if line.length > 0 {
+            let eq = index_of(line, " = ");
+            if eq >= 0 {
+                let key = substring(line, 0, eq);
+                let value = substring(line, eq + 3, line.length);
+                if key == version_key { version = value; } else if key == track_key {
+                    track = value;
+                }
+            }
+        }
+        i += 1;
+    }
+    return ToolchainUserDefault { version: version, track: track };
+}
+
+// `true` only when `text` is non-empty and its first line is not a
+// well-formed `<MAGIC> <int>` header with schema `>= 1`. A schema above
+// `TOOLCHAIN_USER_DEFAULT_MAX_SCHEMA` is NOT corrupt — that is "too new to
+// use", a distinct outcome `toolchain_user_default_parse` already collapses
+// to "no record". This mirrors `index_cache.sfn::toolchain_sequence_corrupt`:
+// a missing/empty file reads as "never recorded a default", which a reader
+// cannot tell apart from "the record is unreadable" unless corruption is
+// surfaced separately — otherwise anyone able to write garbage here would
+// silently reset the default to unset.
+fn toolchain_user_default_text_corrupt(text: string) -> boolean {
+    if _toml_trim_cmd(text).length == 0 { return false; }
+    let lines = _user_default_split_lines(text);
+    if lines.length == 0 { return true; }
+    let magic_prefix = TOOLCHAIN_USER_DEFAULT_MAGIC + " ";
+    if !starts_with(lines[0], magic_prefix) { return true; }
+    let schema = _user_default_parse_uint(substring(lines[0], magic_prefix.length, lines[0].length));
+    return schema < 1;
+}
+
+// `SAILFIN_CONFIG_DIR` is an explicit override (and the test seam); absent
+// that, the default lives under `~/.sfn` like the other per-user config
+// domains (`login.sfn`, `config.sfn`). `""` means home is unresolvable.
+fn toolchain_user_default_dir() -> string ![io] {
+    let override_dir = env.get("SAILFIN_CONFIG_DIR");
+    if override_dir.length > 0 { return override_dir; }
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    return home + "/.sfn";
+}
+
+fn toolchain_user_default_path() -> string ![io] {
+    let dir = toolchain_user_default_dir();
+    if dir.length == 0 { return ""; }
+    return dir + "/toolchain-default";
+}
+
+// Missing file reads as `{"", ""}` — "no default recorded", distinct from
+// "cannot tell" (`toolchain_user_default_corrupt`).
+fn toolchain_user_default_read(host_triple: string) -> ToolchainUserDefault ![io] {
+    let path = toolchain_user_default_path();
+    if path.length == 0 { return _user_default_empty(); }
+    if !fs.exists(path) { return _user_default_empty(); }
+    return toolchain_user_default_parse(fs.readFile(path), host_triple);
+}
+
+// `true` only when the file EXISTS and fails to parse — a missing file is
+// "no default recorded", not corruption.
+fn toolchain_user_default_corrupt() -> boolean ![io] {
+    let path = toolchain_user_default_path();
+    if path.length == 0 { return false; }
+    if !fs.exists(path) { return false; }
+    return toolchain_user_default_text_corrupt(fs.readFile(path));
+}
+
+// Atomic and other-host-preserving: reads the current text (`""` when
+// absent), threads it through `toolchain_user_default_render`, and publishes
+// through a sibling temp plus rename — mirrors
+// `index_cache.sfn::toolchain_sequence_record`'s shape exactly, never the
+// plain `fs.writeFile` `config.sfn::_write_config_registry_cmd` uses.
+fn toolchain_user_default_write(host_triple: string, version: string, track: string) -> boolean ![io] {
+    let dir = toolchain_user_default_dir();
+    if dir.length == 0 { return false; }
+    let created = !fs.exists(dir);
+    if !ensure_dir_p(dir) { return false; }
+    if created { _set_perms_or_skip(dir, 448); }
+
+    let path = toolchain_user_default_path();
+    if path.length == 0 { return false; }
+    let mut current: string = "";
+    if fs.exists(path) { current = fs.readFile(path); }
+    let text = toolchain_user_default_render(current, host_triple, version, track);
+
+    let tmp = _mktemp_sibling_cmd(path);
+    if tmp.length == 0 { return false; }
+    fs.writeFile(tmp, text);
+    if !fs.exists(tmp) {
+        fs.deleteFile(tmp);
+        return false;
+    }
+    return _atomic_rename_into_place(tmp, path);
+}
+
+fn toolchain_user_default_clear(host_triple: string) -> boolean ![io] {
+    return toolchain_user_default_write(host_triple, "", "");
+}
+
+export {
+    TOOLCHAIN_USER_DEFAULT_MAX_SCHEMA,
+    TOOLCHAIN_USER_DEFAULT_SCHEMA,
+    ToolchainUserDefault,
+    toolchain_user_default_clear,
+    toolchain_user_default_corrupt,
+    toolchain_user_default_dir,
+    toolchain_user_default_parse,
+    toolchain_user_default_path,
+    toolchain_user_default_read,
+    toolchain_user_default_render,
+    toolchain_user_default_text_corrupt,
+    toolchain_user_default_write
+};

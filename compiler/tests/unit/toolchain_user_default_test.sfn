@@ -1,0 +1,117 @@
+// Unit coverage for the per-user default toolchain record
+// (`compiler/src/toolchain/user_default.sfn`, SFEP-0073 §3.5, SFN-1068).
+// `toolchain_user_default_parse` / `_render` / `_text_corrupt` are pure — no
+// filesystem, no `![io]`.
+import { index_of, starts_with, substring } from "../../src/string_utils";
+import {
+    ToolchainUserDefault,
+    toolchain_user_default_parse,
+    toolchain_user_default_render,
+    toolchain_user_default_text_corrupt
+} from "../../src/toolchain/user_default";
+
+fn _linux() -> string { return "x86_64-unknown-linux-gnu"; }
+
+fn _darwin() -> string { return "aarch64-apple-darwin"; }
+
+fn _tracked_file() -> string {
+    let mut out: string = "sailfin-toolchain-default 1\n";
+    out = out + _linux() + ".version = 0.10.6\n";
+    out = out + _linux() + ".track = stable\n";
+    out = out + _darwin() + ".version = 0.10.5\n";
+    return out;
+}
+
+test "toolchain user default: parse of empty text yields no record" {
+    let parsed = toolchain_user_default_parse("", _linux());
+    assert parsed.version == "";
+    assert parsed.track == "";
+}
+
+test "toolchain user default: parse returns the named host's record" {
+    let parsed = toolchain_user_default_parse(_tracked_file(), _linux());
+    assert parsed.version == "0.10.6";
+    assert parsed.track == "stable";
+}
+
+test "toolchain user default: parse does not leak another host's record" {
+    let parsed = toolchain_user_default_parse(_tracked_file(), _darwin());
+    assert parsed.version == "0.10.5";
+    assert parsed.track == "";
+}
+
+test "toolchain user default: parse of an absent host yields no record" {
+    let parsed = toolchain_user_default_parse(_tracked_file(), "riscv64-unknown-linux-gnu");
+    assert parsed.version == "";
+    assert parsed.track == "";
+}
+
+test "toolchain user default: parse rejects a wrong magic" {
+    let text = "not-the-magic 1\n" + _linux() + ".version = 0.10.6\n";
+    let parsed = toolchain_user_default_parse(text, _linux());
+    assert parsed.version == "";
+    assert parsed.track == "";
+}
+
+test "toolchain user default: parse rejects a schema above max" {
+    let text = "sailfin-toolchain-default 2\n" + _linux()
+        + ".version = 0.10.6\n";
+    let parsed = toolchain_user_default_parse(text, _linux());
+    assert parsed.version == "";
+    assert parsed.track == "";
+}
+
+test "toolchain user default: render into empty text produces header and lines" {
+    let text = toolchain_user_default_render("", _linux(), "0.10.6", "stable");
+    assert starts_with(text, "sailfin-toolchain-default 1\n");
+    assert index_of(text, _linux() + ".version = 0.10.6") >= 0;
+    assert index_of(text, _linux() + ".track = stable") >= 0;
+    assert substring(text, text.length - 1, text.length) == "\n";
+}
+
+test "toolchain user default: render preserves an unrelated host verbatim and in order" {
+    let text = toolchain_user_default_render(_tracked_file(), _linux(), "0.10.7", "stable");
+    assert index_of(text, _darwin() + ".version = 0.10.5") >= 0;
+}
+
+test "toolchain user default: render replaces an existing version rather than duplicating" {
+    let text = toolchain_user_default_render(_tracked_file(), _linux(), "0.10.7", "stable");
+    assert index_of(text, _linux() + ".version = 0.10.7") >= 0;
+    assert index_of(text, _linux() + ".version = 0.10.6") < 0;
+}
+
+test "toolchain user default: render with an empty track drops the track line but keeps the version" {
+    let text = toolchain_user_default_render(_tracked_file(), _linux(), "0.10.6", "");
+    assert index_of(text, _linux() + ".version = 0.10.6") >= 0;
+    assert index_of(text, _linux() + ".track") < 0;
+}
+
+test "toolchain user default: render with an empty version drops both lines for that host" {
+    let text = toolchain_user_default_render(_tracked_file(), _linux(), "", "");
+    assert index_of(text, _linux() + ".version") < 0;
+    assert index_of(text, _linux() + ".track") < 0;
+    assert index_of(text, _darwin() + ".version = 0.10.5") >= 0;
+}
+
+test "toolchain user default: text_corrupt is false for empty and well-formed text" {
+    assert toolchain_user_default_text_corrupt("") == false;
+    assert toolchain_user_default_text_corrupt(_tracked_file()) == false;
+}
+
+test "toolchain user default: text_corrupt is true for a garbage first line" {
+    assert toolchain_user_default_text_corrupt("not a header at all\n") == true;
+}
+
+test "toolchain user default: round-trip preserves a tracked default" {
+    let text = toolchain_user_default_render("", _linux(), "0.10.6", "stable");
+    let parsed = toolchain_user_default_parse(text, _linux());
+    assert parsed.version == "0.10.6";
+    assert parsed.track == "stable";
+}
+
+test "toolchain user default: round-trip preserves an untracked default" {
+    let text = toolchain_user_default_render("", _darwin(), "0.10.5", "");
+    let parsed = toolchain_user_default_parse(text, _darwin());
+    assert parsed.version == "0.10.5";
+    assert parsed.track == "";
+}
