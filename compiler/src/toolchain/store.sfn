@@ -310,6 +310,17 @@ fn toolchain_discard_staged_entry(staged_dir: string) -> void ![io] {
     if staged_dir.length > 0 { remove_tree(staged_dir); }
 }
 
+// The only supported deletion of a committed store entry (SFEP-0073 §3.4,
+// SFN-1068). Every protection check — the running toolchain, the user
+// default, the active project pin — is the caller's; this function performs
+// no check of its own beyond existence.
+fn toolchain_remove_store_entry(store_dir: string) -> boolean ![io] {
+    if store_dir.length == 0 { return false; }
+    if !fs.exists(store_dir) { return false; }
+    remove_tree(store_dir);
+    return true;
+}
+
 export {
     ToolchainStoreEntry,
     _toolchain_link_alias,
@@ -320,6 +331,7 @@ export {
     toolchain_host_store_base,
     toolchain_lay_out_store_entry,
     toolchain_legacy_version_dir,
+    toolchain_remove_store_entry,
     toolchain_resolve_compatible_store_entry,
     toolchain_resolve_store_entry,
     toolchain_staging_dir,

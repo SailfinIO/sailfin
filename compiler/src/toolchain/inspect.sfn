@@ -28,6 +28,7 @@ import {
     toolchain_version_dir,
     toolchain_versions_base
 } from "./store";
+import { toolchain_user_default_read } from "./user_default";
 
 // Entry lifecycle state, as reported by the `state` envelope field.
 // `partial` is an install that never committed: `toolchain_lay_out_store_entry`
@@ -104,6 +105,8 @@ struct ToolchainInspectReport {
     fetch_policy: string;
     entries: ToolchainInspectEntry[];
     findings: ToolchainFinding[];
+    default_version: string;
+    default_track: string;
 }
 
 fn toolchain_state_name(state: int) -> string {
@@ -285,20 +288,19 @@ fn toolchain_fetch_policy() -> string ![io] {
 
 // Resolve what the current directory selects, without a fetch.
 //
-// SFEP-0073 §3.3 ranks selection inputs; ranks 1 (a one-shot `+<selector>`)
-// and 4 (the per-user default) are not observable here. A one-shot selector is
-// peeled and dispatched before this command's tree is even built, so a
-// `+<version> toolchain active` is already running *as* the selected
-// toolchain; the per-user default is SFN-1068 and unshipped. What remains is
-// rank 2 (an exact `SAILFIN_TOOLCHAIN`), rank 3 (the project pin), and rank 5
-// (the entry toolchain itself).
+// SFEP-0073 §3.3 ranks selection inputs; rank 1 (a one-shot `+<selector>`) is
+// not observable here. A one-shot selector is peeled and dispatched before
+// this command's tree is even built, so a `+<version> toolchain active` is
+// already running *as* the selected toolchain. What remains is rank 2 (an
+// exact `SAILFIN_TOOLCHAIN`), rank 3 (the project pin), rank 4 (the per-user
+// default, SFN-1068), and rank 5 (the entry toolchain itself).
 //
 // A root names a different toolchain two ways, resolved in that order below.
 // Its exact `version` names one unconditionally. Its floor names one only once
 // the running toolchain fails to satisfy it — a satisfied floor selects the
 // entry, and reporting `source: "workspace.toml"` there would claim the
 // project chose a version it merely permitted.
-fn toolchain_resolve_selection(versions_base: string, host: ToolchainHostIdentity, entry_version: string, entry_path: string, env_selector: string, decision_pinned: boolean, decision_satisfied: boolean, pin_sfn: string, pin_source: string, pin_version: string, version_source: string) -> ToolchainSelection ![io] {
+fn toolchain_resolve_selection(versions_base: string, host: ToolchainHostIdentity, entry_version: string, entry_path: string, env_selector: string, decision_pinned: boolean, decision_satisfied: boolean, pin_sfn: string, pin_source: string, pin_version: string, version_source: string, user_default: string) -> ToolchainSelection ![io] {
     let mut sel = ToolchainSelection {
         version: entry_version,
         path: entry_path,
@@ -330,6 +332,15 @@ fn toolchain_resolve_selection(versions_base: string, host: ToolchainHostIdentit
                     }
                 }
             }
+            // SFEP-0073 §3.3 rank 4, reported in the same order it is
+            // applied: only once neither the exact pin nor an unsatisfied
+            // floor named a version does the per-user default get a say.
+            if wanted.length == 0 {
+                if user_default.length > 0 {
+                    wanted = user_default;
+                    sel.source = "user default";
+                }
+            }
         }
     }
 
@@ -353,11 +364,10 @@ fn toolchain_resolve_selection(versions_base: string, host: ToolchainHostIdentit
     return sel;
 }
 
-// Attach `entry|selected|project` role markers. `default` and `management`
-// are SFN-1068 and SFEP-0073 §3.5 respectively and are never assigned in this
-// slice — the role vocabulary is locked here, but only the shipped roles are
-// ever emitted.
-fn toolchain_assign_roles(entries: ToolchainInspectEntry[], entry_version: string, selected_version: string, pin_sfn: string) -> ToolchainInspectEntry[] {
+// Attach `entry|selected|project|default` role markers. `management` is
+// SFEP-0073 §3.5 and is never assigned in this slice — the role vocabulary is
+// locked here, but only the shipped roles are ever emitted.
+fn toolchain_assign_roles(entries: ToolchainInspectEntry[], entry_version: string, selected_version: string, pin_sfn: string, default_version: string) -> ToolchainInspectEntry[] {
     let mut out: ToolchainInspectEntry[] = [];
     let mut i: int = 0;
     loop {
@@ -375,6 +385,11 @@ fn toolchain_assign_roles(entries: ToolchainInspectEntry[], entry_version: strin
         if pin_sfn.length > 0 {
             if strings_equal(entry.version, pin_sfn) {
                 roles.push("project");
+            }
+        }
+        if default_version.length > 0 {
+            if strings_equal(entry.version, default_version) {
+                roles.push("default");
             }
         }
         entry.roles = roles;
@@ -421,10 +436,11 @@ fn _assemble_report(operation: string, binary_dir: string, compiler_path: string
     let entry_version = resolve_compiler_version(binary_dir);
     let decision = toolchain_decide(entry_hint, binary_dir);
     let env_selector = toolchain_env_exact_selector();
+    let user_default = toolchain_user_default_read(host.triple);
 
     let mut raw: ToolchainInspectEntry[] = [];
     if walk_store { raw = toolchain_inspect_entries(versions_base, host); }
-    let selection = toolchain_resolve_selection(versions_base, host, entry_version, compiler_path, env_selector, decision.pinned, decision.satisfied, decision.pin_sfn, decision.pin_source, decision.pin_version, decision.version_source);
+    let selection = toolchain_resolve_selection(versions_base, host, entry_version, compiler_path, env_selector, decision.pinned, decision.satisfied, decision.pin_sfn, decision.pin_source, decision.pin_version, decision.version_source, user_default.version);
     // The `project` role marks the version the root asks for: the exact
     // `version` when it has one, and otherwise the floor, which is what this
     // marker meant before exact roots existed. Marking a floor does tag an
@@ -434,7 +450,7 @@ fn _assemble_report(operation: string, binary_dir: string, compiler_path: string
     if project_role_version.length == 0 {
         project_role_version = decision.pin_sfn;
     }
-    let entries = toolchain_assign_roles(raw, entry_version, selection.version, project_role_version);
+    let entries = toolchain_assign_roles(raw, entry_version, selection.version, project_role_version, user_default.version);
 
     let requirement = ToolchainRequirement {
         minimum: decision.pin_sfn,
@@ -452,7 +468,9 @@ fn _assemble_report(operation: string, binary_dir: string, compiler_path: string
         requirement: requirement,
         fetch_policy: toolchain_fetch_policy(),
         entries: entries,
-        findings: _report_findings(entries, selection)
+        findings: _report_findings(entries, selection),
+        default_version: user_default.version,
+        default_track: user_default.track
     };
 }
 

@@ -46,6 +46,19 @@ fn _stub_bin(dir: string) -> string ![io] {
     return dir + "/sailfin";
 }
 
+// An always-empty per-user config location. `toolchain_user_default_dir()`
+// (`compiler/src/toolchain/user_default.sfn`) reads `SAILFIN_CONFIG_DIR`,
+// falling back to the real `~/.sfn` — so without this every test in this file
+// would inherit whatever default the developer running it happens to have
+// recorded, and `"default":null` would go non-deterministic on a machine that
+// has one set (SFEP-0073 §3.5, SFN-1068). Tests that want a populated default
+// name their own directory through `_env_with_cfg`.
+fn _no_user_config_dir() -> string ![io] {
+    let dir = _scratch_root() + "/no-user-config";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
 // A clean nested-runner environment plus the caller's extra `KEY=VALUE`
 // entries (`run_capture`'s empty env is EMPTY, not "inherit", so the child
 // needs PATH etc. to resolve the compiler and its toolchain subprocesses).
@@ -55,7 +68,12 @@ fn _stub_bin(dir: string) -> string ![io] {
 // silently defeat the push below, pointing the child at the real store
 // instead of the scratch one (SFN-925).
 fn _env_with(extra: string[]) -> string[] ![io] {
+    return _env_with_cfg(extra, _no_user_config_dir());
+}
+
+fn _env_with_cfg(extra: string[], config_dir: string) -> string[] ![io] {
     let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-inspect"), ["INSTALL_BASE", "SAILFIN_HOME", "SAILFIN_TOOLCHAIN"]);
+    e.push("SAILFIN_CONFIG_DIR=" + config_dir);
     let mut i: int = 0;
     loop {
         if i >= extra.length { break; }
@@ -115,6 +133,20 @@ fn _seed_stub_verified(store: string, ver: string) -> string ![io] {
     let dir = _seed_stub(store, ver, true);
     _write_verified_manifest(dir, ver);
     return dir;
+}
+
+// Write a per-user default record directly as literal text, matching
+// `toolchain_dispatch_test.sfn::_seed_user_default` — the on-disk grammar is
+// pinned by writing it out by hand rather than through
+// `toolchain_user_default_write`, which reads `SAILFIN_CONFIG_DIR` from THIS
+// process's own environment, not the child's.
+fn _seed_user_default(config_dir: string, ver: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/toolchain-default", "sailfin-toolchain-default 1\n"
+        + toolchain_current_host().triple
+        + ".version = "
+        + ver
+        + "\n");
 }
 
 test "toolchain: list --json locks the field set and order on a seeded store" ![io] {
@@ -257,7 +289,9 @@ test "toolchain: list --json renders the null contract and empty collections" ![
     report_child_failure("toolchain list --json null-contract", exit, out, err);
     assert exit == 0;
 
-    // `default` and `update` are unshipped in this slice and locked as null.
+    // `default` reads null because this fixture's `SAILFIN_CONFIG_DIR`
+    // records nothing (see `_populated-default` test for the populated
+    // shape); `update` is unshipped in this slice and always locked as null.
     assert find(out, "\"default\":null", 0) >= 0;
     assert find(out, "\"update\":null", 0) >= 0;
     // `requirement.version` reads null because this fixture root is
@@ -268,6 +302,29 @@ test "toolchain: list --json renders the null contract and empty collections" ![
     // no actionable finding — both render as an empty array, never null.
     assert find(out, "\"roles\":[]", 0) >= 0;
     assert find(out, "\"diagnostics\":[]", 0) >= 0;
+}
+
+test "toolchain: list --json renders a recorded per-user default (SFN-1068)" ![io] {
+    let store = _scratch_root() + "/populated-default-store";
+    let proj = _scratch_root() + "/populated-default-proj";
+    let cfg = _scratch_root() + "/populated-default-cfg";
+    _seed_stub(store, "1.2.11", true);
+    _seed_project(proj);
+    _seed_user_default(cfg, "1.2.11");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list", "--json"], _env_with_cfg(["INSTALL_BASE="
+        + store], cfg), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain list --json populated-default", exit, out, err);
+    assert exit == 0;
+
+    // No update track was recorded: `track` reads null, distinct from "".
+    assert find(out, "\"default\":{\"version\":\"1.2.11\",\"track\":null}", 0) >= 0;
+    // The matching entry carries `default` in the locked role order. Rank 4
+    // also makes it the resolved selection (no higher-ranked selector or pin
+    // is seeded), so `selected` precedes `default` here.
+    assert find(out, "\"roles\":[\"selected\",\"default\"]", 0) >= 0;
 }
 
 test "toolchain: list --json exits 0 with no diagnostics on a clean store" ![io] {

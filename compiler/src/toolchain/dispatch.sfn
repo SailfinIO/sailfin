@@ -37,6 +37,11 @@ import {
     toolchain_store_diagnostic,
     toolchain_versions_base
 } from "./store";
+import {
+    toolchain_user_default_corrupt,
+    toolchain_user_default_path,
+    toolchain_user_default_read
+} from "./user_default";
 
 fn _dispatch_normalize_ver(version: string) -> string {
     if version.length == 0 { return ""; }
@@ -312,6 +317,93 @@ fn toolchain_select_project_exact(ctx: CliContext, argv_skip: boolean, version_q
     return toolchain_select_exact(decision.pin_version, source_label, "", ctx, version_query, version_query);
 }
 
+// SFEP-0073 §3.3 rank 4 — the per-user default recorded by `sfn toolchain
+// default`. Every higher rank names a version explicitly; this one is the
+// standing choice for a root that names none, and rank 5 (the entry
+// toolchain) is what runs when this declines.
+//
+// Returns 0 when the caller should keep running in-process (no default
+// recorded, a higher rank owns the selection, or the default names this very
+// toolchain), and non-zero on a refused selection. A successful dispatch
+// replaces the image and never returns.
+fn toolchain_select_user_default(ctx: CliContext, argv_skip: boolean, version_query: boolean) -> int ![clock, io, net] {
+    // Rank 3 runs immediately before this and returns non-zero only when it
+    // refuses, so an exact field surviving to here already had its say —
+    // either it selected this toolchain or it stood down. Answering for it
+    // would invert ranks 3 and 4. A malformed field is likewise rank 3's to
+    // report, and it already did.
+    let decision: ToolchainDecision = toolchain_decide("", ctx.binary_dir);
+    if decision.version_error.length > 0 { return 0; }
+    if decision.pin_version.length > 0 { return 0; }
+
+    // The same stand-downs as rank 3, for the reasons documented there: the
+    // marker means a higher rank already chose this process, rank 2 is applied
+    // downstream by `toolchain_gate_or_dispatch`, and the mode table's
+    // `off`/`0` and the two skip flags all mean *do not dispatch*.
+    if env.get("SAILFIN_TOOLCHAIN_DISPATCHED").length > 0 { return 0; }
+    if toolchain_env_exact_selector().length > 0 { return 0; }
+    let knob = env.get("SAILFIN_TOOLCHAIN");
+    if strings_equal(knob, "off") || strings_equal(knob, "0") { return 0; }
+    if argv_skip || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK") { return 0; }
+
+    // Defaults are keyed by host triple so a roaming home can hold payloads
+    // for several hosts (SFEP-0073 §3.5). An unrecognised host has no key to
+    // read under, which is a stand-down rather than an error: the entry
+    // toolchain still runs.
+    let host = toolchain_current_host();
+    if host.triple.length == 0 { return 0; }
+
+    let recorded = toolchain_user_default_read(host.triple);
+    if recorded.version.length == 0 {
+        // Only now is the second read worth its cost, and only this branch can
+        // confuse the two states: an unreadable record and an absent one both
+        // surface as an empty version. Running the entry toolchain silently
+        // while the user believes they selected another release is the one
+        // outcome worth refusing, so a version query still answers (it reports
+        // rather than builds, exactly as it treats a floor mismatch) and every
+        // other command stops with the command that repairs it.
+        if toolchain_user_default_corrupt() {
+            let where = toolchain_user_default_path();
+            if version_query {
+                print.err("warning: the per-user toolchain default is unreadable: "
+                    + where);
+                return 0;
+            }
+            print.err("error: the per-user toolchain default is unreadable: "
+                + where);
+            print.err("  re-record it with sfn toolchain default <version>");
+            return 2;
+        }
+        return 0;
+    }
+
+    // A standing default that cannot satisfy this root's floor is not an
+    // error here — it is simply not the answer. SFEP-0073 §3.3 scopes the
+    // below-the-minimum refusal to "a one-shot or environment-selected
+    // compiler", both of which are a deliberate act naming a version for this
+    // invocation. A default is neither: the user recorded it once, globally,
+    // and a project they clone later that needs a newer floor should still
+    // dispatch to that floor the way it did before any default existed.
+    // Refusing instead would take a working `sfn build` and break it on every
+    // machine that ever ran `toolchain default`, and the refusal's own advice
+    // (`--skip-toolchain-check`) would then build below the floor rather than
+    // fetch it. Standing down hands the decision to `toolchain_gate_or_dispatch`,
+    // which fetches and re-execs the floor version as it always has.
+    if !toolchain_selection_satisfies(decision, _dispatch_normalize_ver(recorded.version)) {
+        return 0;
+    }
+
+    let rc = toolchain_select_exact(recorded.version, "the per-user toolchain default", "", ctx, version_query, version_query);
+    if rc == 2 {
+        // The record is user-editable, so a non-exact value lands in
+        // `toolchain_select_exact`'s parse error, whose hint names a `+<version>`
+        // one-shot. That does not repair the record, which is what is actually
+        // wrong here.
+        print.err("  re-record it with sfn toolchain default <version>");
+    }
+    return rc;
+}
+
 fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![clock, io, net] {
     // SFEP-0073 §3.3 rank 2. An exact `SAILFIN_TOOLCHAIN` is consulted before
     // the floor decision below, so it selects whether or not the running
@@ -499,5 +591,6 @@ export {
     toolchain_env_exact_selector,
     toolchain_gate_or_dispatch,
     toolchain_select_exact,
-    toolchain_select_project_exact
+    toolchain_select_project_exact,
+    toolchain_select_user_default
 };

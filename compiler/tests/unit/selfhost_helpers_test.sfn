@@ -135,13 +135,17 @@ test "selfhost_stage_env: keeps a variable that merely shares a prefix" {
 // --------------------------------------------------------------
 // Whole-array equality is the point: it pins `argv[0]` to the driver and
 // proves no `sh`/`-c` wrapper crept back in.
+// The trailing `--skip-toolchain-check` keeps a stage build on the driver
+// binary named in `argv[0]` instead of a recorded per-user default
+// (SFN-1068, SFEP-0073 §3.3 rank 4); a stage that selected a different
+// compiler would not be measuring self-hosting at all.
 test "selfhost_stage_argv: invokes the driver directly, with no shell" {
-    assert expect_eq_str_array(_selfhost_stage_argv("build/bin/sfn", "build/selfhost/s2", "build/selfhost/s2/bin/sfn"), ["build/bin/sfn", "build", "--no-cache", "-p", "compiler", "--work-dir", "build/selfhost/s2", "-o", "build/selfhost/s2/bin/sfn"]).ok;
+    assert expect_eq_str_array(_selfhost_stage_argv("build/bin/sfn", "build/selfhost/s2", "build/selfhost/s2/bin/sfn"), ["build/bin/sfn", "build", "--no-cache", "-p", "compiler", "--work-dir", "build/selfhost/s2", "-o", "build/selfhost/s2/bin/sfn", "--skip-toolchain-check"]).ok;
 }
 
 // Arguments reach `execve` verbatim, so a space stays inside one argument
 // instead of being shell-quoted — the former `sh -c` command string
 // needed `_shell_single_quote_arg` for exactly this.
 test "selfhost_stage_argv: passes a spaced path through unquoted" {
-    assert expect_eq_str_array(_selfhost_stage_argv("drv", "work dir", "out bin"), ["drv", "build", "--no-cache", "-p", "compiler", "--work-dir", "work dir", "-o", "out bin"]).ok;
+    assert expect_eq_str_array(_selfhost_stage_argv("drv", "work dir", "out bin"), ["drv", "build", "--no-cache", "-p", "compiler", "--work-dir", "work dir", "-o", "out bin", "--skip-toolchain-check"]).ok;
 }

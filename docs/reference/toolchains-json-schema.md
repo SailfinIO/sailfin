@@ -2,8 +2,9 @@
 
 Status: Locked at `sailfin-toolchains/1`. Shipped in SFN-1066
 (`docs/proposals/0073-toolchain-lifecycle.md` §3.4). `requirement.version` is
-populated as of SFN-1070 (§3.9 slice 2) — no schema bump, since the field was
-already reserved and `null`.
+populated as of SFN-1070 (§3.9 slice 2), and `default`/the `"default"` role
+are populated as of SFN-1068 (§3.4 slice 3) — no schema bump, since both were
+already reserved and `null`/unassigned.
 
 `sfn toolchain list --json`, `sfn toolchain active --json`, and
 `sfn toolchain verify --json` emit a single UTF-8 JSON document on stdout.
@@ -73,7 +74,7 @@ guards the field set so a silent leak fails CI before it lands.
 | `selected` | object | What the current directory resolves to, with no fetch performed. See `selected`. |
 | `requirement` | object | The project's `[toolchain]` requirement, as read from `workspace.toml`/`capsule.toml`. See `requirement`. |
 | `fetch_policy` | string | One of `"auto"`, `"local"`, `"off"`, derived from `SAILFIN_TOOLCHAIN`. |
-| `default` | object \| null | The per-user default. Always `null` in this slice — the per-user default is SFN-1068 and unshipped. The field is locked into the envelope now so no schema bump is needed once it lands. |
+| `default` | object \| null | The per-user default recorded for the current host triple (SFN-1068). `{"version": ..., "track": ...}` when this host has a recorded default, `null` otherwise. See `default`. |
 | `update` | object \| null | Update-check results. Always `null` in this slice — update checks are SFEP-0073 Slice 4 and unshipped. |
 | `toolchains` | array | Every store entry this inspection enumerated. `[]` when the store is empty, and always `[]` for `active` and for `verify <version>` — neither enumerates the store. Only `list` and `verify --all` populate it. See `toolchains[]`. |
 | `diagnostics` | array | One coded entry per non-`complete` store entry. `[]` when everything is `complete`. See `diagnostics[]`. |
@@ -91,9 +92,20 @@ guards the field set so a silent leak fails CI before it lands.
 |---|---|---|
 | `version` | string \| null | The version the current directory resolves to. `null` only if resolution failed entirely. |
 | `path` | string \| null | The selected executable's path. `null` when the selected version is not installed. |
-| `source` | string | Where the selection came from: `"entry"`, `"environment"` (`SAILFIN_TOOLCHAIN`), or the project pin's source (e.g. `"workspace.toml"`). Never empty. |
+| `source` | string | Where the selection came from: `"entry"`, `"environment"` (`SAILFIN_TOOLCHAIN`), `"user default"` (the per-host record set by `sfn toolchain default`), or the project pin's source (e.g. `"workspace.toml"`). Never empty. |
 | `installed` | boolean | Whether the selected version has a ready store entry. |
 | `integrity` | string | One of `"verified"`, `"unverified"`, `"failed"`. See the `integrity` vocabulary below. |
+
+## `default`
+
+The per-user default toolchain record (SFEP-0073 §3.5, SFN-1068), keyed by
+the current host triple — a default recorded for one host is never reported
+under another. `null` when this host has no recorded default.
+
+| Field | Type | Notes |
+|---|---|---|
+| `version` | string | The recorded default version. Always a string when the `default` object is present. |
+| `track` | string \| null | The recorded update track, if any. `null` when no track was recorded — distinct from the empty string. |
 
 ## `requirement`
 
@@ -117,7 +129,7 @@ tree).
 | `path` | string \| null | The entry's on-disk directory. `null` only if unresolvable. |
 | `state` | string | One of `"complete"`, `"partial"`, `"corrupt"`. See the `state` vocabulary below. |
 | `integrity` | string | One of `"verified"`, `"unverified"`, `"failed"`. See the `integrity` vocabulary below. |
-| `roles` | array | Zero or more of `"entry"`, `"selected"`, `"project"`, `"default"`, `"management"`, always emitted in that fixed order. `[]` when the entry holds none. Only `"entry"`, `"selected"`, and `"project"` are ever assigned in this slice — `"default"` (SFN-1068) and `"management"` (SFEP-0073 §3.5) are reserved. |
+| `roles` | array | Zero or more of `"entry"`, `"selected"`, `"project"`, `"default"`, `"management"`, always emitted in that fixed order. `[]` when the entry holds none. `"management"` (SFEP-0073 §3.5) remains reserved and is never assigned in this slice. |
 
 ### `state` vocabulary
 

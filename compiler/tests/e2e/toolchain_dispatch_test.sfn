@@ -86,10 +86,27 @@ fn _marker() -> string { return "DISPATCH_STUB_EXEC_OK_7f3a"; }
 // defeats the test's later override. Preserve the explicit host/target seams
 // after the extras so Windows-host CI still exercises the same resolver as
 // the child compiler, while a future caller-provided seam remains first.
+// An always-empty per-user config location. Rank 4 (SFEP-0073 §3.3) reads a
+// recorded default out of `SAILFIN_CONFIG_DIR`, falling back to the real
+// `~/.sfn` — so without this every test in this file would inherit whatever
+// default the developer running it happens to have set, and a machine with one
+// recorded would dispatch where CI does not. Tests that want a default name
+// their own directory through `_env_with_cfg`.
+fn _no_user_config_dir() -> string ![io] {
+    let dir = _scratch_root() + "/no-user-config";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
 fn _env_with(extra: string[]) -> string[] ![io] {
+    return _env_with_cfg(extra, _no_user_config_dir());
+}
+
+fn _env_with_cfg(extra: string[], config_dir: string) -> string[] ![io] {
     let host_os = env.get("SAILFIN_HOST_OS");
     let target_os = env.get("SAILFIN_TARGET_OS");
     let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-dispatch-child"), ["INSTALL_BASE", "SAILFIN_RUNTIME_ROOT", "SAILFIN_TOOLCHAIN", "SAILFIN_TOOLCHAIN_DISPATCHED"]);
+    e.push("SAILFIN_CONFIG_DIR=" + config_dir);
     let mut i: int = 0;
     loop {
         if i >= extra.length { break; }
@@ -1247,4 +1264,223 @@ test "toolchain dispatch: sfn toolchain list marks the exact project version, no
     assert contains(out, "0.0.7  complete  unverified [selected,project]");
     assert ! contains(out, "0.0.5  complete  unverified [project]");
     assert ! contains(out, "0.0.5  complete  unverified [selected,project]");
+}
+
+// Write the per-host user-default record `user_default.sfn` reads. Written as
+// literal text rather than through the module's writer so the test pins the
+// on-disk grammar itself: a reader change that silently stopped understanding
+// what the writer produces would still pass a round-trip through one of them.
+fn _seed_user_default(config_dir: string, ver: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/toolchain-default", "sailfin-toolchain-default 1\n"
+        + toolchain_current_host().triple
+        + ".version = "
+        + ver
+        + "\n");
+}
+
+test "toolchain dispatch: the user default (rank 4) selects when no higher rank names a version" ![io] {
+    let store = _scratch_root() + "/rank4-store";
+    let proj = _scratch_root() + "/rank4-proj";
+    let cfg = _scratch_root() + "/rank4-cfg";
+    let marker = "DISPATCH_RANK4_777_31c8";
+    _seed_stub(store, "777.0.0", marker, true);
+    // A floor the running toolchain already satisfies, so rank 3 stands down
+    // and the recorded default is the only thing naming a version.
+    let src = _seed_project(proj, "0.0.1");
+    _seed_user_default(cfg, "777.0.0");
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank4 run", exit, out, err);
+    assert ! contains(out + err, "dispatch loop");
+    assert contains(out, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: no recorded default leaves the entry toolchain running" ![io] {
+    let store = _scratch_root() + "/rank4-absent-store";
+    let proj = _scratch_root() + "/rank4-absent-proj";
+    let cfg = _scratch_root() + "/rank4-absent-cfg";
+    let marker = "DISPATCH_RANK4_ABSENT_SHOULD_NOT_RUN_9f13";
+    _seed_stub(store, "777.0.0", marker, true);
+    let src = _seed_project(proj, "0.0.1");
+    // Deliberately no record written: an empty config dir must read as "no
+    // default", never as a dispatch.
+    fs.createDirectory(cfg, true);
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank4-absent run", exit, out, err);
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: a project exact version (rank 3) outranks the user default (rank 4)" ![io] {
+    let store = _scratch_root() + "/rank3-over-rank4-store";
+    let proj = _scratch_root() + "/rank3-over-rank4-proj";
+    let cfg = _scratch_root() + "/rank3-over-rank4-cfg";
+    let marker = "DISPATCH_RANK4_LOSES_SHOULD_NOT_RUN_4a70";
+    // The default names a marker stub; the project names a real compiler copy.
+    // If rank 4 ever won, the marker would print.
+    _seed_stub(store, "777.0.0", marker, true);
+    _seed_real_stub(store, "888.0.0");
+    let src = _seed_project_exact(proj, "0.0.1", "888.0.0");
+    _seed_user_default(cfg, "777.0.0");
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank3-over-rank4 run", exit, out, err);
+    assert ! contains(out + err, "dispatch loop");
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: an exact env knob (rank 2) outranks the user default (rank 4)" ![io] {
+    let store = _scratch_root() + "/rank2-over-rank4-store";
+    let proj = _scratch_root() + "/rank2-over-rank4-proj";
+    let cfg = _scratch_root() + "/rank2-over-rank4-cfg";
+    let marker = "DISPATCH_RANK4_ENV_SHOULD_NOT_RUN_6b22";
+    _seed_stub(store, "777.0.0", marker, true);
+    _seed_real_stub(store, "888.0.0");
+    let src = _seed_project(proj, "0.0.1");
+    _seed_user_default(cfg, "777.0.0");
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_TOOLCHAIN=888.0.0", "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank2-over-rank4 run", exit, out, err);
+    assert ! contains(out + err, "dispatch loop");
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: a CLI selector (rank 1) outranks the user default (rank 4)" ![io] {
+    let store = _scratch_root() + "/rank1-over-rank4-store";
+    let proj = _scratch_root() + "/rank1-over-rank4-proj";
+    let cfg = _scratch_root() + "/rank1-over-rank4-cfg";
+    let marker = "DISPATCH_RANK4_SELECTOR_SHOULD_NOT_RUN_c051";
+    _seed_stub(store, "777.0.0", marker, true);
+    _seed_real_stub(store, "888.0.0");
+    let src = _seed_project(proj, "0.0.1");
+    _seed_user_default(cfg, "777.0.0");
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "+888.0.0", "check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank1-over-rank4 run", exit, out, err);
+    assert ! contains(out + err, "dispatch loop");
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: SAILFIN_TOOLCHAIN=off suppresses the user default" ![io] {
+    let store = _scratch_root() + "/rank4-off-store";
+    let proj = _scratch_root() + "/rank4-off-proj";
+    let cfg = _scratch_root() + "/rank4-off-cfg";
+    let marker = "DISPATCH_RANK4_OFF_SHOULD_NOT_RUN_8d94";
+    _seed_stub(store, "777.0.0", marker, true);
+    let src = _seed_project(proj, "0.0.1");
+    _seed_user_default(cfg, "777.0.0");
+    // §3.3's mode table gives `off` one meaning: do not dispatch. A recorded
+    // default is still a dispatch, so the hatch has to suppress it too.
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_TOOLCHAIN=off", "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank4-off run", exit, out, err);
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
+// SFN-1068 / workspace.toml's `dev` exclusion note: a self-host driver
+// spawns its children as plain argv, invisible to the `sfn dev ...`
+// exclusion, so a recorded per-user default (rank 4) would otherwise select
+// inside a driver-shaped child. Appending `--skip-toolchain-check` to that
+// child's argv (as every driver spawn site now does) is what stands rank 4
+// down — this pins that a driver-shaped invocation carrying the flag never
+// selects the recorded default, exactly like the CLI/env escape hatches
+// already covered above.
+test "toolchain dispatch: a driver child's skip flag suppresses the user default" ![io] {
+    let store = _scratch_root() + "/rank4-driver-skip-store";
+    let proj = _scratch_root() + "/rank4-driver-skip-proj";
+    let cfg = _scratch_root() + "/rank4-driver-skip-cfg";
+    let marker = "DISPATCH_RANK4_DRIVER_SKIP_SHOULD_NOT_RUN_5e2a";
+    _seed_stub(store, "777.0.0", marker, true);
+    let src = _seed_project(proj, "0.0.1");
+    _seed_user_default(cfg, "777.0.0");
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", "--skip-toolchain-check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank4-driver-skip run", exit, out, err);
+    assert ! contains(out + err, marker);
+    assert exit == 0;
+}
+
+test "toolchain dispatch: an unreadable user-default record refuses to build" ![io] {
+    let store = _scratch_root() + "/rank4-corrupt-store";
+    let proj = _scratch_root() + "/rank4-corrupt-proj";
+    let cfg = _scratch_root() + "/rank4-corrupt-cfg";
+    _seed_stub(store, "777.0.0", "DISPATCH_RANK4_CORRUPT_c7e1", true);
+    let src = _seed_project(proj, "0.0.1");
+    fs.createDirectory(cfg, true);
+    // Garbage where the header belongs. Reading this as "no default" would run
+    // the entry toolchain while the user believes another release is selected.
+    fs.writeFile(cfg + "/toolchain-default", "not-a-default-record\n");
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", src], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(out + err, "per-user toolchain default is unreadable");
+    assert exit == 2;
+}
+
+test "toolchain dispatch: a version query still answers over an unreadable default" ![io] {
+    let store = _scratch_root() + "/rank4-corrupt-ver-store";
+    let proj = _scratch_root() + "/rank4-corrupt-ver-proj";
+    let cfg = _scratch_root() + "/rank4-corrupt-ver-cfg";
+    _seed_stub(store, "777.0.0", "DISPATCH_RANK4_CORRUPT_VER_2f60", true);
+    let _ = _seed_project(proj, "0.0.1");
+    fs.createDirectory(cfg, true);
+    fs.writeFile(cfg + "/toolchain-default", "not-a-default-record\n");
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store, "SAILFIN_RUNTIME_ROOT="
+        + _bundled_verify_root()
+        + "/runtime"], cfg);
+
+    // `--version` reports rather than builds, so a record it cannot read is a
+    // warning it prints and proceeds past, exactly as a floor mismatch is.
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "--version"], run_env, proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-dispatch rank4-corrupt-version run", exit, out, err);
+    assert contains(out + err, "per-user toolchain default is unreadable");
+    assert exit == 0;
 }

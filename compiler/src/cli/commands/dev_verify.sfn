@@ -552,6 +552,10 @@ fn _dv_run_fast(cfg: VerifyConfig, self_exe: string) -> int ![io] {
     if !inventory.ok { return 1; }
     let mut argv: string[] = [self_exe, "check"];
     argv = _dv_push_all(argv, inventory.maintainer_source_inputs);
+    // SFN-1068 / SFEP-0073 §3.3: driver-spawned children must never select a
+    // per-user default toolchain (`workspace.toml`); `check` registers this
+    // flag so it can dispatch straight to the pinned toolchain.
+    argv.push("--skip-toolchain-check");
     // Under `--json` the child's own `sailfin-check/1` document is what
     // carries the diagnostics, so it is threaded through and spliced into
     // the ledger exactly as the `selfhost` phase carries its sub-envelope.
@@ -642,13 +646,21 @@ fn verify_run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     if !cfg.json {
         print("[verify] smoke-pass1: hello-world + sfn/test capsule tests...");
     }
-    let hello = _dv_run_bounded([first_pass, "run", "examples/basics/hello-world.sfn"], env, _DV_SMOKE_DEADLINE_MS);
+    // SFN-1068 / SFEP-0073 §3.3: driver-spawned children must never select a
+    // per-user default toolchain (`workspace.toml`); `run` registers this
+    // flag so it can dispatch straight to the pinned toolchain.
+    let hello = _dv_run_bounded([first_pass, "run", "examples/basics/hello-world.sfn", "--skip-toolchain-check"], env, _DV_SMOKE_DEADLINE_MS);
     let mut smoke_failure = verdict_classify(hello.rc, "build");
     let mut smoke_rc = hello.rc;
     if smoke_failure.length == 0 {
         let mut gate: string[] = [first_pass, "test", "capsules/sfn/test/tests"];
         gate = _dv_push_all(gate, _dv_jobs_argv(cfg.jobs));
         if cfg.json { gate.push("--json"); }
+        // SFN-1068 / SFEP-0073 §3.3: driver-spawned children must never
+        // select a per-user default toolchain (`workspace.toml`); `test`
+        // registers this flag so it can dispatch straight to the pinned
+        // toolchain.
+        gate.push("--skip-toolchain-check");
         let gate_run = _dv_run(gate, env);
         smoke_rc = gate_run.rc;
         smoke_failure = verdict_classify(gate_run.rc, "test");
@@ -667,7 +679,14 @@ fn verify_run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         if !cfg.json {
             print("[verify] tests-pass1: full suite against the first-pass binary...");
         }
-        let t1 = _dv_run(_dv_test_argv(first_pass, cfg.jobs, cfg.json), env);
+        // SFN-1068 / SFEP-0073 §3.3: driver-spawned children must never
+        // select a per-user default toolchain (`workspace.toml`); `test`
+        // registers this flag so it can dispatch straight to the pinned
+        // toolchain. Appended at the call site, not in `_dv_test_argv`,
+        // since that helper is shared and exported for regression coverage.
+        let mut t1_argv = _dv_test_argv(first_pass, cfg.jobs, cfg.json);
+        t1_argv.push("--skip-toolchain-check");
+        let t1 = _dv_run(t1_argv, env);
         let t1_failure = verdict_classify(t1.rc, "test");
         if t1_failure.length > 0 {
             phases.push(_dv_phase("tests-pass1", "fail", t1.rc, t1_failure, ""));
@@ -692,6 +711,11 @@ fn verify_run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     }
     let mut sh_argv: string[] = [first_pass, "selfhost", "--work-dir", "build/selfhost", "--first-pass", first_pass, "--seedcheck-out", seedcheck, "--stage3-out", host_exe_name("build/bin/sfn-stage3"), "--promote-to", first_pass, "--json"];
     if cfg.strict { sh_argv.push("--strict"); }
+    // SFN-1068 / SFEP-0073 §3.3: driver-spawned children must never select a
+    // per-user default toolchain (`workspace.toml`); `selfhost`'s manual
+    // parser (`cli_selfhost.sfn::handle_selfhost_command`) now accepts and
+    // ignores this flag so it can dispatch straight to the pinned toolchain.
+    sh_argv.push("--skip-toolchain-check");
     let sh = _dv_run(sh_argv, env);
     let sh_envelope = _dv_last_line_containing(sh.stdout, "\"schema_version\":\"sailfin-selfhost/1\"");
     let sh_sub = _dv_scrape_or_empty(sh_envelope, "failed_phase");
@@ -730,7 +754,14 @@ fn verify_run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     if !cfg.json {
         print("[verify] tests-seedcheck: cold full suite against the seedcheck binary...");
     }
-    let t2 = _dv_run(_dv_test_argv(seedcheck, cfg.jobs, cfg.json), env);
+    // SFN-1068 / SFEP-0073 §3.3: driver-spawned children must never select a
+    // per-user default toolchain (`workspace.toml`); `test` registers this
+    // flag so it can dispatch straight to the pinned toolchain. Appended at
+    // the call site, not in `_dv_test_argv`, since that helper is shared and
+    // exported for regression coverage.
+    let mut t2_argv = _dv_test_argv(seedcheck, cfg.jobs, cfg.json);
+    t2_argv.push("--skip-toolchain-check");
+    let t2 = _dv_run(t2_argv, env);
     let t2_failure = verdict_classify(t2.rc, "test");
     if t2_failure.length > 0 {
         phases.push(_dv_phase("tests-seedcheck", "fail", t2.rc, t2_failure, ""));

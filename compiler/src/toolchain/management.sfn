@@ -48,6 +48,16 @@ import {
 // management route satisfy an ordinary dispatch guard for a selection it never
 // made.
 let TOOLCHAIN_MANAGEMENT_MARKER: string = "SAILFIN_TOOLCHAIN_MANAGEMENT";
+// The entry toolchain's own identity, forwarded across the management route.
+// A routed payload replaces this image, so `ctx` there describes the payload,
+// not the `PATH` executable that started the command. `toolchain remove` has
+// to refuse the entry toolchain (SFEP-0073 §3.4), and the bootstrap installer
+// publishes that entry as an ordinary host-qualified store entry and symlinks
+// `PATH` at it — so without this the routed child cannot tell the entry apart
+// from any other removable payload, and would happily delete the one the
+// symlink points at (SFN-1068).
+let TOOLCHAIN_ENTRY_VERSION_MARKER: string = "SAILFIN_TOOLCHAIN_ENTRY_VERSION";
+let TOOLCHAIN_ENTRY_DIR_MARKER: string = "SAILFIN_TOOLCHAIN_ENTRY_DIR";
 
 // One installed payload considered as the management implementation.
 // `ok` is false for a directory that did not qualify, which keeps every
@@ -266,19 +276,30 @@ fn toolchain_is_management_prefix(args: string[]) -> boolean {
 // Build the routed payload's environment. Any inherited marker is dropped so
 // the one appended here is the only one the payload sees, rather than relying
 // on every path above having returned early on a set marker.
-fn _management_child_env(version: string) -> string[] ![io] {
+fn _management_child_env(version: string, ctx: CliContext) -> string[] ![io] {
     let source = process.environ();
     let mut out: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= source.length { break; }
         let entry = source[i];
-        if !starts_with(entry, TOOLCHAIN_MANAGEMENT_MARKER + "=") {
-            out.push(entry);
-        }
+        // Every marker this function owns is stripped before being re-set, so
+        // an inherited value can never outlive the hop that wrote it. The
+        // entry markers matter most: a stale one would name some earlier
+        // process's entry, and `remove` trusts them to protect a directory.
+        let mine = starts_with(entry, TOOLCHAIN_MANAGEMENT_MARKER + "=")
+            || starts_with(entry, TOOLCHAIN_ENTRY_VERSION_MARKER
+            + "=")
+            || starts_with(entry, TOOLCHAIN_ENTRY_DIR_MARKER
+            + "=");
+        if !mine { out.push(entry); }
         i += 1;
     }
     out.push(TOOLCHAIN_MANAGEMENT_MARKER + "=" + version);
+    // Recorded from this process, which is the entry toolchain: routing only
+    // ever happens once per invocation, before any payload runs.
+    out.push(TOOLCHAIN_ENTRY_VERSION_MARKER + "=" + resolve_compiler_version(ctx.binary_dir));
+    out.push(TOOLCHAIN_ENTRY_DIR_MARKER + "=" + ctx.binary_dir);
     return out;
 }
 
@@ -292,7 +313,7 @@ fn _management_exec(candidate: ToolchainManagementCandidate, ctx: CliContext) ->
     }
     // `process.exec` replaces this image, which is what preserves the routed
     // payload's exit code and terminating signal exactly.
-    let _rc = process.exec(exec_argv, _management_child_env(candidate.version));
+    let _rc = process.exec(exec_argv, _management_child_env(candidate.version, ctx));
     print.err("error: failed to route management to the installed toolchain at "
         + candidate.binary);
     print.err("  reinstall it: " + toolchain_manifest_reinstall_hint(candidate.version));
@@ -475,6 +496,8 @@ fn toolchain_route_management(args: string[], ctx: CliContext) -> int ![io] {
 }
 
 export {
+    TOOLCHAIN_ENTRY_DIR_MARKER,
+    TOOLCHAIN_ENTRY_VERSION_MARKER,
     TOOLCHAIN_MANAGEMENT_MARKER,
     ToolchainManagementCandidate,
     ToolchainManagementSurvey,

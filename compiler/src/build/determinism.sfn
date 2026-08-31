@@ -196,6 +196,11 @@ fn _determinism_pass2_argv(self_exe: string, capsule_path: string, input_path: s
     let mut args: string[] = [];
     args.push(self_exe);
     args.push("build");
+    // The pass-1 driver has already resolved which binary is running this
+    // determinism check; pass 2 must build with the same compiler, not
+    // whatever a recorded user default (SFEP-0073 §3.3 rank 4) or project
+    // pin would select. See workspace.toml's `dev` exclusion note.
+    args.push("--skip-toolchain-check");
     args.push("--work-dir");
     args.push(pass2_work_dir);
     if cache_trace_flag { args.push("--cache-trace"); }
