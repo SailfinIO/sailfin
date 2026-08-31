@@ -338,11 +338,9 @@ fn workspace_capability_audit(workspace_root: string) -> CapabilityDriftReport !
         mi += 1;
         let manifest = _cr_path_join(_cr_path_join(workspace_root, m.member_path), "capsule.toml");
         let mut required: string[] = [];
-        let mut declared: boolean = false;
         if fs.exists(manifest) {
             let manifest_text = fs.readFile(manifest);
             required = toml_get_capabilities_required(manifest_text);
-            declared = toml_has_capabilities_section(manifest_text);
         }
         let grant = toml_get_workspace_capabilities_grant(ws_text, m.name);
 
