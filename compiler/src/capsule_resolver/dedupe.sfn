@@ -11,6 +11,7 @@ import { capsule_artifact_layout_from_specs } from "../capsule_artifact";
 import { enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
 import {
     toml_get_build_full_runtime,
+    toml_get_capabilities_dev_required,
     toml_get_capabilities_required,
     toml_get_dependencies,
     toml_get_entry,
