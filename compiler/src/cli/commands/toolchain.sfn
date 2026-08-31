@@ -21,7 +21,10 @@ import {
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
+import { ToolchainDecision, toolchain_decide } from "../../capsule_resolver/toolchain";
+import { starts_with, strings_equal } from "../../string_utils";
 import { render_terminal_diagnostic } from "../../terminal_output";
+import { toolchain_env_exact_selector } from "../../toolchain/dispatch";
 import { toolchain_current_host } from "../../toolchain/host";
 import {
     ToolchainInspectEntry,
@@ -36,14 +39,21 @@ import {
     toolchain_state_name
 } from "../../toolchain/inspect";
 import { render_toolchains_json } from "../../toolchain/inspect_json";
-import { toolchain_install_to_user_store } from "../../toolchain/install";
+import { toolchain_install_to_user_store, toolchain_is_valid_install_version } from "../../toolchain/install";
 import { TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX, TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN } from "../../toolchain/manifest";
 import {
+    toolchain_remove_store_entry,
     toolchain_resolve_compatible_store_entry,
     toolchain_store_diagnostic,
     toolchain_versions_base
 } from "../../toolchain/store";
-import { resolve_compiler_version } from "../../version";
+import {
+    toolchain_user_default_corrupt,
+    toolchain_user_default_path,
+    toolchain_user_default_read,
+    toolchain_user_default_write
+} from "../../toolchain/user_default";
+import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 
 fn _toolchain_install(version: string, work_root: string, allow_yanked: boolean) -> int ![clock, io, net] {
@@ -240,6 +250,177 @@ fn _toolchain_entry_version(ctx: CliContext) -> int ![io] {
     return 0;
 }
 
+// Mirrors `dispatch.sfn::_dispatch_work_root` (module-private there, so not
+// reusable across the module boundary): an installer invoked from this leaf
+// needs the same scratch-directory precedence as one invoked from dispatch.
+fn _toolchain_work_root() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let temp = env.get("TMPDIR");
+    if temp.length > 0 { return temp; }
+    return "/tmp";
+}
+
+// Shared by `default` and `remove`: both take an exact version, never a
+// channel selector. Mirrors the wording `dispatch.sfn::toolchain_select_exact`
+// already uses for the same rejection.
+fn _toolchain_reject_inexact(version: string, example: string) -> int ![io] {
+    print.err("error: " + version + " is not an exact toolchain version");
+    print.err("  channel selectors (stable|rc|beta|alpha|latest) are not available yet");
+    print.err("  name an exact release, e.g. " + example);
+    return 2;
+}
+
+// SFEP-0073 §3.4 (SFN-1068): report or set the per-user default toolchain
+// consulted by `toolchain_select_user_default` (rank 4). Setting always
+// records an exact version with no track — see the comment at the write
+// call below.
+fn _toolchain_default(ctx: CliContext, requested: string) -> int ![clock, io, net] {
+    let host = toolchain_current_host();
+    if host.triple.length == 0 {
+        print.err("error: could not determine this host's triple");
+        return 2;
+    }
+
+    if requested.length == 0 {
+        let recorded = toolchain_user_default_read(host.triple);
+        if recorded.version.length == 0 {
+            if toolchain_user_default_corrupt() {
+                print.err("error: the per-user toolchain default is unreadable: "
+                    + toolchain_user_default_path());
+                print.err("  re-record it with sfn toolchain default <version>");
+                return 2;
+            }
+            print("no per-user default is recorded for " + host.triple);
+            print("  set one with: sfn toolchain default <version>");
+            return 0;
+        }
+        print(recorded.version);
+        if recorded.track.length > 0 { print(recorded.track); }
+        return 0;
+    }
+
+    if !toolchain_is_valid_install_version(requested) {
+        return _toolchain_reject_inexact(requested, "sfn toolchain default 0.10.6");
+    }
+
+    let entry = toolchain_resolve_compatible_store_entry(toolchain_versions_base(), host, requested);
+    if !entry.ready {
+        let mode = env.get("SAILFIN_TOOLCHAIN");
+        if strings_equal(mode, "local") {
+            print.err("error: toolchain " + requested + " is not installed");
+            print.err("  SAILFIN_TOOLCHAIN=local forbids fetching it");
+            print.err("  install it with: sfn toolchain install " + requested);
+            return 2;
+        }
+        let rc = toolchain_install_to_user_store(requested, toolchain_versions_base(), _toolchain_work_root(), false);
+        if rc != 0 { return 2; }
+    }
+
+    // SFN-1068 records an exact version only: inferring an update track from
+    // an exact spelling is exactly what SFEP-0073 §3.4 forbids ("Setting an
+    // exact default records no implicit update track").
+    if !toolchain_user_default_write(host.triple, requested, "") {
+        print.err("error: failed to write the per-user toolchain default: "
+            + toolchain_user_default_path());
+        return 2;
+    }
+    print("recorded " + requested + " as the per-user default toolchain");
+    return 0;
+}
+
+// SFEP-0073 §3.4 (SFN-1068): delete a committed store entry, refusing when
+// doing so would remove the toolchain this process is running as, and — absent
+// `--force` — when another role (the per-user default or the active project
+// pin) currently names it.
+fn _toolchain_remove(ctx: CliContext, requested: string, force: boolean) -> int ![clock, io, net] {
+    if !toolchain_is_valid_install_version(requested) {
+        return _toolchain_reject_inexact(requested, "sfn toolchain remove 0.10.6");
+    }
+
+    let host = toolchain_current_host();
+    if host.triple.length == 0 {
+        print.err("error: could not determine this host's triple");
+        return 2;
+    }
+
+    let entry = toolchain_resolve_compatible_store_entry(toolchain_versions_base(), host, requested);
+    if !entry.ready {
+        print.err("error: toolchain " + requested
+            + " is not installed in this host's store");
+        return 2;
+    }
+
+    // SFEP-0073 §3.4's one absolute protection: the running toolchain can
+    // never be removed, `--force` included. Two ways it can be the running
+    // image: the requested version is the entry toolchain's own version, or
+    // this process is a dispatched payload executing out of the very
+    // directory being removed.
+    // Build metadata is stripped before comparing because a development build
+    // reports `<version>+dev.<hash>`, and the store is keyed by the release
+    // version alone — an unstripped compare would miss the match entirely.
+    let running_version = _strip_build_metadata(resolve_compiler_version(ctx.binary_dir));
+    // The separator is part of the prefix on purpose. `entry.dir` is a
+    // directory, so a bare prefix test also matches a sibling whose name
+    // merely extends it (removing `0.10.6` while running `0.10.60`), which
+    // would refuse a removal that is perfectly safe.
+    let inside_entry = strings_equal(ctx.binary_dir, entry.dir) || starts_with(ctx.binary_dir, entry.dir
+        + "/");
+    if strings_equal(requested, running_version) || inside_entry {
+        print.err("error: the toolchain currently running cannot be removed: "
+            + requested);
+        print.err("  --force does not override this");
+        return 2;
+    }
+
+    // `--force` overrides the project and user-default protections below (per
+    // SFEP-0073 §3.4). `selected` is a derived role: when it derives from the
+    // project or the default, overriding those must override it too, or
+    // `--force` could never remove anything a root or a default named.
+    if !force {
+        let recorded = toolchain_user_default_read(host.triple);
+        if strings_equal(recorded.version, requested) {
+            print.err("error: " + requested
+                + " is the per-user default toolchain for "
+                + host.triple);
+            print.err("  --force overrides this");
+            return 2;
+        }
+
+        let decision: ToolchainDecision = toolchain_decide("", ctx.binary_dir);
+        if decision.pin_version.length > 0 {
+            if strings_equal(decision.pin_version, requested) {
+                print.err("error: " + requested
+                    + " is the active project's exact toolchain requirement");
+                print.err("  --force overrides this");
+                return 2;
+            }
+        } else if decision.pin_sfn.length > 0 {
+            if strings_equal(decision.pin_sfn, requested) {
+                print.err("error: " + requested
+                    + " is the active project's pinned toolchain");
+                print.err("  --force overrides this");
+                return 2;
+            }
+        }
+
+        let env_selector = toolchain_env_exact_selector();
+        if env_selector.length > 0 && strings_equal(env_selector, requested) {
+            print.err("error: " + requested + " is named by SAILFIN_TOOLCHAIN");
+            print.err("  --force overrides this");
+            return 2;
+        }
+    }
+
+    if !toolchain_remove_store_entry(entry.dir) {
+        print.err("error: failed to remove the toolchain store entry: " + entry.dir);
+        return 2;
+    }
+    print("removed toolchain " + requested + ": " + entry.dir);
+    print("  another checkout may reinstall it automatically if it still pins this version");
+    return 0;
+}
+
 // `run` is registered for help text and for usage errors only. A well-formed
 // `sfn toolchain run <version> -- <args...>` is intercepted by the early
 // selector scan in `cli/main.sfn` and dispatched before this tree is built, so
@@ -264,12 +445,17 @@ fn command_def() -> Command {
     verify_cmd = with_flag(verify_cmd, flag("all", "Verify every complete store entry"));
     verify_cmd = with_flag(verify_cmd, flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
     let entry_version_cmd = command("entry-version", "Report this entry toolchain's identity and management-protocol range, without dispatch");
+    let default_cmd = with_arg(command("default", "Show or set the per-user default toolchain"), arg_optional("version", "Exact version to make the user default (default: report the current one)", ""));
+    let mut remove_cmd = with_arg(command("remove", "Remove an installed toolchain from the store"), arg("version", "Exact toolchain version to remove"));
+    remove_cmd = with_flag(remove_cmd, flag("force", "Override the project and user-default protections; never removes the running toolchain"));
     let mut cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
     cmd = with_subcommand(cmd, entry_version_cmd);
     cmd = with_subcommand(cmd, run_cmd_full);
     cmd = with_subcommand(cmd, list_cmd);
     cmd = with_subcommand(cmd, active_cmd);
     cmd = with_subcommand(cmd, verify_cmd);
+    cmd = with_subcommand(cmd, default_cmd);
+    cmd = with_subcommand(cmd, remove_cmd);
     return with_usage(cmd, "packages", "sfn toolchain list", "inspect and install toolchains");
 }
 
@@ -296,7 +482,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if sub == "verify" {
         return _toolchain_verify(ctx, get(matches, "version"), has_flag(matches, "all"), has_flag(matches, "json"));
     }
-    print("usage: sfn toolchain <install|list|active|verify|run|entry-version>");
+    if sub == "default" {
+        return _toolchain_default(ctx, get(matches, "version"));
+    }
+    if sub == "remove" {
+        return _toolchain_remove(ctx, get(matches, "version"), has_flag(matches, "force"));
+    }
+    print("usage: sfn toolchain <install|list|active|verify|run|entry-version|default|remove>");
     return 2;
 }
 

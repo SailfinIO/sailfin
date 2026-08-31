@@ -62,7 +62,7 @@ fn _host() -> ToolchainHostIdentity {
 // -------------------------------------------------------------------
 test "toolchain: assign_roles gives the entry version the entry role" {
     let entries = [_entry("1.0.0")];
-    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "");
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "", "");
     assert out.length == 1;
     assert out[0].roles.length == 1;
     assert out[0].roles[0] == "entry";
@@ -70,7 +70,7 @@ test "toolchain: assign_roles gives the entry version the entry role" {
 
 test "toolchain: assign_roles gives the selected version the selected role" {
     let entries = [_entry("2.0.0")];
-    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "");
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "", "");
     assert out.length == 1;
     assert out[0].roles.length == 1;
     assert out[0].roles[0] == "selected";
@@ -78,15 +78,30 @@ test "toolchain: assign_roles gives the selected version the selected role" {
 
 test "toolchain: assign_roles gives an exact pin match the project role" {
     let entries = [_entry("3.0.0")];
-    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "3.0.0");
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "3.0.0", "");
     assert out.length == 1;
     assert out[0].roles.length == 1;
     assert out[0].roles[0] == "project";
 }
 
+test "toolchain: assign_roles gives a matching default the default role" {
+    let entries = [_entry("7.0.0")];
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "", "7.0.0");
+    assert out.length == 1;
+    assert out[0].roles.length == 1;
+    assert out[0].roles[0] == "default";
+}
+
+test "toolchain: assign_roles attaches no default role when none is recorded" {
+    let entries = [_entry("8.0.0")];
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "", "");
+    assert out.length == 1;
+    assert out[0].roles.length == 0;
+}
+
 test "toolchain: assign_roles orders entry, selected, project when all three match" {
     let entries = [_entry("4.0.0")];
-    let out = toolchain_assign_roles(entries, "4.0.0", "4.0.0", "4.0.0");
+    let out = toolchain_assign_roles(entries, "4.0.0", "4.0.0", "4.0.0", "");
     assert out.length == 1;
     assert out[0].roles.length == 3;
     assert out[0].roles[0] == "entry";
@@ -94,21 +109,30 @@ test "toolchain: assign_roles orders entry, selected, project when all three mat
     assert out[0].roles[2] == "project";
 }
 
+test "toolchain: assign_roles orders entry, selected, default when all three match" {
+    let entries = [_entry("9.0.0")];
+    let out = toolchain_assign_roles(entries, "9.0.0", "9.0.0", "", "9.0.0");
+    assert out.length == 1;
+    assert out[0].roles.length == 3;
+    assert out[0].roles[0] == "entry";
+    assert out[0].roles[1] == "selected";
+    assert out[0].roles[2] == "default";
+}
+
 test "toolchain: assign_roles gives an unmatched entry no roles" {
     let entries = [_entry("5.0.0")];
-    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "3.0.0");
+    let out = toolchain_assign_roles(entries, "1.0.0", "2.0.0", "3.0.0", "");
     assert out.length == 1;
     assert out[0].roles.length == 0;
 }
 
-test "toolchain: assign_roles never assigns default or management" {
+test "toolchain: assign_roles never assigns management" {
     let entries = [_entry("6.0.0")];
-    let out = toolchain_assign_roles(entries, "6.0.0", "6.0.0", "6.0.0");
+    let out = toolchain_assign_roles(entries, "6.0.0", "6.0.0", "6.0.0", "6.0.0");
     assert out.length == 1;
     let mut i: int = 0;
     loop {
         if i >= out[0].roles.length { break; }
-        assert out[0].roles[i] != "default";
         assert out[0].roles[i] != "management";
         i += 1;
     }
@@ -258,7 +282,7 @@ test "toolchain: resolve_selection an exact env selector wins with source enviro
     let base = _scratch_dir() + "/env-selector";
     assert remove_all(base);
     fs.createDirectory(base, true);
-    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "9.9.9", false, false, "", "", "", "");
+    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "9.9.9", false, false, "", "", "", "", "");
     assert sel.version == "9.9.9";
     assert sel.source == "environment";
     assert sel.installed == false;
@@ -268,7 +292,7 @@ test "toolchain: resolve_selection an unpinned project falls through to source e
     let base = _scratch_dir() + "/unpinned";
     assert remove_all(base);
     fs.createDirectory(base, true);
-    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "", false, false, "", "", "", "");
+    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "", false, false, "", "", "", "", "");
     assert sel.version == "1.0.0";
     assert sel.source == "entry";
     assert sel.path == "/entry/path";
@@ -279,7 +303,7 @@ test "toolchain: resolve_selection a satisfied floor also yields source entry" !
     let base = _scratch_dir() + "/satisfied-floor";
     assert remove_all(base);
     fs.createDirectory(base, true);
-    let sel = toolchain_resolve_selection(base, _host(), "1.5.0", "/entry/path", "", true, true, "1.0.0", "workspace.toml", "", "");
+    let sel = toolchain_resolve_selection(base, _host(), "1.5.0", "/entry/path", "", true, true, "1.0.0", "workspace.toml", "", "", "");
     assert sel.version == "1.5.0";
     assert sel.source == "entry";
 }
@@ -288,8 +312,27 @@ test "toolchain: resolve_selection an unsatisfied floor yields the pin version a
     let base = _scratch_dir() + "/unsatisfied-floor";
     assert remove_all(base);
     fs.createDirectory(base, true);
-    let sel = toolchain_resolve_selection(base, _host(), "0.5.0", "/entry/path", "", true, false, "1.0.0", "workspace.toml", "", "");
+    let sel = toolchain_resolve_selection(base, _host(), "0.5.0", "/entry/path", "", true, false, "1.0.0", "workspace.toml", "", "", "");
     assert sel.version == "1.0.0";
     assert sel.source == "workspace.toml";
     assert sel.installed == false;
+}
+
+test "toolchain: resolve_selection the user default wins with source \"user default\" when nothing else names a version" ![io] {
+    let base = _scratch_dir() + "/user-default-unpinned";
+    assert remove_all(base);
+    fs.createDirectory(base, true);
+    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "", false, false, "", "", "", "", "7.7.7");
+    assert sel.version == "7.7.7";
+    assert sel.source == "user default";
+    assert sel.installed == false;
+}
+
+test "toolchain: resolve_selection a project pin outranks the user default" ![io] {
+    let base = _scratch_dir() + "/user-default-outranked";
+    assert remove_all(base);
+    fs.createDirectory(base, true);
+    let sel = toolchain_resolve_selection(base, _host(), "1.0.0", "/entry/path", "", false, false, "", "", "2.0.0", "workspace.toml", "7.7.7");
+    assert sel.version == "2.0.0";
+    assert sel.source == "workspace.toml";
 }
