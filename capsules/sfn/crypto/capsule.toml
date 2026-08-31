@@ -10,22 +10,26 @@ description = "Cryptographic hashing and digest functions for Sailfin"
 "sfn/strings" = "*"
 
 [capabilities]
-# `io` reads a CA bundle from disk (`src/trust_store.sfn`); `rand` backs
-# `random_bytes` over `getentropy` (`src/rand.sfn`). Both are real
-# shipped surface.
+# The complete shipped surface, and deliberately nothing more. `io` reads
+# a CA bundle from disk (`src/trust_store.sfn`); `rand` backs
+# `random_bytes` over `getentropy` (`src/rand.sfn`).
 #
-# `clock` is TEST-ONLY. No shipped function in this capsule declares it —
-# it is here for six `test` blocks that assert verification timing
-# budgets and X.509 validity windows. It has to be listed anyway because
-# `_analyze_statement_capabilities` checks `test` blocks against the same
-# ceiling as shipped code, so this manifest over-claims `clock` on the
-# strength of a timing assertion. Read that as a known wart, not an
-# intended grant: it matters because SFEP-0016 derives a syscall mask
-# from this list, and this is the most security-sensitive capsule in the
-# tree. SFN-1216 adds a `dev-required` key that unions into the ceiling
-# only for `TestDeclaration`; when it lands, `clock` moves there and
-# this comment goes with it.
-required = ["clock", "io", "rand"]
+# `clock` is deliberately ABSENT. This capsule reads no ambient time:
+# callers supply `now_ms` and the X.509 code does a window comparison
+# (SFN-504), which is what keeps the clock surface scoped to `sfn/time`.
+# `compiler/tests/e2e/clock_gettime_reader_test.sfn` pins that boundary
+# by asserting this manifest never names `clock`, so adding it to satisfy
+# the six `![clock]` timing and validity `test` blocks would trade a real
+# capability grant, on the most security-sensitive capsule in the tree,
+# for a test-only convenience. Under SFEP-0016 that grant becomes a
+# syscall mask.
+#
+# The cost of holding the line: `sfn check` on one of those test files
+# reports `E0403`, because it applies this ceiling to `test` blocks while
+# `sfn test` does not. That divergence is SFN-1219; the `dev-required`
+# key in SFN-1216 is what lets both paths agree without widening the
+# shipped surface.
+required = ["io", "rand"]
 
 [build]
 entry = "src/mod.sfn"
