@@ -32,6 +32,7 @@ import { check_program_scopes } from "./statement_checks";
 import {
     _collect_imported_call_symbols,
     _filter_interface_declarations,
+    _filter_struct_declarations,
     _generic_struct_names,
     _names_from_symbols,
     _symbols_from_global_names,
@@ -58,7 +59,8 @@ fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
 fn typecheck_diagnostics_with_prelude(program: Program, prelude_globals: string[]) -> Diagnostic[] {
     let empty_imports: Statement[] = [];
     let empty_implicit: ImplicitSymbol[] = [];
-    return typecheck_diagnostics_full(program, empty_imports, empty_import_symbols(), prelude_globals, empty_implicit);
+    let empty_structs: Statement[] = [];
+    return typecheck_diagnostics_full(program, empty_imports, empty_import_symbols(), prelude_globals, empty_implicit, empty_structs);
 }
 
 fn typecheck_error_count_with_prelude(program: Program, prelude_globals: string[]) -> int {
@@ -123,7 +125,8 @@ fn typecheck_diagnostics_with_imports(program: Program, imported_interfaces: Sta
 fn typecheck_diagnostics_with_import_symbols(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable) -> Diagnostic[] {
     let empty_prelude: string[] = [];
     let empty_implicit: ImplicitSymbol[] = [];
-    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, empty_prelude, empty_implicit);
+    let empty_structs: Statement[] = [];
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, empty_prelude, empty_implicit, empty_structs);
 }
 
 // Prelude-aware symbol path (#812). The `sfn test` resolver

@@ -26,7 +26,7 @@ fn _walk_ctx() -> TypeckCtx {
     let no_interfaces: Statement[] = [];
     let no_generic_structs: string[] = [];
     let no_known_types: string[] = [];
-    return make_typeck_ctx(_no_bindings(), empty_import_symbols(), empty_import_symbols(), no_interfaces, no_interfaces, _no_bindings(), false, no_generic_structs, no_known_types);
+    return make_typeck_ctx(_no_bindings(), empty_import_symbols(), empty_import_symbols(), no_interfaces, no_interfaces, _no_bindings(), false, no_generic_structs, no_known_types, no_interfaces);
 }
 
 fn _raw_diags(text: string) -> Diagnostic[] ![io] {

@@ -71,12 +71,12 @@ import {
     _find_symbol_with_kind
 } from "./symbols";
 
-fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, available_imports: ImportSymbolTable, top_level: SymbolEntry[], generic_struct_names: string[], known_types: string[]) -> Diagnostic[] {
+fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, available_imports: ImportSymbolTable, top_level: SymbolEntry[], generic_struct_names: string[], known_types: string[], imported_structs: Statement[]) -> Diagnostic[] {
     let mut bindings: SymbolEntry[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
-        let result = check_statement(statement, make_typeck_ctx(bindings, imports, available_imports, interfaces, program.statements, top_level, true, generic_struct_names, known_types));
+        let result = check_statement(statement, make_typeck_ctx(bindings, imports, available_imports, interfaces, program.statements, top_level, true, generic_struct_names, known_types, imported_structs));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
