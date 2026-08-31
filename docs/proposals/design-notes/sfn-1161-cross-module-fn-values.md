@@ -23,6 +23,7 @@ seed 0.10.6 and the compiler built from `main` at `b2c3a18`.
 | **B. Imported *functions* as values** | **Stays rejected, with a new `E0843` that names the real restriction.** SFN-1161's acceptance criteria permit either outcome; making it typecheck would mean changing a positionally-indexed struct and rewriting a fail-closed guard on a PR whose output becomes a seed, with no consumer asking for it (§4). |
 | **C. Facet 3 — `E0840` on named-struct parameters** | **Bundled, though the issue does not mention it.** Without it the seed does not unblock the bare-name registry form and SFN-1173 cuts twice; `.claude/rules/seed-dependency.md` says cross an unavoidable gate once with the complete family (§5). Relaxation is narrow: parameters only, named structs only. |
 | **D. Is SFN-1161 actually a blocker?** | **No — and this is worth recording.** The lambda form already compiles and runs end-to-end cross-module today (§2). SFN-1161 → SFN-1173 → SFN-1159 is a convenience chain, not a hard gate. |
+| **E. How the fix reaches the build path** | **By the module-local staging pass *deferring* the verdict, not by giving it an import context** (§5.5). Threading imports into staging would break an invariant the parallel emit fan-out and the source-only stage cache depend on, and would newly fire `E0843` across the compiler's own modules. |
 
 ---
 
@@ -265,6 +266,74 @@ imported into the `dev_*` modules.
 
 ---
 
+## 5.5. The staging deferral — how the fix reaches the build path
+
+Facets 1 and 3 fix the passes that *have* an import context. They do not, on
+their own, fix `sfn build` — or even `sfn check <entry>`.
+
+**The split is entry-vs-dependency, not check-vs-build.** Measured:
+
+```
+sfn check verb_a.sfn                  → ok      (verb_a is a named entry)
+sfn check main.sfn                    → E0808   (verb_a staged as a dependency)
+sfn run   main.sfn                    → E0808   (same staging pass)
+```
+
+The capsule resolver stages every dependency by emitting its `.sfn-asm`
+standalone, through two sibling copies of one module-local preamble
+(`compiler/src/native_artifact_writer.sfn:84` in-process,
+`compiler/src/main.sfn:728` via the subprocess route). Neither loads an import
+context, so `ctx.imported_structs` is empty and facet 1 cannot fire.
+
+**Order-independence of staging is a deliberate invariant, not an oversight.**
+It is stated at `compiler/src/build/runtime_objs.sfn:1424-1427` ("emits each
+module standalone … so staging `sfn/crypto` does not require `sfn/strings`
+staged for it"), at `compiler/src/cli/commands/emit.sfn:188` ("`native` is
+import-context-free by design (#906)"), and in the
+`write_native_text_file_with_module_gated` header
+(`compiler/src/main.sfn:770-777`). Three things depend on it: the parallel emit
+fan-out schedules a flat list with no dependency edges; the stage cache key
+(`build_cache.sfn:1466-1475`) is a function of the module's own source alone;
+and `.import-deps` sidecars are derived in a later pass. Staging is also **BFS
+outward from the entry**, i.e. dependents *first* — so on a cold cache the
+imported module's artifact does not exist yet when its importer is staged.
+
+So threading an import context into staging was rejected on four grounds:
+
+1. It breaks the order-independence invariant those three mechanisms rely on.
+2. It would make a diagnostic depend on cache warmth — the same source could
+   pass or fail depending on which artifacts happened to be staged.
+3. It is **error-adding**, not merely risky: `is_function_kind` returns false
+   for `"import"`, so an imported function in a struct field is *silently
+   accepted* at staging today. Supplying the context makes `ctx.expected_type`
+   non-null and fires `E0843` where staging previously emitted nothing —
+   across all ~500 compiler modules, on a seed PR.
+4. It is the larger change. The alternative is one arm in the analyzer.
+
+**The deferral.** Where the shape is unknowable, the `Struct` arm drops `E0808`
+for that one field rather than guessing "reject". Three guards keep it narrow:
+the struct name must be one this module actually imported (a typo is not in
+`ctx.known_types`), the type name must be a single segment (so qualified
+variant literals like `Result.Ok { … }` keep their verdict), and the field
+value must be a bare `Identifier` (so `Verb { run: helper(worker) }` still
+reports from inside the call). With `ctx.expected_type == null`, `E0808` is the
+only fn-value diagnostic the arm can produce, so the filter is complete and
+cannot silently swallow a second code.
+
+This mirrors an existing precedent rather than inventing one: the native
+resolve gate already defers to LLVM lowering on the same grounds
+(`main.sfn:770-777`).
+
+**The accepted cost, stated plainly.** `sfn check <entry>` no longer reports a
+genuinely wrong cross-module fn value in a *dependency* — an arity mismatch,
+say. It is still caught by `sfn build`/`run`/`test` and by checking that file
+directly. This is a real reduction in what `check <entry>` proves, not a free
+win. It is bounded by what staging already cannot see: imported interfaces,
+imported effect tables, and implicit symbols are all outside its reach today,
+so cross-module `implements` conformance and `E0402` transitivity in a
+dependency are already deferred the same way. The fix aligns one more
+diagnostic with the epistemic limit its neighbours already have.
+
 ## 6. Effect-row subsumption — unaffected
 
 `_fn_value_effect_is_covered` (`named_fn_values.sfn:104-113`) calls
@@ -289,7 +358,14 @@ tests at `compiler/tests/unit/fn_reference_typecheck_test.sfn:225-236`.
 | Facet 3 is independent of imports | `sfn check` on the all-local struct-parameter fixture → clean |
 | Cross-module dispatch works at runtime, not just at `check` | The `cross_module_fn_field_dispatch` e2e — **build and run**, per acceptance criterion 3 |
 | `E0843` replaced the C-ABI advice | e2e asserts stderr contains `E0843` and **not** `as * u8` |
+| The deferral did not fail open | A struct name that was never imported still reports `E0808` |
 | No latent diagnostic was woken | `sfn dev clean build` then `sfn dev verify` — mandatory here, this is a seed PR |
+
+All of the above were run and passed; §5.5 records the measured entry-vs-
+dependency split that made the deferral necessary. One caution for future
+readers: `sfn dev clean build` **ignores the `build` argument** — it cleans,
+exits 0, and compiles nothing. The structural sequence is `sfn dev clean`
+followed by `sfn dev bootstrap build`.
 
 ---
 
