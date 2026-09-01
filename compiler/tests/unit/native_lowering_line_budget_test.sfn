@@ -91,7 +91,9 @@ fn _grandfathered_ceiling(name: string) -> int {
     // capsule facade; no lowering logic grew. 859 -> 925: SFN-915, per the
     // note above.
     if name == "core_cast_lowering.sfn" { return 826; }
-    if name == "core_operators.sfn" { return 830; }
+    // 830 -> 826: SFN-670 folds the operator-match nest in
+    // `find_top_level_operator` into `&&` conditions.
+    if name == "core_operators.sfn" { return 826; }
     // Newly grandfathered by SFN-915: both were under 750 before the
     // `diags` field landed and are over only by the per-literal cost of
     // naming it. They are the two smallest entries here and the first
