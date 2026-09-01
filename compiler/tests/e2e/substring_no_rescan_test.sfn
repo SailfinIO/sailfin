@@ -1,0 +1,73 @@
+// End-to-end guard: `substring`/`substring_unchecked` on an SfnString
+// aggregate must not re-derive the string's length at runtime.
+//
+// Both builtins share the `registry_services.sfn` descriptor row that pins
+// `parameter_types: ["{i8*, i64}", "double", "double"]` and resolves to the
+// length-aware `sfn_str_slice_lv` symbol (SFN-632). The aggregate already
+// carries its length in field 1, so the lowering must pass it through
+// untouched rather than discarding it and re-scanning with `sfn_str_len`.
+//
+// This mirrors `string_index_no_rescan_test.sfn`'s pattern and its rationale
+// for the load-bearing assertion below.
+import { contains } from "sfn/strings";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+
+fn _scratch(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = default_scratch_dir(); }
+    let dir = base + "/sfn-substring-no-rescan-" + tag;
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A module whose only string operations are the free `substring(...)` call
+// and the `substring_unchecked(...)` builtin on a `string` parameter — both
+// spellings that route through the same registry row. So a correct build
+// emits NO `sfn_str_len` call anywhere in this module.
+//
+// Deliberately no string comparison: `==` still routes an operand whose
+// length is already known through the same discard-then-rescan shape
+// (`core_operands.sfn`), so comparing a sliced result would leave a
+// `sfn_str_len` call here for an unrelated reason and mask the regression
+// this test exists to catch.
+fn _fixture_source() -> string {
+    return "fn slice(s: string) -> int {\n" + "    let a = substring(s, 1, 3);\n"
+        + "    let b = substring_unchecked(s, 0, 2);\n"
+        + "    return a.length + b.length;\n"
+        + "}\n";
+}
+
+test "lowering: substring on an SfnString aggregate emits no sfn_str_len rescan" ![io] {
+    let dir = _scratch("norescan");
+    let src = dir + "/substring_fixture.sfn";
+    let out_ll = dir + "/substring_fixture.ll";
+    fs.writeFile(src, _fixture_source());
+
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", src], _env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+
+    let ir = fs.readFile(out_ll);
+
+    // The slice must reach the length-aware symbol.
+    assert contains(ir, "@sfn_str_slice_lv");
+
+    // The load-bearing assertion. A `declare` for the symbol is harmless, so
+    // this pins the CALL specifically: no runtime length recovery may appear
+    // in a module that only slices and reads `.length`.
+    assert ! contains(ir, "call i64 @sfn_str_len(");
+}

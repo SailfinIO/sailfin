@@ -61,3 +61,26 @@ test "string: substring_unchecked of an immediate grapheme past end" {
     let g = src[3];
     assert substring_unchecked(g, 1, 1) == "";
 }
+
+// SFN-632: `substring_unchecked` now lowers to `sfn_str_slice_lv`, which
+// clamps `end` against the LENGTH CARRIED IN THE AGGREGATE rather than
+// scanning to a NUL. `end` past the string's length must clamp to it.
+test "string: substring_unchecked clamps end beyond the string length" {
+    let text = "hello";
+    assert substring_unchecked(text, 0, 9) == "hello";
+    assert substring_unchecked(text, 2, 9) == "llo";
+}
+
+// `start` at/beyond the string length yields empty rather than reading past
+// the payload.
+test "string: substring_unchecked with start beyond the length is empty" {
+    let text = "hello";
+    assert substring_unchecked(text, 5, 5) == "";
+    assert substring_unchecked(text, 9, 9) == "";
+}
+
+// `start > end` yields empty rather than an inverted or out-of-bounds slice.
+test "string: substring_unchecked with start past end is empty" {
+    let text = "hello";
+    assert substring_unchecked(text, 4, 1) == "";
+}
