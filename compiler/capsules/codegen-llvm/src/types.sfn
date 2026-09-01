@@ -87,6 +87,13 @@ struct RuntimeHelperDescriptor {
     // follow-up issues. Only numeric `double ↔ i64` coercion is
     // supported in this PR; struct/pointer coercion arrives if/when
     // a future helper needs it.
+    //
+    // SFN-632 added the first non-numeric use: `substring` /
+    // `substring_unchecked` set `"{i8*, i64}*"` against a `"{i8*, i64}"`
+    // `return_type`, so the call site loads the aggregate through the pointer
+    // the helper returns. That needed no new coercion code — the generic
+    // pointer-deref arm in `core_operands/pointer_tail.sfn` already handles
+    // `{i8*, i64}*` -> `{i8*, i64}`. Struct-by-value coercion is still absent.
     c_abi_return_type: string?;
 }
 
