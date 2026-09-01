@@ -78,6 +78,14 @@ import {
     make_undefined_value_diagnostic,
     serve_argument_type_diagnostics
 } from "./primitive_rules";
+import {
+    _imported_struct_field_expected_type,
+    _struct_field_expected_type,
+    _struct_name_is_imported,
+    _struct_shape_is_resolvable,
+    _struct_type_names,
+    _without_code
+} from "./struct_literal_fn_values";
 import { _declared_struct_annotation, _string_list_has } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
@@ -720,174 +728,6 @@ fn _array_element_expected_type(expected: TypeAnnotation?) -> TypeAnnotation? {
         }
     }
     return TypeAnnotation { text: element };
-}
-
-fn _struct_field_expected_type(type_name: string[], field_name: string, ctx: TypeckCtx) -> TypeAnnotation? {
-    if type_name.length == 0 { return null; }
-    let name = type_name[type_name.length - 1];
-    let mut declaration_index: int = 0;
-    loop {
-        if declaration_index >= ctx.declarations.length { break; }
-        let declaration = ctx.declarations[declaration_index];
-        if declaration.variant == "StructDeclaration" {
-            if declaration.name == name {
-                let mut field_index: int = 0;
-                loop {
-                    if field_index >= declaration.fields.length { break; }
-                    if declaration.fields[field_index].name == field_name {
-                        return declaration.fields[field_index].type_annotation;
-                    }
-                    field_index += 1;
-                }
-            }
-        }
-        declaration_index += 1;
-    }
-    return null;
-}
-
-// Drop diagnostics carrying `code`, preserving every other diagnostic and
-// their order (SFN-1161).
-fn _without_code(diagnostics: Diagnostic[], code: string) -> Diagnostic[] {
-    let mut kept: Diagnostic[] = [];
-    let mut index: int = 0;
-    loop {
-        if index >= diagnostics.length { break; }
-        if !strings_equal(diagnostics[index].code, code) {
-            kept.push(diagnostics[index]);
-        }
-        index += 1;
-    }
-    return kept;
-}
-
-// True when this module can see the struct's field list — declared locally, or
-// reconstructed from a staged import artifact (SFN-1161). False means the
-// fn-value verdict for its fields is not this pass's to render.
-fn _struct_shape_is_resolvable(type_name: string[], ctx: TypeckCtx) -> boolean {
-    if type_name.length == 0 { return false; }
-    let name = type_name[type_name.length - 1];
-    let mut index: int = 0;
-    loop {
-        if index >= ctx.declarations.length { break; }
-        if ctx.declarations[index].variant == "StructDeclaration" {
-            if ctx.declarations[index].name == name { return true; }
-        }
-        index += 1;
-    }
-    index = 0;
-    loop {
-        if index >= ctx.imported_structs.length { break; }
-        if ctx.imported_structs[index].variant == "StructDeclaration" {
-            if ctx.imported_structs[index].name == name { return true; }
-        }
-        index += 1;
-    }
-    return false;
-}
-
-// True when the literal names a type this module explicitly imported
-// (SFN-1161).
-//
-// Deliberately NOT `ctx.known_types`: that is the whole resolution scope —
-// local functions, enums, interfaces, type aliases and prelude globals all
-// live there alongside import specifiers, so testing membership would treat
-// `interface Runner { ... }` + `Runner { go: helper }` as an imported struct
-// and silently drop its E0808 in a program with no imports at all. Match on
-// the symbol's `kind` instead, which only `_collect_imported_call_symbols`
-// sets to `"import"`.
-//
-// A local type declaration of the same name wins outright: it means the shape
-// is knowable here and the miss is a real error, not missing context.
-//
-// The single-segment guard excludes qualified enum-variant literals such as
-// `Result.Ok { ... }`, whose trailing segment is a variant rather than a
-// struct — those keep their normal verdict too.
-fn _struct_name_is_imported(type_name: string[], ctx: TypeckCtx) -> boolean {
-    if type_name.length != 1 { return false; }
-    let name = type_name[0];
-    let mut found_import: boolean = false;
-    let mut index: int = 0;
-    loop {
-        if index >= ctx.top_level.length { break; }
-        let entry = ctx.top_level[index];
-        if entry.name == name {
-            if strings_equal(entry.kind, "struct") { return false; }
-            if strings_equal(entry.kind, "enum") { return false; }
-            if strings_equal(entry.kind, "interface") { return false; }
-            if strings_equal(entry.kind, "type") { return false; }
-            if strings_equal(entry.kind, "import") { found_import = true; }
-        }
-        index += 1;
-    }
-    return found_import;
-}
-
-// Names of every struct type in scope — local declarations plus the imported
-// channel (SFN-1161). Feeds the parameter-position ABI relaxation in
-// `check_named_fn_value_compatibility`: a named user struct is `%T*` under the
-// boxed-struct ABI and so is pointer-width, unlike `string`.
-//
-// Built from actual `StructDeclaration`s only, never from `ctx.known_types` —
-// that list also carries interfaces, which lower to a `{i8*, i8*}` pair and
-// must keep failing the pointer-width test.
-//
-// Computed at the call site rather than carried on `TypeckCtx`: it is needed
-// only when a bare function name meets a `fn(...)` expectation, which is rare,
-// and every `TypeckCtx` field is indexed positionally by the seed.
-fn _struct_type_names(ctx: TypeckCtx) -> string[] {
-    let mut names: string[] = [];
-    let mut index: int = 0;
-    loop {
-        if index >= ctx.declarations.length { break; }
-        if ctx.declarations[index].variant == "StructDeclaration" {
-            names.push(ctx.declarations[index].name);
-        }
-        index += 1;
-    }
-    index = 0;
-    loop {
-        if index >= ctx.imported_structs.length { break; }
-        if ctx.imported_structs[index].variant == "StructDeclaration" {
-            names.push(ctx.imported_structs[index].name);
-        }
-        index += 1;
-    }
-    return names;
-}
-
-// The imported half of the struct-literal field lookup (SFN-1161). Consulted
-// only after `_struct_field_expected_type` misses, so a local declaration
-// always wins a name collision — the same precedence the interface merge in
-// `typecheck/mod.sfn` gives locals.
-//
-// These declarations are reconstructed from `.sfn-asm` artifacts, so they
-// carry field names and annotation text but no method bodies and no type
-// parameters. That is sufficient here (the field's `fn(...)` annotation
-// round-trips verbatim) and is precisely why the result must not reach any
-// check that reasons about methods or generic substitution.
-fn _imported_struct_field_expected_type(type_name: string[], field_name: string, ctx: TypeckCtx) -> TypeAnnotation? {
-    if type_name.length == 0 { return null; }
-    let name = type_name[type_name.length - 1];
-    let mut declaration_index: int = 0;
-    loop {
-        if declaration_index >= ctx.imported_structs.length { break; }
-        let declaration = ctx.imported_structs[declaration_index];
-        if declaration.variant == "StructDeclaration" {
-            if declaration.name == name {
-                let mut field_index: int = 0;
-                loop {
-                    if field_index >= declaration.fields.length { break; }
-                    if declaration.fields[field_index].name == field_name {
-                        return declaration.fields[field_index].type_annotation;
-                    }
-                    field_index += 1;
-                }
-            }
-        }
-        declaration_index += 1;
-    }
-    return null;
 }
 
 // Walk a match-arm pattern for diagnostics, exempting the `Raw` shorthand
