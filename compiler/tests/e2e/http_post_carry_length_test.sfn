@@ -218,6 +218,7 @@ fn _harness_c() -> string {
         + "#include <signal.h>\n"
         + "#include <arpa/inet.h>\n"
         + "#include <sys/socket.h>\n"
+        + "#include <sys/time.h>\n"
         + "#include <sys/wait.h>\n"
         + "#include <netinet/in.h>\n"
         + "\n"
@@ -235,7 +236,18 @@ fn _harness_c() -> string {
     + "int sfn_socket_net_init(void) { return 0; }\n"
         + "int sfn_socket_open(int d, int t, int p) { return socket(d, t, p); }\n"
         + "int sfn_socket_close(int fd) { return close(fd); }\n"
-        + "void sfn_socket_set_timeouts(int fd, int secs) { (void)fd; (void)secs; }\n"
+    // A REAL pass-through, not a no-op. The runtime arms a receive/send
+    // deadline here (#1581); stubbing it out would leave the parent
+    // blocked forever in `_recv_all` against a child that is itself
+    // blocked waiting for body bytes a regressed build never sends —
+    // turning the exact partial regression this test exists to catch
+    // into a per-file timeout kill with no diagnostic, instead of the
+    // `missing header` message `check_dump` prints.
+    + "void sfn_socket_set_timeouts(int fd, int secs) {\n"
+        + "    struct timeval tv; tv.tv_sec = secs; tv.tv_usec = 0;\n"
+        + "    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));\n"
+        + "    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));\n"
+        + "}\n"
         + "long long sfn_socket_recv(int fd, char *buf, long long len, int flags) {\n"
         + "    return recv(fd, buf, (size_t)len, flags);\n"
         + "}\n"
@@ -284,6 +296,13 @@ fn _harness_c() -> string {
         + "    if (pid == 0) {\n"
         + "        int c = accept(lfd, NULL, NULL);\n"
         + "        if (c < 0) { _exit(1); }\n"
+    // Bound the child too, so a regressed build that sends fewer body
+    // bytes than it advertised makes the loop below give up, dump what
+    // it did receive, and still reply 200 — letting the parent reach
+    // `check_dump` and report which of the header or the bytes is
+    // wrong. `if (got <= 0) break;` already handles the EAGAIN return.
+    + "        struct timeval rtv; rtv.tv_sec = 3; rtv.tv_usec = 0;\n"
+        + "        setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));\n"
         + "        char buf[8192];\n"
         + "        long n = 0;\n"
         + "        long header_end = -1;\n"

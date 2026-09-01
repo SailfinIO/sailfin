@@ -16,29 +16,36 @@
 // 443, SNI = host, peer chain verified AND hostname checked (RFC 6125);
 // system trust-store discovery hardening is #3.
 //
-// ABI. `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` flips the curl
+// ABI. `compiler/capsules/codegen-llvm/src/runtime_helpers/` flips the curl
 // registry rows by setting `native_signature` to the symbols
 // defined here, exactly as the `fs.*` rows were flipped to
 // `sfn_fs_*` (the legacy C `symbol` stays for seed compat):
 //   - `http.get_body`  (url)               -> `sfn_http_get`
-//   - `http.post_json` (url, body, auth)   -> `sfn_http_post`
+//   - `http.post_json` (url, body, auth)   -> `sfn_http_post_lv`
 //   - `http.download`  (url, output_path)  -> `sfn_http_download`
 //   - `http_get`       (url)               -> `sfn_http_get`
-//   - `http_post`      (request, body)      -> `sfn_http_post2`
-// All descriptors keep their existing `i8*`-in / `i8*`-out shape
-// (raw NUL-terminated `* u8` buffers, no arena threading) — the
-// same plain-pointer ABI the `sfn_fs_*` adapters use. The issue's
-// `*Arena` / `SfnString` shorthand would require retyping the
-// descriptors to the aggregate ABI and threading an arena through
-// `core_call_lowering.sfn` (not in this issue's Files Affected);
-// matching the proven `fs.*` raw-pointer shape keeps the flip
-// self-contained.
+//   - `http_post`      (request, body)      -> `sfn_http_post2_lv`
+//   - `http.post`      (url, body)          -> `sfn_http_post2_lv`
+// Every descriptor is `i8*`-in / `i8*`-out (raw NUL-terminated
+// `* u8` buffers, no arena threading) EXCEPT the request body on
+// the three POST rows, which carries the `{i8*, i64}` aggregate so
+// the caller's byte length survives to the `Content-Length` header
+// instead of being re-derived with `strlen` (SFN-1022). The url and
+// auth_header operands stay bare pointers: they are genuinely
+// NUL-terminated C strings, so there is nothing for a length to buy
+// there. This mirrors the `fs.*` rows, whose payload param took the
+// same aggregate under SFN-1009 while their path param stayed `i8*`.
 //
 // The two POST arities exist because the registry carries two
 // rows of different arity: `http.post_json` is (url, body,
 // auth_header) and the `http_post` alias is (request, body). The
-// alias points at `sfn_http_post2`, a 2-arg wrapper that forwards
-// to `sfn_http_post` with an empty auth header.
+// alias points at `sfn_http_post2_lv`, a 3-arg wrapper that forwards
+// to `sfn_http_post_lv` with an empty auth header.
+//
+// The bare-pointer `sfn_http_post` / `sfn_http_post2` are NOT dead
+// and must not be re-signatured in place — seed-built IR still calls
+// them at their original arity, and C linking would not catch the
+// mismatch. See the note above `sfn_http_post_lv` below.
 //
 // Return semantics (matching the curl bodies they replace):
 //   - get / post: the response BODY (headers stripped), null on a
