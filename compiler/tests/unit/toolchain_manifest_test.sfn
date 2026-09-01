@@ -367,13 +367,16 @@ test "toolchain manifest: the header reader agrees with the full reader on a mal
     let bad_line_text = _manifest_text(_good_magic(), bad_line, _good_record_lines());
     _assert_header_agrees(bad_line_text);
     assert toolchain_manifest_parse_header(bad_line_text).status == TOOLCHAIN_MANIFEST_MALFORMED;
-    // No separator at all: header lines run straight into end-of-text.
-    let mut no_separator: string = _good_magic() + "\n";
+    // No separator at all: header lines run straight into end-of-text. The
+    // trailing newline is stripped deliberately — with it, the split yields
+    // a final empty line that both readers accept as the separator, and the
+    // verdict becomes the record-section one ("records no files").
+    let mut no_separator: string = _good_magic();
     let header = _good_header();
     let mut i: int = 0;
     loop {
         if i >= header.length { break; }
-        no_separator = no_separator + header[i] + "\n";
+        no_separator = no_separator + "\n" + header[i];
         i += 1;
     }
     _assert_header_agrees(no_separator);
