@@ -58,9 +58,7 @@ fn _scratch_dir() -> string ![io] {
 
 fn _process_path() -> string ![io] {
     let configured = env.get("SAILFIN_REPO_ROOT");
-    if configured.length > 0 {
-        return configured + "/runtime/sfn/process.sfn";
-    }
+    if configured.length > 0 { return configured + "/runtime/sfn/process.sfn"; }
     return "runtime/sfn/process.sfn";
 }
 
@@ -253,16 +251,15 @@ fn _echo_bin() -> string ![io] {
         + "    }\n"
         + "    return 0;\n"
         + "}\n");
-    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", dir + "/echo", src], _child_env());
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", dir
+        + "/echo", src], _child_env());
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     assert build_exit == 0;
     return _built_path(dir + "/echo");
 }
 
-fn _byte_length(s: string) -> int {
-    return s.length;
-}
+fn _byte_length(s: string) -> int { return s.length; }
 
 test "process.sfn emit: defines both the bare and length-carrying write twins" ![io] {
     let ll = _emit_process_ll();
@@ -292,7 +289,7 @@ test "probe routes process.handle_write through @sfn_process_handle_write_bytes"
     // calls it) but must no longer be the target of a freshly emitted
     // call — that is what proves the length is carried rather than
     // dropped and re-derived with `strlen`.
-    assert !_has_call_site(ir, "sfn_process_handle_write");
+    assert ! _has_call_site(ir, "sfn_process_handle_write");
     // SFN-1021: pin the operand SHAPE, not just the symbol. The aggregate
     // agrees with the callee's split `(data: *u8, len: i64)` params only
     // because a 16-byte by-value aggregate flattens to the same registers.
@@ -304,7 +301,7 @@ test "probe routes process.handle_write through @sfn_process_handle_write_bytes"
     let write_call = _call_line(ir, "sfn_process_handle_write_bytes");
     assert write_call != "";
     assert contains(write_call, "{i8*, i64}");
-    assert !contains(write_call, "byval");
+    assert ! contains(write_call, "byval");
 }
 
 test "runtime object exports both write twins" ![io] {
