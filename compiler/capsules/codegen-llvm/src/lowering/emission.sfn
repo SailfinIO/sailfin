@@ -177,6 +177,56 @@ fn _reorder_phis_to_block_start(lines: string[]) -> string[] {
     return out;
 }
 
+// SFN-968: identify an `alloca` line that is safe to hoist out of a
+// non-entry block into the function entry block. Relocation can only
+// widen an alloca's dominance region (it references no SSA operand), so
+// every alloca emitted by a fixed-size `alloca T` form is safe to move —
+// this compiler never emits LLVM's dynamic `alloca T, i32 %n` form. The
+// comma check below is therefore the safety gate: a comma after the type
+// means either that dynamic form or an explicit `, align N` clause, and
+// neither is relocated. Declining to hoist only preserves today's
+// behaviour, so this predicate stays conservative rather than clever.
+fn _is_hoistable_alloca_line(line: string) -> boolean {
+    if line.length == 0 { return false; }
+    if substring(line, 0, 1) != " " { return false; }
+    let trimmed = trim_text(line);
+    if !starts_with(trimmed, "%") { return false; }
+    let pos = index_of(trimmed, " = alloca ");
+    if pos <= 0 { return false; }
+    let name = substring(trimmed, 0, pos);
+    if index_of(name, " ") >= 0 { return false; }
+    let type_text = substring(trimmed, pos + 10, trimmed.length);
+    if type_text.length == 0 { return false; }
+    if index_of(type_text, ",") >= 0 { return false; }
+    return true;
+}
+
+// Collect the hoistable alloca lines from a body line stream, in order.
+fn _collect_hoistable_allocas(lines: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if _is_hoistable_alloca_line(line) { out = out.push(line); }
+        i += 1;
+    }
+    return out;
+}
+
+// Remove the hoistable alloca lines from a body line stream, in order.
+fn _strip_hoistable_allocas(lines: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if !_is_hoistable_alloca_line(line) { out = out.push(line); }
+        i += 1;
+    }
+    return out;
+}
+
 // Helper: build a ParameterBinding for the loop in prepare_parameters_from_function.
 // Kept as a separate function so the loop never has an inline struct literal at the top level
 // of the loop body — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
@@ -565,7 +615,8 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
 
     let mut _eb_body: string[] = [];
     _eb_body = extend_string_array(_eb_body, _eb_allocas);
-    _eb_body = extend_string_array(_eb_body, _eb_body_lines);
+    _eb_body = extend_string_array(_eb_body, _collect_hoistable_allocas(_eb_body_lines));
+    _eb_body = extend_string_array(_eb_body, _strip_hoistable_allocas(_eb_body_lines));
     lines = extend_string_array(lines, _eb_body);
 
     let mut _eb_has_terminator: boolean = false;
