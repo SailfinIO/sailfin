@@ -1,0 +1,45 @@
+// Fixture for paren_operand_angle_lowering_test.sfn (SFN-670): every binding
+// here is a binary expression whose operand is a parenthesized group, some
+// containing an unbalanced `<`/`>` that the top-level operator scan must not
+// mistake for a generic type bracket.
+fn take_int(x: int) -> int { return x; }
+
+fn take_float(x: float) -> float { return x; }
+
+fn id<T>(x: T) -> T { return x; }
+
+fn main() ![io] {
+    let n: int = 5;
+    let a: int = 2;
+    let b: int = 3;
+    let c: int = 10;
+
+    // Unannotated: must infer `int` and pass through an `int` parameter.
+    let shifted = (1 << n) - 1;
+    print(take_int(shifted));
+
+    // Annotated form of the same shape.
+    let annotated: int = (1 << n) - 1;
+    print(annotated);
+
+    // A lone comparison inside the group: one `<`, no `>`.
+    let cmp = (a < b) as int + c;
+    print(cmp);
+
+    // Right shift inside the group: one `>`, no `<`.
+    let halved = (c >> 1) + a;
+    print(halved);
+
+    // Regression guard: the already-working shape.
+    let plain = (a + b) * c;
+    print(plain);
+
+    // A genuine generic call as a binary operand keeps its type brackets.
+    let generic = id<int>(7) + 1;
+    print(generic);
+
+    // Float arithmetic under no type pressure still infers a float carrier.
+    let fl = 1.5 * 2.0;
+    let fl2 = take_float(fl);
+    if fl2 > 2.9 { print("float-ok"); }
+}
