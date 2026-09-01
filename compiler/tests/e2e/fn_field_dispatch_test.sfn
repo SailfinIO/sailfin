@@ -27,8 +27,8 @@ test "fn field: named and capturing values dispatch beside a struct method" ![io
         let _err = process.capture_take_stderr();
         return exit;
     });
-    expect_eq_int(outcome, 0);
-    expect_eq_str(output, "6\n15\n42\n6");
+    assert expect_eq_int(outcome, 0).ok;
+    assert expect_eq_str(output, "6\n15\n42\n6").ok;
 }
 
 test "fn field: IR stores and loads closure pairs without pair boxing" ![io] {
@@ -37,20 +37,20 @@ test "fn field: IR stores and loads closure pairs without pair boxing" ![io] {
         let exit = process.run_capture([sfn_bin_path(), "emit", "-o", llvm_path, "llvm", _fixture()], clean_runner_env(dir));
         let _out = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
-        expect_eq_int(exit, 0);
-        expect_eq_bool(fs.exists(llvm_path), true);
+        assert expect_eq_int(exit, 0).ok;
+        assert expect_eq_bool(fs.exists(llvm_path), true).ok;
 
         let ir = fs.readFile(llvm_path);
-        expect_eq_bool(contains(ir, "%Router = type { {i8*, i8*}, i64 }"), true);
-        expect_eq_bool(contains(ir, "insertvalue %Router undef, {i8*, i8*}"), true);
-        expect_eq_bool(contains(ir, "load {i8*, i8*}, {i8*, i8*}*"), true);
-        expect_eq_bool(contains(ir, "extractvalue {i8*, i8*}"), true);
+        assert expect_eq_bool(contains(ir, "%Router = type { {i8*, i8*}, i64 }"), true).ok;
+        assert expect_eq_bool(contains(ir, "insertvalue %Router undef, {i8*, i8*}"), true).ok;
+        assert expect_eq_bool(contains(ir, "load {i8*, i8*}, {i8*, i8*}*"), true).ok;
+        assert expect_eq_bool(contains(ir, "extractvalue {i8*, i8*}"), true).ok;
         // The general aggregate-to-pointer boxing fallback starts by sizing
         // the aggregate with this GEP. A closure pair belongs inline in the
         // field and must never enter that path; the Router itself remains a
         // normally boxed user struct.
-        expect_eq_bool(contains(ir, "getelementptr {i8*, i8*}, {i8*, i8*}* null, i32 1"), false);
+        assert expect_eq_bool(contains(ir, "getelementptr {i8*, i8*}, {i8*, i8*}* null, i32 1"), false).ok;
         return 0;
     });
-    expect_eq_int(outcome, 0);
+    assert expect_eq_int(outcome, 0).ok;
 }

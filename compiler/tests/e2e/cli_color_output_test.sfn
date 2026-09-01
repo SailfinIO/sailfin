@@ -46,43 +46,43 @@ test "cli color: always emits ANSI in captured human diagnostics" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "--color", "always", "check", _fixture()], _child_env("1"));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    expect_eq_int(exit, 1);
-    expect_eq_bool(_has_ansi(err), true);
-    expect_eq_bool(contains(err, "[31merror"), true);
-    expect_eq_bool(contains(out, "checked 1 file"), true);
+    assert expect_eq_int(exit, 1).ok;
+    assert expect_eq_bool(_has_ansi(err), true).ok;
+    assert expect_eq_bool(contains(err, "[31merror"), true).ok;
+    assert expect_eq_bool(contains(out, "checked 1 file"), true).ok;
 }
 
 test "cli color: never emits plain captured diagnostics" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "--color=never", "check", _fixture()], _child_env(""));
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    expect_eq_int(exit, 1);
-    expect_eq_bool(_has_ansi(err), false);
-    expect_eq_bool(contains(err, "error[E0501]"), true);
+    assert expect_eq_int(exit, 1).ok;
+    assert expect_eq_bool(_has_ansi(err), false).ok;
+    assert expect_eq_bool(contains(err, "error[E0501]"), true).ok;
 }
 
 test "cli color: auto honors NO_COLOR" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "--color", "auto", "check", _fixture()], _child_env("1"));
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    expect_eq_int(exit, 1);
-    expect_eq_bool(_has_ansi(err), false);
+    assert expect_eq_int(exit, 1).ok;
+    assert expect_eq_bool(_has_ansi(err), false).ok;
 }
 
 test "cli color: auto stays plain for captured output" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "--color", "auto", "check", _fixture()], _child_env(""));
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    expect_eq_int(exit, 1);
-    expect_eq_bool(_has_ansi(err), false);
+    assert expect_eq_int(exit, 1).ok;
+    assert expect_eq_bool(_has_ansi(err), false).ok;
 }
 
 test "cli color: JSON output never contains ANSI" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "--color", "always", "check", "--json", _fixture()], _child_env(""));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    expect_eq_int(exit, 1);
-    expect_eq_str(err, "");
-    expect_eq_bool(_has_ansi(out), false);
-    expect_eq_bool(contains(out, "\"code\":\"E0501\""), true);
+    assert expect_eq_int(exit, 1).ok;
+    assert expect_eq_str(err, "").ok;
+    assert expect_eq_bool(_has_ansi(out), false).ok;
+    assert expect_eq_bool(contains(out, "\"code\":\"E0501\""), true).ok;
 }
