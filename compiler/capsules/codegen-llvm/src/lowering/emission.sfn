@@ -51,6 +51,7 @@ import {
     string_array_contains,
     trim_text
 } from "../utils";
+import { hoist_allocas_to_entry } from "./emission_allocas";
 import { emit_async_function } from "./emission_async";
 import { build_define_header_line } from "./emission_header";
 import { fallthrough_block_is_reachable } from "./emission_reachability";
@@ -563,9 +564,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
             + number_to_string(_eb_allocas.length));
     }
 
-    let mut _eb_body: string[] = [];
-    _eb_body = extend_string_array(_eb_body, _eb_allocas);
-    _eb_body = extend_string_array(_eb_body, _eb_body_lines);
+    let _eb_body = hoist_allocas_to_entry(_eb_allocas, _eb_body_lines);
     lines = extend_string_array(lines, _eb_body);
 
     let mut _eb_has_terminator: boolean = false;

@@ -19,5 +19,5 @@
 #      (see `rendering.sfn` / `core_call_emission/dispatch.sfn`).
 #   3. Delete the bypass comment AND the allowlist line in the same PR.
 
-compiler/capsules/codegen-llvm/src/lowering/emission.sfn:692:            wrapper_lines.push("  %argv_arr_i8 = call i8* @sailfin_runtime_argv_to_string_array(i32 %argc, i8** %argv)");
-compiler/capsules/codegen-llvm/src/lowering/emission.sfn:762:        wrapper_lines.push("  call void @sailfin_runtime_panic_emit(i8* %msg)");
+compiler/capsules/codegen-llvm/src/lowering/emission.sfn:691:            wrapper_lines.push("  %argv_arr_i8 = call i8* @sailfin_runtime_argv_to_string_array(i32 %argc, i8** %argv)");
+compiler/capsules/codegen-llvm/src/lowering/emission.sfn:761:        wrapper_lines.push("  call void @sailfin_runtime_panic_emit(i8* %msg)");

@@ -1,0 +1,139 @@
+// compiler/tests/e2e/expression_alloca_hoist_test.sfn
+//
+// SFN-968: the expression-lowering layer has no route to the entry-block
+// alloca list `_eb_allocas` (`emission.sfn`), so it emits `alloca` text
+// directly into the body line stream — landing inside
+// `then`/`merge`/`loop.body`/`afterloop` blocks instead of the function
+// entry block. The fixture below drives the enum-literal construction site
+// (`core_literals_lowering.sfn`); the `match` in it binds arm payloads,
+// which SFN-967 already routes to `_eb_allocas`, so those arms serve as a
+// regression check rather than as the site under test. An alloca in a
+// repeatedly-executed block grows the stack every iteration and is not
+// reclaimed until the function returns. `emission.sfn` now runs a post-pass
+// at the splice that recovers every fixed-size `alloca` line from the body
+// and hoists it into the entry block alongside `_eb_allocas`.
+//
+// -O2 masks the leak (`mem2reg` erases the per-iteration allocas); -O0 does
+// not. `sfn build`/`sfn run` link at -O2, so they cannot observe the leak —
+// only `sfn test` links at -O0 (`compiler/src/cli/commands/test/link.sfn`).
+// This test therefore drives the fixture through a nested `sfn test`
+// invocation rather than `sfn build`, following the SFN-967 sibling
+// (`match_in_loop_alloca_hoist_test.sfn`), which fixed the analogous leak in
+// `instructions_match.sfn`.
+import { count, find, substring } from "sfn/strings";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-968-expression-alloca";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// A `loop` whose body constructs enum literals inside its own branch blocks.
+// The literals are built inline rather than behind a helper call on purpose:
+// a helper's frame pops on return, so allocas emitted into the helper's
+// blocks cannot accumulate and would not exercise the leak at all. Built
+// inline, the pre-fix compiler emits them into `then`/`else`/`loop.body`
+// nested inside the loop, where two allocate per iteration; at 16 bytes each
+// the 8 MiB stack is exhausted near 262,000 iterations, which the 400,000
+// below clears comfortably.
+fn _fixture_source() -> string {
+    return "enum Shape {\n" + "    Circle { radius: int },\n"
+        + "    Square { side: int }\n"
+        + "}\n"
+        + "\n"
+        + "test \"expression alloca repro\" {\n"
+        + "    let mut i: int = 0;\n"
+        + "    let mut acc: int = 0;\n"
+        + "    loop {\n"
+        + "        if i >= 400000 { break; }\n"
+        + "        let mut s: Shape = Shape.Square { side: 0 };\n"
+        + "        if i % 2 == 0 { s = Shape.Circle { radius: i }; } else { s = Shape.Square { side: i }; }\n"
+        + "        match s {\n"
+        + "            Shape.Circle { radius } => { acc = acc + radius; },\n"
+        + "            Shape.Square { side } => { acc = acc + side; }\n"
+        + "        }\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    assert acc > 0;\n"
+        + "}\n";
+}
+
+test "expression alloca: nested sfn test at -O0 runs the loop fixture and exits 0" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/expression_alloca_968_test.sfn";
+    if fs.exists(src) { fs.deleteFile(src); }
+    fs.writeFile(src, _fixture_source());
+
+    let child_env = clean_runner_env(nested_runner_scratch("sfn968-nested"));
+    let test_exit = process.run_capture([sfn_bin_path(), "test", src], child_env);
+    let _to = process.capture_take_stdout();
+    let _te = process.capture_take_stderr();
+    assert test_exit == 0;
+
+    fs.deleteFile(src);
+}
+
+// Acceptance check named in SFN-968: the emitted IR for the loop fixture
+// must show zero `alloca` inside any non-entry block. The entry block in
+// this compiler's emitted IR is labelled `block.entry`, not `entry`, and is
+// deliberately not scanned here.
+test "expression alloca: emitted IR has zero alloca outside the function entry block" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/expression_alloca_968_ir.sfn";
+    let out_ll = dir + "/expression_alloca_968_ir.ll";
+    if fs.exists(src) { fs.deleteFile(src); }
+    if fs.exists(out_ll) { fs.deleteFile(out_ll); }
+    fs.writeFile(src, _fixture_source());
+
+    let child_env = clean_runner_env(nested_runner_scratch("sfn968-emit"));
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", out_ll, "llvm", src], child_env);
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+    assert fs.exists(out_ll);
+
+    let ir = fs.readFile(out_ll);
+    // `forbody` is swept but not required — the fixture has no `for` loop.
+    // Every other prefix is one this fixture is known to emit, so each is
+    // asserted to have been found: a single shared "checked anything" flag
+    // would let six of the seven silently match nothing and still pass.
+    let prefixes: string[] = ["then", "else", "merge", "loop.body", "afterloop", "forbody", "matchbody"];
+    let required: boolean[] = [true, true, true, true, true, false, true];
+    let mut found: int[] = [0, 0, 0, 0, 0, 0, 0];
+    let mut pi: int = 0;
+    loop {
+        if pi >= prefixes.length { break; }
+        let prefix = prefixes[pi];
+        let mut pos: int = 0;
+        loop {
+            let label_idx = find(ir, "\n" + prefix, pos);
+            if label_idx < 0 { break; }
+            let body_start = label_idx + 1;
+            let next_label = find(ir, "\n\n", body_start);
+            let mut body_end = next_label;
+            if body_end < 0 { body_end = ir.length; }
+            let block = substring(ir, body_start, body_end);
+            assert count(block, " = alloca ") == 0;
+            found[pi] = found[pi] + 1;
+            pos = body_end;
+        }
+        pi += 1;
+    }
+    let mut ri: int = 0;
+    loop {
+        if ri >= prefixes.length { break; }
+        if required[ri] { assert found[ri] > 0; }
+        ri += 1;
+    }
+
+    fs.deleteFile(src);
+    fs.deleteFile(out_ll);
+}
