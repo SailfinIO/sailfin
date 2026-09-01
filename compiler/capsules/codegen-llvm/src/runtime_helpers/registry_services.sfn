@@ -237,11 +237,40 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // freshly-emitted IR reaches the new exports while seed-built
     // IR (which still carries the legacy `symbol` names) keeps
     // linking through the legacy bodies during the cutover.
+    // SFN-632: both rows carry the length in *and* out. `parameter_types[0]`
+    // was `i8*`, so a caller holding a good `{i8*, i64}` had its length
+    // extracted away going in and `sfn_str_slice` could not bound `end`
+    // against the real byte count; `return_type` was `i8*`, so the result
+    // re-entered the `i8*` -> `{i8*, i64}` bridge in
+    // `core_operands/pointer_coercion.sfn` and was re-scanned with
+    // `sfn_str_len`. That scan is a bounded `strnlen`, so a slice spanning an
+    // interior NUL silently reported only the bytes before it (the SFN-1008
+    // truncation class, pointed both ways as in SFN-1009).
+    //
+    // `native_signature` moves to the new `sfn_str_slice_lv`; `symbol` and the
+    // bare `sfn_str_slice` body both stay, because the pinned seed still emits
+    // `call i8* @sfn_str_slice` while compiling this tree. Retiring the old
+    // body is SFN-43.
+    //
+    // The `{i8*, i64}` parameter type is load-bearing in one direction worth
+    // stating: a call site whose string operand is typed `i8*` now gets an
+    // `sfn_str_len` scan inserted on the way IN by
+    // `core_operands/pointer_coercion.sfn`, the exact inverse of this fix.
+    // Every `substring` / `substring_unchecked` call site in the tree carries a
+    // `string`-typed operand, hence an aggregate, hence no scan
+    // (`runtime/prelude.sfn`, `compiler/capsules/syntax/src/lexer.sfn`);
+    // `compiler/tests/e2e/substring_no_rescan_test.sfn` pins it.
+    //
+    // `c_abi_return_type` is the pointer-to-header shape: a Sailfin body cannot
+    // construct a `{i8*, i64}` value carrying an arbitrary length, so
+    // `sfn_str_slice_lv` returns a pointer to a `{data@0, len@8}` header and
+    // the call site loads through it via the existing deref arm in
+    // `core_operands/pointer_tail.sfn`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "substring", symbol: "substring", return_type: "i8*", parameter_types: ["i8*", "double", "double"], native_signature: "sfn_str_slice", c_abi_return_type: null
+        target: "substring", symbol: "substring", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "double", "double"], native_signature: "sfn_str_slice_lv", c_abi_return_type: "{i8*, i64}*"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "substring_unchecked", symbol: "substring_unchecked", return_type: "i8*", parameter_types: ["i8*", "double", "double"], native_signature: "sfn_str_slice", c_abi_return_type: null
+        target: "substring_unchecked", symbol: "substring_unchecked", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "double", "double"], native_signature: "sfn_str_slice_lv", c_abi_return_type: "{i8*, i64}*"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.length", symbol: "sfn_str_len", return_type: "i64", parameter_types: ["i8*"], native_signature: "sfn_str_len", c_abi_return_type: null

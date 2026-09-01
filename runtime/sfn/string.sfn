@@ -413,6 +413,106 @@ fn sfn_str_slice(text: *u8, start: f64, end: f64) -> *u8 {
     return _sfn_substring_unchecked(text, si, ei);
 }
 
+// `sfn_str_slice_lv(s_data, s_len, start, end)` — SFN-632: the length-carrying
+// sibling of `sfn_str_slice` above. The bare `sfn_str_slice` stays defined: it
+// is the old-ABI symbol the pinned seed still emits while it compiles this
+// working tree, and removing it while a seed can still emit it is a silent
+// link-through to a body of the wrong shape. Deleting it is SFN-43's job.
+//
+// Two defects follow from the bare symbol's `(i8*, double, double) -> i8*`
+// shape, and this body fixes both:
+//   1. It never receives the source length, so it cannot bound `end` against
+//      the real byte count — the caller's `.length` guard is the only bound.
+//   2. Its `i8*` return makes the call site rebuild the `{i8*, i64}` aggregate
+//      by scanning the result with `sfn_str_len`, a bounded `strnlen`. A slice
+//      spanning an interior NUL then reports only the bytes before that NUL
+//      and the caller is told nothing — the SFN-1008 truncation class.
+//
+// Why the return is a pointer to a header rather than the aggregate itself. A
+// Sailfin body cannot construct a `{i8*, i64}` value carrying an arbitrary
+// length: every source-level route to that shape either starts from a literal
+// (constant length) or crosses the `i8*` -> `{i8*, i64}` bridge in
+// `core_operands/pointer_coercion.sfn`, which *is* the scan being removed. So
+// declaring this `-> SfnString` would only move the `sfn_str_len` call from the
+// caller into this body. Instead the body returns a pointer to a 16-byte
+// `{data@0, len@8}` SfnString header — the same layout `sfn_str_append` reads
+// and writes below — and the descriptor carries
+// `c_abi_return_type: "{i8*, i64}*"` so the call site loads the aggregate
+// through the existing pointer-deref coercion arm
+// (`core_operands/pointer_tail.sfn`). No new coercion code is required.
+//
+// Header and payload come from ONE allocation: `[0, 16)` header, `[16, ...)`
+// payload. 16 is 8-aligned, so the payload keeps the word read-modify-write
+// discipline `_num_put_byte` relies on (the seed cannot lower a single-byte
+// `* u8` store).
+fn sfn_str_slice_lv(s_data: *u8, s_len: i64, start: f64, end: f64) -> *u8 {
+    let mut si: i64 = 0;
+    if start == start { si = start as i64; }
+    let mut ei: i64 = 0;
+    if end == end { ei = end as i64; }
+
+    // Clamp against the carried length, not against a NUL scan. This is the
+    // half of the fix the bare symbol cannot perform at all.
+    let mut limit: i64 = s_len;
+    if limit < 0 { limit = 0; }
+    if (s_data as i64) == 0 { limit = 0; }
+
+    let mut rs: i64 = si;
+    if rs < 0 { rs = 0; }
+    if rs > limit { rs = limit; }
+    let mut re: i64 = ei;
+    if re < rs { re = rs; }
+    if re > limit { re = limit; }
+    let span: i64 = re - rs;
+
+    let arena: *u8 = sfn_arena_global();
+    let cap: i64 = 16 + ((span + 1 + 7) / 8) * 8;
+    // i64 overflow guard, mirroring `sfn_str_concat`'s `total < alen` arm. A
+    // `span` near i64::MAX wraps `cap` negative, and `sfn_arena_sfn_alloc`
+    // compares `size_i <= space`, which a negative size satisfies — it would
+    // hand back a pointer and the `memcpy` below would then run off the heap.
+    if cap < 16 { return _sfn_empty_str_header(arena); }
+    let block: *u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    if (block as i64) == 0 { return _sfn_empty_str_header(arena); }
+
+    let payload: *u8 = (block as i64 + 16) as *u8;
+    if span > 0 {
+        memcpy(payload, (s_data as i64 + rs) as *u8, span as usize);
+    }
+    _num_put_byte(payload as i64 + span, 0);
+    atomic_store(block as *i64, payload as i64);
+    atomic_store((block as i64 + 8) as *i64, span);
+    return block;
+}
+
+// The allocation-failure arm for `sfn_str_slice_lv`. The call site loads the
+// aggregate through the returned pointer unconditionally, so there is no null
+// this function may return — unlike the bare `_sfn_substring_unchecked`, whose
+// `i8*` shape let it degrade to the empty string literal. A header-only 16-byte
+// retry keeps that graceful degradation in the realistic case; only total arena
+// exhaustion, where even 16 bytes are unavailable, is fatal.
+//
+// The header carries the `""` literal's data pointer, NOT null. `{null, 0}`
+// would be a new value in circulation and consumers do not all treat it as the
+// empty string: `_sfn_is_immediate` (`runtime/sfn/io.sfn:296`) classifies any
+// data pointer in `[0, 127]` as an immediate codepoint, so a null-data header
+// reaching `print` decodes address 0 as codepoint 0 and writes a stray NUL
+// byte instead of nothing. `sfn_str_cmp_lv` would likewise sort it strictly
+// before `""`. The literal keeps this arm byte-for-byte equivalent to the
+// `{non-null, 0}` the bare body already returns on the same failure.
+fn _sfn_empty_str_header(arena: *u8) -> *u8 {
+    let head: *u8 = sfn_arena_alloc(arena, 16 as usize, 8 as usize);
+    if (head as i64) == 0 {
+        let message: string = "sfn_str_slice_lv: arena exhausted";
+        sfn_raise_value_error(message as *u8);
+        return head;
+    }
+    let empty: string = "";
+    atomic_store(head as *i64, empty as *u8 as i64);
+    atomic_store((head as i64 + 8) as *i64, 0);
+    return head;
+}
+
 // `sfn_str_to_cstr(s_data, s_len, arena_slot)` — #1705 (M2.4b, SFEP-0025 §3.3):
 // the runtime-FFI boundary `process.sfn` / `assert.sfn` call to materialize a
 // real NUL-terminated C string for `execve` / `posix_spawn` / `fwrite`. The body
