@@ -142,10 +142,11 @@ END {
     printf("# Targets contributing:")
     for (t in tcount) printf(" %s(%d files, %ds)", t, tcount[t], int(total[t] / 1000 + 0.5))
     printf("\n")
-    printf("# An unlisted file gets _shard_default_weight() from\n")
-    printf("# compiler/src/cli/commands/test/arg_and_jobs.sfn -- a compiler constant,\n")
-    printf("# NOT the median of this table. A missing/unparseable table falls back to\n")
-    printf("# the alphabetical stride. Never fails a build.\n")
+    printf("# An unlisted file gets the median of this table, derived at load\n")
+    printf("# time by _shard_default_weight() in\n")
+    printf("# compiler/src/cli/commands/test/arg_and_jobs.sfn (SFN-1224). A\n")
+    printf("# missing/unparseable table falls back to the alphabetical stride.\n")
+    printf("# Never fails a build.\n")
     printf("path\tweight\n")
 
     m = 0

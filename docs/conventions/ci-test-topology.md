@@ -81,14 +81,29 @@ targets` picks whichever target gave that file the larger share of its own
 suite — not whichever host is slower, which the normalisation cancels. The
 table reliably separates a
 100,000-weight file from a 500-weight one; it does not tell you what any
-single file costs. A discovered file absent from the table gets
-the fixed default weight 2136 (`_shard_default_weight` in
+single file costs. A discovered file absent from the table gets the median of
+the loaded table (`_shard_default_weight` in
 `compiler/src/cli/commands/test/arg_and_jobs.sfn`) rather than 0, so a newly
 added test still lands in a plausible LPT slot instead of always sorting
-first. That default is a compiler constant, not a value read from the table:
-it was the table's median at the SFN-863 generation, but the two drift apart
-on every refresh (the SFN-883 table's median is 282), so re-deriving it is a
-compiler change, not a table change.
+last. SFN-863 hardcoded that default as the constant `2136` — the table's
+median at generation time — but the copy drifted from the table's actual
+median across two regenerations (SFN-883, SFN-1223) before SFN-1224 made it
+derive the median from the loaded table at load time instead, so it can no
+longer decay.
+
+**Coverage signal.** `sfn dev shard cover` also reports how much of the
+discovered test surface has no weight row: a `[shard-weights]` line naming
+the count and percentage uncovered, and the value unlisted files fall back
+to. Above 15% uncovered it additionally prints a `WARN` to stderr (with up to
+10 of the uncovered paths) telling you to regenerate the table — but it never
+fails the build; the weight table is a scheduling hint, not a correctness
+gate. 15% is chosen against the measured decay rate — 53 `*_test.sfn` added
+per week on average over the 8 weeks to 2026-09-01, against an 884-file
+surface, so coverage sheds ~6% per week — which puts the threshold roughly
+2.5 weeks after a refresh: about once per refresh cycle rather than on every
+PR. It is deliberately not calibrated on *modeled* leg spread, per the rule
+above; what an unweighted file costs in wall-clock is exactly the thing the
+missing row denies us.
 
 **Fail-open.** `sfn dev shard` and `sfn test --shard-weights <path>` both
 fall back to the plain alphabetical stride whenever the table is missing,
@@ -129,7 +144,11 @@ max share across targets, and scales by `1e6`. It also prints each target's
 measured suite total into the header. Two provenance lines are **not**
 generated and must be re-added by hand, as the committed table carries them:
 `# Source: run <id> JSONL sidecars (<date>) ...` and
-`# Refresh procedure: docs/conventions/ci-test-topology.md.` Do not hand-add
+`# Refresh procedure: docs/conventions/ci-test-topology.md.` Re-add them
+where the committed table carries them — directly after the generated
+`# Targets contributing:` line — so a refresh diffs clean against the
+`shard-weights-candidate` artifact instead of showing a reordered header.
+Do not hand-add
 a median: a derived number nothing recomputes is how the previous header's
 "median (282)" became a stale authority.
 

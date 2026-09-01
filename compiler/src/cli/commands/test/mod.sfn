@@ -520,11 +520,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         }
         let mut weights: int[] = [];
         if use_lpt {
+            let default_weight = _shard_default_weight(table_text);
             let mut wi: int = 0;
             loop {
                 if wi >= test_files.length { break; }
                 let w = _shard_weight_for_path(table_text, test_files[wi]);
-                if w < 0 { weights.push(_shard_default_weight()); } else {
+                if w < 0 { weights.push(default_weight); } else {
                     weights.push(w);
                 }
                 wi += 1;
