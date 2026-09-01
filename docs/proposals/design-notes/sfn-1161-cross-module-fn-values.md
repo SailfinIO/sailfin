@@ -174,6 +174,14 @@ imported `Box<T>`.
   nothing and yields today's `E0808` — a strict non-regression. Matching the alias
   needs the specifier map that `_collect_imported_call_symbols` already builds for
   *call* names; deliberately out of scope here.
+
+  This holds only because the deferral (§5.5) is gated on an **empty**
+  `imported_structs`. The specifier registers the alias `E` while the artifact
+  declares `Entry`, so the shape never resolves; without that gate the
+  deferral would have swallowed the `E0808` in every pass, turning a loud
+  false rejection into a silent false acceptance. Caught in review — the
+  earlier draft of this note claimed the non-regression while the code no
+  longer delivered it.
 - **Re-exports:** work already. The loader merges structs from every staged
   artifact in the closure with no per-module export filter — the same
   global-by-name resolution documented at `typecheck_import_loader.sfn:600-616`.
@@ -311,14 +319,34 @@ So threading an import context into staging was rejected on four grounds:
 4. It is the larger change. The alternative is one arm in the analyzer.
 
 **The deferral.** Where the shape is unknowable, the `Struct` arm drops `E0808`
-for that one field rather than guessing "reject". Three guards keep it narrow:
-the struct name must be one this module actually imported (a typo is not in
-`ctx.known_types`), the type name must be a single segment (so qualified
-variant literals like `Result.Ok { … }` keep their verdict), and the field
-value must be a bare `Identifier` (so `Verb { run: helper(worker) }` still
-reports from inside the call). With `ctx.expected_type == null`, `E0808` is the
-only fn-value diagnostic the arm can produce, so the filter is complete and
-cannot silently swallow a second code.
+for that one field rather than guessing "reject". Four guards keep it narrow:
+
+1. **No import context was loaded** (`ctx.imported_structs` is empty) — this is
+   what confines the deferral to staging. Once a context exists, an
+   unresolvable shape is a real miss, not missing information.
+2. **The name resolves to an `"import"`-kind symbol**, and no local
+   `struct`/`enum`/`interface`/`type` of that name exists.
+3. **The type name is a single segment**, so qualified variant literals like
+   `Result.Ok { … }` keep their verdict.
+4. **The field value is a bare `Identifier`**, so `Verb { run: helper(worker) }`
+   still reports from inside the call.
+
+With `ctx.expected_type == null`, `E0808` is the only fn-value diagnostic the
+arm can produce, so the filter is complete and cannot silently swallow a second
+code.
+
+Guard 2 is not the obvious spelling, and the obvious spelling is wrong. An
+earlier cut tested membership in `ctx.known_types`, on the reasoning that it
+"carries every import specifier". It does — and also every local function,
+enum, interface, type alias and prelude global, because it is the whole
+resolution scope (`typecheck/mod.sfn`, `_names_from_symbols(resolution_scope)`;
+`symbols.sfn` notes the kind-mixing is deliberate). That made
+`interface Runner { … }` + `Runner { go: helper }` look like an imported struct
+and dropped its `E0808` in a program with **no imports at all** — and unlike
+the intended case, nothing re-renders it, since no import context can make a
+local interface resolve to a struct. It surfaced only at build, as an unrelated
+`E1012`. Keyed on `kind` instead, with local type declarations winning
+outright.
 
 This mirrors an existing precedent rather than inventing one: the native
 resolve gate already defers to LLVM lowering on the same grounds
