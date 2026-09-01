@@ -22,6 +22,7 @@
 // via `sfn/strings` predicates and `==` instead. (#842.)
 import {
     find,
+    replace,
     split,
     starts_with,
     trim
@@ -51,9 +52,9 @@ fn _repo_root() -> string ![io] {
 // rather than merely checking that something is there.
 fn _link_target(path: string) -> string ![io] {
     let native = fs.read_link(path);
-    if native.length > 0 { return native; }
+    if native.length > 0 { return replace(native, "\\", "/"); }
     if !fs.exists(path) { return ""; }
-    return trim(fs.readFile(path));
+    return replace(trim(fs.readFile(path)), "\\", "/");
 }
 
 test "llms.txt: site copy is a symlink to the repo-root llms.txt" ![io] {
