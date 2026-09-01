@@ -72,11 +72,14 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // (`sailfin_adapter_http_*`, no-op stubs) stay for seed compat; the
     // `native_signature` override routes calls to `sfn_http_get` /
     // `sfn_http_post2` (the 2-arg POST wrapper matching this row's arity).
+    // SFN-1022: the body param now carries `{i8*, i64}` and routes through
+    // the `_lv` twin so the caller's length reaches `Content-Length` intact;
+    // the bare-pointer symbol stays defined for seed-built IR.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "http_get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http_post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_http_post2", c_abi_return_type: null
+        target: "http_post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "{i8*, i64}"], native_signature: "sfn_http_post2_lv", c_abi_return_type: null
     });
 
     // Serve adapters — flipped to the Sailfin-native server in

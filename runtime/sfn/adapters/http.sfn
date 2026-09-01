@@ -16,29 +16,36 @@
 // 443, SNI = host, peer chain verified AND hostname checked (RFC 6125);
 // system trust-store discovery hardening is #3.
 //
-// ABI. `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` flips the curl
+// ABI. `compiler/capsules/codegen-llvm/src/runtime_helpers/` flips the curl
 // registry rows by setting `native_signature` to the symbols
 // defined here, exactly as the `fs.*` rows were flipped to
 // `sfn_fs_*` (the legacy C `symbol` stays for seed compat):
 //   - `http.get_body`  (url)               -> `sfn_http_get`
-//   - `http.post_json` (url, body, auth)   -> `sfn_http_post`
+//   - `http.post_json` (url, body, auth)   -> `sfn_http_post_lv`
 //   - `http.download`  (url, output_path)  -> `sfn_http_download`
 //   - `http_get`       (url)               -> `sfn_http_get`
-//   - `http_post`      (request, body)      -> `sfn_http_post2`
-// All descriptors keep their existing `i8*`-in / `i8*`-out shape
-// (raw NUL-terminated `* u8` buffers, no arena threading) — the
-// same plain-pointer ABI the `sfn_fs_*` adapters use. The issue's
-// `*Arena` / `SfnString` shorthand would require retyping the
-// descriptors to the aggregate ABI and threading an arena through
-// `core_call_lowering.sfn` (not in this issue's Files Affected);
-// matching the proven `fs.*` raw-pointer shape keeps the flip
-// self-contained.
+//   - `http_post`      (request, body)      -> `sfn_http_post2_lv`
+//   - `http.post`      (url, body)          -> `sfn_http_post2_lv`
+// Every descriptor is `i8*`-in / `i8*`-out (raw NUL-terminated
+// `* u8` buffers, no arena threading) EXCEPT the request body on
+// the three POST rows, which carries the `{i8*, i64}` aggregate so
+// the caller's byte length survives to the `Content-Length` header
+// instead of being re-derived with `strlen` (SFN-1022). The url and
+// auth_header operands stay bare pointers: they are genuinely
+// NUL-terminated C strings, so there is nothing for a length to buy
+// there. This mirrors the `fs.*` rows, whose payload param took the
+// same aggregate under SFN-1009 while their path param stayed `i8*`.
 //
 // The two POST arities exist because the registry carries two
 // rows of different arity: `http.post_json` is (url, body,
 // auth_header) and the `http_post` alias is (request, body). The
-// alias points at `sfn_http_post2`, a 2-arg wrapper that forwards
-// to `sfn_http_post` with an empty auth header.
+// alias points at `sfn_http_post2_lv`, a 3-arg wrapper that forwards
+// to `sfn_http_post_lv` with an empty auth header.
+//
+// The bare-pointer `sfn_http_post` / `sfn_http_post2` are NOT dead
+// and must not be re-signatured in place — seed-built IR still calls
+// them at their original arity, and C linking would not catch the
+// mismatch. See the note above `sfn_http_post_lv` below.
 //
 // Return semantics (matching the curl bodies they replace):
 //   - get / post: the response BODY (headers stripped), null on a
@@ -844,16 +851,21 @@ fn _http_location_dup(resp: *u8, header_len: i64, base_url: *u8) -> *u8 {
     return null;
 }
 
-// `_http_send_once(url, is_post, body, auth_header, ...)` — one
+// `_http_send_once(url, is_post, body, body_len, auth_header, ...)` — one
 // request/response round trip. Parses `url` (scheme/host/port/path),
 // connects, writes the request head (plus body for POST), drains the
 // response, and returns the extracted body (or null on any failure).
-// `auth_header`, when non-null and non-empty, is emitted as an
-// `Authorization:` header (POST only). Writes the response status through
-// `status_slot` and, for a 3xx with a `Location`, a fresh NUL-terminated
-// redirect-target URL (as an `i64`-cast pointer the caller owns and frees)
-// through `location_slot` — the redirect loop in `_http_send` consumes both.
-fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_len_slot: *i64, status_slot: *i64, location_slot: *i64) -> *u8 ![net] {
+// `body_len` is the caller's REQUEST body length (SFN-1022): it now arrives
+// as a parameter instead of being recovered with `strlen`, since a payload
+// carrying an interior NUL made that recovery wrong. `auth_header`, when
+// non-null and non-empty, is emitted as an `Authorization:` header (POST
+// only). Writes the response status through `status_slot` and, for a 3xx
+// with a `Location`, a fresh NUL-terminated redirect-target URL (as an
+// `i64`-cast pointer the caller owns and frees) through `location_slot` —
+// the redirect loop in `_http_send` consumes both. Note `body_len_slot` is
+// the unrelated RESPONSE-body out-parameter; the two sit adjacent in the
+// signature and are easy to confuse.
+fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_header: *u8, body_len_slot: *i64, status_slot: *i64, location_slot: *i64) -> *u8 ![net] {
     // Detect the `https://` scheme — TLS-wrap the connection below.
     let https: string = "https://";
     let is_https: bool = (strstr(url, https as *u8) as i64) == (url as i64);
@@ -926,8 +938,15 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
     if is_post {
         let verb: string = "POST ";
         let ctype: string = "\r\nContent-Type: application/json\r\nContent-Length: ";
-        let body_len: i64 = strlen(body) as i64;
-        let clen: *u8 = _uint_to_str(body_len);
+        // SFN-1022: the caller's byte length arrives as a parameter now,
+        // instead of being recovered with `strlen` from a pointer that had
+        // already lost it. This value is the `Content-Length` header as well
+        // as the write length, so a recovered length that disagreed with the
+        // caller's produced a malformed request, not merely a truncated one.
+        let mut req_body_len: i64 = body_len;
+        if body as i64 == 0 { req_body_len = 0; }
+        if req_body_len < 0 { req_body_len = 0; }
+        let clen: *u8 = _uint_to_str(req_body_len);
         if clen as i64 == 0 {
             _tls_teardown(ssl, tls_ctx);
             free(authority);
@@ -976,7 +995,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
         let head_ok: bool = _send_all(fd, ssl, head, off);
         free(head);
         if head_ok {
-            if _send_all(fd, ssl, body, body_len) {
+            if _send_all(fd, ssl, body, req_body_len) {
                 // fall through to recv
             } else {
                 _tls_teardown(ssl, tls_ctx);
@@ -1040,16 +1059,18 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
     return result;
 }
 
-// `_http_send(url, is_post, body, auth_header)` — the shared request core,
-// following HTTP 3xx redirects (301/302/303/307/308) up to a bounded hop
-// limit. GitHub release-asset URLs always 302-redirect to a signed CDN URL,
+// `_http_send(url, is_post, body, body_len, auth_header)` — the shared
+// request core, following HTTP 3xx redirects (301/302/303/307/308) up to a
+// bounded hop limit. `body_len` is the caller's REQUEST body length
+// (SFN-1022), forwarded to `_http_send_once` and only read when `is_post` is
+// true. GitHub release-asset URLs always 302-redirect to a signed CDN URL,
 // so redirect following is required for the toolchain fetch/verify path
 // (SFN-213). Fail-closed: a redirect with no `Location`, or one past the hop
 // limit, returns null rather than a misleading empty body. Security: the
 // `Authorization` header is never forwarded across a redirect (the signed CDN
 // URL carries its own query-string auth), and 301/302/303 downgrade to GET
 // (dropping the body); 307/308 preserve the method and body.
-fn _http_send(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_len_slot: *i64) -> *u8 ![net] {
+fn _http_send(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_header: *u8, body_len_slot: *i64) -> *u8 ![net] {
     if url as i64 == 0 { return null; }
     let mut cur: *u8 = _strdup_n(url, strlen(url) as i64);
     if cur as i64 == 0 { return null; }
@@ -1061,7 +1082,7 @@ fn _http_send(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_len_slo
     loop {
         let mut status: i64 = 0;
         let mut loc_i: i64 = 0;
-        let result: *u8 = _http_send_once(cur, post, body, auth_eff, body_len_slot, & status, & loc_i);
+        let result: *u8 = _http_send_once(cur, post, body, body_len, auth_eff, body_len_slot, & status, & loc_i);
         let loc: *u8 = loc_i as *u8;
         let is_redirect: bool = status == 301 || status == 302 || status == 303
             || status == 307
@@ -1111,7 +1132,7 @@ fn sfn_http_get(url: *u8) -> *u8 ![net] {
     // get/post return an `i8*` C string, so the body length is
     // unused here — pass a throwaway slot.
     let mut body_len: i64 = 0;
-    return _http_send(url, false, null, null, & body_len);
+    return _http_send(url, false, null, 0, null, & body_len);
 }
 
 // `sfn_http_post(url, body, auth_header)` — POST `body` to `url`
@@ -1119,18 +1140,71 @@ fn sfn_http_get(url: *u8) -> *u8 ![net] {
 // non-empty it is sent verbatim as the `Authorization:` value
 // (matching the curl `sailfin_runtime_http_post_json` contract).
 // Returns a caller-owned copy of the response body, null on
-// failure or status >= 400.
+// failure or status >= 400. Delegates to `sfn_http_post_lv` with a
+// `strlen`-recovered length; kept, exact name and arity, for seed-built IR
+// (SFN-1022).
 fn sfn_http_post(url: *u8, body: *u8, auth_header: *u8) -> *u8 ![net] {
     if url as i64 == 0 { return null; }
     if body as i64 == 0 { return null; }
-    let mut body_len: i64 = 0;
-    return _http_send(url, true, body, auth_header, & body_len);
+    return sfn_http_post_lv(url, body, strlen(body) as i64, auth_header);
 }
 
 // `sfn_http_post2(url, body)` — 2-arg POST for the `http_post`
-// registry alias; forwards to `sfn_http_post` with no auth header.
+// registry alias; forwards to `sfn_http_post` with no auth header. Kept,
+// exact name and arity, for seed-built IR (SFN-1022).
 fn sfn_http_post2(url: *u8, body: *u8) -> *u8 ![net] {
     return sfn_http_post(url, body, null);
+}
+
+// `sfn_http_post_lv(url, body, body_len, auth_header)` /
+// `sfn_http_post2_lv(url, body, body_len)` — the length-carrying twins of
+// the two POST entry points above (SFN-1022).
+//
+// The `http.post_json` / `http_post` descriptors declare the body payload
+// as `{i8*, i64}` and route the call here through `native_signature`, so
+// the caller's byte length arrives intact instead of being dropped by an
+// `extractvalue ..., 0` at the coercion boundary and then re-derived with
+// `strlen`. That recovered length fed the `Content-Length` header as well
+// as the socket write, so a payload with an interior NUL produced malformed
+// requests, not merely a short write.
+//
+// A `{i8*, i64}` descriptor entry paired with split `(*u8, i64)` params
+// here is the shape already proven by `sfn_fs_write_file_lv` /
+// `sfn_fs_append_file_lv` (SFN-1009): the aggregate is two integer
+// eightbytes, so it occupies the same registers as the two scalars, and the
+// runtime module links as a separate object — the IR-type difference
+// between the emitted `declare` and this `define` never reaches the
+// linker.
+//
+// This closes the send side of an asymmetry the receive side already
+// avoided: `http.sfn:711-716` computes the RESPONSE body length as
+// `total_len - body_off`, explicitly not `strlen`, so `http.download`
+// receives binary payloads faithfully. The REQUEST body had no equivalent
+// until now.
+//
+// The twins are additive, and must stay that way. `sfn dev bootstrap build` has
+// the pinned seed lower the compiler's own `http.*` call sites using the
+// SEED's registry, which still names the bare-`i8*` `sfn_http_post` /
+// `sfn_http_post2`, against runtime objects built from THIS source.
+// Re-signaturing the originals in place would leave those seed-emitted
+// calls handing two arguments to a body expecting more; C linking does not
+// check arity, so the failure would be silent corruption rather than a
+// link error. The originals stay.
+fn sfn_http_post_lv(url: *u8, body: *u8, body_len: i64, auth_header: *u8) -> *u8 ![net] {
+    if url as i64 == 0 { return null; }
+    if body as i64 == 0 { return null; }
+    // The RESPONSE body length; unrelated to `body_len` above, which is the
+    // REQUEST body's. `sfn_http_post*` return an `i8*` C string, so this is a
+    // throwaway slot, as in `sfn_http_get`.
+    let mut resp_len: i64 = 0;
+    return _http_send(url, true, body, body_len, auth_header, & resp_len);
+}
+
+// `sfn_http_post2_lv(url, body, body_len)` — 2-arg length-carrying POST for
+// the `http_post` registry alias; forwards to `sfn_http_post_lv` with no
+// auth header, mirroring the `sfn_http_post2` -> `sfn_http_post` delegation.
+fn sfn_http_post2_lv(url: *u8, body: *u8, body_len: i64) -> *u8 ![net] {
+    return sfn_http_post_lv(url, body, body_len, null);
 }
 
 // `sfn_http_request_raw(method, url, headers, body)` — perform an
@@ -1686,7 +1760,7 @@ fn sfn_http_download(url: *u8, output_path: *u8) -> *u8 ![net, io] {
     if url as i64 == 0 { return null; }
     if output_path as i64 == 0 { return null; }
     let mut body_len: i64 = 0;
-    let body: *u8 = _http_send(url, false, null, null, & body_len);
+    let body: *u8 = _http_send(url, false, null, 0, null, & body_len);
     if body as i64 == 0 { return null; }
 
     let mode: string = "wb";

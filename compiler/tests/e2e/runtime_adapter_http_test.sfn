@@ -12,9 +12,10 @@
 //   4. routing     — `http.get_body` lowers to `@sfn_http_get` and NOT
 //                    the legacy curl `@sailfin_runtime_http_get` call.
 //   5. member-call — `http.get(url)` lowers to a `@sfn_http_get` call
-//                    and `http.post(url, body)` to `@sfn_http_post2`,
+//                    and `http.post(url, body)` to `@sfn_http_post2_lv`,
 //                    with no residual `@sailfin_intrinsic_http_*` call
-//                    (the #912 member-call flip).
+//                    (the #912 member-call flip; SFN-1022 repointed the
+//                    POST leg at the length-carrying twin).
 //
 // OMITTED: the original script's behavioral GET+POST round-trip leg
 // (test_get_round_trip) drove a real socket request against a localhost
@@ -171,6 +172,11 @@ test "http emit: define for every sfn_http_* export" ![io] {
     assert _has_define(ir, "sfn_http_post");
     assert _has_define(ir, "sfn_http_post2");
     assert _has_define(ir, "sfn_http_download");
+    // SFN-1022: the length-carrying twins must be defined alongside the
+    // originals — the originals stay for seed-built IR, but the twins are
+    // what fresh call sites now route through.
+    assert _has_define(ir, "sfn_http_post_lv");
+    assert _has_define(ir, "sfn_http_post2_lv");
 }
 
 // SFN-671: creation and disposal are no longer libc `socket`/`close`.
@@ -235,7 +241,7 @@ test "http.get_body lowers to @sfn_http_get, not the curl path" ![io] {
     assert ! _calls(ir, "sailfin_runtime_http_get");
 }
 
-test "http.get/http.post member calls flip to @sfn_http_get/@sfn_http_post2 (#912)" ![io] {
+test "http.get/http.post member calls flip to @sfn_http_get/@sfn_http_post2_lv (#912)" ![io] {
     let source = "fn main() -> int ![net, io] {\n"
         + "    let got = http.get(\"http://127.0.0.1:9/\");\n"
         + "    print(got);\n"
@@ -246,7 +252,11 @@ test "http.get/http.post member calls flip to @sfn_http_get/@sfn_http_post2 (#91
     let ir = _emit_source("http_member_probe", source);
     assert ir != "EMIT_FAILED";
     assert _calls(ir, "sfn_http_get");
-    assert _calls(ir, "sfn_http_post2");
+    // SFN-1022: the body param carries `{i8*, i64}` and routes through the
+    // length-carrying twin; the bare-pointer symbol stays DEFINED for
+    // seed-built IR but must no longer be a freshly emitted call target.
+    assert _calls(ir, "sfn_http_post2_lv");
+    assert ! _calls(ir, "sfn_http_post2");
     // The old member-call intrinsics must not be CALLED anymore.
     assert ! _calls(ir, "sailfin_intrinsic_http_get");
     assert ! _calls(ir, "sailfin_intrinsic_http_post");

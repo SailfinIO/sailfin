@@ -1,0 +1,468 @@
+// End-to-end regression test for SFN-1022 — `http.post` / `http.post_json`
+// now route through `sfn_http_post2_lv` / `sfn_http_post_lv`, whose
+// `{i8*, i64}` parameter shape carries the caller's byte length instead of
+// dropping it at an `extractvalue` and re-deriving it with `strlen` at the
+// bare-`i8*` originals. That recovered length fed the `Content-Length`
+// header as well as the socket write, so a mismatch there was protocol-level
+// corruption, not merely a short write. Mirrors the SFN-1009 filesystem
+// precedent (`fs_write_carry_length_test.sfn`). Pins, end-to-end:
+//   1. emit shape    — `runtime/sfn/adapters/http.sfn` still defines all four
+//                      of `sfn_http_post` / `sfn_http_post2` /
+//                      `sfn_http_post_lv` / `sfn_http_post2_lv`.
+//   2. call-site ABI — `http.post` / `http.post_json` lower to the `_lv`
+//                      twins with a `{i8*, i64}` descriptor, never a bare
+//                      `sfn_http_post`/`sfn_http_post2` call.
+//   3. soundness     — a forked loopback listener captures the exact bytes
+//                      sent as the request body, including an interior NUL
+//                      no pure-`.sfn` string literal can carry, and checks
+//                      the `Content-Length` header agrees.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test — use `sfn/strings`, as the
+// sibling `runtime_adapter_http_test.sfn` / `fs_write_carry_length_test.sfn`
+// do.
+import {
+    char_at_index,
+    contains,
+    find,
+    split,
+    starts_with
+} from "sfn/strings";
+import {
+    c_math_link_flags,
+    clean_runner_env,
+    default_scratch_dir,
+    host_is_windows,
+    run_external_c_oracle,
+    sfn_bin_path
+} from "sfn/test";
+
+// Derived by subtraction from the real environment via `clean_runner_env`,
+// not built up key-by-key (SFN-1114).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-http-post-carry-length";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _http_path() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 {
+        return configured + "/runtime/sfn/adapters/http.sfn";
+    }
+    return "runtime/sfn/adapters/http.sfn";
+}
+
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// Emit LLVM IR for source written to a scratch `.sfn` file, then read it
+// back (or "EMIT_FAILED" on a non-zero exit).
+fn _emit_source(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let srcpath = dir + "/" + tag + ".sfn";
+    fs.writeFile(srcpath, source);
+    return _emit_module(tag, srcpath);
+}
+
+fn _has_define_named(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _is_word_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let word = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return find(word, ch, 0) >= 0;
+}
+
+// `@sym\b` — does the IR reference the bare symbol at a word boundary?
+fn _references(ir: string, sym: string) -> boolean {
+    let needle = "@" + sym;
+    let mut pos = find(ir, needle, 0);
+    loop {
+        if pos < 0 { break; }
+        let after = pos + needle.length;
+        if after >= ir.length { return true; }
+        let ch = char_at_index(ir, after);
+        if !_is_word_char(ch) { return true; }
+        pos = find(ir, needle, after);
+    }
+    return false;
+}
+
+// Does any `call`/`invoke` line target `@sym(`? (A `declare` of `@sym`
+// is tolerated for seed compat; only call sites are load-bearing here.)
+fn _call_line(ir: string, sym: string) -> string {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_call = contains(line, "call ") || contains(line, "invoke ");
+        if is_call && contains(line, "@" + sym + "(") { return line; }
+        i = i + 1;
+    }
+    return "";
+}
+
+fn _has_call_site(ir: string, sym: string) -> boolean {
+    return _call_line(ir, sym) != "";
+}
+
+fn _int_to_string(n: int) -> string {
+    if n == 0 { return "0"; }
+    let mut v = n;
+    let mut neg = false;
+    if v < 0 {
+        neg = true;
+        v = -v;
+    }
+    let mut digits = "";
+    let table = "0123456789";
+    loop {
+        if v <= 0 { break; }
+        digits = table[v % 10] + digits;
+        v = v / 10;
+    }
+    if neg { return "-" + digits; }
+    return digits;
+}
+
+// ---- (1) emit shape: originals AND twins are both defined ----
+test "http.sfn emit: defines the length-carrying POST twins alongside the originals" ![io] {
+    let ir = _emit_module("http", _http_path());
+    assert ir != "EMIT_FAILED";
+    assert _has_define_named(ir, "sfn_http_post");
+    assert _has_define_named(ir, "sfn_http_post2");
+    assert _has_define_named(ir, "sfn_http_post_lv");
+    assert _has_define_named(ir, "sfn_http_post2_lv");
+}
+
+// ---- (2) call-site ABI shape: http.post / http.post_json route through the
+// _lv twins with a `{i8*, i64}` descriptor, never the bare-pointer symbol ----
+//
+// `http.post_json(url, body, auth_header)` is reachable from Sailfin source
+// today (see `tls_large_body_test.sfn`), so both call shapes are covered
+// here, not just `http.post`.
+test "http.post / http.post_json call sites carry {i8*, i64}, never the bare-pointer symbol" ![io] {
+    let source = "fn main() -> int ![net, io] {\n"
+        + "    let posted = http.post(\"http://127.0.0.1:9/\", \"{}\");\n"
+        + "    print(posted);\n"
+        + "    let posted_json = http.post_json(\"http://127.0.0.1:9/\", \"{}\", \"\");\n"
+        + "    print(posted_json);\n"
+        + "    return 0;\n"
+        + "}\n";
+    let ir = _emit_source("http_post_lv_probe", source);
+    assert ir != "EMIT_FAILED";
+
+    assert _references(ir, "sfn_http_post2_lv");
+    assert _references(ir, "sfn_http_post_lv");
+    assert ! _has_call_site(ir, "sfn_http_post2");
+    assert ! _has_call_site(ir, "sfn_http_post");
+
+    // ABI pin, mirroring `runtime_adapter_filesystem_test.sfn`: the body
+    // param is a `{i8*, i64}` aggregate, and the aggregate's two-eightbyte
+    // shape must never trigger a `byval` indirect-struct pass.
+    let post_call = _call_line(ir, "sfn_http_post2_lv");
+    assert post_call != "";
+    assert contains(post_call, "{i8*, i64}");
+    assert ! contains(post_call, "byval");
+
+    let post_json_call = _call_line(ir, "sfn_http_post_lv");
+    assert post_json_call != "";
+    assert contains(post_json_call, "{i8*, i64}");
+    assert ! contains(post_json_call, "byval");
+}
+
+// ---- (3) soundness: a forked loopback listener captures the exact request
+// body bytes, incl. an interior NUL, and the Content-Length agrees ----
+//
+// The harness's stub set is inherited from
+// `runtime_http_chunked_decode_test.sfn`'s `_chunked_harness_c` (it links
+// the same `http.sfn` module) plus the platform socket/TLS providers that
+// module also declares as `extern fn` (`runtime/sfn/platform/socket_ops.sfn`,
+// `runtime/sfn/platform/tls.sfn`): standalone `sfn emit` of `http.sfn` does
+// not pull those provider modules in, so every declared-and-called symbol
+// in the emitted object needs a link-time definition regardless of whether
+// the `http://` test paths below ever reach it at runtime (the TLS stubs
+// are dead code on every path exercised here, since none of the request
+// URLs are `https://`; the socket stubs are real POSIX pass-throughs
+// because the round trip is real).
+fn _harness_c() -> string {
+    return "#include <stdio.h>\n" + "#include <stdlib.h>\n"
+        + "#include <string.h>\n"
+        + "#include <unistd.h>\n"
+        + "#include <signal.h>\n"
+        + "#include <arpa/inet.h>\n"
+        + "#include <sys/socket.h>\n"
+        + "#include <sys/time.h>\n"
+        + "#include <sys/wait.h>\n"
+        + "#include <netinet/in.h>\n"
+        + "\n"
+        + "extern char *sfn_http_post_lv(char*, char*, long long, char*);\n"
+        + "extern char *sfn_http_post2_lv(char*, char*, long long);\n"
+        + "extern char *sfn_http_post(char*, char*, char*);\n"
+        + "\n"
+        + "void sailfin_runtime_mark_persistent(void *p) { (void)p; }\n"
+        + "void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }\n"
+        + "\n"
+    // Platform socket-layer providers `http.sfn` declares as `extern
+    // fn` (`../platform/socket_ops.sfn`), unresolved when `http.sfn` is
+    // emitted and linked standalone. Real pass-throughs, since the
+    // round trip below is real network I/O.
+    + "int sfn_socket_net_init(void) { return 0; }\n"
+        + "int sfn_socket_open(int d, int t, int p) { return socket(d, t, p); }\n"
+        + "int sfn_socket_close(int fd) { return close(fd); }\n"
+    // A REAL pass-through, not a no-op. The runtime arms a receive/send
+    // deadline here (#1581); stubbing it out would leave the parent
+    // blocked forever in `_recv_all` against a child that is itself
+    // blocked waiting for body bytes a regressed build never sends —
+    // turning the exact partial regression this test exists to catch
+    // into a per-file timeout kill with no diagnostic, instead of the
+    // `missing header` message `check_dump` prints.
+    + "void sfn_socket_set_timeouts(int fd, int secs) {\n"
+        + "    struct timeval tv; tv.tv_sec = secs; tv.tv_usec = 0;\n"
+        + "    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));\n"
+        + "    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));\n"
+        + "}\n"
+        + "long long sfn_socket_recv(int fd, char *buf, long long len, int flags) {\n"
+        + "    return recv(fd, buf, (size_t)len, flags);\n"
+        + "}\n"
+        + "long long sfn_socket_send(int fd, char *buf, long long len, int flags) {\n"
+        + "    return send(fd, buf, (size_t)len, flags);\n"
+        + "}\n"
+        + "\n"
+    // TLS providers (`../platform/tls.sfn`) — dead on every `http://`
+    // path exercised here, stubbed only to satisfy the linker.
+    + "void *tls_client_ctx(void) { return 0; }\n"
+        + "void tls_ctx_free(void *ctx) { (void)ctx; }\n"
+        + "void *tls_connect_fd(void *ctx, int fd, char *host) {\n"
+        + "    (void)ctx; (void)fd; (void)host; return 0;\n"
+        + "}\n"
+        + "long long tls_read(void *ssl, char *buf, long long n) {\n"
+        + "    (void)ssl; (void)buf; (void)n; return -1;\n"
+        + "}\n"
+        + "long long tls_write(void *ssl, char *buf, long long n) {\n"
+        + "    (void)ssl; (void)buf; (void)n; return -1;\n"
+        + "}\n"
+        + "void tls_shutdown_free(void *ssl) { (void)ssl; }\n"
+        + "\n"
+        + "static int start_listener(int *port) {\n"
+        + "    int fd = socket(AF_INET, SOCK_STREAM, 0);\n"
+        + "    if (fd < 0) return -1;\n"
+        + "    int one = 1;\n"
+        + "    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));\n"
+        + "    struct sockaddr_in a; memset(&a, 0, sizeof(a));\n"
+        + "    a.sin_family = AF_INET;\n"
+        + "    a.sin_addr.s_addr = htonl(0x7f000001);\n"
+        + "    a.sin_port = htons(0);\n"
+        + "    if (bind(fd, (struct sockaddr*)&a, sizeof(a)) != 0) return -1;\n"
+        + "    if (listen(fd, 4) != 0) return -1;\n"
+        + "    socklen_t al = sizeof(a);\n"
+        + "    if (getsockname(fd, (struct sockaddr*)&a, &al) != 0) return -1;\n"
+        + "    *port = (int)ntohs(a.sin_port);\n"
+        + "    return fd;\n"
+        + "}\n"
+        + "\n"
+    // The forked child captures the FULL request (head + body) into
+    // `dumppath`, recv-ing until it has seen the blank-line header
+    // terminator and at least `expected_body_len` bytes past it, then
+    // replies with a fixed 200 so the parent-side POST calls succeed.
+    + "static pid_t serve_once(int lfd, long expected_body_len, const char *dumppath) {\n"
+        + "    pid_t pid = fork();\n"
+        + "    if (pid == 0) {\n"
+        + "        int c = accept(lfd, NULL, NULL);\n"
+        + "        if (c < 0) { _exit(1); }\n"
+    // Bound the child too, so a regressed build that sends fewer body
+    // bytes than it advertised makes the loop below give up, dump what
+    // it did receive, and still reply 200 — letting the parent reach
+    // `check_dump` and report which of the header or the bytes is
+    // wrong. `if (got <= 0) break;` already handles the EAGAIN return.
+    + "        struct timeval rtv; rtv.tv_sec = 3; rtv.tv_usec = 0;\n"
+        + "        setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));\n"
+        + "        char buf[8192];\n"
+        + "        long n = 0;\n"
+        + "        long header_end = -1;\n"
+        + "        while (n < (long)sizeof(buf)) {\n"
+        + "            long got = recv(c, buf + n, sizeof(buf) - (size_t)n, 0);\n"
+        + "            if (got <= 0) break;\n"
+        + "            n += got;\n"
+        + "            if (header_end < 0) {\n"
+        + "                for (long i = 0; i + 3 < n; i++) {\n"
+        + "                    if (buf[i] == '\\r' && buf[i+1] == '\\n' && buf[i+2] == '\\r' && buf[i+3] == '\\n') {\n"
+        + "                        header_end = i + 4;\n"
+        + "                        break;\n"
+        + "                    }\n"
+        + "                }\n"
+        + "            }\n"
+        + "            if (header_end >= 0 && (n - header_end) >= expected_body_len) break;\n"
+        + "        }\n"
+        + "        FILE *f = fopen(dumppath, \"wb\");\n"
+        + "        if (f) { fwrite(buf, 1, (size_t)n, f); fclose(f); }\n"
+        + "        const char *resp = \"HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\nok\";\n"
+        + "        long off = 0; long resp_len = (long)strlen(resp);\n"
+        + "        while (off < resp_len) {\n"
+        + "            long s = send(c, resp + off, (size_t)(resp_len - off), 0);\n"
+        + "            if (s <= 0) break;\n"
+        + "            off += s;\n"
+        + "        }\n"
+        + "        close(c);\n"
+        + "        _exit(0);\n"
+        + "    }\n"
+        + "    return pid;\n"
+        + "}\n"
+        + "\n"
+    // Reads the dump file with `fread` into a fixed buffer, tracking the
+    // real byte count — the buffer contains an interior NUL, so `strlen`
+    // must not be used to size it. `strstr` on the head is safe only
+    // because the header region is NUL-free, so the buffer is
+    // explicitly NUL-terminated one byte past the real read count
+    // before `strstr` is called.
+    + "static int check_dump(const char *dumppath, long body_len, const char *body) {\n"
+        + "    FILE *f = fopen(dumppath, \"rb\");\n"
+        + "    if (!f) { fprintf(stderr, \"cannot reopen dump\\n\"); return 0; }\n"
+        + "    char got[8192];\n"
+        + "    size_t gn = fread(got, 1, sizeof(got) - 1, f);\n"
+        + "    fclose(f);\n"
+        + "    got[gn] = '\\0';\n"
+        + "    char want[64];\n"
+        + "    snprintf(want, sizeof(want), \"Content-Length: %ld\\r\\n\", body_len);\n"
+        + "    if (!strstr(got, want)) {\n"
+        + "        fprintf(stderr, \"missing header '%s'\\n\", want);\n"
+        + "        return 0;\n"
+        + "    }\n"
+        + "    if ((long)gn < body_len) { fprintf(stderr, \"dump too short\\n\"); return 0; }\n"
+        + "    if (memcmp(got + gn - (size_t)body_len, body, (size_t)body_len) != 0) {\n"
+        + "        fprintf(stderr, \"body bytes mismatch\\n\");\n"
+        + "        return 0;\n"
+        + "    }\n"
+        + "    return 1;\n"
+        + "}\n"
+        + "\n"
+        + "int main(int argc, char **argv) {\n"
+        + "    signal(SIGPIPE, SIG_IGN);\n"
+        + "    const char *dumpdir = argc > 1 ? argv[1] : \"/tmp\";\n"
+        + "    int port, lfd;\n"
+        + "    char url[64], dumppath[512];\n"
+        + "    pid_t pid;\n"
+        + "    char *body;\n"
+        + "\n"
+    // `char payload[] = {'A','B','\\0','C','D'}` — the interior-NUL
+    // hazard no pure-`.sfn` string literal can carry, mirroring
+    // `fs_write_carry_length_test.sfn`'s harness.
+    + "    char payload[] = { 'A', 'B', '\\0', 'C', 'D' };\n"
+        + "\n"
+        + "    /* Case 1: sfn_http_post_lv — 4-arg length-carrying POST. */\n"
+        + "    lfd = start_listener(&port);\n"
+        + "    if (lfd < 0) return 2;\n"
+        + "    sprintf(url, \"http://127.0.0.1:%d/\", port);\n"
+        + "    sprintf(dumppath, \"%s/post_lv.bin\", dumpdir);\n"
+        + "    pid = serve_once(lfd, 5, dumppath);\n"
+        + "    body = sfn_http_post_lv(url, payload, 5, NULL);\n"
+        + "    waitpid(pid, NULL, 0);\n"
+        + "    close(lfd);\n"
+        + "    if (body == NULL) { fprintf(stderr, \"case1: null body\\n\"); return 10; }\n"
+        + "    if (strcmp(body, \"ok\") != 0) { fprintf(stderr, \"case1: got '%s'\\n\", body); return 11; }\n"
+        + "    if (!check_dump(dumppath, 5, payload)) { return 12; }\n"
+        + "\n"
+        + "    /* Case 2: sfn_http_post2_lv — 3-arg alias `http.post` lowers to. */\n"
+        + "    lfd = start_listener(&port);\n"
+        + "    if (lfd < 0) return 2;\n"
+        + "    sprintf(url, \"http://127.0.0.1:%d/\", port);\n"
+        + "    sprintf(dumppath, \"%s/post2_lv.bin\", dumpdir);\n"
+        + "    pid = serve_once(lfd, 5, dumppath);\n"
+        + "    body = sfn_http_post2_lv(url, payload, 5);\n"
+        + "    waitpid(pid, NULL, 0);\n"
+        + "    close(lfd);\n"
+        + "    if (body == NULL) { fprintf(stderr, \"case2: null body\\n\"); return 20; }\n"
+        + "    if (strcmp(body, \"ok\") != 0) { fprintf(stderr, \"case2: got '%s'\\n\", body); return 21; }\n"
+        + "    if (!check_dump(dumppath, 5, payload)) { return 22; }\n"
+        + "\n"
+        + "    /* Case 3: regression — sfn_http_post (bare-pointer original)\n"
+        + "       still works, still delegates through the twin. */\n"
+        + "    lfd = start_listener(&port);\n"
+        + "    if (lfd < 0) return 2;\n"
+        + "    sprintf(url, \"http://127.0.0.1:%d/\", port);\n"
+        + "    sprintf(dumppath, \"%s/post_orig.bin\", dumpdir);\n"
+        + "    pid = serve_once(lfd, 5, dumppath);\n"
+        + "    body = sfn_http_post(url, \"hello\", NULL);\n"
+        + "    waitpid(pid, NULL, 0);\n"
+        + "    close(lfd);\n"
+        + "    if (body == NULL) { fprintf(stderr, \"case3: null body\\n\"); return 30; }\n"
+        + "    if (strcmp(body, \"ok\") != 0) { fprintf(stderr, \"case3: got '%s'\\n\", body); return 31; }\n"
+        + "    if (!check_dump(dumppath, 5, \"hello\")) { return 32; }\n"
+        + "\n"
+        + "    printf(\"ALL OK\\n\");\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+test "http.sfn: forked-listener round trip carries the caller's POST byte length (SFN-1022)" ![io] {
+    // POSIX-only harness (`fork`, `sys/socket.h`, `unistd.h`) — a platform-
+    // support skip, not a link-failure skip. D1/D2 above still run on
+    // Windows.
+    if host_is_windows() {
+        assert true;
+        return;
+    }
+
+    let dir = _scratch_dir();
+    let ll = dir + "/http_rt.ll";
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _http_path()], _child_env());
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+
+    let harness = dir + "/carry_length_harness.c";
+    fs.writeFile(harness, _harness_c());
+    let bin = dir + "/carry_length_harness";
+
+    // The link boundary FAILS LOUDLY, not silently — never splice a scratch
+    // path into generated source text (SFN-1001); it travels via argv[1].
+    let mut oracle_argv: string[] = ["-Wno-override-module", harness, ll, "-o", bin];
+    for flag in c_math_link_flags() { oracle_argv.push(flag); }
+    let clang_exit = run_external_c_oracle(oracle_argv);
+    let _co = process.capture_take_stdout();
+    let clang_err = process.capture_take_stderr();
+    if clang_exit != 0 {
+        print("http POST carry-length harness failed to link (exit="
+            + _int_to_string(clang_exit)
+            + ")");
+        print(clang_err);
+    }
+    assert clang_exit == 0;
+
+    let run_exit = process.run_capture([bin, dir], _child_env());
+    let out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    if run_exit != 0 {
+        print("http POST carry-length harness exited " + _int_to_string(run_exit));
+        print(out);
+        print(run_err);
+    }
+    assert run_exit == 0;
+    assert find(out, "ALL OK", 0) >= 0;
+}

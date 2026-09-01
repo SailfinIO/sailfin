@@ -320,11 +320,14 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `native_signature` override routes `http.get_body` /
     // `http.post_json` / `http.download` to `sfn_http_get` /
     // `sfn_http_post` (url, body, auth_header) / `sfn_http_download`.
+    // SFN-1022: the body param now carries `{i8*, i64}` and routes through
+    // the `_lv` twin so the caller's length reaches `Content-Length` intact;
+    // the bare-pointer symbol stays defined for seed-built IR.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "http.get_body", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.post_json", symbol: "sfn_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], native_signature: "sfn_http_post", c_abi_return_type: null
+        target: "http.post_json", symbol: "sfn_http_post", return_type: "i8*", parameter_types: ["i8*", "{i8*, i64}", "i8*"], native_signature: "sfn_http_post_lv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "http.download", symbol: "sfn_http_download", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_http_download", c_abi_return_type: null
