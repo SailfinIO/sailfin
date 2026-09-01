@@ -429,6 +429,7 @@ export {
     // by host — the errno accessor the emitter picks, a C harness's link flags.
     // A test that merely needs platform-shaped INPUT should force it with the
     // `SAILFIN_TARGET_OS` override instead, so the assertion runs everywhere.
+    git_bash_path,
     host_is_windows,
     nested_runner_scratch,
     with_cwd,

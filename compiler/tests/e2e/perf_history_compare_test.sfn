@@ -16,27 +16,7 @@
 // Drives the script as a subprocess (no bash e2e scripts — see
 // .claude/rules/no-bash-e2e.md) and asserts on captured stdout/stderr.
 import { contains } from "sfn/strings";
-import { bash_path, host_is_windows, scratch_root } from "sfn/test";
-
-// Native Windows resolves a bare `bash` through CreateProcess rather than the
-// GitHub Actions step-shell selection that points at Git Bash. Prefer the Git
-// for Windows provider the runner installs, then retain PATH lookup for custom
-// hosts. The WSL app alias is not equivalent: it consumes `/mnt/c/...` paths,
-// while these Bash-backed repository fixtures use the MSYS `/c/...` bridge.
-fn _bash_tool() -> string ![io] {
-    if !host_is_windows() { return "bash"; }
-    let program_files = env.get("ProgramFiles");
-    if program_files.length > 0 {
-        let system_git_bash = program_files + "\\Git\\bin\\bash.exe";
-        if fs.exists(system_git_bash) { return system_git_bash; }
-    }
-    let local_app_data = env.get("LOCALAPPDATA");
-    if local_app_data.length > 0 {
-        let user_git_bash = local_app_data + "\\Programs\\Git\\bin\\bash.exe";
-        if fs.exists(user_git_bash) { return user_git_bash; }
-    }
-    return "bash.exe";
-}
+import { bash_path, git_bash_path, scratch_root } from "sfn/test";
 
 fn _fixture_dir(name: string) -> string ![io] {
     return scratch_root() + "/perf-history-compare-test/" + name;
@@ -77,12 +57,12 @@ fn _prior_rows(seed: string) -> string {
 }
 
 fn _run_compare(dir: string) -> int ![io] {
-    return process.run_capture([_bash_tool(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--out", bash_path(dir
+    return process.run_capture([git_bash_path(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--out", bash_path(dir
         + "/out.tsv")], _child_env());
 }
 
 fn _run_compare_budget(dir: string, budget: string) -> int ![io] {
-    return process.run_capture([_bash_tool(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--budget", budget, "--out", bash_path(dir
+    return process.run_capture([git_bash_path(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--budget", budget, "--out", bash_path(dir
         + "/out.tsv")], _child_env());
 }
 
@@ -204,7 +184,7 @@ fn _write_consumer_fixture(dir: string, priors: int, current: string) -> void ![
 }
 
 fn _run_compare_consumer(dir: string) -> int ![io] {
-    return process.run_capture([_bash_tool(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--count-threshold-pct", "0", "--out", bash_path(dir
+    return process.run_capture([git_bash_path(), bash_path("scripts/perf_history.sh"), "compare", "--data-dir", bash_path(dir), "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--count-threshold-pct", "0", "--out", bash_path(dir
         + "/out.tsv")], _child_env());
 }
 
@@ -335,7 +315,7 @@ test "perf-history: three comparison kinds coexist without masking one another" 
 }
 
 fn _run_append_consumer(dir: string, raw: string) -> int ![io] {
-    return process.run_capture([_bash_tool(), bash_path("scripts/perf_history.sh"), "append", "--data-dir", bash_path(dir), "--sha", "cur", "--date", "2026-08-12", "--consumer", bash_path(raw)], _child_env());
+    return process.run_capture([git_bash_path(), bash_path("scripts/perf_history.sh"), "append", "--data-dir", bash_path(dir), "--sha", "cur", "--date", "2026-08-12", "--consumer", bash_path(raw)], _child_env());
 }
 
 // Re-running the nightly against an already-recorded commit must leave the

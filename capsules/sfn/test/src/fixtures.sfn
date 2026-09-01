@@ -251,6 +251,27 @@ fn bash_path(path: string) -> string ![io] {
     return normalized;
 }
 
+// The Bash executable for fixtures that intentionally validate repository
+// shell scripts. Native Windows exposes a WSL `bash.exe` application alias,
+// so PATH lookup cannot distinguish the MSYS provider that consumes the
+// `/c/...` paths `bash_path` emits. Resolve the two Git for Windows install
+// roots explicitly and fail closed with `""` when neither exists. POSIX
+// keeps the historical bare-name lookup and its byte-identical contract.
+fn git_bash_path() -> string ![io] {
+    if !host_is_windows() { return "bash"; }
+    let program_files = env.get("ProgramFiles");
+    if program_files.length > 0 {
+        let system = program_files + "\\Git\\bin\\bash.exe";
+        if fs.exists(system) { return system; }
+    }
+    let local_app_data = env.get("LOCALAPPDATA");
+    if local_app_data.length > 0 {
+        let user = local_app_data + "\\Programs\\Git\\bin\\bash.exe";
+        if fs.exists(user) { return user; }
+    }
+    return "";
+}
+
 // Build a clean top-level child environment for spawning a nested `sfn test`
 // (or `sfn build` / `sfn run`) subprocess. Returns `process.environ()` with
 // every pool-managed key (see `_pool_managed_keys`) and every caller-override

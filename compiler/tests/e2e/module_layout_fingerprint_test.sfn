@@ -20,6 +20,7 @@ import {
     bash_path,
     clean_runner_env_without,
     default_scratch_dir,
+    git_bash_path,
     report_child_failure,
     sfn_bin_abs_path
 } from "sfn/test";
@@ -53,7 +54,7 @@ fn _script_env() -> string[] ![io] {
 fn _fingerprint(root: string) -> string ![io] {
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture(["bash", script, bash_path(root)], _script_env());
+    let exit = process.run_capture([git_bash_path(), script, bash_path(root)], _script_env());
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     report_child_failure("module-layout-fingerprint", exit, output, error);
@@ -63,7 +64,7 @@ fn _fingerprint(root: string) -> string ![io] {
 fn _default_fingerprint(root: string) -> string ![io] {
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture_cwd(["bash", script], _script_env(), root);
+    let exit = process.run_capture_cwd([git_bash_path(), script], _script_env(), root);
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     report_child_failure("module-layout-fingerprint", exit, output, error);
@@ -73,7 +74,7 @@ fn _default_fingerprint(root: string) -> string ![io] {
 fn _freshness_fingerprint(root: string) -> string ![io] {
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture_cwd(["bash", script, "--freshness"], _script_env(), root);
+    let exit = process.run_capture_cwd([git_bash_path(), script, "--freshness"], _script_env(), root);
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     report_child_failure("module-layout-fingerprint --freshness", exit, output, error);
@@ -83,7 +84,7 @@ fn _freshness_fingerprint(root: string) -> string ![io] {
 fn _ci_freshness_fingerprint(root: string) -> string ![io] {
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture_cwd(["bash", script, "--ci-freshness"], _script_env(), root);
+    let exit = process.run_capture_cwd([git_bash_path(), script, "--ci-freshness"], _script_env(), root);
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     report_child_failure("module-layout-fingerprint --ci-freshness", exit, output, error);
@@ -93,7 +94,7 @@ fn _ci_freshness_fingerprint(root: string) -> string ![io] {
 fn _inventory_view(root: string, view: string) -> string ![io] {
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture_cwd(["bash", script, view], _script_env(), root);
+    let exit = process.run_capture_cwd([git_bash_path(), script, view], _script_env(), root);
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     report_child_failure("module-layout-fingerprint " + view, exit, output, error);
@@ -103,7 +104,7 @@ fn _inventory_view(root: string, view: string) -> string ![io] {
 fn _member_manifest(root: string, name: string) -> string ![io] {
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture_cwd(["bash", script, "--member-manifest", name], _script_env(), root);
+    let exit = process.run_capture_cwd([git_bash_path(), script, "--member-manifest", name], _script_env(), root);
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     report_child_failure("module-layout-fingerprint --member-manifest", exit, output, error);
@@ -179,7 +180,7 @@ test "module layout fingerprint: explicit overlapping roots preserve v1 multipli
     let once = _fingerprint(scratch);
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture(["bash", script, bash_path(scratch), bash_path(scratch)], _script_env());
+    let exit = process.run_capture([git_bash_path(), script, bash_path(scratch), bash_path(scratch)], _script_env());
     let twice = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     report_child_failure("module-layout-fingerprint overlapping roots", exit, twice, error);
@@ -266,7 +267,7 @@ test "module layout fingerprint: duplicate canonical members fail every inventor
         + "/compiler/tests/unit/fixtures/repository_topology/duplicate_name";
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture_cwd(["bash", script, "--member-records"], _script_env(), root);
+    let exit = process.run_capture_cwd([git_bash_path(), script, "--member-records"], _script_env(), root);
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     if !contains(error, "duplicate workspace capsule name") {
@@ -321,7 +322,7 @@ test "module layout fingerprint: missing declared entry fails closed" ![io] {
     fs.writeFile(scratch + "/compiler/src/other.sfn", "fn other() -> int { return 1; }\n");
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture_cwd(["bash", script], _script_env(), scratch);
+    let exit = process.run_capture_cwd([git_bash_path(), script], _script_env(), scratch);
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     if !contains(error, "missing declared entry") {
@@ -352,7 +353,7 @@ test "module layout fingerprint: missing member source fails closed" ![io] {
         + "/compiler/tests/unit/fixtures/repository_topology/missing_source";
     let script = bash_path(_repo_root()
         + "/scripts/module_layout_fingerprint.sh");
-    let exit = process.run_capture_cwd(["bash", script], _script_env(), root);
+    let exit = process.run_capture_cwd([git_bash_path(), script], _script_env(), root);
     let output = process.capture_take_stdout();
     let error = process.capture_take_stderr();
     if !contains(error, "member has no Sailfin source input") {

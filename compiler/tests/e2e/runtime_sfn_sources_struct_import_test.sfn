@@ -103,12 +103,23 @@ fn _setup_workspace(ws: string) ![io] {
     // SFN-927: `io.sfn` calls `sfn_fd_write`/`sfn_fd_read` from the
     // target-swapped `platform/fd_io.sfn` pair, so this fixture must
     // list it or the link leaves those symbols undefined.
-    + "\"../sfn/io.sfn\", \"../sfn/platform/fd_io.sfn\", "
+    + "\"../sfn/io.sfn\", \"../sfn/platform/fd_io.sfn\", \"../sfn/platform/mkdtemp_acl.sfn\", "
         + "\"../sfn/memory/arena.sfn\", \"../sfn/memory/ownedbuf.sfn\", "
         + "\"../sfn/string.sfn\", \"../sfn/array.sfn\", \"../sfn/memory/mem.sfn\"]\n"
         + "include-dirs = []\n"
         + "link-libs = [\"-lm\"]\n"
-        + "prelude-entry = \"../prelude.sfn\"\n");
+        + "prelude-entry = \"../prelude.sfn\"\n\n"
+        + "[targets.x86_64-pc-windows-msvc]\n"
+        + "sfn-sources-replace = [\"../sfn/platform/fd_io.sfn=../sfn/platform/fd_io_windows.sfn\", "
+        + "\"../sfn/platform/mkdtemp_acl.sfn=../sfn/platform/mkdtemp_acl_windows.sfn\"]\n"
+        + "sfn-sources-add = [\"../sfn/platform/realpath_windows.sfn\", \"../sfn/platform/clock_windows.sfn\", "
+        + "\"../sfn/platform/pthread_windows.sfn\", \"../sfn/platform/popen_windows.sfn\", "
+        + "\"../sfn/platform/mkstemp_windows.sfn\", \"../sfn/platform/strcasestr_windows.sfn\", "
+        + "\"../sfn/platform/opendir_windows.sfn\", \"../sfn/platform/mkdtemp_windows.sfn\"]\n"
+        + "sfn-sources-drop = []\n"
+        + "ll-sources-add = []\n"
+        + "link-libs-drop = [\"-lm\"]\n"
+        + "link-libs-add = [\"-ladvapi32\"]\n");
 
     // Mirror the real runtime modules the manifest references (copies, since
     // there is no Sailfin fs symlink surface).
@@ -128,6 +139,8 @@ fn _setup_workspace(ws: string) ![io] {
     _copy("runtime/sfn/platform/libc.sfn", ws + "/runtime/sfn/platform/libc.sfn");
     _copy("runtime/sfn/platform/fd_io.sfn", ws
         + "/runtime/sfn/platform/fd_io.sfn");
+    _copy("runtime/sfn/platform/mkdtemp_acl.sfn", ws
+        + "/runtime/sfn/platform/mkdtemp_acl.sfn");
 
     // SFN-1115: stage the Windows half of the runtime platform set too.
     // On a native Windows host manifest target conditioning rewrites the
@@ -142,6 +155,8 @@ fn _setup_workspace(ws: string) ![io] {
     // target tables in `runtime/capsule.toml`.
     _copy("runtime/sfn/platform/fd_io_windows.sfn", ws
         + "/runtime/sfn/platform/fd_io_windows.sfn");
+    _copy("runtime/sfn/platform/mkdtemp_acl_windows.sfn", ws
+        + "/runtime/sfn/platform/mkdtemp_acl_windows.sfn");
     _copy("runtime/sfn/platform/realpath_windows.sfn", ws
         + "/runtime/sfn/platform/realpath_windows.sfn");
     _copy("runtime/sfn/platform/clock_windows.sfn", ws
