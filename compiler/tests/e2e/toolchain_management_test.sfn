@@ -44,6 +44,9 @@
 //       answers.
 //   15. an exact `+<version>` selector resolving in-process outranks
 //       management routing entirely.
+//   16. a payload whose manifest header is well-formed but whose record
+//       section is malformed is never executed: the header-only survey
+//       (SFN-1201) admits it, and the pre-exec full verify skips it.
 import { remove_all } from "sfn/fs";
 import { contains, split, trim } from "sfn/strings";
 import {
@@ -63,6 +66,7 @@ import {
     TOOLCHAIN_MANAGEMENT_PROTOCOL,
     TOOLCHAIN_MANIFEST_SCHEMA,
     ToolchainManifestMeta,
+    toolchain_manifest_path,
     toolchain_manifest_write
 } from "../../src/toolchain/manifest";
 import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
@@ -580,4 +584,35 @@ test "toolchain management: an exact selector outranks management routing" ![io]
     // The selector resolved in-process — neither store stub ever ran.
     assert ! contains(out + err, marker_a);
     assert ! contains(out + err, marker_b);
+}
+
+// Before SFN-1201 the survey parsed every candidate's manifest in full, so a
+// bad record section disqualified the payload at candidacy. The header-only
+// survey admits it instead, and the pre-exec `toolchain_verify_executable`
+// — which still reads in full — is what has to catch it. The observable
+// outcome must be identical to case 4: the payload never runs, the skip is
+// named, and the next-newest compatible payload answers.
+test "toolchain management: a malformed record section is never executed and falls through" ![io] {
+    let store = _scratch_root() + "/malformed-records-store";
+    let proj = _scratch_root() + "/malformed-records-proj";
+    let older_marker = "MANAGEMENT_MALFORMED_RECORDS_998_6c07";
+    let newer_marker = "MANAGEMENT_MALFORMED_RECORDS_999_6c07";
+    _seed_stub_verified(store, "998.0.0", older_marker);
+    let newer_dir = _seed_stub_verified(store, "999.0.0", newer_marker);
+
+    // Leave the header intact and corrupt only the record section, so the
+    // header-only read still says OK for a version and host that match.
+    let manifest_path = toolchain_manifest_path(newer_dir);
+    fs.writeFile(manifest_path, fs.readFile(manifest_path)
+        + "not-a-record-line\n");
+    _seed_project(proj, "0.0.1");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-management malformed-records run", exit, out, err);
+    assert contains(out + err, older_marker);
+    assert ! contains(out + err, newer_marker);
+    assert contains(err, "999.0.0");
 }
