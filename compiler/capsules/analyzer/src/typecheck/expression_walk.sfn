@@ -36,6 +36,7 @@ import {
     find_value_symbol,
     is_function_kind,
     make_fn_value_position_diagnostic,
+    make_imported_fn_value_diagnostic,
     register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { trim_text } from "../typecheck_types/text_utils";
@@ -77,6 +78,14 @@ import {
     make_undefined_value_diagnostic,
     serve_argument_type_diagnostics
 } from "./primitive_rules";
+import {
+    _imported_struct_field_expected_type,
+    _struct_field_expected_type,
+    _struct_name_is_imported,
+    _struct_shape_is_resolvable,
+    _struct_type_names,
+    _without_code
+} from "./struct_literal_fn_values";
 import { _declared_struct_annotation, _string_list_has } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
@@ -277,14 +286,65 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // Skip E0310 entirely for a generic struct's literal, matching the
         // E0833 `generic_struct_names` precedent (SFN-910).
         let is_generic_struct = _string_list_has(ctx.generic_struct_names, struct_name);
+        // SFN-1161. Capsule staging emits each module's `.sfn-asm` standalone,
+        // deliberately order-independent — `build/runtime_objs.sfn` and
+        // `main.sfn`'s `write_native_text_file_with_module_gated` header both
+        // state the invariant, and the parallel emit fan-out plus the
+        // source-only stage cache key depend on it. So a dependency module is
+        // typechecked with no import context: an imported struct's *name* is
+        // known (`_collect_imported_call_symbols` puts every import specifier
+        // in `ctx.known_types`) but its *shape* is not.
+        //
+        // In that state this pass cannot render the fn-value verdict, and
+        // guessing "reject" is what made a bare function name in an imported
+        // struct's field fail the build. Defer instead: drop E0808 for that
+        // one shape and let the pass that does have the shape decide —
+        // `main.sfn`'s per-module compile for build/run/test, or
+        // `check/engine.sfn` when the module is a named check entry. Both run
+        // over the same module before any binary exists.
+        //
+        // Deferring, not disabling: the guards below keep every other
+        // rejection intact, and the native resolve gate already defers to LLVM
+        // lowering on the same grounds.
+        // `imported_structs.length == 0` narrows the deferral to the pass it
+        // exists for: capsule staging, which loads no import context at all.
+        // Once a context IS loaded — the check engine for a named entry, or
+        // the per-module compile — an unresolvable shape is a real miss, not
+        // missing information, and keeps its normal verdict. That is what
+        // preserves the pre-existing rejection for an aliased import
+        // (`import { Verb as V }` registers `V` while the artifact declares
+        // `Verb`, so the shape never resolves): loud as before, rather than
+        // silently accepted forever.
+        let no_import_context = ctx.imported_structs.length == 0;
+        let shape_unresolvable = !_struct_shape_is_resolvable(expression.type_name, ctx);
+        let name_is_imported = _struct_name_is_imported(expression.type_name, ctx);
+        let defer_fn_value_verdict = no_import_context && shape_unresolvable
+            && name_is_imported;
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
             let field = expression.fields[index];
-            let field_expected = _struct_field_expected_type(expression.type_name, field.name, ctx);
-            diagnostics = diagnostics.concat(walk_expression(field.value, ctx_with_expected_type(ctx, field_expected)));
+            let local_expected = _struct_field_expected_type(expression.type_name, field.name, ctx);
+            let mut field_expected = local_expected;
+            if field_expected == null {
+                field_expected = _imported_struct_field_expected_type(expression.type_name, field.name, ctx);
+            }
+            let field_diagnostics = walk_expression(field.value, ctx_with_expected_type(ctx, field_expected));
+            if defer_fn_value_verdict && field.value.variant == "Identifier" {
+                diagnostics = diagnostics.concat(_without_code(field_diagnostics, "E0808"));
+            } else { diagnostics = diagnostics.concat(field_diagnostics); }
             if !is_generic_struct {
-                diagnostics = diagnostics.concat(check_array_element_type(field.value, field_expected, ctx, "field `"
+                // `local_expected`, deliberately, not `field_expected`
+                // (SFN-1161). `ctx.expected_type` is read in exactly two
+                // places — `_array_element_expected_type` and the fn-value
+                // gate — so routing an imported annotation only into
+                // `ctx_with_expected_type` cannot raise anything but the
+                // fn-value verdict this fix exists to correct. Passing it
+                // here would additionally open E0310 on imported struct
+                // fields, and `.sfn-asm` carries no struct type parameters,
+                // so `is_generic_struct` above could not suppress an
+                // unsubstituted `T[]` field on an imported `Box<T>`.
+                diagnostics = diagnostics.concat(check_array_element_type(field.value, local_expected, ctx, "field `"
                     + field.name
                     + "`", field.name, _value_anchor_span(field.value)));
             }
@@ -565,7 +625,12 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                         // Import/prelude placeholders do not carry a complete
                         // callable signature. Fail closed until parameter,
                         // generic, async, and ABI metadata cross this boundary.
-                        return [make_fn_value_position_diagnostic(expression.name, expression.span)];
+                        //
+                        // E0843, not E0808 (SFN-1161): the restriction here is
+                        // missing import metadata, not the C ABI, so the
+                        // generic "take its address with `as * u8`" advice
+                        // sent readers to an unrelated escape hatch.
+                        return [make_imported_fn_value_diagnostic(expression.name, expression.span)];
                     }
                 }
             }
@@ -582,7 +647,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                         if ctx.expected_type != null {
                             let expected = parse_fn_type_text(ctx.expected_type.text);
                             if expected.ok {
-                                return check_named_fn_value_compatibility(expression.name, entry, ctx.expected_type.text, expression.span);
+                                return check_named_fn_value_compatibility(expression.name, entry, ctx.expected_type.text, expression.span, _struct_type_names(ctx));
                             }
                         }
                     }
@@ -663,30 +728,6 @@ fn _array_element_expected_type(expected: TypeAnnotation?) -> TypeAnnotation? {
         }
     }
     return TypeAnnotation { text: element };
-}
-
-fn _struct_field_expected_type(type_name: string[], field_name: string, ctx: TypeckCtx) -> TypeAnnotation? {
-    if type_name.length == 0 { return null; }
-    let name = type_name[type_name.length - 1];
-    let mut declaration_index: int = 0;
-    loop {
-        if declaration_index >= ctx.declarations.length { break; }
-        let declaration = ctx.declarations[declaration_index];
-        if declaration.variant == "StructDeclaration" {
-            if declaration.name == name {
-                let mut field_index: int = 0;
-                loop {
-                    if field_index >= declaration.fields.length { break; }
-                    if declaration.fields[field_index].name == field_name {
-                        return declaration.fields[field_index].type_annotation;
-                    }
-                    field_index += 1;
-                }
-            }
-        }
-        declaration_index += 1;
-    }
-    return null;
 }
 
 // Walk a match-arm pattern for diagnostics, exempting the `Raw` shorthand

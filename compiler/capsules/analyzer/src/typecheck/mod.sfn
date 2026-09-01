@@ -32,6 +32,7 @@ import { check_program_scopes } from "./statement_checks";
 import {
     _collect_imported_call_symbols,
     _filter_interface_declarations,
+    _filter_struct_declarations,
     _generic_struct_names,
     _names_from_symbols,
     _symbols_from_global_names,
@@ -58,7 +59,8 @@ fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
 fn typecheck_diagnostics_with_prelude(program: Program, prelude_globals: string[]) -> Diagnostic[] {
     let empty_imports: Statement[] = [];
     let empty_implicit: ImplicitSymbol[] = [];
-    return typecheck_diagnostics_full(program, empty_imports, empty_import_symbols(), prelude_globals, empty_implicit);
+    let empty_structs: Statement[] = [];
+    return typecheck_diagnostics_full(program, empty_imports, empty_import_symbols(), prelude_globals, empty_implicit, empty_structs);
 }
 
 fn typecheck_error_count_with_prelude(program: Program, prelude_globals: string[]) -> int {
@@ -123,7 +125,8 @@ fn typecheck_diagnostics_with_imports(program: Program, imported_interfaces: Sta
 fn typecheck_diagnostics_with_import_symbols(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable) -> Diagnostic[] {
     let empty_prelude: string[] = [];
     let empty_implicit: ImplicitSymbol[] = [];
-    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, empty_prelude, empty_implicit);
+    let empty_structs: Statement[] = [];
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, empty_prelude, empty_implicit, empty_structs);
 }
 
 // Prelude-aware symbol path (#812). The `sfn test` resolver
@@ -134,23 +137,42 @@ fn typecheck_diagnostics_with_import_symbols(program: Program, imported_interfac
 // checked source resolve.
 fn typecheck_diagnostics_with_import_symbols_prelude(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[]) -> Diagnostic[] {
     let empty_implicit: ImplicitSymbol[] = [];
-    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, empty_implicit);
+    let empty_structs: Statement[] = [];
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, empty_implicit, empty_structs);
 }
 
 fn typecheck_diagnostics_with_import_symbols_prelude_implicit(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[]) -> Diagnostic[] {
-    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols);
+    let empty_structs: Statement[] = [];
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols, empty_structs);
+}
+
+// Cross-module struct-aware variant (SFN-1161). `imported_structs` carries
+// struct declarations reconstructed from imported `.sfn-asm` artifacts
+// (`typecheck_imports.sfn::structs_from_native`), so a struct-literal
+// field's expected type resolves against an imported struct's field shape
+// (SFN-1161). Consulted by the `Struct` arm of the expression walk and by
+// the parameter-position ABI relaxation; an empty list also marks the
+// capsule-staging pass, which loads no import context and therefore defers
+// its fn-value verdict rather than guessing.
+fn typecheck_diagnostics_with_import_symbols_prelude_implicit_structs(program: Program, imported_interfaces: Statement[], imported_structs: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[]) -> Diagnostic[] {
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols, imported_structs);
 }
 
 // Full implementation behind every typecheck entry point.
 // `prelude_globals` carries the implicitly-available prelude/runtime
 // declaration names (#812); callers without `![io]` to load them pass
 // an empty list and fall back to import-specifier + builtin resolution.
-fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[]) -> Diagnostic[] {
+fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[], imported_structs: Statement[]) -> Diagnostic[] {
     let local_imports = localize_import_symbols_for_program(program, imported_function_effects);
     let top_level = collect_top_level_symbols(program);
     let local_interfaces = collect_interface_definitions(program);
     let filtered_imports = _filter_interface_declarations(imported_interfaces);
     let combined_interfaces = local_interfaces.concat(filtered_imports);
+    // SFN-1161: deliberately NOT merged into `local_structs` below —
+    // `local_structs` feeds `_generic_struct_names` and
+    // `check_generic_instantiation_sites`, which own E0833, and imported
+    // structs must not participate in that generic-instantiation check.
+    let filtered_imported_structs = _filter_struct_declarations(imported_structs);
     // E0420 resolution scope (#812): every top-level declaration, the
     // program's own import-specifier names, and the implicitly-available
     // prelude/runtime globals. Threaded into function/method/test bodies
@@ -165,7 +187,7 @@ fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[]
     // SFN-555: the same resolution scope answers "is this a known type name?".
     // Flattened once here so the E0013 check never rebuilds it per annotation.
     let known_types = _names_from_symbols(resolution_scope);
-    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, imported_function_effects, resolution_scope, generic_struct_names, known_types);
+    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, imported_function_effects, resolution_scope, generic_struct_names, known_types, filtered_imported_structs);
 
     let instantiation_diagnostics = check_generic_instantiation_sites(program, combined_interfaces, local_structs);
 

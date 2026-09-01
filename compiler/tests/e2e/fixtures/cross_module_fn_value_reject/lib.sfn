@@ -1,0 +1,7 @@
+// The imported function SFN-1161's second facet rejects in value position.
+fn imported_one(x: int) -> int ![io] {
+    print("imported");
+    return x + 1;
+}
+
+export { imported_one }

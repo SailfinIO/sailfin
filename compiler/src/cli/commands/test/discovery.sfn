@@ -142,6 +142,11 @@ struct TestGroup {
     // SFN-882: carried from the group's resolver pass to the link site so both
     // use one demand set. See `TestCapsuleResolution.runtime_demand`.
     runtime_demand: string[];
+    // SFN-1161: struct declarations reconstructed from imported `.sfn-asm`
+    // artifacts, populated from the same per-group resolver pass that
+    // populates `interfaces`. Trailing for pinned-seed positional layout
+    // stability.
+    structs: Statement[];
 }
 
 // Compute the resolution-group key for a test file path. Two files
@@ -325,7 +330,7 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
             let empty_caps: string[] = [];
             let empty_implicit: ImplicitSymbol[] = [];
             groups.push(TestGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, runtime_demand: runtime_demand_all()
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, runtime_demand: runtime_demand_all(), structs: empty_interfaces
             });
             idx = groups.length - 1;
         }
@@ -419,6 +424,7 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
             };
         }
         groups[gi].interfaces = load.interfaces;
+        groups[gi].structs = load.structs;
         groups[gi].implicit_symbols = load.implicit_symbols;
         groups[gi].native_texts = load.native_texts;
         groups[gi].dep_ll_paths = resolution.ll_paths;

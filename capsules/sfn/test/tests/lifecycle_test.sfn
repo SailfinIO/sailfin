@@ -10,9 +10,11 @@
 //
 // There is intentionally NO `capsules/sfn/test/src/lifecycle.sfn` registration
 // surface. A `before_each(hook: fn() ![io])` register-now-call-later API would
-// (a) need storable+callable fn-values, a current frontend gap (see
-// `capsules/sfn/test/src/expect.sfn` — "a thunk cannot be stored in a struct
-// field and called");
+// (a) rest on storable+callable fn-values. That is no longer the blocker it
+// was: SFN-674 shipped fn-typed struct fields and SFN-1161 extended them
+// across module boundaries, so only an *imported* function named directly in
+// such a field is still refused (`E0843`; a module-local wrapper or lambda
+// works). The reasons below are what keep this surface out;
 // (b) trade #975's static direct calls for indirect dispatch; and (c) make hook
 // order depend on runtime registration sequence instead of static module order.
 // See `docs/proposals/0010-test-infra.md` §6.4 for the full architecture

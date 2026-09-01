@@ -25,7 +25,7 @@ import { check_ownership_with_imports } from "./ownership_checker";
 import { collect_reexport_violations } from "./reexport_check";
 import {
     collect_decorator_deprecation_findings,
-    typecheck_diagnostics_with_import_symbols_prelude_implicit
+    typecheck_diagnostics_with_import_symbols_prelude_implicit_structs
 } from "./typecheck";
 import { Diagnostic } from "./typecheck_types";
 
@@ -49,6 +49,9 @@ struct AnalyzerInput {
     // Structured provider surface for declarations made available without a
     // source import. Trailing for pinned-seed positional layout stability.
     implicit_symbols: ImplicitSymbol[];
+    // SFN-1161: struct declarations reconstructed from imported `.sfn-asm`
+    // artifacts. Trailing for pinned-seed positional layout stability.
+    imported_structs: Statement[];
 }
 
 // Semantic data retained for downstream analysis/codegen consumers. The
@@ -107,7 +110,7 @@ fn _record_severity(diagnostic: Diagnostic, errors: int, warnings: int) -> int[]
 fn analyze_program(input: AnalyzerInput) -> AnalyzerResult {
     let program = input.program;
     let analysis_symbols = with_intrinsic_effects(input.imported_symbols, input.intrinsic_effects);
-    let type_diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit(program, input.imported_interfaces, analysis_symbols, input.prelude_globals, input.implicit_symbols);
+    let type_diagnostics = typecheck_diagnostics_with_import_symbols_prelude_implicit_structs(program, input.imported_interfaces, input.imported_structs, analysis_symbols, input.prelude_globals, input.implicit_symbols);
     let ownership_findings = check_ownership_with_imports(program, analysis_symbols);
     let effect_violations = validate_effects_with_imports_api(program, analysis_symbols);
     let capability_violations = validate_capsule_capabilities_api(program, input.capabilities_required, input.capabilities_declared, input.capabilities_dev_required);

@@ -1,0 +1,68 @@
+// compiler/tests/e2e/cross_module_fn_value_reject_test.sfn
+//
+// SFN-1161, second facet: an IMPORTED function referenced as a value in a
+// fn-typed field. This stays rejected — the cross-module import table records
+// a name, arity and effects, but not parameter types, async-ness or
+// generic-ness, so the signature cannot be proved compatible with the expected
+// `fn(...)` type. Admitting it would be fail-open.
+//
+// What changed is the diagnostic, and that is the whole point of this test.
+// The old E0808 advised "take its address with `<fn> as * u8` to pass it
+// across the C ABI", which named an unrelated escape hatch: the obstacle here
+// is missing import metadata, not calling convention. E0843 states the real
+// restriction and the two spellings that do work.
+//
+// The struct is declared locally on purpose. Its shape is therefore known, so
+// the staging deferral (see `cross_module_fn_field_dispatch_test.sfn`) does not
+// apply and this reference reaches the real verdict — which is what keeps this
+// test honest about *why* it fails.
+//
+// SFN-1161's acceptance criteria permit either outcome for this facet. Making
+// imported functions resolve would mean widening a struct the seed indexes
+// positionally and rewriting a fail-closed guard on a seed-bound change, with
+// no consumer requiring it; the honest diagnostic was chosen instead. If that
+// is ever revisited, this test is the one to restate.
+import { find, trim_right } from "sfn/strings";
+import {
+    clean_runner_env,
+    expect_eq_int,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
+
+fn _entry() -> string {
+    return "compiler/tests/e2e/fixtures/cross_module_fn_value_reject/main.sfn";
+}
+
+fn _check_output() -> string ![io] {
+    let args = [sfn_bin_path(), "check", _entry()];
+    let child_env = clean_runner_env(nested_runner_scratch("sfn1161-reject"));
+    let exit = process.run_capture(args, child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let mut result = trim_right(out + err);
+    if exit == 0 { result = "unexpected zero exit\n" + result; }
+    return result;
+}
+
+test "cross-module fn value: imported function is rejected under E0843" ![io] {
+    let output = _check_output();
+    assert find(output, "unexpected zero exit", 0) < 0;
+    assert find(output, "error[E0843]:", 0) >= 0;
+    assert find(output, "imported_one", 0) >= 0;
+}
+
+test "cross-module fn value: the rejection drops the C-ABI advice" ![io] {
+    let output = _check_output();
+    // The misleading advice and its code must both be gone: a reader following
+    // `as * u8` here would be chasing a restriction that does not exist.
+    assert find(output, "as * u8", 0) < 0;
+    assert find(output, "E0808", 0) < 0;
+    assert find(output, "pthread_create", 0) < 0;
+}
+
+test "cross-module fn value: E0843 names the working alternatives" ![io] {
+    let output = _check_output();
+    assert find(output, "module-local function", 0) >= 0;
+    assert find(output, "lambda", 0) >= 0;
+}

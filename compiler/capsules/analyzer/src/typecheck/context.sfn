@@ -57,10 +57,22 @@ struct TypeckCtx {
     // exactly one walk step: the receiver inside `foo().bar()` still gets its
     // own field check.
     in_callee_position: boolean;
+    // SFN-1161: struct declarations reconstructed from imported `.sfn-asm`
+    // artifacts (`typecheck_imports.sfn::structs_from_native`). Read by the
+    // `Struct` arm to resolve a struct-literal field's expected type against
+    // an imported struct's field shape, and by the parameter-position ABI
+    // relaxation in `check_named_fn_value_compatibility`.
+    //
+    // Empty on the capsule-staging path, which typechecks each module
+    // standalone by design — the `Struct` arm defers its fn-value verdict
+    // there rather than guessing. Carries no methods and no type parameters
+    // (artifacts record neither), so it must never feed a check that reasons
+    // about either.
+    imported_structs: Statement[];
 }
 
 // Root context for a walk: top-level scope, no enclosing return type.
-fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, available_imports: ImportSymbolTable, interfaces: Statement[], declarations: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[], known_types: string[]) -> TypeckCtx {
+fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, available_imports: ImportSymbolTable, interfaces: Statement[], declarations: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[], known_types: string[], imported_structs: Statement[]) -> TypeckCtx {
     return TypeckCtx {
         bindings: bindings,
         imports: imports,
@@ -76,7 +88,8 @@ fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, availabl
         generic_struct_names: generic_struct_names,
         known_types: known_types,
         type_params: [],
-        in_callee_position: false
+        in_callee_position: false,
+        imported_structs: imported_structs
     };
 }
 
@@ -101,7 +114,8 @@ fn ctx_with_type_params(ctx: TypeckCtx, names: string[]) -> TypeckCtx {
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
         type_params: ctx.type_params.concat(names),
-        in_callee_position: false
+        in_callee_position: false,
+        imported_structs: ctx.imported_structs
     };
 }
 
@@ -126,7 +140,8 @@ fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) 
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
         type_params: ctx.type_params,
-        in_callee_position: false
+        in_callee_position: false,
+        imported_structs: ctx.imported_structs
     };
 }
 
@@ -149,7 +164,8 @@ fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnno
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
         type_params: ctx.type_params,
-        in_callee_position: false
+        in_callee_position: false,
+        imported_structs: ctx.imported_structs
     };
 }
 
@@ -172,7 +188,8 @@ fn ctx_in_callee_position(ctx: TypeckCtx) -> TypeckCtx {
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
         type_params: ctx.type_params,
-        in_callee_position: true
+        in_callee_position: true,
+        imported_structs: ctx.imported_structs
     };
 }
 
@@ -194,6 +211,7 @@ fn ctx_with_expected_type(ctx: TypeckCtx, expected_type: TypeAnnotation?) -> Typ
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
         type_params: ctx.type_params,
-        in_callee_position: false
+        in_callee_position: false,
+        imported_structs: ctx.imported_structs
     };
 }

@@ -25,11 +25,19 @@
 // See docs/proposals/0004-check-architecture.md and
 // docs/proposals/0006-build-architecture.md (Stage B PR2) for the design
 // rationale.
-import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "sfn/ir";
+import {
+    NativeInterface,
+    NativeInterfaceSignature,
+    NativeParameter,
+    NativeStruct,
+    NativeStructField
+} from "sfn/ir";
 import {
     Decorator,
+    FieldDeclaration,
     FunctionSignature,
     InterfaceFieldMember,
+    MethodDeclaration,
     Parameter,
     Statement,
     TypeAnnotation,
@@ -158,13 +166,73 @@ fn interfaces_from_native(natives: NativeInterface[]) -> Statement[] {
     return out;
 }
 
+// -------------------------------------------------------------------
+// Struct converters
+// -------------------------------------------------------------------
+// Reconstructs imported struct declarations from `.sfn-asm` artifacts so
+// cross-module fn-value expected-type resolution (SFN-1161) can consult a
+// struct's field shape without re-parsing source. `methods: []` is
+// structural, not a placeholder: artifacts carry no method bodies, so
+// these reconstructed declarations must never feed method-existence
+// checks.
+fn field_declaration_from_native(native: NativeStructField) -> FieldDeclaration {
+    return FieldDeclaration {
+        name: native.name,
+        type_annotation: TypeAnnotation { text: native.type_annotation },
+        mutable: native.mutable,
+        name_span: null
+    };
+}
+
+fn field_declarations_from_native(natives: NativeStructField[]) -> FieldDeclaration[] {
+    let mut out: FieldDeclaration[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= natives.length { break; }
+        out.push(field_declaration_from_native(natives[i]));
+        i += 1;
+    }
+    return out;
+}
+
+fn struct_statement_from_native(native: NativeStruct) -> Statement {
+    let empty_decorators: Decorator[] = [];
+    let empty_implements: TypeAnnotation[] = [];
+    let empty_type_parameters: TypeParameter[] = [];
+    let empty_methods: MethodDeclaration[] = [];
+    return Statement.StructDeclaration {
+        name: native.name,
+        name_span: null,
+        type_parameters: empty_type_parameters,
+        implements_types: empty_implements,
+        fields: field_declarations_from_native(native.fields),
+        methods: empty_methods,
+        decorators: empty_decorators
+    };
+}
+
+fn structs_from_native(natives: NativeStruct[]) -> Statement[] {
+    let mut out: Statement[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= natives.length { break; }
+        out.push(struct_statement_from_native(natives[i]));
+        i += 1;
+    }
+    return out;
+}
+
 export {
+    field_declaration_from_native,
+    field_declarations_from_native,
     function_signature_from_native_interface_signature,
     function_signatures_from_native,
     interface_statement_from_native,
     interfaces_from_native,
     parameter_from_native,
     parameters_from_native,
+    struct_statement_from_native,
+    structs_from_native,
     type_parameter_from_name,
     type_parameters_from_names
 };

@@ -34,7 +34,7 @@ import {
     empty_import_symbols
 } from "sfn/analyzer/effect_imports";
 import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
-import { interfaces_from_native } from "sfn/analyzer/typecheck_imports";
+import { interfaces_from_native, structs_from_native } from "sfn/analyzer/typecheck_imports";
 import {
     ImplicitSymbol,
     LoweringDiagnostic,
@@ -59,6 +59,7 @@ struct ArtifactInterfaceParse {
     interfaces: Statement[];
     function_effects: ImportSymbolTable;
     diags: LoweringDiagnostic[];
+    structs: Statement[];
 }
 
 // Result of loading a batch of `.sfn-asm` artifacts. The path lists
@@ -66,8 +67,8 @@ struct ArtifactInterfaceParse {
 //   - `missing_paths`: not on disk (resolver/staging out of sync).
 //   - `parse_failure_paths`: existed but the native-IR parser
 //      produced diagnostics — treat as corrupt/stale.
-//   - `skipped_paths`: parsed fine and contained zero interfaces
-//      (benign — common for modules that export only structs/fns).
+//   - `skipped_paths`: parsed fine and contributed neither interfaces
+//      nor structs (benign — common for modules that export only fns).
 //
 // `function_effects` is the Phase E channel: an `ImportSymbolTable`
 // aggregating the `effects` field on every `NativeFunction` declared
@@ -93,6 +94,7 @@ struct ImportedInterfaceLoadResult {
     native_texts: string[];
     implicit_symbols: ImplicitSymbol[];
     implicit_diagnostics: string[];
+    structs: Statement[];
 }
 
 struct ImplicitProviderSurfaceResult {
@@ -107,6 +109,7 @@ struct ImplicitProviderSurfaceResult {
 fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     let parsed = parse_native_artifact_for_import_context(text);
     let interfaces = interfaces_from_native(parsed.interfaces);
+    let structs = structs_from_native(parsed.structs);
     let mut function_effects = empty_import_symbols();
     let mut i: int = 0;
     loop {
@@ -146,7 +149,8 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     return ArtifactInterfaceParse {
         interfaces: interfaces,
         function_effects: function_effects,
-        diags: parsed.diags
+        diags: parsed.diags,
+        structs: structs
     };
 }
 
@@ -698,7 +702,9 @@ fn build_closure_symbol_set(asm_paths: string[]) -> ClosureSymbolSet ![io] {
 // follows the `ImportedInterfaceLoadResult` contract: missing files
 // surface in `missing_paths`, parse failures surface in
 // `parse_failure_paths`, and successfully-parsed artifacts that
-// happened to declare zero interfaces surface in `skipped_paths`.
+// contributed neither interfaces nor struct declarations surface in
+// `skipped_paths` (SFN-1161 added the struct half — an artifact carrying
+// only structs is a real contribution and is no longer reported skipped).
 // No condition aborts the load — `sfn check` should always run
 // analysis; the partitioning lets the CLI decide which slices warrant
 // a warning.
@@ -714,6 +720,7 @@ fn _interface_path_contains(paths: string[], target: string) -> boolean {
 
 fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths: string[]) -> ImportedInterfaceLoadResult ![io] {
     let mut interfaces: Statement[] = [];
+    let mut structs: Statement[] = [];
     let mut function_effects = empty_import_symbols();
     let mut missing: string[] = [];
     let mut parse_failures: string[] = [];
@@ -783,12 +790,20 @@ fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths:
             }
             k += 1;
         }
-        if parsed.interfaces.length == 0 { skipped.push(path); } else {
+        if parsed.interfaces.length == 0 && parsed.structs.length == 0 {
+            skipped.push(path);
+        } else {
             let mut j: int = 0;
             loop {
                 if j >= parsed.interfaces.length { break; }
                 interfaces.push(parsed.interfaces[j]);
                 j += 1;
+            }
+            let mut m: int = 0;
+            loop {
+                if m >= parsed.structs.length { break; }
+                structs.push(parsed.structs[m]);
+                m += 1;
             }
         }
         i += 1;
@@ -803,7 +818,8 @@ fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths:
         skipped_paths: skipped,
         native_texts: native_texts,
         implicit_symbols: implicit_surface.symbols,
-        implicit_diagnostics: implicit_surface.diagnostics
+        implicit_diagnostics: implicit_surface.diagnostics,
+        structs: structs
     };
 }
 

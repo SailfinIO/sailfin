@@ -106,9 +106,14 @@ test "fn-value: fn expectation does not leak into a conditional condition" ![io]
     assert _count_code(source, "E0808") == 1;
 }
 
-test "fn-value: imported placeholder fails closed under fn expectation" ![io] {
+// SFN-1161: an imported name in a typed fn-value slot still fails closed, but
+// under E0843, which names the real restriction — the import table carries
+// effects and arity, not parameter types, async-ness, or generic-ness — rather
+// than E0808's C-ABI advice, which pointed at an unrelated escape hatch.
+test "fn-value: imported placeholder fails closed with the import-metadata code" ![io] {
     let source = "import { remote } from \"pkg\"; fn main() { let f: fn (int) -> int = remote; }";
-    assert _count_code(source, "E0808") == 1;
+    assert _count_code(source, "E0843") == 1;
+    assert _count_code(source, "E0808") == 0;
 }
 
 test "fn-value: generic named function stays rejected under fn expectation" ![io] {
@@ -240,6 +245,75 @@ test "fn-value: aggregate parameter signature is E0840" ![io] {
 test "fn-value: aggregate return signature is E0840" ![io] {
     let source = "struct Point { x: int } fn worker(x: int) -> Point { return Point { x: x }; } fn main() { let f: fn (int) -> Point = worker; }";
     assert _count_code(source, "E0840") == 1;
+}
+
+// ── SFN-1161: named-struct PARAMETERS are pointer-width under the boxed-struct
+// ABI (a user struct maps to `%T*`), so E0840's allowlist admits them. The two
+// tests above are the boundary and must keep failing: `string` is a real
+// `{i8*, i64}` aggregate, and returns stay gated pending an sret audit. ──
+test "fn-value: named struct parameter signature is accepted" ![io] {
+    let source = "struct Ctx { id: int } fn worker(c: Ctx) -> int { return c.id; } fn main() { let f: fn (Ctx) -> int = worker; }";
+    assert _count_code(source, "E0840") == 0;
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: struct-typed field initializer accepts a struct-parameter function" ![io] {
+    let source = "struct Ctx { id: int } struct Verb { run: fn (Ctx) -> int } fn worker(c: Ctx) -> int { return c.id; } fn main() { let v = Verb { run: worker }; }";
+    assert _count_code(source, "E0840") == 0;
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+// ── SFN-1161: capsule staging typechecks a dependency module with no import
+// context, so an imported struct's field shape is unknowable there. The walk
+// defers that one verdict rather than guessing "reject"; a later pass that has
+// the shape (the per-module compile, or the check engine for a named entry)
+// renders it. These pin the guards that keep the deferral from failing open. ──
+test "fn-value: bare fn in an unresolvable imported struct literal defers" ![io] {
+    let source = "import { Verb } from \"pkg\"; fn worker(x: int) -> int { return x; } fn main() { let v = Verb { run: worker }; }";
+    assert _count_code(source, "E0808") == 0;
+}
+
+test "fn-value: bare fn in a locally declared struct literal keeps its verdict" ![io] {
+    let source = "struct Verb { run: fn (int) -> int } fn worker(x: int) -> int { return x; } fn main() { let v = Verb { run: worker }; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: bare fn in a struct literal of an unimported name stays E0808" ![io] {
+    let source = "fn worker(x: int) -> int { return x; } fn main() { let v = Unknown { run: worker }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: qualified variant literal keeps its verdict under the deferral" ![io] {
+    let source = "import { Result } from \"pkg\"; fn worker(x: int) -> int { return x; } fn main() { let v = Result.Ok { run: worker }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+// The deferral keys on an `"import"`-kind symbol, never on `ctx.known_types` —
+// that list is the whole resolution scope, so a local interface, enum, type
+// alias or function of the same name would otherwise be mistaken for an
+// imported struct and have its E0808 dropped in a program with no imports at
+// all. Each of these must still reject.
+test "fn-value: local interface literal is not treated as an imported struct" ![io] {
+    let source = "interface Runner { fn go() -> int; } fn helper(x: int) -> int { return x; } fn main() { let r = Runner { go: helper }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: local type alias literal is not treated as an imported struct" ![io] {
+    let source = "type Handler = int; fn helper(x: int) -> int { return x; } fn main() { let h = Handler { run: helper }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: local enum literal is not treated as an imported struct" ![io] {
+    let source = "enum Color { Red } fn helper(x: int) -> int { return x; } fn main() { let c = Color { run: helper }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: local function name literal is not treated as an imported struct" ![io] {
+    let source = "fn Runner(x: int) -> int { return x; } fn helper(x: int) -> int { return x; } fn main() { let r = Runner { run: helper }; }";
+    assert _count_code(source, "E0808") == 1;
 }
 
 // ── E0809: generic function address has no single concrete code symbol ──
