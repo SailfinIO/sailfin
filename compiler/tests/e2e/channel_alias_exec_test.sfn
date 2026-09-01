@@ -12,7 +12,11 @@
 // handle — inferred, explicitly typed, declared inside a `routine` block,
 // or aliasing a module-global — still dispatches `.send`/`.receive` and
 // runs to completion, and a typed alias still enforces the channel's
-// element kind on `.send` (E0815).
+// element kind on `.send` (E0815). Tests (1)-(4) and the parameter-alias
+// case are the regression guards for the lowering fix; the E0815 case
+// exercises only the frontend (`sfn check`, which keys on the declared
+// annotation) and passes without the fix — it is kept as a guard that the
+// fix did not weaken the element-kind check.
 //
 // Everything is single-threaded: each fixture is a buffered channel with
 // send count < capacity, so a send-then-receive sequence on one thread is
@@ -22,6 +26,7 @@ import {
     assert_does_not_compile,
     clean_runner_env,
     default_scratch_dir,
+    nested_runner_scratch,
     report_child_failure,
     sfn_bin_path
 } from "sfn/test";
@@ -30,9 +35,13 @@ import {
 // "inherit". `sfn run` spawns a nested clang + linker, so the child needs
 // PATH (else the linker is not found). Derived by subtraction from the
 // real environment via `clean_runner_env`, not built up key-by-key
-// (SFN-1114).
-fn _child_env() -> string[] ![io] {
-    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
+// (SFN-1114). `clean_runner_env` on the raw `SAILFIN_TEST_SCRATCH`
+// re-points the child at the parent runner's own scratch (a pool-only
+// clobber), and standalone (`""`) it falls back to the fixed
+// `build/sailfin` cache; `nested_runner_scratch` mints an isolated dir in
+// both cases (SFN-401, docs/conventions/e2e-tests.md).
+fn _child_env(label: string) -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("channel-alias-" + label));
 }
 
 // A unique per-invocation scratch root (the native `mktemp -d`) so the
@@ -52,7 +61,7 @@ fn _run_and_capture(label: string, source: string) -> string ![io] {
     let dir = _scratch_dir();
     let src = dir + "/" + label + ".sfn";
     fs.writeFile(src, source);
-    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env(label));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("channel-alias " + label, exit, out, err);
@@ -113,7 +122,24 @@ test "channel alias: alias of a module-global channel dispatches and closes (SFN
     assert contains(out, "global alias sum: 7");
 }
 
-// ── (5) a typed alias still enforces the channel's element kind ──────
+// ── (5) an alias of a channel parameter sends through the callee ─────
+test "channel alias: alias of a channel parameter sends through the callee (SFN-695)" ![io] {
+    let out = _run_and_capture("param_alias", "fn pump(ch: channel) ![io] {\n"
+        + "    let alias = ch;\n"
+        + "    alias.send(5);\n"
+        + "    alias.send(6);\n"
+        + "}\n"
+        + "fn main() ![io] {\n"
+        + "    let ch = channel(2);\n"
+        + "    pump(ch);\n"
+        + "    let a: int = ch.receive();\n"
+        + "    let b: int = ch.receive();\n"
+        + "    print.info(\"param alias sum: \" + number_to_string(a + b));\n"
+        + "}");
+    assert contains(out, "param alias sum: 11");
+}
+
+// ── (6) a typed alias still enforces the channel's element kind ──────
 // `sfn check`'s `--json` envelope carries the diagnostic code and message
 // as separate fields; `assert_does_not_compile` only substring-matches the
 // message text, so the pattern below is the E0815 message body rather than
