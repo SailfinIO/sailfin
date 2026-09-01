@@ -6,6 +6,7 @@ import {
     bash_path,
     clean_runner_env,
     clean_runner_env_without,
+    git_bash_path,
     nested_runner_scratch,
     report_child_failure
 } from "sfn/test";
@@ -88,7 +89,7 @@ fn _release_topology_exit(fixture: string[], expected_exit: int) -> int ![io] {
     let mut child_env = clean_runner_env_without(bash_path(root
         + "/classifier-scratch"), ["RUNNER_TEMP", "TMPDIR"]);
     child_env.push("RUNNER_TEMP=" + bash_path(temp));
-    let exit = process.run_capture_cwd(["bash", classifier, fixture[1], fixture[2], bash_path(root
+    let exit = process.run_capture_cwd([git_bash_path(), classifier, fixture[1], fixture[2], bash_path(root
         + "/before-public"), "sfn/probe", "stdlib/probe", fixture[3], bash_path("capsules/sfn/probe/tests/path_test.sfn"), bash_path("stdlib/probe/tests/path_test.sfn")], child_env, root);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();

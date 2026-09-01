@@ -31,6 +31,7 @@ import { find } from "sfn/strings";
 import {
     bash_path,
     clean_runner_env,
+    git_bash_path,
     host_is_windows,
     nested_runner_scratch,
     scratch_root,
@@ -46,6 +47,17 @@ test "bash_path: POSIX paths pass through unchanged" ![io] {
 test "bash_path: Win32 drive, backslashes, and spaces become an MSYS path" ![io] {
     if !host_is_windows() { return; }
     assert bash_path("C:\\fixture root\\with spaces\\probe.sfn") == "/c/fixture root/with spaces/probe.sfn";
+}
+
+test "git_bash_path: Windows resolves an explicit Git for Windows provider" ![io] {
+    let bash = git_bash_path();
+    if !host_is_windows() {
+        assert bash == "bash";
+        return;
+    }
+    assert bash.length > 0;
+    assert fs.exists(bash);
+    assert bash != "bash.exe";
 }
 
 // A fresh marker-file path for `name`, with any stale value from a prior

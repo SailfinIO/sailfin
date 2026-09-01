@@ -3,6 +3,7 @@
 import {
     bash_path,
     clean_runner_env,
+    git_bash_path,
     nested_runner_scratch,
     report_child_failure
 } from "sfn/test";
@@ -27,7 +28,7 @@ fn _fixture_root(name: string) -> string ![io] {
 }
 
 fn _classify(root: string, expected_exit: int) -> int ![io] {
-    let result = process.run_capture(["bash", bash_path(_script()), bash_path(root
+    let result = process.run_capture([git_bash_path(), bash_path(_script()), bash_path(root
         + "/before.ll"), bash_path(root
         + "/after.ll"), bash_path(root
         + "/map.tsv")], clean_runner_env(bash_path(root)));

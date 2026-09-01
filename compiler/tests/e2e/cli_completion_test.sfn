@@ -10,7 +10,7 @@ import {
     bash_path,
     clean_runner_env,
     default_scratch_dir,
-    host_is_windows,
+    git_bash_path,
     sfn_bin_path,
     skip,
     tool_present
@@ -27,25 +27,6 @@ fn _scratch_dir() -> string ![io] {
     if dir.length == 0 { dir = default_scratch_dir(); }
     fs.createDirectory(dir, true);
     return dir;
-}
-
-// Native Windows resolves a bare `bash` through CreateProcess rather than the
-// GitHub Actions step-shell selection that points at Git Bash. Prefer the Git
-// for Windows provider whose MSYS path contract `bash_path` targets, then
-// retain PATH lookup for custom hosts.
-fn _bash_tool() -> string ![io] {
-    if !host_is_windows() { return "bash"; }
-    let program_files = env.get("ProgramFiles");
-    if program_files.length > 0 {
-        let system_git_bash = program_files + "\\Git\\bin\\bash.exe";
-        if fs.exists(system_git_bash) { return system_git_bash; }
-    }
-    let local_app_data = env.get("LOCALAPPDATA");
-    if local_app_data.length > 0 {
-        let user_git_bash = local_app_data + "\\Programs\\Git\\bin\\bash.exe";
-        if fs.exists(user_git_bash) { return user_git_bash; }
-    }
-    return "bash.exe";
 }
 
 test "cli completion: bash script is deterministic and names registered commands" ![io] {
@@ -80,7 +61,7 @@ test "cli completion: bash script is deterministic and names registered commands
 }
 
 test "cli completion: generated bash script passes bash -n syntax check" ![io] {
-    let bash = _bash_tool();
+    let bash = git_bash_path();
     if !tool_present(bash) {
         skip("Bash syntax oracle unavailable: no Git Bash provider or bash executable was found");
     }
