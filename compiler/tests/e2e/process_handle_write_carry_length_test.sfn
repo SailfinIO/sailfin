@@ -132,16 +132,19 @@ fn _call_line(ir: string, sym: string) -> string {
     return "";
 }
 
-// `call ... @sym(` on any line, where `sym` is the WHOLE callee name (not
-// merely a prefix). `_has_call_site` in the sibling
-// `runtime_adapter_filesystem_test.sfn` matches `@sym + "("` as a
-// substring, which is safe there because none of its symbols is a prefix
-// of another. Here `sfn_process_handle_write` IS a prefix of
-// `sfn_process_handle_write_bytes`, so a naive `contains(line, needle)`
-// would report a call to `@sfn_process_handle_write_bytes(...)` as a call
-// site of the bare symbol too — the exact false positive this test exists
-// to avoid. Guard with a word-boundary check on the character right after
-// the matched name instead of assuming `(` is that boundary.
+// `call ... @sym` on any line, where `sym` is the WHOLE callee name (not
+// merely a prefix). This file asks whether the BARE
+// `sfn_process_handle_write` is still called while
+// `sfn_process_handle_write_bytes` — of which the bare name is a literal
+// prefix — is called on the very next line, so the prefix relationship is
+// load-bearing and worth being explicit about.
+//
+// The sibling `runtime_adapter_filesystem_test.sfn::_has_call_site`
+// matches `@sym + "("`; that trailing paren is itself a sufficient
+// boundary here (`@sfn_process_handle_write_bytes(` does not contain
+// `@sfn_process_handle_write(`), so it is NOT wrong and does not need
+// fixing. This form checks the character after the name instead, which
+// holds for any delimiter rather than only `(`.
 fn _has_call_site(ir: string, sym: string) -> boolean {
     let lines = split(ir, "\n");
     let needle = "@" + sym;
@@ -259,8 +262,6 @@ fn _echo_bin() -> string ![io] {
     return _built_path(dir + "/echo");
 }
 
-fn _byte_length(s: string) -> int { return s.length; }
-
 test "process.sfn emit: defines both the bare and length-carrying write twins" ![io] {
     let ll = _emit_process_ll();
     let ir = fs.readFile(ll);
@@ -328,7 +329,7 @@ test "handle_write round-trips a payload through a child's stdin" ![io] {
     // pins that the returned count is the BYTE length.
     let unicode_payload = "héllo-ünïcode\n";
     let unicode_n = process.handle_write(id, unicode_payload);
-    assert unicode_n == _byte_length(unicode_payload);
+    assert unicode_n == unicode_payload.length;
     assert unicode_n != 14;
     let unicode_echoed = process.handle_read_line_stdout(id);
     assert unicode_echoed == "héllo-ünïcode";
