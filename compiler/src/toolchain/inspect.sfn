@@ -107,6 +107,17 @@ struct ToolchainInspectReport {
     findings: ToolchainFinding[];
     default_version: string;
     default_track: string;
+    // The `update` envelope object (SFEP-0073 §3.4, SFN-1071), populated only
+    // by `update --check`. `update_present` is false for every other
+    // operation, so `render_toolchains_json` emits `"update":null` for
+    // `list`/`active`/`verify` unconditionally, exactly as before.
+    update_present: boolean;
+    update_policy: string;
+    update_channel: string;
+    update_available: boolean;
+    update_current: string;
+    update_candidate: string;  // "" -> null
+    update_advisory: string;  // "" -> null
 }
 
 fn toolchain_state_name(state: int) -> string {
@@ -470,7 +481,14 @@ fn _assemble_report(operation: string, binary_dir: string, compiler_path: string
         entries: entries,
         findings: _report_findings(entries, selection),
         default_version: user_default.version,
-        default_track: user_default.track
+        default_track: user_default.track,
+        update_present: false,
+        update_policy: "",
+        update_channel: "",
+        update_available: false,
+        update_current: "",
+        update_candidate: "",
+        update_advisory: ""
     };
 }
 

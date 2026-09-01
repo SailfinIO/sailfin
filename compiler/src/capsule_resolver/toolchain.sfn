@@ -143,6 +143,12 @@ struct ToolchainDecision {
     pin_version: string;
     version_source: string;
     version_error: string;
+    // The manifest file `pin_version` was read from — the joined path this
+    // function already computes as `ws_path`/`cap_path` — "" when absent.
+    // `update --project` (SFEP-0073 §3.4, SFN-1071) rewrites that file
+    // directly; `version_source` is a label ("capsule.toml"), not a path, and
+    // cannot be joined back into one when the project root differs from cwd.
+    version_path: string;
 }
 
 // Discover the manifest `[toolchain]` pin and evaluate the running toolchain
@@ -165,6 +171,7 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
     let mut sfn_source: string = "";
     let mut channel_source: string = "";
     let mut version_source: string = "";
+    let mut version_path: string = "";
     if workspace_root.length > 0 {
         let ws_path = _cr_path_join(workspace_root, "workspace.toml");
         if fs.exists(ws_path) {
@@ -174,7 +181,10 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
             pin_version = toml_get_toolchain_version(ws_text);
             if pin_sfn.length > 0 { sfn_source = "workspace.toml"; }
             if pin_channel.length > 0 { channel_source = "workspace.toml"; }
-            if pin_version.length > 0 { version_source = "workspace.toml"; }
+            if pin_version.length > 0 {
+                version_source = "workspace.toml";
+                version_path = ws_path;
+            }
         }
     }
     if project_root.length > 0 {
@@ -195,6 +205,7 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
             if m_version.length > 0 {
                 pin_version = m_version;
                 version_source = "capsule.toml";
+                version_path = cap_path;
             }
         }
     }
@@ -209,7 +220,8 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
         running_str: "",
         pin_version: "",
         version_source: "",
-        version_error: ""
+        version_error: "",
+        version_path: ""
     };
     if pin_sfn.length == 0 && pin_channel.length == 0 && pin_version.length == 0 {
         return d;
@@ -223,6 +235,7 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
     d.pin_channel = pin_channel;
     d.pin_version = pin_version;
     d.version_source = version_source;
+    d.version_path = version_path;
 
     let running_str = resolve_compiler_version(binary_dir);
     let running = semver_parse(running_str);

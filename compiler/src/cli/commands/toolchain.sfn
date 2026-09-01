@@ -21,11 +21,22 @@ import {
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
-import { ToolchainDecision, toolchain_decide } from "../../capsule_resolver/toolchain";
+import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "../../build/fs";
+import {
+    ToolchainDecision,
+    toolchain_decide,
+    toolchain_selection_satisfies
+} from "../../capsule_resolver/toolchain";
 import { starts_with, strings_equal } from "../../string_utils";
 import { render_terminal_diagnostic } from "../../terminal_output";
+import { toolchain_channel_canonical } from "../../toolchain/channel";
 import { toolchain_env_exact_selector } from "../../toolchain/dispatch";
 import { toolchain_current_host } from "../../toolchain/host";
+import {
+    toolchain_revocations_corrupt,
+    toolchain_revocations_path,
+    toolchain_revocations_read
+} from "../../toolchain/index_cache";
 import {
     ToolchainInspectEntry,
     ToolchainInspectReport,
@@ -39,15 +50,26 @@ import {
     toolchain_state_name
 } from "../../toolchain/inspect";
 import { render_toolchains_json } from "../../toolchain/inspect_json";
-import { toolchain_install_to_user_store, toolchain_is_valid_install_version } from "../../toolchain/install";
+import {
+    toolchain_fetch_index,
+    toolchain_install_to_user_store,
+    toolchain_is_valid_install_version
+} from "../../toolchain/install";
 import { TOOLCHAIN_ENTRY_DIR_MARKER, TOOLCHAIN_ENTRY_VERSION_MARKER } from "../../toolchain/management";
 import { TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX, TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN } from "../../toolchain/manifest";
+import { toolchain_policy_decide } from "../../toolchain/release_policy";
 import {
     toolchain_remove_store_entry,
     toolchain_resolve_compatible_store_entry,
     toolchain_store_diagnostic,
     toolchain_versions_base
 } from "../../toolchain/store";
+import {
+    toolchain_manifest_set_version,
+    toolchain_network_refusal,
+    toolchain_update_plan,
+    toolchain_update_policy_read
+} from "../../toolchain/update_policy";
 import {
     toolchain_user_default_clear,
     toolchain_user_default_corrupt,
@@ -505,6 +527,10 @@ fn command_def() -> Command {
     verify_cmd = with_flag(verify_cmd, flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
     let entry_version_cmd = command("entry-version", "Report this entry toolchain's identity and management-protocol range, without dispatch");
     let default_cmd = with_arg(command("default", "Show or set the per-user default toolchain"), arg_optional("version", "Exact version to make the user default (default: report the current one)", ""));
+    let mut update_cmd = with_arg(command("update", "Check for, or install, a newer toolchain on a channel — never a downgrade"), arg_optional("channel", "Channel to follow (stable|rc|beta|alpha|latest); default: the recorded user-default track", ""));
+    update_cmd = with_flag(update_cmd, flag("check", "Report whether a newer release exists and change nothing"));
+    update_cmd = with_flag(update_cmd, flag("project", "Update this project's exact [toolchain] version instead of the user default; requires a channel"));
+    update_cmd = with_flag(update_cmd, flag("json", "With --check: emit the sailfin-toolchains/1 envelope on stdout"));
     let mut remove_cmd = with_arg(command("remove", "Remove an installed toolchain from the store"), arg("version", "Exact toolchain version to remove"));
     remove_cmd = with_flag(remove_cmd, flag("force", "Override the project and user-default protections; never removes the running toolchain"));
     let mut cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
@@ -514,6 +540,7 @@ fn command_def() -> Command {
     cmd = with_subcommand(cmd, active_cmd);
     cmd = with_subcommand(cmd, verify_cmd);
     cmd = with_subcommand(cmd, default_cmd);
+    cmd = with_subcommand(cmd, update_cmd);
     cmd = with_subcommand(cmd, remove_cmd);
     return with_usage(cmd, "packages", "sfn toolchain list", "inspect and install toolchains");
 }
@@ -544,10 +571,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if sub == "default" {
         return _toolchain_default(ctx, get(matches, "version"));
     }
+    if sub == "update" {
+        return _toolchain_update(ctx, get(matches, "channel"), has_flag(matches, "check"), has_flag(matches, "project"), has_flag(matches, "json"));
+    }
     if sub == "remove" {
         return _toolchain_remove(ctx, get(matches, "version"), has_flag(matches, "force"));
     }
-    print("usage: sfn toolchain <install|list|active|verify|run|entry-version|default|remove>");
+    print("usage: sfn toolchain <install|list|active|verify|run|entry-version|default|update|remove>");
     return 2;
 }
 
