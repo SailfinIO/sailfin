@@ -636,6 +636,13 @@ fn map_struct_field_annotation(annotation: string) -> string {
 // (a struct local stored unboxed) and SFN-771 (a closure pair boxed by the
 // writer and loaded by value by the reader). One function, two callers.
 //
+// Two callers, not every reader of the slot: direct member access
+// (`expression_lowering/native/core_member_lowering.sfn`) reads an enum
+// payload without substituting the generic parameter at all, so it sees the
+// type-erased `%T` and does not consult this function. That gap predates both
+// fixes above and is tracked separately -- do not read this comment as a
+// claim that the representation decision is now universal.
+//
 // The mapping is idempotent, and is the identity on every payload shape
 // `map_struct_field_annotation` can produce except the `{i8*, i8*}` closure
 // pair: strings are already narrowed to `i8*`, arrays to `{ T*, i64, i64 }*`,

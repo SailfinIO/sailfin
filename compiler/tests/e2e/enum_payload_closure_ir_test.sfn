@@ -10,40 +10,28 @@
 // over a tiny fixture and asserts on the emitted IR (frontend + lowering
 // only, no link), so it is fast and needs no clang/linker.
 import { find } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
-// `emit` neither links nor spawns clang, but `run_capture`'s empty array is the
-// *empty* environment; thread HOME/TMPDIR/SAILFIN_TEST_SCRATCH so the toolchain
-// has a writable scratch under the parallel pool. No PATH needed (no linker).
-fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
-}
-
-// A unique scratch dir for this test (under the runner's per-file scratch when
-// present, else /tmp). `emit` writes IR to `-o` and keeps no `program.ll` build
-// cache, so a per-`tag` path is sufficient isolation under the parallel pool.
+// `clean_runner_env` filters `process.environ()` rather than allowlisting it,
+// which is what `docs/conventions/e2e-tests.md` requires: an allowlist only
+// carries the variables its author thought of, and it re-points
+// `SAILFIN_TEST_SCRATCH` so a parallel run does not collide on the fixed
+// build-cache path.
 fn _scratch_dir() -> string ![io] {
-    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length == 0 { dir = default_scratch_dir(); }
-    dir = dir + "/sfn-enum-closure-payload";
+    let dir = nested_runner_scratch("enum-closure-payload");
     fs.createDirectory(dir, true);
     return dir;
 }
 
-// Emit LLVM IR for `source` and return it (or "EMIT_FAILED" on a non-zero exit).
+// Emit LLVM IR for `source` and return it (or "EMIT_FAILED" on a non-zero
+// exit). `tag` names the fixture's source and output files; each test passes
+// its own so two tests never write the same path.
 fn _emit_ir(tag: string, source: string) -> string ![io] {
     let dir = _scratch_dir();
     let srcpath = dir + "/" + tag + ".sfn";
     let outpath = dir + "/" + tag + ".ll";
     fs.writeFile(srcpath, source);
-    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", srcpath], _child_env());
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", srcpath], clean_runner_env(dir));
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return "EMIT_FAILED"; }
@@ -51,7 +39,7 @@ fn _emit_ir(tag: string, source: string) -> string ![io] {
 }
 
 fn _fixture() -> string {
-    return "enum Holder<T> { Some { value: T }, None { reason: string } }\n"
+    return "enum Holder<T> { Some { value: T }, None { } }\n"
         + "fn apply(f: fn(int) -> int, x: int) -> int { return f(x); }\n"
         + "fn hold(c: int) -> Holder<fn(int) -> int> {\n"
         + "    return Holder.Some { value: fn(x: int) -> int { return x + c; } };\n"
@@ -59,7 +47,7 @@ fn _fixture() -> string {
         + "fn use_it() -> int {\n"
         + "    match hold(1) {\n"
         + "        Holder.Some { value } => { return apply(value, 1); },\n"
-        + "        Holder.None { reason } => { return 0; }\n"
+        + "        Holder.None { } => { return 0; }\n"
         + "    }\n"
         + "}\n";
 }
@@ -70,15 +58,18 @@ test "enum payload closure ir: writer boxes the closure pair into the payload sl
 }
 
 test "enum payload closure ir: reader loads the box pointer, then dereferences it" ![io] {
-    let ir = _emit_ir("closurebox", _fixture());
-    // `load {i8*, i8*}*` cannot alias `load {i8*, i8*},` -- the character
-    // after the closing brace differs. Absent before the fix.
+    let ir = _emit_ir("closureread", _fixture());
+    // The slot load. Absent before the fix, which loaded the pair directly
+    // out of the slot. `load {i8*, i8*}*` cannot alias `load {i8*, i8*},` --
+    // the character after the closing brace differs.
     assert find(ir, " = load {i8*, i8*}*, ptr ", 0) >= 0;
+    // The deref back to value form. This line is also what the pre-fix reader
+    // emitted against the slot itself, so it pins the pair, not this line alone.
     assert find(ir, " = load {i8*, i8*}, ptr ", 0) >= 0;
 }
 
 test "enum payload closure ir: the closure reaches its consumer in value form" ![io] {
-    let ir = _emit_ir("closurebox", _fixture());
+    let ir = _emit_ir("closureconsumer", _fixture());
     assert find(ir, "define i64 @apply", 0) >= 0;
     assert find(ir, "extractvalue {i8*, i8*} ", 0) >= 0;
 }

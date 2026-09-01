@@ -609,7 +609,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
                             // BOXED: the pointer-width slot holds a heap
                             // pointer, so the slot load yields that pointer and
                             // a second load recovers the value (SFN-771).
-                            let mut value_temp = format_temp_name(current_temp);
+                            let mut value_temp: string = format_temp_name(current_temp);
                             current_temp += 1;
                             current_lines.push("  " + value_temp + " = load "
                                 + field_binding.slot_type

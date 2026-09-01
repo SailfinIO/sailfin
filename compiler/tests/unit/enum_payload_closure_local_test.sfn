@@ -25,16 +25,14 @@
 // function pointer paired with a null (harmless) env.
 //
 // Direct invocation of a match-bound closure (`value(1)`) is a separate,
-// out-of-scope defect (E1007: match locals carry no type_annotation), so
-// every call here is routed through `apply`, which has a known signature. The
-// monomorphic-closure-payload layout (a non-generic enum holding a closure
-// field) is also out of scope -- this file only exercises the generic,
-// substituted path.
+// out-of-scope defect (match locals carry no type_annotation, so closure
+// callee resolution fails with E1007), so every call here is routed through
+// `apply`, which has a known signature.
 import { expect_eq_int } from "sfn/test";
 
 enum Holder<T> {
     Some { value: T },
-    None { reason: string }
+    None { }
 }
 
 fn apply(f: fn(int) -> int, x: int) -> int {
@@ -64,67 +62,97 @@ fn hold_int() -> Holder<int> {
     return Holder.Some { value: 42 };
 }
 
+// A NON-generic enum carrying a struct payload. `type_context.sfn` strips the
+// pointer for a monomorphic user-value field, so the payload is stored INLINE
+// (`store %Pt` / `load %Pt`) rather than boxed, and the reader must not
+// dereference it. This pins the `if substituted` gate on the reader's
+// slot-type derivation: without that gate the shared predicate would promote
+// `%Pt` to `%Pt*`, the slot and field types would diverge, and the reader
+// would emit a second load through an inline aggregate read as a pointer.
+// Every other case in this file is generic, so this arm is the only guard.
+enum MonoBox {
+    Held { pt: Pt },
+    Empty { }
+}
+
+fn mono_held() -> MonoBox {
+    return MonoBox.Held { pt: Pt { x: 7, y: 9 } };
+}
+
 test "enum payload: generic closure payload round-trips through a match" {
     match hold(7) {
         Holder.Some { value } => {
-            assert apply(value, 1) == 8;
+            assert expect_eq_int(apply(value, 1), 8).ok;
         },
-        Holder.None { reason } => { assert false; }
+        Holder.None { } => { assert false; }
     }
 }
 
 test "enum payload: captured environment survives the round-trip" {
+    // Two holders built from distinct captures. A corrupted environment read
+    // makes these agree (or crash); an intact one keeps them apart.
     let a = hold(10);
     let b = hold(100);
     match a {
         Holder.Some { value } => {
-            assert apply(value, 1) == 11;
+            assert expect_eq_int(apply(value, 1), 11).ok;
         },
-        Holder.None { reason } => { assert false; }
+        Holder.None { } => { assert false; }
     }
     match b {
         Holder.Some { value } => {
-            assert apply(value, 1) == 101;
+            assert expect_eq_int(apply(value, 1), 101).ok;
         },
-        Holder.None { reason } => { assert false; }
+        Holder.None { } => { assert false; }
     }
 }
 
 test "enum payload: closure payload is invoked repeatedly from one binding" {
+    // The deref must not consume or invalidate the box.
     match hold(3) {
         Holder.Some { value } => {
-            assert apply(value, 1) == 4;
-            assert apply(value, 2) == 5;
-            assert apply(value, 10) == 13;
+            assert expect_eq_int(apply(value, 1), 4).ok;
+            assert expect_eq_int(apply(value, 2), 5).ok;
+            assert expect_eq_int(apply(value, 10), 13).ok;
         },
-        Holder.None { reason } => { assert false; }
+        Holder.None { } => { assert false; }
     }
 }
 
-test "enum payload: struct payload still loads in pointer form (negative control)" {
+test "enum payload: struct payload still loads in pointer form" {
     match hold_pt() {
         Holder.Some { value } => {
             assert expect_eq_int(value.x, 4).ok;
             assert expect_eq_int(value.y, 5).ok;
         },
-        Holder.None { reason } => { assert false; }
+        Holder.None { } => { assert false; }
     }
 }
 
-test "enum payload: string payload still narrows to its data pointer (negative control)" {
+test "enum payload: string payload still narrows to its data pointer" {
     match hold_string() {
         Holder.Some { value } => {
             assert expect_eq_int(value.length, 4).ok;
         },
-        Holder.None { reason } => { assert false; }
+        Holder.None { } => { assert false; }
     }
 }
 
-test "enum payload: int payload is unaffected (negative control)" {
+test "enum payload: int payload is unaffected" {
     match hold_int() {
         Holder.Some { value } => {
             assert expect_eq_int(value, 42).ok;
         },
-        Holder.None { reason } => { assert false; }
+        Holder.None { } => { assert false; }
+    }
+}
+
+test "enum payload: monomorphic struct payload stays inline" {
+    match mono_held() {
+        MonoBox.Held { pt } => {
+            assert expect_eq_int(pt.x, 7).ok;
+            assert expect_eq_int(pt.y, 9).ok;
+        },
+        MonoBox.Empty { } => { assert false; }
     }
 }

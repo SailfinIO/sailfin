@@ -1,0 +1,63 @@
+// Unit tests for `generic_payload_slot_type`
+// (compiler/capsules/codegen-llvm/src/type_mapping.sfn), the single
+// representation decision for a generic enum payload slot, consulted by both
+// the enum-literal writer and the match-arm reader.
+//
+// The point of the function is that two independently maintained copies of
+// this decision let the writer and reader drift apart -- SFN-770 (a struct
+// local stored unboxed) and SFN-771 (a closure pair boxed by the writer and
+// loaded by value by the reader). Locking the mapping down here is what makes
+// the equivalence mechanical rather than an argument: the writer's previous
+// inline branch chain and this function must agree on every input, and the
+// table below is that agreement written out.
+//
+// Idempotence matters too. The reader applies the predicate to a type the
+// mapper produced, which for a struct payload is already the pointer form, so
+// a non-idempotent mapping would double-star it and desynchronise the pair.
+import { generic_payload_slot_type } from "sfn/codegen-llvm/type_mapping";
+import { expect_eq_str } from "sfn/test";
+
+test "payload slot type: an empty type is returned unchanged" ![pure] {
+    assert expect_eq_str(generic_payload_slot_type(""), "").ok;
+}
+
+test "payload slot type: the string aggregate narrows to its data pointer" ![pure] {
+    // `{i8*, i64}` is unwrapped, not boxed -- every reader of a `string`
+    // payload expects the bare `i8*`.
+    assert expect_eq_str(generic_payload_slot_type("{i8*, i64}"), "i8*").ok;
+}
+
+test "payload slot type: scalars are returned unchanged" ![pure] {
+    assert expect_eq_str(generic_payload_slot_type("i64"), "i64").ok;
+    assert expect_eq_str(generic_payload_slot_type("double"), "double").ok;
+    assert expect_eq_str(generic_payload_slot_type("i1"), "i1").ok;
+    assert expect_eq_str(generic_payload_slot_type("i8*"), "i8*").ok;
+}
+
+test "payload slot type: a value-form aggregate is promoted to a pointer" ![pure] {
+    // The closure pair is the only value-form aggregate the reader's mapper
+    // produces, and the reason the second load exists.
+    assert expect_eq_str(generic_payload_slot_type("{i8*, i8*}"), "{i8*, i8*}*").ok;
+    assert expect_eq_str(generic_payload_slot_type("%P"), "%P*").ok;
+}
+
+test "payload slot type: an aggregate already in pointer form is unchanged" ![pure] {
+    assert expect_eq_str(generic_payload_slot_type("%P*"), "%P*").ok;
+    assert expect_eq_str(generic_payload_slot_type("{ i8*, i64, i64 }*"), "{ i8*, i64, i64 }*").ok;
+}
+
+test "payload slot type: the mapping is idempotent" ![pure] {
+    // The reader feeds this a type the mapper already produced, so a second
+    // application must be inert or the slot and field types desynchronise.
+    let once = generic_payload_slot_type("{i8*, i8*}");
+    assert expect_eq_str(generic_payload_slot_type(once), once).ok;
+    let struct_once = generic_payload_slot_type("%P");
+    assert expect_eq_str(generic_payload_slot_type(struct_once), struct_once).ok;
+    let string_once = generic_payload_slot_type("{i8*, i64}");
+    assert expect_eq_str(generic_payload_slot_type(string_once), string_once).ok;
+}
+
+test "payload slot type: surrounding whitespace is tolerated" ![pure] {
+    assert expect_eq_str(generic_payload_slot_type("  {i8*, i8*}  "), "{i8*, i8*}*").ok;
+    assert expect_eq_str(generic_payload_slot_type("  {i8*, i64}  "), "i8*").ok;
+}
