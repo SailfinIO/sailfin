@@ -267,8 +267,8 @@ hazards surface in the smallest pilot first:
 
 | Descriptor `target` | Native symbol | Wave |
 | --- | --- | --- |
-| `substring` | `sfn_str_slice` | M2.4a (#430) |
-| `substring_unchecked` | `sfn_str_slice` | M2.4a (#430) |
+| `substring` | `sfn_str_slice_lv` | SFN-632 |
+| `substring_unchecked` | `sfn_str_slice_lv` | SFN-632 |
 | `string.length` | `sfn_str_len` | M2.4a (#430) |
 | `strings_equal` | `sfn_str_eq` | M2.4a (#430) |
 | `string.concat` | `sfn_str_concat_arena` | M2.4b (#398) |

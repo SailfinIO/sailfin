@@ -1,8 +1,10 @@
 // #1308 (M1.A.2): regression coverage for the Sailfin-native substring body
 // (`_sfn_substring_unchecked` in `runtime/sfn/string.sfn`) that replaced the C
 // `sailfin_runtime_substring_unchecked` entrypoint (now `static`). The
-// `substring_unchecked(...)` builtin lowers via the registry to `sfn_str_slice`,
-// which now calls the Sailfin body. With the immediate-codepoint encoding
+// `substring_unchecked(...)` builtin lowers via the registry to
+// `sfn_str_slice_lv` (SFN-632), which bounds the span against the carried
+// length — the source of the clamping cases below. With the
+// immediate-codepoint encoding
 // retired (#1420/#822), `src[i]` yields an ordinary grapheme string, so these
 // tests pin the real-pointer substring behavior.
 test "string: substring_unchecked returns expected slice" {

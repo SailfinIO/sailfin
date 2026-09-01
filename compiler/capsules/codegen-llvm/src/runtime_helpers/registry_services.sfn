@@ -252,6 +252,15 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `call i8* @sfn_str_slice` while compiling this tree. Retiring the old
     // body is SFN-43.
     //
+    // The `{i8*, i64}` parameter type is load-bearing in one direction worth
+    // stating: a call site whose string operand is typed `i8*` now gets an
+    // `sfn_str_len` scan inserted on the way IN by
+    // `core_operands/pointer_coercion.sfn`, the exact inverse of this fix.
+    // Every `substring` / `substring_unchecked` call site in the tree carries a
+    // `string`-typed operand, hence an aggregate, hence no scan
+    // (`runtime/prelude.sfn`, `compiler/capsules/syntax/src/lexer.sfn`);
+    // `compiler/tests/e2e/substring_no_rescan_test.sfn` pins it.
+    //
     // `c_abi_return_type` is the pointer-to-header shape: a Sailfin body cannot
     // construct a `{i8*, i64}` value carrying an arbitrary length, so
     // `sfn_str_slice_lv` returns a pointer to a `{data@0, len@8}` header and
