@@ -2,12 +2,14 @@
 
 Status: Locked at `sailfin-toolchains/1`. Shipped in SFN-1066
 (`docs/proposals/0073-toolchain-lifecycle.md` §3.4). `requirement.version` is
-populated as of SFN-1070 (§3.9 slice 2), and `default`/the `"default"` role
-are populated as of SFN-1068 (§3.4 slice 3) — no schema bump, since both were
+populated as of SFN-1070 (§3.9 slice 2), `default`/the `"default"` role
+are populated as of SFN-1068 (§3.4 slice 3), and `update` is populated as of
+SFN-1071 (§3.4 slice 4) — no schema bump for any of the three, since all were
 already reserved and `null`/unassigned.
 
-`sfn toolchain list --json`, `sfn toolchain active --json`, and
-`sfn toolchain verify --json` emit a single UTF-8 JSON document on stdout.
+`sfn toolchain list --json`, `sfn toolchain active --json`,
+`sfn toolchain verify --json`, and `sfn toolchain update --check --json` emit
+a single UTF-8 JSON document on stdout.
 Under `--json`, stdout carries **only** the envelope; all human-readable
 diagnostics go to stderr. The exit matrix follows SFEP-0003: `0` means the
 inspection completed with no actionable finding; `1` means the inspection
@@ -68,14 +70,14 @@ guards the field set so a silent leak fails CI before it lands.
 | Field | Type | Notes |
 |---|---|---|
 | `schema_version` | string | Always first. `"sailfin-toolchains/N"` — consumers must hard-fail on unknown N. |
-| `operation` | string | The leaf that produced the envelope: `"list"`, `"active"`, or `"verify"`. |
+| `operation` | string | The leaf that produced the envelope: `"list"`, `"active"`, `"verify"`, or `"update"`. |
 | `host` | string \| null | The current host triple. `null` only if host identity could not be resolved. |
 | `entry` | object | The PATH entry toolchain's identity. See `entry`. |
 | `selected` | object | What the current directory resolves to, with no fetch performed. See `selected`. |
 | `requirement` | object | The project's `[toolchain]` requirement, as read from `workspace.toml`/`capsule.toml`. See `requirement`. |
 | `fetch_policy` | string | One of `"auto"`, `"local"`, `"off"`, derived from `SAILFIN_TOOLCHAIN`. |
 | `default` | object \| null | The per-user default recorded for the current host triple (SFN-1068). `{"version": ..., "track": ...}` when this host has a recorded default, `null` otherwise. See `default`. |
-| `update` | object \| null | Update-check results. Always `null` in this slice — update checks are SFEP-0073 Slice 4 and unshipped. |
+| `update` | object \| null | Update-check results. Populated only by `sfn toolchain update --check --json`; `null` for every other operation. See `update`. |
 | `toolchains` | array | Every store entry this inspection enumerated. `[]` when the store is empty, and always `[]` for `active` and for `verify <version>` — neither enumerates the store. Only `list` and `verify --all` populate it. See `toolchains[]`. |
 | `diagnostics` | array | One coded entry per non-`complete` store entry. `[]` when everything is `complete`. See `diagnostics[]`. |
 
@@ -106,6 +108,24 @@ under another. `null` when this host has no recorded default.
 |---|---|---|
 | `version` | string | The recorded default version. Always a string when the `default` object is present. |
 | `track` | string \| null | The recorded update track, if any. `null` when no track was recorded — distinct from the empty string. |
+
+## `update`
+
+Populated only by `sfn toolchain update --check --json` (SFEP-0073 §3.4,
+SFN-1071); `null` for `list`, `active`, and `verify`. Field order below is
+normative — it matches `_ij_render_update_object`
+(`compiler/src/toolchain/inspect_json.sfn`) and is locked by
+`compiler/tests/unit/toolchain_inspect_json_test.sfn`, beside the e2e
+schema-lock reference in `compiler/tests/e2e/toolchain_inspect_json_test.sfn`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `policy` | string | The effective `toolchain.update-policy` value: `"notify"`, `"manual"`, or `"disabled"`, or the verbatim unrecognized value from a hand-edited `~/.sfn/config.toml`. A `disabled` or unrecognized policy refuses the operation before any envelope is produced, so in practice this field is `"notify"` or `"manual"` whenever an `update` envelope exists. |
+| `channel` | string | The canonical channel checked (`"stable"`, `"rc"`, `"beta"`, or `"alpha"` — `"latest"` resolves to `"stable"`). |
+| `available` | boolean | Whether the channel's head is strictly newer than `current` by semver precedence. |
+| `current` | string | The version an update would replace: the recorded user default, the project's exact `[toolchain] version` under `--project`, or the entry toolchain. |
+| `candidate` | string \| null | The channel's strictly-newer head. `null` exactly when `available` is `false` — an equal, older, or channel-regressed head is never a candidate. |
+| `advisory` | string \| null | The first indexed advisory line for `current`, if any, or the release-state refusal text if `current` is revoked or yanked. `null` when neither applies. |
 
 ## `requirement`
 
@@ -270,6 +290,51 @@ not the store, so it does not enumerate entries. Use `list` for the store.
 
 Exit code: `1`.
 
+### `update --check` run
+
+```jsonc
+{
+  "schema_version": "sailfin-toolchains/1",
+  "operation": "update",
+  "host": "x86_64-unknown-linux-gnu",
+  "entry": { "version": "0.10.6", "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.6/sfn" },
+  "selected": {
+    "version": "0.10.6",
+    "path": "/home/user/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/0.10.6/sfn",
+    "source": "user default",
+    "installed": true,
+    "integrity": "verified"
+  },
+  "requirement": {
+    "minimum": null,
+    "version": null,
+    "channel": null,
+    "source": null
+  },
+  "fetch_policy": "auto",
+  "default": { "version": "0.10.6", "track": "stable" },
+  "update": {
+    "policy": "notify",
+    "channel": "stable",
+    "available": true,
+    "current": "0.10.6",
+    "candidate": "0.10.7",
+    "advisory": null
+  },
+  "toolchains": [],
+  "diagnostics": []
+}
+```
+
+Exit code: `0` — `update --check` never fails on the *presence* of an update; only a
+setup, usage, or policy failure does. A `toolchain.update-policy` refusal
+(`disabled`, or an unrecognized configured value) or any other preflight
+failure — an unresolvable host triple, `SAILFIN_TOOLCHAIN=local`, `--project`
+with no explicit channel, or a project with no exact `[toolchain] version`
+under `--project` — emits **no envelope at all**, the same empty-stdout
+contract as any other setup failure: check the exit code, not the presence of
+`update`, before parsing.
+
 ## Consumers
 
 - **CI scrapers / agentic tooling**: `jq` is the canonical reader. Examples:
@@ -277,6 +342,7 @@ Exit code: `1`.
   sfn toolchain list --json | jq '.toolchains[] | select(.state != "complete")'
   sfn toolchain active --json | jq '.selected'
   sfn toolchain verify --json | jq '.diagnostics'
+  sfn toolchain update --check --json | jq '.update'
   ```
 - **`sfn toolchain` human renderer** shares the same underlying
   `ToolchainInspectReport` (`compiler/src/toolchain/inspect.sfn`) so the

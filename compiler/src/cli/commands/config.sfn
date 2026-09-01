@@ -31,6 +31,13 @@ import {
 import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
 import { _get_home_cmd } from "../../build_flags";
 import { render_terminal_diagnostic } from "../../terminal_output";
+import { toml_get_string } from "../../toml_parser";
+import {
+    TOOLCHAIN_UPDATE_POLICY_KEY,
+    toolchain_update_policy_is_valid,
+    toolchain_update_policy_read,
+    toolchain_user_config_path
+} from "../../toolchain/update_policy";
 import { CliContext } from "../context";
 import {
     _is_valid_registry_url_cmd,
@@ -52,7 +59,31 @@ fn _home_dir_diagnostic() -> Diagnostic {
     };
 }
 
-fn _write_config_registry_cmd(url: string) -> int ![io] {
+// Raw `[toolchain] update-policy` value from the config file, "" when the
+// file or key is absent. Distinct from `toolchain_update_policy_read`, which
+// substitutes the `notify` default — a merge-write must not persist a
+// default that was never set.
+fn _config_update_policy_from_file_cmd() -> string ![io] {
+    let path = toolchain_user_config_path();
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    let text = fs.readFile(path);
+    return _toml_trim_cmd(toml_get_string(text, "toolchain", "update-policy"));
+}
+
+// Raw `[registry] url` value from the config file, "" when the file or key
+// is absent. Distinct from `_resolve_registry_url_cmd`, which layers in
+// `SFN_REGISTRY` and the compiled-in default — a merge-write must persist
+// only what is actually on disk.
+fn _config_registry_url_from_file_cmd() -> string ![io] {
+    let path = toolchain_user_config_path();
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    let text = fs.readFile(path);
+    return _toml_trim_cmd(toml_get_string(text, "registry", "url"));
+}
+
+fn _write_config_cmd(registry_url: string, update_policy: string) -> int ![io] {
     let home = _get_home_cmd();
     if home.length == 0 {
         let empty_lines: string[] = [];
@@ -67,9 +98,14 @@ fn _write_config_registry_cmd(url: string) -> int ![io] {
     }
     let path = sfn_dir + "/config.toml";
     let mut out: string = "";
-    if url.length > 0 {
+    if registry_url.length > 0 {
         out = out + "[registry]\n";
-        out = out + "url = \"" + url + "\"\n";
+        out = out + "url = \"" + registry_url + "\"\n";
+    }
+    if update_policy.length > 0 {
+        if registry_url.length > 0 { out = out + "\n"; }
+        out = out + "[toolchain]\n";
+        out = out + "update-policy = \"" + update_policy + "\"\n";
     }
     fs.writeFile(path, out);
     if !_set_perms_or_skip(path, 384) {
@@ -91,6 +127,7 @@ fn handle_config_command(args: string[]) -> int ![io] {
             return 2;
         }
         print("registry = " + _resolve_registry_url_cmd());
+        print(TOOLCHAIN_UPDATE_POLICY_KEY + " = " + toolchain_update_policy_read());
         return 0;
     }
     if strings_equal(sub, "get") {
@@ -103,7 +140,12 @@ fn handle_config_command(args: string[]) -> int ![io] {
             print(_resolve_registry_url_cmd());
             return 0;
         }
+        if strings_equal(key, TOOLCHAIN_UPDATE_POLICY_KEY) {
+            print(toolchain_update_policy_read());
+            return 0;
+        }
         print("unknown config key: " + key);
+        print("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
         return 2;
     }
     if strings_equal(sub, "set") {
@@ -113,23 +155,38 @@ fn handle_config_command(args: string[]) -> int ![io] {
         }
         let key = args[2];
         let value = _toml_trim_cmd(args[3]);
-        if !strings_equal(key, "registry") {
-            print("unknown config key: " + key);
-            return 2;
+        if strings_equal(key, "registry") {
+            if value.length == 0 {
+                print("error: empty value");
+                return 1;
+            }
+            let normalized = _strip_trailing_slash_cmd(value);
+            if !_is_valid_registry_url_cmd(normalized) {
+                print("error: registry must be an http(s) URL with no whitespace, quotes, or shell metacharacters");
+                return 1;
+            }
+            let rc = _write_config_cmd(normalized, _config_update_policy_from_file_cmd());
+            if rc != 0 { return rc; }
+            print("registry = " + normalized);
+            return 0;
         }
-        if value.length == 0 {
-            print("error: empty value");
-            return 1;
+        if strings_equal(key, TOOLCHAIN_UPDATE_POLICY_KEY) {
+            if value.length == 0 {
+                print("error: empty value");
+                return 1;
+            }
+            if !toolchain_update_policy_is_valid(value) {
+                print("error: toolchain.update-policy must be one of notify, manual, disabled");
+                return 1;
+            }
+            let rc = _write_config_cmd(_config_registry_url_from_file_cmd(), value);
+            if rc != 0 { return rc; }
+            print(TOOLCHAIN_UPDATE_POLICY_KEY + " = " + value);
+            return 0;
         }
-        let normalized = _strip_trailing_slash_cmd(value);
-        if !_is_valid_registry_url_cmd(normalized) {
-            print("error: registry must be an http(s) URL with no whitespace, quotes, or shell metacharacters");
-            return 1;
-        }
-        let rc = _write_config_registry_cmd(normalized);
-        if rc != 0 { return rc; }
-        print("registry = " + normalized);
-        return 0;
+        print("unknown config key: " + key);
+        print("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
+        return 2;
     }
     if strings_equal(sub, "unset") {
         if args.length != 3 {
@@ -137,14 +194,21 @@ fn handle_config_command(args: string[]) -> int ![io] {
             return 2;
         }
         let key = args[2];
-        if !strings_equal(key, "registry") {
-            print("unknown config key: " + key);
-            return 2;
+        if strings_equal(key, "registry") {
+            let rc = _write_config_cmd("", _config_update_policy_from_file_cmd());
+            if rc != 0 { return rc; }
+            print("unset " + key);
+            return 0;
         }
-        let rc = _write_config_registry_cmd("");
-        if rc != 0 { return rc; }
-        print("unset " + key);
-        return 0;
+        if strings_equal(key, TOOLCHAIN_UPDATE_POLICY_KEY) {
+            let rc = _write_config_cmd(_config_registry_url_from_file_cmd(), "");
+            if rc != 0 { return rc; }
+            print("unset " + key);
+            return 0;
+        }
+        print("unknown config key: " + key);
+        print("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
+        return 2;
     }
     print("unknown subcommand: " + sub);
     print("usage: sfn config <get|set|unset|list> [key] [value]");

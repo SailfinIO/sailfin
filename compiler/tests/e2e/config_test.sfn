@@ -200,3 +200,80 @@ test "config: config dir/file permissions are restricted" ![io] {
         assert fs.get_perms(home + "/.sfn/config.toml") == 384;
     }
 }
+
+// ---- Test 14: toolchain.update-policy defaults to notify ----
+test "config: toolchain.update-policy defaults to notify" ![io] {
+    let home = _home("policy_default");
+    let r = _run(home, ["config", "get", "toolchain.update-policy"], []);
+    assert r.exit == 0;
+    assert find(r.out, "notify", 0) >= 0;
+}
+
+// ---- Test 15: set toolchain.update-policy persists and round-trips ----
+test "config: set toolchain.update-policy persists and round-trips" ![io] {
+    let home = _home("policy_set");
+    let s = _run(home, ["config", "set", "toolchain.update-policy", "manual"], []);
+    assert s.exit == 0;
+    assert find(s.out, "toolchain.update-policy = manual", 0) >= 0;
+    let r = _run(home, ["config", "get", "toolchain.update-policy"], []);
+    assert r.exit == 0;
+    assert find(r.out, "manual", 0) >= 0;
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    assert contains(body, "[toolchain]");
+    assert contains(body, "update-policy = \"manual\"");
+}
+
+// ---- Test 16: rejects an unknown toolchain.update-policy value ----
+test "config: rejects an unknown toolchain.update-policy value" ![io] {
+    let home = _home("policy_invalid");
+    let s = _run(home, ["config", "set", "toolchain.update-policy", "sometimes"], []);
+    assert s.exit == 1;
+    assert find(s.out, "notify, manual, disabled", 0) >= 0;
+    let r = _run(home, ["config", "get", "toolchain.update-policy"], []);
+    assert find(r.out, "notify", 0) >= 0;
+}
+
+// ---- Test 17: unset toolchain.update-policy restores the default ----
+test "config: unset toolchain.update-policy restores the default" ![io] {
+    let home = _home("policy_unset");
+    let _s = _run(home, ["config", "set", "toolchain.update-policy", "disabled"], []);
+    let _u = _run(home, ["config", "unset", "toolchain.update-policy"], []);
+    let r = _run(home, ["config", "get", "toolchain.update-policy"], []);
+    assert find(r.out, "notify", 0) >= 0;
+}
+
+// ---- Test 18: registry and toolchain.update-policy survive each other ----
+test "config: registry and toolchain.update-policy survive each other" ![io] {
+    let home = _home("policy_and_registry");
+    let _s1 = _run(home, ["config", "set", "registry", "https://a.test"], []);
+    let _s2 = _run(home, ["config", "set", "toolchain.update-policy", "disabled"], []);
+    let r1 = _run(home, ["config", "get", "registry"], []);
+    assert find(r1.out, "https://a.test", 0) >= 0;
+    let _s3 = _run(home, ["config", "set", "registry", "https://b.test"], []);
+    let r2 = _run(home, ["config", "get", "toolchain.update-policy"], []);
+    assert find(r2.out, "disabled", 0) >= 0;
+    let _u = _run(home, ["config", "unset", "registry"], []);
+    let r3 = _run(home, ["config", "get", "toolchain.update-policy"], []);
+    assert find(r3.out, "disabled", 0) >= 0;
+    let r4 = _run(home, ["config", "list"], []);
+    assert find(r4.out, "registry = ", 0) >= 0;
+    assert find(r4.out, "toolchain.update-policy = disabled", 0) >= 0;
+}
+
+// ---- Test 19: get reports a hand-edited unrecognized policy verbatim ----
+test "config: get reports a hand-edited unrecognized policy verbatim" ![io] {
+    let home = _home("policy_hand_edited");
+    fs.createDirectory(home + "/.sfn", true);
+    fs.writeFile(home + "/.sfn/config.toml", "[toolchain]\nupdate-policy = \"sometimes\"\n");
+    let r = _run(home, ["config", "get", "toolchain.update-policy"], []);
+    assert r.exit == 0;
+    assert find(r.out, "sometimes", 0) >= 0;
+}
+
+// ---- Test 20: unknown key names the known keys ----
+test "config: unknown key names the known keys" ![io] {
+    let home = _home("unknown_key_names");
+    let r = _run(home, ["config", "get", "nope"], []);
+    assert r.exit == 2;
+    assert find(r.out, "toolchain.update-policy", 0) >= 0;
+}

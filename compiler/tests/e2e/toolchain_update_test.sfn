@@ -1,0 +1,408 @@
+// compiler/tests/e2e/toolchain_update_test.sfn
+//
+// End-to-end coverage for `sfn toolchain update` (SFEP-0073 §3.4, SFN-1071).
+// Native (no-bash) `*_test.sfn` per `.claude/rules/no-bash-e2e.md`: drives the
+// compiler-under-test as a subprocess against a pre-seeded store and a
+// per-user config directory, and asserts on captured output plus exit codes.
+//
+// Every child env carries a private `HOME` (the update policy lives at
+// `$HOME/.sfn/config.toml`), `SAILFIN_CONFIG_DIR` (the per-user default
+// record), an `INSTALL_BASE` scratch store, and
+// `SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9` — connection refused, so
+// no real network is ever reached. A genuine "update available -> install"
+// cannot be driven end-to-end here: the release trust root is pinned with no
+// test seam (`compiler/src/release_trust.sfn:10-11`,
+// `compiler/tests/e2e/toolchain_install_test.sfn:39-44`). The strictly-newer
+// decision itself is unit-tested against struct literals in
+// `compiler/tests/unit/toolchain_update_policy_test.sfn` (a sibling change).
+// This file therefore covers only the local usage/mode/policy gates that
+// precede any fetch — every case here exits before the connection-refused
+// index would even be reached, except the `manual`/`notify` legs, which
+// exist specifically to prove the gate lets the request through and the
+// failure is the unreachable index, not the policy.
+import { remove_all } from "sfn/fs";
+import { contains, trim } from "sfn/strings";
+import {
+    clean_runner_env_without,
+    default_scratch_dir,
+    nested_runner_scratch,
+    report_child_failure,
+    sfn_bin_abs_path,
+    sfn_bin_path
+} from "sfn/test";
+
+import { host_exe_name } from "../../src/build/target";
+import { toolchain_current_host } from "../../src/toolchain/host";
+import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
+
+// A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
+// under the parallel pool; `/tmp` is the standalone fallback.
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    return dir + "/sfn-toolchain-update-e2e";
+}
+
+fn _home_dir(label: string) -> string ![io] {
+    let dir = _scratch_root() + "/" + label + "-home";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _config_dir(label: string) -> string ![io] {
+    let dir = _scratch_root() + "/" + label + "-cfg";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _neutral_cwd(label: string) -> string ![io] {
+    let dir = _scratch_root() + "/" + label + "-cwd";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Every child env in this file: a private `HOME`/`SAILFIN_CONFIG_DIR`/
+// `INSTALL_BASE`, and a `SAILFIN_TOOLCHAIN_RELEASE_BASE` that refuses the
+// connection so no real network is ever reached (SFEP-0073 §3.6).
+fn _env_with(extra: string[], home: string, config_dir: string, store: string) -> string[] ![io] {
+    let host_os = env.get("SAILFIN_HOST_OS");
+    let target_os = env.get("SAILFIN_TARGET_OS");
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-update-child"), ["HOME", "INSTALL_BASE", "SAILFIN_CONFIG_DIR", "SAILFIN_TOOLCHAIN", "SAILFIN_TOOLCHAIN_DISPATCHED", "SAILFIN_TOOLCHAIN_RELEASE_BASE"]);
+    e.push("HOME=" + home);
+    e.push("SAILFIN_CONFIG_DIR=" + config_dir);
+    e.push("INSTALL_BASE=" + store);
+    e.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9");
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    if host_os.length > 0 { e.push("SAILFIN_HOST_OS=" + host_os); }
+    if target_os.length > 0 { e.push("SAILFIN_TARGET_OS=" + target_os); }
+    return e;
+}
+
+// Write the `[toolchain] update-policy` key `update_policy.sfn` reads, at
+// `<home>/.sfn/config.toml` — the same file `sfn config set` owns.
+fn _seed_policy(home: string, value: string) -> void ![io] {
+    fs.createDirectory(home + "/.sfn", true);
+    fs.writeFile(home + "/.sfn/config.toml", "[toolchain]\nupdate-policy = \""
+        + value
+        + "\"\n");
+}
+
+fn _stub_bin_path(dir: string) -> string ![io] {
+    return host_exe_name(dir + "/sailfin");
+}
+
+// Seed a host-qualified store entry as "installed" without compiling
+// anything, mirroring `toolchain_default_remove_test.sfn::_seed_installed`.
+fn _seed_installed(store: string, ver: string) -> string ![io] {
+    let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    fs.writeFile(_stub_bin_path(dir), "not-a-real-toolchain-binary");
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+    return dir;
+}
+
+// Write the per-host user-default record as literal text, mirroring
+// `toolchain_default_remove_test.sfn::_seed_user_default`.
+fn _seed_user_default(config_dir: string, ver: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/toolchain-default", "sailfin-toolchain-default 1\n"
+        + toolchain_current_host().triple
+        + ".version = "
+        + ver
+        + "\n");
+}
+
+fn _seed_user_default_with_track(config_dir: string, ver: string, track: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/toolchain-default", "sailfin-toolchain-default 1\n"
+        + toolchain_current_host().triple
+        + ".version = "
+        + ver
+        + "\n"
+        + toolchain_current_host().triple
+        + ".track = "
+        + track
+        + "\n");
+}
+
+// Seed a project pinning only `sfn` — no exact `[toolchain] version` —
+// mirroring `toolchain_default_remove_test.sfn::_seed_project_exact`'s shape
+// but without the `version` field, for the "declares no exact version" case.
+fn _seed_project_floor_only(root: string, pin_ver: string) -> string ![io] {
+    assert remove_all(root);
+    fs.createDirectory(root, true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\nname = \"update-e2e\"\nversion = \"0.0.1\"\n\n[toolchain]\nsfn = \""
+        + pin_ver
+        + "\"\n");
+    return root + "/capsule.toml";
+}
+
+// ---------------------------------------------------------------------------
+// Case 1-2: default-mode track resolution errors
+// ---------------------------------------------------------------------------
+test "toolchain update: no arg, no user-default record -> track error" ![io] {
+    let store = _scratch_root() + "/track-none-store";
+    let home = _home_dir("track-none");
+    let cfg = _config_dir("track-none");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "no update track is recorded");
+    assert contains(err, "sfn toolchain update stable");
+}
+
+test "toolchain update: no arg, default recorded by exact version -> records no track error" ![io] {
+    let store = _scratch_root() + "/track-exact-store";
+    let home = _home_dir("track-exact");
+    let cfg = _config_dir("track-exact");
+    _seed_user_default(cfg, "401.0.0");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "records no track");
+}
+
+// ---------------------------------------------------------------------------
+// Case 3-6: usage errors
+// ---------------------------------------------------------------------------
+test "toolchain update: an unrecognized channel argument is a usage error" ![io] {
+    let store = _scratch_root() + "/bad-channel-store";
+    let home = _home_dir("bad-channel");
+    let cfg = _config_dir("bad-channel");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "bogus"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "is not a channel");
+}
+
+test "toolchain update: --project with no channel argument is a usage error" ![io] {
+    let store = _scratch_root() + "/project-no-channel-store";
+    let home = _home_dir("project-no-channel");
+    let cfg = _config_dir("project-no-channel");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "--project"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "--project requires an explicit channel");
+}
+
+test "toolchain update: --project on a floor-only project declares no exact version" ![io] {
+    let store = _scratch_root() + "/project-no-exact-store";
+    let home = _home_dir("project-no-exact");
+    let cfg = _config_dir("project-no-exact");
+    let cwd = _neutral_cwd("project-no-exact");
+    let manifest = _seed_project_floor_only(cwd, "0.1.0");
+    let before = fs.readFile(manifest);
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "update", "stable", "--project"], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "declares no exact [toolchain] version");
+    assert fs.readFile(manifest) == before;
+}
+
+test "toolchain update: --json without --check is a usage error" ![io] {
+    let store = _scratch_root() + "/json-no-check-store";
+    let home = _home_dir("json-no-check");
+    let cfg = _config_dir("json-no-check");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "--json"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "--json requires --check");
+}
+
+// ---------------------------------------------------------------------------
+// Case 7: policy disabled
+// ---------------------------------------------------------------------------
+test "toolchain update: policy disabled refuses --check before the network" ![io] {
+    let store = _scratch_root() + "/disabled-check-store";
+    let home = _home_dir("disabled-check");
+    let cfg = _config_dir("disabled-check");
+    _seed_policy(home, "disabled");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "update policy is disabled");
+    assert ! contains(err, "index");
+    assert ! contains(err, "download");
+}
+
+test "toolchain update: policy disabled refuses an argument-less update after reading the track" ![io] {
+    let store = _scratch_root() + "/disabled-track-store";
+    let home = _home_dir("disabled-track");
+    let cfg = _config_dir("disabled-track");
+    _seed_policy(home, "disabled");
+    _seed_user_default_with_track(cfg, "402.0.0", "stable");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "update policy is disabled");
+}
+
+test "toolchain update: policy disabled refuses install too" ![io] {
+    let store = _scratch_root() + "/disabled-install-store";
+    let home = _home_dir("disabled-install");
+    let cfg = _config_dir("disabled-install");
+    _seed_policy(home, "disabled");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_abs_path(), "toolchain", "install", "0.10.6"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "update policy is disabled");
+}
+
+test "toolchain update: policy disabled leaves default/list/remove working" ![io] {
+    let store = _scratch_root() + "/disabled-local-store";
+    let home = _home_dir("disabled-local");
+    let cfg = _config_dir("disabled-local");
+    _seed_policy(home, "disabled");
+    _seed_installed(store, "403.0.0");
+    let run_env = _env_with([], home, cfg, store);
+
+    let default_exit = process.run_capture([sfn_bin_path(), "toolchain", "default"], run_env);
+    let default_out = process.capture_take_stdout();
+    let default_err = process.capture_take_stderr();
+    report_child_failure("update-disabled default", default_exit, default_out, default_err);
+    assert default_exit == 0;
+
+    let list_exit = process.run_capture([sfn_bin_path(), "toolchain", "list"], run_env);
+    let list_out = process.capture_take_stdout();
+    let list_err = process.capture_take_stderr();
+    report_child_failure("update-disabled list", list_exit, list_out, list_err);
+    assert list_exit == 0;
+
+    let remove_cwd = _neutral_cwd("disabled-local-remove");
+    let remove_exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "remove", "403.0.0"], run_env, remove_cwd);
+    let remove_out = process.capture_take_stdout();
+    let remove_err = process.capture_take_stderr();
+    report_child_failure("update-disabled remove", remove_exit, remove_out, remove_err);
+    assert remove_exit == 0;
+}
+
+test "toolchain update: policy disabled --check --json emits no envelope on stdout" ![io] {
+    let store = _scratch_root() + "/disabled-json-store";
+    let home = _home_dir("disabled-json");
+    let cfg = _config_dir("disabled-json");
+    _seed_policy(home, "disabled");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check", "--json"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert trim(out) == "";
+}
+
+// ---------------------------------------------------------------------------
+// Case 8: policy manual permits the explicit request through to the network
+// ---------------------------------------------------------------------------
+test "toolchain update: policy manual reaches the (refused) network, not a policy refusal" ![io] {
+    let store = _scratch_root() + "/manual-store";
+    let home = _home_dir("manual");
+    let cfg = _config_dir("manual");
+    _seed_policy(home, "manual");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert ! contains(err, "update policy");
+}
+
+test "toolchain update: no config file at all behaves as notify, reaching the network" ![io] {
+    let store = _scratch_root() + "/no-config-store";
+    let home = _home_dir("no-config");
+    let cfg = _config_dir("no-config");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert ! contains(err, "update policy");
+}
+
+// ---------------------------------------------------------------------------
+// Case 9: an unrecognized policy value fails closed with the repair hint
+// ---------------------------------------------------------------------------
+test "toolchain update: an unrecognized policy value is refused and named" ![io] {
+    let store = _scratch_root() + "/unrecognized-store";
+    let home = _home_dir("unrecognized");
+    let cfg = _config_dir("unrecognized");
+    _seed_policy(home, "sometimes");
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "is not recognized");
+    assert contains(err, "notify, manual, disabled");
+}
+
+// ---------------------------------------------------------------------------
+// Case 9b: a refused update never touches the record it would have rewritten
+// ---------------------------------------------------------------------------
+test "toolchain update: a refused update leaves the default record byte-identical" ![io] {
+    let store = _scratch_root() + "/disabled-byte-identical-store";
+    let home = _home_dir("disabled-byte-identical");
+    let cfg = _config_dir("disabled-byte-identical");
+    _seed_policy(home, "disabled");
+    _seed_user_default_with_track(cfg, "0.10.6", "stable");
+    let record_path = cfg + "/toolchain-default";
+    let before = fs.readFile(record_path);
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert fs.readFile(record_path) == before;
+}
+
+// ---------------------------------------------------------------------------
+// Case 10: SAILFIN_TOOLCHAIN=local forbids fetching, independent of policy
+// ---------------------------------------------------------------------------
+test "toolchain update: SAILFIN_TOOLCHAIN=local forbids fetching" ![io] {
+    let store = _scratch_root() + "/local-store";
+    let home = _home_dir("local");
+    let cfg = _config_dir("local");
+    let run_env = _env_with(["SAILFIN_TOOLCHAIN=local"], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert contains(err, "forbids fetching");
+}

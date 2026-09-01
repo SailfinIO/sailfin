@@ -132,6 +132,20 @@ fn _ij_render_default_object(version: string, track: string) -> string {
     return "{" + _ij_join(parts, ",") + "}";
 }
 
+// The `update` object (SFEP-0073 §3.4, SFN-1071), populated only by `update
+// --check`. Field order is normative: `policy`, `channel`, `available`,
+// `current`, `candidate`, `advisory`.
+fn _ij_render_update_object(report: ToolchainInspectReport) -> string {
+    let mut parts: string[] = [];
+    parts.push(_ij_string_field("policy", report.update_policy));
+    parts.push(_ij_string_field("channel", report.update_channel));
+    parts.push(_ij_field("available", _ij_boolean(report.update_available)));
+    parts.push(_ij_string_field("current", report.update_current));
+    parts.push(_ij_nullable_string_field("candidate", report.update_candidate));
+    parts.push(_ij_nullable_string_field("advisory", report.update_advisory));
+    return "{" + _ij_join(parts, ",") + "}";
+}
+
 fn _ij_render_selection(selection: ToolchainSelection) -> string {
     let mut parts: string[] = [];
     parts.push(_ij_nullable_string_field("version", selection.version));
@@ -199,13 +213,16 @@ fn render_toolchains_json(report: ToolchainInspectReport) -> string {
     parts.push(_ij_string_field("fetch_policy", report.fetch_policy));
     // `default` is the per-user default recorded for this host (SFN-1068,
     // SFEP-0073 §3.5): `null` when this host has no recorded default, else
-    // `{"version": ..., "track": ...}`. `update` stays unshipped in this
-    // slice — update checks are SFEP-0073 Slice 4 — and is locked into the
-    // envelope now so the field set never needs a bump once it lands.
+    // `{"version": ..., "track": ...}`.
     if report.default_version.length > 0 {
         parts.push(_ij_field("default", _ij_render_default_object(report.default_version, report.default_track)));
     } else { parts.push(_ij_field("default", "null")); }
-    parts.push(_ij_field("update", "null"));
+    // `update` is populated only by `update --check` (SFEP-0073 §3.4,
+    // SFN-1071); `list`/`active`/`verify` never set `update_present` and so
+    // keep emitting `"update":null` exactly as before this slice.
+    if report.update_present {
+        parts.push(_ij_field("update", _ij_render_update_object(report)));
+    } else { parts.push(_ij_field("update", "null")); }
     parts.push(_ij_field("toolchains", _ij_render_toolchains(report.entries)));
     parts.push(_ij_field("diagnostics", _ij_render_diagnostics(report.findings)));
     // No trailing newline: the caller emits this through `print`, which adds

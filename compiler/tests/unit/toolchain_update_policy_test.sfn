@@ -1,0 +1,345 @@
+// Unit coverage for `compiler/src/toolchain/update_policy.sfn` (SFEP-0073
+// §§3.4, 3.6, SFN-1071). `toolchain_update_plan` and
+// `toolchain_manifest_set_version` are pure — no `![io]`, no `![net]` — so
+// every fixture below is a `ToolchainIndex` struct literal built directly,
+// never a parsed or signed payload, matching
+// `toolchain_release_policy_test.sfn`'s discipline.
+import { index_of } from "../../src/string_utils";
+import {
+    ToolchainIndex,
+    ToolchainIndexChannel,
+    ToolchainIndexHost,
+    ToolchainIndexRelease
+} from "../../src/toolchain/index";
+import { ToolchainRevocationRecord } from "../../src/toolchain/index_cache";
+import {
+    toolchain_manifest_set_version,
+    toolchain_update_plan,
+    toolchain_update_policy_from_config,
+    toolchain_update_policy_is_valid
+} from "../../src/toolchain/update_policy";
+
+let HOST: string = "x86_64-unknown-linux-gnu";
+
+// A 64-char lowercase-hex digest built from a repeated byte rather than
+// pasted, so a wrong-length literal fails loudly instead of silently passing
+// a shape check by coincidence.
+fn _digest(byte: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 64 { break; }
+        out = out + byte;
+        i += 1;
+    }
+    return out;
+}
+
+fn _channel(name: string, host: string, version: string) -> ToolchainIndexChannel {
+    return ToolchainIndexChannel {
+        name: name,
+        host: host,
+        version: version
+    };
+}
+
+fn _release(version: string, channel: string, host: string) -> ToolchainIndexRelease {
+    let mut hosts: ToolchainIndexHost[] = [];
+    hosts.push(ToolchainIndexHost {
+        host: host, asset: "sailfin-" + version + "-" + host + ".tar.gz", sha256: _digest("a")
+    });
+    return ToolchainIndexRelease {
+        version: version,
+        channel: channel,
+        manifest_key_id: "key-a",
+        manifest_path: version + "/SHA256SUMS",
+        manifest_sha256: _digest("f"),
+        hosts: hosts
+    };
+}
+
+fn _revocation(kind: string, subject: string) -> ToolchainRevocationRecord {
+    return ToolchainRevocationRecord {
+        kind: kind,
+        subject: subject,
+        reason: "test revocation",
+        recorded_at: "2026-01-01T00:00:00Z",
+        sequence: 1
+    };
+}
+
+// Builds an authenticated (`ok: true`) index directly, skipping the signed
+// payload this function would otherwise require — `toolchain_update_plan`
+// never parses or verifies, so a struct literal is a faithful fixture.
+fn _index_with(channels: ToolchainIndexChannel[], releases: ToolchainIndexRelease[]) -> ToolchainIndex {
+    let no_revocations: ToolchainRevocationRecord[] = [];
+    return ToolchainIndex {
+        ok: true,
+        error: "",
+        sequence: 1,
+        generated_at: "2026-01-01T00:00:00Z",
+        expires_at: "2027-01-01T00:00:00Z",
+        key_id: "",
+        public_key: "",
+        channels: channels,
+        releases: releases,
+        yanks: [],
+        revocations: no_revocations,
+        advisories: []
+    };
+}
+
+fn _index_failure(reason: string) -> ToolchainIndex {
+    let no_channels: ToolchainIndexChannel[] = [];
+    let no_releases: ToolchainIndexRelease[] = [];
+    let no_revocations: ToolchainRevocationRecord[] = [];
+    return ToolchainIndex {
+        ok: false,
+        error: reason,
+        sequence: -1,
+        generated_at: "",
+        expires_at: "",
+        key_id: "",
+        public_key: "",
+        channels: no_channels,
+        releases: no_releases,
+        yanks: [],
+        revocations: no_revocations,
+        advisories: []
+    };
+}
+
+fn _no_known() -> ToolchainRevocationRecord[] {
+    let known: ToolchainRevocationRecord[] = [];
+    return known;
+}
+
+test "toolchain update: a newer channel head is offered" {
+    let index = _index_with([_channel("stable", HOST, "0.10.7")], [_release("0.10.7", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.10.6");
+    assert plan.ok;
+    assert plan.available;
+    assert plan.head == "0.10.7";
+    assert plan.candidate == "0.10.7";
+    assert plan.channel == "stable";
+    assert plan.current == "0.10.6";
+}
+
+test "toolchain update: an equal head is not an update" {
+    let index = _index_with([_channel("stable", HOST, "0.10.7")], [_release("0.10.7", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.10.7");
+    assert plan.ok;
+    assert ! plan.available;
+    assert plan.head == "0.10.7";
+    assert plan.candidate == "";
+}
+
+test "toolchain update: an older head is not an update" {
+    let index = _index_with([_channel("stable", HOST, "0.10.7")], [_release("0.10.7", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.10.8");
+    assert plan.ok;
+    assert ! plan.available;
+    assert plan.candidate == "";
+}
+
+test "toolchain update: a prerelease advancing to the stable release is offered" {
+    let index = _index_with([_channel("stable", HOST, "0.11.0")], [_release("0.11.0", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.11.0-rc.1");
+    assert plan.ok;
+    assert plan.available;
+}
+
+test "toolchain update: a channel switch never plans a downgrade" {
+    let index = _index_with([_channel("beta", HOST, "0.11.0-beta.2")], [_release("0.11.0-beta.2", "beta", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "beta", HOST, "0.11.0");
+    assert plan.ok;
+    assert ! plan.available;
+    assert plan.candidate == "";
+    assert plan.head == "0.11.0-beta.2";
+}
+
+test "toolchain update: build metadata on the current version is ignored" {
+    let index = _index_with([_channel("stable", HOST, "0.10.7")], [_release("0.10.7", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.10.6+dev.abc123");
+    assert plan.ok;
+    assert plan.available;
+}
+
+test "toolchain update: a malformed current version cannot be compared" {
+    let index = _index_with([_channel("stable", HOST, "0.10.7")], [_release("0.10.7", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "garbage");
+    assert ! plan.ok;
+    assert plan.reason.length > 0;
+    assert index_of(plan.reason, "cannot compare") >= 0;
+}
+
+test "toolchain update: a channel with no head for this host refuses" {
+    let index = _index_with([_channel("stable", HOST, "0.10.7")], [_release("0.10.7", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "rc", HOST, "0.10.6");
+    assert ! plan.ok;
+    assert plan.reason.length > 0;
+    assert plan.candidate == "";
+    assert plan.head == "";
+    assert ! plan.available;
+}
+
+test "toolchain update: a malformed head with build metadata refuses" {
+    let index = _index_with([_channel("stable", HOST, "0.10.7+build.1")], [_release("0.10.7+build.1", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.10.6");
+    assert ! plan.ok;
+    assert index_of(plan.reason, "malformed") >= 0;
+}
+
+test "toolchain update: a malformed head with a v-prefix refuses" {
+    let index = _index_with([_channel("stable", HOST, "v0.10.7")], [_release("v0.10.7", "stable", HOST)]);
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.10.6");
+    assert ! plan.ok;
+    assert index_of(plan.reason, "malformed") >= 0;
+}
+
+test "toolchain update: a revoked head is excluded from resolution" {
+    let index = _index_with([_channel("stable", HOST, "0.10.7")], [_release("0.10.7", "stable", HOST)]);
+    let mut known: ToolchainRevocationRecord[] = [];
+    known.push(_revocation("release", "0.10.7"));
+
+    let plan = toolchain_update_plan(index, known, "stable", HOST, "0.10.6");
+    assert ! plan.ok;
+    assert plan.reason.length > 0;
+}
+
+test "toolchain update: an unauthenticated index refuses" {
+    let index = _index_failure("the signed index expired at 2025-01-01T00:00:00Z");
+
+    let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.10.6");
+    assert ! plan.ok;
+    // The acquisition failure must be the reason shown, not the "publishes no
+    // stable release" a channel lookup on an empty index would produce.
+    assert plan.reason == "the signed index expired at 2025-01-01T00:00:00Z";
+}
+
+test "toolchain manifest set version: rewrites only the toolchain version line" {
+    let text = "[capsule]\nname = \"x\"\nversion = \"0.0.1\"\n\n[toolchain]\nsfn = \"0.10.0\"\nversion = \"0.10.6\"  # pinned\nchannel = \"stable\"\n";
+    let expected = "[capsule]\nname = \"x\"\nversion = \"0.0.1\"\n\n[toolchain]\nsfn = \"0.10.0\"\nversion = \"0.10.7\"  # pinned\nchannel = \"stable\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == expected;
+}
+
+test "toolchain manifest set version: preserves CRLF line endings" {
+    let text = "[toolchain]\r\nsfn = \"0.10.0\"\r\nversion = \"0.10.6\"\r\n";
+    let expected = "[toolchain]\r\nsfn = \"0.10.0\"\r\nversion = \"0.10.7\"\r\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == expected;
+}
+
+test "toolchain manifest set version: preserves a missing trailing newline" {
+    let text = "[toolchain]\nversion = \"0.10.6\"";
+    let expected = "[toolchain]\nversion = \"0.10.7\"";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == expected;
+}
+
+test "toolchain manifest set version: preserves odd spacing and single quotes" {
+    let text = "[ toolchain ]\n  version   =   '0.10.6'   \n";
+    let expected = "[ toolchain ]\n  version   =   '0.10.7'   \n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == expected;
+}
+
+test "toolchain manifest set version: a toolchain section with no version key returns empty" {
+    let text = "[toolchain]\nsfn = \"0.10.0\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
+test "toolchain manifest set version: no toolchain section returns empty" {
+    let text = "[capsule]\nversion = \"0.0.1\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
+test "toolchain manifest set version: empty text returns empty" {
+    assert toolchain_manifest_set_version("", "0.10.7") == "";
+}
+
+test "toolchain manifest set version: a commented-out version line is untouched" {
+    let text = "[toolchain]\n# version = \"0.10.6\"\nversion = \"0.10.6\"\n";
+    let expected = "[toolchain]\n# version = \"0.10.6\"\nversion = \"0.10.7\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == expected;
+}
+
+test "toolchain manifest set version: only the first toolchain version key changes" {
+    let text = "[toolchain]\nversion = \"0.10.6\"\nversion = \"0.10.6\"\n\n[other]\nversion = \"9.9.9\"\n";
+    let expected = "[toolchain]\nversion = \"0.10.7\"\nversion = \"0.10.6\"\n\n[other]\nversion = \"9.9.9\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == expected;
+}
+
+test "toolchain manifest set version: an unquoted version value returns empty" {
+    let text = "[toolchain]\nversion = 0.10.6\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
+test "toolchain manifest set version: a nested [toolchain.sub] section is not the root" {
+    let text = "[toolchain.sub]\nversion = \"1.2.3\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
+test "toolchain manifest set version: a [[toolchain]] array header is not the root table" {
+    let text = "[[toolchain]]\nversion = \"1.2.3\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
+test "toolchain manifest set version: a quoted \"version\" key is not the plain key" {
+    let text = "[toolchain]\n\"version\" = \"0.10.6\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
+test "toolchain update policy: an absent key defaults to notify" {
+    assert toolchain_update_policy_from_config("") == "notify";
+}
+
+test "toolchain update policy: reads a disabled policy" {
+    assert toolchain_update_policy_from_config("[toolchain]\nupdate-policy = \"disabled\"\n") == "disabled";
+}
+
+test "toolchain update policy: reads a manual policy alongside other sections" {
+    let text = "[registry]\nurl = \"https://r.test\"\n\n[toolchain]\nupdate-policy = \"manual\"\n";
+
+    assert toolchain_update_policy_from_config(text) == "manual";
+}
+
+test "toolchain update policy: an unrecognized value is returned verbatim" {
+    assert toolchain_update_policy_from_config("[toolchain]\nupdate-policy = \"bogus\"\n") == "bogus";
+}
+
+test "toolchain update policy: the wrong section is treated as absent" {
+    assert toolchain_update_policy_from_config("[registry]\nupdate-policy = \"disabled\"\n") == "notify";
+}
+
+test "toolchain update policy: valid policy names" {
+    assert toolchain_update_policy_is_valid("notify");
+    assert toolchain_update_policy_is_valid("manual");
+    assert toolchain_update_policy_is_valid("disabled");
+}
+
+test "toolchain update policy: invalid policy names" {
+    assert ! toolchain_update_policy_is_valid("");
+    assert ! toolchain_update_policy_is_valid("Notify");
+    assert ! toolchain_update_policy_is_valid("off");
+    assert ! toolchain_update_policy_is_valid("auto");
+}

@@ -48,6 +48,7 @@ import {
     toolchain_store_diagnostic,
     toolchain_versions_base
 } from "../../toolchain/store";
+import { toolchain_update_run } from "../../toolchain/update";
 import {
     toolchain_user_default_clear,
     toolchain_user_default_corrupt,
@@ -505,6 +506,10 @@ fn command_def() -> Command {
     verify_cmd = with_flag(verify_cmd, flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
     let entry_version_cmd = command("entry-version", "Report this entry toolchain's identity and management-protocol range, without dispatch");
     let default_cmd = with_arg(command("default", "Show or set the per-user default toolchain"), arg_optional("version", "Exact version to make the user default (default: report the current one)", ""));
+    let mut update_cmd = with_arg(command("update", "Check for, or install, a newer toolchain on a channel — never a downgrade"), arg_optional("channel", "Channel to follow (stable|rc|beta|alpha|latest); default: the recorded user-default track", ""));
+    update_cmd = with_flag(update_cmd, flag("check", "Report whether a newer release exists and change nothing"));
+    update_cmd = with_flag(update_cmd, flag("project", "Update this project's exact [toolchain] version instead of the user default; requires a channel"));
+    update_cmd = with_flag(update_cmd, flag("json", "With --check: emit the sailfin-toolchains/1 envelope on stdout"));
     let mut remove_cmd = with_arg(command("remove", "Remove an installed toolchain from the store"), arg("version", "Exact toolchain version to remove"));
     remove_cmd = with_flag(remove_cmd, flag("force", "Override the project and user-default protections; never removes the running toolchain"));
     let mut cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
@@ -514,6 +519,7 @@ fn command_def() -> Command {
     cmd = with_subcommand(cmd, active_cmd);
     cmd = with_subcommand(cmd, verify_cmd);
     cmd = with_subcommand(cmd, default_cmd);
+    cmd = with_subcommand(cmd, update_cmd);
     cmd = with_subcommand(cmd, remove_cmd);
     return with_usage(cmd, "packages", "sfn toolchain list", "inspect and install toolchains");
 }
@@ -544,10 +550,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if sub == "default" {
         return _toolchain_default(ctx, get(matches, "version"));
     }
+    if sub == "update" {
+        return toolchain_update_run(ctx, get(matches, "channel"), has_flag(matches, "check"), has_flag(matches, "project"), has_flag(matches, "json"));
+    }
     if sub == "remove" {
         return _toolchain_remove(ctx, get(matches, "version"), has_flag(matches, "force"));
     }
-    print("usage: sfn toolchain <install|list|active|verify|run|entry-version|default|remove>");
+    print("usage: sfn toolchain <install|list|active|verify|run|entry-version|default|update|remove>");
     return 2;
 }
 

@@ -584,7 +584,7 @@ Rejects empty tokens. Overwrites any existing credentials file.
 
 ### `sfn config <get|set|unset|list> [key] [value]`
 
-Persist per-user toolchain settings to `~/.sfn/config.toml` (mode 600). The only supported key today is `registry`, which controls where `sfn add` and `sfn publish` look for capsules.
+Persist per-user toolchain settings to `~/.sfn/config.toml` (mode 600). Two keys are supported today: `registry`, which controls where `sfn add` and `sfn publish` look for capsules, and `toolchain.update-policy`, which controls whether `sfn toolchain install`/`update` (and the automatic fetch of a missing selected toolchain) may contact the release endpoint at all.
 
 **Subcommands:**
 
@@ -619,6 +619,16 @@ export SFN_REGISTRY=https://registry.acme.internal
 ```
 
 Or put it in `~/.sfn/config.toml` once per workstation with `sfn config set registry ...` — no shell changes required.
+
+**`toolchain.update-policy`** (SFEP-0073 §3.6, SFN-1071) takes one of three values, stored as `[toolchain] update-policy` in the same `~/.sfn/config.toml`:
+
+| Value | Effect |
+|---|---|
+| `notify` (default when unset) | Permits `sfn toolchain install`, `update`, and `update --check`. |
+| `manual` | Also permits all three — in this slice `notify` and `manual` behave identically for explicit commands. They differ only for the opportunistic post-command update notice designed in SFEP-0073 §3.6, which is not yet shipped (SFN-1073). |
+| `disabled` | Refuses every release-network operation — `install`, `update` (with or without `--check`), `default <version>` when it would have to fetch, and the automatic fetch of a missing selected toolchain — before any request, naming the policy and `sfn config set toolchain.update-policy manual` as the remedy. Local selection, `list`/`active`/`verify`, reporting or recording an already-installed `default`, and `remove` are unaffected. |
+
+`sfn config set toolchain.update-policy <value>` rejects anything else (`error: toolchain.update-policy must be one of notify, manual, disabled`, exit `1`). A hand-edited value outside this set is reported verbatim by `sfn config get toolchain.update-policy`, but every network operation fails closed against it, naming the config file and the three valid values. `sfn config set`/`unset registry` and `sfn config set`/`unset toolchain.update-policy` each rewrite only their own section — setting one never clobbers the other. `sfn config list` prints both keys; an unknown key names both in its `known keys:` message.
 
 ---
 
@@ -685,7 +695,7 @@ Whichever candidate wins still has to satisfy this root's `sfn` floor and `chann
 
 `sfn toolchain active` reports the resolved exact field as an `exact:` line (alongside the `requires:` floor line) when this root sets one, and the `sailfin-toolchains/1` JSON envelope's `requirement.version` carries the same value (see [`docs/reference/toolchains-json-schema.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/reference/toolchains-json-schema.md)).
 
-No command besides `sfn init` writes `version` into a project manifest today — `sfn toolchain update` and a channel selector resolving into a project `version` remain later SFEP-0073 slices, not shipped. `sfn toolchain default` (below) now ships, but it records a per-user default, never a project manifest, so it doesn't change that claim.
+`sfn init` and [`sfn toolchain update <channel> --project`](#updating-a-toolchain) are the only commands that write `version` into a project manifest; a channel selector or `latest` resolving directly into a project `version` field remains a later SFEP-0073 slice, not shipped. `sfn toolchain default` (below) records a per-user default, never a project manifest, so it doesn't write this field.
 
 ### Installing a toolchain
 
@@ -705,7 +715,7 @@ A revoked identity is additionally recorded in a local, append-only revocation l
 
 The bootstrap seed path (`bootstrap.toml [seed].version`, SFEP-0047) does not consult the signed index — gating the self-host build on index liveness would couple it to the index's expiry.
 
-> **Not yet shipped:** default update tracks, `sfn toolchain update`, and opportunistic update notification are designed in SFEP-0073 but not implemented. `sfn toolchain default` and `sfn toolchain remove` have shipped — see below.
+> **Not yet shipped:** opportunistic update notification (a passive notice surfaced after an unrelated command) and `sfn toolchain default <channel>` (recording a track by setting the default directly, rather than through `update`) are designed in SFEP-0073 §3.6 but not implemented (SFN-1073). `sfn toolchain default`, `sfn toolchain remove`, and [`sfn toolchain update`](#updating-a-toolchain) have shipped — see below.
 >
 > **Testing boundary:** channel resolution, yank handling, and index-listed asset binding are covered at unit level only — an end-to-end test cannot forge a signature against the pinned release-signing trust root. Offline execution refusal for an already-known-revoked release is covered end-to-end, since it consults only the local ledger and needs no signature to verify.
 
@@ -713,13 +723,58 @@ The bootstrap seed path (`bootstrap.toml [seed].version`, SFEP-0047) does not co
 
 `sfn toolchain default [<version>]` reports or records the per-user default consulted at rank 4 of the [selection precedence](#exact-toolchain-selection) above, for a directory whose project doesn't pin an exact `[toolchain] version` of its own.
 
-With no argument, it prints the version recorded for this host's triple and, when the record also carries an update track, prints that on the next line — no command yet writes a track (see below), so today that second line never appears. When nothing is recorded for this host, it says so and prints the command to set one. When the record exists but can't be parsed, it refuses with the record's path and a `sfn toolchain default <version>` repair instruction, rather than silently treating the default as unset.
+With no argument, it prints the version recorded for this host's triple and, when the record also carries an update track, prints that on the next line. [`sfn toolchain update <channel>`](#updating-a-toolchain) is the only command that writes a track today, so the second line appears only after running it at least once for this host. When nothing is recorded for this host, it says so and prints the command to set one. When the record exists but can't be parsed, it refuses with the record's path and a `sfn toolchain default <version>` repair instruction, rather than silently treating the default as unset.
 
-With an exact `<version>`, it installs that version into the host-qualified store if it isn't there already — through the same signed, verified path as [`sfn toolchain install`](#installing-a-toolchain) — and then atomically records it as this host's default. Under `SAILFIN_TOOLCHAIN=local`, a version that isn't already installed is refused rather than fetched. A channel name (`stable`, `rc`, `beta`, `alpha`, `latest`) is rejected outright: `default` takes only an exact release today, and an exact spelling never records an update track — channel resolution for `default`, and the tracks a later `sfn toolchain update` would consume, are further SFEP-0073 slices.
+With an exact `<version>`, it installs that version into the host-qualified store if it isn't there already — through the same signed, verified path as [`sfn toolchain install`](#installing-a-toolchain) — and then atomically records it as this host's default. Under `SAILFIN_TOOLCHAIN=local`, a version that isn't already installed is refused rather than fetched. A channel name (`stable`, `rc`, `beta`, `alpha`, `latest`) is rejected outright: `default` takes only an exact release, and an exact spelling never records an update track. To follow a channel, use [`sfn toolchain update <channel>`](#updating-a-toolchain), which both installs the channel's head and records it as this host's tracked channel; `default <channel>` itself is still unshipped.
 
 `sfn toolchain remove <version> [--force]` deletes one exact installed store entry. It always refuses to remove the toolchain currently running this process — `--force` does not override this. Without `--force` it also refuses a version that is this host's recorded default, a version the active project's `[toolchain]` names (its exact `version` or its floor `sfn`), or a version an exact `SAILFIN_TOOLCHAIN` names; `--force` overrides those three, and only those three. On success it reports the removed store path and that another checkout may reinstall the version automatically if it still pins it.
 
 The default record lives at `<config-dir>/toolchain-default`, where `<config-dir>` is `SAILFIN_CONFIG_DIR` when set, otherwise `~/.sfn`. It's keyed by host triple, so one home directory — roaming or shared — can carry a different default per host, and it's written atomically (a temp file, then a rename), so an interrupted write can never publish a half-written default.
+
+### Updating a toolchain
+
+`sfn toolchain update [<channel>] [--check] [--project] [--json]` checks for, or installs, a strictly newer release on a channel (SFEP-0073 §3.4, SFN-1071). It never downgrades: a deliberate step down is `sfn toolchain default <version>`, `sfn +<version>`, or a manual manifest edit, never `update`.
+
+`<channel>` is one of `stable`, `rc`, `beta`, `alpha`, or the `latest` alias for `stable`. Omit it to use the update track recorded on this host's user default; that track is written only by a prior `sfn toolchain update <channel>` (`sfn toolchain default <channel>` is not yet shipped — see [Default toolchain and removal](#default-toolchain-and-removal)). A default set by exact version (`sfn toolchain default 0.10.6`) records no track, so an argument-less `update` on a host with no recorded track fails, listing the four explicit `sfn toolchain update <channel>` forms.
+
+"Current" is the recorded user default when this host has one, else the entry toolchain; under `--project` (which requires an explicit channel) it is the project's exact `[toolchain] version` instead. The candidate is the channel's head for this host from the signed index, offered only when it is strictly newer than current by semver precedence — an equal, older, or channel-regressed head (e.g. current `0.11.0`, `update beta` whose head is `0.11.0-beta.2`) changes nothing and exits `0`.
+
+`--check` prints `channel:`/`current:`/`newest:`/`update:` lines and changes nothing, exiting `0` whether or not an update is available — availability is data, not an error:
+
+```
+$ sfn toolchain update stable --check
+channel:    stable
+current:    0.10.6 (user default)
+newest:     0.10.7
+update:     available — sfn toolchain update stable
+```
+
+```
+$ sfn toolchain update stable --check
+channel:    stable
+current:    0.10.7 (user default)
+newest:     0.10.7
+update:     none (0.10.7 is the newest stable release)
+```
+
+`--check --json` emits the `sailfin-toolchains/1` envelope with `operation: "update"` and a populated `update` object — see [`docs/reference/toolchains-json-schema.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/reference/toolchains-json-schema.md#update) for the field shapes. `--json` without `--check` is a usage error (exit `2`).
+
+Without `--check`, a strictly newer candidate is installed through the same signed, verified path as [`sfn toolchain install`](#installing-a-toolchain):
+
+- **User default (no `--project`):** the installed candidate is atomically recorded as this host's user default, and `<channel>` is recorded as its tracked channel.
+- **`--project`:** the project must already declare an exact `[toolchain] version` (else `update --project` refuses); a candidate that fails the project's own `sfn` floor or `channel` constraint is refused rather than installed. On success, only the `version` value in the manifest that declared it (`capsule.toml` or `workspace.toml`) is rewritten — every other byte, including `sfn`, `channel`, comments, and line endings, is preserved — written atomically (temp file, then rename).
+
+A failed install leaves the default, the track, and the manifest unchanged.
+
+**Exit codes:**
+
+| Code | Meaning |
+|---|---|
+| `0` | Completed, including "no update available". |
+| `1` | An install ran and failed. |
+| `2` | Usage error, `--json` without `--check`, an unrecognized channel, `--project` without a channel, a disabled update policy, `SAILFIN_TOOLCHAIN=local`, no recorded track for an argument-less `update`, or a network/index failure. |
+
+`SAILFIN_TOOLCHAIN=local` refuses `update` — `--check` included — before any network attempt. `toolchain.update-policy` (see [`sfn config`](#sfn-config-getsetunsetlist-key-value)) gates the same network attempt: `disabled` refuses every form of `update` with a message naming the policy and the remedy, before any request; `notify` and `manual` both permit it.
 
 ### Management-command routing
 
@@ -739,7 +794,7 @@ management-protocol: 1-1
 
 Management routing never reads the project `[toolchain]` pin, so `sfn toolchain ...` commands stay reachable even when ordinary selection (above) is broken or unsatisfiable. A payload the local revocation ledger knows to be revoked is excluded from the survey, offline included — see [Installing a toolchain](#installing-a-toolchain).
 
-> **Not yet shipped:** channel/update discovery (`sfn toolchain update`) is designed in SFEP-0073 but not implemented. `sfn toolchain default` and `sfn toolchain remove` have shipped — see [Default toolchain and removal](#default-toolchain-and-removal). See [`docs/status.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md) for current per-leaf status.
+> **Not yet shipped:** opportunistic update notification is designed in SFEP-0073 §3.6 but not implemented (SFN-1073). `sfn toolchain default`, `sfn toolchain remove`, and [`sfn toolchain update`](#updating-a-toolchain) have shipped — see [Default toolchain and removal](#default-toolchain-and-removal) and [Updating a toolchain](#updating-a-toolchain). See [`docs/status.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md) for current per-leaf status.
 
 ---
 
@@ -816,11 +871,11 @@ These environment variables influence the behavior of `sfn`.
 | `SFN_REGISTRY` | `sfn add` / `sfn publish` | Override the package registry base URL for this shell. Takes precedence over `~/.sfn/config.toml`. See [`sfn config`](#sfn-config-getsetunsetlist-key-value). |
 | `SFN_TOKEN` | `sfn publish` | Bearer token used when uploading a capsule. Takes precedence over `~/.sfn/credentials` written by `sfn login`. |
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `sfn build`/`run`/`check`/`test` | Set to `1` to downgrade a `[toolchain]` pin mismatch from a hard error to a warning for every invocation in the shell/CI job. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
-| `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | Controls the toolchain-pin mismatch response: `auto` (default) fetches + verifies + re-execs the pinned toolchain; `local` verifies only and errors on mismatch; `<version>` forces that dispatch target; `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
+| `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | Controls the toolchain-pin mismatch response: `auto` (default) fetches + verifies + re-execs the pinned toolchain; `local` verifies only and errors on mismatch; `<version>` forces that dispatch target; `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. `local` also makes [`sfn toolchain update`](#updating-a-toolchain) — `--check` included — refuse before any network attempt. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN_DISPATCHED` | `sfn build`/`run`/`check`/`test` | Set automatically by `sfn` before re-exec'ing a dispatched toolchain (`=<version>`) as a re-entrancy guard; not intended to be set by hand. |
 | `SAILFIN_TOOLCHAIN_MANAGEMENT` | `sfn toolchain ...` | Set automatically by `sfn` before re-exec'ing a routed management payload (`=<version>`) as a re-entrancy guard; not intended to be set by hand. See [Management-command routing](#management-command-routing). |
 | `SAILFIN_TOOLCHAIN_RELEASE_BASE` | `sfn toolchain install` | Override the release host for air-gapped mirrors (signature/digest verification stays mandatory). Also serves the signed toolchain index and its detached signature that `sfn toolchain install <version \| channel>` consults before any release-specific fetch — see [Installing a toolchain](#installing-a-toolchain). |
-| `SAILFIN_CONFIG_DIR` | `sfn toolchain default` / `remove` | Override the directory holding the per-user toolchain-default record (`toolchain-default`), in place of `~/.sfn`. Read only by that record — it does not relocate `~/.sfn/config.toml` (`sfn config`) or `~/.sfn/credentials` (`sfn login`). See [Default toolchain and removal](#default-toolchain-and-removal). |
+| `SAILFIN_CONFIG_DIR` | `sfn toolchain default` / `remove` | Override the directory holding the per-user toolchain-default record (`toolchain-default`), in place of `~/.sfn`. Read only by that record — it does not relocate `~/.sfn/config.toml` (`sfn config`, including `toolchain.update-policy`) or `~/.sfn/credentials` (`sfn login`); those always live under the real home. See [Default toolchain and removal](#default-toolchain-and-removal). |
 | `SAILFIN_CLEAN_KEEP_SEED` | `sfn dev clean build`/`all` | Set to `0` (equivalent to `--include-seed`) to also delete the seed toolchain store. Defaults to `1` (the seed toolchain is preserved). |
 | `SAILFIN_TEST_SCRATCH` | `sfn test` | Override the scratch directory a test's subprocess builds are isolated into. |
 | `SAILFIN_EFFECT_ENFORCE` | `sfn` binary | Control runtime effect-enforcement (the seal, SFEP-0016); partial on macOS arm64 (#613). |

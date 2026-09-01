@@ -273,7 +273,14 @@ fn _report_with_findings(findings: ToolchainFinding[]) -> ToolchainInspectReport
         entries: [],
         findings: findings,
         default_version: "",
-        default_track: ""
+        default_track: "",
+        update_present: false,
+        update_policy: "",
+        update_channel: "",
+        update_available: false,
+        update_current: "",
+        update_candidate: "",
+        update_advisory: ""
     };
 }
 
