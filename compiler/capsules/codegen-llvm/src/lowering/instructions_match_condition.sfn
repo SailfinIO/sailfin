@@ -20,6 +20,7 @@ import {
     ends_with_pointer_suffix,
     enum_inst_parse_args,
     enum_inst_substitute_annotation,
+    generic_payload_slot_type,
     layout_annotation_represents_user_value,
     map_struct_field_annotation,
     strip_pointer_suffix
@@ -322,9 +323,20 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                         }
                                     }
                                 }
+                                // SFN-771: the slot type is the constructor's boxing
+                                // decision, `field_type` is the form consumers want.
+                                // They coincide for a struct payload (the mapper
+                                // already yields `%T*`, which IS the boxed pointer) and
+                                // diverge for a closure, whose consumer-facing form is
+                                // the bare `{i8*, i8*}` pair every `extractvalue` and
+                                // every by-value parameter expects.
+                                let mut slot_llvm_type: string = llvm_field_type;
+                                if substituted {
+                                    slot_llvm_type = generic_payload_slot_type(llvm_field_type);
+                                }
                                 let mut updated_fields = field_bindings;
                                 updated_fields = updated_fields.push(MatchFieldBinding {
-                                    field_name: pattern_field.name, field_type: llvm_field_type, field_offset: found_field.offset
+                                    field_name: pattern_field.name, field_type: llvm_field_type, slot_type: slot_llvm_type, field_offset: found_field.offset
                                 });
                                 field_bindings = updated_fields;
                             }

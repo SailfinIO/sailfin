@@ -1,0 +1,158 @@
+// Regression test: a generic enum payload holding a closure (`fn(int) -> int`,
+// LLVM `{i8*, i8*}`) is heap-boxed by the writer but was loaded BY VALUE by the
+// match-arm reader (SFN-771). Confirmed SIGSEGV (exit 139) before the fix.
+//
+// `lower_enum_literal` (`core_literals_lowering.sfn`) stores every generic
+// payload through a pointer-width slot; a value-form aggregate wider than a
+// pointer is heap-boxed first, so the closure's 16-byte `{i8*, i8*}` pair ends
+// up behind an 8-byte box pointer (`store {i8*, i8*}* %box, ptr %slot`). The
+// match reader (`instructions_match.sfn`) used to load the slot straight in
+// the field's consumer-facing form -- `load {i8*, i8*}, ptr %slot` -- reading
+// 16 bytes out of an 8-byte pointer store. The fix loads the box pointer first
+// and then dereferences it, keeping the binding in value form.
+//
+// A struct payload (`enum_payload_struct_local_test.sfn`, SFN-770) was
+// unaffected by this exact defect because `map_struct_field_annotation` maps a
+// struct annotation to `%T*` -- the mapped field type IS already the boxed
+// pointer form, so the pre-fix reader's `load %T*, ptr %slot` happened to be
+// correct by coincidence. A closure's consumer-facing form is the bare pair
+// `{i8*, i8*}` (what every `extractvalue` and by-value call parameter
+// expects), which is where the boxed slot and the consumer form diverge.
+//
+// The capture is load-bearing: a non-capturing closure has a null env pointer
+// and the value-form corruption can pass by accident even with the bug
+// present, since `extractvalue` on garbage bytes might still yield a callable
+// function pointer paired with a null (harmless) env.
+//
+// Direct invocation of a match-bound closure (`value(1)`) is a separate,
+// out-of-scope defect (match locals carry no type_annotation, so closure
+// callee resolution fails with E1007), so every call here is routed through
+// `apply`, which has a known signature.
+import { expect_eq_int } from "sfn/test";
+
+enum Holder<T> {
+    Some { value: T },
+    None { }
+}
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x);
+}
+
+fn hold(c: int) -> Holder<fn(int) -> int> {
+    return Holder.Some {
+        value: fn(x: int) -> int { return x + c; }
+    };
+}
+
+struct Pt {
+    x: int;
+    y: int;
+}
+
+fn hold_pt() -> Holder<Pt> {
+    return Holder.Some { value: Pt { x: 4, y: 5 } };
+}
+
+fn hold_string() -> Holder<string> {
+    return Holder.Some { value: "abcd" };
+}
+
+fn hold_int() -> Holder<int> {
+    return Holder.Some { value: 42 };
+}
+
+// A NON-generic enum carrying a struct payload. `type_context.sfn` strips the
+// pointer for a monomorphic user-value field, so the payload is stored INLINE
+// (`store %Pt` / `load %Pt`) rather than boxed, and the reader must not
+// dereference it. This pins the `if substituted` gate on the reader's
+// slot-type derivation: without that gate the shared predicate would promote
+// `%Pt` to `%Pt*`, the slot and field types would diverge, and the reader
+// would emit a second load through an inline aggregate read as a pointer.
+// Every other case in this file is generic, so this arm is the only guard.
+enum MonoBox {
+    Held { pt: Pt },
+    Empty { }
+}
+
+fn mono_held() -> MonoBox {
+    return MonoBox.Held { pt: Pt { x: 7, y: 9 } };
+}
+
+test "enum payload: generic closure payload round-trips through a match" {
+    match hold(7) {
+        Holder.Some { value } => {
+            assert expect_eq_int(apply(value, 1), 8).ok;
+        },
+        Holder.None { } => { assert false; }
+    }
+}
+
+test "enum payload: captured environment survives the round-trip" {
+    // Two holders built from distinct captures. A corrupted environment read
+    // makes these agree (or crash); an intact one keeps them apart.
+    let a = hold(10);
+    let b = hold(100);
+    match a {
+        Holder.Some { value } => {
+            assert expect_eq_int(apply(value, 1), 11).ok;
+        },
+        Holder.None { } => { assert false; }
+    }
+    match b {
+        Holder.Some { value } => {
+            assert expect_eq_int(apply(value, 1), 101).ok;
+        },
+        Holder.None { } => { assert false; }
+    }
+}
+
+test "enum payload: closure payload is invoked repeatedly from one binding" {
+    // The deref must not consume or invalidate the box.
+    match hold(3) {
+        Holder.Some { value } => {
+            assert expect_eq_int(apply(value, 1), 4).ok;
+            assert expect_eq_int(apply(value, 2), 5).ok;
+            assert expect_eq_int(apply(value, 10), 13).ok;
+        },
+        Holder.None { } => { assert false; }
+    }
+}
+
+test "enum payload: struct payload still loads in pointer form" {
+    match hold_pt() {
+        Holder.Some { value } => {
+            assert expect_eq_int(value.x, 4).ok;
+            assert expect_eq_int(value.y, 5).ok;
+        },
+        Holder.None { } => { assert false; }
+    }
+}
+
+test "enum payload: string payload still narrows to its data pointer" {
+    match hold_string() {
+        Holder.Some { value } => {
+            assert expect_eq_int(value.length, 4).ok;
+        },
+        Holder.None { } => { assert false; }
+    }
+}
+
+test "enum payload: int payload is unaffected" {
+    match hold_int() {
+        Holder.Some { value } => {
+            assert expect_eq_int(value, 42).ok;
+        },
+        Holder.None { } => { assert false; }
+    }
+}
+
+test "enum payload: monomorphic struct payload stays inline" {
+    match mono_held() {
+        MonoBox.Held { pt } => {
+            assert expect_eq_int(pt.x, 7).ok;
+            assert expect_eq_int(pt.y, 9).ok;
+        },
+        MonoBox.Empty { } => { assert false; }
+    }
+}

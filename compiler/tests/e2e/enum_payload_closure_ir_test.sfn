@@ -1,0 +1,75 @@
+// IR-assertion companion to `enum_payload_closure_local_test.sfn` (SFN-771).
+// A behavioural test can pass by luck if the box pointer happens to be
+// readable, so this pins the shape of the emitted IR directly: the writer
+// boxes the `{i8*, i8*}` closure pair into the pointer-width payload slot, and
+// the reader loads the box pointer (`{i8*, i8*}*`) before dereferencing it to
+// recover the value form every consumer (`extractvalue`, by-value call
+// parameters) expects.
+//
+// Native (no-bash) per `.claude/rules/no-bash-e2e.md`. Drives `sfn emit llvm`
+// over a tiny fixture and asserts on the emitted IR (frontend + lowering
+// only, no link), so it is fast and needs no clang/linker.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+
+// `clean_runner_env` filters `process.environ()` rather than allowlisting it,
+// which is what `docs/conventions/e2e-tests.md` requires: an allowlist only
+// carries the variables its author thought of, and it re-points
+// `SAILFIN_TEST_SCRATCH` so a parallel run does not collide on the fixed
+// build-cache path.
+fn _scratch_dir() -> string ![io] {
+    let dir = nested_runner_scratch("enum-closure-payload");
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for `source` and return it (or "EMIT_FAILED" on a non-zero
+// exit). `tag` names the fixture's source and output files; each test passes
+// its own so two tests never write the same path.
+fn _emit_ir(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let srcpath = dir + "/" + tag + ".sfn";
+    let outpath = dir + "/" + tag + ".ll";
+    fs.writeFile(srcpath, source);
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", outpath, "llvm", srcpath], clean_runner_env(dir));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+fn _fixture() -> string {
+    return "enum Holder<T> { Some { value: T }, None { } }\n"
+        + "fn apply(f: fn(int) -> int, x: int) -> int { return f(x); }\n"
+        + "fn hold(c: int) -> Holder<fn(int) -> int> {\n"
+        + "    return Holder.Some { value: fn(x: int) -> int { return x + c; } };\n"
+        + "}\n"
+        + "fn use_it() -> int {\n"
+        + "    match hold(1) {\n"
+        + "        Holder.Some { value } => { return apply(value, 1); },\n"
+        + "        Holder.None { } => { return 0; }\n"
+        + "    }\n"
+        + "}\n";
+}
+
+test "enum payload closure ir: writer boxes the closure pair into the payload slot" ![io] {
+    let ir = _emit_ir("closurebox", _fixture());
+    assert find(ir, "store {i8*, i8*}* ", 0) >= 0;
+}
+
+test "enum payload closure ir: reader loads the box pointer, then dereferences it" ![io] {
+    let ir = _emit_ir("closureread", _fixture());
+    // The slot load. Absent before the fix, which loaded the pair directly
+    // out of the slot. `load {i8*, i8*}*` cannot alias `load {i8*, i8*},` --
+    // the character after the closing brace differs.
+    assert find(ir, " = load {i8*, i8*}*, ptr ", 0) >= 0;
+    // The deref back to value form. This line is also what the pre-fix reader
+    // emitted against the slot itself, so it pins the pair, not this line alone.
+    assert find(ir, " = load {i8*, i8*}, ptr ", 0) >= 0;
+}
+
+test "enum payload closure ir: the closure reaches its consumer in value form" ![io] {
+    let ir = _emit_ir("closureconsumer", _fixture());
+    assert find(ir, "define i64 @apply", 0) >= 0;
+    assert find(ir, "extractvalue {i8*, i8*} ", 0) >= 0;
+}

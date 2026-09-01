@@ -665,6 +665,11 @@ struct MatchStructure {
 struct MatchFieldBinding {
     field_name: string;
     field_type: string;
+    // The LLVM type actually stored in the pointer-width payload slot. Equal to
+    // `field_type` for every payload whose consumer-facing form is already a
+    // pointer or a scalar; `field_type + "*"` when the constructor heap-boxed a
+    // value-form aggregate (SFN-771). See `generic_payload_slot_type`.
+    slot_type: string;
     field_offset: int;
 }
 

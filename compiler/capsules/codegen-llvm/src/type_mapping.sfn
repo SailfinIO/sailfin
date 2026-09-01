@@ -622,6 +622,45 @@ fn map_struct_field_annotation(annotation: string) -> string {
     return result;
 }
 
+// =============================================================================
+// Generic Enum Payload Slot Representation (SFN-770, SFN-771)
+// =============================================================================
+// The single representation decision for a generic enum payload slot, consulted
+// by BOTH the constructor (`lower_enum_literal` in
+// `expression_lowering/native/core_literals_lowering.sfn`) and the match-arm
+// reader (`lowering/instructions_match_condition.sfn`). The slot is
+// pointer-width, so a value-form aggregate is stored as a heap pointer produced
+// by `box_aggregate_operand`.
+//
+// Deriving this twice from independent string tests is what produced SFN-770
+// (a struct local stored unboxed) and SFN-771 (a closure pair boxed by the
+// writer and loaded by value by the reader). One function, two callers.
+//
+// Two callers, not every reader of the slot: direct member access
+// (`expression_lowering/native/core_member_lowering.sfn`) reads an enum
+// payload without substituting the generic parameter at all, so it sees the
+// type-erased `%T` and does not consult this function. That gap predates both
+// fixes above and is tracked separately -- do not read this comment as a
+// claim that the representation decision is now universal.
+//
+// The mapping is idempotent, and is the identity on every payload shape
+// `map_struct_field_annotation` can produce except the `{i8*, i8*}` closure
+// pair: strings are already narrowed to `i8*`, arrays to `{ T*, i64, i64 }*`,
+// user types to `%T*`.
+fn generic_payload_slot_type(value_llvm_type: string) -> string {
+    let trimmed = trim_text(value_llvm_type);
+    if trimmed.length == 0 { return trimmed; }
+    // The SfnString fat aggregate narrows to its data pointer rather than
+    // boxing -- every reader of a `string` payload expects `i8*`.
+    if trimmed == "{i8*, i64}" { return "i8*"; }
+    let mut is_aggregate: boolean = false;
+    if starts_with(trimmed, "%") { is_aggregate = true; }
+    if starts_with(trimmed, "{") { is_aggregate = true; }
+    if !is_aggregate { return trimmed; }
+    if ends_with_pointer_suffix(trimmed) { return trimmed; }
+    return trimmed + "*";
+}
+
 fn map_struct_type_annotation(annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 { return ""; }
