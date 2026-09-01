@@ -177,27 +177,61 @@ fn _reorder_phis_to_block_start(lines: string[]) -> string[] {
     return out;
 }
 
-// SFN-968: identify an `alloca` line that is safe to hoist out of a
-// non-entry block into the function entry block. Relocation can only
-// widen an alloca's dominance region (it references no SSA operand), so
-// every alloca emitted by a fixed-size `alloca T` form is safe to move —
-// this compiler never emits LLVM's dynamic `alloca T, i32 %n` form. The
-// comma check below is therefore the safety gate: a comma after the type
-// means either that dynamic form or an explicit `, align N` clause, and
-// neither is relocated. Declining to hoist only preserves today's
-// behaviour, so this predicate stays conservative rather than clever.
+// SFN-968: locate the first comma in an alloca's type text that is not
+// nested inside an aggregate literal (`{i8*, i64}`) or an array/vector type
+// (`[592 x i8]`). Only a top-level comma introduces a trailing clause;
+// commas below depth zero are part of the type itself. Returns -1 when the
+// type carries no trailing clause.
+fn _top_level_comma_index(type_text: string) -> int {
+    let mut depth: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= type_text.length { break; }
+        let ch = substring(type_text, i, i + 1);
+        if ch == "{" { depth += 1; }
+        if ch == "[" { depth += 1; }
+        if ch == "<" { depth += 1; }
+        if ch == "}" { depth -= 1; }
+        if ch == "]" { depth -= 1; }
+        if ch == ">" { depth -= 1; }
+        if ch == "," {
+            if depth == 0 { return i; }
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+// SFN-968: identify an `alloca` line that is safe to hoist out of a non-entry
+// block into the function entry block. Relocation can only widen an alloca's
+// dominance region, because a fixed-size alloca references no SSA operand —
+// so the question is only whether the allocation is fixed-size.
+//
+// The discriminator is the trailing clause after the first top-level comma,
+// not the presence of a comma anywhere: `alloca {i8*, i64}` (every string
+// operand) and `alloca [592 x i8], align 8` (the filesystem intrinsics) are
+// both fixed-size and both must hoist. Only LLVM's dynamic form,
+// `alloca T, i32 %n`, takes an SSA count operand and must stay where it is.
+// This compiler emits no dynamic alloca today, so the check guards a form
+// that does not yet occur; it is kept because declining is always safe and
+// the cost of getting it wrong later is a stack overflow that -O2 hides.
 fn _is_hoistable_alloca_line(line: string) -> boolean {
+    let alloca_marker = " = alloca ";
     if line.length == 0 { return false; }
     if substring(line, 0, 1) != " " { return false; }
     let trimmed = trim_text(line);
     if !starts_with(trimmed, "%") { return false; }
-    let pos = index_of(trimmed, " = alloca ");
+    let pos = index_of(trimmed, alloca_marker);
     if pos <= 0 { return false; }
     let name = substring(trimmed, 0, pos);
     if index_of(name, " ") >= 0 { return false; }
-    let type_text = substring(trimmed, pos + 10, trimmed.length);
+    let type_text = substring(trimmed, pos + alloca_marker.length, trimmed.length);
     if type_text.length == 0 { return false; }
-    if index_of(type_text, ",") >= 0 { return false; }
+    let comma = _top_level_comma_index(type_text);
+    if comma >= 0 {
+        let trailing = trim_text(substring(type_text, comma + 1, type_text.length));
+        if !starts_with(trailing, "align ") { return false; }
+    }
     return true;
 }
 

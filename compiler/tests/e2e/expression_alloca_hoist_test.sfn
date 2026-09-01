@@ -1,10 +1,13 @@
 // compiler/tests/e2e/expression_alloca_hoist_test.sfn
 //
 // SFN-968: the expression-lowering layer has no route to the entry-block
-// alloca list `_eb_allocas` (`emission.sfn`), so enum literal construction
-// and enum payload member access emit `alloca` text directly into the body
-// line stream — landing inside `then`/`merge`/`loop.body`/`afterloop`
-// blocks instead of the function entry block. An alloca in a
+// alloca list `_eb_allocas` (`emission.sfn`), so it emits `alloca` text
+// directly into the body line stream — landing inside
+// `then`/`merge`/`loop.body`/`afterloop` blocks instead of the function
+// entry block. The fixture below drives the enum-literal construction site
+// (`core_literals_lowering.sfn`); the `match` in it binds arm payloads,
+// which SFN-967 already routes to `_eb_allocas`, so those arms serve as a
+// regression check rather than as the site under test. An alloca in a
 // repeatedly-executed block grows the stack every iteration and is not
 // reclaimed until the function returns. `emission.sfn` now runs a post-pass
 // at the splice that recovers every fixed-size `alloca` line from the body
@@ -98,8 +101,13 @@ test "expression alloca: emitted IR has zero alloca outside the function entry b
     assert fs.exists(out_ll);
 
     let ir = fs.readFile(out_ll);
+    // `forbody` is swept but not required — the fixture has no `for` loop.
+    // Every other prefix is one this fixture is known to emit, so each is
+    // asserted to have been found: a single shared "checked anything" flag
+    // would let six of the seven silently match nothing and still pass.
     let prefixes: string[] = ["then", "else", "merge", "loop.body", "afterloop", "forbody", "matchbody"];
-    let mut checked_any: boolean = false;
+    let required: boolean[] = [true, true, true, true, true, false, true];
+    let mut found: int[] = [0, 0, 0, 0, 0, 0, 0];
     let mut pi: int = 0;
     loop {
         if pi >= prefixes.length { break; }
@@ -114,12 +122,17 @@ test "expression alloca: emitted IR has zero alloca outside the function entry b
             if body_end < 0 { body_end = ir.length; }
             let block = substring(ir, body_start, body_end);
             assert count(block, " = alloca ") == 0;
-            checked_any = true;
+            found[pi] = found[pi] + 1;
             pos = body_end;
         }
         pi += 1;
     }
-    assert checked_any;
+    let mut ri: int = 0;
+    loop {
+        if ri >= prefixes.length { break; }
+        if required[ri] { assert found[ri] > 0; }
+        ri += 1;
+    }
 
     fs.deleteFile(src);
     fs.deleteFile(out_ll);
