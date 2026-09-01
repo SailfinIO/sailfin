@@ -677,6 +677,17 @@ fn sfn_str_concat(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64, arena_slot: 
     if alen < 0 { alen = 0; }
     let mut blen: i64 = b_len;
     if blen < 0 { blen = 0; }
+    // SFN-761: a null data pointer carries no bytes, whatever the length half
+    // says. `{null, len > 0}` violates the SfnString invariant, and honouring
+    // the length used to reserve `len` bytes while the copy below (gated on the
+    // pointer) wrote none of them — stale arena content, since the bump
+    // allocator does not zero-fill, which the return-path NUL scan then cut at
+    // the first zero byte. Clamping the length is the one repair that keeps
+    // the other operand: zero-filling the gap would pin the scan at offset 0
+    // and drop `b` deterministically. It also matches how `sfn_str_len` and
+    // `sfn_str_eq` already read a null pointer — as the empty string.
+    if (a_data as i64) == 0 { alen = 0; }
+    if (b_data as i64) == 0 { blen = 0; }
     _sfn_check_concat_limit(alen, blen);
     let total: i64 = alen + blen;
     // i64 overflow guard (mirrors the C `alen > SIZE_MAX - blen` arm).
@@ -693,14 +704,11 @@ fn sfn_str_concat(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64, arena_slot: 
         return empty;
     }
 
-    // `alen` / `blen` are already the UTF-8 byte widths the caller computed.
-    if alen > 0 {
-        if (a_data as i64) != 0 { memcpy(data, a_data, alen as usize); }
-    }
+    // `alen` / `blen` are already the UTF-8 byte widths the caller computed,
+    // and a positive width now implies a real pointer (clamped above).
+    if alen > 0 { memcpy(data, a_data, alen as usize); }
     if blen > 0 {
-        if (b_data as i64) != 0 {
-            memcpy((data as i64 + alen) as *u8, b_data, blen as usize);
-        }
+        memcpy((data as i64 + alen) as *u8, b_data, blen as usize);
     }
     _num_put_byte(data as i64 + total, 0);
     return data;

@@ -1,0 +1,92 @@
+// SFN-761: `sfn_str_concat` must never return bytes it did not write. A
+// `{data, len}` operand with `len > 0` but a null `data` is an invariant
+// violation, and the body used to size the allocation from the length while
+// gating each copy on the pointer — reserving `len` bytes and writing none of
+// them. The arena bump allocator does not zero-fill, so the gap was stale page
+// content, and the `-> SfnString` return-path NUL scan then cut the result at
+// whatever byte it found first.
+//
+// These tests call the runtime symbol directly over its scalar-split ABI
+// (`{i8*, i64}` by value is two integer eightbytes; the return's data half is
+// the first register, which is all a `*u8` return spelling reads). No string
+// `+` appears in this file on purpose: the compiler emits its own aggregate
+// `declare` for `sfn_str_concat` at a concat site, and a second declare over
+// the scalar spelling would collide with it.
+extern fn sfn_str_concat(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64, arena_slot: *u8) -> *u8;
+
+extern fn sfn_arena_create(default_page_size: usize) -> *u8;
+
+extern fn sfn_arena_alloc(arena: *u8, size: usize, align: usize) -> *u8;
+
+extern fn sfn_arena_sfn_reset(arena: *u8) -> void;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+
+extern fn strnlen(s: *u8, max: usize) -> usize;
+
+// A private arena whose first page is pre-filled with `X` and then rewound, so
+// any byte concat leaves unwritten is a deterministic non-NUL residue rather
+// than whatever a fresh page happens to hold (a fresh page is usually zero,
+// which would hide the gap behind the NUL scan). `sfn_arena_sfn_reset` only
+// rewinds the page cursors; it does not clear page contents. Returns the
+// `SfnArena **` slot shape `sfn_str_concat` resolves its arena through.
+fn _stale_arena_slot() -> *u8 {
+    let arena: *u8 = sfn_arena_create(4096 as usize);
+    let scratch: *u8 = sfn_arena_alloc(arena, 256 as usize, 8 as usize);
+    memset(scratch, 88, 256 as usize);
+    sfn_arena_sfn_reset(arena);
+    let slot: *i64 = malloc(8 as usize) as *i64;
+    *slot = arena as i64;
+    return slot as *u8;
+}
+
+fn _byte(p: *u8, i: i64) -> i64 {
+    let q = p + i;
+    let v = *q;
+    return v as i64;
+}
+
+fn _scan_len(p: *u8) -> i64 { return strnlen(p, 64 as usize) as i64; }
+
+test "concat: null-data left operand with positive length contributes nothing" {
+    let slot = _stale_arena_slot();
+    let b: string = "tail";
+    let r: *u8 = sfn_str_concat(null, 7, b as *u8, 4, slot);
+    assert _scan_len(r) == 4;
+    assert _byte(r, 0) == 116;
+    assert _byte(r, 1) == 97;
+    assert _byte(r, 2) == 105;
+    assert _byte(r, 3) == 108;
+    assert _byte(r, 4) == 0;
+}
+
+test "concat: null-data right operand with positive length contributes nothing" {
+    let slot = _stale_arena_slot();
+    let a: string = "head";
+    let r: *u8 = sfn_str_concat(a as *u8, 4, null, 9, slot);
+    assert _scan_len(r) == 4;
+    assert _byte(r, 0) == 104;
+    assert _byte(r, 3) == 100;
+    assert _byte(r, 4) == 0;
+}
+
+test "concat: both operands null-data yields the empty string" {
+    let slot = _stale_arena_slot();
+    let r: *u8 = sfn_str_concat(null, 5, null, 3, slot);
+    assert _scan_len(r) == 0;
+}
+
+test "concat: well-formed operands still round-trip byte-for-byte" {
+    let slot = _stale_arena_slot();
+    let a: string = "ab";
+    let b: string = "cd";
+    let r: *u8 = sfn_str_concat(a as *u8, 2, b as *u8, 2, slot);
+    assert _scan_len(r) == 4;
+    assert _byte(r, 0) == 97;
+    assert _byte(r, 1) == 98;
+    assert _byte(r, 2) == 99;
+    assert _byte(r, 3) == 100;
+    assert _byte(r, 4) == 0;
+}
