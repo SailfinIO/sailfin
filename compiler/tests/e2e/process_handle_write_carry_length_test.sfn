@@ -4,17 +4,28 @@
 // at an `extractvalue` and letting the callee re-derive it with `strlen`
 // (`compiler/capsules/codegen-llvm/src/runtime_helpers/registry_process.sfn:129-135`).
 // Mirrors `fs_write_carry_length_test.sfn` (SFN-1009), the precedent for
-// this exact defect class. Pins, end-to-end:
-//   1. emit shape — process.sfn still defines both the bare and
-//                   length-carrying write twins.
-//   2. flip probe — a fresh `process.handle_write` call site routes
-//                   through `@sfn_process_handle_write_bytes`, carries the
-//                   `{i8*, i64}` aggregate (not `byval`), and is NOT a
-//                   call site of the bare `sfn_process_handle_write`.
-//   3. exports    — the compiled runtime object defines both text symbols.
-//   4. round-trip — a real child sees the exact byte length written,
-//                   including a multi-byte UTF-8 payload where byte count
-//                   and character count diverge.
+// this exact defect class.
+//
+// Only test 2 detects the flip — it is the one that fails with the
+// descriptor reverted. The others guard the surrounding contract, and are
+// labelled below so nobody mistakes a green run of them for evidence the
+// repoint is in place:
+//   1. emit shape  — process.sfn still defines both write twins. (Guard:
+//                    the bare twin must stay defined for seed-built IR.)
+//   2. flip probe  — DETECTOR. A fresh `process.handle_write` call site
+//                    routes through `@sfn_process_handle_write_bytes`,
+//                    carries the `{i8*, i64}` aggregate (not `byval`), and
+//                    is NOT a call site of the bare symbol.
+//   3. exports     — the compiled runtime object defines both text
+//                    symbols. (Guard, as 1.)
+//   4. round-trip  — ABI smoke test: a real child receives the payload
+//                    over the new aggregate-parameter path. Passes either
+//                    way; see the note at the test.
+//   5. coexistence — the two descriptors sharing
+//                    `@sfn_process_handle_write_bytes` with different
+//                    arities emit one declare and two call shapes that
+//                    both build. Pins the ordering hazard documented at
+//                    `registry_process.sfn`.
 //
 // Windows: `runtime/sfn/platform/process_windows.sfn:1760` / `:1797` carry
 // the matching twins, so the repoint is sound there too, but this file's
@@ -36,7 +47,6 @@ import {
 import {
     clean_runner_env,
     default_scratch_dir,
-    scratch_root,
     sfn_bin_path,
     skip,
     symbol_reader
@@ -100,21 +110,6 @@ fn _is_word_char(ch: string) -> boolean {
     if ch.length == 0 { return false; }
     let word = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
     return find(word, ch, 0) >= 0;
-}
-
-// `@sym\b` — does the IR reference the bare symbol at a word boundary?
-fn _references(ir: string, sym: string) -> boolean {
-    let needle = "@" + sym;
-    let mut pos = find(ir, needle, 0);
-    loop {
-        if pos < 0 { break; }
-        let after = pos + needle.length;
-        if after >= ir.length { return true; }
-        let ch = char_at_index(ir, after);
-        if !_is_word_char(ch) { return true; }
-        pos = find(ir, needle, after);
-    }
-    return false;
 }
 
 // The first `call ... @sym(` line, or "" — lets a caller assert over the
@@ -272,11 +267,13 @@ test "process.sfn emit: defines both the bare and length-carrying write twins" !
 test "probe routes process.handle_write through @sfn_process_handle_write_bytes" ![io] {
     let dir = _scratch_dir();
     let probe = dir + "/process_handle_write_probe.sfn";
-    // SFN-1001: `dir` travels through argv[1], never spliced into source
-    // text — on Windows it's a backslash path, and a literal `+ dir +`
-    // here would silently corrupt it. Not exercised for its own value
-    // here (the probe never spawns a child), but kept as argv[1] to match
-    // the convention every sibling probe in this suite follows.
+    // The probe is emit-only — never executed — so its spawn target is
+    // whatever `argv[1]` would hold at runtime rather than a path spliced
+    // into the source text. That matches the SFN-1001 convention the
+    // sibling probes follow (a spliced Windows path is a backslash string
+    // the literal decoder would silently mangle); here it costs nothing
+    // and keeps the fixtures uniform. Nothing in this test depends on the
+    // probe ever running.
     fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
         + "    let id = process.spawn_with_env([argv[1]], []);\n"
         + "    let payload = \"sfn-1021-probe-payload\";\n"
@@ -285,7 +282,12 @@ test "probe routes process.handle_write through @sfn_process_handle_write_bytes"
         + "}\n");
     let ir = _emit_module("process_handle_write_probe", probe);
     assert ir != "EMIT_FAILED";
-    assert _references(ir, "sfn_process_handle_write_bytes");
+    // Asserted as a CALL SITE, not a bare reference: `handle_write_bytes`
+    // is seeded unconditionally into every module
+    // (`lowering/lowering_helpers.sfn`), so `declare ...
+    // @sfn_process_handle_write_bytes` is present even with this row
+    // reverted. Only a call site distinguishes the two registries.
+    assert _has_call_site(ir, "sfn_process_handle_write_bytes");
     // SFN-1021: the bare-`i8*` twin stays DEFINED (seed-built IR still
     // calls it) but must no longer be the target of a freshly emitted
     // call — that is what proves the length is carried rather than
@@ -314,6 +316,48 @@ test "runtime object exports both write twins" ![io] {
     assert _nm_has_defined(obj, "sfn_process_handle_write_bytes");
 }
 
+// SFN-1021: `process.handle_write` (2-slot `["i64", "{i8*, i64}"]`) and
+// `process.handle_write_bytes` (3-slot `["i64", "i8*", "i64"]`) are the
+// registry's only two descriptors sharing an `effective_symbol` while
+// declaring different `parameter_types`. `render_runtime_helper_declarations`
+// keeps the FIRST, and `_rh_descriptors_05` precedes `_06`, so the 2-slot
+// declare is what every module carries — while a `handle_write_bytes` call
+// site still emits three arguments against it. That is legal (a direct call
+// carries its own function type under opaque pointers) and correct (a
+// 16-byte integer aggregate occupies the same two registers as the split
+// scalars), but it holds only while the registry order holds. Reordering
+// `_05` after `_06` flips the surviving declare and breaks the 2-arg call
+// sites instead, with nothing else in the suite to catch it. Full rationale
+// at `registry_process.sfn`.
+test "process: both handle_write arities share one declare and still build" ![io] {
+    let dir = _scratch_dir();
+    let probe = dir + "/process_handle_write_both.sfn";
+    fs.writeFile(probe, "fn main(argv: string[]) -> int ![io] {\n"
+        + "    let id = process.spawn_with_env([argv[1]], []);\n"
+        + "    let a = process.handle_write(id, \"alpha\\n\");\n"
+        + "    let b = process.handle_write_bytes(id, \"bravo\\n\", 6);\n"
+        + "    return (a + b) as int;\n"
+        + "}\n");
+    let ir = _emit_module("process_handle_write_both", probe);
+    assert ir != "EMIT_FAILED";
+    // Exactly one declare survives the dedup, and it is the 2-slot form.
+    assert contains(ir, "declare i64 @sfn_process_handle_write_bytes(i64, {i8*, i64})");
+    assert ! contains(ir, "declare i64 @sfn_process_handle_write_bytes(i64, i8*, i64)");
+    // Both call shapes are present against that single declare.
+    assert _has_call_site(ir, "sfn_process_handle_write_bytes");
+    assert contains(ir, "{i8*, i64} ");
+    // The mismatch must survive the real toolchain, not just the emitter —
+    // this is the assertion that would fail if a future LLVM tightened the
+    // direct-call type rule, and it is why the collision is documented
+    // rather than merely tolerated.
+    let bin = dir + "/process_handle_write_both_bin";
+    let build_exit = process.run_capture([sfn_bin_path(), "build", "-o", bin, probe], _child_env());
+    let _bo = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    if build_exit != 0 { print(build_err); }
+    assert build_exit == 0;
+}
+
 test "handle_write round-trips a payload through a child's stdin" ![io] {
     let id = process.spawn_with_env([_echo_bin()], []);
     assert id != 0;
@@ -322,11 +366,16 @@ test "handle_write round-trips a payload through a child's stdin" ![io] {
     assert n == payload.length;
     let echoed = process.handle_read_line_stdout(id);
     assert echoed == "sfn-1021-payload";
-    // SFN-1021: a multi-byte UTF-8 payload is the assertion that would
-    // regress if the aggregate's length were dropped and re-derived with
-    // `strlen` — `strlen` counts bytes too, but a caller-derived
-    // *character* count would silently diverge from it here, and this
-    // pins that the returned count is the BYTE length.
+    // A multi-byte payload pins that the count is a BYTE count (17) and
+    // not a character count (14). Note what this does NOT prove: with no
+    // interior NUL, `strlen` returns 17 as well, so this test passes with
+    // the descriptor reverted. It is an ABI smoke test over the new
+    // aggregate-parameter call path — it would catch mis-packing or an
+    // indirect lowering — not a detector for the flip itself. The flip is
+    // detected by the probe test above. A real detector needs an
+    // interior-NUL payload, which no pure-`.sfn` string can hold; the
+    // sibling `fs_write_carry_length_test.sfn` synthesizes one through a
+    // C harness for exactly that reason.
     let unicode_payload = "héllo-ünïcode\n";
     let unicode_n = process.handle_write(id, unicode_payload);
     assert unicode_n == unicode_payload.length;

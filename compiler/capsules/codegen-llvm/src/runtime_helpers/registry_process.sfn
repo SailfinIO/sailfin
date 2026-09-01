@@ -130,6 +130,36 @@ fn _rh_descriptors_05(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // the `_bytes` twin so the caller's length reaches the write loop
     // intact instead of being recovered with `strlen`; the bare-pointer
     // symbol stays defined for seed-built IR.
+    //
+    // ORDERING HAZARD — read before editing this row or the
+    // `process.handle_write_bytes` row in `_rh_descriptors_06`. This is the
+    // only place in the registry where two descriptors share an
+    // `effective_symbol` (`native_signature ?? symbol`) while declaring
+    // DIFFERENT `parameter_types`: this row is 2-slot
+    // `["i64", "{i8*, i64}"]`, that one is 3-slot `["i64", "i8*", "i64"]`.
+    // Every other same-symbol pair in the registry is byte-identical.
+    // `render_runtime_helper_declarations` (`rendering.sfn`) dedups on
+    // `effective_symbol` and keeps the FIRST, and `_rh_descriptors_05` runs
+    // before `_06` (`runtime_helpers/mod.sfn`), so the 2-slot form below is
+    // what every module declares. `seed_default_runtime_helpers`
+    // (`lowering/lowering_helpers.sfn`) seeds both targets unconditionally,
+    // so a module calling `handle_write_bytes` emits a 3-arg call against
+    // that 2-param declare.
+    //
+    // That is legal and correct, but only for a reason worth stating: a
+    // direct call carries its own function type under opaque pointers, so
+    // `llvm-as` accepts the mismatch, and `{i8*, i64}` occupies the same two
+    // integer registers as the split `(i8*, i64)` — the same flattening the
+    // repoint itself relies on (`runtime/sfn/adapters/filesystem.sfn`
+    // states it for the `fs` precedent). Reordering `_05` after `_06` would
+    // flip the surviving declare to the 3-slot form and break the 2-arg
+    // `handle_write` call sites instead. `handle_write_bytes` cannot simply
+    // adopt `{i8*, i64}` to remove the divergence: its `len` is
+    // deliberately independent of the payload's own length — that is the
+    // entire point of the builtin
+    // (`compiler/tests/integration/process_framed_stdio_test.sfn` writes 5
+    // bytes of an 11-byte string). Coexistence is pinned by
+    // `compiler/tests/e2e/process_handle_write_carry_length_test.sfn`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.handle_write", symbol: "sfn_process_handle_write", return_type: "i64", parameter_types: ["i64", "{i8*, i64}"], native_signature: "sfn_process_handle_write_bytes", c_abi_return_type: null
     });
