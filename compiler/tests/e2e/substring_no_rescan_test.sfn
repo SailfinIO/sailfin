@@ -44,7 +44,8 @@ fn _env() -> string[] ![io] {
 // `sfn_str_len` call here for an unrelated reason and mask the regression
 // this test exists to catch.
 fn _fixture_source() -> string {
-    return "fn slice(s: string) -> int {\n" + "    let a = substring(s, 1, 3);\n"
+    return "fn slice(s: string) -> int {\n"
+        + "    let a = substring(s, 1, 3);\n"
         + "    let b = substring_unchecked(s, 0, 2);\n"
         + "    return a.length + b.length;\n"
         + "}\n";
