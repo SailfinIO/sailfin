@@ -10,10 +10,11 @@
 # Source: run 33407348555 JSONL sidecars (2026-08-31) -- the first run
 # carrying SFN-1222 file_elapsed_ms.
 # Refresh procedure: docs/conventions/ci-test-topology.md.
-# An unlisted file gets _shard_default_weight() from
-# compiler/src/cli/commands/test/arg_and_jobs.sfn -- a compiler constant,
-# NOT the median of this table. A missing/unparseable table falls back to
-# the alphabetical stride. Never fails a build.
+# An unlisted file gets the median of this table, derived at load
+# time by _shard_default_weight() in
+# compiler/src/cli/commands/test/arg_and_jobs.sfn (SFN-1224). A
+# missing/unparseable table falls back to the alphabetical stride.
+# Never fails a build.
 path	weight
 capsules/sfn/cli/tests/choice_flag_test.sfn	260
 capsules/sfn/cli/tests/cli_test.sfn	310

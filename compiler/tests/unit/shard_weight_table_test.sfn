@@ -1,0 +1,104 @@
+// SFN-1224: unit coverage for the weight-table parsing surface
+// (`_shard_default_weight`, `_shard_weight_table_row_count`,
+// `_shard_weight_for_path`). Previously untested. Pins:
+//   * the default weight is the median of the loaded table, not a hardcoded
+//     constant, and stays robust to comment/header/blank/malformed rows.
+//   * an even row count takes the upper-middle element (selection walks
+//     `k = n / 2` steps).
+//   * a heavy outlier does not drag the median (the tail-robustness property
+//     the median was chosen for).
+//   * an empty or comments-only table falls back to the defensive floor `1`.
+//   * `_shard_weight_table_row_count` reports zero for a comments-only table,
+//     pinning the fail-open gate both call sites branch on.
+//   * `_shard_weight_for_path` returns a listed row's own weight, not the
+//     default, and `-1` for an unlisted path.
+import {
+    _shard_default_weight,
+    _shard_weight_for_path,
+    _shard_weight_table_row_count,
+    _shard_weights_coverage_warns
+} from "../../src/cli/commands/test/arg_and_jobs";
+
+test "shard-weights: the default is the median of the loaded table" ![pure] {
+    let table_text = "# shard weight table\n" + "path\tweight\n"
+        + "a_test.sfn\t10\n"
+        + "b_test.sfn\t20\n"
+        + "c_test.sfn\t30\n"
+        + "d_test.sfn\t40\n"
+        + "e_test.sfn\t50\n";
+    assert _shard_default_weight(table_text) == 30;
+}
+
+test "shard-weights: an even row count takes the upper middle weight" ![pure] {
+    let table_text = "a_test.sfn\t10\n" + "b_test.sfn\t20\n"
+        + "c_test.sfn\t30\n"
+        + "d_test.sfn\t40\n";
+    assert _shard_default_weight(table_text) == 30;
+}
+
+// The selection loop picks `k + 1` times with `k = n / 2`, so `n = 1` and
+// `n = 2` are its degenerate bounds: one pick and two picks respectively.
+// Pinned because a table this small is what a hand-written or truncated
+// fixture produces, and an off-by-one here reads out of bounds.
+test "shard-weights: a single-row table yields that row's weight" ![pure] {
+    let table_text = "only_test.sfn\t770\n";
+    assert _shard_default_weight(table_text) == 770;
+}
+
+test "shard-weights: a two-row table takes the larger weight" ![pure] {
+    let table_text = "a_test.sfn\t10\n" + "b_test.sfn\t20\n";
+    assert _shard_default_weight(table_text) == 20;
+}
+
+test "shard-weights: the median ignores unparseable and comment rows" ![pure] {
+    let table_text = "# comment row\n" + "\n" + "no_tab_here_test.sfn\n"
+        + "a_test.sfn\t10\n"
+        + "b_test.sfn\t20\n"
+        + "c_test.sfn\t30\n";
+    assert _shard_default_weight(table_text) == 20;
+}
+
+test "shard-weights: a heavy outlier does not drag the default" ![pure] {
+    let table_text = "a_test.sfn\t10\n" + "b_test.sfn\t20\n"
+        + "c_test.sfn\t30\n"
+        + "d_test.sfn\t40\n"
+        + "e_test.sfn\t999999\n";
+    assert _shard_default_weight(table_text) == 30;
+}
+
+test "shard-weights: an empty table yields the defensive floor" ![pure] {
+    assert _shard_default_weight("") == 1;
+    assert _shard_default_weight("# only comments\n# nothing else\n") == 1;
+}
+
+test "shard-weights: a zero-row table still reports no usable rows" ![pure] {
+    let table_text = "# only comments\n# nothing else\n";
+    assert _shard_weight_table_row_count(table_text) == 0;
+}
+
+test "shard-weights: a listed path takes its own weight, not the default" ![pure] {
+    let table_text = "a_test.sfn\t10\n" + "b_test.sfn\t20\n"
+        + "c_test.sfn\t9000\n";
+    assert _shard_weight_for_path(table_text, "c_test.sfn") == 9000;
+    assert _shard_weight_for_path(table_text, "unlisted_test.sfn") == -1;
+    assert _shard_default_weight(table_text) == 20;
+}
+
+test "shard-weights: coverage below the threshold does not warn" ![pure] {
+    assert ! _shard_weights_coverage_warns(5, 885);
+    assert ! _shard_weights_coverage_warns(0, 100);
+}
+
+test "shard-weights: exactly fifteen percent does not warn" ![pure] {
+    assert ! _shard_weights_coverage_warns(15, 100);
+}
+
+test "shard-weights: above fifteen percent warns" ![pure] {
+    assert _shard_weights_coverage_warns(16, 100);
+    assert _shard_weights_coverage_warns(200, 885);
+}
+
+test "shard-weights: an empty surface never warns" ![pure] {
+    assert ! _shard_weights_coverage_warns(0, 0);
+    assert ! _shard_weights_coverage_warns(5, 0);
+}

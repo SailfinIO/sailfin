@@ -51,7 +51,8 @@ import {
     _shard_weight_for_path,
     _shard_weight_table_path,
     _shard_weight_table_row_count,
-    _shard_weight_table_text
+    _shard_weight_table_text,
+    _shard_weights_coverage_warns
 } from "./test/arg_and_jobs";
 import { _collect_test_files_cmd } from "./test/discovery";
 import { command_def as test_command_def, run as test_run } from "./test/mod";
@@ -154,11 +155,12 @@ fn _shard_files(def: ShardDef) -> string[] ![io] {
     let use_lpt = _shard_weight_table_row_count(table_text) > 0;
     let mut weights: int[] = [];
     if use_lpt {
+        let default_weight = _shard_default_weight(table_text);
         let mut wi: int = 0;
         loop {
             if wi >= all.length { break; }
             let w = _shard_weight_for_path(table_text, all[wi]);
-            if w < 0 { weights.push(_shard_default_weight()); } else {
+            if w < 0 { weights.push(default_weight); } else {
                 weights.push(w);
             }
             wi += 1;
@@ -400,6 +402,69 @@ fn _shard_cover() -> int ![io] {
             rc = 1;
         }
         ei += 1;
+    }
+
+    // Weight-table coverage signal (SFN-1224): warn-only, never fail.
+    //
+    // The 15% threshold is calibrated on decay rate, which is a measured
+    // count rather than a model: 53 *_test.sfn were added per week on
+    // average over the 8 weeks to 2026-09-01, against a surface of 884
+    // files, so the table sheds ~6% of its coverage per week. 15% is
+    // therefore reached roughly 2.5 weeks after a refresh -- the warning
+    // fires about once per refresh cycle rather than on every PR, and a
+    // single PR adding 3 tests moves the fraction by ~0.34 points, far
+    // below the trigger.
+    //
+    // Deliberately NOT calibrated on modeled leg spread. The rule in
+    // docs/conventions/ci-test-topology.md -- treat simulated balance as no
+    // evidence at all -- exists because SFN-883 modeled its legs balanced
+    // to 0.01% and they measured 1.48x-1.85x. Predicting what an unweighted
+    // file costs in wall-clock needs the timing we do not have, which is
+    // the whole defect, so the trigger is how fast coverage decays rather
+    // than what the decay is predicted to cost.
+    //
+    // Warn-not-fail preserves the subsystem's fail-open invariant: the
+    // weight table is a scheduling hint and must never gate correctness.
+    if full.length > 0 {
+        let table_text = _shard_weight_table_text();
+        if _shard_weight_table_row_count(table_text) <= 0 {
+            print("[shard-weights] no usable weight table; shards fall back to the alphabetical stride");
+        } else {
+            let mut uncovered: int = 0;
+            let mut uncovered_paths: string[] = [];
+            let mut ci: int = 0;
+            loop {
+                if ci >= full.length { break; }
+                if _shard_weight_for_path(table_text, full[ci]) < 0 {
+                    uncovered += 1;
+                    uncovered_paths.push(full[ci]);
+                }
+                ci += 1;
+            }
+            let pct_tenths = (uncovered * 1000) / full.length;
+            let pct = int_to_string(pct_tenths / 10) + "." + int_to_string(pct_tenths % 10);
+            let median_weight = _shard_default_weight(table_text);
+            print("[shard-weights] " + int_to_string(uncovered) + " of "
+                + int_to_string(full.length)
+                + " *_test.sfn have no weight row ("
+                + pct
+                + "%); unlisted files use the table median "
+                + int_to_string(median_weight));
+            if _shard_weights_coverage_warns(uncovered, full.length) {
+                print.err("[shard-weights] WARN: over 15% of the test surface is unweighted; regenerate compiler/tests/shard_weights.tsv (see docs/conventions/ci-test-topology.md)");
+                let mut pi: int = 0;
+                loop {
+                    if pi >= uncovered_paths.length { break; }
+                    if pi >= 10 { break; }
+                    print.err("  " + uncovered_paths[pi]);
+                    pi += 1;
+                }
+                if uncovered_paths.length > 10 {
+                    print.err("  ... and " + int_to_string(uncovered_paths.length - 10)
+                        + " more");
+                }
+            }
+        }
     }
 
     if rc == 0 {

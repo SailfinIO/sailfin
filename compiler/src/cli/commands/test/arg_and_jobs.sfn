@@ -313,11 +313,93 @@ fn _shard_weight_table_path() -> string {
     return "compiler/tests/shard_weights.tsv";
 }
 
-// Median weight of the generated table (SFN-863 refresh) — the default for a
-// discovered file with no table row, so a newly added test still lands in a
-// plausible LPT slot instead of defaulting to 0, which would always sort
-// last and never balance anything.
-fn _shard_default_weight() -> int { return 2136; }
+// The default for a discovered file with no table row is the median of the
+// loaded table, derived at load time rather than hardcoded. SFN-863 hardcoded
+// `2136` -- exactly the median of the 621-row table it generated -- but that
+// copy decayed across two regenerations (SFN-883, SFN-1223) while the
+// table's actual median moved to 449. Deriving it here makes the value
+// self-maintaining (SFN-1224).
+//
+// Median rather than mean: the weight distribution is heavy-tailed (current
+// table: max 106411, mean 1286, median 449), so the mean is pulled ~2.9x
+// above the typical file by a handful of outliers.
+//
+// This is a hygiene fix, not a measured partition-quality win: a simulation
+// over the current table found no significant difference in resulting leg
+// spread between median, mean, p75, p90 and the old 2136 constant. What
+// actually drives spread is how many files lack a row, which is why the
+// coverage signal in `dev shard cover` exists.
+//
+// Built and consumed entirely inside this function per the module note
+// above: an exported `int[]`-returning helper cannot resolve its return
+// type in the pinned seed.
+fn _shard_default_weight(table_text: string) -> int {
+    let len = table_text.length;
+    let mut i: int = 0;
+    let mut values: int[] = [];
+    loop {
+        if i >= len { break; }
+        let mut line_end = find_char_local(table_text, "\n", i);
+        if line_end < 0 { line_end = len; }
+        let w = _shard_weight_row_weight(table_text, i, line_end);
+        if w > 0 { values.push(w); }
+        i = line_end + 1;
+    }
+
+    let n = values.length;
+    if n == 0 {
+        // Defensive and unreachable in practice: both call sites gate on
+        // `_shard_weight_table_row_count(table_text) > 0` before ever asking
+        // for a default. `1` rather than `0` because a `0` weight would
+        // always sort last under LPT and never balance anything.
+        return 1;
+    }
+
+    // Selection with a `used` marker array (mirrors `_shard_lpt_owner`
+    // above) rather than an in-place sort: repeatedly scan for the smallest
+    // not-yet-used value, mark it used, `k + 1` times where
+    // `k = n / 2`. For an even-length array this yields the upper-middle
+    // element.
+    let mut used: boolean[] = [];
+    let mut ui: int = 0;
+    loop {
+        if ui >= n { break; }
+        used.push(false);
+        ui += 1;
+    }
+    let k = n / 2;
+    let mut median: int = 0;
+    let mut picked: int = 0;
+    loop {
+        if picked > k { break; }
+        let mut best: int = -1;
+        let mut bi: int = 0;
+        loop {
+            if bi >= n { break; }
+            if !used[bi] {
+                if best < 0 { best = bi; } else {
+                    if values[bi] < values[best] { best = bi; }
+                }
+            }
+            bi += 1;
+        }
+        used[best] = true;
+        median = values[best];
+        picked += 1;
+    }
+    return median;
+}
+
+// Whether the unweighted fraction of the discovered test surface (`uncovered`
+// out of `total`) has passed the point where regenerating the weight table is
+// worth doing (SFN-1224). Threshold is 15%, warn-only -- see the call site in
+// `dev_shard.sfn::_shard_cover` for the calibration. Integer comparison, no
+// division: no rounding, no divide-by-zero.
+fn _shard_weights_coverage_warns(uncovered: int, total: int) -> boolean {
+    if total <= 0 { return false; }
+    if uncovered <= 0 { return false; }
+    return uncovered * 100 > total * 15;
+}
 
 // Load the raw weight table text at an arbitrary path, or "" if it is
 // missing or unreadable. Fail-open (mirrors SFEP-0070's filter): callers
@@ -489,6 +571,7 @@ export {
     _shard_keeps_index,
     _shard_weight_table_path,
     _shard_default_weight,
+    _shard_weights_coverage_warns,
     _shard_weight_table_text_at,
     _shard_weight_table_text,
     _shard_weight_table_row_count,
