@@ -702,7 +702,9 @@ fn build_closure_symbol_set(asm_paths: string[]) -> ClosureSymbolSet ![io] {
 // follows the `ImportedInterfaceLoadResult` contract: missing files
 // surface in `missing_paths`, parse failures surface in
 // `parse_failure_paths`, and successfully-parsed artifacts that
-// happened to declare zero interfaces surface in `skipped_paths`.
+// contributed neither interfaces nor struct declarations surface in
+// `skipped_paths` (SFN-1161 added the struct half — an artifact carrying
+// only structs is a real contribution and is no longer reported skipped).
 // No condition aborts the load — `sfn check` should always run
 // analysis; the partitioning lets the CLI decide which slices warrant
 // a warning.

@@ -298,9 +298,20 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // Deferring, not disabling: the guards below keep every other
         // rejection intact, and the native resolve gate already defers to LLVM
         // lowering on the same grounds.
+        // `imported_structs.length == 0` narrows the deferral to the pass it
+        // exists for: capsule staging, which loads no import context at all.
+        // Once a context IS loaded — the check engine for a named entry, or
+        // the per-module compile — an unresolvable shape is a real miss, not
+        // missing information, and keeps its normal verdict. That is what
+        // preserves the pre-existing rejection for an aliased import
+        // (`import { Verb as V }` registers `V` while the artifact declares
+        // `Verb`, so the shape never resolves): loud as before, rather than
+        // silently accepted forever.
+        let no_import_context = ctx.imported_structs.length == 0;
         let shape_unresolvable = !_struct_shape_is_resolvable(expression.type_name, ctx);
         let name_is_imported = _struct_name_is_imported(expression.type_name, ctx);
-        let defer_fn_value_verdict = shape_unresolvable && name_is_imported;
+        let defer_fn_value_verdict = no_import_context && shape_unresolvable
+            && name_is_imported;
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
@@ -776,16 +787,40 @@ fn _struct_shape_is_resolvable(type_name: string[], ctx: TypeckCtx) -> boolean {
 }
 
 // True when the literal names a type this module explicitly imported
-// (SFN-1161). `ctx.known_types` carries every import specifier via
-// `_collect_imported_call_symbols`, so a misspelled or undeclared struct name
-// is *not* in it and keeps its normal rejection.
+// (SFN-1161).
+//
+// Deliberately NOT `ctx.known_types`: that is the whole resolution scope —
+// local functions, enums, interfaces, type aliases and prelude globals all
+// live there alongside import specifiers, so testing membership would treat
+// `interface Runner { ... }` + `Runner { go: helper }` as an imported struct
+// and silently drop its E0808 in a program with no imports at all. Match on
+// the symbol's `kind` instead, which only `_collect_imported_call_symbols`
+// sets to `"import"`.
+//
+// A local type declaration of the same name wins outright: it means the shape
+// is knowable here and the miss is a real error, not missing context.
 //
 // The single-segment guard excludes qualified enum-variant literals such as
 // `Result.Ok { ... }`, whose trailing segment is a variant rather than a
 // struct — those keep their normal verdict too.
 fn _struct_name_is_imported(type_name: string[], ctx: TypeckCtx) -> boolean {
     if type_name.length != 1 { return false; }
-    return _string_list_has(ctx.known_types, type_name[0]);
+    let name = type_name[0];
+    let mut found_import: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= ctx.top_level.length { break; }
+        let entry = ctx.top_level[index];
+        if entry.name == name {
+            if strings_equal(entry.kind, "struct") { return false; }
+            if strings_equal(entry.kind, "enum") { return false; }
+            if strings_equal(entry.kind, "interface") { return false; }
+            if strings_equal(entry.kind, "type") { return false; }
+            if strings_equal(entry.kind, "import") { found_import = true; }
+        }
+        index += 1;
+    }
+    return found_import;
 }
 
 // Names of every struct type in scope — local declarations plus the imported

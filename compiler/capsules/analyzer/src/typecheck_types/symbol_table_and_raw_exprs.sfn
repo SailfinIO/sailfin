@@ -382,6 +382,9 @@ fn make_fn_value_position_diagnostic(name: string, span: SourceSpan?) -> Diagnos
 }
 
 // E0843 — an imported or prelude name in a function-value slot (SFN-1161).
+// "name", not "function": the branch fires for any `kind == "import"` entry,
+// which `_collect_imported_call_symbols` attaches to every import specifier —
+// a constant or a type name reaches it too — and for prelude globals.
 // Distinct from E0808: the obstacle is not the C ABI but the cross-module
 // import table, which carries a name, arity, and effects but no parameter
 // types, async-ness, or generic-ness — so the signature cannot be proved
@@ -392,7 +395,7 @@ fn make_imported_fn_value_diagnostic(name: string, span: SourceSpan?) -> Diagnos
     return Diagnostic {
         code: "E0843",
         severity: "error",
-        message: "imported function `" + name
+        message: "imported name `" + name
             + "` cannot fill a function-value slot: the cross-module import table carries effects and arity but not parameter types, async-ness, or generic-ness, so its signature cannot be proved compatible; wrap it in a module-local function or a `fn (...) => "
             + name
             + "(...)` lambda",

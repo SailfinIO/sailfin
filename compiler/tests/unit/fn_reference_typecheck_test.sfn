@@ -291,6 +291,31 @@ test "fn-value: qualified variant literal keeps its verdict under the deferral" 
     assert _count_code(source, "E0808") == 1;
 }
 
+// The deferral keys on an `"import"`-kind symbol, never on `ctx.known_types` —
+// that list is the whole resolution scope, so a local interface, enum, type
+// alias or function of the same name would otherwise be mistaken for an
+// imported struct and have its E0808 dropped in a program with no imports at
+// all. Each of these must still reject.
+test "fn-value: local interface literal is not treated as an imported struct" ![io] {
+    let source = "interface Runner { fn go() -> int; } fn helper(x: int) -> int { return x; } fn main() { let r = Runner { go: helper }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: local type alias literal is not treated as an imported struct" ![io] {
+    let source = "type Handler = int; fn helper(x: int) -> int { return x; } fn main() { let h = Handler { run: helper }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: local enum literal is not treated as an imported struct" ![io] {
+    let source = "enum Color { Red } fn helper(x: int) -> int { return x; } fn main() { let c = Color { run: helper }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: local function name literal is not treated as an imported struct" ![io] {
+    let source = "fn Runner(x: int) -> int { return x; } fn helper(x: int) -> int { return x; } fn main() { let r = Runner { run: helper }; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
 // ── E0809: generic function address has no single concrete code symbol ──
 test "fn-ref: generic function `as * u8` is E0809" ![io] {
     let source = "fn gen<T>(x: T) -> T { return x; } fn main() { let f = gen as * u8; }";

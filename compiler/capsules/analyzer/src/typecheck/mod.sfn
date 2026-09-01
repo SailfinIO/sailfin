@@ -148,10 +148,12 @@ fn typecheck_diagnostics_with_import_symbols_prelude_implicit(program: Program, 
 
 // Cross-module struct-aware variant (SFN-1161). `imported_structs` carries
 // struct declarations reconstructed from imported `.sfn-asm` artifacts
-// (`typecheck_imports.sfn::structs_from_native`) so a later step can
-// resolve a struct-literal field's expected type against an imported
-// struct's field shape. Not yet consulted by any check — this is plumbing
-// only.
+// (`typecheck_imports.sfn::structs_from_native`), so a struct-literal
+// field's expected type resolves against an imported struct's field shape
+// (SFN-1161). Consulted by the `Struct` arm of the expression walk and by
+// the parameter-position ABI relaxation; an empty list also marks the
+// capsule-staging pass, which loads no import context and therefore defers
+// its fn-value verdict rather than guessing.
 fn typecheck_diagnostics_with_import_symbols_prelude_implicit_structs(program: Program, imported_interfaces: Statement[], imported_structs: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[]) -> Diagnostic[] {
     return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols, imported_structs);
 }
