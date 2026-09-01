@@ -559,7 +559,11 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
 fn toolchain_install_to_user_store(version_arg: string, store_base: string, work_root: string, allow_yanked: boolean) -> int ![clock, io, net] {
     let refusal = toolchain_network_refusal();
     if refusal.length > 0 {
-        print("error: " + refusal);
+        // This file's other errors use `print` by historical convention, but
+        // this gate is reachable from an implicit dispatch (`sfn run` in a
+        // project pinning an uninstalled toolchain): under `disabled`, a
+        // `print` here would land the refusal on the *program's* stdout.
+        print.err("error: " + refusal);
         return 1;
     }
     return _toolchain_install(version_arg, store_base, work_root, true, allow_yanked);

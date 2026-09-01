@@ -45,6 +45,12 @@ let TOOLCHAIN_UPDATE_POLICY_KEY: string = "toolchain.update-policy";
 let TOOLCHAIN_UPDATE_POLICY_SECTION: string = "toolchain";
 let TOOLCHAIN_UPDATE_POLICY_FIELD: string = "update-policy";
 
+// The project manifest's `[toolchain]` table (SFEP-0073 §3.2) — the same
+// spelling as `TOOLCHAIN_UPDATE_POLICY_SECTION` above by coincidence, never
+// by dependency: that constant names a section of `~/.sfn/config.toml`, this
+// one names a section of `capsule.toml`/`workspace.toml`.
+let TOOLCHAIN_MANIFEST_SECTION: string = "toolchain";
+
 fn toolchain_update_policy_is_valid(value: string) -> boolean {
     if strings_equal(value, TOOLCHAIN_UPDATE_POLICY_NOTIFY) { return true; }
     if strings_equal(value, TOOLCHAIN_UPDATE_POLICY_MANUAL) { return true; }
@@ -65,14 +71,14 @@ fn toolchain_update_policy_from_config(text: string) -> string {
 // "" when the home directory is unresolvable; the caller treats that as
 // "no configuration", never as an error, matching `cmd_shared.sfn`'s
 // registry reader.
-fn toolchain_update_policy_config_path() -> string ![io] {
+fn toolchain_user_config_path() -> string ![io] {
     let home = _get_home_cmd();
     if home.length == 0 { return ""; }
     return home + "/.sfn/config.toml";
 }
 
 fn toolchain_update_policy_read() -> string ![io] {
-    let path = toolchain_update_policy_config_path();
+    let path = toolchain_user_config_path();
     if path.length == 0 { return TOOLCHAIN_UPDATE_POLICY_NOTIFY; }
     if !fs.exists(path) { return TOOLCHAIN_UPDATE_POLICY_NOTIFY; }
     return toolchain_update_policy_from_config(fs.readFile(path));
@@ -96,7 +102,7 @@ fn toolchain_network_refusal() -> string ![io] {
             + "  to allow explicit network commands: sfn config set toolchain.update-policy manual";
     }
     return "toolchain update policy \"" + policy + "\" is not recognized ("
-        + toolchain_update_policy_config_path()
+        + toolchain_user_config_path()
         + ")\n  expected one of: notify, manual, disabled\n  repair it with: sfn config set toolchain.update-policy notify";
 }
 
@@ -212,7 +218,9 @@ fn _rewrite_version_line(line: string, version: string) -> string {
 // `toml_parser.sfn::toml_add_dependency`. Returns "" when the root has no
 // such key: a root without an exact version is not an update target, and
 // the caller refuses rather than inventing the field (that is `sfn init`'s
-// job, SFN-1070).
+// job, SFN-1070). The *first* `version` key in `[toolchain]` is rewritten
+// deliberately; duplicate keys are invalid TOML, and the reader's last-wins
+// behavior is not something this splice tries to mirror.
 fn toolchain_manifest_set_version(text: string, version: string) -> string {
     let mut out: string = "";
     let mut section: string = "";
@@ -235,7 +243,7 @@ fn toolchain_manifest_set_version(text: string, version: string) -> string {
                         if close > 0 {
                             section = _toml_trim_cmd(substring(trimmed, 1, close));
                         }
-                    } else if first != "#" && strings_equal(section, TOOLCHAIN_UPDATE_POLICY_SECTION) {
+                    } else if first != "#" && strings_equal(section, TOOLCHAIN_MANIFEST_SECTION) {
                         let rewritten = _rewrite_version_line(line, version);
                         if rewritten.length > 0 {
                             emitted = rewritten;
@@ -263,7 +271,7 @@ export {
     toolchain_manifest_set_version,
     toolchain_network_refusal,
     toolchain_update_plan,
-    toolchain_update_policy_config_path,
+    toolchain_user_config_path,
     toolchain_update_policy_from_config,
     toolchain_update_policy_is_valid,
     toolchain_update_policy_read

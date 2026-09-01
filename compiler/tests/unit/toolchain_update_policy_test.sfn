@@ -291,6 +291,24 @@ test "toolchain manifest set version: an unquoted version value returns empty" {
     assert toolchain_manifest_set_version(text, "0.10.7") == "";
 }
 
+test "toolchain manifest set version: a nested [toolchain.sub] section is not the root" {
+    let text = "[toolchain.sub]\nversion = \"1.2.3\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
+test "toolchain manifest set version: a [[toolchain]] array header is not the root table" {
+    let text = "[[toolchain]]\nversion = \"1.2.3\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
+test "toolchain manifest set version: a quoted \"version\" key is not the plain key" {
+    let text = "[toolchain]\n\"version\" = \"0.10.6\"\n";
+
+    assert toolchain_manifest_set_version(text, "0.10.7") == "";
+}
+
 test "toolchain update policy: an absent key defaults to notify" {
     assert toolchain_update_policy_from_config("") == "notify";
 }

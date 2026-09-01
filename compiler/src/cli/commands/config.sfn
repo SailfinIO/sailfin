@@ -34,9 +34,9 @@ import { render_terminal_diagnostic } from "../../terminal_output";
 import { toml_get_string } from "../../toml_parser";
 import {
     TOOLCHAIN_UPDATE_POLICY_KEY,
-    toolchain_update_policy_config_path,
     toolchain_update_policy_is_valid,
-    toolchain_update_policy_read
+    toolchain_update_policy_read,
+    toolchain_user_config_path
 } from "../../toolchain/update_policy";
 import { CliContext } from "../context";
 import {
@@ -64,7 +64,7 @@ fn _home_dir_diagnostic() -> Diagnostic {
 // substitutes the `notify` default — a merge-write must not persist a
 // default that was never set.
 fn _config_update_policy_from_file_cmd() -> string ![io] {
-    let path = toolchain_update_policy_config_path();
+    let path = toolchain_user_config_path();
     if path.length == 0 { return ""; }
     if !fs.exists(path) { return ""; }
     let text = fs.readFile(path);
@@ -76,7 +76,7 @@ fn _config_update_policy_from_file_cmd() -> string ![io] {
 // `SFN_REGISTRY` and the compiled-in default — a merge-write must persist
 // only what is actually on disk.
 fn _config_registry_url_from_file_cmd() -> string ![io] {
-    let path = toolchain_update_policy_config_path();
+    let path = toolchain_user_config_path();
     if path.length == 0 { return ""; }
     if !fs.exists(path) { return ""; }
     let text = fs.readFile(path);

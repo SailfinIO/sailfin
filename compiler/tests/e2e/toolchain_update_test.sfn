@@ -372,6 +372,26 @@ test "toolchain update: an unrecognized policy value is refused and named" ![io]
 }
 
 // ---------------------------------------------------------------------------
+// Case 9b: a refused update never touches the record it would have rewritten
+// ---------------------------------------------------------------------------
+test "toolchain update: a refused update leaves the default record byte-identical" ![io] {
+    let store = _scratch_root() + "/disabled-byte-identical-store";
+    let home = _home_dir("disabled-byte-identical");
+    let cfg = _config_dir("disabled-byte-identical");
+    _seed_policy(home, "disabled");
+    _seed_user_default_with_track(cfg, "0.10.6", "stable");
+    let record_path = cfg + "/toolchain-default";
+    let before = fs.readFile(record_path);
+    let run_env = _env_with([], home, cfg, store);
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert fs.readFile(record_path) == before;
+}
+
+// ---------------------------------------------------------------------------
 // Case 10: SAILFIN_TOOLCHAIN=local forbids fetching, independent of policy
 // ---------------------------------------------------------------------------
 test "toolchain update: SAILFIN_TOOLCHAIN=local forbids fetching" ![io] {
