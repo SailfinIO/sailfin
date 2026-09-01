@@ -119,7 +119,10 @@ fn toolchain_manifest_normalize_key(rel: string) -> string {
 // `header_only` stops after the first empty line — the header/record
 // separator — so a header read allocates one string per header line and
 // never one per recorded file (SFN-1201). The separator itself is kept so
-// the header parser can prove it was present.
+// the header parser can prove it was present. A CRLF document has no empty
+// line (its separator is `"\r"`), so the early return never fires there;
+// that costs nothing but the split, on a document both readers already
+// reject at the schema line.
 fn _manifest_split_lines(text: string, header_only: boolean) -> string[] {
     let mut lines: string[] = [];
     let mut start: int = 0;
@@ -315,9 +318,11 @@ fn _manifest_parse_header_lines(lines: string[]) -> ToolchainManifestHeader {
     };
 }
 
-// Pure. Header only: stops at the record separator and never allocates a
-// record, so its cost is proportional to the header rather than to the
-// recorded file count (SFN-1201). Agrees with `toolchain_manifest_parse` on
+// Pure. Header only: stops at the record separator and never validates a
+// record, so its cost is the header parse rather than the per-record
+// substring, digest, path, and duplicate checks (SFN-1201). The caller still
+// reads the whole file — the win is the discarded per-record work, not the
+// I/O. Agrees with `toolchain_manifest_parse` on
 // `status`, `meta`, and `detail` for every header-level outcome; the one
 // divergence is a well-formed header over a malformed record section,
 // which reads OK here and MALFORMED in full.

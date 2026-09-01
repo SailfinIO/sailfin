@@ -30,6 +30,7 @@ import {
     TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX,
     TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN,
     TOOLCHAIN_MANIFEST_OK,
+    toolchain_manifest_read,
     toolchain_manifest_read_header,
     toolchain_manifest_reinstall_hint
 } from "./manifest";
@@ -239,8 +240,22 @@ fn toolchain_management_survey(versions_base: string, host: ToolchainHostIdentit
                     let candidate = _management_candidate(base, triple, version);
                     if candidate.ok {
                         if candidate.protocol > TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX {
-                            let beats = semver_compare(semver_parse(candidate.version), semver_parse(blocked.version));
-                            if !blocked.ok || beats > 0 { blocked = candidate; }
+                            // The header-only survey (SFN-1201) cannot see a
+                            // corrupt record section, and unlike a compatible
+                            // candidate this one is never handed to
+                            // `toolchain_verify_executable` — it is reported,
+                            // not executed. Admitting it on the header alone
+                            // would refuse every management leaf over a
+                            // payload that is merely corrupt, with upgrade
+                            // guidance for what is a reinstall problem. So
+                            // pay one full read here, on the outranged
+                            // entries only; a store normally has none.
+                            if toolchain_manifest_read(candidate.dir).status == TOOLCHAIN_MANIFEST_OK {
+                                let beats = semver_compare(semver_parse(candidate.version), semver_parse(blocked.version));
+                                if !blocked.ok || beats > 0 {
+                                    blocked = candidate;
+                                }
+                            }
                         } else {
                             if candidate.protocol >= TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN {
                                 compatible.push(candidate);

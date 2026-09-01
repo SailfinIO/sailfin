@@ -353,14 +353,20 @@ test "toolchain manifest: the header reader agrees with the full reader on a mal
     // Empty document.
     _assert_header_agrees("");
     _assert_header_agrees("  \n\n");
+    assert toolchain_manifest_parse_header("").status == TOOLCHAIN_MANIFEST_MALFORMED;
+    assert toolchain_manifest_parse_header("  \n\n").status == TOOLCHAIN_MANIFEST_MALFORMED;
     // Bad magic.
     _assert_header_agrees(_manifest_text("not-the-magic 1", _good_header(), _good_record_lines()));
     // Unparseable schema.
-    _assert_header_agrees(_manifest_text("sailfin-install-manifest x", _good_header(), _good_record_lines()));
+    let bad_schema = _manifest_text("sailfin-install-manifest x", _good_header(), _good_record_lines());
+    _assert_header_agrees(bad_schema);
+    assert toolchain_manifest_parse_header(bad_schema).status == TOOLCHAIN_MANIFEST_MALFORMED;
     // A header line with no ` = `.
     let mut bad_line = _good_header();
     bad_line.push("no-equals-here");
-    _assert_header_agrees(_manifest_text(_good_magic(), bad_line, _good_record_lines()));
+    let bad_line_text = _manifest_text(_good_magic(), bad_line, _good_record_lines());
+    _assert_header_agrees(bad_line_text);
+    assert toolchain_manifest_parse_header(bad_line_text).status == TOOLCHAIN_MANIFEST_MALFORMED;
     // No separator at all: header lines run straight into end-of-text.
     let mut no_separator: string = _good_magic() + "\n";
     let header = _good_header();
