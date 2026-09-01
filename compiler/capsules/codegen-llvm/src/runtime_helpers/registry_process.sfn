@@ -126,8 +126,12 @@ fn _rh_descriptors_05(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.spawn_with_env_cwd", symbol: "sfn_process_spawn_with_env_cwd", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*", "i8*"], native_signature: "sfn_process_spawn_with_env_cwd", c_abi_return_type: null
     });
+    // SFN-1021: the payload param carries `{i8*, i64}` and routes through
+    // the `_bytes` twin so the caller's length reaches the write loop
+    // intact instead of being recovered with `strlen`; the bare-pointer
+    // symbol stays defined for seed-built IR.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "process.handle_write", symbol: "sfn_process_handle_write", return_type: "i64", parameter_types: ["i64", "i8*"], native_signature: "sfn_process_handle_write", c_abi_return_type: null
+        target: "process.handle_write", symbol: "sfn_process_handle_write", return_type: "i64", parameter_types: ["i64", "{i8*, i64}"], native_signature: "sfn_process_handle_write_bytes", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.handle_close_stdin", symbol: "sfn_process_handle_close_stdin", return_type: "void", parameter_types: ["i64"], native_signature: "sfn_process_handle_close_stdin", c_abi_return_type: null
