@@ -176,11 +176,12 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             index += 1;
             continue;
         }
-        // Angle brackets only mean generic type arguments at the top level of
-        // the scan. Inside a parenthesized group they are shift or comparison
-        // operators (`(1 << n) - 1`), and counting them there leaves
-        // `angle_depth` unbalanced so the real top-level operator is never
-        // matched (SFN-670).
+        // Angle brackets only delimit type arguments or marker text at the
+        // top level of the scan. Inside a parenthesized group they are shift
+        // or comparison operators (`(1 << n) - 1`), and counting them there
+        // leaves `angle_depth` unbalanced so the real top-level operator is
+        // never matched (SFN-670). Same gate as `parse_cast_expression`
+        // (SFN-560).
         let nested = paren_depth > 0 || bracket_depth > 0 || brace_depth > 0;
         if ch == "<" {
             if !nested { angle_depth += 1; }

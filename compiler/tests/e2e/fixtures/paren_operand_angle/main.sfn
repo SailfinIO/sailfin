@@ -8,6 +8,8 @@ fn take_float(x: float) -> float { return x; }
 
 fn id<T>(x: T) -> T { return x; }
 
+fn apply(f: fn (int) -> int, x: int) -> int { return f(x); }
+
 fn main() ![io] {
     let n: int = 5;
     let a: int = 2;
@@ -34,9 +36,16 @@ fn main() ![io] {
     let plain = (a + b) * c;
     print(plain);
 
-    // A genuine generic call as a binary operand keeps its type brackets.
+    // A generic call as a binary operand. Monomorphization rewrites the
+    // call to its mangled specialization before the operator scan, so this
+    // guards the end-to-end shape rather than the angle tracking itself.
     let generic = id<int>(7) + 1;
     print(generic);
+
+    // A lambda operand lowers to an angle-delimited closure-pair marker;
+    // that marker is what the retained top-level angle tracking protects.
+    let closure = apply(fn (x: int) -> int { return x * 2; }, 3) + 1;
+    print(closure);
 
     // Float arithmetic under no type pressure still infers a float carrier.
     let fl = 1.5 * 2.0;

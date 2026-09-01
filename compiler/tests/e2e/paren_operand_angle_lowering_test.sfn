@@ -3,39 +3,52 @@
 // (`(1 << n) - 1`, `(a < b) as int + c`, `(c >> 1) + a`) must lower.
 //
 // `find_top_level_operator` (codegen-llvm `core_operators.sfn`) tracks
-// `<` / `>` as generic-type angle-bracket depth so `f<T>(x) + 1` splits at
-// the `+`, not inside the type arguments. Before the fix that tracking ran
-// inside parentheses too, so the `<<` in `(1 << n)` left `angle_depth`
-// unbalanced and the top-level `-` was never matched — the initializer did
-// not lower at all (E1002), and the unannotated binding reported the
-// `double` placeholder that SFN-835 mistook for an inference bug.
+// top-level `<` / `>` as angle-bracket depth so angle-delimited text — the
+// closure-pair marker a lambda operand lowers to — is not split on an
+// operator inside it. Before the fix that tracking also ran inside
+// parentheses, so the `<<` in `(1 << n)` left `angle_depth` unbalanced and
+// the top-level `-` was never matched: the initializer did not lower at
+// all (E1002), and the unannotated binding reported the `double`
+// placeholder that SFN-835 mistook for an inference bug.
 //
-// This fails at lowering, not at `sfn check`, so the test drives a real
-// `sfn run` of the fixture and asserts on its stdout. Environment
-// threading follows `.claude/rules/no-bash-e2e.md` (full parent env for
-// the nested clang/ld, SAILFIN_TEST_SCRATCH for build-cache isolation).
-import { trim_right } from "sfn/strings";
-import { sfn_bin_path } from "sfn/test";
+// This fails at lowering, not at `sfn check`, so both tests drive the
+// compiler-under-test as a subprocess: a cheap `sfn emit llvm` that pins
+// the emitted `shl`/`sub`, and a full `sfn run` of the fixture that pins
+// the runtime values. The nested compiler gets
+// `clean_runner_env(nested_runner_scratch(...))`, never raw
+// `process.environ()`, so the parent pool's orchestration keys do not leak
+// into the child (SFN-401, `.claude/rules/no-bash-e2e.md`).
+import { contains, trim_right } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
-fn _child_env() -> string[] ![io] { return process.environ(); }
-
-struct RunOut {
-    exit: int;
-    out: string;
-    err: string;
-}
-
-fn _run_fixture(path: string) -> RunOut ![io] {
-    let exit = process.run_capture([sfn_bin_path(), "run", path], _child_env());
-    let out = process.capture_take_stdout();
+test "lowering: (1 << n) - 1 emits shl and sub instead of failing to lower (SFN-670)" ![io] {
+    let scratch = nested_runner_scratch("paren_operand_angle_emit");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/mask.sfn";
+    let ll = scratch + "/mask.ll";
+    fs.writeFile(src, "fn mask(n: int) -> int { return (1 << n) - 1; }\n");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", src], clean_runner_env(scratch));
+    let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    return RunOut { exit: exit, out: trim_right(out), err: err };
+    if exit != 0 { print(err); }
+    assert exit == 0;
+    assert fs.exists(ll);
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    fs.deleteFile(src);
+    assert contains(ir, "shl i64");
+    assert contains(ir, "sub i64");
+    assert ! contains(ir, "E1002");
 }
 
 test "lowering: parenthesized operand with unbalanced angle chars lowers and runs (SFN-670)" ![io] {
-    let r = _run_fixture("compiler/tests/e2e/fixtures/paren_operand_angle/main.sfn");
-    if r.exit != 0 { print(r.err); }
-    assert r.exit == 0;
-    // shifted, annotated, cmp, halved, plain, generic, float carrier.
-    assert r.out == "31\n31\n11\n7\n50\n8\nfloat-ok";
+    let child_env = clean_runner_env(nested_runner_scratch("paren_operand_angle_run"));
+    let exit = process.run_capture([sfn_bin_path(), "run", "compiler/tests/e2e/fixtures/paren_operand_angle/main.sfn"], child_env);
+    let out = trim_right(process.capture_take_stdout());
+    let err = process.capture_take_stderr();
+    if exit != 0 { print(err); }
+    assert exit == 0;
+    // shifted, annotated, cmp, halved, plain, generic, closure, float carrier.
+    assert out == "31\n31\n11\n7\n50\n8\n7\nfloat-ok";
 }

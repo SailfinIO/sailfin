@@ -191,7 +191,7 @@ fn _br_bits(r: *_BitReader, need: int) -> int {
     // in `find_top_level_operator`, but this capsule is a compiler
     // dependency compiled by the pinned seed, so the natural form breaks
     // `sfn dev bootstrap build` until `bootstrap.toml [seed].version`
-    // carries that fix. Collapse it back once the seed does.
+    // carries that fix. SFN-1236 collapses it back once the seed does.
     let mask_span: int = 1 << need;
     let mask: int = mask_span - 1;
     let taken: int = buf & mask;

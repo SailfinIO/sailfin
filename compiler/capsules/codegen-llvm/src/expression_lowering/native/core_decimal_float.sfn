@@ -45,8 +45,8 @@
 // used as an operand of another binary operator (`(1 << n) - 1`) did not
 // lower (SFN-670). The fix lives in `find_top_level_operator`, but this
 // file is compiled by the pinned seed, so the decomposition stays
-// load-bearing until `bootstrap.toml [seed].version` carries that fix; it
-// can be condensed once the seed does.
+// load-bearing until `bootstrap.toml [seed].version` carries that fix;
+// SFN-1236 condenses it once the seed does.
 // Bits per limb, and the derived base/mask. Changing these three together
 // is the only supported way to retune the representation.
 fn _limb_bits() -> int { return 16; }
