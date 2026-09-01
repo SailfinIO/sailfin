@@ -41,12 +41,12 @@
 // array, so a trimmed value's limb count is its magnitude.
 //
 // Style note: arithmetic here is deliberately written one operation per
-// annotated `let`. A parenthesized group used as an operand of another
-// binary operator (`(1 << n) - 1`) does not lower, and an unannotated
-// arithmetic binding infers `double`. Both are compiler limits rather than
-// preferences, so the decomposition is load-bearing — collapsing it back
-// breaks the build. SFN-670 tracks fixing them; this file can be condensed
-// once it lands.
+// annotated `let`. A parenthesized group containing a shift or comparison
+// used as an operand of another binary operator (`(1 << n) - 1`) did not
+// lower (SFN-670). The fix lives in `find_top_level_operator`, but this
+// file is compiled by the pinned seed, so the decomposition stays
+// load-bearing until `bootstrap.toml [seed].version` carries that fix; it
+// can be condensed once the seed does.
 // Bits per limb, and the derived base/mask. Changing these three together
 // is the only supported way to retune the representation.
 fn _limb_bits() -> int { return 16; }
