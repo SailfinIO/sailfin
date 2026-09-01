@@ -65,15 +65,15 @@ fn _run_sfn(command: string, label: string) -> RunOutcome ![io] {
 
 test "cross-module fn field: bare imported-struct field initializer runs end to end" ![io] {
     let outcome = _run_sfn("run", "sfn1161-run");
-    expect_eq_int(outcome.exit, 0);
+    assert expect_eq_int(outcome.exit, 0).ok;
     // Both callees announce themselves, so the assertion fails if a field
     // dispatches to the wrong target rather than merely type-checking.
-    expect_eq_str(outcome.output, "a-ok\nb-ok\nrc_a=42\nrc_b=7");
+    assert expect_eq_str(outcome.output, "a-ok\nb-ok\nrc_a=42\nrc_b=7").ok;
 }
 
 test "cross-module fn field: check agrees with build on the same fixture" ![io] {
     let outcome = _run_sfn("check", "sfn1161-check");
-    expect_eq_int(outcome.exit, 0);
+    assert expect_eq_int(outcome.exit, 0).ok;
     // The staging deferral must not leak the old advice for a program that
     // builds and runs cleanly.
     assert find(outcome.output, "E0808", 0) < 0;

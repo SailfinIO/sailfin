@@ -21,7 +21,7 @@ test "terminal output: disabled style preserves canonical diagnostic bytes" {
     let diagnostic = _diag("error");
     let lines: string[] = [];
     let style = Style { enabled: false, mode: "never", stream: "stderr" };
-    expect_eq_str(render_terminal_diagnostic_with_style(diagnostic, lines, "typecheck", style), render_diagnostic(diagnostic, lines, "typecheck"));
+    assert expect_eq_str(render_terminal_diagnostic_with_style(diagnostic, lines, "typecheck", style), render_diagnostic(diagnostic, lines, "typecheck")).ok;
 }
 
 test "terminal output: enabled style colors only the severity label" {
@@ -31,5 +31,5 @@ test "terminal output: enabled style colors only the severity label" {
     let esc = char_from_code(27);
     let expected = esc + "[31merror" + esc + "[0m[E0001]: example failure"
         + "\n  --> example.sfn\n  [kind: typecheck]";
-    expect_eq_str(render_terminal_diagnostic_with_style(diagnostic, lines, "typecheck", style), expected);
+    assert expect_eq_str(render_terminal_diagnostic_with_style(diagnostic, lines, "typecheck", style), expected).ok;
 }

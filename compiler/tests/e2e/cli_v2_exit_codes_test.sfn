@@ -28,8 +28,6 @@
 // Drives the compiler-under-test as a subprocess with the runtime
 // `process.*` builtins and asserts on captured output — the canonical
 // e2e pattern (see `.claude/rules/no-bash-e2e.md` and `guillermo_test.sfn`).
-// The `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
-// from an `![io]` test, so output is asserted with `sfn/strings`.
 import { find, starts_with, trim } from "sfn/strings";
 import {
     expect_eq_bool,
@@ -79,11 +77,11 @@ test "cli-v2: root color flag is accepted before a subcommand" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "--color", "never", "version"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    expect_eq_int(exit, 0);
-    expect_eq_str(err, "");
+    assert expect_eq_int(exit, 0).ok;
+    assert expect_eq_str(err, "").ok;
     let line = trim(out);
-    expect_eq_bool(starts_with(line, "sfn "), true);
-    expect_eq_bool(line.length > 4, true);
+    assert expect_eq_bool(starts_with(line, "sfn "), true).ok;
+    assert expect_eq_bool(line.length > 4, true).ok;
 }
 
 // `not-a-known-subcommand` is not `version`, does not end in `.sfn`, and

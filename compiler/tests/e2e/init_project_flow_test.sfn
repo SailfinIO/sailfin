@@ -29,7 +29,7 @@ test "sfn init: bare build uses the generated capsule entry" ![io] {
             + "/build/sailfin/program.exe");
         return 0;
     });
-    expect_eq_int(exit, 0);
+    assert expect_eq_int(exit, 0).ok;
 }
 
 test "sfn init: bare run uses the generated capsule entry" ![io] {
@@ -50,5 +50,5 @@ test "sfn init: bare run uses the generated capsule entry" ![io] {
         assert find(run_out + run_err, "Hello, Sailfin!", 0) >= 0;
         return 0;
     });
-    expect_eq_int(exit, 0);
+    assert expect_eq_int(exit, 0).ok;
 }
