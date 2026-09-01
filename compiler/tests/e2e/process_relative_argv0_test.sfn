@@ -37,43 +37,46 @@ import {
     clean_runner_env,
     expect_eq_bool,
     expect_eq_int,
-    nested_runner_scratch
+    host_is_windows,
+    nested_runner_scratch,
+    sfn_bin_abs_path
 } from "sfn/test";
 
-// The compiler binary named RELATIVE to the working directory.
-//
-// Deliberately not `sfn_bin_path()`: that honours `SAILFIN_BIN`, which the
-// pooled runner and every CI leg set to an absolute path, so reusing it would
-// make this test silently vacuous in exactly the environments that gate
-// merges. Probing for the suffix keeps it host-conditioned without importing
-// the driver's `host_exe_name` across the capsule boundary that
-// `compiler/tests/unit/compiler_capsule_boundary_test.sfn` ratchets.
-fn _rel_sfn() -> string ![io] {
-    if fs.exists("build/bin/sfn.exe") { return "build/bin/sfn.exe"; }
-    return "build/bin/sfn";
-}
+import { _copy_file_preserving_mode } from "../../src/build/fs";
 
-// The same executable named relative to `build`, for exercising the child-cwd
-// variants. This path is deliberately absent from the repo root: the spawn can
-// succeed only if executable resolution applies the requested cwd first.
-fn _rel_sfn_from_build() -> string ![io] {
-    if fs.exists("build/bin/sfn.exe") { return "bin/sfn.exe"; }
+// A host-qualified compiler name relative to a fixture root.
+fn _fixture_argv0() -> string ![io] {
+    if host_is_windows() { return "bin/sfn.exe"; }
     return "bin/sfn";
 }
 
-// Not a skip-guard. Every `sfn/test` consumer already depends on a repo-root
-// working directory, because `sfn_bin_path()`'s unoverridden default is this
-// same relative path — so if this assertion ever fails, the cwd contract has
-// moved under the whole e2e tier, not just under this file, and a silent skip
-// here would hide that.
-test "process: the relative compiler path this test spawns exists" ![io] {
-    assert expect_eq_bool(fs.exists(_rel_sfn()), true).ok;
+// Copy the active compiler under test into a fresh repo-relative fixture.
+// `fs.mkdtemp` preserves a prefix containing `/`, so this returns a controlled
+// relative root under `build/sailfin` rather than assuming which repository
+// output the Windows nightly selected as its fixed-point compiler.
+fn _fixture_root(label: string) -> string ![io] {
+    fs.createDirectory("build/sailfin", true);
+    let root = fs.mkdtemp("build/sailfin/process-relative-argv0-" + label + "-");
+    if root.length == 0 { return ""; }
+    fs.createDirectory(root + "/bin", true);
+    let dst = root + "/" + _fixture_argv0();
+    if !_copy_file_preserving_mode(sfn_bin_abs_path(), dst) { return ""; }
+    if !fs.set_perms(dst, 493) { return ""; }
+    return root;
+}
+
+test "process: the controlled relative compiler fixture exists" ![io] {
+    let root = _fixture_root("exists");
+    assert expect_eq_bool(root.length > 0, true).ok;
+    assert expect_eq_bool(fs.exists(root + "/" + _fixture_argv0()), true).ok;
 }
 
 // The passthrough spawn — the path `built_program_path()`'s smoke check and
 // `sfn run` both take.
 test "process: run spawns a working-directory-relative argv[0]" ![io] {
-    let rc = process.run([_rel_sfn(), "--version"]);
+    let root = _fixture_root("run");
+    assert expect_eq_bool(root.length > 0, true).ok;
+    let rc = process.run([root + "/" + _fixture_argv0(), "--version"]);
     assert expect_eq_int(rc as i64, 0).ok;
 }
 
@@ -81,9 +84,11 @@ test "process: run spawns a working-directory-relative argv[0]" ![io] {
 // failed the same way before the fix (it returns its own `-1` sentinel rather
 // than 127), so it needs its own assertion rather than riding on the above.
 test "process: run_capture spawns a working-directory-relative argv[0]" ![io] {
+    let root = _fixture_root("capture");
+    assert expect_eq_bool(root.length > 0, true).ok;
     let scratch = nested_runner_scratch("sfn1104-capture");
     fs.createDirectory(scratch, true);
-    let rc = process.run_capture([_rel_sfn(), "--version"], clean_runner_env(scratch));
+    let rc = process.run_capture([root + "/" + _fixture_argv0(), "--version"], clean_runner_env(scratch));
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert expect_eq_int(rc, 0).ok;
@@ -94,9 +99,11 @@ test "process: run_capture spawns a working-directory-relative argv[0]" ![io] {
 // cwd instead, so the Windows runtime must combine the requested cwd with a
 // separator-bearing relative argv[0] itself (SFN-1144).
 test "process: run_capture_cwd resolves argv[0] from the requested cwd" ![io] {
+    let root = _fixture_root("capture-cwd");
+    assert expect_eq_bool(root.length > 0, true).ok;
     let scratch = nested_runner_scratch("sfn1144-capture-cwd");
     fs.createDirectory(scratch, true);
-    let rc = process.run_capture_cwd([_rel_sfn_from_build(), "--version"], clean_runner_env(scratch), "build");
+    let rc = process.run_capture_cwd([_fixture_argv0(), "--version"], clean_runner_env(scratch), root);
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert expect_eq_int(rc, 0).ok;
