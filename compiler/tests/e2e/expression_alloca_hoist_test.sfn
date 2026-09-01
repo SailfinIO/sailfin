@@ -33,17 +33,17 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
-// A `loop` around a branch that constructs enum literals and reads an enum
-// payload member on every iteration — the expression-lowering alloca sites
-// that have no route to `_eb_allocas`. Runs 400,000 iterations.
+// A `loop` whose body constructs enum literals inside its own branch blocks.
+// The literals are built inline rather than behind a helper call on purpose:
+// a helper's frame pops on return, so allocas emitted into the helper's
+// blocks cannot accumulate and would not exercise the leak at all. Built
+// inline, the pre-fix compiler emits them into `then`/`else`/`loop.body`
+// nested inside the loop, where two allocate per iteration; at 16 bytes each
+// the 8 MiB stack is exhausted near 262,000 iterations, which the 400,000
+// below clears comfortably.
 fn _fixture_source() -> string {
     return "enum Shape {\n" + "    Circle { radius: int },\n"
         + "    Square { side: int }\n"
-        + "}\n"
-        + "\n"
-        + "fn pick(i: int) -> Shape {\n"
-        + "    if i % 2 == 0 { return Shape.Circle { radius: i }; }\n"
-        + "    return Shape.Square { side: i };\n"
         + "}\n"
         + "\n"
         + "test \"expression alloca repro\" {\n"
@@ -51,8 +51,12 @@ fn _fixture_source() -> string {
         + "    let mut acc: int = 0;\n"
         + "    loop {\n"
         + "        if i >= 400000 { break; }\n"
-        + "        let s = pick(i);\n"
-        + "        if i % 3 == 0 { acc = acc + 1; } else { acc = acc + 2; }\n"
+        + "        let mut s: Shape = Shape.Square { side: 0 };\n"
+        + "        if i % 2 == 0 { s = Shape.Circle { radius: i }; } else { s = Shape.Square { side: i }; }\n"
+        + "        match s {\n"
+        + "            Shape.Circle { radius } => { acc = acc + radius; },\n"
+        + "            Shape.Square { side } => { acc = acc + side; }\n"
+        + "        }\n"
         + "        i = i + 1;\n"
         + "    }\n"
         + "    assert acc > 0;\n"
