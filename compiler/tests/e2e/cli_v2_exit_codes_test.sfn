@@ -28,8 +28,6 @@
 // Drives the compiler-under-test as a subprocess with the runtime
 // `process.*` builtins and asserts on captured output — the canonical
 // e2e pattern (see `.claude/rules/no-bash-e2e.md` and `guillermo_test.sfn`).
-// The `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
-// from an `![io]` test, so output is asserted with `sfn/strings`.
 import { find, starts_with, trim } from "sfn/strings";
 import {
     expect_eq_bool,
