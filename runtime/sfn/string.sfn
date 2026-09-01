@@ -685,7 +685,10 @@ fn sfn_str_concat(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64, arena_slot: 
     // the first zero byte. Clamping the length is the one repair that keeps
     // the other operand: zero-filling the gap would pin the scan at offset 0
     // and drop `b` deterministically. It also matches how `sfn_str_len` and
-    // `sfn_str_eq` already read a null pointer — as the empty string.
+    // `sfn_str_eq` already read a null pointer — as the empty string. The
+    // clamp sits ahead of the concat-limit gate on purpose: a stale length on
+    // a null pointer reserves nothing once clamped, so it cannot exhaust the
+    // arena and should not trip the limit.
     if (a_data as i64) == 0 { alen = 0; }
     if (b_data as i64) == 0 { blen = 0; }
     _sfn_check_concat_limit(alen, blen);

@@ -45,7 +45,8 @@ fn _stale_arena_slot() -> *u8 {
 fn _byte(p: *u8, i: i64) -> i64 {
     let q = p + i;
     let v = *q;
-    return v as i64;
+    // An `i8` load sign-extends; mask so bytes >= 0x80 read as unsigned.
+    return (v as i64) & 255;
 }
 
 fn _scan_len(p: *u8) -> i64 { return strnlen(p, 64 as usize) as i64; }
