@@ -308,7 +308,8 @@ fn prepare_runtime_dep_capsules(runtime_root: string, config: BuildCacheConfig, 
         walk_project_src: false,
         include_host_as_dep: false,
         runtime_root: runtime_root,
-        retain_full_runtime: false
+        retain_full_runtime: false,
+        include_dev_dependencies: false
     };
     return _cr_prepare(empty_entry_paths, config, consumer, sailfin_exe, self_exe, work_dir, binary_dir);
 }

@@ -4,7 +4,7 @@ title: Capsule Distribution and the Registry Protocol
 status: Accepted
 type: tooling
 created: 2025-10-01
-updated: 2026-08-05
+updated: 2026-09-01
 author: "Tooling / Registry Working Group (original sketch); agent:Sailbot (2026-08 rewrite); human review"
 tracking:
 supersedes:
@@ -520,7 +520,8 @@ half does not, and SFEP-0001 §4 is explicit that a safety feature is not
 
 | Slice | State |
 |---|---|
-| `capsule.toml` schema — `[capsule]`, `[dependencies]`, `[dev-dependencies]`, `[capabilities]`, `[build]` | Shipped (SFEP-0006 §4.2) |
+| `capsule.toml` schema — `[capsule]`, `[dependencies]`, `[dev-dependencies]`, `[capabilities]`, `[build]` parse and round-trip | Shipped (SFEP-0006 §4.2) |
+| `[dev-dependencies]` → resolution | Shipped (SFEP-0006 §4.6, SFN-988) — `sfn test` targets only, root manifest only, never transitive |
 | `capsule.toml` `[toolchain]` section | Shipped (SFEP-0046 §3.1 — not 0006 §4.2) |
 | `SFNPKG/1` archive format, round-trip pack/unpack | Shipped |
 | Registry protocol — index, download, publish | Shipped |

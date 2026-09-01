@@ -4,6 +4,7 @@ import {
     toml_get_capabilities_dev_required,
     toml_get_capabilities_required,
     toml_get_dependencies,
+    toml_get_dev_dependencies,
     toml_has_capabilities_section,
     toml_merge_capabilities_required
 } from "../../src/toml_parser";
@@ -134,6 +135,27 @@ test "toml_get_dependencies: quoted keys preserved" {
     let deps = toml_get_dependencies(toml);
     // The toml parser strips quotes, so the key should be "sfn/special"
     assert _str_eq(_test_lookup_dep(deps, "sfn/special"), "0.5.0");
+}
+
+// -- toml_get_dev_dependencies (SFN-988) --
+test "toml_get_dev_dependencies: absent section returns empty string" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"1.0.0\"\n\n[dependencies]\n\"cli\" = \"0.2.0\"\n";
+    assert _str_eq(toml_get_dev_dependencies(toml), "");
+}
+
+test "toml_get_dev_dependencies: same line format as toml_get_dependencies" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"1.0.0\"\n\n[dev-dependencies]\n\"sfn/test\" = \"0.1.0\"\n\"demo/mock\" = \"*\"\n";
+    let deps = toml_get_dev_dependencies(toml);
+    assert _str_eq(deps, "sfn/test=0.1.0\ndemo/mock=*");
+    assert _str_eq(_test_lookup_dep(deps, "sfn/test"), "0.1.0");
+    assert _str_eq(_test_lookup_dep(deps, "demo/mock"), "*");
+}
+
+test "toml_get_dev_dependencies: normal deps are excluded" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"1.0.0\"\n\n[dependencies]\n\"cli\" = \"0.2.0\"\n\n[dev-dependencies]\n\"test\" = \"0.1.0\"\n";
+    let deps = toml_get_dev_dependencies(toml);
+    assert _str_eq(_test_lookup_dep(deps, "test"), "0.1.0");
+    assert _str_eq(_test_lookup_dep(deps, "cli"), "");
 }
 
 // -- toml_merge_capabilities_required (#1395) --

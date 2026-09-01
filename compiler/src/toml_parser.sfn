@@ -925,6 +925,26 @@ fn toml_get_dependencies(text: string) -> string {
     return out;
 }
 
+// `[dev-dependencies]` in the same "capsule=version" line format as
+// `toml_get_dependencies`, so the resolver parses both with one helper.
+// Kept as a separate getter rather than a flag on `toml_get_dependencies`:
+// only the `sfn test` root manifest merges these (SFEP-0006 §4.6), and every
+// other reader — transitive enqueue, `sfn build`/`run`/`check`, the
+// installer, the capability cross-check — must keep seeing `[dependencies]`
+// alone. A dev-dep entering a library build is a defect (SFN-988).
+fn toml_get_dev_dependencies(text: string) -> string {
+    let t = _parse_toml_internal(text);
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= t.dev_dependencies.length { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + t.dev_dependencies[i].capsule + "=" + t.dev_dependencies[i].version;
+        i += 1;
+    }
+    return out;
+}
+
 // Generate a capsule.toml string from individual fields
 fn toml_generate(name: string, version: string, description: string, entry: string, toolchain_sfn: string, toolchain_version: string) -> string {
     let mut out: string = "[capsule]\n";
