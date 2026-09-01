@@ -57,7 +57,12 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1512; }
     if path == LOWERING_ROOT + "/lowering_recovery.sfn" { return 1056; }
     if path == LOWERING_ROOT + "/instructions_let.sfn" { return 984; }
-    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 908; }
+    // 908 -> 923: SFN-771. A generic enum payload whose consumer-facing form
+    // is a value aggregate (the `{i8*, i8*}` closure pair) is stored boxed,
+    // so the match arm needs a second load to recover the value. A raise
+    // against the shrink-only rule, called out for review: the alternative is
+    // a `load {i8*, i8*}` against an 8-byte slot, which segfaults.
+    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 923; }
     if path == LOWERING_ROOT + "/instructions.sfn" { return 779; }
     if path == LOWERING_ROOT + "/instructions_helpers.sfn" { return 849; }
     // SFN-916 raises `instructions_if.sfn` 784 -> 785. Retiring the legacy

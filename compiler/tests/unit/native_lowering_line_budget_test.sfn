@@ -81,8 +81,9 @@ fn _grandfathered_ceiling(name: string) -> int {
     if name == "core_ops_lowering.sfn" { return 1568; }
     // 1447 -> 1460: SFN-770, a miscompile that stored a struct-typed local
     // into a pointer-width enum payload slot by value. 1460 -> 1536: SFN-915,
-    // per the note above.
-    if name == "core_literals_lowering.sfn" { return 1389; }
+    // per the note above. 1389 -> 1376: SFN-771 routes the writer's
+    // slot-type adoption through the shared predicate.
+    if name == "core_literals_lowering.sfn" { return 1376; }
     if name == "core_member_lowering.sfn" { return 1186; }
     if name == "core_parse.sfn" { return 1059; }
     if name == "core_parsing.sfn" { return 959; }
