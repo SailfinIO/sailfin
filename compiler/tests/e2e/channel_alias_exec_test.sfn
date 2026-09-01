@@ -1,0 +1,129 @@
+// SFN-695: preserve channel identity through local aliases.
+//
+// LLVM `let` lowering (`codegen-llvm/src/lowering/instructions_let.sfn`)
+// annotates a channel-handle binding with a `channel` / `channel:<kind>`
+// marker so later `.send`/`.receive` calls on that symbol route through
+// `try_lower_channel_method` instead of generic call resolution. An
+// inferred alias (`let alias = ch;`) lost that annotation, and so did an
+// explicitly typed one (`let alias: Channel<int> = ch;`) — both fell
+// through to generic call resolution and fataled at lowering with E1007
+// "cannot resolve return type for call to `alias.send`" (the typed form as
+// `Channel<int>receive`). This test proves the fix: an aliased channel
+// handle — inferred, explicitly typed, declared inside a `routine` block,
+// or aliasing a module-global — still dispatches `.send`/`.receive` and
+// runs to completion, and a typed alias still enforces the channel's
+// element kind on `.send` (E0815).
+//
+// Everything is single-threaded: each fixture is a buffered channel with
+// send count < capacity, so a send-then-receive sequence on one thread is
+// deterministic and cannot deadlock.
+import { contains } from "sfn/strings";
+import {
+    assert_does_not_compile,
+    clean_runner_env,
+    default_scratch_dir,
+    report_child_failure,
+    sfn_bin_path
+} from "sfn/test";
+
+// `process.run_capture`'s empty array is the *empty* environment, not
+// "inherit". `sfn run` spawns a nested clang + linker, so the child needs
+// PATH (else the linker is not found). Derived by subtraction from the
+// real environment via `clean_runner_env`, not built up key-by-key
+// (SFN-1114).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
+}
+
+// A unique per-invocation scratch root (the native `mktemp -d`) so the
+// fixture source paths never collide under the parallel pool.
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = default_scratch_dir(); }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-channel-alias-");
+}
+
+// Compile + run a source snippet via `sailfin run` and return its combined
+// stdout+stderr (or "RUN_FAILED" on a non-zero exit). The fixture is
+// written under an absolute scratch path so the program (run from repo
+// root) never writes into the tree.
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([sfn_bin_path(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("channel-alias " + label, exit, out, err);
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── (1) an inferred local alias still dispatches send/receive ────────
+test "channel alias: inferred local alias sends and receives (SFN-695)" ![io] {
+    let out = _run_and_capture("inferred_alias", "fn main() ![io] {\n"
+        + "    let ch = channel(2);\n"
+        + "    let alias = ch;\n"
+        + "    alias.send(7);\n"
+        + "    let value: int = alias.receive();\n"
+        + "    print.info(\"alias value: \" + number_to_string(value));\n"
+        + "}");
+    assert contains(out, "alias value: 7");
+}
+
+// ── (2) an explicitly typed alias still dispatches send/receive ──────
+test "channel alias: explicitly typed alias sends and receives (SFN-695)" ![io] {
+    let out = _run_and_capture("typed_alias", "fn main() ![io] {\n"
+        + "    let ch = channel(2);\n"
+        + "    let alias: Channel<int> = ch;\n"
+        + "    alias.send(11);\n"
+        + "    let value: int = alias.receive();\n"
+        + "    print.info(\"typed alias value: \" + number_to_string(value));\n"
+        + "}");
+    assert contains(out, "typed alias value: 11");
+}
+
+// ── (3) an alias declared inside a `routine` block round-trips ───────
+test "channel alias: alias inside a routine block round-trips (SFN-695)" ![io] {
+    let out = _run_and_capture("routine_alias", "fn main() ![io] {\n"
+        + "    routine {\n"
+        + "        let ch = channel(1);\n"
+        + "        let alias = ch;\n"
+        + "        alias.send(7);\n"
+        + "        let value: int = alias.receive();\n"
+        + "        print.info(\"routine alias value: \" + number_to_string(value));\n"
+        + "    }\n"
+        + "}");
+    assert contains(out, "routine alias value: 7");
+}
+
+// ── (4) an alias of a module-global channel dispatches and closes ────
+test "channel alias: alias of a module-global channel dispatches and closes (SFN-695)" ![io] {
+    let out = _run_and_capture("global_alias", "let g_ch = channel(2);\n\n"
+        + "fn main() ![io] {\n"
+        + "    let alias = g_ch;\n"
+        + "    alias.send(3);\n"
+        + "    alias.send(4);\n"
+        + "    let a: int = alias.receive();\n"
+        + "    let b: int = alias.receive();\n"
+        + "    alias.close();\n"
+        + "    print.info(\"global alias sum: \" + number_to_string(a + b));\n"
+        + "}");
+    assert contains(out, "global alias sum: 7");
+}
+
+// ── (5) a typed alias still enforces the channel's element kind ──────
+// `sfn check`'s `--json` envelope carries the diagnostic code and message
+// as separate fields; `assert_does_not_compile` only substring-matches the
+// message text, so the pattern below is the E0815 message body rather than
+// the code itself (confirmed at
+// `compiler/capsules/analyzer/src/typecheck_types/expr_type_rules.sfn::make_channel_send_mismatch_diagnostic`).
+test "channel alias: typed alias still enforces the element kind on send (SFN-695)" ![io] {
+    let result = assert_does_not_compile("fn main() ![io] {\n"
+        + "    let ch = channel(2);\n"
+        + "    let alias: Channel<int> = ch;\n"
+        + "    alias.send(\"text\");\n"
+        + "}\n", "channel send element-kind mismatch");
+    assert result.ok;
+}
