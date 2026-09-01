@@ -22,11 +22,7 @@ import {
 import { int_to_string } from "sfn/strings";
 
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "../../build/fs";
-import {
-    ToolchainDecision,
-    toolchain_decide,
-    toolchain_selection_satisfies
-} from "../../capsule_resolver/toolchain";
+import { ToolchainDecision, toolchain_decide, toolchain_selection_satisfies } from "../../capsule_resolver/toolchain";
 import { starts_with, strings_equal } from "../../string_utils";
 import { render_terminal_diagnostic } from "../../terminal_output";
 import { toolchain_channel_canonical } from "../../toolchain/channel";
@@ -355,6 +351,250 @@ fn _toolchain_default(ctx: CliContext, requested: string) -> int ![clock, io, ne
         return 2;
     }
     print("recorded " + requested + " as the per-user default toolchain");
+    return 0;
+}
+
+// SFEP-0073 §3.4 (SFN-1071): check for, or install, a strictly newer release
+// on a channel. Usage/mode errors are checked first because they are free;
+// the network gate runs after every local error but before any staging or
+// request, so `disabled`/`SAILFIN_TOOLCHAIN=local` never touch the network
+// even when the local checks above it already read far enough to know the
+// track (SFEP-0073 §3.6). `--project` validates the candidate against
+// `toolchain_selection_satisfies` because the exact field this leaf rewrites
+// must never drift below the project's own floor or channel constraint —
+// the same requirement `toolchain_decide` enforces for the manifest's
+// original value.
+fn _toolchain_update(ctx: CliContext, channel_arg: string, check: boolean, project: boolean, as_json: boolean) -> int ![clock, io, net] {
+    if as_json && !check {
+        print.err("error: --json requires --check");
+        print.err("  usage: sfn toolchain update [<channel>] --check --json");
+        return 2;
+    }
+    if project && channel_arg.length == 0 {
+        print.err("error: --project requires an explicit channel");
+        print.err("  e.g. sfn toolchain update stable --project");
+        return 2;
+    }
+
+    let host = toolchain_current_host();
+    if host.triple.length == 0 {
+        print.err("error: could not determine this host's triple");
+        return 2;
+    }
+    let versions_base = _inspect_store_base();
+    if versions_base.length == 0 { return 2; }
+
+    let mut report = toolchain_inspect_report_shallow("update", ctx.binary_dir, ctx.compiler_path, "");
+
+    let mut channel: string = "";
+    if channel_arg.length > 0 {
+        channel = toolchain_channel_canonical(channel_arg);
+        if channel.length == 0 {
+            print.err("error: \"" + channel_arg
+                + "\" is not a channel (stable|rc|beta|alpha|latest)");
+            return 2;
+        }
+    }
+
+    let decision: ToolchainDecision = toolchain_decide("", ctx.binary_dir);
+    let mut current: string = "";
+    let mut current_source: string = "";
+    let mut manifest_path: string = "";
+
+    if project {
+        if decision.version_error.length > 0 {
+            print.err("error: " + decision.version_error);
+            return 2;
+        }
+        if decision.pin_version.length == 0 {
+            print.err("error: this project declares no exact [toolchain] version to update");
+            print.err("  add one under [toolchain] in capsule.toml or workspace.toml: version = \""
+                + report.entry_version
+                + "\"");
+            print.err("  update --project changes only that field; the sfn floor is never raised");
+            return 2;
+        }
+        current = decision.pin_version;
+        current_source = decision.version_source;
+        manifest_path = decision.version_path;
+        if manifest_path.length == 0 {
+            print.err("error: could not locate the manifest that declares [toolchain] version");
+            return 2;
+        }
+    } else {
+        let recorded = toolchain_user_default_read(host.triple);
+        if recorded.version.length == 0 && toolchain_user_default_corrupt() {
+            print.err("error: the per-user toolchain default is unreadable: "
+                + toolchain_user_default_path());
+            print.err("  re-record it with sfn toolchain default <version>");
+            return 2;
+        }
+        if channel_arg.length == 0 {
+            if recorded.track.length == 0 {
+                print.err("error: no update track is recorded for " + host.triple);
+                if recorded.version.length > 0 {
+                    print.err("  the default " + recorded.version
+                        + " was set by exact version, which records no track");
+                }
+                print.err("  choose a channel explicitly:");
+                print.err("    sfn toolchain update stable");
+                print.err("    sfn toolchain update rc");
+                print.err("    sfn toolchain update beta");
+                print.err("    sfn toolchain update alpha");
+                return 2;
+            }
+            channel = toolchain_channel_canonical(recorded.track);
+            if channel.length == 0 {
+                print.err("error: the recorded update track \"" + recorded.track
+                    + "\" is not a channel; re-record it with sfn toolchain update <channel>");
+                return 2;
+            }
+        }
+        if recorded.version.length > 0 {
+            current = recorded.version;
+            current_source = "user default";
+        } else {
+            current = report.entry_version;
+            current_source = "entry toolchain";
+        }
+    }
+
+    // The network gate runs before any staging or request, and after every
+    // local error above it: a refusal must never be preceded by a partial
+    // fetch attempt, and a local usage error must never be masked by a
+    // network refusal that would have fired anyway (SFEP-0073 §3.6).
+    let refusal = toolchain_network_refusal();
+    if refusal.length > 0 {
+        print.err("error: " + refusal);
+        return 2;
+    }
+    if strings_equal(env.get("SAILFIN_TOOLCHAIN"), "local") {
+        print.err("error: SAILFIN_TOOLCHAIN=local forbids fetching; unset it to check for or install updates");
+        return 2;
+    }
+
+    let index = toolchain_fetch_index(versions_base, _toolchain_work_root());
+    if toolchain_revocations_corrupt(versions_base) {
+        print.err("error: the local revocation ledger is unreadable; refusing to install");
+        print.err("  " + toolchain_revocations_path(versions_base));
+        print.err("  delete that file to re-fetch revocation state");
+        return 2;
+    }
+    let known = toolchain_revocations_read(versions_base);
+
+    let plan = toolchain_update_plan(index, known, channel, host.triple, current);
+    if !plan.ok {
+        print.err("error: " + plan.reason);
+        return 2;
+    }
+
+    let outcome = toolchain_policy_decide(index, known, current, host.triple, true);
+    let mut advisory: string = "";
+    if outcome.ok {
+        if outcome.advisories.length > 0 {
+            advisory = outcome.advisories[0];
+        }
+    } else { advisory = outcome.reason; }
+    if advisory.length > 0 {
+        if !as_json { print.err("warning: " + advisory); }
+    }
+
+    if check {
+        report.update_present = true;
+        report.update_policy = toolchain_update_policy_read();
+        report.update_channel = channel;
+        report.update_available = plan.available;
+        report.update_current = current;
+        report.update_candidate = plan.candidate;
+        report.update_advisory = advisory;
+        if as_json {
+            print(render_toolchains_json(report));
+            return 0;
+        }
+        print("channel:    " + channel);
+        print("current:    " + current + " (" + current_source + ")");
+        print("newest:     " + plan.head);
+        if plan.available {
+            let mut hint = "sfn toolchain update " + channel;
+            if project { hint = hint + " --project"; }
+            print("update:     available — " + hint);
+        } else {
+            print("update:     none (" + current + " is the newest " + channel
+                + " release)");
+        }
+        return 0;
+    }
+
+    if !plan.available {
+        print("sfn toolchain: " + current + " is up to date on " + channel
+            + " (newest: "
+            + plan.head
+            + ")");
+        return 0;
+    }
+
+    if project {
+        if !toolchain_selection_satisfies(decision, plan.candidate) {
+            print.err("error: " + plan.candidate
+                + " does not satisfy this project's [toolchain] constraints ("
+                + decision.pin_desc
+                + ")");
+            print.err("  update never raises the sfn floor or changes the channel field");
+            return 2;
+        }
+        let rc = toolchain_install_to_user_store(plan.candidate, versions_base, _toolchain_work_root(), false);
+        if rc != 0 {
+            print.err("error: install of " + plan.candidate + " failed; "
+                + manifest_path
+                + " is unchanged");
+            return 1;
+        }
+        let text = fs.readFile(manifest_path);
+        let rewritten = toolchain_manifest_set_version(text, plan.candidate);
+        if rewritten.length == 0 {
+            print.err("error: could not find the [toolchain] version field in "
+                + manifest_path
+                + "; it is unchanged");
+            return 2;
+        }
+        let tmp = _mktemp_sibling_cmd(manifest_path);
+        let mut write_ok = tmp.length > 0;
+        if write_ok {
+            fs.writeFile(tmp, rewritten);
+            if !fs.exists(tmp) {
+                fs.deleteFile(tmp);
+                write_ok = false;
+            } else {
+                write_ok = _atomic_rename_into_place(tmp, manifest_path);
+            }
+        }
+        if !write_ok {
+            print.err("error: failed to write " + manifest_path);
+            return 2;
+        }
+        print("updated " + manifest_path + ": [toolchain] version " + current
+            + " -> "
+            + plan.candidate);
+        print("  the sfn floor and channel fields are unchanged");
+        return 0;
+    }
+
+    let rc = toolchain_install_to_user_store(plan.candidate, versions_base, _toolchain_work_root(), false);
+    if rc != 0 {
+        print.err("error: install of " + plan.candidate
+            + " failed; the user default is unchanged");
+        return 1;
+    }
+    if !toolchain_user_default_write(host.triple, plan.candidate, channel) {
+        print.err("error: failed to write the per-user toolchain default: "
+            + toolchain_user_default_path());
+        return 2;
+    }
+    print("updated the per-user default toolchain for " + host.triple + ": "
+        + current
+        + " -> "
+        + plan.candidate);
+    print("  update track: " + channel);
     return 0;
 }
 

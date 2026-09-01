@@ -1,0 +1,84 @@
+// Schema-lock unit coverage for the `update` object in the
+// `sailfin-toolchains/1` envelope (`compiler/src/toolchain/inspect_json.sfn`,
+// SFEP-0073 §3.4, SFN-1071). `render_toolchains_json` is pure, so this exercises
+// it directly against struct literals rather than driving a subprocess — the
+// sibling e2e test (`toolchain_inspect_json_test.sfn`) still locks the rest of
+// the envelope and confirms `list`/`active`/`verify` keep emitting
+// `"update":null`.
+import { contains } from "sfn/strings";
+
+import {
+    TOOLCHAIN_INTEGRITY_VERIFIED,
+    ToolchainInspectReport,
+    ToolchainRequirement,
+    ToolchainSelection
+} from "../../src/toolchain/inspect";
+import { render_toolchains_json } from "../../src/toolchain/inspect_json";
+
+fn _base_report() -> ToolchainInspectReport {
+    let selection = ToolchainSelection {
+        version: "1.0.0",
+        path: "/entry/path",
+        source: "entry",
+        installed: true,
+        integrity: TOOLCHAIN_INTEGRITY_VERIFIED
+    };
+    let requirement = ToolchainRequirement {
+        minimum: "",
+        version: "",
+        channel: "",
+        source: ""
+    };
+    return ToolchainInspectReport {
+        operation: "update",
+        host: "x86_64-unknown-linux-gnu",
+        entry_version: "1.0.0",
+        entry_path: "/entry/path",
+        selection: selection,
+        requirement: requirement,
+        fetch_policy: "auto",
+        entries: [],
+        findings: [],
+        default_version: "",
+        default_track: "",
+        update_present: false,
+        update_policy: "",
+        update_channel: "",
+        update_available: false,
+        update_current: "",
+        update_candidate: "",
+        update_advisory: ""
+    };
+}
+
+test "toolchain inspect json: a populated update object renders every field between default and toolchains" {
+    let mut report = _base_report();
+    report.update_present = true;
+    report.update_policy = "notify";
+    report.update_channel = "stable";
+    report.update_available = true;
+    report.update_current = "0.10.6";
+    report.update_candidate = "0.10.7";
+    report.update_advisory = "";
+    let out = render_toolchains_json(report);
+    assert contains(out, "\"default\":null,\"update\":{\"policy\":\"notify\",\"channel\":\"stable\",\"available\":true,\"current\":\"0.10.6\",\"candidate\":\"0.10.7\",\"advisory\":null},\"toolchains\":");
+}
+
+test "toolchain inspect json: an unavailable update renders a null candidate" {
+    let mut report = _base_report();
+    report.update_present = true;
+    report.update_policy = "notify";
+    report.update_channel = "stable";
+    report.update_available = false;
+    report.update_current = "0.10.6";
+    report.update_candidate = "";
+    report.update_advisory = "";
+    let out = render_toolchains_json(report);
+    assert contains(out, "\"available\":false,\"current\":\"0.10.6\",\"candidate\":null");
+}
+
+test "toolchain inspect json: update_present false renders update as null" {
+    let report = _base_report();
+    let out = render_toolchains_json(report);
+    assert contains(out, "\"update\":null");
+}
