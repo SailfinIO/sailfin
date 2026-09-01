@@ -139,6 +139,11 @@ fn _plan_failure(channel: string, current: string, reason: string) -> ToolchainU
 // Failures here are policy/network failures (exit 2), never data: a channel
 // with no resolvable head cannot answer "is there an update".
 fn toolchain_update_plan(index: ToolchainIndex, known: ToolchainRevocationRecord[], channel: string, host_triple: string, current: string) -> ToolchainUpdatePlan {
+    // An index that was never obtained has no channels, and
+    // `toolchain_channel_refusal` would read that as "publishes no <channel>
+    // release" — blaming the publisher for an unreachable endpoint. The
+    // acquisition failure is the truthful reason, so it wins.
+    if !index.ok { return _plan_failure(channel, current, index.error); }
     let head = toolchain_channel_resolve(index, known, channel, host_triple);
     if head.length == 0 {
         return _plan_failure(channel, current, toolchain_channel_refusal(index, known, channel, host_triple));

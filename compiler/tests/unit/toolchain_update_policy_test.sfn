@@ -222,7 +222,9 @@ test "toolchain update: an unauthenticated index refuses" {
 
     let plan = toolchain_update_plan(index, _no_known(), "stable", HOST, "0.10.6");
     assert ! plan.ok;
-    assert plan.reason.length > 0;
+    // The acquisition failure must be the reason shown, not the "publishes no
+    // stable release" a channel lookup on an empty index would produce.
+    assert plan.reason == "the signed index expired at 2025-01-01T00:00:00Z";
 }
 
 test "toolchain manifest set version: rewrites only the toolchain version line" {
