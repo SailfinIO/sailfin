@@ -176,41 +176,37 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             index += 1;
             continue;
         }
+        // Angle brackets only delimit type arguments or marker text at the
+        // top level of the scan. Inside a parenthesized group they are shift
+        // or comparison operators (`(1 << n) - 1`), and counting them there
+        // leaves `angle_depth` unbalanced so the real top-level operator is
+        // never matched (SFN-670). Same gate as `parse_cast_expression`
+        // (SFN-560).
+        let nested = paren_depth > 0 || bracket_depth > 0 || brace_depth > 0;
         if ch == "<" {
-            angle_depth += 1;
+            if !nested { angle_depth += 1; }
             index += 1;
             continue;
         }
         if ch == ">" {
-            if angle_depth > 0 { angle_depth -= 1; }
+            if !nested && angle_depth > 0 { angle_depth -= 1; }
             index += 1;
             continue;
         }
-        if paren_depth == 0 {
-            if bracket_depth == 0 {
-                if brace_depth == 0 {
-                    if angle_depth == 0 {
-                        if contains_char(operators, ch) {
-                            if ch == "-" {
-                                if is_binary_minus(expression, index) {
-                                    candidate_index = index;
-                                    candidate_symbol = substring(expression, index, index
-                                        + 1);
-                                }
-                            } else if ch == "*" {
-                                if is_binary_star(expression, index) {
-                                    candidate_index = index;
-                                    candidate_symbol = substring(expression, index, index
-                                        + 1);
-                                }
-                            } else {
-                                candidate_index = index;
-                                candidate_symbol = substring(expression, index, index
-                                    + 1);
-                            }
-                        }
-                    }
+        if !nested && angle_depth == 0 && contains_char(operators, ch) {
+            if ch == "-" {
+                if is_binary_minus(expression, index) {
+                    candidate_index = index;
+                    candidate_symbol = substring(expression, index, index + 1);
                 }
+            } else if ch == "*" {
+                if is_binary_star(expression, index) {
+                    candidate_index = index;
+                    candidate_symbol = substring(expression, index, index + 1);
+                }
+            } else {
+                candidate_index = index;
+                candidate_symbol = substring(expression, index, index + 1);
             }
         }
         index += 1;
