@@ -25,6 +25,7 @@ import {
     sfn_bin_path
 } from "sfn/test";
 
+import { host_exe_name } from "../../src/build/target";
 import { toolchain_current_host } from "../../src/toolchain/host";
 import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
 
@@ -78,7 +79,9 @@ fn _neutral_cwd(label: string) -> string ![io] {
     return dir;
 }
 
-fn _stub_bin_path(dir: string) -> string { return dir + "/sailfin"; }
+fn _stub_bin_path(dir: string) -> string ![io] {
+    return host_exe_name(dir + "/sailfin");
+}
 
 // Seed a host-qualified store entry as "installed" without compiling
 // anything: `toolchain_store_ready` only checks that the binary path exists
