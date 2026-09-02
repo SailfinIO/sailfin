@@ -1,0 +1,73 @@
+// compiler/tests/unit/install_root_test.sfn
+//
+// Unit coverage for `compiler/src/install_root.sfn`, the shared
+// `sailfin-install-root` pointer lookup both runtime-root resolvers consult
+// (SFN-1124). The e2e `install_root_pointer_test.sfn` drives a copied
+// compiler through the pointer end-to-end; this file pins the helper's own
+// edge cases — the ones an installer never writes today but a hand-edited
+// or foreign-tool-written pointer could — without a binary copy per case.
+import { remove_all } from "sfn/fs";
+import { scratch_root } from "sfn/test";
+
+import { installed_payload_dir, installed_payload_dir_for_exe } from "../../src/install_root";
+
+fn _tmp_root(label: string) -> string ![io] {
+    let base = scratch_root();
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn_install_root_test_" + label + "_");
+}
+
+// A bin dir plus a version-store dir that owns `runtime/`; returns the
+// pair as `[bin, store]`.
+fn _store_layout(root: string) -> string[] ![io] {
+    let bin = root + "/bin";
+    let store = root + "/store";
+    fs.createDirectory(bin, true);
+    fs.createDirectory(store + "/runtime", true);
+    return [bin, store];
+}
+
+test "install root: no pointer file resolves to nothing" ![io] {
+    let root = _tmp_root("absent");
+    let paths = _store_layout(root);
+    assert installed_payload_dir(paths[0]) == "";
+    assert installed_payload_dir("") == "";
+    remove_all(root);
+}
+
+test "install root: an empty or whitespace-only pointer resolves to nothing" ![io] {
+    let root = _tmp_root("empty");
+    let paths = _store_layout(root);
+    fs.writeFile(paths[0] + "/sailfin-install-root", "");
+    assert installed_payload_dir(paths[0]) == "";
+    fs.writeFile(paths[0] + "/sailfin-install-root", " \n\t\n");
+    assert installed_payload_dir(paths[0]) == "";
+    remove_all(root);
+}
+
+test "install root: a pointer with a trailing newline is trimmed" ![io] {
+    let root = _tmp_root("trim");
+    let paths = _store_layout(root);
+    fs.writeFile(paths[0] + "/sailfin-install-root", paths[1] + "\n");
+    assert installed_payload_dir(paths[0]) == paths[1];
+    remove_all(root);
+}
+
+test "install root: a pointer to a dir without runtime/ is ignored" ![io] {
+    let root = _tmp_root("stale");
+    let paths = _store_layout(root);
+    let gone = root + "/removed-install";
+    fs.createDirectory(gone, true);
+    fs.writeFile(paths[0] + "/sailfin-install-root", gone);
+    assert installed_payload_dir(paths[0]) == "";
+    remove_all(root);
+}
+
+test "install root: the exe-anchored lookup derives the bin dir from the exe path" ![io] {
+    let root = _tmp_root("exe");
+    let paths = _store_layout(root);
+    fs.writeFile(paths[0] + "/sailfin-install-root", paths[1]);
+    assert installed_payload_dir_for_exe(paths[0] + "/sfn") == paths[1];
+    assert installed_payload_dir_for_exe("") == "";
+    remove_all(root);
+}

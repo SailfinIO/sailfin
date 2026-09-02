@@ -1,0 +1,185 @@
+// compiler/tests/e2e/install_root_pointer_test.sfn
+//
+// End-to-end regression for SFN-1124: an installed compiler whose exe is
+// COPIED (not symlinked) into the global bin dir loses its prelude globals.
+// `install.sh`/`install.ps1` normally symlink `sfn` into the version store;
+// when they cannot (NTFS without dev mode, `cp -f` fallback in `install.sh`)
+// they copy the exe and write `<bin_dir>/sailfin-install-root` holding the
+// absolute version-store root that owns `runtime/`. A copied exe reports the
+// bin dir as its own directory, so every exe-relative `runtime/` probe
+// misses. The CLI driver read the pointer; the analyzer's prelude-global
+// loader (`compiler/src/prelude_globals.sfn::_pg_find_runtime_dir`) did not,
+// so a bare prelude call failed `E0420` from an empty cwd. The fix routes
+// both resolvers through `compiler/src/install_root.sfn`; this test pins the
+// copied-exe + pointer layout end-to-end by driving the compiler under test
+// as a subprocess.
+//
+// Modeled on `dev_bootstrap_prefix_install_test.sfn` (run-installed-exe-from
+// -an-away-cwd shape) and `prelude_mirror_fallback_test.sfn` (prelude
+// free-function fixture).
+import { copy } from "sfn/fs";
+import { find, replace } from "sfn/strings";
+import { clean_runner_env_without, nested_runner_scratch, sfn_bin_abs_path } from "sfn/test";
+import { skip } from "sfn/test/skip";
+
+import { host_exe_name, host_is_windows } from "../../src/build/target";
+
+// macOS spells its temporary directory beneath `/var`, whose physical path
+// starts at `/private/var`; absolutizing the created store dir keeps the
+// pointer file's contents an unambiguous absolute path regardless of where
+// the scratch root lexically resolves. Mirrors `_physical_scratch` in
+// `dev_bootstrap_prefix_install_test.sfn`.
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+fn _abs(path: string) -> string ![io] {
+    if !fs.exists(path) && !fs.createDirectory(path, true) { return path; }
+    let resolved: *u8 = realpath(path as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    return path;
+}
+
+// Absolutized scratch root for `label`. Each test resolves it exactly once
+// and threads the result, so the pointer it writes and the layout it builds
+// can never name different directories.
+fn _root_path(label: string) -> string ![io] {
+    return _abs(nested_runner_scratch(label));
+}
+
+fn _fixture_src() -> string {
+    return "fn main() -> int ![io] {\n" + "    let s = char_from_code(104);\n"
+        + "    let code = char_code(s);\n"
+        + "    let c = char_at(\"hello\", 1);\n"
+        + "    let idx = find_char(\"hello\", \"l\", 0);\n"
+        + "    let sub = substring(\"hello\", 1, 3);\n"
+        + "    let g = grapheme_at(\"hello\", 0);\n"
+        + "    let n = grapheme_count(\"hello\");\n"
+        + "    let k = clamp(5, 0, 3);\n"
+        + "    print.info(c + sub + g + number_to_string(code + idx + n + k));\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Copy the repo's `runtime/` tree beneath `dst_runtime` with a small BFS,
+// mirroring `_pg_scan_sfn_tree`'s shape (queue of dirs, guard counter,
+// `fs.listDirectory` on a file returns empty so a non-empty listing means
+// "directory"). Tests run from the repo root, so the source is cwd-relative.
+fn _copy_runtime_tree(dst_runtime: string) ![io] {
+    assert fs.exists("runtime/prelude.sfn");
+    fs.createDirectory(dst_runtime, true);
+    let mut dir_queue: string[] = [""];
+    let mut head: int = 0;
+    let max_iters: int = 20000;
+    let mut iters: int = 0;
+    loop {
+        if head >= dir_queue.length { break; }
+        iters += 1;
+        if iters >= max_iters { break; }
+        let rel = dir_queue[head];
+        head += 1;
+        let src_dir = "runtime" + rel;
+        let dst_dir = dst_runtime + rel;
+        fs.createDirectory(dst_dir, true);
+        let entries = fs.listDirectory(src_dir);
+        let mut i: int = 0;
+        loop {
+            if i >= entries.length { break; }
+            let entry = entries[i];
+            i += 1;
+            let src_child = src_dir + "/" + entry;
+            let child_entries = fs.listDirectory(src_child);
+            if child_entries.length > 0 {
+                dir_queue.push(rel + "/" + entry);
+                continue;
+            }
+            copy(src_child, dst_dir + "/" + entry);
+        }
+    }
+}
+
+// Build the copied-exe + pointer layout under `root`. Writes the pointer
+// file only when `pointer` is non-empty, so a test can pin the no-pointer
+// control or a deliberately stale value.
+fn _layout(root: string, pointer: string) ![io] {
+    let gbin = root + "/gbin";
+    fs.createDirectory(gbin, true);
+    let exe = gbin + "/" + host_exe_name("sfn");
+    assert copy(sfn_bin_abs_path(), exe);
+    fs.set_perms(exe, 493);
+
+    let store = root + "/store/0.0.0-test";
+    _copy_runtime_tree(store + "/runtime");
+
+    let away = root + "/away";
+    fs.createDirectory(away, true);
+    fs.writeFile(away + "/probe.sfn", _fixture_src());
+
+    if pointer.length > 0 {
+        fs.writeFile(gbin + "/sailfin-install-root", pointer);
+    }
+}
+
+// Run the copied exe against `<root>/away/probe.sfn` with a clean, isolated
+// environment and no `SAILFIN_RUNTIME_ROOT` override (stripping it is
+// mandatory: the operator override would otherwise hide the bug). Leaves
+// stdout/stderr in the capture slots for the caller to take.
+fn _check(root: string) -> int ![io] {
+    let exe = root + "/gbin/" + host_exe_name("sfn");
+    let away = root + "/away";
+    let child_env = clean_runner_env_without(root, ["SAILFIN_RUNTIME_ROOT"]);
+    return process.run_capture_cwd([exe, "check", "probe.sfn"], child_env, away);
+}
+
+test "install root: copied exe + pointer resolves prelude globals from an empty cwd" ![io] {
+    let root = _root_path("install_root_pointer_ok");
+    _layout(root, root + "/store/0.0.0-test");
+
+    let rc = _check(root);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert rc == 0;
+    assert find(out + err, "E0420", 0) < 0;
+}
+
+test "install root: without the pointer a copied exe cannot see the prelude" ![io] {
+    let root = _root_path("install_root_pointer_missing");
+    _layout(root, "");
+
+    let rc = _check(root);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert rc != 0;
+    assert find(out + err, "E0420", 0) >= 0;
+    assert find(out + err, "char_code", 0) >= 0;
+}
+
+test "install root: a pointer to a dir without runtime/ is ignored" ![io] {
+    let root = _root_path("install_root_pointer_stale");
+    let empty_store = root + "/store/empty";
+    fs.createDirectory(empty_store, true);
+    _layout(root, empty_store);
+
+    let rc = _check(root);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert rc != 0;
+    assert find(out + err, "E0420", 0) >= 0;
+    assert find(out + err, "char_code", 0) >= 0;
+}
+
+test "install root: a backslash Windows pointer path resolves" ![io] {
+    if !host_is_windows() {
+        skip("pointer backslash form is the install.ps1 shape; Windows host only");
+    }
+    let root = _root_path("install_root_pointer_backslash");
+    _layout(root, replace(root + "/store/0.0.0-test", "/", "\\"));
+
+    let rc = _check(root);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert rc == 0;
+    assert find(out + err, "E0420", 0) < 0;
+}
