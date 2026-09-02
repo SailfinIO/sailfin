@@ -233,7 +233,8 @@ test "toolchain revocation: a signing-key revocation of the recorded manifest_ke
     let err = process.capture_take_stderr();
     assert exit != 0;
     assert ! contains(out + err, marker);
-    assert contains(err, "revoked key");
+    assert contains(err, "toolchain 999.0.0 was signed by revoked key ed25519:e2e-revoked-key");
+    assert contains(err, "will not be executed");
 }
 
 test "toolchain revocation: a signing-key revocation of a different key does not block dispatch" ![io] {

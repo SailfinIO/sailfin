@@ -284,9 +284,9 @@ fn _manifest_parse_header_lines(lines: string[]) -> ToolchainManifestHeader {
 
     // Unknown header keys are ignored, not errors — this is the
     // forward-compatibility seam SFEP-0073 §3.5 requires: "the
-    // install-manifest reader is the durable compatibility seam." (This is
-    // also exactly what `manifest_key_id` is (SFN-1203): an older reader
-    // ignores it, and a reader of an older manifest gets `""`.)
+    // install-manifest reader is the durable compatibility seam."
+    // `manifest_key_id` (SFN-1203) rides on that seam: an older reader
+    // ignores it, and a reader of an older manifest gets `""`.
     let mut management_protocol: int = -1;
     let mut version: string = "";
     let mut host: string = "";

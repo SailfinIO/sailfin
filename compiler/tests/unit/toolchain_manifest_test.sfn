@@ -160,6 +160,10 @@ test "toolchain manifest: a header without manifest_key_id parses with an empty 
     let parsed = toolchain_manifest_parse(text);
     assert parsed.status == TOOLCHAIN_MANIFEST_OK;
     assert parsed.meta.manifest_key_id == "";
+    // The execution gates read the header only, so the boundary must hold
+    // through that reader too.
+    assert toolchain_manifest_parse_header(text).meta.manifest_key_id == "";
+    _assert_header_agrees(text);
 }
 
 test "toolchain manifest: render omits manifest_key_id when nothing was recorded" {

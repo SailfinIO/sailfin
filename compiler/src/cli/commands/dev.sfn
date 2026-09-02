@@ -930,7 +930,11 @@ fn bootstrap_gate_or_dispatch(ctx: CliContext) -> int ![clock, io, net] {
         // `_bootstrap_store_ready` probes, so a `signing-key` revocation of
         // the seed's recorded key is caught offline too (SFN-1203). Anything
         // but OK contributes "" — an unreadable header is never presumed
-        // revoked, only a recorded key id is.
+        // revoked, only a recorded key id is. Today the index-exempt seed
+        // install (`toolchain_install_to_base`, SFEP-0047) records no key id,
+        // so this gate matches a seed by `release` records only; the key
+        // branch is the same shape as dispatch's so the three gates cannot
+        // drift, and it becomes live the day the seed path records one.
         let seed_store_dir = m.install_base + "/" + m.version;
         let header = toolchain_manifest_read_header(seed_store_dir);
         let mut manifest_key_id: string = "";
