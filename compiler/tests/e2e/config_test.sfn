@@ -34,8 +34,9 @@ fn _home(tag: string) -> string ![io] {
 }
 
 // Run `sfn <args...>` with HOME (+ PATH, + any extra env entries)
-// threaded to the child, returning the exit code and combined
-// stdout+stderr.
+// threaded to the child, returning the exit code and the two output
+// streams separately, so a test can assert which one a diagnostic
+// landed on (SFN-1244).
 fn _run(home: string, args: string[], extra_env: string[]) -> CfgRun ![io] {
     let mut e: string[] = ["HOME=" + home];
     let path = env.get("PATH");
@@ -173,15 +174,21 @@ test "config: invalid SFN_REGISTRY env falls back to default" ![io] {
     let home = _home("invalid_env");
     let r = _run(home, ["config", "get", "registry"], ["SFN_REGISTRY=not a url"]);
     assert find(r.out, "https://pkg.sfn.dev", 0) >= 0;
-    assert find(to_lower_all(r.out), "warning", 0) >= 0;
+    // The fallback warning is a diagnostic and rides stderr, so a caller
+    // parsing `config get registry` reads only the URL.
+    assert find(to_lower_all(r.err), "warning", 0) >= 0;
+    assert find(to_lower_all(r.out), "warning", 0) < 0;
 }
 
 // ---- Test 12: unknown subcommand rejected ----
 test "config: rejects unknown subcommand" ![io] {
     let home = _home("unknown_sub");
     let r = _run(home, ["config", "quantum", "registry"], []);
-    assert find(to_lower_all(r.err), "unknown subcommand", 0) >= 0;
-    assert find(to_lower_all(r.out), "unknown subcommand", 0) < 0;
+    // `config quantum registry` fails in `sfn/cli`'s parser, not in
+    // `config.sfn`, so `cli/main.sfn::_v2_help_or_usage` renders it on
+    // stdout. SFN-1244 moved only the command handlers' own diagnostics,
+    // so this one stays stream-agnostic.
+    assert find(to_lower_all(r.out + r.err), "unknown subcommand", 0) >= 0;
 }
 
 // ---- Test 13: ~/.sfn and config.toml have restrictive permissions ----
@@ -230,7 +237,8 @@ test "config: rejects an unknown toolchain.update-policy value" ![io] {
     let home = _home("policy_invalid");
     let s = _run(home, ["config", "set", "toolchain.update-policy", "sometimes"], []);
     assert s.exit == 1;
-    assert find(s.out, "notify, manual, disabled", 0) >= 0;
+    assert find(s.err, "notify, manual, disabled", 0) >= 0;
+    assert find(s.out, "notify, manual, disabled", 0) < 0;
     let r = _run(home, ["config", "get", "toolchain.update-policy"], []);
     assert find(r.out, "notify", 0) >= 0;
 }
@@ -277,5 +285,6 @@ test "config: unknown key names the known keys" ![io] {
     let home = _home("unknown_key_names");
     let r = _run(home, ["config", "get", "nope"], []);
     assert r.exit == 2;
-    assert find(r.out, "toolchain.update-policy", 0) >= 0;
+    assert find(r.err, "toolchain.update-policy", 0) >= 0;
+    assert find(r.out, "toolchain.update-policy", 0) < 0;
 }

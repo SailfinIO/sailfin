@@ -74,7 +74,8 @@ fn _age_cache_tree(path: string) -> int ![io] {
 
 // Run `sfn cache <args...>` with the scratch cache root threaded to the
 // child, derived by subtraction from the real environment (SFN-1114),
-// returning the exit code and combined output.
+// returning the exit code and the two output streams separately, so a
+// test can assert which one a diagnostic landed on (SFN-1244).
 fn _run_cache(cache_base: string, args: string[]) -> Run ![io] {
     let mut e = clean_runner_env_without("", ["SAILFIN_BUILD_CACHE_DIR"]);
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_base);
