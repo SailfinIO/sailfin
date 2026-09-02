@@ -549,6 +549,19 @@ to it.
   fail closed on a revocation ledger that exists but fails to parse — a
   ledger that will not parse is not the same as "nothing is revoked", and
   §3.7 requires revocation to hold with no network at all.
+  A `signing-key` revocation is honoured at execution time too: an install
+  records the index release's `manifest_key_id` in the install manifest, and
+  dispatch, management routing, and the bootstrap seed gate match it
+  offline through `index_cache.sfn::toolchain_payload_revocation_find`
+  (SFN-1203). An entry that recorded no key id — installed before SFN-1203,
+  or via the index-exempt bootstrap path — is matched by `release` records
+  only and is never presumed revoked. Note the limit of key-scoped
+  revocation today: `install.sfn` verifies `SHA256SUMS` against the pinned
+  `release_signing_public_key_hex()` root, not against the index's
+  `manifest_key_id`, so that field has no verification force and a key
+  revocation reaches exactly the releases the index attributes to that key
+  — making `manifest_key_id` load-bearing for verification is a separate,
+  larger change.
   `_management_known_revoked` (SFN-1067) now reads the ledger, retiring the
   empty stub that entry shipped with. Not shipped: default update tracks,
   `sfn toolchain update`, opportunistic update notification/scheduling,

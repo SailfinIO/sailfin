@@ -22,9 +22,12 @@
 //   1. a revoked pinned toolchain is refused at dispatch, never executed.
 //   2. an unrevoked toolchain still dispatches normally (the gate does not
 //      over-refuse).
-//   3. a `signing-key` revocation record alone does not block dispatch —
-//      the execution gate keys on `release` records only.
-//   4. a revoked payload is never a management-routing candidate; routing
+//   3. a `signing-key` revocation of the manifest's own recorded
+//      `manifest_key_id` refuses dispatch too, offline (SFN-1203); a
+//      revocation of a different key does not, and an entry with no
+//      recorded key id is never presumed revoked.
+//   4. a revoked payload — by `release` version or its manifest's recorded
+//      `manifest_key_id` — is never a management-routing candidate; routing
 //      falls through to the newest unrevoked one.
 //   5. a corrupt ledger refuses execution rather than reading as clean —
 //      "cannot tell" is not "nothing is revoked".
@@ -118,8 +121,10 @@ fn _seed_stub(store: string, ver: string, marker: string) -> void ![io] {
 
 // (Re-)derive and write an install manifest for whatever payload already
 // sits in `dir`, recording `TOOLCHAIN_MANAGEMENT_PROTOCOL` (this build's own
-// writing value) as the management protocol.
-fn _write_verified_manifest(dir: string, ver: string) -> void ![io] {
+// writing value) as the management protocol. `manifest_key_id` is the index
+// release's recorded signing key (SFN-1203); "" mirrors an entry installed
+// before that field existed, or via the index-exempt bootstrap path.
+fn _write_verified_manifest(dir: string, ver: string, manifest_key_id: string) -> void ![io] {
     let records = toolchain_build_records(dir);
     assert records.length > 0;
     let meta = ToolchainManifestMeta {
@@ -127,7 +132,8 @@ fn _write_verified_manifest(dir: string, ver: string) -> void ![io] {
         management_protocol: TOOLCHAIN_MANAGEMENT_PROTOCOL,
         version: ver,
         host: toolchain_current_host().triple,
-        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        manifest_key_id: manifest_key_id
     };
     assert toolchain_manifest_write(dir, meta, records);
 }
@@ -136,10 +142,10 @@ fn _write_verified_manifest(dir: string, ver: string) -> void ![io] {
 // exercises the SFEP-0073 §3.8 integrity gate every dispatch/management
 // candidate is verified against. Returns the host-qualified store entry
 // directory.
-fn _seed_stub_verified(store: string, ver: string, marker: string) -> string ![io] {
+fn _seed_stub_verified(store: string, ver: string, marker: string, manifest_key_id: string) -> string ![io] {
     _seed_stub(store, ver, marker);
     let dir = toolchain_version_dir(toolchain_host_store_base(store, toolchain_current_host().triple), ver);
-    _write_verified_manifest(dir, ver);
+    _write_verified_manifest(dir, ver, manifest_key_id);
     return dir;
 }
 
@@ -178,7 +184,7 @@ test "toolchain revocation: a revoked pinned toolchain is not executed" ![io] {
     let store = _scratch_root() + "/revoked-not-executed-store";
     let proj = _scratch_root() + "/revoked-not-executed-proj";
     let marker = "REVOCATION_NOT_EXECUTED_999_c31a";
-    _seed_stub_verified(store, "999.0.0", marker);
+    _seed_stub_verified(store, "999.0.0", marker, "");
     let src = _seed_project(proj, "999.0.0");
     _seed_revocation(store, "release", "999.0.0");
 
@@ -199,7 +205,7 @@ test "toolchain revocation: an unrevoked toolchain still dispatches" ![io] {
     let store = _scratch_root() + "/unrevoked-dispatches-store";
     let proj = _scratch_root() + "/unrevoked-dispatches-proj";
     let marker = "REVOCATION_UNREVOKED_DISPATCHES_999_c31a";
-    _seed_stub_verified(store, "999.0.0", marker);
+    _seed_stub_verified(store, "999.0.0", marker, "");
     let src = _seed_project(proj, "999.0.0");
     // The ledger names a DIFFERENT version — this pin's target is untouched.
     _seed_revocation(store, "release", "997.0.0");
@@ -213,23 +219,57 @@ test "toolchain revocation: an unrevoked toolchain still dispatches" ![io] {
     assert exit == 0;
 }
 
-test "toolchain revocation: a signing-key revocation does not block dispatch by itself" ![io] {
-    let store = _scratch_root() + "/signing-key-only-store";
-    let proj = _scratch_root() + "/signing-key-only-proj";
-    let marker = "REVOCATION_SIGNING_KEY_ONLY_999_c31a";
-    _seed_stub_verified(store, "999.0.0", marker);
+test "toolchain revocation: a signing-key revocation of the recorded manifest_key_id refuses dispatch" ![io] {
+    let store = _scratch_root() + "/signing-key-match-store";
+    let proj = _scratch_root() + "/signing-key-match-proj";
+    let marker = "REVOCATION_SIGNING_KEY_MATCH_999_c31a";
+    _seed_stub_verified(store, "999.0.0", marker, "ed25519:e2e-revoked-key");
     let src = _seed_project(proj, "999.0.0");
-    // `_dispatch_exec_target` (dispatch.sfn) calls
-    // `toolchain_revocation_find(revoked, "release", target)` only — a
-    // `signing-key` record's subject is a key id, never a version, so it can
-    // never match regardless of what string it holds.
-    _seed_revocation(store, "signing-key", "some-signing-key-id-e2e");
+    _seed_revocation(store, "signing-key", "ed25519:e2e-revoked-key");
 
     let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
         + store]));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    report_child_failure("toolchain-revocation signing-key-only run", exit, out, err);
+    assert exit != 0;
+    assert ! contains(out + err, marker);
+    assert contains(err, "revoked key");
+}
+
+test "toolchain revocation: a signing-key revocation of a different key does not block dispatch" ![io] {
+    let store = _scratch_root() + "/signing-key-mismatch-store";
+    let proj = _scratch_root() + "/signing-key-mismatch-proj";
+    let marker = "REVOCATION_SIGNING_KEY_MISMATCH_999_c31a";
+    _seed_stub_verified(store, "999.0.0", marker, "ed25519:e2e-other-key");
+    let src = _seed_project(proj, "999.0.0");
+    _seed_revocation(store, "signing-key", "ed25519:e2e-revoked-key");
+
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-revocation signing-key-mismatch run", exit, out, err);
+    assert contains(out + err, marker);
+    assert exit == 0;
+}
+
+// The SFN-1203 compatibility boundary: an entry installed before the
+// manifest recorded a key id (or via the index-exempt bootstrap path) must
+// keep running rather than being presumed revoked by a `signing-key` record
+// it has no key id to match against.
+test "toolchain revocation: an entry with no recorded manifest_key_id is not presumed revoked" ![io] {
+    let store = _scratch_root() + "/signing-key-no-recorded-key-store";
+    let proj = _scratch_root() + "/signing-key-no-recorded-key-proj";
+    let marker = "REVOCATION_SIGNING_KEY_NO_RECORDED_KEY_999_c31a";
+    _seed_stub_verified(store, "999.0.0", marker, "");
+    let src = _seed_project(proj, "999.0.0");
+    _seed_revocation(store, "signing-key", "ed25519:e2e-revoked-key");
+
+    let exit = process.run_capture([sfn_bin_path(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-revocation signing-key-no-recorded-key run", exit, out, err);
     assert contains(out + err, marker);
     assert exit == 0;
 }
@@ -239,8 +279,8 @@ test "toolchain revocation: a revoked payload is never a management candidate" !
     let proj = _scratch_root() + "/management-excludes-revoked-proj";
     let marker_a = "REVOCATION_MANAGEMENT_UNREVOKED_998_c31a";
     let marker_b = "REVOCATION_MANAGEMENT_REVOKED_999_c31a";
-    _seed_stub_verified(store, "998.0.0", marker_a);
-    _seed_stub_verified(store, "999.0.0", marker_b);
+    _seed_stub_verified(store, "998.0.0", marker_a, "");
+    _seed_stub_verified(store, "999.0.0", marker_b, "");
     _seed_project(proj, "0.0.1");
     // Without the revocation, `toolchain_management_survey`
     // (management.sfn) would route to 999.0.0 as the newest candidate — see
@@ -253,6 +293,26 @@ test "toolchain revocation: a revoked payload is never a management candidate" !
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("toolchain-revocation management-excludes-revoked run", exit, out, err);
+    assert exit == 0;
+    assert contains(out + err, marker_a);
+    assert ! contains(out + err, marker_b);
+}
+
+test "toolchain revocation: a payload signed by a revoked key is never a management candidate" ![io] {
+    let store = _scratch_root() + "/management-excludes-revoked-key-store";
+    let proj = _scratch_root() + "/management-excludes-revoked-key-proj";
+    let marker_a = "REVOCATION_MANAGEMENT_KEY_OK_998_c31a";
+    let marker_b = "REVOCATION_MANAGEMENT_KEY_REVOKED_999_c31a";
+    _seed_stub_verified(store, "998.0.0", marker_a, "ed25519:e2e-ok-key");
+    _seed_stub_verified(store, "999.0.0", marker_b, "ed25519:e2e-revoked-key");
+    _seed_project(proj, "0.0.1");
+    _seed_revocation(store, "signing-key", "ed25519:e2e-revoked-key");
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "list"], _env_with(["INSTALL_BASE="
+        + store]), proj);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("toolchain-revocation management-excludes-revoked-key run", exit, out, err);
     assert exit == 0;
     assert contains(out + err, marker_a);
     assert ! contains(out + err, marker_b);
@@ -273,7 +333,7 @@ test "toolchain revocation: a corrupt ledger refuses execution" ![io] {
     let store = _scratch_root() + "/corrupt-ledger-store";
     let proj = _scratch_root() + "/corrupt-ledger-proj";
     let marker = "REVOCATION_CORRUPT_LEDGER_999_c31a";
-    _seed_stub_verified(store, "999.0.0", marker);
+    _seed_stub_verified(store, "999.0.0", marker, "");
     let src = _seed_project(proj, "999.0.0");
 
     let dir = toolchain_index_cache_dir(store);
