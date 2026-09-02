@@ -2,7 +2,12 @@
 import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
-import { find_local_binding, find_parameter_binding } from "../../expressions_bindings";
+import {
+    find_local_binding,
+    find_parameter_binding,
+    resolve_subject_call_annotation,
+    resolve_subject_type_annotation
+} from "../../expressions_bindings";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { trace_log } from "../../lowering_debug_state";
 import {
@@ -51,7 +56,13 @@ import {
     trim_text
 } from "../../utils";
 import { lower_expression } from "./core";
-import { lower_inline_gep_field_access } from "./core_member_helpers";
+import {
+    boxed_generic_enum_info,
+    enum_payload_inst_args,
+    generic_payload_load_slot_type,
+    lower_inline_gep_field_access,
+    resolve_generic_payload_field
+} from "./core_member_helpers";
 import {
     RuntimeCallOverrides,
     emit_runtime_call,
@@ -214,7 +225,7 @@ fn _enum_field_conflict_diag(enum_name: string, field: string, variants: EnumVar
         + "`, or rename the field in one variant";
 }
 
-fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: int, lines: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[], expected_type: string, narrowed_variant: string) -> ExpressionResult {
+fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: int, lines: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[], expected_type: string, narrowed_variant: string, subject_type_annotation: string) -> ExpressionResult {
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
     let mut enum_string_constants: StringConstant[] = string_constants;
@@ -335,6 +346,9 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         return make_expression_result(current_lines, current_temp, operand, messages_diags, enum_string_constants);
     }
 
+    // SFN-772: substitute generic payload types against the base's
+    // instantiation, as the match reader does (`core_member_helpers.sfn`).
+    let subject_inst_args = enum_payload_inst_args(enum_info, subject_type_annotation);
     let mut matched_variants: EnumVariantInfo[] = [];
     let mut matched_fields: StructFieldInfo[] = [];
     let mut variant_check_index: int = 0;
@@ -343,7 +357,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         let candidate_variant = enum_info.variants[variant_check_index];
         let candidate_field = find_variant_field_info(candidate_variant, parse.field);
         if candidate_field != null {
-            let mut resolved_field = candidate_field;
+            let mut resolved_field = resolve_generic_payload_field(candidate_field, enum_info, subject_inst_args);
             if resolved_field.llvm_type.length == 0 {
                 let mut mapped = map_type_annotation(resolved_field.type_annotation);
                 if mapped == "void" { mapped = ""; }
@@ -733,21 +747,42 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             + " to ptr");
         current_temp += 1;
 
+        // SFN-771/SFN-772: the slot holds the constructor's boxing decision,
+        // `storage_type` is the form consumers want; a second load unboxes
+        // when they differ (`generic_payload_load_slot_type`).
+        let mut slot_type: string = storage_type;
+        if subject_inst_args.length > 0 {
+            slot_type = generic_payload_load_slot_type(storage_type, field_info.type_annotation, find_variant_field_info(variant_info, parse.field));
+        }
         let mut value_temp: string = typed_ptr_temp;
+        let mut loaded: boolean = false;
         if pointer_coercion {
-            if ends_with_pointer_suffix(storage_type) {
+            if ends_with_pointer_suffix(slot_type) {
                 value_temp = format_temp_name(current_temp);
-                current_lines.push("  " + value_temp + " = load " + storage_type
+                current_lines.push("  " + value_temp + " = load " + slot_type
                     + ", ptr "
                     + typed_ptr_temp);
                 current_temp += 1;
+                loaded = true;
             }
         } else {
             value_temp = format_temp_name(current_temp);
-            current_lines.push("  " + value_temp + " = load " + storage_type
+            current_lines.push("  " + value_temp + " = load " + slot_type
                 + ", ptr "
                 + typed_ptr_temp);
             current_temp += 1;
+            loaded = true;
+        }
+        if loaded {
+            if slot_type != storage_type {
+                let unboxed_temp = format_temp_name(current_temp);
+                current_lines.push("  " + unboxed_temp + " = load "
+                    + storage_type
+                    + ", ptr "
+                    + value_temp);
+                current_temp += 1;
+                value_temp = unboxed_temp;
+            }
         }
 
         let compare_temp = format_temp_name(current_temp);
@@ -781,6 +816,26 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     return make_expression_result(current_lines, current_temp, operand, messages_diags, enum_string_constants);
 }
 
+// SFN-772: route an `i8*` base that is a boxed generic enum instantiation
+// into the enum payload reader (see `boxed_generic_enum_info`). Null when the
+// base is not one, so the caller falls through to the struct/dynamic paths.
+fn _lower_boxed_generic_enum_member(parse: MemberAccessParse, base_operand: LLVMOperand, base_type_annotation: string, narrowed_variant: string, temp_index: int, lines: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[], context: TypeContext, expected_type: string) -> ExpressionResult? {
+    let enum_info = boxed_generic_enum_info(context, base_type_annotation);
+    if enum_info == null { return null; }
+    let mut current_lines: string[] = lines;
+    let enum_ptr_temp = format_temp_name(temp_index);
+    current_lines.push("  " + enum_ptr_temp + " = bitcast i8* " + base_operand.value
+        + " to "
+        + enum_info.llvm_name
+        + "*");
+    let enum_operand = LLVMOperand {
+        llvm_type: enum_info.llvm_name + "*",
+        value: enum_ptr_temp
+    };
+    return lower_enum_member_access(parse, enum_info, enum_operand, true, temp_index
+        + 1, current_lines, diags, string_constants, expected_type, narrowed_variant, base_type_annotation);
+}
+
 fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diags = base_result.diags;
@@ -798,6 +853,15 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     let mut current_lines: string[] = base_result.lines;
     let mut current_temp: int = base_result.temp_index;
     let base_operand = base_result.operand;
+    // SFN-772: the base's declared instantiation (`Result<P, string>`), so a
+    // generic enum payload read resolves the concrete type the match reader
+    // resolves. Recovered from the tracked local/parameter, else from a
+    // direct call's declared generic return type; "" otherwise.
+    let base_name = trim_text(parse.base);
+    let mut base_type_annotation = resolve_subject_type_annotation(base_name, bindings, locals);
+    if base_type_annotation.length == 0 {
+        base_type_annotation = resolve_subject_call_annotation(base_name, functions);
+    }
 
     // Flow-sensitive variant narrowing (see `lower_enum_member_access`):
     // if the base is a simple local guarded by `if <base>.variant == "<V>"`,
@@ -928,9 +992,11 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
         if struct_info == null {
             let enum_info_candidate = find_enum_info_by_llvm_type(context, candidate);
             if enum_info_candidate != null {
-                return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diags, collected_string_constants, expected_type, base_narrowed_variant);
+                return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diags, collected_string_constants, expected_type, base_narrowed_variant, base_type_annotation);
             }
             if base_type_trimmed == "i8*" {
+                let boxed_enum_result = _lower_boxed_generic_enum_member(parse, base_operand, base_type_annotation, base_narrowed_variant, current_temp, current_lines, diags, collected_string_constants, context, expected_type);
+                if boxed_enum_result != null { return boxed_enum_result; }
                 let _igep_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diags, collected_string_constants, context);
                 if _igep_result != null { return _igep_result; }
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diags, collected_string_constants);
@@ -957,9 +1023,11 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
         if struct_info == null {
             let enum_info_candidate = find_enum_info_by_llvm_type(context, base_type_trimmed);
             if enum_info_candidate != null {
-                return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diags, collected_string_constants, expected_type, base_narrowed_variant);
+                return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diags, collected_string_constants, expected_type, base_narrowed_variant, base_type_annotation);
             }
             if base_type_trimmed == "i8*" {
+                let boxed_enum2_result = _lower_boxed_generic_enum_member(parse, base_operand, base_type_annotation, base_narrowed_variant, current_temp, current_lines, diags, collected_string_constants, context, expected_type);
+                if boxed_enum2_result != null { return boxed_enum2_result; }
                 let _igep2_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diags, collected_string_constants, context);
                 if _igep2_result != null { return _igep2_result; }
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diags, collected_string_constants);

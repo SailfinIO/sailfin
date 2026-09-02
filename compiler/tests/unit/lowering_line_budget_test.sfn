@@ -78,7 +78,9 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     // a `load {i8*, i8*}` against an 8-byte slot, which segfaults. The
     // payload-binder block this sits in is still the obvious extraction, and
     // taking it would let the ceiling shrink instead.
-    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 923; }
+    // 923 -> 850: SFN-772 moves the subject-annotation resolvers to
+    // `expressions_bindings.sfn` so the member-access reader shares them.
+    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 850; }
     if path == LOWERING_ROOT + "/instructions.sfn" { return 779; }
     if path == LOWERING_ROOT + "/instructions_helpers.sfn" { return 849; }
     // SFN-916 raises `instructions_if.sfn` 784 -> 785. Retiring the legacy

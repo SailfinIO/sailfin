@@ -1,0 +1,114 @@
+// Regression test: reading a generic enum payload through direct member
+// access (`r.value`) must resolve the same concrete payload type the
+// `match` arm does.
+//
+// Background (SFN-772): `Result<T, E>` is generic, so the constructor boxes
+// a struct payload and stores the `%P*` heap pointer in the variant slot
+// (0.5.8+ boxed aggregate ABI). The `match` reader in
+// `compiler/capsules/codegen-llvm/src/lowering/instructions_match_condition.sfn`
+// substitutes `T -> P` against the subject's instantiation annotation before
+// mapping the slot type, so it loads a `%P*`. The member-access reader in
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_member_lowering.sfn`
+// performed no substitution at all and read the slot as the type-erased
+// `%T`, so `r.value` on a `Result<P, string>` yielded garbage (or failed to
+// lower). This file pins the member-access read against every subject shape
+// the match reader already recovers: a typed local, a parameter, and a
+// direct call of a function returning the generic instantiation.
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
+struct P {
+    ok: boolean;
+    error: string;
+    depth: int;
+}
+
+fn make_p() -> P {
+    return P { ok: true, error: "", depth: 3 };
+}
+
+fn w_ok() -> Result<P, string> {
+    return Result.Ok { value: make_p() };
+}
+
+fn read_param(r: Result<P, string>) -> int {
+    let p: P = r.value;
+    return p.depth;
+}
+
+enum Wrapped<T> {
+    Some { item: T, label: string },
+    None { }
+}
+
+fn w_user_generic() -> Wrapped<P> {
+    let p: P = make_p();
+    return Wrapped.Some { item: p, label: "wrapped" };
+}
+
+fn w_err() -> Result<P, string> {
+    return Result.Err { error: "boom" };
+}
+
+fn apply(f: fn (int) -> int, x: int) -> int { return f(x); }
+
+fn w_closure(c: int) -> Wrapped<fn (int) -> int> {
+    return Wrapped.Some {
+        item: fn (x: int) -> int { return x + c; },
+        label: "closure"
+    };
+}
+
+test "enum payload: member access on a typed local reads the concrete struct" {
+    let r: Result<P, string> = w_ok();
+    let p: P = r.value;
+    assert expect_eq_int(p.depth, 3).ok;
+    assert expect_eq_bool(p.ok, true).ok;
+    assert expect_eq_int(p.error.length, 0).ok;
+}
+
+test "enum payload: member access on a parameter reads the concrete struct" {
+    assert expect_eq_int(read_param(w_ok()), 3).ok;
+}
+
+test "enum payload: member access chained through the payload field" {
+    let r: Result<P, string> = w_ok();
+    assert expect_eq_int(r.value.depth, 3).ok;
+    assert expect_eq_bool(r.value.ok, true).ok;
+}
+
+test "enum payload: member access on a user-declared generic enum" {
+    let w: Wrapped<P> = w_user_generic();
+    let p: P = w.item;
+    assert expect_eq_int(p.depth, 3).ok;
+    assert expect_eq_bool(p.ok, true).ok;
+}
+
+test "enum payload: member access on a direct call base reads the concrete struct" {
+    let p: P = w_ok().value;
+    assert expect_eq_int(p.depth, 3).ok;
+    assert expect_eq_int(w_ok().value.depth, 3).ok;
+}
+
+test "enum payload: non-generic field beside a generic payload reads unchanged" {
+    let w: Wrapped<P> = w_user_generic();
+    let label: string = w.label;
+    assert expect_eq_int(label.length, 7).ok;
+}
+
+test "enum payload: member access on the Err side reads the string payload" {
+    let r: Result<P, string> = w_err();
+    let e: string = r.error;
+    assert expect_eq_int(e.length, 4).ok;
+}
+
+test "enum payload: closure payload unboxes through member access" {
+    let w: Wrapped<fn (int) -> int> = w_closure(10);
+    let f: fn (int) -> int = w.item;
+    assert expect_eq_int(apply(f, 5), 15).ok;
+}
+
+test "enum payload: scalar generic payload still reads through member access" {
+    let r: Result<int, string> = Result.Ok { value: 42 };
+    let v: int = r.value;
+    assert expect_eq_int(v, 42).ok;
+}

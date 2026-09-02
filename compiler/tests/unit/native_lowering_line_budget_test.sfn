@@ -84,7 +84,14 @@ fn _grandfathered_ceiling(name: string) -> int {
     // per the note above. 1389 -> 1376: SFN-771 routes the writer's
     // slot-type adoption through the shared predicate.
     if name == "core_literals_lowering.sfn" { return 1376; }
-    if name == "core_member_lowering.sfn" { return 1186; }
+    // 1186 -> 1254: SFN-772, a raise against the shrink-only rule, called
+    // out for review. Direct member access on a boxed generic enum
+    // instantiation (`Result<P, string>` lowers as `i8*`) is routed into
+    // the enum payload reader instead of the dynamic field lookup, the
+    // reader threads the base's instantiation through its variant scan and
+    // slot load, and the call frames widen by one parameter. The
+    // substitution itself lives in `core_member_helpers.sfn`.
+    if name == "core_member_lowering.sfn" { return 1254; }
     if name == "core_parse.sfn" { return 1059; }
     if name == "core_parsing.sfn" { return 959; }
     if name == "statement.sfn" { return 845; }
