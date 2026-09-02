@@ -28,6 +28,17 @@
 // `openssl` is missing (no TLS peer / cert gen). CI runners (Linux +
 // coreutils + libssl) have it.
 //
+// Fixed loopback ports owned by this file: 18796, 18797, 18903, 18904.
+// Non-contiguous because the two reason-guard legs (SFN-816 / SFN-822)
+// moved off 18798/18799 in SFN-854 — `toolchain_install_test.sfn:226,312`
+// binds those with `python3 -m http.server`, and two tests sharing a fixed
+// port is a pool-only collision (`.claude/rules/no-bash-e2e.md`, incident
+// #1862). The claim is recorded here because its absence is what caused
+// that collision: this file took two further ports without declaring them,
+// and the surveys the sibling e2es maintain
+// (`tls_large_body_test.sfn`, `socket_ops_timeout_readback_test.sfn`) are
+// re-derived by grepping, so an unrecorded claim is an invisible one.
+//
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured state with
 // direct comparisons instead.
