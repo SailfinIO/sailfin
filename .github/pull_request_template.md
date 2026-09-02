@@ -61,5 +61,8 @@ maintainer sweep, not by this PR. -->
 
 ## Notes for reviewers
 
-<!-- Risk areas, deferred follow-ups (file a Linear issue and cite it —
-no bare TODO), or anything the diff doesn't make obvious. -->
+<!-- Risk areas, deferred follow-ups, or anything the diff doesn't make
+obvious. A follow-up is a new Linear issue only if it clears
+.claude/rules/follow-up-filing.md (reproduced defect, Urgent/High, or hard
+prerequisite) — then it lands in Backlog, never Triage. Everything else is a
+`Noticed in passing` comment on the issue this PR works. No bare TODO. -->
