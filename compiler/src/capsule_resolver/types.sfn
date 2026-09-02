@@ -116,7 +116,10 @@ struct ResolverConsumer {
     // `sfn test` consumers; `build`/`run`/`check` leave it off, since a
     // dev-dep reaching a library or binary build would re-inflate the link set
     // SFEP-0070 narrowed. Never transitive: a staged dep's own
-    // `[dev-dependencies]` are not walked regardless of this flag.
+    // `[dev-dependencies]` are not walked regardless of this flag. The merge
+    // reaches only the source worklist — `manifest_dep_specs` stays
+    // `[dependencies]`-only by construction, so a `kind = "runtime"` capsule
+    // named under `[dev-dependencies]` is dropped rather than enumerated.
     include_dev_dependencies: boolean;
 }
 

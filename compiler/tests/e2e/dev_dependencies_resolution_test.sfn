@@ -144,7 +144,6 @@ test "dev-dependencies: a build target does not see a dev-dependency" ![io] {
         // a library/binary build would re-inflate the link set SFEP-0070
         // narrowed.
         fs.createDirectory(root + "/app/src", true);
-        _write_app_manifest(root + "/app", "", "\"demo/lib\" = \"*\"\n");
         _write_provider(root + "/app/capsules/demo/lib", "demo/lib", "41");
         fs.writeFile(root + "/app/src/main.sfn", "import { lib_value } from "
             + "\"demo/lib\";\n\n"
@@ -152,6 +151,21 @@ test "dev-dependencies: a build target does not see a dev-dependency" ![io] {
             + "    return lib_value() - 41;\n"
             + "}\n");
 
+        // Positive control: the identical layout with `demo/lib` under
+        // `[dependencies]` must build and produce an artifact. Without it,
+        // any unrelated build failure would satisfy the negative below.
+        _write_app_manifest(root + "/app", "\"demo/lib\" = \"*\"\n", "");
+        let control_out = root + "/control-out";
+        let control_exit = process.run_capture([sfn_bin_path(), "build", "-o", control_out, root
+            + "/app/src/main.sfn"], _build_env("sfn-988-build-control"));
+        let control_text = process.capture_take_stdout() + process.capture_take_stderr();
+        if control_exit != 0 || !fs.exists(control_out) {
+            _log_failure("build-control", control_text);
+            return 2;
+        }
+
+        // Now the same manifest with the sections swapped.
+        _write_app_manifest(root + "/app", "", "\"demo/lib\" = \"*\"\n");
         let output = root + "/app-out";
         let exit = process.run_capture([sfn_bin_path(), "build", "-o", output, root
             + "/app/src/main.sfn"], _build_env("sfn-988-build"));

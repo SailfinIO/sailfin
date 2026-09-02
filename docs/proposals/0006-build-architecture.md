@@ -847,7 +847,8 @@ Resolution algorithm:
 3. Look up `scope/name` in the resolved dep graph:
    - Workspace members (always available).
    - `[dependencies]` / `[dev-dependencies]` from the current capsule's
-     manifest, pinned by `capsule.lock`.
+     manifest, pinned by `capsule.lock` (`[dev-dependencies]` only for the
+     root manifest of a test target — §4.6).
    - Resolution sources: local workspace, user cache
      (`~/.sfn/cache/capsules/...`), registry.
 4. If `rest` is empty, load the dep's `[build].entry`. If `rest` is
@@ -889,7 +890,9 @@ override this by putting a `workspace.toml` in their project.
     dependencies were tested with ten dev-deps or none.
   Lockfile precedence is identical to `[dependencies]`: `sfn add --dev` pins
   the entry in `capsule.lock`, and `workspace.lock → capsule.lock →
-  capsule.toml range` applies unchanged.
+  capsule.toml range` applies unchanged. Known consequence: `sfn check` is
+  not a test target, so a test file importing a dev-only dep reports E0430
+  under `sfn check` while resolving under `sfn test` (SFN-1240).
 - The executor's link phase produces a test binary per test file (or a
   single combined binary if `[test].bundle = true`). The test runner is
   itself a capsule (`sfn/test` today) that the driver depends on.
