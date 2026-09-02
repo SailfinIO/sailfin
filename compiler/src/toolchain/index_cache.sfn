@@ -383,6 +383,22 @@ fn toolchain_revocation_find(records: ToolchainRevocationRecord[], kind: string,
     return -1;
 }
 
+// The execution-gate question: is this stored payload — identified by its
+// version and the `manifest_key_id` its install manifest recorded — covered by
+// any accepted revocation? Mirrors `channel.sfn::toolchain_release_is_revoked`,
+// which answers the same question at install time from the signed index; here
+// the key id comes from disk so the answer holds with no network (SFEP-0073
+// §3.7, SFN-1203). An empty `manifest_key_id` means the entry recorded none
+// (installed before SFN-1203, or via the index-exempt bootstrap path) and can
+// only be matched by a `release` record: an entry is never presumed revoked
+// for lacking a key id. Returns the matching record's index, or -1.
+fn toolchain_payload_revocation_find(records: ToolchainRevocationRecord[], version: string, manifest_key_id: string) -> int {
+    let at = toolchain_revocation_find(records, "release", version);
+    if at >= 0 { return at; }
+    if manifest_key_id.length == 0 { return -1; }
+    return toolchain_revocation_find(records, "signing-key", manifest_key_id);
+}
+
 // Append-only and monotonic: an identity already on disk keyed on
 // `(kind, subject)` is never removed and never rewritten, even when
 // `incoming` carries the same identity with a different `reason`,
@@ -444,6 +460,7 @@ export {
     toolchain_index_cache_read_payload,
     toolchain_index_cache_read_signature,
     toolchain_index_cache_store,
+    toolchain_payload_revocation_find,
     toolchain_revocation_find,
     toolchain_revocations_corrupt,
     toolchain_revocations_merge,

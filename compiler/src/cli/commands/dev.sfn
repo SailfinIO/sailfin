@@ -93,11 +93,12 @@ import {
     substring
 } from "../../string_utils";
 import {
-    toolchain_revocation_find,
+    toolchain_payload_revocation_find,
     toolchain_revocations_corrupt,
     toolchain_revocations_path,
     toolchain_revocations_read
 } from "../../toolchain/index_cache";
+import { TOOLCHAIN_MANIFEST_OK, toolchain_manifest_read_header } from "../../toolchain/manifest";
 import { toolchain_versions_base } from "../../toolchain/store";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
@@ -925,9 +926,32 @@ fn bootstrap_gate_or_dispatch(ctx: CliContext) -> int ![clock, io, net] {
             return 1;
         }
         let ledger = toolchain_revocations_read(ledger_base);
-        if toolchain_revocation_find(ledger, "release", m.version) >= 0 {
-            print.err("error: the pinned bootstrap seed " + m.version
-                + " is revoked and will not be executed");
+        // Read the flat store dir's manifest header, the same layout
+        // `_bootstrap_store_ready` probes, so a `signing-key` revocation of
+        // the seed's recorded key is caught offline too (SFN-1203). Anything
+        // but OK contributes "" — an unreadable header is never presumed
+        // revoked, only a recorded key id is. Today the index-exempt seed
+        // install (`toolchain_install_to_base`, SFEP-0047) records no key id,
+        // so this gate matches a seed by `release` records only; the key
+        // branch is the same shape as dispatch's so the three gates cannot
+        // drift, and it becomes live the day the seed path records one.
+        let seed_store_dir = m.install_base + "/" + m.version;
+        let header = toolchain_manifest_read_header(seed_store_dir);
+        let mut manifest_key_id: string = "";
+        if header.status == TOOLCHAIN_MANIFEST_OK {
+            manifest_key_id = header.meta.manifest_key_id;
+        }
+        let revoked_at = toolchain_payload_revocation_find(ledger, m.version, manifest_key_id);
+        if revoked_at >= 0 {
+            if ledger[revoked_at].kind == "signing-key" {
+                print.err("error: the pinned bootstrap seed " + m.version
+                    + " was signed by revoked key "
+                    + ledger[revoked_at].subject
+                    + " and will not be executed");
+            } else {
+                print.err("error: the pinned bootstrap seed " + m.version
+                    + " is revoked and will not be executed");
+            }
             print.err("  revocation has no override; pin a different seed in bootstrap.toml");
             return 1;
         }

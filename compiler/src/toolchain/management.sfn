@@ -23,7 +23,11 @@ import {
 import { starts_with, strings_equal } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import { ToolchainHostIdentity, toolchain_current_host } from "./host";
-import { toolchain_revocations_corrupt, toolchain_revocations_read } from "./index_cache";
+import {
+    toolchain_payload_revocation_find,
+    toolchain_revocations_corrupt,
+    toolchain_revocations_read
+} from "./index_cache";
 import { toolchain_is_valid_install_version } from "./install";
 import { toolchain_verify_executable } from "./integrity";
 import {
@@ -70,6 +74,7 @@ struct ToolchainManagementCandidate {
     dir: string;
     binary: string;
     protocol: int;
+    manifest_key_id: string;
 }
 
 // The store as management routing sees it. `compatible` is newest-first, so
@@ -90,26 +95,9 @@ fn _management_none() -> ToolchainManagementCandidate {
         host: "",
         dir: "",
         binary: "",
-        protocol: 0
+        protocol: 0,
+        manifest_key_id: ""
     };
-}
-
-// Versions the local revocation ledger knows to be revoked (SFEP-0073 §3.7).
-// Read from disk rather than the network: routing must exclude a revoked
-// payload offline too, and the ledger is monotonic so a later index cannot
-// un-revoke one.
-fn _management_known_revoked(versions_base: string) -> string[] ![io] {
-    let records = toolchain_revocations_read(versions_base);
-    let mut out: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= records.length { break; }
-        if strings_equal(records[i].kind, "release") {
-            out.push(records[i].subject);
-        }
-        i += 1;
-    }
-    return out;
 }
 
 fn _management_contains(items: string[], value: string) -> boolean {
@@ -177,6 +165,7 @@ fn _management_candidate(base: string, host_triple: string, version: string) -> 
     out.ok = true;
     out.binary = toolchain_binary_path(dir);
     out.protocol = manifest.meta.management_protocol;
+    out.manifest_key_id = manifest.meta.manifest_key_id;
     return out;
 }
 
@@ -219,7 +208,7 @@ fn toolchain_management_survey(versions_base: string, host: ToolchainHostIdentit
     let mut compatible: ToolchainManagementCandidate[] = [];
     let mut blocked = _management_none();
     let mut seen: string[] = [];
-    let revoked = _management_known_revoked(versions_base);
+    let ledger = toolchain_revocations_read(versions_base);
     let triples = _management_host_triples(host);
 
     let mut t: int = 0;
@@ -236,30 +225,31 @@ fn toolchain_management_survey(versions_base: string, host: ToolchainHostIdentit
             // matching per-version store resolution.
             if !_management_contains(seen, version) {
                 seen.push(version);
-                if !_management_contains(revoked, version) {
-                    let candidate = _management_candidate(base, triple, version);
-                    if candidate.ok {
-                        if candidate.protocol > TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX {
-                            // The header-only survey (SFN-1201) cannot see a
-                            // corrupt record section, and unlike a compatible
-                            // candidate this one is never handed to
-                            // `toolchain_verify_executable` — it is reported,
-                            // not executed. Admitting it on the header alone
-                            // would refuse every management leaf over a
-                            // payload that is merely corrupt, with upgrade
-                            // guidance for what is a reinstall problem. So
-                            // pay one full read here, on the outranged
-                            // entries only; a store normally has none.
-                            if toolchain_manifest_read(candidate.dir).status == TOOLCHAIN_MANIFEST_OK {
-                                let beats = semver_compare(semver_parse(candidate.version), semver_parse(blocked.version));
-                                if !blocked.ok || beats > 0 {
-                                    blocked = candidate;
-                                }
-                            }
-                        } else {
-                            if candidate.protocol >= TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN {
-                                compatible.push(candidate);
-                            }
+                let candidate = _management_candidate(base, triple, version);
+                // A revoked payload is neither a candidate nor a reported
+                // blocker: `release` records match its version, `signing-key`
+                // records match the key id its manifest header recorded
+                // (SFN-1203). Header-only, like the rest of the survey
+                // (SFN-1201).
+                if candidate.ok && toolchain_payload_revocation_find(ledger, version, candidate.manifest_key_id) < 0 {
+                    if candidate.protocol > TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX {
+                        // The header-only survey (SFN-1201) cannot see a
+                        // corrupt record section, and unlike a compatible
+                        // candidate this one is never handed to
+                        // `toolchain_verify_executable` — it is reported,
+                        // not executed. Admitting it on the header alone
+                        // would refuse every management leaf over a
+                        // payload that is merely corrupt, with upgrade
+                        // guidance for what is a reinstall problem. So
+                        // pay one full read here, on the outranged
+                        // entries only; a store normally has none.
+                        if toolchain_manifest_read(candidate.dir).status == TOOLCHAIN_MANIFEST_OK {
+                            let beats = semver_compare(semver_parse(candidate.version), semver_parse(blocked.version));
+                            if !blocked.ok || beats > 0 { blocked = candidate; }
+                        }
+                    } else {
+                        if candidate.protocol >= TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN {
+                            compatible.push(candidate);
                         }
                     }
                 }

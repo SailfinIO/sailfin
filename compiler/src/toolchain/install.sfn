@@ -21,7 +21,8 @@ import {
 import {
     toolchain_channel_canonical,
     toolchain_channel_refusal,
-    toolchain_channel_resolve
+    toolchain_channel_resolve,
+    toolchain_index_release_index
 } from "./channel";
 import {
     ToolchainHostIdentity,
@@ -312,6 +313,7 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     // is exempt: its seed is a reviewed `bootstrap.toml` pin (SFEP-0047), and
     // gating it on index liveness would couple the self-host build to the
     // index's expiry, so a missed republish would break every CI bootstrap.
+    let mut manifest_key_id: string = "";
     let mut policy = _policy_exempt();
     if qualify_user_store {
         let index = _install_acquire_index(store_base, temp);
@@ -353,6 +355,15 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
             return 1;
         }
         _print_policy_advisories(policy);
+        // Record which key the index says signed this release so an offline
+        // execution gate can honour a later `signing-key` revocation from the
+        // manifest alone (SFN-1203). A release the index does not list records
+        // nothing — SFN-1069 already refuses an unlisted release whenever any
+        // signing key is revoked, so coverage is never silently assumed.
+        let release_at = toolchain_index_release_index(index, version);
+        if release_at >= 0 {
+            manifest_key_id = index.releases[release_at].manifest_key_id;
+        }
     }
 
     let tag = "v" + version;
@@ -504,7 +515,7 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         return 1;
     }
     let staged_bin = host_exe_name(staged_dir + "/sailfin");
-    if !toolchain_lay_out_store_entry(root, staged_dir, staged_bin, expected, version, host.triple) {
+    if !toolchain_lay_out_store_entry(root, staged_dir, staged_bin, expected, version, host.triple, manifest_key_id) {
         toolchain_discard_staged_entry(staged_dir);
         remove_tree(temp);
         return 1;

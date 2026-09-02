@@ -48,6 +48,7 @@ fn _good_header() -> string[] {
     header.push("version = 0.10.5");
     header.push("host = aarch64-apple-darwin");
     header.push("archive_sha256 = " + _digest("a"));
+    header.push("manifest_key_id = ed25519:unit-key");
     return header;
 }
 
@@ -84,7 +85,8 @@ fn _good_meta() -> ToolchainManifestMeta {
         management_protocol: TOOLCHAIN_MANAGEMENT_PROTOCOL,
         version: "0.10.5",
         host: "aarch64-apple-darwin",
-        archive_sha256: _digest("a")
+        archive_sha256: _digest("a"),
+        manifest_key_id: "ed25519:unit-key"
     };
 }
 
@@ -113,6 +115,7 @@ fn _assert_header_agrees(text: string) -> void {
     assert header.meta.version == full.meta.version;
     assert header.meta.host == full.meta.host;
     assert header.meta.archive_sha256 == full.meta.archive_sha256;
+    assert header.meta.manifest_key_id == full.meta.manifest_key_id;
 }
 
 fn _scratch_root() -> string ![io] {
@@ -136,11 +139,48 @@ test "toolchain manifest: render then parse round-trips meta and records" {
     assert parsed.meta.version == "0.10.5";
     assert parsed.meta.host == "aarch64-apple-darwin";
     assert parsed.meta.archive_sha256 == _digest("a");
+    assert parsed.meta.manifest_key_id == "ed25519:unit-key";
     assert parsed.records.length == 2;
     assert parsed.records[0].digest == _digest("a");
     assert parsed.records[0].path == "sailfin";
     assert parsed.records[1].digest == _digest("b");
     assert parsed.records[1].path == "runtime/prelude.sfn";
+}
+
+// The SFN-1203 compatibility boundary: a manifest written before
+// `manifest_key_id` existed has none of its lines, and parses with an empty
+// key id rather than failing.
+test "toolchain manifest: a header without manifest_key_id parses with an empty key id" {
+    let mut header: string[] = [];
+    header.push("management_protocol = " + int_to_string(TOOLCHAIN_MANAGEMENT_PROTOCOL));
+    header.push("version = 0.10.5");
+    header.push("host = aarch64-apple-darwin");
+    header.push("archive_sha256 = " + _digest("a"));
+    let text = _manifest_text(_good_magic(), header, _good_record_lines());
+    let parsed = toolchain_manifest_parse(text);
+    assert parsed.status == TOOLCHAIN_MANIFEST_OK;
+    assert parsed.meta.manifest_key_id == "";
+    // The execution gates read the header only, so the boundary must hold
+    // through that reader too.
+    assert toolchain_manifest_parse_header(text).meta.manifest_key_id == "";
+    _assert_header_agrees(text);
+}
+
+test "toolchain manifest: render omits manifest_key_id when nothing was recorded" {
+    let mut no_key = _good_meta();
+    no_key.manifest_key_id = "";
+    let no_key_text = toolchain_manifest_render(no_key, _good_records());
+    assert no_key_text.length > 0;
+    assert index_of(no_key_text, "manifest_key_id") < 0;
+
+    let with_key_text = toolchain_manifest_render(_good_meta(), _good_records());
+    assert index_of(with_key_text, "manifest_key_id = ed25519:unit-key\n") >= 0;
+}
+
+test "toolchain manifest: a manifest_key_id containing a newline is refused" {
+    let mut bad = _good_meta();
+    bad.manifest_key_id = "ed25519:unit-key\nother = injected";
+    assert toolchain_manifest_render(bad, _good_records()) == "";
 }
 
 test "toolchain manifest: a bad magic line is malformed" {
@@ -347,6 +387,7 @@ test "toolchain manifest: the header reader agrees with the full reader on a wel
     assert header.meta.management_protocol == TOOLCHAIN_MANAGEMENT_PROTOCOL;
     assert header.meta.version == "0.10.5";
     assert header.meta.host == "aarch64-apple-darwin";
+    assert header.meta.manifest_key_id == "ed25519:unit-key";
 }
 
 test "toolchain manifest: the header reader agrees with the full reader on a malformed header" {

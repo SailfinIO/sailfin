@@ -53,6 +53,13 @@ struct ToolchainManifestMeta {
     version: string;
     host: string;
     archive_sha256: string;
+    // The index release's `manifest_key_id`, recorded at install so an
+    // offline execution gate can evaluate a `signing-key` revocation from
+    // disk alone (SFN-1203). `""` means "not recorded" — an entry installed
+    // before this change, or via the index-exempt bootstrap path — and is
+    // the compatibility boundary, like `TOOLCHAIN_MANIFEST_ABSENT` is
+    // SFN-1064's.
+    manifest_key_id: string;
 }
 
 // Reader outcome. `status` is one of TOOLCHAIN_MANIFEST_OK / _ABSENT /
@@ -180,6 +187,9 @@ fn toolchain_manifest_render(meta: ToolchainManifestMeta, records: ToolchainMani
     // must at minimum record the executable) so a manifest this function
     // accepts always round-trips through `toolchain_manifest_parse`.
     if records.length == 0 { return ""; }
+    // A key id with a newline would corrupt the header grammar; the reader
+    // rejects lines without ` = ` (SFN-1203).
+    if index_of(meta.manifest_key_id, "\n") >= 0 { return ""; }
 
     let mut seen_keys: string[] = [];
     let mut i: int = 0;
@@ -203,6 +213,9 @@ fn toolchain_manifest_render(meta: ToolchainManifestMeta, records: ToolchainMani
     out = out + "version = " + meta.version + "\n";
     out = out + "host = " + meta.host + "\n";
     out = out + "archive_sha256 = " + meta.archive_sha256 + "\n";
+    if meta.manifest_key_id.length > 0 {
+        out = out + "manifest_key_id = " + meta.manifest_key_id + "\n";
+    }
     out = out + "\n";
     let mut j: int = 0;
     loop {
@@ -235,7 +248,8 @@ fn _manifest_empty_meta() -> ToolchainManifestMeta {
         management_protocol: 0,
         version: "",
         host: "",
-        archive_sha256: ""
+        archive_sha256: "",
+        manifest_key_id: ""
     };
 }
 
@@ -271,10 +285,13 @@ fn _manifest_parse_header_lines(lines: string[]) -> ToolchainManifestHeader {
     // Unknown header keys are ignored, not errors — this is the
     // forward-compatibility seam SFEP-0073 §3.5 requires: "the
     // install-manifest reader is the durable compatibility seam."
+    // `manifest_key_id` (SFN-1203) rides on that seam: an older reader
+    // ignores it, and a reader of an older manifest gets `""`.
     let mut management_protocol: int = -1;
     let mut version: string = "";
     let mut host: string = "";
     let mut archive_sha256: string = "";
+    let mut manifest_key_id: string = "";
     let mut found_separator: boolean = false;
     let mut i: int = 1;
     loop {
@@ -295,7 +312,9 @@ fn _manifest_parse_header_lines(lines: string[]) -> ToolchainManifestHeader {
             management_protocol = _manifest_parse_uint(value);
         } else if key == "version" { version = value; } else if key == "host" {
             host = value;
-        } else if key == "archive_sha256" { archive_sha256 = value; }
+        } else if key == "archive_sha256" { archive_sha256 = value; } else if key == "manifest_key_id" {
+            manifest_key_id = value;
+        }
         i += 1;
     }
     if !found_separator {
@@ -312,7 +331,8 @@ fn _manifest_parse_header_lines(lines: string[]) -> ToolchainManifestHeader {
             management_protocol: management_protocol,
             version: version,
             host: host,
-            archive_sha256: archive_sha256
+            archive_sha256: archive_sha256,
+            manifest_key_id: manifest_key_id
         },
         detail: ""
     };

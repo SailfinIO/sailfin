@@ -193,7 +193,7 @@ fn _toolchain_link_alias(bin_path: string, alias_path: string) -> boolean ![io] 
 // is what ties the extracted bytes back to the authenticated release
 // (SFN-1064). Ordering is load-bearing: `.sha256` stays the last write so a
 // half-written staging directory can never satisfy `toolchain_store_ready`.
-fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: string, expected: string, version: string, host_triple: string) -> boolean ![io] {
+fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: string, expected: string, version: string, host_triple: string, manifest_key_id: string) -> boolean ![io] {
     let sha_path = store_dir + "/.sha256";
     let src_bin = _binary_in_root(root);
     ensure_dir_p(store_dir);
@@ -246,7 +246,8 @@ fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: stri
         management_protocol: TOOLCHAIN_MANAGEMENT_PROTOCOL,
         version: version,
         host: host_triple,
-        archive_sha256: expected
+        archive_sha256: expected,
+        manifest_key_id: manifest_key_id
     };
     if !toolchain_manifest_write(store_dir, meta, records) {
         print("error: failed to write the install manifest in " + store_dir);

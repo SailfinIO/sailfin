@@ -20,7 +20,7 @@ import { _strip_build_metadata, resolve_compiler_version } from "../version";
 import { toolchain_known_sequence, toolchain_known_sequence_note } from "./channel";
 import { toolchain_current_host } from "./host";
 import {
-    toolchain_revocation_find,
+    toolchain_payload_revocation_find,
     toolchain_revocations_corrupt,
     toolchain_revocations_path,
     toolchain_revocations_read
@@ -31,6 +31,7 @@ import {
     toolchain_verify_bundled_inputs,
     toolchain_verify_executable
 } from "./integrity";
+import { TOOLCHAIN_MANIFEST_OK, toolchain_manifest_read_header } from "./manifest";
 import {
     ToolchainStoreEntry,
     toolchain_resolve_compatible_store_entry,
@@ -555,9 +556,27 @@ fn _dispatch_exec_target(target: string, ctx: CliContext, allow_fetch: boolean, 
     }
 
     let revoked = toolchain_revocations_read(versions_base);
-    if toolchain_revocation_find(revoked, "release", target) >= 0 {
-        print.err("error: toolchain " + target
-            + " is revoked and will not be executed");
+    // Anything but OK contributes "": ABSENT is the SFN-1064 legacy boundary
+    // and records nothing; MALFORMED/TOO_NEW cannot be trusted for anything
+    // and `toolchain_verify_executable` below refuses them anyway — the gate
+    // must not presume revocation from an unreadable header, only from a
+    // recorded key id (SFN-1203).
+    let header = toolchain_manifest_read_header(entry.dir);
+    let mut manifest_key_id: string = "";
+    if header.status == TOOLCHAIN_MANIFEST_OK {
+        manifest_key_id = header.meta.manifest_key_id;
+    }
+    let revoked_at = toolchain_payload_revocation_find(revoked, target, manifest_key_id);
+    if revoked_at >= 0 {
+        if revoked[revoked_at].kind == "signing-key" {
+            print.err("error: toolchain " + target
+                + " was signed by revoked key "
+                + revoked[revoked_at].subject
+                + " and will not be executed");
+        } else {
+            print.err("error: toolchain " + target
+                + " is revoked and will not be executed");
+        }
         print.err("  " + toolchain_known_sequence_note(toolchain_known_sequence(revoked)));
         print.err("  revocation has no override; select a different version");
         return 1;

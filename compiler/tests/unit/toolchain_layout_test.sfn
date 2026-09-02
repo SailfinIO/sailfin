@@ -72,7 +72,7 @@ test "toolchain layout: a complete entry lands the binary, alias, runtime, and m
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
 
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     // The binary lands at `bin_path` with the source's exact bytes, and is
     // EXECUTABLE — `_copy_file` alone lands 0644, so this is what pins
@@ -121,7 +121,7 @@ test "toolchain layout: a missing source binary fails closed with no marker" ![i
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
 
-    assert ! toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert ! toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     // The incomplete-install contract: no marker means the entry is not
     // read as complete on a later run.
@@ -151,7 +151,7 @@ test "toolchain layout: an alias path that cannot be replaced fails closed with 
     fs.createDirectory(blocker_dir, true);
     fs.writeFile(blocker_dir + "/blocker", "occupying the alias path");
 
-    assert ! toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert ! toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
     assert ! fs.exists(store_dir + "/.sha256");
 }
 
@@ -166,7 +166,7 @@ test "toolchain layout: a workspace manifest without capsules fails before the m
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
 
     assert ! toolchain_lay_out_store_entry(root, store_dir, host_exe_name(store_dir
-        + "/sailfin"), expected, "0.10.5", "aarch64-apple-darwin");
+        + "/sailfin"), expected, "0.10.5", "aarch64-apple-darwin", "");
     assert ! fs.exists(store_dir + "/.sha256");
 }
 
@@ -185,7 +185,7 @@ test "toolchain layout: two hosts atomically hold the same exact version" ![io] 
         assert staged.length > 0;
         let bin = host_exe_name(staged + "/sailfin");
         let digest = "host-digest-" + hosts[i];
-        assert toolchain_lay_out_store_entry(root, staged, bin, digest, version, hosts[i]);
+        assert toolchain_lay_out_store_entry(root, staged, bin, digest, version, hosts[i], "");
         assert ! fs.exists(store_dir);
         assert toolchain_commit_staged_entry(staged, store_dir);
         assert fs.readFile(store_dir + "/.sha256") == digest + "\n";
@@ -210,7 +210,7 @@ test "toolchain layout: failed qualified staging leaves legacy untouched" ![io] 
     let missing_root = base + "/missing-extract-root";
     fs.createDirectory(missing_root, true);
     assert ! toolchain_lay_out_store_entry(missing_root, staged, host_exe_name(staged
-        + "/sailfin"), "fresh-digest", "0.10.5", "aarch64-apple-darwin");
+        + "/sailfin"), "fresh-digest", "0.10.5", "aarch64-apple-darwin", "");
     toolchain_discard_staged_entry(staged);
 
     assert ! fs.exists(qualified);
@@ -269,7 +269,7 @@ test "toolchain layout: a complete entry writes a parseable install manifest" ![
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
 
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     assert fs.exists(store_dir + "/.install-manifest");
     let manifest = toolchain_manifest_read(store_dir);
@@ -293,6 +293,27 @@ test "toolchain layout: a complete entry writes a parseable install manifest" ![
     assert ! contains_string(paths, ".install-manifest");
 }
 
+test "toolchain layout: the install manifest records the manifest_key_id it was given" ![io] {
+    let base = _scratch_dir() + "/manifest-key-id";
+    fs.createDirectory(base, true);
+    let root = _fake_extract_root(base);
+    let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
+
+    let store_dir = base + "/store-with-key";
+    let bin_path = host_exe_name(store_dir + "/sailfin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "ed25519:e2e-key");
+    let manifest = toolchain_manifest_read(store_dir);
+    assert manifest.status == TOOLCHAIN_MANIFEST_OK;
+    assert manifest.meta.manifest_key_id == "ed25519:e2e-key";
+
+    let no_key_store_dir = base + "/store-without-key";
+    let no_key_bin_path = host_exe_name(no_key_store_dir + "/sailfin");
+    assert toolchain_lay_out_store_entry(root, no_key_store_dir, no_key_bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
+    let no_key_manifest = toolchain_manifest_read(no_key_store_dir);
+    assert no_key_manifest.status == TOOLCHAIN_MANIFEST_OK;
+    assert no_key_manifest.meta.manifest_key_id == "";
+}
+
 test "toolchain layout: a freshly laid-out entry verifies" ![io] {
     let base = _scratch_dir() + "/manifest-verify-fresh";
     fs.createDirectory(base, true);
@@ -300,7 +321,7 @@ test "toolchain layout: a freshly laid-out entry verifies" ![io] {
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     let outcome = toolchain_verify_entry(store_dir);
     assert outcome.ok;
@@ -317,7 +338,7 @@ test "toolchain layout: a same-length modification is still caught" ![io] {
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     let original = "// fake prelude";
     let modified = "// FAKE prelude";
@@ -338,7 +359,7 @@ test "toolchain layout: a missing payload file is caught" ![io] {
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     fs.deleteFile(store_dir + "/runtime/sfn/io.sfn");
 
@@ -355,7 +376,7 @@ test "toolchain layout: an unrecorded extra file is caught" ![io] {
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     fs.writeFile(store_dir + "/runtime/extra.sfn", "// not recorded");
 
@@ -374,7 +395,7 @@ test "toolchain layout: a failed verification never repairs or deletes" ![io] {
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     let manifest_before = fs.readFile(store_dir + "/.install-manifest");
     let modified = "// FAKE prelude";
@@ -401,7 +422,7 @@ test "toolchain layout: no manifest is the legacy/unverified boundary" ![io] {
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     fs.deleteFile(store_dir + "/.install-manifest");
 
@@ -420,7 +441,7 @@ test "toolchain layout: a repeated check re-hashes rather than trusting an earli
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     let first = toolchain_verify_entry(store_dir);
     assert first.ok;
@@ -470,7 +491,7 @@ test "toolchain layout: a manifest missing the executable's record fails closed"
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     let manifest_path = store_dir + "/.install-manifest";
     let exe_path = host_exe_name("sailfin");
@@ -492,7 +513,7 @@ test "toolchain layout: a manifest missing a bundled record fails closed" ![io] 
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     let manifest_path = store_dir + "/.install-manifest";
     let stripped = _manifest_without_record(fs.readFile(manifest_path), "runtime/prelude.sfn");
@@ -514,7 +535,7 @@ test "toolchain layout: an intact manifest passes both narrow checks" ![io] {
     let store_dir = base + "/store";
     let bin_path = host_exe_name(store_dir + "/sailfin");
     let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
-    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin");
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected, "0.10.5", "aarch64-apple-darwin", "");
 
     assert toolchain_verify_executable(store_dir).ok;
     assert toolchain_verify_bundled_inputs(store_dir).ok;

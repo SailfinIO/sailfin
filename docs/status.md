@@ -507,9 +507,11 @@ to it.
   answers in-process rather than failing. Routing reads no project
   `[toolchain]` pin, so management stays reachable when ordinary selection is
   broken or unsatisfiable. Revocation exclusion now reads the local ledger:
-  `_management_known_revoked` retired the empty stub this entry originally
-  shipped with and excludes a known-revoked payload from the survey
-  (SFEP-0073 §3.9 slice 4, SFN-1069, below). This is the routing half of §3.9
+  `toolchain_management_survey` checks each surveyed entry inline through
+  `index_cache.sfn::toolchain_payload_revocation_find`, retiring the empty
+  `_management_known_revoked` stub this entry originally shipped with, and
+  excludes a known-revoked payload from the survey (SFEP-0073 §3.9 slice 4,
+  SFN-1069/SFN-1203, below). This is the routing half of §3.9
   slice 3 only: the per-user default and `sfn toolchain remove` (SFN-1068)
   remain unshipped. SFEP-0073 stays `Accepted`, not `Implemented`.
 - **Signed index client + local revocation ledger — release-state policy**
@@ -549,8 +551,27 @@ to it.
   fail closed on a revocation ledger that exists but fails to parse — a
   ledger that will not parse is not the same as "nothing is revoked", and
   §3.7 requires revocation to hold with no network at all.
-  `_management_known_revoked` (SFN-1067) now reads the ledger, retiring the
-  empty stub that entry shipped with. Not shipped: default update tracks,
+  A `signing-key` revocation is honoured at execution time too: a user-store
+  install of a release the signed index lists records that release's
+  `manifest_key_id` in the install manifest, and dispatch and management
+  routing match it offline through
+  `index_cache.sfn::toolchain_payload_revocation_find` (SFN-1203). The
+  bootstrap seed gate reads the same field, but the index-exempt seed path
+  records none, so a seed is matched by `release` records only. An entry
+  that recorded no key id — installed before SFN-1203, via the bootstrap
+  path, or from a release the index did not list — is matched by `release`
+  records only and is never presumed revoked. A reinstall of an entry whose
+  manifest already verifies short-circuits and does not backfill the key
+  id, so the remediation for a pre-SFN-1203 entry is to delete its store
+  directory and reinstall. Note the limit of key-scoped revocation today:
+  `install.sfn` verifies `SHA256SUMS` against the pinned
+  `release_signing_public_key_hex()` root, not against the index's
+  `manifest_key_id`, so that field has no verification force and a key
+  revocation reaches exactly the releases the index attributes to that key
+  — making `manifest_key_id` load-bearing for verification is a separate,
+  larger change. The management survey (SFN-1067) now reads the ledger
+  inline, retiring the `_management_known_revoked` stub that entry shipped
+  with. Not shipped: default update tracks,
   `sfn toolchain update`, opportunistic update notification/scheduling,
   per-user defaults, `sfn toolchain remove`, and any automatic installation
   or project-manifest mutation — those are SFN-1071/1073/1068. SFEP-0073

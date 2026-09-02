@@ -177,7 +177,8 @@ fn _write_verified_manifest(dir: string, ver: string) -> void ![io] {
         management_protocol: TOOLCHAIN_MANAGEMENT_PROTOCOL,
         version: ver,
         host: toolchain_current_host().triple,
-        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        manifest_key_id: ""
     };
     assert toolchain_manifest_write(dir, meta, records);
 }
@@ -203,7 +204,8 @@ fn _write_manifest_protocol(dir: string, ver: string, protocol: int) -> void ![i
         management_protocol: protocol,
         version: ver,
         host: toolchain_current_host().triple,
-        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+        archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        manifest_key_id: ""
     };
     assert toolchain_manifest_write(dir, meta, records);
 }
