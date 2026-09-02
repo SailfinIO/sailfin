@@ -7,7 +7,8 @@ explain *why*; never narrate the line below. Cite only durable references
 reader cannot see. Tracked work is Linear-native, so a **removal condition names
 `SFN-NNN`**; a bare `#NNN` is a GitHub PR or external-intake issue and is
 acceptable only as historical provenance, never as the thing a reader is waiting
-on. No `TODO`/`FIXME` (file an issue and cite it), no commented-out code. A
+on. No `TODO`/`FIXME` (cite an issue — one that clears `follow-up-filing.md`, or
+the issue being worked), no commented-out code. A
 workaround comment states its concrete removal condition, and the PR that
 satisfies it deletes both.
 

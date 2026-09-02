@@ -6,7 +6,9 @@ follow this file when creating or updating Linear records.
 
 ## Issue template
 
-Use this for maintainer-created work and pickup follow-ups.
+Use this for maintainer-created work and pickup follow-ups. A pickup follow-up
+must first clear `.claude/rules/follow-up-filing.md` — most observations are a
+`Noticed in passing` comment on the source issue, not a new record.
 
 **Title**
 
@@ -24,12 +26,12 @@ Examples: `fix(parser): reject unterminated type effects`,
 | Field | Value |
 |---|---|
 | Team | `Sailfin` (`SFN`) |
-| Status | `Triage` for unclear intake, `Backlog` for scoped but not ready, `Ready` for fully groomed and unblocked leaves, `Blocked` when a blocker relation exists, `In Progress` only when claimed |
+| Status | `Triage` for unclear **human or automation** intake only, `Backlog` for scoped but not ready — **every agent-filed follow-up starts here, never `Triage`** (`.claude/rules/follow-up-filing.md`), `Ready` for fully groomed and unblocked leaves, `Blocked` when a blocker relation exists, `In Progress` only when claimed |
 | Project | Same Project as the current issue when the work belongs to the same epic |
 | Priority | Urgent = release/self-host/seed blocker; High = critical path; Medium = current-milestone enabling work; Low = polish or post-milestone work |
 | Estimate | `1` = XS, `2` = S, `3` = M; split or triage anything larger |
 | Labels | Canonical `type:*` and `area:*` labels only |
-| Relations | `related to` the source issue; `blocked by` only when work cannot start yet |
+| Relations | `related to` the source issue, and `Spawned from SFN-<N>` as the body's first line for a pickup follow-up; `blocked by` only when work cannot start yet |
 
 Do not create or apply Linear labels for status, priority, estimate, release,
 blockers, assignee, cycle, or Project membership.

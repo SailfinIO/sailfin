@@ -161,7 +161,9 @@ Windows `run_capture` issue") and link by URL instead.
 
 **Anti-patterns:** picking up an ungroomed issue; expanding scope mid-session
 (comment and pause instead); bundling issues into one PR; picking up from the
-roadmap (it isn't pickable — Linear `Todo`, then `Ready`, is).
+roadmap (it isn't pickable — Linear `Todo`, then `Ready`, is); filing a
+follow-up that fails the bar in `.claude/rules/follow-up-filing.md`, or filing
+one into `Triage` (agent follow-ups land in `Backlog`, classified).
 
 ## Approval gates
 

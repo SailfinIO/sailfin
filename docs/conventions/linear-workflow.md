@@ -91,8 +91,8 @@ answers, it shouldn't exist.
 
 | Lane | Answers | Who moves it | Body bar |
 |---|---|---|---|
-| **Triage** | *Should this exist at all?* | you file here; `/triage` works it | none — raw capture is fine |
-| **Backlog** | *Real, but not now.* | `/triage` | classified (`type:*`/`area:*`) + priority; no structure |
+| **Triage** | *Should this exist at all?* | **humans and automation** file here (external intake, CI-regression bots, things you typed); `/triage` works it. **Agent follow-ups never land here** — see § Follow-up filing | none — raw capture is fine |
+| **Backlog** | *Real, but not now.* | `/triage`; an agent filing a follow-up that clears the bar in § Follow-up filing | classified (`type:*`/`area:*`) + priority; no structure |
 | **Ready** | *Could an agent finish this cold?* | `/triage` Pass 2, `/groom` | **full bar** — Goal / Scope In+Out / Acceptance / Files / Verification, plus estimate 1–3 |
 | **Todo** | *What's next, in what order?* | **you, by hand** | already `Ready`-grade; this lane only reorders |
 | **In Progress** → **In Review** | in flight | `/pickup` | — |
@@ -108,6 +108,47 @@ twenty issues is just a second `Ready`.
 
 Only two lanes are pickable: `Todo`, then `Ready`. Nothing enters either without
 clearing the full body bar.
+
+### Follow-up filing
+
+The binding rule is `.claude/rules/follow-up-filing.md`; this section is the
+*why* and the lane consequences.
+
+**The failure mode (measured 2026-09-02).** Fourteen days: >250 issues created,
+~165 closed. `Backlog` held 250+ items of which 100 were under two weeks old and
+only 13 over sixty days — fresh spawn, not old debt. `Triage` held 25, 21 with
+no priority, and four of them were sibling pairs/triples from single sessions
+(three closure-in-enum-payload symptoms filed as three issues; two halves of
+one toolchain-selector defect). Only ~20 of 60 `Backlog` bugs were
+`area:compiler`/`area:lowering`; 22 were `area:build` and 10 `area:test-infra`.
+The language was not accumulating bugs — every session was filing one to three
+follow-ups, and each one cost a human decision the session had already made.
+
+Queueing, not effort: when arrivals outpace service the queue grows no matter
+how fast it is worked. Emptying `Triage` raises the service rate for a week;
+only the filing rule lowers the arrival rate.
+
+**Lane consequences.**
+
+- `Triage` is for items whose *existence* is in question: external-contributor
+  mirrors, CI-regression bots (`perf-regression`, `windows-native-regression`),
+  and things a human typed in raw. A session that files a follow-up has already
+  decided it should exist, so it lands in `Backlog`, classified and prioritised
+  by the filer, with `Spawned from SFN-<N>` as the body's first line and a
+  `related to` relation. `/triage` Pass 1 never sees it.
+- What does not clear the bar is a `Noticed in passing` comment on the issue
+  being worked — one line per item, with a path. It is searchable, it carries
+  the context that found it, and it does not queue.
+- Siblings merge before they file. One root cause is one issue with a
+  checklist; `/triage` Pass 1 proposes MERGE when it finds a set that slipped
+  through.
+- `/triage age` is the disposal floor: `Backlog`, priority ≤ Medium, no
+  Project, 45 days idle → proposed KILL. Terminal states stay a human call.
+
+**Why not a label or a lane.** A `spawned` label duplicates the
+`Spawned from` line and the relation; a `Follow-ups` lane would shadow the
+`backlog` state type and widen every query (§ Querying lanes — the state-type
+trap). The body line and the relation are enough to filter on.
 
 ### "What work do I have?"
 
