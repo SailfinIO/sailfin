@@ -1,0 +1,61 @@
+// compiler/src/install_root.sfn
+//
+// The install-root pointer: the single source of truth for locating the
+// versioned payload directory of an installed compiler whose executable was
+// COPIED into a shared global bin dir rather than symlinked there (SFN-1124).
+//
+// `install.sh` / `install.ps1` normally publish the global `sfn` as a
+// symlink into the version store, so the executable's own path already
+// resolves beside its `runtime/`. On a filesystem that cannot create
+// symlinks (NTFS without developer mode is the common case) the installer
+// copies the executable instead and writes `<bin_dir>/sailfin-install-root`
+// holding the absolute version-store root that owns `runtime/`, `capsules/`
+// and the bundled `workspace.toml`. A copied executable reports the global
+// bin dir as its own directory, so every exe-relative probe misses; this
+// pointer is the discovery anchor that restores the versioned layout.
+//
+// Two independent consumers resolve the runtime root from the executable,
+// and both must consult the pointer or the installed compiler splits down
+// the middle: the CLI driver (`cli/entry.sfn`) reads it for runtime-object
+// and dependency discovery, and the analyzer's prelude-global loader
+// (`prelude_globals.sfn`) reads it to locate the runtime SOURCE tree. The
+// 0.10.5 release wired only the first, so the installed compiler linked
+// fine but failed every bare prelude call with E0420 (`char_code`,
+// `char_from_code`, `char_at`, …) because the second resolver degraded to
+// the compiler-known helper names. Keeping the lookup here, imported by
+// both, is what prevents that split from recurring.
+//
+// Leaf module on purpose: `prelude_globals.sfn` sits below `main`, so this
+// file imports nothing from the compiler tree and only the `sfn/strings`
+// capsule for `trim`.
+import { trim } from "sfn/strings";
+
+// Declared rather than imported for the same reason as `cli/entry.sfn` and
+// `prelude_globals.sfn`: the seed's cross-module signature resolver does not
+// hand back runtime-capsule `.sfn` signatures. Definition:
+// `runtime/sfn/platform/exec.sfn`.
+extern fn binary_dir(exe: *u8) -> *u8;
+
+fn install_root_pointer_name() -> string { return "sailfin-install-root"; }
+
+// The version-store root the pointer beside `bin_dir` names, or `""` when
+// there is no pointer, it is empty, or the directory it names no longer
+// owns a `runtime/` tree (a stale pointer must never redirect discovery
+// to a removed install).
+fn installed_payload_dir(bin_dir: string) -> string ![io] {
+    if bin_dir.length == 0 { return ""; }
+    let pointer = bin_dir + "/" + install_root_pointer_name();
+    if !fs.exists(pointer) { return ""; }
+    let candidate = trim(fs.readFile(pointer));
+    if candidate.length == 0 { return ""; }
+    if !fs.exists(candidate + "/runtime") { return ""; }
+    return candidate;
+}
+
+// `installed_payload_dir` anchored on an executable path rather than a
+// directory, for callers that only hold `exe_path()`.
+fn installed_payload_dir_for_exe(exe: string) -> string ![io] {
+    if exe.length == 0 { return ""; }
+    let raw_dir: *u8 = binary_dir(exe as *u8);
+    return installed_payload_dir(raw_dir as string);
+}

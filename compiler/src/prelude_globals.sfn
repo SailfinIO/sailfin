@@ -21,6 +21,7 @@
 import { prelude_global_names_from_source } from "sfn/analyzer/prelude_scan";
 
 import { relocate_string_to_heap } from "./arena_relocate";
+import { installed_payload_dir_for_exe } from "./install_root";
 import { substring } from "./string_utils";
 
 // Mirrors the runtime-root externs declared in `cli_main.sfn` (declared,
@@ -160,8 +161,8 @@ fn _pg_scan_sfn_tree(runtime_dir: string, names: string[]) -> string[] ![io] {
 }
 
 // Locate the runtime SOURCE directory (the one containing `prelude.sfn`)
-// cwd-independently. Tries the resolved runtime root first, then
-// cwd-relative fallbacks for in-repo invocations.
+// cwd-independently. Tries the resolved runtime root first, then the
+// install-root pointer, then cwd-relative fallbacks for in-repo invocations.
 fn _pg_find_runtime_dir() -> string ![io] {
     let mut candidates: string[] = [];
     let exe_raw: *u8 = exe_path();
@@ -170,6 +171,15 @@ fn _pg_find_runtime_dir() -> string ![io] {
     if root.length > 0 {
         candidates.push(root);
         candidates.push(_pg_join(root, "runtime"));
+    }
+    // A copied (non-symlinked) installed `sfn` has no `runtime/` anywhere
+    // near its own directory; the installer's pointer names the version
+    // directory that owns it. Consulted before the cwd-relative probes so an
+    // installed compiler run from an empty cwd still sees the full prelude
+    // rather than degrading to `helper_names` (SFN-1124).
+    let payload = installed_payload_dir_for_exe(exe_raw as string);
+    if payload.length > 0 {
+        candidates.push(_pg_join(payload, "runtime"));
     }
     candidates.push("runtime");
     candidates.push("../runtime");
