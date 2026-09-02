@@ -1,7 +1,12 @@
 // compiler/capsules/codegen-llvm/src/expressions_bindings.sfn
 //
 // Local and parameter binding lookup and mutation helpers.
+import { NativeFunction } from "sfn/ir";
+import { find, substring } from "sfn/strings";
+
+import { find_function_by_name_or_import } from "./rendering_helpers";
 import { LocalBinding, ParameterBinding } from "./types";
+import { is_identifier_part_char, is_identifier_start_char, trim_text } from "./utils";
 
 // =============================================================================
 // Local and Parameter Binding Lookup
@@ -103,4 +108,85 @@ fn reset_local_consumption(locals: LocalBinding[], name: string) -> LocalBinding
         index += 1;
     }
     return result;
+}
+
+// =============================================================================
+// Subject instantiation recovery
+// =============================================================================
+// #830: resolve the declared source annotation of a subject by name (a match
+// scrutinee or a member-access base), so generic enum payload field types can
+// be substituted per instantiation. Shared by the match reader
+// (`lowering/instructions_match.sfn`) and the member-access reader
+// (`expression_lowering/native/core_member_lowering.sfn`, SFN-772) so the two
+// cannot drift on how a subject's `Result<P, string>` is recovered.
+// Locals take precedence over parameters (a local may shadow/rebind). Returns
+// "" when the subject is not a simple identifier or carries no annotation.
+fn resolve_subject_type_annotation(subject_name: string, bindings: ParameterBinding[], locals: LocalBinding[]) -> string {
+    if subject_name.length == 0 { return ""; }
+    let mut found: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= locals.length { break; }
+        if locals[i].name == subject_name {
+            if locals[i].type_annotation.length > 0 {
+                found = locals[i].type_annotation;
+            }
+        }
+        i += 1;
+    }
+    if found.length > 0 { return found; }
+    i = 0;
+    loop {
+        if i >= bindings.length { break; }
+        if bindings[i].name == subject_name {
+            if bindings[i].type_annotation.length > 0 {
+                return bindings[i].type_annotation;
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// Extract the leading call target from a subject expression, i.e. `make_ok`
+// from `make_ok()`. Returns "" when the expression is not a direct call of a
+// simple identifier (mirrors `_extract_leading_call_target` in
+// instructions_let.sfn). Used so a `match <call>()` scrutinee can recover the
+// callee's declared `Result<int, Error>` return type for #830 generic payload
+// monomorphization, exactly as a typed local/param already does.
+fn _extract_call_target(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return ""; }
+    let first = substring(trimmed, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: int = 1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if !is_identifier_part_char(ch) { break; }
+        index += 1;
+    }
+    if index >= trimmed.length { return ""; }
+    if substring(trimmed, index, index + 1) != "(" { return ""; }
+    return substring(trimmed, 0, index);
+}
+
+// #830 (call/inferred scrutinee gap): when the match subject is a direct call
+// expression (e.g. `match make_ok()`), resolve its concrete instantiation from
+// the callee's declared return type so generic enum payloads monomorphize the
+// same way they do for a typed local/parameter scrutinee. Returns "" when the
+// subject is not a direct call or the callee has no return type.
+fn resolve_subject_call_annotation(subject_expression: string, functions: NativeFunction[]) -> string {
+    let call_target = _extract_call_target(subject_expression);
+    if call_target.length == 0 { return ""; }
+    let callee = find_function_by_name_or_import(functions, call_target);
+    if callee == null { return ""; }
+    if callee.return_type.length == 0 { return ""; }
+    // Generic instantiations only. The payload monomorphization gap this
+    // recovers from (#830) is generic-only; adopting a non-generic struct
+    // return type (e.g. `SymbolCollectionResult`) as the subject annotation
+    // would mis-route later member/method-call resolution and break the
+    // self-host build (test_work_dir_parity).
+    if find(callee.return_type, "<", 0) == -1 { return ""; }
+    return callee.return_type;
 }
