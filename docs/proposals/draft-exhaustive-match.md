@@ -600,9 +600,11 @@ in the same pass.
 - `compiler/capsules/codegen-llvm/src/expressions_bindings.sfn`
   (`resolve_subject_type_annotation`/`resolve_subject_call_annotation`
   — the name-based, no-type-inference resolution precedent this SFEP's
-  §3.3 follows), `:825-834` (the existing `match_exhaustive` computation
-  this SFEP leaves untouched at the lowering layer), the per-arm
-  `!guard_has_text` gating this SFEP's §3.4 mirrors.
+  §3.3 follows).
+- `compiler/capsules/codegen-llvm/src/lowering/instructions_match.sfn`
+  (the existing `match_exhaustive` computation this SFEP leaves untouched
+  at the lowering layer), the per-arm `!guard_has_text` gating this SFEP's
+  §3.4 mirrors.
 - `runtime/prelude.sfn:701-704` (`match_exhaustive_failed` — the runtime
   backstop kept as defense-in-depth, §3.1/§5).
 - `docs/proposals/0004-check-architecture.md` — `sfn check` as the fast,

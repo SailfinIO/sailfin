@@ -36,13 +36,26 @@ fn read_param(r: Result<P, string>) -> int {
 }
 
 enum Wrapped<T> {
-    Some { item: T },
+    Some { item: T, label: string },
     None { }
 }
 
 fn w_user_generic() -> Wrapped<P> {
     let p: P = make_p();
-    return Wrapped.Some { item: p };
+    return Wrapped.Some { item: p, label: "wrapped" };
+}
+
+fn w_err() -> Result<P, string> {
+    return Result.Err { error: "boom" };
+}
+
+fn apply(f: fn (int) -> int, x: int) -> int { return f(x); }
+
+fn w_closure(c: int) -> Wrapped<fn (int) -> int> {
+    return Wrapped.Some {
+        item: fn (x: int) -> int { return x + c; },
+        label: "closure"
+    };
 }
 
 test "enum payload: member access on a typed local reads the concrete struct" {
@@ -74,6 +87,24 @@ test "enum payload: member access on a direct call base reads the concrete struc
     let p: P = w_ok().value;
     assert expect_eq_int(p.depth, 3).ok;
     assert expect_eq_int(w_ok().value.depth, 3).ok;
+}
+
+test "enum payload: non-generic field beside a generic payload reads unchanged" {
+    let w: Wrapped<P> = w_user_generic();
+    let label: string = w.label;
+    assert expect_eq_int(label.length, 7).ok;
+}
+
+test "enum payload: member access on the Err side reads the string payload" {
+    let r: Result<P, string> = w_err();
+    let e: string = r.error;
+    assert expect_eq_int(e.length, 4).ok;
+}
+
+test "enum payload: closure payload unboxes through member access" {
+    let w: Wrapped<fn (int) -> int> = w_closure(10);
+    let f: fn (int) -> int = w.item;
+    assert expect_eq_int(apply(f, 5), 15).ok;
 }
 
 test "enum payload: scalar generic payload still reads through member access" {

@@ -1,7 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_member_helpers.sfn
 //
-// Inline GEP field access helper extracted from core_member_lowering.sfn
-// to keep each function under ~500 .sfn-asm instructions (avoids seed OOM).
+// Helpers extracted from core_member_lowering.sfn: the inline GEP field
+// access (kept under ~500 .sfn-asm instructions to avoid seed OOM) and the
+// generic enum payload substitution shared with the match reader (SFN-772).
 import { LoweringDiagnostic } from "sfn/ir";
 import { find, substring } from "sfn/strings";
 
@@ -28,7 +29,7 @@ import {
     StructFieldInfo,
     TypeContext
 } from "../../types";
-import { number_to_string, trim_text } from "../../utils";
+import { ends_with, number_to_string, trim_text } from "../../utils";
 
 // Try to resolve a struct field access via in-memory TypeContext when the
 // base type is i8* (opaque pointer). Returns an ExpressionResult with the
@@ -174,7 +175,14 @@ fn boxed_generic_enum_info(context: TypeContext, base_type_annotation: string) -
     let trimmed = trim_text(base_type_annotation);
     let generic_start = find(trimmed, "<", 0);
     if generic_start <= 0 { return null; }
-    let enum_info = resolve_enum_info_for_literal(context, trim_text(substring(trimmed, 0, generic_start)));
+    // A bare instantiation only: `Result<P, string>?` / `[]` / `| X` wrap the
+    // erased pointer in another representation this branch must not claim.
+    if !ends_with(trimmed, ">") { return null; }
+    let enum_name = trim_text(substring(trimmed, 0, generic_start));
+    // A user generic struct erases to `i8*` the same way; if one shares the
+    // enum's name (the prelude injects `Result`), the annotation is not ours.
+    if find_struct_info_by_name(context, enum_name) != null { return null; }
+    let enum_info = resolve_enum_info_for_literal(context, enum_name);
     if enum_info == null { return null; }
     if enum_info.type_parameters.length == 0 { return null; }
     return enum_info;
