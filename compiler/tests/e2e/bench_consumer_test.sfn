@@ -120,7 +120,9 @@ test "bench consumer: an empty fixture directory exits 1" ![clock, io] {
     fs.createDirectory(empty_dir, true);
 
     let exit = process.run_capture([sfn_bin_path(), "bench", "--consumer", "--fixtures", empty_dir], child_env);
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
     assert exit == 1;
+    assert find(err, "no fixtures under", 0) >= 0;
+    assert find(out, "no fixtures under", 0) < 0;
 }

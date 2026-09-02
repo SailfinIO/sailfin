@@ -16,7 +16,8 @@ import { host_is_windows } from "../../src/build/target";
 
 struct LoginRun {
     exit: int,
-    out: string
+    out: string,
+    err: string
 }
 
 // A private, freshly-cleaned HOME under the runner's scratch dir (or
@@ -46,7 +47,8 @@ fn _env(home: string) -> string[] ![io] {
 }
 
 // Run `sfn <args...>` with HOME threaded to the child, returning the exit
-// code and combined stdout+stderr.
+// code and the two output streams separately, so a test can assert which
+// one a diagnostic landed on (SFN-1244).
 fn _run(home: string, args: string[]) -> LoginRun ![io] {
     let mut argv: string[] = [sfn_bin_path()];
     let mut i = 0;
@@ -58,7 +60,7 @@ fn _run(home: string, args: string[]) -> LoginRun ![io] {
     let exit = process.run_capture(argv, _env(home));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    return LoginRun { exit: exit, out: out + err };
+    return LoginRun { exit: exit, out: out, err: err };
 }
 
 // ---- Test 1: login with token argument writes credentials ----
@@ -103,7 +105,10 @@ test "login: rejects empty token" ![io] {
 test "login: too many args shows usage" ![io] {
     let home = _home("too_many_args");
     let r = _run(home, ["login", "a", "b"]);
-    assert find(to_lower_all(r.out), "usage", 0) >= 0;
+    // `login a b` fails in `sfn/cli`'s parser, not in `login.sfn`, so
+    // `cli/main.sfn::_v2_help_or_usage` renders the usage on stdout.
+    // SFN-1244 moved only the command handlers' own diagnostics.
+    assert find(to_lower_all(r.out + r.err), "usage", 0) >= 0;
 }
 
 // ---- Test 6: login output confirms save path ----

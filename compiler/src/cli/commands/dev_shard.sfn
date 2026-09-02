@@ -502,7 +502,7 @@ fn shard_run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if strings_equal(leaf, "run") {
         return _shard_run_one(get(matches, "shard"), has_flag(matches, "json"), _resolve_jobs(matches), ctx);
     }
-    print("usage: sfn dev shard <names|list|run|cover>");
+    print.err("usage: sfn dev shard <names|list|run|cover>");
     return 2;
 }
 

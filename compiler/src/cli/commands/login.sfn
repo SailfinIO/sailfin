@@ -119,13 +119,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         // mktemp/rm shellout.
         let line = io.read_line(0);
         if line != null { token = _toml_trim_cmd(line); } else {
-            print("error: failed to read token");
+            print.err("error: failed to read token");
             return 1;
         }
     }
 
     if token.length == 0 {
-        print("error: empty token");
+        print.err("error: empty token");
         return 1;
     }
 
@@ -145,12 +145,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     _set_perms_or_skip(cred_path, 384);
 
     if !fs.exists(cred_path) {
-        print("error: failed to write credentials to " + cred_path);
+        print.err("error: failed to write credentials to " + cred_path);
         return 1;
     }
     let saved = fs.readFile(cred_path);
     if !strings_equal(_toml_trim_cmd(saved), token) {
-        print("error: failed to write credentials to " + cred_path);
+        print.err("error: failed to write credentials to " + cred_path);
         return 1;
     }
 

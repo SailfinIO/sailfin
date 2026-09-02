@@ -24,7 +24,8 @@ import {
 
 struct Run {
     exit: int,
-    out: string
+    out: string,
+    err: string
 }
 
 // A private cache base for `tag`, wiped first so each run starts clean.
@@ -73,7 +74,8 @@ fn _age_cache_tree(path: string) -> int ![io] {
 
 // Run `sfn cache <args...>` with the scratch cache root threaded to the
 // child, derived by subtraction from the real environment (SFN-1114),
-// returning the exit code and combined output.
+// returning the exit code and the two output streams separately, so a
+// test can assert which one a diagnostic landed on (SFN-1244).
 fn _run_cache(cache_base: string, args: string[]) -> Run ![io] {
     let mut e = clean_runner_env_without("", ["SAILFIN_BUILD_CACHE_DIR"]);
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_base);
@@ -87,7 +89,7 @@ fn _run_cache(cache_base: string, args: string[]) -> Run ![io] {
     let exit = process.run_capture(argv, e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    return Run { exit: exit, out: out + err };
+    return Run { exit: exit, out: out, err: err };
 }
 
 // Materialize a synthetic cache entry `<base>/v2/<prefix>/<key>` with a
@@ -123,7 +125,7 @@ fn _build(cache_base: string, work: string, src: string, out: string) -> Run ![i
     let so = process.capture_take_stdout();
     let se = process.capture_take_stderr();
     report_child_failure("cache-command build", exit, so, se);
-    return Run { exit: exit, out: so + se };
+    return Run { exit: exit, out: so, err: se };
 }
 
 // ---- info ----
@@ -259,7 +261,8 @@ test "cache: no subcommand prints usage and exits non-zero" ![io] {
     let base = _cache_base("usage");
     let r = _run_cache(base, []);
     assert r.exit != 0;
-    assert find(r.out, "usage", 0) >= 0;
+    assert find(r.err, "usage", 0) >= 0;
+    assert find(r.out, "usage", 0) < 0;
 }
 
 // ---- mtime-on-hit (real build) ----

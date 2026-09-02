@@ -47,13 +47,13 @@ fn handle_lock_command(args: string[]) -> int ![io] {
         let arg = args[ai];
         if strings_equal(arg, "--work-dir") {
             if ai + 1 >= args.length {
-                print("sfn lock: --work-dir requires a directory argument");
+                print.err("sfn lock: --work-dir requires a directory argument");
                 return 2;
             }
             work_dir = args[ai + 1];
             ai += 2;
         } else {
-            print("usage: sfn lock [--work-dir DIR]");
+            print.err("usage: sfn lock [--work-dir DIR]");
             return 2;
         }
     }
@@ -64,7 +64,7 @@ fn handle_lock_command(args: string[]) -> int ![io] {
     }
     let workspace_root = discover_workspace_root(start_dir);
     if workspace_root.length == 0 {
-        print("sfn lock: no workspace.toml found (run inside a workspace)");
+        print.err("sfn lock: no workspace.toml found (run inside a workspace)");
         return 1;
     }
     let entries = resolve_workspace_lock_entries(workspace_root);

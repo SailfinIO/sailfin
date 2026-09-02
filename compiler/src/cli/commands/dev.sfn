@@ -1580,7 +1580,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if strings_equal(sub, "install") {
         return _dev_bootstrap_install(get(matches, "from"), get(matches, "prefix"), get(matches, "destdir"));
     }
-    print("usage: sfn dev bootstrap <fetch|build|check|pin|fingerprint|install>");
+    print.err("usage: sfn dev bootstrap <fetch|build|check|pin|fingerprint|install>");
     return 2;
 }
 

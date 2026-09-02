@@ -267,7 +267,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // resolve through SAILFIN_TEST_JOBS and then the native host budget.
     let jobs: int = _resolve_test_jobs(matches);
     if jobs < 1 || jobs > 256 {
-        print("sfn test: --jobs requires a positive integer in [1, 256] (got '"
+        print.err("sfn test: --jobs requires a positive integer in [1, 256] (got '"
             + int_to_string(jobs)
             + "')");
         return 2;
@@ -278,7 +278,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let mut slowest_n: int = 5;
     if has(matches, "slowest") { slowest_n = get_int(matches, "slowest"); }
     if slowest_n < 0 || slowest_n > 1000 {
-        print("sfn test: --slowest requires an integer in [0, 1000] (got '"
+        print.err("sfn test: --slowest requires an integer in [0, 1000] (got '"
             + int_to_string(slowest_n)
             + "')");
         return 2;
@@ -297,7 +297,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         let s_index: int = _parse_shard_index(shard_spec_raw);
         let s_total: int = _parse_shard_total(shard_spec_raw);
         if s_index < 0 || s_total < 0 {
-            print("sfn test: --shard requires I/N with 1 <= I <= N (got '"
+            print.err("sfn test: --shard requires I/N with 1 <= I <= N (got '"
                 + shard_spec_raw
                 + "')");
             return 2;
@@ -344,7 +344,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     loop {
         if mpi >= positional.length { break; }
         if !fs.exists(positional[mpi]) {
-            print("error: path not found: " + positional[mpi]);
+            print.err("error: path not found: " + positional[mpi]);
             missing_paths += 1;
         }
         mpi += 1;

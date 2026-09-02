@@ -544,7 +544,8 @@ test "sfn package --installer -p errors (mutual exclusion)" ![io] {
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
-    assert contains(out + err, "incompatible");
+    assert contains(err, "incompatible");
+    assert ! contains(out, "incompatible");
 }
 
 // =====================================================================
@@ -558,7 +559,8 @@ test "sfn package: missing --compiler-bin errors" ![io] {
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
-    assert contains(out + err, "compiler binary not found");
+    assert contains(err, "compiler binary not found");
+    assert ! contains(out, "compiler binary not found");
 }
 
 test "sfn package -p without prior build errors (no sidecar)" ![io] {
@@ -574,5 +576,6 @@ test "sfn package -p without prior build errors (no sidecar)" ![io] {
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
-    assert contains(out + err, "no sidecar");
+    assert contains(err, "no sidecar");
+    assert ! contains(out, "no sidecar");
 }

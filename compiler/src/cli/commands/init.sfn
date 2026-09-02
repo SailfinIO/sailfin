@@ -50,7 +50,7 @@ fn command_def() -> Command {
 // no input). Byte-identical to the legacy `init` handler body.
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     if fs.exists("capsule.toml") {
-        print("capsule.toml already exists in this directory");
+        print.err("capsule.toml already exists in this directory");
         return 1;
     }
     let cwd = _get_env_cmd("PWD");

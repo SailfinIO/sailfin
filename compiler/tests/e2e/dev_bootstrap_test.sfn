@@ -60,7 +60,8 @@ test "dev bootstrap: bare sfn dev prints usage and exits non-zero" ![io] {
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
-    assert find(out + err, "bootstrap", 0) >= 0;
+    assert find(err, "bootstrap", 0) >= 0;
+    assert find(out, "bootstrap", 0) < 0;
 }
 
 test "dev bootstrap: sfn dev bootstrap in the compiler checkout is recognized" ![io] {

@@ -278,7 +278,7 @@ fn _clean_execute(label: string, targets: string[], dry: boolean, preserved: str
 fn clean_run(matches: Matches, ctx: CliContext) -> int ![io] {
     let sub = subcommand(matches);
     if !strings_equal(sub, "build") && !strings_equal(sub, "dist") && !strings_equal(sub, "all") {
-        print("usage: sfn dev clean <build|dist|all> [--include-seed] [--dry-run]");
+        print.err("usage: sfn dev clean <build|dist|all> [--include-seed] [--dry-run]");
         return 2;
     }
 

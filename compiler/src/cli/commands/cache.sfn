@@ -80,7 +80,7 @@ fn _run_prune(root: string, matches: Matches) -> int ![io] {
 fn _run_clean(root: string, matches: Matches) -> int ![io] {
     let all_schemas = has_flag(matches, "all-schemas");
     if !cache_clean(root) {
-        print("error: failed to remove cache root " + root);
+        print.err("error: failed to remove cache root " + root);
         return 1;
     }
     if all_schemas {
@@ -115,7 +115,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     if strings_equal(sub, "info") { return _run_info(root); }
     if strings_equal(sub, "prune") { return _run_prune(root, matches); }
     if strings_equal(sub, "clean") { return _run_clean(root, matches); }
-    print("usage: sfn cache <info|prune|clean>");
+    print.err("usage: sfn cache <info|prune|clean>");
     return 2;
 }
 

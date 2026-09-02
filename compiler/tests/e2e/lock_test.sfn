@@ -130,6 +130,7 @@ test "lock: from a member dir writes at the workspace root" ![io] {
 
 // ---- Test 4: outside a workspace errors cleanly (non-zero) ----
 test "lock: outside a workspace errors cleanly" ![io] {
+    let out_marker = _marker("t4-out");
     let err_marker = _marker("t4-err");
     let lockfile_marker = _marker("t4-lockfile");
     let exit = with_tmp_dir(fn (dir: string) -> int {
@@ -144,23 +145,29 @@ test "lock: outside a workspace errors cleanly" ![io] {
             + out
             + "\nstderr:\n"
             + err);
-        fs.writeFile(err_marker, out + err);
+        fs.writeFile(out_marker, out);
+        fs.writeFile(err_marker, err);
         fs.writeFile(lockfile_marker, bool_to_marker(fs.exists(dir
             + "/workspace.lock")));
         return rc;
     });
-    // Non-zero exit, an error message mentioning the workspace, and no
-    // lockfile left behind.
+    // Non-zero exit, an error message mentioning the workspace on stderr, and
+    // no lockfile left behind.
     assert exit != 0;
-    let message = fs.readFile(err_marker);
+    let out_message = fs.readFile(out_marker);
+    let err_message = fs.readFile(err_marker);
     let lockfile = fs.readFile(lockfile_marker);
-    print.err("[lock-outside-workspace] err_marker=<<<" + message
+    print.err("[lock-outside-workspace] out_marker=<<<" + out_message
+        + ">>> err_marker=<<<"
+        + err_message
         + ">>> lockfile_marker=<<<"
         + lockfile
         + ">>>");
+    fs.deleteFile(out_marker);
     fs.deleteFile(err_marker);
     fs.deleteFile(lockfile_marker);
-    assert find(message, "workspace", 0) >= 0;
+    assert find(err_message, "workspace", 0) >= 0;
+    assert find(out_message, "workspace", 0) < 0;
     assert lockfile == "no";
 }
 
