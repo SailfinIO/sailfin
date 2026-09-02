@@ -70,6 +70,12 @@ test "enum payload: member access on a user-declared generic enum" {
     assert expect_eq_bool(p.ok, true).ok;
 }
 
+test "enum payload: member access on a direct call base reads the concrete struct" {
+    let p: P = w_ok().value;
+    assert expect_eq_int(p.depth, 3).ok;
+    assert expect_eq_int(w_ok().value.depth, 3).ok;
+}
+
 test "enum payload: scalar generic payload still reads through member access" {
     let r: Result<int, string> = Result.Ok { value: 42 };
     let v: int = r.value;

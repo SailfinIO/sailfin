@@ -28,8 +28,8 @@ import {
     StringConstant,
     StructFieldInfo
 } from "sfn/codegen-llvm/types";
-
 import { LoweringDiagnostic } from "sfn/ir";
+
 import { index_of } from "../../src/string_utils";
 
 fn _any_line_contains(lines: string[], needle: string) -> boolean {
@@ -118,7 +118,7 @@ test "lowering: escaping enum-by-value field spills to a persistent heap box, no
     let empty_lines: string[] = [];
     let empty_structured_diags: LoweringDiagnostic[] = [];
     let empty_consts: StringConstant[] = [];
-    let result = lower_enum_member_access(_access(), _coercion_enum(), _by_value_base(), false, 0, empty_lines, empty_structured_diags, empty_consts, "%Cell*", "");
+    let result = lower_enum_member_access(_access(), _coercion_enum(), _by_value_base(), false, 0, empty_lines, empty_structured_diags, empty_consts, "%Cell*", "", "");
 
     // The escaping coercion spill heap-boxes the by-value enum and marks the
     // box persistent so the returned field address outlives the function.
@@ -134,7 +134,7 @@ test "lowering: non-escaping enum-by-value field keeps the cheaper alloca spill 
     let empty_lines: string[] = [];
     let empty_structured_diags: LoweringDiagnostic[] = [];
     let empty_consts: StringConstant[] = [];
-    let result = lower_enum_member_access(_access(), _value_enum(), _by_value_base(), false, 0, empty_lines, empty_structured_diags, empty_consts, "%Cell*", "");
+    let result = lower_enum_member_access(_access(), _value_enum(), _by_value_base(), false, 0, empty_lines, empty_structured_diags, empty_consts, "%Cell*", "", "");
 
     // No coercion: the field VALUE is loaded before return, so nothing escapes
     // the spill and the heap box is unnecessary. The fix must stay scoped to

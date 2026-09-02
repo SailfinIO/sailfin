@@ -3,16 +3,29 @@
 // Inline GEP field access helper extracted from core_member_lowering.sfn
 // to keep each function under ~500 .sfn-asm instructions (avoids seed OOM).
 import { LoweringDiagnostic } from "sfn/ir";
+import { find, substring } from "sfn/strings";
 
 import { find_local_binding } from "../../expressions_bindings";
 import { format_temp_name } from "../../expressions_helpers";
-import { find_struct_field_info, find_struct_info_by_name } from "../../type_context_queries";
 import {
+    find_struct_field_info,
+    find_struct_info_by_name,
+    resolve_enum_info_for_literal
+} from "../../type_context_queries";
+import {
+    enum_inst_parse_args,
+    enum_inst_substitute_annotation,
+    generic_payload_slot_type,
+    map_struct_field_annotation
+} from "../../type_mapping";
+import {
+    EnumTypeInfo,
     ExpressionResult,
     LLVMOperand,
     LocalBinding,
     ParameterBinding,
     StringConstant,
+    StructFieldInfo,
     TypeContext
 } from "../../types";
 import { number_to_string, trim_text } from "../../utils";
@@ -94,4 +107,83 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
     };
 }
 
-export { lower_inline_gep_field_access };
+// =============================================================================
+// Generic enum payload substitution (SFN-772)
+// =============================================================================
+// The type context maps a `value: T` variant field to the type-erased `%T`,
+// which no constructor ever stores: a generic struct payload is heap-boxed and
+// the slot holds `%P*`, a scalar is stored inline as its own type. The match
+// reader (`lowering/instructions_match_condition.sfn`, #830) substitutes the
+// enum's type parameters against the subject's instantiation before mapping;
+// direct member access must resolve the same concrete type, or `r.value`
+// reads the slot as `%T` while `match r { Ok { value } }` reads it as `%P*`.
+// The instantiation arguments of `subject_type_annotation` (`Result<P, string>`
+// -> ["P", "string"]) when it names `enum_info`; [] for a monomorphic enum, an
+// unrecoverable annotation, or one naming a different enum. The last case
+// matters because `enum_info` is looked up from the base operand's LLVM type
+// while the annotation comes from the tracked binding — two independent
+// recoveries that must agree before positional substitution means anything.
+fn enum_payload_inst_args(enum_info: EnumTypeInfo, subject_type_annotation: string) -> string[] {
+    if enum_info.type_parameters.length == 0 { return []; }
+    let mut subject_name = trim_text(subject_type_annotation);
+    let generic_start = find(subject_name, "<", 0);
+    if generic_start > 0 {
+        subject_name = trim_text(substring(subject_name, 0, generic_start));
+    }
+    if subject_name != enum_info.name { return []; }
+    return enum_inst_parse_args(subject_type_annotation);
+}
+
+// `declared` with its type parameters substituted, mapped WITHOUT the
+// user-value pointer strip so a boxed struct payload resolves to `%P*` (the
+// form the writer stores). Returned unchanged when substitution is a no-op,
+// so a substituted field is recognisable by `type_annotation` alone.
+fn resolve_generic_payload_field(declared: StructFieldInfo, enum_info: EnumTypeInfo, inst_args: string[]) -> StructFieldInfo {
+    if inst_args.length == 0 { return declared; }
+    let substituted = enum_inst_substitute_annotation(declared.type_annotation, enum_info.type_parameters, inst_args);
+    if substituted == declared.type_annotation { return declared; }
+    let mut llvm_type = map_struct_field_annotation(substituted);
+    if llvm_type.length == 0 { llvm_type = "i8*"; }
+    return StructFieldInfo {
+        name: declared.name,
+        llvm_type: llvm_type,
+        type_annotation: substituted,
+        index: declared.index,
+        offset: declared.offset
+    };
+}
+
+// The LLVM type the payload slot holds for a field whose consumer-facing
+// (`storage`) type is `storage_type`. They coincide for a substituted struct
+// payload (`%P*` IS the boxed pointer) and for a scalar, and diverge only for
+// a value aggregate such as the `{i8*, i8*}` closure pair, whose slot holds a
+// heap pointer a second load unboxes (SFN-771). The gate is "substitution
+// changed the annotation", the same predicate the match reader uses.
+fn generic_payload_load_slot_type(storage_type: string, resolved_annotation: string, declared: StructFieldInfo?) -> string {
+    if declared == null { return storage_type; }
+    if resolved_annotation == declared.type_annotation { return storage_type; }
+    return generic_payload_slot_type(storage_type);
+}
+
+// SFN-565/SFN-772: a boxed generic enum instantiation (`Result<P, string>`)
+// lowers as a type-erased `i8*`, so an `i8*` member-access base whose declared
+// annotation names a generic enum is that enum behind the erased pointer, not
+// an opaque struct for the dynamic field lookup. Mirrors the match reader's
+// recovery of an `i8*` scrutinee (`lowering/instructions_match.sfn`).
+fn boxed_generic_enum_info(context: TypeContext, base_type_annotation: string) -> EnumTypeInfo? {
+    let trimmed = trim_text(base_type_annotation);
+    let generic_start = find(trimmed, "<", 0);
+    if generic_start <= 0 { return null; }
+    let enum_info = resolve_enum_info_for_literal(context, trim_text(substring(trimmed, 0, generic_start)));
+    if enum_info == null { return null; }
+    if enum_info.type_parameters.length == 0 { return null; }
+    return enum_info;
+}
+
+export {
+    boxed_generic_enum_info,
+    enum_payload_inst_args,
+    generic_payload_load_slot_type,
+    lower_inline_gep_field_access,
+    resolve_generic_payload_field
+};

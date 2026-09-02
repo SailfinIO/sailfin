@@ -183,10 +183,9 @@ to a narrower, structurally-resolvable case rather than wait for #829.
 
 This SFEP takes the same **name-based, pattern-driven** approach the LLVM
 lowering pass already uses successfully for the analogous problem
-(`resolve_match_subject_annotation`,
-`compiler/src/llvm/lowering/instructions_match.sfn:97-122`, and
-`_match_extract_call_target`/`resolve_match_subject_call_annotation` at
-lines 130-165) — but resolve the **enum identity from the patterns
+(`resolve_subject_type_annotation`, `_extract_call_target` and
+`resolve_subject_call_annotation` in
+`compiler/capsules/codegen-llvm/src/expressions_bindings.sfn`) — but resolve the **enum identity from the patterns
 themselves**, which sidesteps needing the scrutinee's declared type at all
 for the common case:
 
@@ -598,8 +597,8 @@ in the same pass.
 - `compiler/src/llvm/lowering/lowering_phase_types.sfn:45-69` — enum tag/
   max-payload-size layout (`EnumTypeInfo`), confirming enums are real tagged
   unions.
-- `compiler/src/llvm/lowering/instructions_match.sfn:97-165`
-  (`resolve_match_subject_annotation`/`resolve_match_subject_call_annotation`
+- `compiler/capsules/codegen-llvm/src/expressions_bindings.sfn`
+  (`resolve_subject_type_annotation`/`resolve_subject_call_annotation`
   — the name-based, no-type-inference resolution precedent this SFEP's
   §3.3 follows), `:825-834` (the existing `match_exhaustive` computation
   this SFEP leaves untouched at the lowering layer), the per-arm
