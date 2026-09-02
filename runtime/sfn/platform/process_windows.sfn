@@ -94,6 +94,13 @@ extern fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8;
 // ── Win32 kernel32 (implicitly linked by mingw; no extra `-l`). ──────
 extern fn CreateProcessA(app: *u8, cmdline: *u8, pattr: *u8, tattr: *u8, inherit: i32, flags: i32, env: *u8, cwd: *u8, si: *u8, pi: *u8) -> i32;
 
+// `SearchPathA(path, file, ext, cap, buf, file_part)` — resolve `file` against
+// the `;`-separated directory list `path` ONLY (a non-NULL `path` disables the
+// registry/system search order), appending `ext` when `file` carries no
+// extension. Returns the resolved length (excluding NUL), the required size
+// when `cap` is too small, or `0` when nothing matched.
+extern fn SearchPathA(path: *u8, file: *u8, ext: *u8, cap: i32, buf: *u8, file_part: *u8) -> i32;
+
 extern fn AcquireSRWLockExclusive(lock: *i64) -> void;
 
 extern fn ReleaseSRWLockExclusive(lock: *i64) -> void;
@@ -348,14 +355,20 @@ fn _pw_close_dup(h: i64) -> void ![io] {
 // only for a bare name and resolves a relative path after applying the
 // requested child cwd. Win32 instead resolves a relative `lpApplicationName`
 // against the PARENT cwd. Prefix such paths with the requested cwd before
-// spawning, while absolute/drive-qualified paths pass through unchanged and
-// bare names keep NULL so `PATH` lookup and the implicit `.exe` suffix remain
-// available (SFN-1144).
+// spawning, while absolute/drive-qualified paths pass through unchanged
+// (SFN-1144).
+//
+// A bare name is resolved against `PATH` explicitly (`_pw_resolve_on_path`)
+// rather than left NULL: `CreateProcessA`'s own module search consults the
+// system directory BEFORE `PATH`, so `find`, `sort`, `timeout` and every other
+// name that also lives in `System32` ran the DOS tool no matter what `PATH`
+// said — silently, since the DOS tool exits non-zero and a caller reads that
+// as a legitimate empty result (SFN-1132).
 //
 // Arena-backed via `sfn_str_to_cstr`, so the caller must NOT free it — the
 // same discipline every other `sfn_str_to_cstr` result in this file follows,
 // as against the `malloc`'d `cmdline` beside it, which is freed.
-fn _pw_app_name(argv0: string, cwd: *u8) -> *u8 {
+fn _pw_app_name(argv0: string, cwd: *u8) -> *u8 ![io] {
     let a: *u8 = sfn_str_to_cstr(argv0 as *u8, argv0.length, null);
     let n: i64 = strlen(a) as i64;
     let mut i: i64 = 0;
@@ -383,7 +396,7 @@ fn _pw_app_name(argv0: string, cwd: *u8) -> *u8 {
         has_drive_prefix = first_is_letter && second == 58;
     }
 
-    if !has_separator && !has_drive_prefix { return 0 as *u8; }
+    if !has_separator && !has_drive_prefix { return _pw_resolve_on_path(a); }
     if (cwd as i64) == 0 || strlen(cwd) as i64 == 0 { return a; }
 
     let first: i64 = load_byte(a as i64);
@@ -391,6 +404,53 @@ fn _pw_app_name(argv0: string, cwd: *u8) -> *u8 {
 
     let joined: string = (cwd as string) + "/" + argv0;
     return sfn_str_to_cstr(joined as *u8, joined.length, null);
+}
+
+// `_pw_resolve_on_path(name)` — the first `PATH` match for a bare `name`, with
+// the implicit `.exe` suffix `CreateProcessA` would itself have applied, or
+// `null` when `PATH` is unset or holds no match.
+//
+// This is `posix_spawnp`'s contract: the CALLING process's `PATH`, first
+// directory wins, nothing else consulted. `SearchPathA` with an explicit
+// directory list gives exactly that; the NULL-path form would re-enter the
+// system-directory-first order this function exists to bypass.
+//
+// `null` on a miss deliberately falls back to `CreateProcessA`'s own search
+// rather than failing the spawn here, so a name that only the legacy order
+// finds — the parent executable's own directory, say — keeps resolving as it
+// did before, and a name found nowhere still fails inside `CreateProcessA`
+// as a spawn failure (`-1` to the caller). This is a PRECEDENCE fix, not a
+// full `posix_spawnp` emulation: when `PATH` has no match but `System32`
+// does, the legacy order still runs the `System32` tool. That residual case
+// needs a `PATH` with no match at all, whereas every real-world `PATH` this
+// bug bit carried the intended tool and lost to `System32` on order alone.
+//
+// The literals are bound to `string` locals before the `*u8` cast: the
+// inline `"..." as *u8` argument form miscompiles under the seed
+// (`runtime/sfn/string.sfn`, `runtime/sfn/memory/arena.sfn` record it), and
+// `sfn check` cannot catch a lowering defect.
+//
+// 32767 is the longest command-line-safe Win32 path; a resolved path that
+// does not fit is treated as a miss.
+fn _pw_resolve_on_path(name: *u8) -> *u8 ![io] {
+    let path_name: string = "PATH";
+    let path_cname: *u8 = sfn_str_to_cstr(path_name as *u8, path_name.length, null);
+    let path_env: *u8 = getenv(path_cname);
+    if (path_env as i64) == 0 { return 0 as *u8; }
+    if strlen(path_env) as i64 == 0 { return 0 as *u8; }
+    let cap: i64 = 32767;
+    let buf: *u8 = malloc(cap as usize);
+    if (buf as i64) == 0 { return 0 as *u8; }
+    let exe_suffix: string = ".exe";
+    let ext: *u8 = sfn_str_to_cstr(exe_suffix as *u8, exe_suffix.length, null);
+    let n: i32 = SearchPathA(path_env, name, ext, cap as i32, buf, null);
+    if n <= 0 || (n as i64) >= cap {
+        free(buf);
+        return 0 as *u8;
+    }
+    let resolved: *u8 = sfn_str_to_cstr(buf, n as i64, null);
+    free(buf);
+    return resolved;
 }
 
 // `_pw_cwd_arg(cwd)` — the `lpCurrentDirectory` `CreateProcessA` needs for a
@@ -461,6 +521,10 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     }
     memset(pi, 0, 24 as usize);
 
+    // Resolved before the spawn lock: the PATH walk is filesystem I/O and
+    // holds no handle, so nothing else needs to wait on it (SFN-1132).
+    let app: *u8 = _pw_app_name(argv[0], null);
+
     // Win32 has no POSIX-style "the child keeps the parent's fds" default:
     // with `bInheritHandles = 0` and no `STARTF_USESTDHANDLES` the child is
     // handed fresh console handles by the OS rather than the parent's own
@@ -505,7 +569,6 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
         inherit = 1;
     }
 
-    let app: *u8 = _pw_app_name(argv[0], null);
     let ok: i32 = CreateProcessA(app, cmdline, null, null, inherit, 0, null, null, si, pi);
     free(cmdline);
     _pw_close_dup(h_in);
@@ -888,6 +951,10 @@ fn _pw_run_capture_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![i
     atomic_store(sa as *i64, 24);
     atomic_store((sa as i64 + 16) as *i64, 1);
 
+    // Resolved before the spawn lock: the PATH walk is filesystem I/O and
+    // holds no handle, so nothing else needs to wait on it (SFN-1132).
+    let app: *u8 = _pw_app_name(argv[0], cwd);
+
     // Two anonymous pipes packed into one 32-byte buffer:
     // stdout (rd@0, wr@8), stderr (rd@16, wr@24).
     let hbuf: *u8 = malloc(32 as usize);
@@ -1001,7 +1068,6 @@ fn _pw_run_capture_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![i
 
     // bInheritHandles=TRUE(1) so the child inherits the redirected write
     // ends; flags=0 (ANSI environment block).
-    let app: *u8 = _pw_app_name(argv[0], cwd);
     let ok: i32 = CreateProcessA(app, cmdline, null, null, 1, 0, env_block, _pw_cwd_arg(cwd), si, pi);
     free(cmdline);
     free(env_block);
@@ -1561,6 +1627,10 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
     atomic_store(sa as *i64, 24);
     atomic_store((sa as i64 + 16) as *i64, 1);
 
+    // Resolved before the spawn lock: the PATH walk is filesystem I/O and
+    // holds no handle, so nothing else needs to wait on it (SFN-1132).
+    let app: *u8 = _pw_app_name(argv[0], cwd);
+
     // Three anonymous pipes packed into one 48-byte buffer:
     // stdin (rd@0, wr@8), stdout (rd@16, wr@24), stderr (rd@32, wr@40).
     let hbuf: *u8 = malloc(48 as usize);
@@ -1701,7 +1771,6 @@ fn _pw_spawn_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
     // bInheritHandles=TRUE(1) so the child inherits the three redirected
     // ends; flags=0 (ANSI environment block). The file-level inheritance
     // lock is held until the parent closes its child-side pipe ends below.
-    let app: *u8 = _pw_app_name(argv[0], cwd);
     let ok: i32 = CreateProcessA(app, cmdline, null, null, 1, 0, env_block, _pw_cwd_arg(cwd), si, pi);
     free(cmdline);
     free(env_block);
@@ -2285,6 +2354,10 @@ fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
     }
     memset(pi, 0, 24 as usize);
 
+    // Resolved before the spawn lock: the PATH walk is filesystem I/O and
+    // holds no handle, so nothing else needs to wait on it (SFN-1132).
+    let app: *u8 = _pw_app_name(argv[0], null);
+
     // The child must own the parent's streams — that is what makes the
     // replacement look like one from the outside. Same inheritable-duplicate
     // discipline as `sfn_process_run` (SFN-546), taken under the same lock so
@@ -2304,7 +2377,6 @@ fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
         inherit = 1;
     }
 
-    let app: *u8 = _pw_app_name(argv[0], null);
     let ok: i32 = CreateProcessA(app, cmdline, null, null, inherit, 0, env_block, null, si, pi);
     free(cmdline);
     _pw_close_dup(h_in);
