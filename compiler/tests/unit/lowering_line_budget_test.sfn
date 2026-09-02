@@ -56,7 +56,17 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     // SFN-639 tracks the decomposition.
     if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1512; }
     if path == LOWERING_ROOT + "/lowering_recovery.sfn" { return 1056; }
-    if path == LOWERING_ROOT + "/instructions_let.sfn" { return 984; }
+    // SFN-695 raises `instructions_let.sfn` 984 -> 1020. A `let` whose
+    // initializer is a bare identifier bound to a channel (`let alias = ch;`)
+    // now adopts the source binding's `channel` / `channel:<kind>` annotation,
+    // so `alias.send` / `alias.receive` / `alias.close` reach the channel
+    // lowering instead of fataling with E1007. A raise against the
+    // shrink-only rule, called out for review: the alternative is a program
+    // `sfn check` accepts and lowering rejects. The channel-annotation block
+    // this arm joins (constructor inference plus the two `Channel<T>` element
+    // helpers, ~125 lines) is self-contained and the obvious extraction;
+    // SFN-639 tracks the decomposition.
+    if path == LOWERING_ROOT + "/instructions_let.sfn" { return 1020; }
     // The SFN-1168 note above describes an earlier state: the ceiling has
     // since come back down 963 -> 908, so the numbers in that paragraph no
     // longer match this entry.
