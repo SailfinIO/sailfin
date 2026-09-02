@@ -1159,6 +1159,12 @@ jobs:
     if: ${{ always() && needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # `actions: read` is what lets the supersede classifier below read this
+    # workflow's own run list. Declaring the block overrides the workflow-level
+    # grant, so `contents: read` is restated rather than inherited.
+    permissions:
+      contents: read
+      actions: read
     env:
       CROSS_VEHICLE: ${{ needs.build-aarch64-cross-vehicle.result }}
       CROSS_ARTIFACT: ${{ needs.build-aarch64-cross-vehicle.outputs.artifact_ready }}
@@ -1166,6 +1172,11 @@ jobs:
       NATIVE_ARTIFACT: ${{ needs.build-compiler-aarch64-linux.outputs.artifact_ready }}
       SHARD_COVER: ${{ needs.shard-cover.result }}
       ARM_SHARDS: ${{ needs.build-aarch64-linux.result }}
+      EVENT_NAME: ${{ github.event_name }}
+      HEAD_BRANCH: ${{ github.head_ref }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Summarize aarch64-Linux result
         shell: bash
@@ -1194,7 +1205,61 @@ jobs:
           check "Native compiler artifact" "$NATIVE_ARTIFACT" "true"
           check "Shard-cover lint" "$SHARD_COVER" "success"
           check "ARM test shards" "$ARM_SHARDS" "success"
+          # A superseded run is not a failing run. `concurrency` (:51-53) sets
+          # `cancel-in-progress: true`, so a newer push kills the in-flight run
+          # for this PR -- correct, and what stops us burning runners on stale
+          # commits. But `always()` still schedules this gate on the dead head,
+          # where every dependency reads `cancelled`, the comparisons above
+          # turn those no-signals into a red required check, and a reviewer
+          # glancing at the list sees red on a PR whose completed jobs all
+          # passed (SFN-1170).
+          #
+          # Classified by asking whether a NEWER run exists for this head
+          # branch -- the same discriminator as the "Classify cancellation
+          # (supersede vs timeout)" step in windows-native-selfhost.yml --
+          # rather than by testing `cancelled()` or by scoring a `cancelled`
+          # result as a pass. Neither of those separates supersession from a
+          # job `timeout-minutes` expiry, which also surfaces as a `cancelled`
+          # conclusion (build-quality.yml:634-637; observed on
+          # nightly-selfhost run 33202903428, whose macOS verify leg ran
+          # 2h59m24s into a `timeout-minutes: 180` cap and reported
+          # `cancelled`). A hung shard must stay red. "Is anyone still waiting
+          # on this head?" is the question that actually distinguishes them,
+          # and it leaves a timeout, a manual cancel and a genuine failure all
+          # reporting red on the head they happened on.
+          #
+          # Scoring `cancelled` as a pass would not even have sufficed: a
+          # cancelled job's *outputs* expand to the empty string rather than
+          # `cancelled` (run 33572114693 logged `CROSS_ARTIFACT:` blank beside
+          # `CROSS_VEHICLE: cancelled`), so the two artifact checks below would
+          # have stayed red anyway.
+          #
+          # `if: !cancelled()` was the other candidate, and is rejected for the
+          # reason already recorded in `required-ci` below: GitHub counts a
+          # *skipped* job as success for a required status check, so a
+          # superseded run would advertise a green gate rather than no gate.
+          #
+          # Fails closed: an API error leaves `latest` empty and the run is
+          # treated as current, so the gate still reports.
+          superseded() {
+            [ "${EVENT_NAME:-}" = "pull_request" ] || return 1
+            [ -n "${HEAD_BRANCH:-}" ] || return 1
+            latest="$(
+              gh api -X GET "/repos/${REPO}/actions/workflows/ci.yml/runs" \
+                -f event=pull_request \
+                -f "branch=${HEAD_BRANCH}" \
+                -f per_page=1 \
+                --jq '.workflow_runs[0].id // empty' 2>/dev/null || true
+            )"
+            [ -n "$latest" ] && [ "$latest" != "${RUN_ID:-}" ]
+          }
+
           if [ "$fail" -gt 0 ]; then
+            if superseded; then
+              echo "[aarch64-linux] $fail result(s) did not succeed, but this run was superseded by a newer run on ${HEAD_BRANCH}; the new head's run is the authority."
+              echo "| AArch64 Linux result | superseded -- no signal |" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             echo "[aarch64-linux] $fail ARM prerequisite or shard result(s) did not succeed." >&2
             exit 1
           fi
@@ -2684,6 +2749,12 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # `actions: read` is what lets the supersede classifier below read this
+    # workflow's own run list. Declaring the block overrides the workflow-level
+    # grant, so `contents: read` is restated rather than inherited.
+    permissions:
+      contents: read
+      actions: read
     env:
       CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
       EVENT_NAME: ${{ github.event_name }}
@@ -2703,6 +2774,10 @@ jobs:
       WINDOWS_HOST_GUARD: ${{ needs.windows-host-guard.result }}
       BUILD_COMPILER_WINDOWS: ${{ needs.build-compiler-windows.result }}
       AARCH64_LINUX: ${{ needs.aarch64-linux-result.result }}
+      HEAD_BRANCH: ${{ github.head_ref }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Summarize required CI result
         shell: bash
@@ -2718,6 +2793,53 @@ jobs:
             echo "| CI scope output | ${SOURCE_CI:-unset} |"
             echo "| Public-claim scope output | ${PUBLIC_CLAIMS_CI:-unset} |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # A superseded run is not a failing run -- see the identical
+          # classifier on `aarch64-linux-result` above for why supersession is
+          # detected by "does a newer run exist for this head branch?" rather
+          # than by `cancelled()` or by scoring a `cancelled` dependency as a
+          # pass. Both alternatives also swallow a job `timeout-minutes`
+          # expiry, which reports the same `cancelled` conclusion
+          # (build-quality.yml:634-637).
+          #
+          # Deliberately inert outside `pull_request`: `github.head_ref` is
+          # empty on `merge_group`, `schedule` and `workflow_dispatch`, so
+          # `superseded` returns false and those events keep failing closed
+          # exactly as before. That is load-bearing for the queue -- a
+          # `merge_group` run gets its own concurrency ref and is never
+          # superseded by a PR push, so a cancelled queue run is always an
+          # abort rather than coalescing, and the queue's premise is that it
+          # never lands an untested combination (SFEP-0037 3.1).
+          #
+          # Fails closed: an API error leaves `latest` empty and the run is
+          # treated as current, so the gate still reports.
+          superseded() {
+            [ "${EVENT_NAME:-}" = "pull_request" ] || return 1
+            [ -n "${HEAD_BRANCH:-}" ] || return 1
+            latest="$(
+              gh api -X GET "/repos/${REPO}/actions/workflows/ci.yml/runs" \
+                -f event=pull_request \
+                -f "branch=${HEAD_BRANCH}" \
+                -f per_page=1 \
+                --jq '.workflow_runs[0].id // empty' 2>/dev/null || true
+            )"
+            [ -n "$latest" ] && [ "$latest" != "${RUN_ID:-}" ]
+          }
+
+          # `ci-scope` is the first job in the run, so a push that supersedes
+          # early cancels it before any output is set -- every scope output
+          # below would then read unset and this gate would fail closed on a
+          # head nobody is waiting on. Only a cancellation is routed through
+          # the classifier; a genuine `failure` still fails closed.
+          if [ "${CI_SCOPE_RESULT:-}" = "cancelled" ] && superseded; then
+            echo "[required-ci] run superseded by a newer run on ${HEAD_BRANCH} before CI scope completed; nothing to gate."
+            {
+              echo "| Required CI gate | superseded -- no signal |"
+              echo ""
+              echo "This run was replaced by a newer push. The gate on the current head is the authority."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
           if [ "${CI_SCOPE_RESULT:-}" != "success" ]; then
             echo "[required-ci] CI scope did not succeed; failing closed." >&2
@@ -2820,6 +2942,11 @@ jobs:
           fi
 
           if [ "$fail" -gt 0 ]; then
+            if superseded; then
+              echo "[required-ci] $fail job(s) did not succeed, but this run was superseded by a newer run on ${HEAD_BRANCH}; the new head's gate is the authority."
+              echo "| Required CI gate | superseded -- no signal |" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             echo "[required-ci] $fail required CI job(s) did not succeed." >&2
             exit 1
           fi
