@@ -54,7 +54,9 @@ fn _write_provider(dir: string, name: string, value: string) -> void ![io] {
         + "kind = \"library\"\n"
         + "entry = \"src/mod.sfn\"\n");
     fs.writeFile(dir + "/src/mod.sfn", "fn lib_value() -> int {\n"
-        + "    return " + value + ";\n"
+        + "    return "
+        + value
+        + ";\n"
         + "}\n\n"
         + "export { lib_value };\n");
 }
@@ -128,9 +130,7 @@ test "dev-dependencies: a test target resolves a dev-dependency" ![io] {
             + "/app/tests/lib_test.sfn"], _build_env("sfn-988-test"));
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
-        if exit != 0 {
-            _log_failure("test", out + err);
-        }
+        if exit != 0 { _log_failure("test", out + err); }
         return exit;
     });
     assert result == 0;
@@ -153,8 +153,8 @@ test "dev-dependencies: a build target does not see a dev-dependency" ![io] {
             + "}\n");
 
         let output = root + "/app-out";
-        let exit = process.run_capture([sfn_bin_path(), "build", "-o", output,
-            root + "/app/src/main.sfn"], _build_env("sfn-988-build"));
+        let exit = process.run_capture([sfn_bin_path(), "build", "-o", output, root
+            + "/app/src/main.sfn"], _build_env("sfn-988-build"));
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         _log_failure("build", out + err);
@@ -191,11 +191,10 @@ test "dev-dependencies: a dependency's own dev-dependencies are not walked" ![io
             + "[build]\n"
             + "kind = \"library\"\n"
             + "entry = \"src/mod.sfn\"\n");
-        fs.writeFile(root + "/app/capsules/demo/lib/src/mod.sfn",
-            "fn lib_value() -> int {\n"
-                + "    return 41;\n"
-                + "}\n\n"
-                + "export { lib_value };\n");
+        fs.writeFile(root + "/app/capsules/demo/lib/src/mod.sfn", "fn lib_value() -> int {\n"
+            + "    return 41;\n"
+            + "}\n\n"
+            + "export { lib_value };\n");
 
         // `demo/hidden` must be present and in-tree-locatable for this test
         // to be meaningful — without it, a resolver that had simply lost the
