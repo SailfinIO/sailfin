@@ -278,12 +278,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     let is_update: boolean = has_flag(matches, "update");
     let capsule_arg: string = get(matches, "capsule");
     if capsule_arg.length == 0 {
-        print("usage: sfn add [--dev] [--update] <capsule>");
+        print.err("usage: sfn add [--dev] [--update] <capsule>");
         return 2;
     }
 
     if !fs.exists("capsule.toml") {
-        print("no capsule.toml found — run `sfn init` first");
+        print.err("no capsule.toml found — run `sfn init` first");
         return 1;
     }
 
@@ -301,18 +301,18 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     // through a shell, so there is no injection surface on that path.)
     let slash_pos = find_char_local(registry_name, "/", 0);
     if slash_pos < 0 {
-        print("invalid capsule id — expected scope/name format: "
+        print.err("invalid capsule id — expected scope/name format: "
             + registry_name);
         return 1;
     }
     let scope = substring(registry_name, 0, slash_pos);
     let name = substring(registry_name, slash_pos + 1, registry_name.length);
     if !_is_safe_capsule_segment_cmd(scope) {
-        print("invalid capsule scope: " + scope);
+        print.err("invalid capsule scope: " + scope);
         return 1;
     }
     if !_is_safe_capsule_segment_cmd(name) {
-        print("invalid capsule name: " + name);
+        print.err("invalid capsule name: " + name);
         return 1;
     }
 
@@ -342,13 +342,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
         let index_body = _registry_get_cmd(registry_base + "/api/index.json");
         resolved_version = _extract_index_latest_cmd(index_body, registry_name);
         if resolved_version.length == 0 {
-            print("capsule not found in registry: " + registry_name);
+            print.err("capsule not found in registry: " + registry_name);
             return 1;
         }
     }
 
     if !_is_safe_capsule_version_cmd(resolved_version) {
-        print("invalid version (possible path traversal): " + resolved_version);
+        print.err("invalid version (possible path traversal): "
+            + resolved_version);
         return 1;
     }
 
@@ -377,7 +378,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     print("downloading " + display_name + "@" + resolved_version + "...");
     let dl_rc = _registry_download_cmd(download_url, pkg_path);
     if dl_rc != 0 {
-        print("failed to download: " + download_url);
+        print.err("failed to download: " + download_url);
         return 1;
     }
 

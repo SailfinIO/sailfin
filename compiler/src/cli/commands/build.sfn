@@ -114,11 +114,11 @@ fn command_def() -> Command {
 }
 
 fn _print_build_usage() ![io] {
-    print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--target TRIPLE] [<file.sfn> | -p <capsule-path>]");
-    print("       with no target, builds the current capsule or [workspace].default-members (or all members)");
-    print("       --target takes a compilation triple (x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu,");
-    print("       x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, x86_64-w64-mingw32) —");
-    print("       distinct from `sfn package --target`, which takes a platform label.");
+    print.err("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--target TRIPLE] [<file.sfn> | -p <capsule-path>]");
+    print.err("       with no target, builds the current capsule or [workspace].default-members (or all members)");
+    print.err("       --target takes a compilation triple (x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu,");
+    print.err("       x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, x86_64-w64-mingw32) —");
+    print.err("       distinct from `sfn package --target`, which takes a platform label.");
 }
 
 // E0614: an unsupported triple reached `build_target_triple()` via the
@@ -280,7 +280,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     let mut cap_entry_relative: string = "";
     if capsule_path.length > 0 {
         if input_path.length > 0 {
-            print("sfn build: -p and positional source are mutually exclusive");
+            print.err("sfn build: -p and positional source are mutually exclusive");
             return 2;
         }
         let cap_spec = _resolve_capsule_build_spec(capsule_path);
@@ -334,8 +334,8 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     // unsupported invocation as success and proceed with missing
     // artifacts.
     if is_runtime_build {
-        print("sfn build: kind = \"runtime\" capsules are not buildable directly;");
-        print("           declare \"" + cap_capsule_name
+        print.err("sfn build: kind = \"runtime\" capsules are not buildable directly;");
+        print.err("           declare \"" + cap_capsule_name
             + "\" as a dependency of a kind=\"binary\" capsule instead.");
         return 2;
     }
@@ -442,7 +442,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     }
 
     if !fs.exists(input_path) {
-        print("file not found: " + input_path);
+        print.err("file not found: " + input_path);
 
         return 1;
     }
@@ -455,8 +455,8 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     // path is user error and has to read as one; the ICE path is reserved for
     // backend failures on IR the compiler actually emitted from real source.
     if fs.is_directory(input_path) {
-        print("not a source file: " + input_path + " is a directory");
-        print("note: pass a `.sfn` file, or `-p <capsule>` to build a capsule");
+        print.err("not a source file: " + input_path + " is a directory");
+        print.err("note: pass a `.sfn` file, or `-p <capsule>` to build a capsule");
 
         return 1;
     }
@@ -534,7 +534,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     let module_name = module_name_for_source(input_path);
     let ok = compile_to_llvm_file_with_module_imports_and_implicit(source, module_name, ll_path, work_dir, capsule_result.entry_import_asm_paths, capsule_result.implicit_provider_asm_paths);
     if !ok {
-        print("failed to compile LLVM for: " + input_path);
+        print.err("failed to compile LLVM for: " + input_path);
 
         return 1;
     }

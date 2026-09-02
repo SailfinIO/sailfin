@@ -74,7 +74,7 @@ fn command_def() -> Command {
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     let sub: string = subcommand(matches);
     if !strings_equal(sub, "audit") {
-        print("usage: sfn capabilities audit");
+        print.err("usage: sfn capabilities audit");
         return 2;
     }
 

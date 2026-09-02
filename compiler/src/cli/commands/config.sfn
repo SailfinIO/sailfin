@@ -93,7 +93,7 @@ fn _write_config_cmd(registry_url: string, update_policy: string) -> int ![io] {
     let sfn_dir = home + "/.sfn";
     _ensure_dir_recursive_cmd(sfn_dir);
     if !_set_perms_or_skip(sfn_dir, 448) {
-        print("error: failed to set permissions on " + sfn_dir);
+        print.err("error: failed to set permissions on " + sfn_dir);
         return 1;
     }
     let path = sfn_dir + "/config.toml";
@@ -109,7 +109,7 @@ fn _write_config_cmd(registry_url: string, update_policy: string) -> int ![io] {
     }
     fs.writeFile(path, out);
     if !_set_perms_or_skip(path, 384) {
-        print("error: failed to set permissions on " + path);
+        print.err("error: failed to set permissions on " + path);
         return 1;
     }
     return 0;
@@ -117,13 +117,13 @@ fn _write_config_cmd(registry_url: string, update_policy: string) -> int ![io] {
 
 fn handle_config_command(args: string[]) -> int ![io] {
     if args.length < 2 {
-        print("usage: sfn config <get|set|unset|list> [key] [value]");
+        print.err("usage: sfn config <get|set|unset|list> [key] [value]");
         return 2;
     }
     let sub = args[1];
     if strings_equal(sub, "list") {
         if args.length != 2 {
-            print("usage: sfn config list");
+            print.err("usage: sfn config list");
             return 2;
         }
         print("registry = " + _resolve_registry_url_cmd());
@@ -132,7 +132,7 @@ fn handle_config_command(args: string[]) -> int ![io] {
     }
     if strings_equal(sub, "get") {
         if args.length != 3 {
-            print("usage: sfn config get <key>");
+            print.err("usage: sfn config get <key>");
             return 2;
         }
         let key = args[2];
@@ -144,25 +144,25 @@ fn handle_config_command(args: string[]) -> int ![io] {
             print(toolchain_update_policy_read());
             return 0;
         }
-        print("unknown config key: " + key);
-        print("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
+        print.err("unknown config key: " + key);
+        print.err("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
         return 2;
     }
     if strings_equal(sub, "set") {
         if args.length != 4 {
-            print("usage: sfn config set <key> <value>");
+            print.err("usage: sfn config set <key> <value>");
             return 2;
         }
         let key = args[2];
         let value = _toml_trim_cmd(args[3]);
         if strings_equal(key, "registry") {
             if value.length == 0 {
-                print("error: empty value");
+                print.err("error: empty value");
                 return 1;
             }
             let normalized = _strip_trailing_slash_cmd(value);
             if !_is_valid_registry_url_cmd(normalized) {
-                print("error: registry must be an http(s) URL with no whitespace, quotes, or shell metacharacters");
+                print.err("error: registry must be an http(s) URL with no whitespace, quotes, or shell metacharacters");
                 return 1;
             }
             let rc = _write_config_cmd(normalized, _config_update_policy_from_file_cmd());
@@ -172,11 +172,11 @@ fn handle_config_command(args: string[]) -> int ![io] {
         }
         if strings_equal(key, TOOLCHAIN_UPDATE_POLICY_KEY) {
             if value.length == 0 {
-                print("error: empty value");
+                print.err("error: empty value");
                 return 1;
             }
             if !toolchain_update_policy_is_valid(value) {
-                print("error: toolchain.update-policy must be one of notify, manual, disabled");
+                print.err("error: toolchain.update-policy must be one of notify, manual, disabled");
                 return 1;
             }
             let rc = _write_config_cmd(_config_registry_url_from_file_cmd(), value);
@@ -184,13 +184,13 @@ fn handle_config_command(args: string[]) -> int ![io] {
             print(TOOLCHAIN_UPDATE_POLICY_KEY + " = " + value);
             return 0;
         }
-        print("unknown config key: " + key);
-        print("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
+        print.err("unknown config key: " + key);
+        print.err("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
         return 2;
     }
     if strings_equal(sub, "unset") {
         if args.length != 3 {
-            print("usage: sfn config unset <key>");
+            print.err("usage: sfn config unset <key>");
             return 2;
         }
         let key = args[2];
@@ -206,12 +206,12 @@ fn handle_config_command(args: string[]) -> int ![io] {
             print("unset " + key);
             return 0;
         }
-        print("unknown config key: " + key);
-        print("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
+        print.err("unknown config key: " + key);
+        print.err("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
         return 2;
     }
-    print("unknown subcommand: " + sub);
-    print("usage: sfn config <get|set|unset|list> [key] [value]");
+    print.err("unknown subcommand: " + sub);
+    print.err("usage: sfn config <get|set|unset|list> [key] [value]");
     return 2;
 }
 

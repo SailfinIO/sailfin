@@ -534,7 +534,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if sub == "run" {
         // Reached only when the early scan declined to peel this invocation,
         // i.e. no selector followed `run`.
-        print("usage: sfn toolchain run <version> -- <command> [args...]");
+        print.err("usage: sfn toolchain run <version> -- <command> [args...]");
         return 2;
     }
     if sub == "entry-version" { return _toolchain_entry_version(ctx); }
@@ -556,7 +556,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if sub == "remove" {
         return _toolchain_remove(ctx, get(matches, "version"), has_flag(matches, "force"));
     }
-    print("usage: sfn toolchain <install|list|active|verify|run|entry-version|default|update|remove>");
+    print.err("usage: sfn toolchain <install|list|active|verify|run|entry-version|default|update|remove>");
     return 2;
 }
 

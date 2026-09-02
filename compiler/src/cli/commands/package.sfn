@@ -226,7 +226,7 @@ fn handle_package_command(args: string[]) -> int ![clock, io] {
         let a = args[argi];
         if strings_equal(a, "--target") {
             if argi + 1 >= args.length {
-                print("sfn package: --target requires a value");
+                print.err("sfn package: --target requires a value");
                 return 2;
             }
             target_arg = args[argi + 1];
@@ -235,7 +235,7 @@ fn handle_package_command(args: string[]) -> int ![clock, io] {
         }
         if strings_equal(a, "--out") {
             if argi + 1 >= args.length {
-                print("sfn package: --out requires a directory");
+                print.err("sfn package: --out requires a directory");
                 return 2;
             }
             out_dir = args[argi + 1];
@@ -244,7 +244,7 @@ fn handle_package_command(args: string[]) -> int ![clock, io] {
         }
         if strings_equal(a, "--compiler-bin") {
             if argi + 1 >= args.length {
-                print("sfn package: --compiler-bin requires a path");
+                print.err("sfn package: --compiler-bin requires a path");
                 return 2;
             }
             compiler_bin = args[argi + 1];
@@ -258,15 +258,15 @@ fn handle_package_command(args: string[]) -> int ![clock, io] {
         }
         if strings_equal(a, "-p") {
             if argi + 1 >= args.length {
-                print("sfn package: -p requires a capsule path");
+                print.err("sfn package: -p requires a capsule path");
                 return 2;
             }
             capsule_path = args[argi + 1];
             argi += 2;
             continue;
         }
-        print("sfn package: unknown argument \"" + a + "\"");
-        print("usage: sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]");
+        print.err("sfn package: unknown argument \"" + a + "\"");
+        print.err("usage: sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]");
         return 2;
     }
 
@@ -275,7 +275,7 @@ fn handle_package_command(args: string[]) -> int ![clock, io] {
     // are all compiler-specific. A user capsule has no analogue.
     if installer_mode {
         if capsule_path.length > 0 {
-            print("sfn package: --installer is incompatible with -p");
+            print.err("sfn package: --installer is incompatible with -p");
             return 2;
         }
     }
@@ -284,7 +284,7 @@ fn handle_package_command(args: string[]) -> int ![clock, io] {
     let mut target: string = target_arg;
     if target.length == 0 { target = _package_detect_target(); }
     if target.length == 0 {
-        print("sfn package: failed to detect platform target");
+        print.err("sfn package: failed to detect platform target");
         return 1;
     }
 
@@ -365,7 +365,7 @@ fn _package_staging_root() -> string ![io] {
 fn _package_mint_staging_dir(label: string) -> string ![io] {
     let root = _package_staging_root();
     if !ensure_dir_p(root) {
-        print("sfn package: failed to create staging root " + root);
+        print.err("sfn package: failed to create staging root " + root);
         return "";
     }
     // The prefix contains a '/', so `fs.mkdtemp` treats it as a literal
@@ -373,7 +373,7 @@ fn _package_mint_staging_dir(label: string) -> string ![io] {
     // (`sfn_fs_mkdtemp`, `runtime/sfn/adapters/filesystem.sfn`).
     let staging = fs.mkdtemp(root + "/." + label + "-");
     if staging.length == 0 {
-        print("sfn package: failed to mint " + label
+        print.err("sfn package: failed to mint " + label
             + " staging directory under "
             + root);
     }
@@ -385,20 +385,20 @@ fn _package_mint_staging_dir(label: string) -> string ![io] {
 // target), tars + sha256s + manifest.
 fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> int ![clock, io] {
     if !fs.exists(compiler_bin) {
-        print("sfn package: compiler binary not found: " + compiler_bin);
-        print("hint: run `sfn dev bootstrap build` first");
+        print.err("sfn package: compiler binary not found: " + compiler_bin);
+        print.err("hint: run `sfn dev bootstrap build` first");
         return 1;
     }
     let manifest_path = compiler_manifest_from_workspace(".");
     if !fs.exists(manifest_path) {
-        print("sfn package: missing manifest for workspace member `sfn/compiler`");
+        print.err("sfn package: missing manifest for workspace member `sfn/compiler`");
         return 1;
     }
     let manifest_text = fs.readFile(manifest_path);
     let version = toml_get_version(manifest_text);
     let capsule_name = toml_get_name(manifest_text);
     if version.length == 0 {
-        print("sfn package: missing version in " + manifest_path);
+        print.err("sfn package: missing version in " + manifest_path);
         return 1;
     }
     // Defence-in-depth: `version` is interpolated into the tarball
@@ -407,7 +407,8 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     // produce a path-traversal or shell-metachar surface. The
     // sanitiser blocks `/`, `\`, `..` traversal components.
     if !_is_safe_capsule_version_cmd(version) {
-        print("sfn package: rejecting unsafe version string \"" + version + "\"");
+        print.err("sfn package: rejecting unsafe version string \"" + version
+            + "\"");
         return 1;
     }
 
@@ -426,12 +427,12 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     ensure_dir_p(staging_bin);
     if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/"
         + sailfin_name) {
-        print("sfn package: failed to stage sailfin binary");
+        print.err("sfn package: failed to stage sailfin binary");
         remove_tree(staging);
         return 1;
     }
     if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/" + sfn_name) {
-        print("sfn package: failed to stage sfn binary");
+        print.err("sfn package: failed to stage sfn binary");
         remove_tree(staging);
         return 1;
     }
@@ -453,7 +454,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
         : { },
         Result.Err { error }
         : {
-            print("sfn package: archive creation failed: " + error.message);
+            print.err("sfn package: archive creation failed: " + error.message);
             remove_tree(staging);
             return 1;
         }
@@ -461,7 +462,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 
     let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
-        print("sfn package: failed to compute sha256 for " + tarball);
+        print.err("sfn package: failed to compute sha256 for " + tarball);
         remove_tree(staging);
         return 1;
     }
@@ -477,7 +478,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
         },
         Result.Err { error }
         : {
-            print(error);
+            print.err(error);
             remove_tree(staging);
             return 1;
         }
@@ -535,24 +536,25 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 // optional because a fresh install can regenerate it.
 fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> int ![clock, io] {
     if !fs.exists(compiler_bin) {
-        print("sfn package: compiler binary not found: " + compiler_bin);
-        print("hint: run `sfn dev bootstrap build` first");
+        print.err("sfn package: compiler binary not found: " + compiler_bin);
+        print.err("hint: run `sfn dev bootstrap build` first");
         return 1;
     }
     let manifest_path = compiler_manifest_from_workspace(".");
     if !fs.exists(manifest_path) {
-        print("sfn package: missing manifest for workspace member `sfn/compiler`");
+        print.err("sfn package: missing manifest for workspace member `sfn/compiler`");
         return 1;
     }
     let manifest_text = fs.readFile(manifest_path);
     let version = toml_get_version(manifest_text);
     let capsule_name = toml_get_name(manifest_text);
     if version.length == 0 {
-        print("sfn package: missing version in " + manifest_path);
+        print.err("sfn package: missing version in " + manifest_path);
         return 1;
     }
     if !_is_safe_capsule_version_cmd(version) {
-        print("sfn package: rejecting unsafe version string \"" + version + "\"");
+        print.err("sfn package: rejecting unsafe version string \"" + version
+            + "\"");
         return 1;
     }
 
@@ -569,12 +571,12 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     ensure_dir_p(staging_bin);
     if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/"
         + sailfin_name) {
-        print("sfn package: failed to stage sailfin binary");
+        print.err("sfn package: failed to stage sailfin binary");
         remove_tree(staging);
         return 1;
     }
     if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/" + sfn_name) {
-        print("sfn package: failed to stage sfn binary");
+        print.err("sfn package: failed to stage sfn binary");
         remove_tree(staging);
         return 1;
     }
@@ -594,7 +596,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     if fs.exists("build/compiler/import-context") {
         if !copy_tree("build/compiler/import-context", staging
             + "/import-context") {
-            print("sfn package: failed to stage import-context");
+            print.err("sfn package: failed to stage import-context");
             remove_tree(staging);
             return 1;
         }
@@ -618,7 +620,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         : { },
         Result.Err { error }
         : {
-            print("sfn package: archive creation failed: " + error.message);
+            print.err("sfn package: archive creation failed: " + error.message);
             remove_tree(staging);
             return 1;
         }
@@ -626,7 +628,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
 
     let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
-        print("sfn package: failed to compute sha256 for " + tarball);
+        print.err("sfn package: failed to compute sha256 for " + tarball);
         remove_tree(staging);
         return 1;
     }
@@ -647,7 +649,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         },
         Result.Err { error }
         : {
-            print(error);
+            print.err(error);
             remove_tree(staging);
             return 1;
         }
@@ -690,25 +692,26 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     }
     let manifest_path = path + "/capsule.toml";
     if !fs.exists(manifest_path) {
-        print("sfn package: " + manifest_path + " not found");
+        print.err("sfn package: " + manifest_path + " not found");
         return 1;
     }
     let manifest_text = fs.readFile(manifest_path);
     let capsule_name = toml_get_name(manifest_text);
     let version = toml_get_version(manifest_text);
     if capsule_name.length == 0 {
-        print("sfn package: missing [capsule].name in " + manifest_path);
+        print.err("sfn package: missing [capsule].name in " + manifest_path);
         return 1;
     }
     if version.length == 0 {
-        print("sfn package: missing version in " + manifest_path);
+        print.err("sfn package: missing version in " + manifest_path);
         return 1;
     }
     // See compiler-mode rationale: `version` flows into the tarball
     // stem and into shell commands; reject anything that could
     // escape filename or shell quoting.
     if !_is_safe_capsule_version_cmd(version) {
-        print("sfn package: rejecting unsafe version string \"" + version + "\"");
+        print.err("sfn package: rejecting unsafe version string \"" + version
+            + "\"");
         return 1;
     }
 
@@ -717,39 +720,40 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     // for the sidecar to have been written.
     let parts = parse_scope_name(capsule_name);
     if parts.scope.length == 0 {
-        print("sfn package: capsule name \"" + capsule_name
+        print.err("sfn package: capsule name \"" + capsule_name
             + "\" is not in scope/name form; cannot locate sidecar");
         return 1;
     }
     if !is_safe_scope_name(parts.scope, parts.name) {
-        print("sfn package: capsule name \"" + capsule_name + "\" is unsafe");
+        print.err("sfn package: capsule name \"" + capsule_name + "\" is unsafe");
         return 1;
     }
     let sidecar_path = path + "/build/capsules/" + parts.scope + "/" + parts.name
         + "/manifest.json";
     if !fs.exists(sidecar_path) {
-        print("sfn package: no sidecar at " + sidecar_path);
-        print("hint: run `sfn build -p " + capsule_path + "` first");
+        print.err("sfn package: no sidecar at " + sidecar_path);
+        print.err("hint: run `sfn build -p " + capsule_path + "` first");
         return 1;
     }
     let sidecar_text = fs.readFile(sidecar_path);
     let kind = _package_extract_top_level(sidecar_text, "kind");
     let out_field = _package_extract_top_level(sidecar_text, "out");
     if kind.length == 0 {
-        print("sfn package: sidecar at " + sidecar_path
+        print.err("sfn package: sidecar at " + sidecar_path
             + " has no \"kind\" field");
         return 1;
     }
     if out_field.length == 0 {
-        print("sfn package: sidecar at " + sidecar_path
+        print.err("sfn package: sidecar at " + sidecar_path
             + " has no \"out\" field");
         return 1;
     }
     // out field is relative to the capsule path's CWD. Resolve.
     let artifact_path = path + "/" + out_field;
     if !fs.exists(artifact_path) {
-        print("sfn package: artifact not found: " + artifact_path);
-        print("hint: run `sfn build -p " + capsule_path + "` to (re)produce it");
+        print.err("sfn package: artifact not found: " + artifact_path);
+        print.err("hint: run `sfn build -p " + capsule_path
+            + "` to (re)produce it");
         return 1;
     }
 
@@ -775,7 +779,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
         // Use the artifact's basename for the tarball's bin entry.
         let bn = _package_basename(artifact_path);
         if bn.length == 0 {
-            print("sfn package: could not derive binary basename from "
+            print.err("sfn package: could not derive binary basename from "
                 + artifact_path);
             remove_tree(staging);
             return 1;
@@ -786,13 +790,13 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
         ensure_dir_p(staging_root + "/obj");
         artifact_dest = staging_root + "/obj/mod.o";
     } else {
-        print("sfn package: unsupported kind \"" + kind
+        print.err("sfn package: unsupported kind \"" + kind
             + "\" (expected binary | library)");
         remove_tree(staging);
         return 1;
     }
     if !_copy_file_preserving_mode(artifact_path, artifact_dest) {
-        print("sfn package: failed to stage artifact " + artifact_path);
+        print.err("sfn package: failed to stage artifact " + artifact_path);
         remove_tree(staging);
         return 1;
     }
@@ -816,7 +820,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
         : { },
         Result.Err { error }
         : {
-            print("sfn package: archive creation failed: " + error.message);
+            print.err("sfn package: archive creation failed: " + error.message);
             remove_tree(staging);
             return 1;
         }
@@ -824,7 +828,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
 
     let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
-        print("sfn package: failed to compute sha256 for " + tarball);
+        print.err("sfn package: failed to compute sha256 for " + tarball);
         remove_tree(staging);
         return 1;
     }
@@ -840,7 +844,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
         },
         Result.Err { error }
         : {
-            print(error);
+            print.err(error);
             remove_tree(staging);
             return 1;
         }

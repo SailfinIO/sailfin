@@ -451,14 +451,14 @@ let _BC_CSV_HEADER: string = "fixture,cold_s,warm_s,binary_bytes,ctors,modules_s
 // this mode's own `--csv` is the machine-readable surface.
 fn consumer_run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     if has_flag(matches, "json") {
-        print("[bench-consumer] --json is not supported in consumer mode; use --csv PATH");
+        print.err("[bench-consumer] --json is not supported in consumer mode; use --csv PATH");
         return 2;
     }
 
     let fixtures_root = get_or(matches, "fixtures", "benchmarks/consumer");
     let names = _bc_discover_fixtures(fixtures_root);
     if names.length == 0 {
-        print("[bench-consumer] no fixtures under " + fixtures_root);
+        print.err("[bench-consumer] no fixtures under " + fixtures_root);
         return 1;
     }
 

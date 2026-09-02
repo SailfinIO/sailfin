@@ -164,7 +164,7 @@ fn _run_emit(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     let mode: string = get(matches, "mode");
     let path: string = get(matches, "path");
     if !fs.exists(path) {
-        print("file not found: " + path);
+        print.err("file not found: " + path);
         return 1;
     }
     // Same input-path fail-open the build driver carries (SFN-1115), but with
@@ -175,8 +175,8 @@ fn _run_emit(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     // script a bogus artifact with nothing to notice; refusing is the only
     // answer that cannot be mistaken for a real emit.
     if fs.is_directory(path) {
-        print("not a source file: " + path + " is a directory");
-        print("note: pass a `.sfn` file");
+        print.err("not a source file: " + path + " is a directory");
+        print.err("note: pass a `.sfn` file");
         return 1;
     }
     // #1370: a user-facing `emit llvm` (no `--module-name` /
@@ -265,6 +265,6 @@ fn _run_emit(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         }
         return 0;
     }
-    print("unknown emit mode: " + mode);
+    print.err("unknown emit mode: " + mode);
     return 2;
 }

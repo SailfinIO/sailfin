@@ -69,13 +69,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
 
     if check_mode {
         if write_mode {
-            print("error: --check and --write are mutually exclusive");
+            print.err("error: --check and --write are mutually exclusive");
             return 1;
         }
     }
 
     if paths.length == 0 {
-        print("usage: sfn fmt [--check] [--write] <path...>");
+        print.err("usage: sfn fmt [--check] [--write] <path...>");
         return 1;
     }
 
@@ -94,7 +94,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     loop {
         if mi >= paths.length { break; }
         if !fs.exists(paths[mi]) {
-            print("error: path not found: " + paths[mi]);
+            print.err("error: path not found: " + paths[mi]);
             missing += 1;
         }
         mi += 1;
@@ -117,7 +117,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     }
 
     if files.length == 0 {
-        print("no .sfn files found");
+        print.err("no .sfn files found");
         return 1;
     }
 

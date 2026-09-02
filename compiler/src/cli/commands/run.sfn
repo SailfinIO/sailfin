@@ -142,19 +142,20 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // created by `sfn init`. More than one positional remains a usage error.
     let _run_positionals: string[] = positionals(matches, "file");
     if _run_positionals.length > 1 {
-        print("usage: sfn run [--no-cache] [--clean] [--cache-trace] [<file.sfn>]");
+        print.err("usage: sfn run [--no-cache] [--clean] [--cache-trace] [<file.sfn>]");
         return 2;
     }
     let mut input_path: string = "";
     if _run_positionals.length == 1 { input_path = _run_positionals[0]; } else {
         if !fs.exists("capsule.toml") {
-            print("sfn run: no capsule.toml in the current directory; pass a .sfn file to run");
+            print.err("sfn run: no capsule.toml in the current directory; pass a .sfn file to run");
             return 2;
         }
         let cap_spec = _resolve_capsule_build_spec(".");
         if cap_spec.entry_path.length == 0 { return 1; }
         if cap_spec.kind != "binary" {
-            print("sfn run: current capsule has [build].kind = \"" + cap_spec.kind
+            print.err("sfn run: current capsule has [build].kind = \""
+                + cap_spec.kind
                 + "\"; only binary capsules can be run");
             return 2;
         }
@@ -173,7 +174,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     }
 
     if !fs.exists(input_path) {
-        print("file not found: " + input_path);
+        print.err("file not found: " + input_path);
 
         return 1;
     }
@@ -286,7 +287,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let module_name = module_name_for_source(input_path);
     let ok = compile_to_llvm_file_with_module_imports_and_implicit(source, module_name, ll_path, "", run_capsule_result.entry_import_asm_paths, run_capsule_result.implicit_provider_asm_paths);
     if !ok {
-        print("failed to compile LLVM for: " + input_path);
+        print.err("failed to compile LLVM for: " + input_path);
         _release_run_stem(run_exe_unguarded, exe_path, ll_path, run_work_dir, false);
         return 1;
     }
