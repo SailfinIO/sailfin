@@ -178,6 +178,22 @@ test "trust_store: the probe list and environment overrides are well-formed" {
     }
 }
 
+// The probe order is a trust decision, not an implementation detail: it is
+// the precedence in which CA bundles are tried, so a silent reorder (or a
+// dropped entry) changes which bundle wins without any other assertion in
+// this file catching it. Pinned by index rather than just by length.
+test "trust_store: the probe list order is pinned exactly" {
+    let paths: string[] = trust_store_default_paths();
+    assert paths.length == 7;
+    assert paths[0] == "/etc/ssl/certs/ca-certificates.crt";
+    assert paths[1] == "/etc/pki/tls/certs/ca-bundle.crt";
+    assert paths[2] == "/etc/ssl/ca-bundle.pem";
+    assert paths[3] == "/etc/pki/tls/cacert.pem";
+    assert paths[4] == "/etc/ssl/cert.pem";
+    assert paths[5] == "/opt/homebrew/etc/openssl@3/cert.pem";
+    assert paths[6] == "/usr/local/etc/openssl@3/cert.pem";
+}
+
 test "trust_store: an empty path is rejected without touching the filesystem" ![io] {
     let store: TrustStore = trust_store_load_from("");
     assert ! store.ok;

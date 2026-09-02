@@ -232,13 +232,12 @@ fn _line_pos_from_end(out: string) -> int {
     return pos;
 }
 
-// Stores `value` at `depth` in the delimiter-flag array, growing it as
-// needed. Returned rather than mutated in place so the caller reassigns.
-fn _set_delim_flag(flags: int[], depth: int, value: int) -> int[] {
+// Stores `value` at `depth` in the delimiter-flag array, growing it as needed.
+fn _set_delim_flag(flags: boolean[], depth: int, value: boolean) -> boolean[] {
     let mut out = flags;
     loop {
         if out.length > depth { break; }
-        out.push(0);
+        out.push(false);
     }
     out[depth] = value;
     return out;
@@ -246,10 +245,10 @@ fn _set_delim_flag(flags: int[], depth: int, value: int) -> int[] {
 
 // True when the innermost open delimiter is an expanded bracket literal.
 // `depth` is the current `paren_depth`, so the innermost sits at `depth - 1`.
-fn _innermost_expanded(flags: int[], depth: int) -> boolean {
+fn _innermost_expanded(flags: boolean[], depth: int) -> boolean {
     if depth <= 0 { return false; }
     if flags.length < depth { return false; }
-    return flags[depth - 1] == 1;
+    return flags[depth - 1];
 }
 
 // A bracket literal expands to one element per line when — and only when —
@@ -299,10 +298,11 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
     let mut inline_block_depth = 0;
     let mut inline_block_end = -1;
     let mut wrap_operators = false;
-    // Per-delimiter-depth flag: 1 marks an expanded bracket literal (SFN-763).
-    // Indexed by the depth `paren_depth` holds while that delimiter is open,
-    // so it answers "is the innermost open delimiter an expanded literal?".
-    let mut delim_expanded: int[] = [];
+    // Per-delimiter-depth flag: true marks an expanded bracket literal
+    // (SFN-763). Indexed by the depth `paren_depth` holds while that delimiter
+    // is open, so it answers "is the innermost open delimiter an expanded
+    // literal?".
+    let mut delim_expanded: boolean[] = [];
 
     let mut i = 0;
     loop {
@@ -414,15 +414,23 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             if paren_depth < 0 { paren_depth = 0; }
         }
         if strings_equal(role, "bracket_close") {
+            // A `]` with no matching `[` — `fmt` lexes but does not parse, so
+            // malformed input reaches here — would clamp back to a slot an
+            // earlier delimiter wrote and inherit its flag. Nothing clears a
+            // slot, so that stale `true` would drop `indent` for the rest of
+            // the file: the de-indent SFN-763 exists to stop.
+            let had_open = paren_depth > 0;
             paren_depth -= 1;
             if paren_depth < 0 { paren_depth = 0; }
             // `paren_depth` now indexes the bracket being closed.
-            if !in_inline {
-                if delim_expanded.length > paren_depth {
-                    if delim_expanded[paren_depth] == 1 {
-                        indent -= 1;
-                        if indent < 0 { indent = 0; }
-                        force_close_nl = true;
+            if had_open {
+                if !in_inline {
+                    if delim_expanded.length > paren_depth {
+                        if delim_expanded[paren_depth] {
+                            indent -= 1;
+                            if indent < 0 { indent = 0; }
+                            force_close_nl = true;
+                        }
                     }
                 }
             }
@@ -537,21 +545,21 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         // Record, at this delimiter's own depth, whether it is an expanded
         // bracket literal — only `[` is ever expanded (SFN-763).
         if strings_equal(role, "paren_open") {
-            delim_expanded = _set_delim_flag(delim_expanded, paren_depth, 0);
+            delim_expanded = _set_delim_flag(delim_expanded, paren_depth, false);
             paren_depth += 1;
         }
         if strings_equal(role, "generic_open") {
-            delim_expanded = _set_delim_flag(delim_expanded, paren_depth, 0);
+            delim_expanded = _set_delim_flag(delim_expanded, paren_depth, false);
             paren_depth += 1;
         }
         if strings_equal(role, "bracket_open") {
-            let mut want = 0;
+            let mut want = false;
             if !in_inline {
-                if _bracket_needs_expansion(fmt_tokens, i) { want = 1; }
+                if _bracket_needs_expansion(fmt_tokens, i) { want = true; }
             }
             delim_expanded = _set_delim_flag(delim_expanded, paren_depth, want);
             paren_depth += 1;
-            if want == 1 { indent += 1; }
+            if want { indent += 1; }
         }
 
         // ── Track inline block exit ──
@@ -626,9 +634,12 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                     if !at_line_start { out = out + "\n"; }
                     at_line_start = true;
                 } else if _innermost_expanded(delim_expanded, paren_depth) {
-                    // One element per line. A comma inside a nested call keeps
-                    // the flat form, because the nested `(` owns the innermost
-                    // depth and is never expanded.
+                    // One element per line. A comma inside a nested call or
+                    // generic keeps the flat form, because that `(` or `<` owns
+                    // the innermost depth and is never expanded. A nested block
+                    // pushes no frame, so its commas share the bracket's frame
+                    // and do break — struct-literal fields inside an expanded
+                    // literal go one per line, which is the wanted shape.
                     if !at_line_start { out = out + "\n"; }
                     at_line_start = true;
                 }

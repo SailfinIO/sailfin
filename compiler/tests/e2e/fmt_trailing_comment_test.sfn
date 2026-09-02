@@ -92,7 +92,14 @@ let IF_CONDITION: string = "fn cond(a: i64) -> boolean {\n    if a > 0 && // pos
 // every element after the first stranded at the enclosing block's indent.
 let ARRAY_ALL_COMMENTED: string = "fn paths() -> string[] {\n    return [\n        \"/a\", // first\n        \"/b\", // second\n        \"/c\", // third\n    ];\n}";
 
-let ARRAY_PLAIN: string = "fn a() -> string[] {\n    return [\"a\", \"b\", \"c\"];\n}";
+// SFN-1105 gap: with only three short elements the enclosing function body
+// itself collapses onto one line, so `[` is reached with `in_inline == true`
+// and takes the no-expand path unconditionally — the assertion below would
+// pass even if the comment-free expansion predicate always returned true.
+// Four elements keeps the block from collapsing (the inline threshold has an
+// `items > 3` arm), so the bracket is reached through the non-inline path
+// this test actually means to guard.
+let ARRAY_PLAIN: string = "fn a() -> string[] {\n    return [\"aaaa\", \"bbbb\", \"cccc\", \"dddd\"];\n}";
 
 // All four shapes collapse onto one line, so all four could swallow. Each is
 // asserted independently: they reach the collapse through different roles
@@ -163,7 +170,7 @@ test "fmt: the expanded array form is idempotent" ![io] {
 // comment-free array must stay on the collapsed form the formatter already
 // produces for short expressions, not get reflowed by the same fix.
 test "fmt: a comment-free array literal is not expanded" ![io] {
-    let want = "fn a() -> string[] { return [\"a\", \"b\", \"c\"]; }";
+    let want = "fn a() -> string[] {\n    return [\"aaaa\", \"bbbb\", \"cccc\", \"dddd\"];\n}";
     assert _fmt("array_plain_exact", ARRAY_PLAIN) == want;
 }
 
