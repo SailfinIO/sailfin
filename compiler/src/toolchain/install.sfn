@@ -145,14 +145,25 @@ fn _digest_for_asset(sums_text: string, asset: string) -> string {
     return "";
 }
 
-fn _download_to(url: string, destination: string) -> boolean ![io, net] {
-    let _ = http.download(url, destination);
-    return fs.exists(destination);
+// Returns `""` on success, or the transport/status failure reason on
+// failure (SFN-1028: `http.download` now reports the real reason instead
+// of a bare boolean). `fs.exists` is demoted from the primary success
+// signal to a post-condition — a `"missing-output"` reason distinguishes a
+// download that reported success but did not actually leave a file behind.
+fn _download_to(url: string, destination: string) -> string ![io, net] {
+    let outcome: string = http.download(url, destination);
+    if outcome.length == 0 { return "unknown"; }
+    if strings_equal(outcome, "ok") {
+        if fs.exists(destination) { return ""; }
+        return "missing-output";
+    }
+    return outcome;
 }
 
-fn _print_download_failure(what: string, url: string) -> void ![io] {
+fn _print_download_failure(what: string, url: string, reason: string) -> void ![io] {
     print("error: failed to download " + what);
     print("  " + url);
+    print("  reason: " + reason);
 }
 
 fn _install_work_dir(work_root: string, version: string) -> string ![io] {
@@ -196,8 +207,8 @@ fn _install_acquire_index(versions_base: string, temp: string) -> ToolchainIndex
     let sig_path = temp + "/toolchain-index.json.sig";
     let mut payload = "";
     let mut signature = "";
-    if _download_to(toolchain_index_payload_url(base), payload_path) {
-        if _download_to(toolchain_index_signature_url(base), sig_path) {
+    if _download_to(toolchain_index_payload_url(base), payload_path).length == 0 {
+        if _download_to(toolchain_index_signature_url(base), sig_path).length == 0 {
             payload = fs.readFile(payload_path);
             signature = _toml_trim_cmd(fs.readFile(sig_path));
         }
@@ -373,13 +384,15 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
 
     let sums_path = temp + "/SHA256SUMS";
     let sig_path = temp + "/SHA256SUMS.sig";
-    if !_download_to(sums_url, sums_path) {
-        _print_download_failure("release manifest", sums_url);
+    let sums_fail = _download_to(sums_url, sums_path);
+    if sums_fail.length > 0 {
+        _print_download_failure("release manifest", sums_url, sums_fail);
         remove_tree(temp);
         return 1;
     }
-    if !_download_to(sig_url, sig_path) {
-        _print_download_failure("release manifest signature", sig_url);
+    let sig_fail = _download_to(sig_url, sig_path);
+    if sig_fail.length > 0 {
+        _print_download_failure("release manifest signature", sig_url, sig_fail);
         remove_tree(temp);
         return 1;
     }
@@ -462,8 +475,9 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     }
     let asset_url = release_base + "/" + asset;
     let archive = temp + "/" + asset;
-    if !_download_to(asset_url, archive) {
-        _print_download_failure("toolchain asset", asset_url);
+    let asset_fail = _download_to(asset_url, archive);
+    if asset_fail.length > 0 {
+        _print_download_failure("toolchain asset", asset_url, asset_fail);
         remove_tree(temp);
         return 1;
     }

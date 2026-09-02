@@ -16,13 +16,19 @@
 //                    with no residual `@sailfin_intrinsic_http_*` call
 //                    (the #912 member-call flip; SFN-1022 repointed the
 //                    POST leg at the length-carrying twin).
+//   6. behavioral   — `http.download` against an unreachable transport
+//                    (TCP discard, nothing bound) surfaces the real
+//                    `connect-failed` reason via a nested build + run
+//                    (SFN-1028). Skips, rather than fails, when the
+//                    nested build cannot link (clang unavailable).
 //
 // OMITTED: the original script's behavioral GET+POST round-trip leg
 // (test_get_round_trip) drove a real socket request against a localhost
 // Python listener. A live network server / Python client cannot run as
 // an `![io]` `sfn/test` leg per `.claude/rules/no-bash-e2e.md`, so it is
-// dropped here; the emit-shape + routing + reference-absence checks
-// cover the registry-flip behavior without a network.
+// dropped here; the emit-shape + routing + reference-absence checks, plus
+// the connect-failed behavioral leg above, cover the registry-flip
+// behavior without a live network server.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
 // they cannot be called from an `![io]` test. For subprocess/IR-output
@@ -35,7 +41,12 @@ import {
     split,
     starts_with
 } from "sfn/strings";
-import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. `emit` / `check` neither link nor spawn
@@ -179,6 +190,17 @@ test "http emit: define for every sfn_http_* export" ![io] {
     assert _has_define(ir, "sfn_http_post2_lv");
 }
 
+// SFN-1028: the download fail-code vocabulary must actually compile into the
+// module — the Windows CI leg runs no behavioral tests (SFN-981), so this is
+// the only Windows-side proof the shared taxonomy is present.
+test "http emit: the download failure-reason taxonomy compiles in" ![io] {
+    let ir = _emit_module("http", "runtime/sfn/adapters/http.sfn");
+    assert ir != "EMIT_FAILED";
+    assert contains(ir, "connect-failed");
+    assert contains(ir, "dns-failed");
+    assert contains(ir, "http-status-");
+}
+
 // SFN-671: creation and disposal are no longer libc `socket`/`close`.
 // SFN-927 widened this to timeouts and recv/send: Winsock's `recv`/
 // `send` are 32-bit (not POSIX's 64-bit `ssize_t`) and its
@@ -260,4 +282,49 @@ test "http.get/http.post member calls flip to @sfn_http_get/@sfn_http_post2_lv (
     // The old member-call intrinsics must not be CALLED anymore.
     assert ! _calls(ir, "sailfin_intrinsic_http_get");
     assert ! _calls(ir, "sailfin_intrinsic_http_post");
+}
+
+// SFN-1028: `http.download` against an unreachable transport (TCP discard,
+// nothing ever bound) must report the real connect failure reason instead
+// of the pre-fix bare-boolean contract. `.invalid` is avoided because a
+// captive resolver could hijack the NXDOMAIN and flip the reason to
+// `dns-failed`; `http://127.0.0.1:9` is the established in-repo idiom
+// (`http_post_carry_length_test.sfn`, `publish_test.sfn`,
+// the emit-shape tests above). Per SFN-1001, the scratch destination path
+// is threaded through `SAILFIN_TEST_SCRATCH`, never spliced into the
+// generated source text. Per `.claude/rules/no-bash-e2e.md`, the nested
+// build uses `clean_runner_env(nested_runner_scratch(...))`, never raw
+// `process.environ()`.
+fn _child_env_download_reason() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("http-download-reason"));
+}
+
+test "http.download surfaces the connect-failed reason (SFN-1028)" ![io] {
+    let scratch = _scratch_dir() + "/http-download-reason";
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/probe.sfn";
+    let bin = scratch + "/probe";
+    fs.writeFile(src, "fn main() -> int ![io, net] {\n"
+        + "    let dest = env.get(\"SAILFIN_TEST_SCRATCH\") + \"/out.bin\";\n"
+        + "    let r: string = http.download(\"http://127.0.0.1:9/nope\", dest);\n"
+        + "    print(\"R=\" + r);\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let build_env = _child_env_download_reason();
+    let build_rc = process.run_capture([sfn_bin_path(), "build", src, "-o", bin], build_env);
+    let _build_out = process.capture_take_stdout();
+    let _build_err = process.capture_take_stderr();
+    if build_rc != 0 {
+        // clang unavailable or link failed — the emit-shape + routing legs
+        // above still pin the wiring; skip the behavioral leg.
+        assert true;
+        return;
+    }
+
+    let run_env = _child_env_download_reason();
+    let run_rc = process.run_capture([bin], run_env);
+    let run_out = process.capture_take_stdout();
+    let _run_err = process.capture_take_stderr();
+    assert contains(run_out, "R=connect-failed");
 }

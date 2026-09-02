@@ -51,9 +51,10 @@
 //   - get / post: the response BODY (headers stripped), null on a
 //     socket/connect failure or an HTTP status >= 400 (mirrors
 //     curl `-f`).
-//   - download: the literal `"ok"` on success, null on failure
-//     (mirrors `sailfin_runtime_http_download`'s contract). Writes
-//     the body to `output_path` in binary mode.
+//   - download: the literal `"ok"` on success, otherwise a non-null
+//     NUL-terminated reason token (never null — SFN-1028). Writes
+//     the body to `output_path` in binary mode. The returned pointer
+//     is never freed by the caller.
 //
 // Host resolution: numeric dotted-quad IPv4 (`atoi` per octet, each
 // validated to 0..255), a `localhost` -> 127.0.0.1 special case, and real
@@ -417,6 +418,45 @@ fn _set_socket_timeouts(fd: i32) -> void {
     sfn_socket_set_timeouts(fd, _http_io_timeout_secs() as i32);
 }
 
+// ── Download fail-code vocabulary (SFN-1028) ──────────────────────
+// `_dl_fail_*()` — the transport/status failure ordinals `_download_to`
+// (`compiler/src/toolchain/install.sfn`) surfaces instead of discarding.
+// `0` means success. Styled after the `_tls_err_*()` block in
+// `runtime/sfn/platform/tls_status.sfn`.
+fn _dl_fail_invalid_arg() -> i64 { return 1; }
+
+fn _dl_fail_oom() -> i64 { return 2; }
+
+fn _dl_fail_dns() -> i64 { return 3; }
+
+fn _dl_fail_socket() -> i64 { return 4; }
+
+fn _dl_fail_connect() -> i64 { return 5; }
+
+fn _dl_fail_tls_ctx() -> i64 { return 6; }
+
+fn _dl_fail_tls_handshake() -> i64 { return 7; }
+
+fn _dl_fail_send() -> i64 { return 8; }
+
+fn _dl_fail_recv() -> i64 { return 9; }
+
+fn _dl_fail_malformed() -> i64 { return 10; }
+
+fn _dl_fail_body_decode() -> i64 { return 11; }
+
+fn _dl_fail_redirect_no_location() -> i64 { return 12; }
+
+fn _dl_fail_redirect_limit() -> i64 { return 13; }
+
+fn _dl_fail_open() -> i64 { return 14; }
+
+fn _dl_fail_write() -> i64 { return 15; }
+
+// Base for the `http-status-<N>` family: code `1000 + N` for HTTP status
+// `N`. Not a failure on its own — a floor `_dl_reason` compares against.
+fn _dl_fail_http_base() -> i64 { return 1000; }
+
 // `_connect_tcp(host, port)` — build an IPv4 `sockaddr_in`, open a
 // stream socket, and connect. Returns the connected fd, or -1 on
 // any failure.
@@ -436,11 +476,22 @@ fn _set_socket_timeouts(fd: i32) -> void {
 // attempt costs nothing observable. `sin_port` is big-endian
 // (network byte order); the four address octets sit at offset 4.
 fn _connect_tcp(host: *u8, port: i64) -> i32 ![net] {
+    let mut throwaway: i64 = 0;
+    return _connect_tcp_ex(host, port, & throwaway);
+}
+
+// `_connect_tcp_ex(host, port, fail_slot)` — `_connect_tcp`, additionally
+// writing the transport failure reason (a `_dl_fail_*()` ordinal, `0` on
+// success) through `fail_slot` (SFN-1028).
+fn _connect_tcp_ex(host: *u8, port: i64, fail_slot: *i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
         let addr: *u8 = malloc(16 as usize);
-        if addr as i64 == 0 { return 0 - 1; }
+        if addr as i64 == 0 {
+            atomic_store(fail_slot, _dl_fail_oom());
+            return 0 - 1;
+        }
         memset(addr, 0, 16 as usize);
         if attempt == 0 {
             // Linux: u16 sin_family at offset 0.
@@ -458,6 +509,7 @@ fn _connect_tcp(host: *u8, port: i64) -> i32 ![net] {
             let fd: i32 = sfn_socket_open(2, 1, 0);
             if fd < 0 {
                 free(addr);
+                atomic_store(fail_slot, _dl_fail_socket());
                 return 0 - 1;
             }
             // Bound recv/send so a connected-but-silent upstream cannot
@@ -465,14 +517,19 @@ fn _connect_tcp(host: *u8, port: i64) -> i32 ![net] {
             _set_socket_timeouts(fd);
             let rc: i32 = connect(fd, addr, 16);
             free(addr);
-            if rc == 0 { return fd; }
+            if rc == 0 {
+                atomic_store(fail_slot, 0);
+                return fd;
+            }
             sfn_socket_close(fd);
         } else {
             free(addr);
+            atomic_store(fail_slot, _dl_fail_dns());
             return 0 - 1;
         }
         attempt = attempt + 1;
     }
+    atomic_store(fail_slot, _dl_fail_connect());
     return 0 - 1;
 }
 
@@ -862,10 +919,12 @@ fn _http_location_dup(resp: *u8, header_len: i64, base_url: *u8) -> *u8 {
 // only). Writes the response status through `status_slot` and, for a 3xx
 // with a `Location`, a fresh NUL-terminated redirect-target URL (as an
 // `i64`-cast pointer the caller owns and frees) through `location_slot` —
-// the redirect loop in `_http_send` consumes both. Note `body_len_slot` is
-// the unrelated RESPONSE-body out-parameter; the two sit adjacent in the
-// signature and are easy to confuse.
-fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_header: *u8, body_len_slot: *i64, status_slot: *i64, location_slot: *i64) -> *u8 ![net] {
+// the redirect loop in `_http_send` consumes both. `fail_slot` receives the
+// `_dl_fail_*()` transport/status failure ordinal (`0` on success,
+// SFN-1028) — set at every failure return and classified from the
+// response after `_extract_body`.
+fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_header: *u8, body_len_slot: *i64, status_slot: *i64, location_slot: *i64, fail_slot: *i64) -> *u8 ![net] {
+    atomic_store(fail_slot, 0);
     // Detect the `https://` scheme — TLS-wrap the connection below.
     let https: string = "https://";
     let is_https: bool = (strstr(url, https as *u8) as i64) == (url as i64);
@@ -883,7 +942,10 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
         authority_len = (slash as i64) - (host_start as i64);
     } else { authority_len = strlen(host_start) as i64; }
     let authority: *u8 = _strdup_n(host_start, authority_len);
-    if authority as i64 == 0 { return null; }
+    if authority as i64 == 0 {
+        atomic_store(fail_slot, _dl_fail_oom());
+        return null;
+    }
 
     // Split host:port (terminate host in place at the colon). Default
     // port is 443 for https, 80 for http; an explicit `:port` overrides.
@@ -899,7 +961,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
     let mut path: *u8 = root as *u8;
     if slash as i64 != 0 { path = slash; }
 
-    let fd: i32 = _connect_tcp(authority, port);
+    let fd: i32 = _connect_tcp_ex(authority, port, fail_slot);
     if fd < 0 {
         free(authority);
         return null;
@@ -916,12 +978,14 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
     if is_https {
         tls_ctx = tls_client_ctx();
         if tls_ctx as i64 == 0 {
+            atomic_store(fail_slot, _dl_fail_tls_ctx());
             free(authority);
             sfn_socket_close(fd);
             return null;
         }
         ssl = tls_connect_fd(tls_ctx, fd, authority);
         if ssl as i64 == 0 {
+            atomic_store(fail_slot, _dl_fail_tls_handshake());
             tls_ctx_free(tls_ctx);
             free(authority);
             sfn_socket_close(fd);
@@ -948,6 +1012,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
         if req_body_len < 0 { req_body_len = 0; }
         let clen: *u8 = _uint_to_str(req_body_len);
         if clen as i64 == 0 {
+            atomic_store(fail_slot, _dl_fail_oom());
             _tls_teardown(ssl, tls_ctx);
             free(authority);
             sfn_socket_close(fd);
@@ -971,6 +1036,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
         }
         let head: *u8 = malloc((total + 1) as usize);
         if head as i64 == 0 {
+            atomic_store(fail_slot, _dl_fail_oom());
             _tls_teardown(ssl, tls_ctx);
             free(clen);
             free(authority);
@@ -998,12 +1064,14 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
             if _send_all(fd, ssl, body, req_body_len) {
                 // fall through to recv
             } else {
+                atomic_store(fail_slot, _dl_fail_send());
                 _tls_teardown(ssl, tls_ctx);
                 free(authority);
                 sfn_socket_close(fd);
                 return null;
             }
         } else {
+            atomic_store(fail_slot, _dl_fail_send());
             _tls_teardown(ssl, tls_ctx);
             free(authority);
             sfn_socket_close(fd);
@@ -1016,6 +1084,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
             + (strlen(tail as *u8) as i64);
         let head: *u8 = malloc((total + 1) as usize);
         if head as i64 == 0 {
+            atomic_store(fail_slot, _dl_fail_oom());
             _tls_teardown(ssl, tls_ctx);
             free(authority);
             sfn_socket_close(fd);
@@ -1034,6 +1103,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
         if head_ok {
             // fall through to recv
         } else {
+            atomic_store(fail_slot, _dl_fail_send());
             _tls_teardown(ssl, tls_ctx);
             free(authority);
             sfn_socket_close(fd);
@@ -1055,6 +1125,16 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
     if hlen >= 0 { loc = _http_location_dup(resp, hlen, url); }
     atomic_store(location_slot, loc as i64);
     let result: *u8 = _extract_body(resp, total_len, body_len_slot);
+    if result as i64 != 0 { atomic_store(fail_slot, 0); } else if resp as i64 == 0 {
+        atomic_store(fail_slot, _dl_fail_recv());
+    } else {
+        let status: i64 = _http_status_code(resp);
+        if status >= 400 {
+            atomic_store(fail_slot, _dl_fail_http_base() + status);
+        } else if hlen < 0 {
+            atomic_store(fail_slot, _dl_fail_malformed());
+        } else { atomic_store(fail_slot, _dl_fail_body_decode()); }
+    }
     if resp as i64 != 0 { free(resp); }
     return result;
 }
@@ -1069,11 +1149,25 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_heade
 // limit, returns null rather than a misleading empty body. Security: the
 // `Authorization` header is never forwarded across a redirect (the signed CDN
 // URL carries its own query-string auth), and 301/302/303 downgrade to GET
-// (dropping the body); 307/308 preserve the method and body.
+// (dropping the body); 307/308 preserve the method and body. `_http_send`
+// forwards to `_http_send_rc` with a throwaway fail slot; `_http_send_rc`
+// additionally reports the `_dl_fail_*()` transport/status failure ordinal
+// through `fail_slot` (SFN-1028).
 fn _http_send(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_header: *u8, body_len_slot: *i64) -> *u8 ![net] {
-    if url as i64 == 0 { return null; }
+    let mut throwaway: i64 = 0;
+    return _http_send_rc(url, is_post, body, body_len, auth_header, body_len_slot, & throwaway);
+}
+
+fn _http_send_rc(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_header: *u8, body_len_slot: *i64, fail_slot: *i64) -> *u8 ![net] {
+    if url as i64 == 0 {
+        atomic_store(fail_slot, _dl_fail_invalid_arg());
+        return null;
+    }
     let mut cur: *u8 = _strdup_n(url, strlen(url) as i64);
-    if cur as i64 == 0 { return null; }
+    if cur as i64 == 0 {
+        atomic_store(fail_slot, _dl_fail_oom());
+        return null;
+    }
     let mut post: bool = is_post;
     let mut auth_eff: *u8 = auth_header;
     let mut hops: i64 = 0;
@@ -1082,7 +1176,8 @@ fn _http_send(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_header: *u
     loop {
         let mut status: i64 = 0;
         let mut loc_i: i64 = 0;
-        let result: *u8 = _http_send_once(cur, post, body, body_len, auth_eff, body_len_slot, & status, & loc_i);
+        atomic_store(fail_slot, 0);
+        let result: *u8 = _http_send_once(cur, post, body, body_len, auth_eff, body_len_slot, & status, & loc_i, fail_slot);
         let loc: *u8 = loc_i as *u8;
         let is_redirect: bool = status == 301 || status == 302 || status == 303
             || status == 307
@@ -1097,6 +1192,9 @@ fn _http_send(url: *u8, is_post: bool, body: *u8, body_len: i64, auth_header: *u
         // fails closed — never hand back the empty 3xx body as if it were the
         // resource.
         if loc as i64 == 0 || hops >= max_hops {
+            if loc as i64 == 0 {
+                atomic_store(fail_slot, _dl_fail_redirect_no_location());
+            } else { atomic_store(fail_slot, _dl_fail_redirect_limit()); }
             if loc as i64 != 0 { free(loc); }
             free(cur);
             if result as i64 != 0 { free(result); }
@@ -1750,35 +1848,139 @@ fn sfn_http_conn_close(fd: i64) -> void ![net] {
     }
 }
 
-// `sfn_http_download(url, output_path)` — GET `url` and write the
-// body to `output_path` in binary mode. Returns the literal `"ok"`
-// on success, null on failure (matching the curl
-// `sailfin_runtime_http_download` contract). Uses the exact body
-// length reported by `_http_send` (not `strlen`), so binary
-// payloads with embedded NULs are written whole.
-fn sfn_http_download(url: *u8, output_path: *u8) -> *u8 ![net, io] {
-    if url as i64 == 0 { return null; }
-    if output_path as i64 == 0 { return null; }
+// `_dl_reason(code)` — map a `_dl_fail_*()` ordinal to a NUL-terminated C
+// string (SFN-1028). `1..15` are static literals (no allocation); `code >=
+// _dl_fail_http_base()` builds `"http-status-<N>"` for HTTP status `N` via
+// `_uint_to_str`/`malloc`/`_append` (falling back to the `unknown` literal
+// on OOM); anything else, including `0`, is `unknown`. The returned
+// pointer is never freed by the caller — see the `sfn_http_download`
+// contract note below.
+fn _dl_reason(code: i64) -> *u8 {
+    if code == _dl_fail_invalid_arg() {
+        let s: string = "invalid-argument";
+        return s as *u8;
+    }
+    if code == _dl_fail_oom() {
+        let s: string = "out-of-memory";
+        return s as *u8;
+    }
+    if code == _dl_fail_dns() {
+        let s: string = "dns-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_socket() {
+        let s: string = "socket-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_connect() {
+        let s: string = "connect-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_tls_ctx() {
+        let s: string = "tls-context-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_tls_handshake() {
+        let s: string = "tls-handshake-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_send() {
+        let s: string = "send-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_recv() {
+        let s: string = "recv-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_malformed() {
+        let s: string = "malformed-response";
+        return s as *u8;
+    }
+    if code == _dl_fail_body_decode() {
+        let s: string = "body-decode-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_redirect_no_location() {
+        let s: string = "redirect-no-location";
+        return s as *u8;
+    }
+    if code == _dl_fail_redirect_limit() {
+        let s: string = "redirect-limit";
+        return s as *u8;
+    }
+    if code == _dl_fail_open() {
+        let s: string = "open-failed";
+        return s as *u8;
+    }
+    if code == _dl_fail_write() {
+        let s: string = "write-failed";
+        return s as *u8;
+    }
+    if code >= _dl_fail_http_base() {
+        let prefix: string = "http-status-";
+        let status: *u8 = _uint_to_str(code - _dl_fail_http_base());
+        if status as i64 == 0 {
+            let unknown: string = "unknown";
+            return unknown as *u8;
+        }
+        let total: i64 = (strlen(prefix as *u8) as i64) + (strlen(status) as i64);
+        let out: *u8 = malloc((total + 1) as usize);
+        if out as i64 == 0 {
+            free(status);
+            let unknown: string = "unknown";
+            return unknown as *u8;
+        }
+        let mut off: i64 = 0;
+        off = _append(out, off, prefix as *u8);
+        off = _append(out, off, status);
+        memset(_ptr_off(out, off), 0, 1 as usize);
+        free(status);
+        return out;
+    }
+    let unknown: string = "unknown";
+    return unknown as *u8;
+}
+
+// `sfn_http_download(url, output_path)` — GET `url` and write the body to
+// `output_path` in binary mode. Returns the literal `"ok"` on success, or a
+// NUL-terminated reason string on failure (matching the curl
+// `sailfin_runtime_http_download` contract, but preserving the real
+// transport/status failure reason instead of discarding it — SFN-1028).
+// Uses the exact body length reported by `_http_send_rc` (not `strlen`),
+// so binary payloads with embedded NULs are written whole. The returned
+// pointer is never freed by the caller: it is either a static string
+// literal or, for the `http-status-<N>` form, a small one-shot heap
+// allocation on the failure path.
+fn sfn_http_download(url: *u8, output_path: *u8) -> *u8 ![io, net] {
+    if url as i64 == 0 { return _dl_reason(_dl_fail_invalid_arg()); }
+    if output_path as i64 == 0 {
+        return _dl_reason(_dl_fail_invalid_arg());
+    }
     let mut body_len: i64 = 0;
-    let body: *u8 = _http_send(url, false, null, 0, null, & body_len);
-    if body as i64 == 0 { return null; }
+    let mut fail: i64 = 0;
+    let body: *u8 = _http_send_rc(url, false, null, 0, null, & body_len, & fail);
+    if body as i64 == 0 { return _dl_reason(fail); }
 
     let mode: string = "wb";
     let f: *File = fopen(output_path, mode as *u8);
     if f as i64 == 0 {
         free(body);
-        return null;
+        return _dl_reason(_dl_fail_open());
     }
     if body_len > 0 {
-        fwrite(body, 1 as usize, body_len as usize, f);
+        let written: usize = fwrite(body, 1 as usize, body_len as usize, f);
+        if written != body_len as usize {
+            fclose(f);
+            free(body);
+            return _dl_reason(_dl_fail_write());
+        }
     }
-    fclose(f);
+    if fclose(f) != 0 {
+        free(body);
+        return _dl_reason(_dl_fail_write());
+    }
     free(body);
 
-    let ok: *u8 = malloc(3 as usize);
-    if ok as i64 == 0 { return null; }
-    memset(_ptr_off(ok, 0), 111, 1 as usize);
-    memset(_ptr_off(ok, 1), 107, 1 as usize);
-    memset(_ptr_off(ok, 2), 0, 1 as usize);
-    return ok;
+    let ok: string = "ok";
+    return ok as *u8;
 }
