@@ -87,18 +87,18 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
         src_dir = capsule_dir + "/src";
     }
     if !fs.exists(toml_path) {
-        print("no capsule.toml found — run `sfn init` first");
+        print.err("no capsule.toml found — run `sfn init` first");
         return 1;
     }
     let toml_text = fs.readFile(toml_path);
     let pkg_name = toml_get_name(toml_text);
     let pkg_version = toml_get_version(toml_text);
     if pkg_name.length == 0 {
-        print("capsule.toml: missing capsule name");
+        print.err("capsule.toml: missing capsule name");
         return 1;
     }
     if pkg_version.length == 0 {
-        print("capsule.toml: missing capsule version");
+        print.err("capsule.toml: missing capsule version");
         return 1;
     }
 
@@ -115,10 +115,11 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     // An invalid value carries no policy (SFN-707), so it is rejected rather
     // than coerced to either boolean. `E0612` is the code SFEP-0002 §3.7
     // allocates for this refusal; it is emitted as a message prefix because
-    // every diagnostic in this command is a plain `print` + non-zero return.
+    // every diagnostic in this command is a plain `print.err` + non-zero
+    // return (SFN-732), not a rendered `Diagnostic`.
     let publish_policy = toml_get_publish(toml_text);
     if publish_policy.error.length > 0 {
-        print(toml_path + ": " + publish_policy.error);
+        print.err(toml_path + ": " + publish_policy.error);
         return 1;
     }
     // Fail closed on an unresolved policy. `toml_get_publish` pairs a null
@@ -127,12 +128,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     // edge, and permitting publication for a policy that did not resolve is the
     // wrong default if that pairing ever changes.
     if publish_policy.publish == null {
-        print(toml_path + ": could not resolve the [capsule] publish policy");
+        print.err(toml_path + ": could not resolve the [capsule] publish policy");
         return 1;
     }
     let publish_allowed: boolean = publish_policy.publish;
     if !publish_allowed {
-        print("E0612: " + pkg_name + ": " + toml_path
+        print.err("E0612: " + pkg_name + ": " + toml_path
             + " sets [capsule] publish = false — this capsule is private and cannot be published");
         return 1;
     }
@@ -150,7 +151,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
         }
     }
     if token.length == 0 {
-        print("no auth token found — set SFN_TOKEN or create ~/.sfn/credentials");
+        print.err("no auth token found — set SFN_TOKEN or create ~/.sfn/credentials");
         return 1;
     }
 
@@ -174,13 +175,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
 
     let payload_tmp = _mktemp_from_template_cmd("/tmp/.sfn_pub_XXXXXX");
     if payload_tmp.length == 0 {
-        print("failed to create temp file");
+        print.err("failed to create temp file");
         return 1;
     }
     fs.writeFile(payload_tmp, payload);
     let raw_digest = _sha256_of_file(payload_tmp);
     if raw_digest.length == 0 {
-        print("failed to compute digest");
+        print.err("failed to compute digest");
         fs.deleteFile(payload_tmp);
         return 1;
     }
@@ -209,13 +210,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     fs.deleteFile(payload_tmp);
     let response = _toml_trim_cmd(resp.body);
     if resp.status == 0 {
-        print("publish failed — could not reach registry");
-        if response.length > 0 { print("server: " + response); }
+        print.err("publish failed — could not reach registry");
+        if response.length > 0 { print.err("server: " + response); }
         return 1;
     }
     if resp.status < 200 || resp.status >= 300 {
-        print("publish failed (HTTP " + int_to_string(resp.status) + ")");
-        if response.length > 0 { print("server: " + response); }
+        print.err("publish failed (HTTP " + int_to_string(resp.status) + ")");
+        if response.length > 0 { print.err("server: " + response); }
         return 1;
     }
     print(response);
