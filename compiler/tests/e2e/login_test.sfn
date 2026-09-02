@@ -105,10 +105,8 @@ test "login: rejects empty token" ![io] {
 test "login: too many args shows usage" ![io] {
     let home = _home("too_many_args");
     let r = _run(home, ["login", "a", "b"]);
-    // `login a b` fails in `sfn/cli`'s parser, not in `login.sfn`, so
-    // `cli/main.sfn::_v2_help_or_usage` renders the usage on stdout.
-    // SFN-1244 moved only the command handlers' own diagnostics.
-    assert find(to_lower_all(r.out + r.err), "usage", 0) >= 0;
+    assert find(to_lower_all(r.err), "usage", 0) >= 0;
+    assert find(to_lower_all(r.out), "usage", 0) < 0;
 }
 
 // ---- Test 6: login output confirms save path ----

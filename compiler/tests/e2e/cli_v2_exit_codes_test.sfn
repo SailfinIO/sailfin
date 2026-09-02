@@ -94,5 +94,6 @@ test "cli-v2: fallthrough exit code is observed by the caller (no process.exit)"
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 2;
-    assert find(out + err, "unknown command", 0) >= 0;
+    assert find(err, "unknown command", 0) >= 0;
+    assert find(out, "unknown command", 0) < 0;
 }

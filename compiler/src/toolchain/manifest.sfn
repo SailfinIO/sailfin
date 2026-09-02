@@ -229,14 +229,14 @@ fn toolchain_manifest_render(meta: ToolchainManifestMeta, records: ToolchainMani
 fn toolchain_manifest_write(store_dir: string, meta: ToolchainManifestMeta, records: ToolchainManifestRecord[]) -> boolean ![io] {
     let text = toolchain_manifest_render(meta, records);
     if text.length == 0 {
-        print("error: refusing to write an invalid install manifest for "
+        print.err("error: refusing to write an invalid install manifest for "
             + store_dir);
         return false;
     }
     let manifest_path = toolchain_manifest_path(store_dir);
     fs.writeFile(manifest_path, text);
     if !fs.exists(manifest_path) {
-        print("error: failed to write the install manifest " + manifest_path);
+        print.err("error: failed to write the install manifest " + manifest_path);
         return false;
     }
     return true;
