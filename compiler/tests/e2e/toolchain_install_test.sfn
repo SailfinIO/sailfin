@@ -184,6 +184,36 @@ test "toolchain install: an unfetchable version fails closed with nothing stored
     assert ! _installed(store, ver);
 }
 
+// SFN-1028: `_download_to` must surface the real transport failure reason
+// instead of discarding it. Driven through `sfn dev bootstrap fetch`, not
+// `sfn toolchain install` — see the file header: with
+// `qualify_user_store == true`, `_toolchain_install` consults the signed
+// index and refuses at the index-fetch step BEFORE ever reaching the
+// `SHA256SUMS` download this leg targets, while `toolchain_install_to_base`
+// (the bootstrap-fetch entry point) is index-exempt, so the first network
+// touch there is exactly the `_download_to` this leg pins. `http://127.0.0.1:9`
+// is TCP discard — a port nothing ever binds — the established in-repo idiom
+// (`http_post_carry_length_test.sfn:172`, `publish_test.sfn:459`,
+// `runtime_adapter_http_test.sfn:232`); a `.invalid` hostname is avoided
+// because a captive resolver could hijack the NXDOMAIN and flip the reason
+// to `dns-failed`.
+test "toolchain install: a failed download reports the transport reason" ![io] {
+    let ver = "0.0.0-e2e-reason.1";
+    let store = _scratch_root() + "/reason-store";
+    let bootstrap_dir = _scratch_root() + "/reason-bootstrap";
+    assert remove_all(store);
+    assert remove_all(bootstrap_dir);
+    _seed_bootstrap_manifest(bootstrap_dir, ver, store);
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9"]);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "failed to download release manifest");
+    assert contains(out + err, "reason: connect-failed");
+    assert ! _installed(store, ver);
+}
+
 test "toolchain install: a bad signature is refused before extraction" ![io] {
     let tcmd = _timeout_cmd();
     // Skip (still pass) when the local-server fixture can't run: no
@@ -529,5 +559,68 @@ test "toolchain install: a windows host prefers the msvc entry when the manifest
     let err = process.capture_take_stderr();
     assert exit != 0;
     assert contains(out + err, "digest mismatch for sailfin_0.10.3_windows_x86_64-msvc.tar.gz");
+    assert ! _installed(store, ver);
+}
+
+// SFN-1028: `http-status-<N>` is the only `_dl_reason` branch built with
+// manual buffer arithmetic (`_uint_to_str` + `malloc` + `_append` +
+// trailing `memset` at `runtime/sfn/adapters/http.sfn:1914-1933`) — pin
+// its allocated output rather than only the static-literal reasons the
+// legs above already cover. Serving a directory with no `v<ver>/SHA256SUMS`
+// makes the manifest fetch a plain HTTP 404, well before any signature or
+// digest step.
+test "toolchain install: a 404 manifest fetch reports the http status reason" ![io] {
+    let tcmd = _timeout_cmd();
+    if !tool_present("python3") {
+        assert true;
+        return;
+    }
+    if tcmd.length == 0 {
+        assert true;
+        return;
+    }
+
+    let ver = "0.0.0-e2e-404.1";
+    let srv = _scratch_root() + "/http-status-srv";
+    let store = _scratch_root() + "/http-status-store";
+    assert remove_all(srv);
+    assert remove_all(store);
+    fs.createDirectory(srv, true);
+
+    // Own, unshared loopback port: 18790-18799, 18882-18886, 18893-18895,
+    // 18898-18900, 18902, 18910-18914, 18916, 18917, 18920 are claimed
+    // elsewhere under `compiler/tests/` (surveyed at
+    // `tls_large_body_test.sfn:128`, plus this file's own legs above at
+    // 18913/18914); 18915 sits in that noted free 18913-18919 block.
+    let port = "18915";
+    let base = "http://127.0.0.1:" + port;
+    let _pid = process.spawn_with_env([tcmd, "30", "python3", "-m", "http.server", port, "--bind", "127.0.0.1", "--directory", srv], process.environ());
+    let poll = "import socket,sys,time\n" + "for _ in range(50):\n"
+        + "    try:\n"
+        + "        socket.create_connection(('127.0.0.1',"
+        + port
+        + "),0.2).close(); sys.exit(0)\n"
+        + "    except Exception:\n"
+        + "        time.sleep(0.1)\n"
+        + "sys.exit(1)\n";
+    let up = process.run_capture(["python3", "-c", poll], process.environ());
+    let _pout = process.capture_take_stdout();
+    let _perr = process.capture_take_stderr();
+    if up != 0 {
+        assert true;
+        return;
+    }
+
+    // Driven through `sfn dev bootstrap fetch`, not `sfn toolchain install`
+    // — see the file header.
+    let bootstrap_dir = _scratch_root() + "/http-status-bootstrap";
+    assert remove_all(bootstrap_dir);
+    _seed_bootstrap_manifest(bootstrap_dir, ver, store);
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=" + base]);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "reason: http-status-404");
     assert ! _installed(store, ver);
 }
