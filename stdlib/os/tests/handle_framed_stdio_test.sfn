@@ -4,23 +4,25 @@
 // end-of-stream; `handle_read_bytes_stdout` does a bounded incremental
 // read into a caller-owned `OwnedBuf`. These wrap the raw framed
 // builtins (pinned by `compiler/tests/integration/process_framed_stdio_test.sfn`)
-// and add the `string?` / `OwnedBuf` typed surface. POSIX `sh`/`cat`/
-// `printf` assumed, matching the sibling `spawn_with_env` tests.
+// and add the `string?` / `OwnedBuf` typed surface. The shared native child
+// keeps the same scenarios portable across Windows and POSIX.
+import { process_fixture_bin } from "sfn/test";
+
 import {
-    ProcessHandle,
     OwnedBuf,
+    ProcessHandle,
     env_empty,
-    spawn_with_env,
-    handle_write,
     handle_close_stdin,
-    handle_read_line_stdout,
     handle_read_bytes_stdout,
+    handle_read_line_stdout,
+    handle_wait,
+    handle_write,
     owned_buf_free,
-    handle_wait
+    spawn_with_env
 } from "../src/mod";
 
 test "handle_read_line_stdout: frames lines then yields null at EOF" ![io] {
-    let h = spawn_with_env(["sh", "-c", "printf 'one\\ntwo\\n'"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "one\ntwo\n", "", "0"], env_empty(), "");
     assert h.handle_id != 0;
     let a = handle_read_line_stdout(h);
     if a == null { assert false; } else { assert strings_equal(a, "one"); }
@@ -37,7 +39,7 @@ test "handle_read_line_stdout: a genuine blank line is empty, not EOF" ![io] {
     // "\n\n" — two blank lines, then EOF. Blank lines return ""; only
     // end-of-stream returns null. This is the whole reason the wrapper
     // is `string?` rather than plain `string`.
-    let h = spawn_with_env(["sh", "-c", "printf '\\n\\n'"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "\n\n", "", "0"], env_empty(), "");
     assert h.handle_id != 0;
     let a = handle_read_line_stdout(h);
     if a == null { assert false; } else { assert strings_equal(a, ""); }
@@ -50,10 +52,10 @@ test "handle_read_line_stdout: a genuine blank line is empty, not EOF" ![io] {
 }
 
 test "handle_read_line_stdout: reads a frame from a live child" ![io] {
-    // `cat` echoes each frame as it reads it — read one line back while
+    // The fixture echoes each frame as it reads it — read one line back while
     // the child is still running (stdin not yet closed), proving the
     // pipe stays open across calls.
-    let h = spawn_with_env(["cat"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "echo"], env_empty(), "");
     assert h.handle_id != 0;
     let w = handle_write(h, "ping\n");
     assert w == 5;
@@ -68,7 +70,7 @@ test "handle_read_bytes_stdout: bounded read into an owned buffer, empty at EOF"
     // Delay beyond Windows' raw 25 ms framed-poll budget. The typed owned
     // wrapper must retry a live-but-silent empty chunk rather than expose it
     // as EOF (SFN-1142).
-    let h = spawn_with_env(["sh", "-c", "sleep 0.1; printf 'abcdefgh'"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "abcdefgh", "", "0", "100"], env_empty(), "");
     assert h.handle_id != 0;
     // First call caps at 3 bytes; the remaining 5 stay buffered.
     let p1 = handle_read_bytes_stdout(h, 3);

@@ -29,6 +29,7 @@ import { contains, find } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
+    process_fixture_bin,
     report_child_failure,
     sfn_bin_path
 } from "sfn/test";
@@ -40,39 +41,22 @@ fn _stdout_sentinel() -> string { return "SFN546_STDOUT_PASSTHROUGH_9f2c"; }
 
 fn _stderr_sentinel() -> string { return "SFN546_STDERR_PASSTHROUGH_9f2c"; }
 
-// Source for the generated program: it picks a working echo-to-stdout and
-// echo-to-stderr command per host (Windows has no `echo.exe` — `echo` is a
-// `cmd` builtin, and stderr redirection syntax differs from POSIX `sh`) and
-// calls `process.run` on each, uninterposed (no capture args). If `run`
+// Source for the generated program: it builds the shared native child and
+// calls `process.run` on it twice, uninterposed (no capture args). If `run`
 // leaves the grandchild attached to this generated program's own inherited
 // stdout/stderr, the sentinels flow straight through to whatever the
 // generated program itself is attached to — the nested `sfn run` process,
 // whose stdout/stderr THIS test captures.
 fn _generated_program_src() -> string {
-    return "import { find } from \"sfn/strings\";\n\n"
-        + "fn _is_windows() -> bool ![io] {\n"
-        + "    let os = env.get(\"OS\");\n"
-        + "    if find(os, \"Windows\", 0) >= 0 { return true; }\n"
-        + "    if env.get(\"SYSTEMROOT\").length > 0 { return true; }\n"
-        + "    if env.get(\"windir\").length > 0 { return true; }\n"
-        + "    return false;\n"
-        + "}\n\n"
+    return "import { process_fixture_bin } from \"sfn/test\";\n\n"
         + "fn main() ![io] {\n"
-        + "    if _is_windows() {\n"
-        + "        process.run([\"cmd\", \"/c\", \"echo "
+        + "    let child = process_fixture_bin();\n"
+        + "    process.run([child, \"emit\", \""
         + _stdout_sentinel()
-        + "\"]);\n"
-        + "        process.run([\"cmd\", \"/c\", \"echo "
+        + "\", \"\", \"0\", \"0\"]);\n"
+        + "    process.run([child, \"emit\", \"\", \""
         + _stderr_sentinel()
-        + " 1>&2\"]);\n"
-        + "    } else {\n"
-        + "        process.run([\"echo\", \""
-        + _stdout_sentinel()
-        + "\"]);\n"
-        + "        process.run([\"sh\", \"-c\", \"echo "
-        + _stderr_sentinel()
-        + " 1>&2\"]);\n"
-        + "    }\n"
+        + "\", \"0\", \"0\"]);\n"
         + "}\n";
 }
 
@@ -103,10 +87,8 @@ test "process.run: passes a nested child's stdout/stderr through to the caller (
 // `process.capture_take_stdout()` rather than leaking onto this test's own
 // stdout.
 test "process.run_capture: still captures rather than passing through (SFN-546)" ![io] {
-    // `[]` is a deliberate EMPTY child environment, not "inherit" — `echo`
-    // needs none, and `posix_spawnp` resolves a bare name from the caller's
-    // `PATH` rather than from `envp`.
-    let exit = process.run_capture(["echo", "SFN546_CAPTURE_SENTINEL_7ab1"], []);
+    // `[]` is a deliberate EMPTY child environment, not "inherit".
+    let exit = process.run_capture([process_fixture_bin(), "emit", "SFN546_CAPTURE_SENTINEL_7ab1", "", "0", "0"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("process-run-stdio-passthrough run-capture", exit, out, err);

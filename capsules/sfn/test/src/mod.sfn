@@ -575,3 +575,7 @@ export {
     wait_until,
     with_background
 } from "./process_control";
+
+// The shared Sailfin-native child used by managed-process tests. The helper
+// builds it in runner-owned scratch and returns an absolute `.exe`-aware path.
+export { process_fixture_bin } from "./process_fixture";

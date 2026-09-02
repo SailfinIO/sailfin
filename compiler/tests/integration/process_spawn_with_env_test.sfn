@@ -9,8 +9,10 @@
 // `stdlib/os/tests/spawn_with_env_test.sfn`. The exit-code decode
 // and the C-parity contract (return `0`, not `-1`, on failure) mirror
 // `sailfin_runtime.c:6664-6798`.
-test "spawn_with_env: cat round-trips piped stdin to stdout" ![io] {
-    let id = process.spawn_with_env(["cat"], []);
+import { process_fixture_bin } from "sfn/test";
+
+test "spawn_with_env: native child round-trips piped stdin to stdout" ![io] {
+    let id = process.spawn_with_env([process_fixture_bin(), "echo"], []);
     assert id != 0;
     let written = process.handle_write(id, "hello world\n");
     assert written == 12;
@@ -23,17 +25,17 @@ test "spawn_with_env: cat round-trips piped stdin to stdout" ![io] {
 }
 
 test "spawn_with_env: env overrides reach the spawned child" ![io] {
-    let id = process.spawn_with_env(["printenv", "GREETING"], ["GREETING=salve"]);
+    let id = process.spawn_with_env([process_fixture_bin(), "env", "GREETING"], ["GREETING=salve"]);
     assert id != 0;
     process.handle_close_stdin(id);
     let out = process.handle_read_stdout(id);
-    assert out == "salve\n";
+    assert out == "salve";
     let exit = process.handle_wait(id);
     assert exit == 0;
 }
 
 test "spawn_with_env: handle_wait surfaces a non-zero exit code" ![io] {
-    let id = process.spawn_with_env(["sh", "-c", "exit 3"], []);
+    let id = process.spawn_with_env([process_fixture_bin(), "emit", "", "", "3", "0"], []);
     assert id != 0;
     process.handle_close_stdin(id);
     let exit = process.handle_wait(id);

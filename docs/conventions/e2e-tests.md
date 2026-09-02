@@ -94,6 +94,12 @@ The supported building blocks (all already shipped):
   through to the spawned compiler so its staging stays per-invocation —
   **mandatory** under the parallel pool. See the dedicated section below
   for the why.
+- **Drive managed-process behavior:** use `process_fixture_bin()` from
+  `sfn/test` for deterministic stdout/stderr, exit codes, bounded delays,
+  stdin echo/EOF, environment reads, cwd probes, and killable children. It
+  builds the Sailfin fixture in runner-owned scratch and returns an absolute,
+  host-correct executable path, so process tests do not depend on `sh`,
+  `cat`, `printenv`, or other host utilities.
 
 ## Gating a test that cannot run
 

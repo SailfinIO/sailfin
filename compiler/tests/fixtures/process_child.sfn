@@ -1,0 +1,143 @@
+// Deterministic native child for process tests (SFN-1140).
+//
+// Modes:
+//   emit OUT ERR EXIT DELAY_MS
+//   alternate OUT1 ERR1 OUT2 ERR2 [DELAY_MS]
+//   echo
+//   env NAME
+//   fill OUT_BYTE OUT_COUNT ERR_BYTE ERR_COUNT
+//   wait-stdin [MARKER]
+//   touch-after DELAY_MS MARKER
+//   exists PATH
+struct OwnedBuf {
+    ptr_addr: i64;
+    len: i64;
+    cap: i64;
+    arena_addr: i64;
+}
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn sfn_write_fd(fd: i32, buf: *u8, count: usize) -> i64;
+
+fn _parse_int(value: string) -> int {
+    let mut out: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let digit = char_code(value[i]) - 48;
+        if digit < 0 || digit > 9 { return -1; }
+        out = out * 10 + digit;
+        i += 1;
+    }
+    return out;
+}
+
+fn _write(fd: i32, value: string) -> void ![io] {
+    if value.length == 0 { return; }
+    let _ = sfn_write_fd(fd, value as *u8, value.length as usize);
+}
+
+fn _fill(fd: i32, byte: string, count: int) -> void ![io] {
+    let mut block: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 1024 { break; }
+        block = block + byte;
+        i += 1;
+    }
+    let mut remaining = count;
+    loop {
+        if remaining <= 0 { break; }
+        let mut chunk = block.length;
+        if remaining < chunk { chunk = remaining; }
+        let _ = sfn_write_fd(fd, block as *u8, chunk as usize);
+        remaining = remaining - chunk;
+    }
+}
+
+fn _drain_stdin(echo: bool) -> void ![io] {
+    let mut reads: int = 0;
+    loop {
+        if reads >= 5000 {
+            _write(2, "process-child: stdin read guard exhausted\n");
+            return;
+        }
+        reads += 1;
+        let chunk: OwnedBuf = io.read_fd(0, 4096);
+        if chunk.len == 0 { break; }
+        if echo {
+            let _ = sfn_write_fd(1, chunk.ptr_addr as *u8, chunk.len as usize);
+        }
+        if chunk.arena_addr == 0 { free(chunk.ptr_addr as *u8); }
+    }
+}
+
+fn main(argv: string[]) -> int ![clock, io] {
+    if argv.length < 2 { return 64; }
+    let mode = argv[1];
+    if mode == "emit" {
+        if argv.length < 5 { return 64; }
+        let exit_code = _parse_int(argv[4]);
+        if exit_code < 0 || exit_code > 255 { return 65; }
+        let mut delay_ms: int = 0;
+        if argv.length > 5 { delay_ms = _parse_int(argv[5]); }
+        if delay_ms < 0 || delay_ms > 60000 { return 65; }
+        if delay_ms > 0 { sleep(delay_ms); }
+        _write(1, argv[2]);
+        _write(2, argv[3]);
+        return exit_code;
+    }
+    if mode == "alternate" {
+        if argv.length < 6 { return 64; }
+        let mut delay_ms: int = 0;
+        if argv.length > 6 { delay_ms = _parse_int(argv[6]); }
+        if delay_ms < 0 || delay_ms > 60000 { return 65; }
+        _write(1, argv[2]);
+        if delay_ms > 0 { sleep(delay_ms); }
+        _write(2, argv[3]);
+        if delay_ms > 0 { sleep(delay_ms); }
+        _write(1, argv[4]);
+        if delay_ms > 0 { sleep(delay_ms); }
+        _write(2, argv[5]);
+        return 0;
+    }
+    if mode == "echo" {
+        _drain_stdin(true);
+        return 0;
+    }
+    if mode == "env" {
+        if argv.length < 3 { return 64; }
+        _write(1, env.get(argv[2]));
+        return 0;
+    }
+    if mode == "fill" {
+        if argv.length < 6 { return 64; }
+        let out_count = _parse_int(argv[3]);
+        let err_count = _parse_int(argv[5]);
+        if argv[2].length != 1 || argv[4].length != 1 || out_count < 0
+            || err_count < 0 { return 65; }
+        _fill(2, argv[4], err_count);
+        _fill(1, argv[2], out_count);
+        return 0;
+    }
+    if mode == "wait-stdin" {
+        _drain_stdin(false);
+        if argv.length > 2 { fs.writeFile(argv[2], "ready\n"); }
+        return 0;
+    }
+    if mode == "touch-after" {
+        if argv.length < 4 { return 64; }
+        let delay_ms = _parse_int(argv[2]);
+        if delay_ms < 0 || delay_ms > 60000 { return 65; }
+        sleep(delay_ms);
+        fs.writeFile(argv[3], "ready\n");
+        return 0;
+    }
+    if mode == "exists" {
+        if argv.length < 3 { return 64; }
+        if fs.exists(argv[2]) { return 0; }
+        return 1;
+    }
+    return 64;
+}

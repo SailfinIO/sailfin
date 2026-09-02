@@ -7,18 +7,15 @@
 // Skeleton-shape coverage (typecheck + fmt + LLVM define/call
 // shape) lives in `compiler/tests/e2e/test_runtime_process.sh`;
 // this file pins the runtime behavior.
-test "process_run: echo returns exit code 0" ![io] {
-    let rc = process.run(["echo", "hello"]);
+import { process_fixture_bin } from "sfn/test";
+
+test "process_run: fixture returns exit code 0" ![io] {
+    let rc = process.run([process_fixture_bin(), "emit", "hello", "", "0", "0"]);
     assert rc == 0;
 }
 
-test "process_run: true returns exit code 0" ![io] {
-    let rc = process.run(["true"]);
-    assert rc == 0;
-}
-
-test "process_run: false returns exit code 1" ![io] {
-    let rc = process.run(["false"]);
+test "process_run: fixture preserves a nonzero exit code" ![io] {
+    let rc = process.run([process_fixture_bin(), "emit", "", "", "1", "0"]);
     assert rc == 1;
 }
 
