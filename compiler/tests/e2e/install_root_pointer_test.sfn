@@ -38,10 +38,9 @@ fn _abs(path: string) -> string ![io] {
     return path;
 }
 
-// Absolutized scratch root for `label`. Idempotent (a second call against
-// the same label just re-resolves an already-created directory), so both a
-// caller precomputing the pointer contents and `_layout` itself can call it
-// without disagreeing on the path.
+// Absolutized scratch root for `label`. Each test resolves it exactly once
+// and threads the result, so the pointer it writes and the layout it builds
+// can never name different directories.
 fn _root_path(label: string) -> string ![io] {
     return _abs(nested_runner_scratch(label));
 }
@@ -97,13 +96,10 @@ fn _copy_runtime_tree(dst_runtime: string) ![io] {
     }
 }
 
-// Build the copied-exe + pointer layout under its own scratch root and
-// return that root's absolute path. Writes the pointer file only when
-// `pointer` is non-empty; the caller (who alone knows the absolutized store
-// path once this returns, or wants a stale/malformed value) writes it
-// itself otherwise.
-fn _layout(label: string, pointer: string) -> string ![io] {
-    let root = _root_path(label);
+// Build the copied-exe + pointer layout under `root`. Writes the pointer
+// file only when `pointer` is non-empty, so a test can pin the no-pointer
+// control or a deliberately stale value.
+fn _layout(root: string, pointer: string) ![io] {
     let gbin = root + "/gbin";
     fs.createDirectory(gbin, true);
     let exe = gbin + "/" + host_exe_name("sfn");
@@ -120,7 +116,6 @@ fn _layout(label: string, pointer: string) -> string ![io] {
     if pointer.length > 0 {
         fs.writeFile(gbin + "/sailfin-install-root", pointer);
     }
-    return root;
 }
 
 // Run the copied exe against `<root>/away/probe.sfn` with a clean, isolated
@@ -135,9 +130,8 @@ fn _check(root: string) -> int ![io] {
 }
 
 test "install root: copied exe + pointer resolves prelude globals from an empty cwd" ![io] {
-    let label = "install_root_pointer_ok";
-    let store_abs = _root_path(label) + "/store/0.0.0-test";
-    let root = _layout(label, store_abs);
+    let root = _root_path("install_root_pointer_ok");
+    _layout(root, root + "/store/0.0.0-test");
 
     let rc = _check(root);
     let out = process.capture_take_stdout();
@@ -148,7 +142,8 @@ test "install root: copied exe + pointer resolves prelude globals from an empty 
 }
 
 test "install root: without the pointer a copied exe cannot see the prelude" ![io] {
-    let root = _layout("install_root_pointer_missing", "");
+    let root = _root_path("install_root_pointer_missing");
+    _layout(root, "");
 
     let rc = _check(root);
     let out = process.capture_take_stdout();
@@ -160,10 +155,10 @@ test "install root: without the pointer a copied exe cannot see the prelude" ![i
 }
 
 test "install root: a pointer to a dir without runtime/ is ignored" ![io] {
-    let label = "install_root_pointer_stale";
-    let empty_store = _root_path(label) + "/store/empty";
+    let root = _root_path("install_root_pointer_stale");
+    let empty_store = root + "/store/empty";
     fs.createDirectory(empty_store, true);
-    let root = _layout(label, empty_store);
+    _layout(root, empty_store);
 
     let rc = _check(root);
     let out = process.capture_take_stdout();
@@ -178,9 +173,8 @@ test "install root: a backslash Windows pointer path resolves" ![io] {
     if !host_is_windows() {
         skip("pointer backslash form is the install.ps1 shape; Windows host only");
     }
-    let label = "install_root_pointer_backslash";
-    let store_abs = _root_path(label) + "/store/0.0.0-test";
-    let root = _layout(label, replace(store_abs, "/", "\\"));
+    let root = _root_path("install_root_pointer_backslash");
+    _layout(root, replace(root + "/store/0.0.0-test", "/", "\\"));
 
     let rc = _check(root);
     let out = process.capture_take_stdout();

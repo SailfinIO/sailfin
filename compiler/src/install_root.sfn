@@ -36,7 +36,7 @@ import { trim } from "sfn/strings";
 // `runtime/sfn/platform/exec.sfn`.
 extern fn binary_dir(exe: *u8) -> *u8;
 
-fn install_root_pointer_name() -> string { return "sailfin-install-root"; }
+fn _install_root_pointer_name() -> string { return "sailfin-install-root"; }
 
 // The version-store root the pointer beside `bin_dir` names, or `""` when
 // there is no pointer, it is empty, or the directory it names no longer
@@ -44,7 +44,7 @@ fn install_root_pointer_name() -> string { return "sailfin-install-root"; }
 // to a removed install).
 fn installed_payload_dir(bin_dir: string) -> string ![io] {
     if bin_dir.length == 0 { return ""; }
-    let pointer = bin_dir + "/" + install_root_pointer_name();
+    let pointer = bin_dir + "/" + _install_root_pointer_name();
     if !fs.exists(pointer) { return ""; }
     let candidate = trim(fs.readFile(pointer));
     if candidate.length == 0 { return ""; }
