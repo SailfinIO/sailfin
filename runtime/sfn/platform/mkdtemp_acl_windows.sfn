@@ -17,8 +17,9 @@
 //
 // The allocation helpers are consumed only by `mkdtemp_windows.sfn`. The
 // exported predicate is a narrow test seam: it reads the actual descriptor
-// back from the filesystem and compares the DACL's canonical SDDL instead of
-// routing through the Windows `get_perms == -1` sentinel.
+// back from the filesystem and verifies the owner, protection flag, and sole
+// ACE structurally instead of depending on Windows' SDDL rendering or routing
+// through the Windows `get_perms == -1` sentinel.
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
@@ -26,8 +27,6 @@ extern fn free(ptr: *u8) -> void;
 extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
 extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
-
-extern fn strcmp(a: *u8, b: *u8) -> i32;
 
 extern fn strlen(text: *u8) -> usize;
 
@@ -45,19 +44,24 @@ extern fn LocalFree(memory: *u8) -> *u8;
 
 extern fn ConvertStringSecurityDescriptorToSecurityDescriptorA(text: *u8, revision: i32, descriptor_out: *u8, descriptor_size_out: *u8) -> i32;
 
-extern fn ConvertSecurityDescriptorToStringSecurityDescriptorA(descriptor: *u8, revision: i32, security_information: i32, text_out: *u8, text_length_out: *u8) -> i32;
-
 extern fn GetNamedSecurityInfoA(path: *u8, object_type: i32, security_information: i32, owner_out: *u8, group_out: *u8, dacl_out: *u8, sacl_out: *u8, descriptor_out: *u8) -> i32;
+
+extern fn GetSecurityDescriptorControl(descriptor: *u8, control_out: *u8, revision_out: *u8) -> i32;
+
+extern fn GetAclInformation(acl: *u8, information_out: *u8, information_length: i32, information_class: i32) -> i32;
+
+extern fn GetAce(acl: *u8, index: i32, ace_out: *u8) -> i32;
+
+extern fn EqualSid(first: *u8, second: *u8) -> i32;
 
 fn _mkdtemp_acl_ptr(slot: *u8) -> *u8 {
     if slot as i64 == 0 { return null; }
     return sailfin_intrinsic_pointer_read_i64(slot) as *u8;
 }
 
-// Materialize the exact owner + DACL SDDL for the effective process user.
-// The returned C string is malloc-owned. All Win32 out-parameter slots are
-// eight bytes so the pointer writes stay naturally aligned on x86-64.
-fn _mkdtemp_acl_contract() -> *u8 ![io] {
+// Return a malloc-owned TOKEN_USER buffer for the effective process user.
+// Keeping the buffer alive also keeps its embedded SID pointer valid.
+fn _mkdtemp_acl_token_user() -> *u8 ![io] {
     let token_slot: *u8 = malloc(8 as usize);
     if token_slot as i64 == 0 { return null; }
     let _token_zero = memset(token_slot, 0, 8 as usize);
@@ -98,7 +102,15 @@ fn _mkdtemp_acl_contract() -> *u8 ![io] {
         free(token_user);
         return null;
     }
+    return token_user;
+}
 
+// Materialize the exact owner + DACL SDDL for the effective process user.
+// The returned C string is malloc-owned. All Win32 out-parameter slots are
+// eight bytes so the pointer writes stay naturally aligned on x86-64.
+fn _mkdtemp_acl_contract() -> *u8 ![io] {
+    let token_user: *u8 = _mkdtemp_acl_token_user();
+    if token_user as i64 == 0 { return null; }
     // TOKEN_USER begins with SID_AND_ATTRIBUTES; its first x86-64 field is
     // the user SID pointer.
     let user_sid: *u8 = _mkdtemp_acl_ptr(token_user);
@@ -183,38 +195,64 @@ fn sfn_fs_mkdtemp_security_attributes_free(attributes: *u8) -> void ![io] {
 fn sfn_fs_mkdtemp_acl_is_private(path: *u8) -> bool ![io] {
     if path as i64 == 0 { return false; }
 
-    let descriptor_slot: *u8 = malloc(8 as usize);
-    if descriptor_slot as i64 == 0 { return false; }
-    let _descriptor_zero = memset(descriptor_slot, 0, 8 as usize);
+    let scratch: *u8 = malloc(64 as usize);
+    if scratch as i64 == 0 { return false; }
+    let _scratch_zero = memset(scratch, 0, 64 as usize);
+    let owner_slot: *u8 = scratch;
+    let dacl_slot: *u8 = ((scratch as i64) + 8) as *u8;
+    let descriptor_slot: *u8 = ((scratch as i64) + 16) as *u8;
+    let control_slot: *u8 = ((scratch as i64) + 24) as *u8;
+    let revision_slot: *u8 = ((scratch as i64) + 32) as *u8;
+    let acl_info: *u8 = ((scratch as i64) + 40) as *u8;
+    let ace_slot: *u8 = ((scratch as i64) + 56) as *u8;
 
     // SE_FILE_OBJECT = 1; OWNER_SECURITY_INFORMATION = 1;
     // DACL_SECURITY_INFORMATION = 4.
-    let read_status: i32 = GetNamedSecurityInfoA(path, 1, 5, null, null, null, null, descriptor_slot);
+    let read_status: i32 = GetNamedSecurityInfoA(path, 1, 5, owner_slot, null, dacl_slot, null, descriptor_slot);
     let descriptor: *u8 = _mkdtemp_acl_ptr(descriptor_slot);
-    if read_status != 0 || descriptor as i64 == 0 {
-        free(descriptor_slot);
+    let owner: *u8 = _mkdtemp_acl_ptr(owner_slot);
+    let dacl: *u8 = _mkdtemp_acl_ptr(dacl_slot);
+    if read_status != 0 || descriptor as i64 == 0 || owner as i64 == 0 || dacl as i64 == 0 {
+        if descriptor as i64 != 0 { let _released = LocalFree(descriptor); }
+        free(scratch);
         return false;
     }
 
-    let text_slot: *u8 = malloc(8 as usize);
-    if text_slot as i64 == 0 {
+    let token_user: *u8 = _mkdtemp_acl_token_user();
+    if token_user as i64 == 0 {
         let _released = LocalFree(descriptor);
-        free(descriptor_slot);
+        free(scratch);
         return false;
     }
-    let _text_zero = memset(text_slot, 0, 8 as usize);
-    let rendered: i32 = ConvertSecurityDescriptorToStringSecurityDescriptorA(descriptor, 1, 5, text_slot, null);
-    let text: *u8 = _mkdtemp_acl_ptr(text_slot);
-    let expected: *u8 = _mkdtemp_acl_contract();
+    let expected_owner: *u8 = _mkdtemp_acl_ptr(token_user);
+
     let mut matches: bool = false;
-    if rendered != 0 && text as i64 != 0 && expected as i64 != 0 {
-        matches = strcmp(text, expected) == 0;
+    let has_control = GetSecurityDescriptorControl(descriptor, control_slot, revision_slot) != 0;
+    let control: i32 = sailfin_intrinsic_pointer_read_i32(control_slot);
+
+    // SE_DACL_PROTECTED = 4096; AclSizeInformation = 2. The ACL size
+    // structure begins with its DWORD AceCount.
+    if has_control && expected_owner as i64 != 0 && (control & 4096) != 0
+        && EqualSid(owner, expected_owner) != 0
+        && GetAclInformation(dacl, acl_info, 12, 2) != 0
+        && sailfin_intrinsic_pointer_read_i32(acl_info) == 1
+        && GetAce(dacl, 0, ace_slot) != 0 {
+        let ace: *u8 = _mkdtemp_acl_ptr(ace_slot);
+        if ace as i64 != 0 {
+            let ace_type: i64 = load_byte(ace as i64);
+            let ace_flags: i64 = load_byte((ace as i64) + 1);
+            let access_mask: i32 = sailfin_intrinsic_pointer_read_i32(((ace as i64)
+                + 4) as *u8);
+            let ace_sid: *u8 = ((ace as i64) + 8) as *u8;
+            // ACCESS_ALLOWED_ACE_TYPE = 0; OBJECT_INHERIT_ACE |
+            // CONTAINER_INHERIT_ACE = 3; FILE_ALL_ACCESS = 2032127.
+            matches = ace_type == 0 && ace_flags == 3 && access_mask == 2032127
+                && EqualSid(ace_sid, expected_owner) != 0;
+        }
     }
 
-    if expected as i64 != 0 { free(expected); }
-    if text as i64 != 0 { let _text_released = LocalFree(text); }
+    free(token_user);
     let _descriptor_released = LocalFree(descriptor);
-    free(text_slot);
-    free(descriptor_slot);
+    free(scratch);
     return matches;
 }
