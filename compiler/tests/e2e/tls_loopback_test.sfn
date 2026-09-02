@@ -130,6 +130,36 @@ fn _tll_connect(port: i64) -> i32 ![net] {
     return 0 - 1;
 }
 
+// Pre-flight stale-listener probe (SFN-854). Mechanism and full rationale
+// are stated on `_tvf_port_held` in
+// `compiler/tests/e2e/runtime_tls_verify_failure_test.sfn`; the precedent
+// is SFN-851's in `runtime_tls_ca_bundle_realistic_size_test.sfn`. In
+// short: `start_background` reports a child that STARTED, not one that
+// BOUND, so a fixture server that lost this port still yields
+// `handle_id != 0` and the readiness polls below connect to the foreign
+// peer instead. The probe narrows that exposure; it does not eliminate
+// it, since a listener arriving between the probe and the spawn is still
+// missed.
+//
+// The two legs here differ in direction, and only one is a false PASS.
+// `_write_plain_server`'s generated source is constant across runs and its
+// round-trip involves no crypto, so a stale plaintext server from a PRIOR
+// run serves the very same `PLAIN-RT-OK-7c1e` marker and the leg passes
+// for entirely the wrong reason. The TLS leg is not that shape: `_gen_cert`
+// mints a fresh Ed25519 key per run, so a stale server still holding the
+// prior run's cert fails verification against the new CAFILE and the leg
+// goes red — the false-FAILURE shape SFN-851 diagnosed. There the probe
+// buys a fast, correctly labelled skip in place of a slow misattributed
+// failure.
+fn _tll_port_held(port: i64, port_str: string) -> boolean ![io, net] {
+    let fd: i32 = _tll_connect(port);
+    if fd < 0 { return false; }
+    sfn_socket_close(fd);
+    print.info("[tls-loopback] SKIP: port " + port_str
+        + " is held by a listener this run did not start");
+    return true;
+}
+
 // Fixed loopback ports for this test — distinct from the other native
 // loopback e2es (18790 serve, 18795/18796/18797 tls-client/verify, 18893
 // serve-tls) so the pool's `--jobs N` does not collide; high + uncommon to
@@ -522,6 +552,16 @@ test "tls loopback: native serve ↔ native https client round-trips + verify-fa
     let cli_bin = _build_bin(cli_main, dir + "/client-bin");
     assert cli_bin.length > 0;
 
+    // Pre-flight stale-listener probe (SFN-854): the TLS leg, where a
+    // foreign peer fails this run's freshly minted CAFILE and would
+    // otherwise surface as a slow, misattributed round-trip failure. See
+    // `_tll_port_held`.
+    if _tll_port_held(_tls_port(), _tls_port_str()) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
+
     // Managed explicitly (`start_background`/`stop_background`) rather than
     // through the scoped `with_background` fixture: `with_background`'s own
     // catch drains and DISCARDS the child's streams before rethrowing, so a
@@ -598,6 +638,15 @@ test "tls loopback: plaintext serve still round-trips (regression guard)" ![cloc
         + "/");
     let cli_bin = _build_bin(cli_main, dir + "/client-bin");
     assert cli_bin.length > 0;
+
+    // Pre-flight stale-listener probe (SFN-854): the plaintext leg, and
+    // the one genuine false PASS in this file — a stale server from a
+    // prior run emits the identical marker. See `_tll_port_held`.
+    if _tll_port_held(_plain_port(), _plain_port_str()) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
 
     // See the TLS test above for why this manages the server explicitly
     // instead of through `with_background`.

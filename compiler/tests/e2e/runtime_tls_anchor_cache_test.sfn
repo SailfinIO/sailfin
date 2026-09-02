@@ -119,6 +119,31 @@ fn _tac_connect(port: i64) -> i32 ![net] {
     return 0 - 1;
 }
 
+// Pre-flight stale-listener probe (SFN-854). Mechanism and full rationale
+// are stated on `_tvf_port_held` in
+// `compiler/tests/e2e/runtime_tls_verify_failure_test.sfn`; the precedent
+// is SFN-851's in `runtime_tls_ca_bundle_realistic_size_test.sfn`. In
+// short: `start_background` reports a child that STARTED, not one that
+// BOUND, so a server that lost this port still yields `handle_id != 0`
+// and `_await_listening` connects to the foreign peer instead. The probe
+// narrows that exposure; it does not eliminate it, since a listener
+// arriving between the probe and the spawn is still missed.
+//
+// The two legs here differ in direction. The negative-cache leg is
+// all-negative (`n1`/`n2:err=trust-store` against a CAFILE that never
+// resolves), a rejection any TLS peer earns — so an unguarded run reports
+// green while proving nothing. The three-connection leg also asserts
+// `c1:ok=true` / `c3:ok=true` against this run's own certs, which a
+// foreign peer fails, so there the exposure surfaces noisily instead.
+fn _tac_port_held(port: i64, port_str: string) -> boolean ![io, net] {
+    let fd: i32 = _tac_connect(port);
+    if fd < 0 { return false; }
+    sfn_socket_close(fd);
+    print.info("[tls-anchor-cache] SKIP: port " + port_str
+        + " is held by a listener this run did not start");
+    return true;
+}
+
 // Nested build/server child env, pool-safe (SFN-401): stripped of the
 // pool's own orchestration keys and re-pointed at an isolated scratch dir,
 // rather than threading the raw parent `process.environ()`.
@@ -351,6 +376,20 @@ test "runtime tls: anchor cache survives an intervening verify failure in-proces
     let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
+    // Pre-flight stale-listener probe (SFN-854). BOTH ports must be free:
+    // this property needs two servers of ours up at once, so a foreign
+    // peer on either would be graded as this run's. See `_tac_port_held`.
+    if _tac_port_held(port_a, port_a_str) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
+    if _tac_port_held(port_b, port_b_str) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
+
     // This property needs BOTH servers up at once (the client connects to
     // A, then B, then A again in one process), so the two `with_background`
     // fixtures nest: each independently owns its child's kill+reap on scope
@@ -401,6 +440,14 @@ test "runtime tls: a trust-store load failure is never cached (SFN-816 stays fix
     // captures it.
     let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
+
+    // Pre-flight stale-listener probe (SFN-854): an all-negative leg, the
+    // false-PASS direction. See `_tac_port_held`.
+    if _tac_port_held(port_a, port_a_str) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
 
     // `with_background` owns `s_server`'s lifetime; see the sibling test
     // above for why this replaced the `timeout <secs>` vehicle. Its own
