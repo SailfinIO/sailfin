@@ -28,6 +28,17 @@
 // `openssl` is missing (no TLS peer / cert gen). CI runners (Linux +
 // coreutils + libssl) have it.
 //
+// Fixed loopback ports owned by this file: 18796, 18797, 18903, 18904.
+// Non-contiguous because the two reason-guard legs (SFN-816 / SFN-822)
+// moved off 18798/18799 in SFN-854 — `toolchain_install_test.sfn:226,312`
+// binds those with `python3 -m http.server`, and two tests sharing a fixed
+// port is a pool-only collision (`.claude/rules/no-bash-e2e.md`, incident
+// #1862). The claim is recorded here because its absence is what caused
+// that collision: this file took two further ports without declaring them,
+// and the surveys the sibling e2es maintain
+// (`tls_large_body_test.sfn`, `socket_ops_timeout_readback_test.sfn`) are
+// re-derived by grepping, so an unrecorded claim is an invisible one.
+//
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured state with
 // direct comparisons instead.
@@ -116,6 +127,38 @@ fn _tvf_connect(port: i64) -> i32 ![net] {
         attempt = attempt + 1;
     }
     return 0 - 1;
+}
+
+// Pre-flight stale-listener probe (SFN-854). `start_background` — and so
+// `with_background` — returns a handle for a child that STARTED, not one
+// that BOUND: `capsules/sfn/test/src/process_control.sfn` checks only the
+// spawn. An `s_server` that lost this port therefore still yields
+// `handle_id != 0`, and `_await_listening` then connects to whatever else
+// is listening.
+//
+// SFN-843's scoped teardown reclaims the port on this run's own exit,
+// including the throwing path. The residue is a prior run killed hard (a
+// cancelled CI job, a SIGKILLed pool) or any other lost bind. This probe
+// NARROWS that residue rather than eliminating it: a listener arriving
+// between the probe and the spawn is still missed.
+//
+// The three pure-rejection legs are why it is worth having. A foreign peer
+// earns the same rejection, so the leg reports green while proving nothing
+// about this run's server — a silent loss of coverage on the
+// hostname-mismatch, cert-verify and trust-store paths. The untrusted-cert
+// leg additionally asserts a positive control against this run's own
+// freshly minted cert, which a foreign peer fails, so there the exposure
+// surfaces noisily instead. Skipping is the sanctioned outcome either way
+// (SFN-851's precedent in
+// `runtime_tls_ca_bundle_realistic_size_test.sfn`); grading an unknown
+// peer is not.
+fn _tvf_port_held(port: i64, port_str: string) -> boolean ![io, net] {
+    let fd: i32 = _tvf_connect(port);
+    if fd < 0 { return false; }
+    sfn_socket_close(fd);
+    print.info("[tls-verify] SKIP: port " + port_str
+        + " is held by a listener this run did not start");
+    return true;
 }
 
 // Full parent environment for the build + server subprocesses
@@ -381,6 +424,17 @@ test "runtime tls: an untrusted server cert is rejected (verify enforced)" ![clo
     let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
+    // Pre-flight stale-listener probe (SFN-854). This leg pairs its
+    // rejection with a positive control against this run's own cert, so a
+    // foreign peer fails it loudly rather than silently — the probe still
+    // skips, so that failure is never misattributed to TLS. See
+    // `_tvf_port_held`.
+    if _tvf_port_held(port, port_str) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
+
     // `with_background` owns `s_server`'s lifetime: it is killed and reaped
     // on scope exit, including when an assertion below throws — replacing
     // the previous `timeout <secs>` argv vehicle, which was the ONLY
@@ -437,6 +491,14 @@ test "runtime tls: a hostname/SAN mismatch is rejected (RFC-6125 enforced)" ![cl
     let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
+    // Pre-flight stale-listener probe (SFN-854): a pure-rejection leg, the
+    // false-PASS direction. See `_tvf_port_held`.
+    if _tvf_port_held(port, port_str) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
+
     // `with_background` owns `s_server`'s lifetime; see the untrusted-cert
     // test above for why this replaced the `timeout <secs>` vehicle.
     let _served = with_background(_server_argv(dir, port_str), _child_env_typed(), "", "tls-verify-hostmismatch-server", fn (server: Background) -> int {
@@ -464,12 +526,20 @@ test "runtime tls: an untrusted peer reports cert-verify, not silence" ![clock, 
         assert true;
         return;
     }
-    let port: i64 = 18798;
-    let port_str = "18798";
+    let port: i64 = 18903;
+    let port_str = "18903";
 
     let dir = _scratch_root() + "/sfn-tls-reason-certverify";
     fs.createDirectory(dir, true);
     assert _gen_cert(dir, "localhost");
+
+    // Pre-flight stale-listener probe (SFN-854): a pure-rejection leg, the
+    // false-PASS direction. See `_tvf_port_held`.
+    if _tvf_port_held(port, port_str) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
 
     // `with_background` owns `s_server`'s lifetime; see the untrusted-cert
     // test above for why this replaced the `timeout <secs>` vehicle.
@@ -503,8 +573,8 @@ test "runtime tls: an unreadable trust store reports trust-store, not cert-verif
         assert true;
         return;
     }
-    let port: i64 = 18799;
-    let port_str = "18799";
+    let port: i64 = 18904;
+    let port_str = "18904";
 
     let dir = _scratch_root() + "/sfn-tls-reason-truststore";
     fs.createDirectory(dir, true);
@@ -514,6 +584,14 @@ test "runtime tls: an unreadable trust store reports trust-store, not cert-verif
     // SFN-843: typed explicitly — see the untrusted-cert test above.
     let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
+
+    // Pre-flight stale-listener probe (SFN-854): a pure-rejection leg, the
+    // false-PASS direction. See `_tvf_port_held`.
+    if _tvf_port_held(port, port_str) {
+        let _ = remove_all(dir);
+        assert true;
+        return;
+    }
 
     // `with_background` owns `s_server`'s lifetime; see the untrusted-cert
     // test above for why this replaced the `timeout <secs>` vehicle. The
