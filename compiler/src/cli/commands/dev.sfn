@@ -1228,7 +1228,15 @@ fn _dev_bootstrap_install(from_path: string, prefix: string, destdir: string) ->
         if prepared_destdir.kind < 0 { return 1; }
         live_prefixed = prepared_destdir.kind == 1;
         staged_prefixed = prepared_destdir.kind == 0;
-        if staged_prefixed {
+        if live_prefixed {
+            // `_bootstrap_prefixed_install_path` strips an absolute prefix's
+            // root while composing a staged path. Once DESTDIR resolves to
+            // the live filesystem root, restore the direct prefix spelling;
+            // on Windows a drive-stripped `/path` would otherwise probe and
+            // publish on the process's current drive instead of the prefix's
+            // drive.
+            out = _bootstrap_prefixed_install_path(effective_prefix, "", host_exe_name("sfn"));
+        } else if staged_prefixed {
             // Stop using the caller's lexical DESTDIR after validation. A
             // later swap of an alias/junction ancestor must not retarget the
             // lock, staging tree, backups, or publication paths.
