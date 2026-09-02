@@ -17,6 +17,17 @@
 // stdout/stderr text with `sfn/strings` predicates (`find`/`contains`)
 // instead. (#842.)
 //
+// Hermeticity is a file-wide invariant, not a per-test courtesy (SFN-1245):
+// no test may inherit a credential, and no test may resolve a registry off
+// loopback. `_env_for` strips `SFN_TOKEN` so the first half cannot be
+// violated by accident. The second half has no single choke point — the CLI
+// falls through to the compiled-in `https://pkg.sfn.dev`
+// (`cli/commands/cmd_shared.sfn`) whenever neither `SFN_REGISTRY` nor
+// `~/.sfn/config.toml` supplies one — so every test that gets as far as
+// packaging pins the registry at the fixture and then asserts the fixture
+// recorded the request. A test that reaches packaging without such an
+// assertion is publishing to production.
+//
 // Run semantics: `run_capture` cannot chdir, so the .sh's "cd then run"
 // shape is reproduced by passing the capsule dir as an explicit path arg.
 // The "uses cwd" case (test 5) is therefore covered by passing the workdir
@@ -93,11 +104,15 @@ fn _write_credentials(home: string) -> void ![io] {
 }
 
 // Build a child env with HOME forced to `home` and any extra `KEY=value`
-// entries appended (this file only ever passes SFN_REGISTRY). Both keys are
-// named to `clean_runner_env_without` so an inherited entry earlier in the
-// array cannot shadow the caller's push (SFN-1114).
+// entries appended (this file only ever passes SFN_REGISTRY). `HOME` and
+// `SFN_REGISTRY` are named to `clean_runner_env_without` because this helper
+// goes on to push its own, so an inherited entry earlier in the array cannot
+// shadow the caller's push (SFN-1114). `SFN_TOKEN` is stripped and never
+// re-pushed: an inherited developer credential would defeat the no-token
+// tests' premise and would otherwise be transmitted to whatever registry the
+// child resolves (SFN-1245).
 fn _env_for(home: string, extra: string[]) -> string[] ![io] {
-    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["HOME", "SFN_REGISTRY"]);
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["HOME", "SFN_REGISTRY", "SFN_TOKEN"]);
     e.push("HOME=" + home);
     let mut i = 0;
     loop {
@@ -249,49 +264,88 @@ test "publish: no capsule.toml fails" ![io] {
 }
 
 // ---- Test 3: publish with path arg finds capsule.toml ----
-test "publish: path arg finds capsule" ![io] {
+test "publish: path arg finds capsule" ![clock, io, net] {
     let root = _test_root("t3");
     let home = root + "/home";
     let workdir = root + "/work";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule(workdir + "/my/capsule", "test/pkg", "1.0.0");
-    let e = _env_for(home, []);
-    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
-        + "/my/capsule"], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    assert contains(out + err, "packaging test/pkg@1.0.0");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
+            + "/my/capsule"], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert contains(out + err, "packaging test/pkg@1.0.0");
+        return 0;
+    });
+    // Proves the POST landed on the loopback fixture, not the default registry.
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
 }
 
 // ---- Test 4: publish with trailing-slash path still works ----
-test "publish: trailing-slash path works" ![io] {
+test "publish: trailing-slash path works" ![clock, io, net] {
     let root = _test_root("t4");
     let home = root + "/home";
     let workdir = root + "/work";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule(workdir + "/cap", "test/pkg", "1.0.0");
-    let e = _env_for(home, []);
-    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
-        + "/cap/"], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    assert contains(out + err, "packaging test/pkg@1.0.0");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
+            + "/cap/"], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert contains(out + err, "packaging test/pkg@1.0.0");
+        return 0;
+    });
+    // Proves the POST landed on the loopback fixture, not the default registry.
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
 }
 
 // ---- Test 5: publish without path uses cwd ----
 // run_capture cannot chdir, so the cwd-discovery semantics are exercised by
 // passing the capsule dir as an explicit path arg.
-test "publish: discovers capsule (cwd semantics)" ![io] {
+test "publish: discovers capsule (cwd semantics)" ![clock, io, net] {
     let root = _test_root("t5");
     let home = root + "/home";
     let workdir = root + "/work";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule(workdir, "my/cap", "2.0.0");
-    let e = _env_for(home, []);
-    let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    assert contains(out + err, "packaging my/cap@2.0.0");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert contains(out + err, "packaging my/cap@2.0.0");
+        return 0;
+    });
+    // Proves the POST landed on the loopback fixture, not the default registry.
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
 }
 
 // ---- Test 6: publish with no token fails ----
@@ -301,13 +355,15 @@ test "publish: no token fails" ![io] {
     let workdir = root + "/work";
     fs.createDirectory(home, true);
     _make_capsule(workdir, "test/pkg", "1.0.0");
-    // No credentials written, and SFN_TOKEN/SFN_REGISTRY omitted from env
-    // (run_capture env is complete, so omission = unset).
+    // No credentials written, and `_env_for` strips any inherited SFN_TOKEN
+    // (SFN-1245) so a developer's own token cannot defeat the guard.
     let e = _env_for(home, []);
     let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(out + err, "no auth token found");
+    // No packaging means no POST was attempted.
+    assert ! contains(out + err, "packaging");
 }
 
 // ---- Test 7: digest in payload has sha256: prefix ----
@@ -411,6 +467,12 @@ test "publish: surfaces HTTP error details" ![clock, io, net] {
         assert contains(all, "Digest mismatch");
         return 0;
     });
+    // The 400 is only producible by the fixture's `status400` branch, but
+    // assert the recording too: the header's invariant is that every test
+    // reaching packaging proves where its request landed.
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
 }
 
 // ---- Test 10: publish uses default registry when none configured ----
