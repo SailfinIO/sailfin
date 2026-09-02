@@ -467,6 +467,12 @@ test "publish: surfaces HTTP error details" ![clock, io, net] {
         assert contains(all, "Digest mismatch");
         return 0;
     });
+    // The 400 is only producible by the fixture's `status400` branch, but
+    // assert the recording too: the header's invariant is that every test
+    // reaching packaging proves where its request landed.
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
 }
 
 // ---- Test 10: publish uses default registry when none configured ----
