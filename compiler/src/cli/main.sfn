@@ -48,7 +48,6 @@ import {
 import { int_to_string } from "sfn/strings";
 
 import { _ends_with } from "../build/paths";
-import { _runtime_bundle_exists } from "../build/runtime_objs";
 import { handle_selfhost_command } from "../cli_selfhost";
 import { ice_set_binary_dir } from "../ice";
 import { starts_with, substring } from "../string_utils";
@@ -84,6 +83,7 @@ import {
 } from "./commands/toolchain";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
+import { resolve_runtime_bundle_root } from "./runtime_root";
 import { verdict_arm, verdict_funnel_enter, verdict_funnel_exit } from "./verdict";
 
 // Render one command row for `_usage()`: the invocation `sig` padded to a
@@ -1046,14 +1046,11 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // `python script.py` / `node script.js` convention. Re-enters as
     // `["run", <file>]` through `sailfin_cli_main_with_paths` → this
     // dispatch, so `cli/commands/run.sfn` owns the build-then-exec body.
-    // The empty `runtime_root` → "runtime" bundle fallback is a
-    // filesystem probe (not argv parsing), reproduced from the legacy
-    // caller.
+    // The runtime-bundle probe is a filesystem question, not argv parsing,
+    // so it goes through the shared `cli/runtime_root.sfn` contract
+    // (SFN-1088) rather than a copy of the legacy caller's inline block.
     if args.length == 1 && _ends_with(cmd, ".sfn") {
-        let mut runtime_root: string = ctx.runtime_root;
-        if runtime_root.length == 0 {
-            if _runtime_bundle_exists("runtime") { runtime_root = "runtime"; }
-        }
+        let runtime_root: string = resolve_runtime_bundle_root(ctx.runtime_root);
         return sailfin_cli_main_with_paths(["run", cmd], runtime_root, ctx.binary_dir, ctx.compiler_path);
     }
 

@@ -50,7 +50,7 @@ import {
 import { _do_determinism_check } from "../../build/determinism";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
-import { _runtime_bundle_exists, clean_runtime_object_cache } from "../../build/runtime_objs";
+import { clean_runtime_object_cache } from "../../build/runtime_objs";
 import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import { build_target_os, target_exe_name, triple_is_supported } from "../../build/target";
 import { supported_targets_hint, unsupported_target_diagnostic } from "../../build/target_diagnostics";
@@ -81,6 +81,7 @@ import { compile_to_llvm_file_with_module_imports_and_implicit } from "../../mai
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { render_terminal_diagnostic } from "../../terminal_output";
 import { CliContext } from "../context";
+import { resolve_runtime_bundle_root } from "../runtime_root";
 import { bootstrap_gate_or_dispatch } from "./dev";
 import { toolchain_gate_or_dispatch } from "./toolchain";
 
@@ -255,10 +256,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     let mut out_path: string = out_path_arg;
 
     let binary_dir: string = ctx.binary_dir;
-    let mut runtime_root: string = ctx.runtime_root;
-    if runtime_root.length == 0 {
-        if _runtime_bundle_exists("runtime") { runtime_root = "runtime"; }
-    }
+    let runtime_root: string = resolve_runtime_bundle_root(ctx.runtime_root);
 
     // Resolved scratch / staging roots for this build. With
     // `--work-dir` unset both fall back to the legacy in-tree

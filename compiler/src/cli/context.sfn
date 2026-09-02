@@ -109,7 +109,9 @@ fn driver_prefix_length(argv: string[]) -> int {
 // flag, with the legacy `build/sailfin/.trace_argv` file as
 // back-compat). The `runtime_root` fallback to the local `runtime`
 // bundle stays with the caller — it is a filesystem probe, not argv
-// parsing, and moves to `cli/runtime_root.sfn` in a later issue.
+// parsing. It now lives in `cli/runtime_root.sfn` (SFN-1088), which
+// every linking command resolves through; this parser still yields the
+// raw driver-prefix value and validates nothing.
 fn parse_driver_prefix(argv: string[]) -> CliContext ![io] {
     let prefix = _walk_driver_prefix(argv);
     let mut ctx = CliContext {

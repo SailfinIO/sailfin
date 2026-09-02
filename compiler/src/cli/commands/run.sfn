@@ -55,7 +55,6 @@ import {
 import { remove_tree } from "../../build/fs_tree";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ends_with, _ensure_dir } from "../../build/paths";
-import { _runtime_bundle_exists } from "../../build/runtime_objs";
 import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import { build_target_os, target_exe_name } from "../../build/target";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
@@ -68,6 +67,7 @@ import { format_backend_failure_banner } from "../../ice";
 import { compile_to_llvm_file_with_module_imports_and_implicit } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
+import { resolve_runtime_bundle_root } from "../runtime_root";
 import { toolchain_gate_or_dispatch } from "./toolchain";
 
 // The `sfn/cli` definition for `run`, registered on the v2 root via
@@ -163,10 +163,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     }
 
     let binary_dir: string = ctx.binary_dir;
-    let mut runtime_root: string = ctx.runtime_root;
-    if runtime_root.length == 0 {
-        if _runtime_bundle_exists("runtime") { runtime_root = "runtime"; }
-    }
+    let runtime_root: string = resolve_runtime_bundle_root(ctx.runtime_root);
 
     // If the argument doesn't look like Sailfin source, treat it as an executable.
     if !_ends_with(input_path, ".sfn") {

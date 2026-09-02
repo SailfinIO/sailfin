@@ -1,0 +1,103 @@
+// compiler/src/cli/runtime_root.sfn
+//
+// The one runtime-BUNDLE resolution contract for the CLI commands that link
+// against the runtime: `build`, `run`, bare-file dispatch, and `test`
+// (SFN-1088). `cli/context.sfn`'s header earmarked this module: the fallback
+// "is a filesystem probe, not argv parsing", so it never belonged in the
+// driver-prefix parser and it never belonged copy-pasted into each command.
+//
+// Distinct from `resolve_runtime_root` (`runtime/sfn/platform/exec.sfn`),
+// which answers a different question. That one runs once at process start
+// from `cli/entry.sfn`: honour `$SAILFIN_RUNTIME_ROOT`, else walk
+// `<exe_dir>/runtime`, `../runtime`, `../../runtime`, and return the first
+// DIRECTORY that exists. Its result — already corrected for the SFN-1124
+// install-root pointer — is what lands in `CliContext.runtime_root`. This
+// module answers the follow-on question a linking command actually has: is
+// that path a runtime BUNDLE, i.e. does it own the `capsule.toml` the
+// implicit runtime-capsule resolver reads (`_runtime_bundle_exists`, #940)?
+// An exe-relative `runtime/` directory can exist and still carry no
+// manifest, and `resolve_runtime_root` returns "" for a compiler invoked
+// through a `$PATH` name it cannot walk back from — both leave a linking
+// command holding a root that resolves no runtime capsule.
+//
+// Why the candidate list lives in one function rather than four. Before
+// SFN-1088 the empty-root fallback was copy-pasted verbatim into
+// `commands/build.sfn`, `commands/run.sfn` and `main.sfn`'s bare-file
+// dispatch, and `commands/test/mod.sfn` had no copy at all — it consumed
+// `ctx.runtime_root` raw, so an installed toolchain whose startup probe came
+// back empty failed at the test link stage with a diagnostic that named
+// `/capsule.toml`. Three copies of a rule are three chances to drift; the
+// fourth consumer proves the drift already happened.
+//
+// `resolve_runtime_bundle_root` and `runtime_bundle_probe_lines` share
+// `runtime_bundle_candidates` so the diagnostic can only ever name the
+// locations resolution actually considered. They take the raw context root
+// as a `string` rather than a `CliContext` so the deep link sites
+// (`build/link.sfn`, `commands/test/link.sfn`), which hold only the resolved
+// path, can render the report without threading the context down to them.
+import { _runtime_bundle_exists } from "../build/runtime_objs";
+
+// The ordered runtime-bundle candidates for a CLI command, given the
+// process-startup root the driver prefix carried. The sole definition of
+// what "the runtime bundle root" may be:
+//
+//   1. `ctx.runtime_root` — the startup probe's answer, already
+//      install-root-pointer corrected by `cli/entry.sfn`. Absent (empty)
+//      whenever that probe found nothing.
+//   2. `runtime` relative to the cwd — the in-checkout shape, which is how
+//      a compiler invoked by a name it cannot walk back from still finds the
+//      bundle it was built beside.
+//
+// Order is precedence: an installed toolchain's own bundle always outranks
+// whatever `runtime/` the cwd happens to contain.
+fn runtime_bundle_candidates(ctx_root: string) -> string[] {
+    let mut candidates: string[] = [];
+    if ctx_root.length > 0 { candidates.push(ctx_root); }
+    candidates.push("runtime");
+    return candidates;
+}
+
+// The first candidate that is a real runtime bundle, else `ctx_root`
+// unchanged.
+//
+// Returning `ctx_root` rather than "" on total failure is deliberate: it
+// preserves the pre-SFN-1088 value every caller already passed downstream,
+// so a failing invocation reaches the same link-stage diagnostic it always
+// did, and `runtime_bundle_probe_lines` re-derives the identical candidate
+// list from it.
+fn resolve_runtime_bundle_root(ctx_root: string) -> string ![io] {
+    let candidates = runtime_bundle_candidates(ctx_root);
+    let mut i: int = 0;
+    loop {
+        if i >= candidates.length { break; }
+        if _runtime_bundle_exists(candidates[i]) { return candidates[i]; }
+        i += 1;
+    }
+    return ctx_root;
+}
+
+// The "locations actually probed" lines for a missing-runtime diagnostic,
+// pre-indented to sit under a `sfn <command>: ...` headline.
+//
+// Rendered from `runtime_bundle_candidates`, so a candidate added to
+// resolution cannot silently go unreported. When the startup probe came back
+// empty the list is just the cwd bundle — which is the honest report, and
+// strictly better than interpolating an empty root into a message that then
+// reads `expected /capsule.toml`.
+fn runtime_bundle_probe_lines(ctx_root: string) -> string[] {
+    let candidates = runtime_bundle_candidates(ctx_root);
+    let mut lines: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= candidates.length { break; }
+        lines.push("     probed " + candidates[i] + "/capsule.toml");
+        i += 1;
+    }
+    return lines;
+}
+
+export {
+    resolve_runtime_bundle_root,
+    runtime_bundle_candidates,
+    runtime_bundle_probe_lines
+};
