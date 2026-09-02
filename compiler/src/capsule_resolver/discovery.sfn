@@ -572,7 +572,12 @@ fn enumerate_capsule_sources(project_root: string, runtime_root: string, additio
                 let mut rmi: int = 0;
                 loop {
                     if rmi >= rt_manifest_dirs.length { break; }
-                    let rt_located = locate_runtime_dep_capsule_src(rt_manifest_dirs[rmi], spec);
+                    let runtime_workspace_root = discover_workspace_root(rt_manifest_dirs[rmi]);
+                    let mut runtime_workspace_members: WorkspaceMember[] = [];
+                    if runtime_workspace_root.length > 0 {
+                        runtime_workspace_members = load_workspace_members(runtime_workspace_root);
+                    }
+                    let rt_located = locate_runtime_dep_capsule_src(rt_manifest_dirs[rmi], spec, runtime_workspace_members, runtime_workspace_root.length > 0);
                     rmi += 1;
                     if rt_located.src_dir.length > 0 {
                         src_dir = rt_located.src_dir;

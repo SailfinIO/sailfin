@@ -23,6 +23,8 @@ import {
 import { _env_flag } from "../build_flags";
 import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
 import { locate_runtime_dep_capsule_src } from "../capsule_resolver/locate";
+import { WorkspaceMember } from "../capsule_resolver/types";
+import { discover_workspace_root, load_workspace_members } from "../capsule_resolver/workspace";
 import {
     SourceIdentityOwner,
     module_name_from_path,
@@ -1391,7 +1393,7 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
 // emit failure does — a missing sibling artifact would otherwise
 // surface later as the far less actionable "cannot resolve return
 // type" fatal in whichever module imports it.
-fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], ctx_root: string, compiler_identity: string, shared_cache_root: string) -> boolean ![io] {
+fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], workspace_members: WorkspaceMember[], workspace_members_authoritative: boolean, ctx_root: string, compiler_identity: string, shared_cache_root: string) -> boolean ![io] {
     let mut staged_slugs: string[] = [];
     let mut staged_asm_paths: string[] = [];
     let mut staged_src_paths: string[] = [];
@@ -1450,13 +1452,21 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
             let spec = cap2.capsule_deps[dsi];
             dsi += 1;
             if !contains_string(demanded_specs, spec) { continue; }
-            let located = locate_runtime_dep_capsule_src(cap2.manifest_dir, spec);
+            let located = locate_runtime_dep_capsule_src(cap2.manifest_dir, spec, workspace_members, workspace_members_authoritative);
             if located.src_dir.length == 0 {
-                print("sfn build: runtime capsule `" + cap2.capsule_name
-                    + "` declares dependency `"
-                    + spec
-                    + "` but its sources were not found next to "
-                    + cap2.manifest_dir);
+                if workspace_members_authoritative {
+                    print("sfn build: runtime capsule `" + cap2.capsule_name
+                        + "` declares dependency `"
+                        + spec
+                        + "` but it is not a usable member of the workspace containing "
+                        + cap2.manifest_dir);
+                } else {
+                    print("sfn build: runtime capsule `" + cap2.capsule_name
+                        + "` declares dependency `"
+                        + spec
+                        + "` but its installed sources were not found next to "
+                        + cap2.manifest_dir);
+                }
                 return false;
             }
             let dep_files = _collect_sfn_files_cmd(located.src_dir, 16);
@@ -1652,10 +1662,29 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
     // carry the commit hash in the version. Computed once here (not per
     // source) so the binary is hashed at most once per build.
     let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
+    // SFN-1242: the runtime manifest is the stable anchor shared by the
+    // pinned-seed self-host and installed-toolchain paths. When it belongs to
+    // a workspace, resolve that workspace's canonical member inventory once
+    // so runtime dependency staging is independent of physical member paths.
+    // An installed runtime without a workspace leaves the inventory empty and
+    // retains the sibling `capsules/<scope>/<name>/src` fallback.
+    let mut workspace_members: WorkspaceMember[] = [];
+    let mut workspace_members_authoritative: boolean = false;
+    let mut wsi: int = 0;
+    loop {
+        if wsi >= runtime_capsules.length { break; }
+        let workspace_root = discover_workspace_root(runtime_capsules[wsi].manifest_dir);
+        if workspace_root.length > 0 {
+            workspace_members = load_workspace_members(workspace_root);
+            workspace_members_authoritative = true;
+            break;
+        }
+        wsi += 1;
+    }
     // #1288: stage every sfn-source's import-context artifacts FIRST
     // so each module's llvm emit below can resolve sibling imports.
     let ctx_root = _runtime_sfn_ctx_root(out_dir);
-    if !_stage_runtime_sfn_import_context(self_path, runtime_capsules, ctx_root, compiler_identity, shared_cache_root) {
+    if !_stage_runtime_sfn_import_context(self_path, runtime_capsules, workspace_members, workspace_members_authoritative, ctx_root, compiler_identity, shared_cache_root) {
         return _failed_runtime_link_inputs();
     }
     let mut plans: RuntimeSfnObjectPlan[] = [];

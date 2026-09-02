@@ -21,7 +21,7 @@ import {
     _cr_path_join
 } from "./paths";
 import { capsule_origin_cache, capsule_origin_workspace } from "./provenance";
-import { CapsuleLocation } from "./types";
+import { CapsuleLocation, WorkspaceMember } from "./types";
 
 // Locate the src/ directory for a capsule dep. Checks the in-tree
 // capsules/<scope>/<name>/src/ first (compiler self-build and ecosystem
@@ -104,15 +104,19 @@ export fn locate_capsule_src(project_root: string, spec: string, version: string
 // dependency and link-fails every user program (SFN-773, design note
 // `sfn-341-native-tls-runtime-swap.md` §3.1.4).
 //
-// One path shape covers both layouts, which is why this takes the manifest dir
-// rather than a root: in-repo `<root>/runtime` yields `<root>/capsules/...`,
-// and installed `<prefix>/runtime` yields `<prefix>/capsules/...`. Derived with
-// `_cr_dirname` rather than a `..` segment so the result stays normalized and
-// reads cleanly in diagnostics.
+// A workspace member map is authoritative when present: its canonical capsule
+// identity is independent of physical layout, so `sfn/crypto` may live at
+// `stdlib/crypto`. The stable installed projection beside the runtime bundle
+// is consulted only when there is no authoritative workspace.
+//
+// The fallback takes the manifest dir rather than a root: installed
+// `<prefix>/runtime` yields `<prefix>/capsules/...`. Derived with `_cr_dirname`
+// rather than a `..` segment so the result stays normalized and reads cleanly
+// in diagnostics.
 //
 // Trust is `capsule_origin_workspace()`: these sources ship with the compiler,
 // so they carry the runtime's own provenance, not a fetched capsule's.
-export fn locate_runtime_dep_capsule_src(runtime_manifest_dir: string, spec: string) -> CapsuleLocation ![io] {
+export fn locate_runtime_dep_capsule_src(runtime_manifest_dir: string, spec: string, workspace_members: WorkspaceMember[], workspace_members_authoritative: boolean) -> CapsuleLocation ![io] {
     let missing = CapsuleLocation {
         src_dir: "",
         origin: capsule_origin_cache()
@@ -126,6 +130,33 @@ export fn locate_runtime_dep_capsule_src(runtime_manifest_dir: string, spec: str
     let name = substring(spec, slash + 1, spec.length);
     if !_cr_is_safe_segment(scope) { return missing; }
     if !_cr_is_safe_segment(name) { return missing; }
+
+    // Workspace-local precedence is fail-closed. Once the authoritative map
+    // declares this canonical identity, a missing source root must not be
+    // masked by a stale installed projection carrying the same name.
+    let mut wi: int = 0;
+    loop {
+        if wi >= workspace_members.length { break; }
+        if strings_equal(workspace_members[wi].name, spec) {
+            if fs.exists(workspace_members[wi].src_dir) {
+                return CapsuleLocation {
+                    src_dir: workspace_members[wi].src_dir,
+                    origin: capsule_origin_workspace()
+                };
+            }
+            return CapsuleLocation {
+                src_dir: "",
+                origin: capsule_origin_workspace()
+            };
+        }
+        wi += 1;
+    }
+
+    // A source workspace may not be repaired by an unregistered compatibility
+    // mirror. Absence from its canonical inventory is a hard miss; only a
+    // runtime outside a workspace is eligible for the installed projection.
+    if workspace_members_authoritative { return missing; }
+
     let root = _cr_dirname(runtime_manifest_dir);
     let src_dir = _cr_path_join(root, "capsules/" + scope + "/" + name + "/src");
     if fs.exists(src_dir) {
