@@ -161,9 +161,9 @@ fn _download_to(url: string, destination: string) -> string ![io, net] {
 }
 
 fn _print_download_failure(what: string, url: string, reason: string) -> void ![io] {
-    print("error: failed to download " + what);
-    print("  " + url);
-    print("  reason: " + reason);
+    print.err("error: failed to download " + what);
+    print.err("  " + url);
+    print.err("  reason: " + reason);
 }
 
 fn _install_work_dir(work_root: string, version: string) -> string ![io] {
@@ -217,8 +217,8 @@ fn _install_acquire_index(versions_base: string, temp: string) -> ToolchainIndex
 }
 
 fn _print_policy_refusal(outcome: ToolchainPolicyOutcome) -> void ![io] {
-    print("error: " + outcome.reason);
-    if outcome.hint.length > 0 { print("  " + outcome.hint); }
+    print.err("error: " + outcome.reason);
+    if outcome.hint.length > 0 { print.err("  " + outcome.hint); }
 }
 
 // An advisory release stays runnable — the indexed severity is information,
@@ -227,7 +227,7 @@ fn _print_policy_advisories(outcome: ToolchainPolicyOutcome) -> void ![io] {
     let mut i: int = 0;
     loop {
         if i >= outcome.advisories.length { break; }
-        print("warning: " + outcome.advisories[i]);
+        print.err("warning: " + outcome.advisories[i]);
         i += 1;
     }
 }
@@ -249,8 +249,8 @@ fn _policy_exempt() -> ToolchainPolicyOutcome {
 // complete sibling staging, then atomic directory commit.
 fn _toolchain_install(version_arg: string, store_base: string, work_root: string, qualify_user_store: boolean, allow_yanked: boolean) -> int ![clock, io, net] {
     if version_arg.length == 0 {
-        print("error: sfn toolchain install requires a <version>");
-        print("usage: sfn toolchain install <version|channel>");
+        print.err("error: sfn toolchain install requires a <version>");
+        print.err("usage: sfn toolchain install <version|channel>");
         return 2;
     }
     let mut version = version_arg;
@@ -264,31 +264,31 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     let is_channel = channel.length > 0;
     if is_channel {
         if !qualify_user_store {
-            print("error: the bootstrap store installs exact versions only, not the channel \""
+            print.err("error: the bootstrap store installs exact versions only, not the channel \""
                 + version_arg
                 + "\"");
             return 1;
         }
     } else {
         if !toolchain_is_valid_install_version(version) {
-            print("error: not a valid version: \"" + version_arg + "\"");
+            print.err("error: not a valid version: \"" + version_arg + "\"");
             return 1;
         }
     }
 
     let host = toolchain_current_host();
     if host.release_os.length == 0 {
-        print("error: unsupported host OS (SAILFIN_HOST_OS override not linux/macos/windows)");
+        print.err("error: unsupported host OS (SAILFIN_HOST_OS override not linux/macos/windows)");
         return 1;
     }
     if host.release_arch.length == 0 || host.triple.length == 0 {
-        print("error: unsupported host architecture (uname -m not x86_64/arm64)");
+        print.err("error: unsupported host architecture (uname -m not x86_64/arm64)");
         return 1;
     }
 
     let temp = _install_work_dir(work_root, version);
     if temp.length == 0 {
-        print("error: could not create toolchain download staging directory");
+        print.err("error: could not create toolchain download staging directory");
         return 1;
     }
 
@@ -301,17 +301,17 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     let ledger_base = toolchain_versions_base();
     if ledger_base.length > 0 {
         if toolchain_revocations_corrupt(ledger_base) {
-            print("error: the local revocation ledger is unreadable; refusing to install");
-            print("  " + toolchain_revocations_path(ledger_base));
-            print("  delete that file to re-fetch revocation state");
+            print.err("error: the local revocation ledger is unreadable; refusing to install");
+            print.err("  " + toolchain_revocations_path(ledger_base));
+            print.err("  delete that file to re-fetch revocation state");
             remove_tree(temp);
             return 1;
         }
         if !is_channel {
             let ledger = toolchain_revocations_read(ledger_base);
             if toolchain_revocation_find(ledger, "release", version) >= 0 {
-                print("error: toolchain " + version + " is revoked");
-                print("  revocation has no override; install a different version");
+                print.err("error: toolchain " + version + " is revoked");
+                print.err("  revocation has no override; install a different version");
                 remove_tree(temp);
                 return 1;
             }
@@ -331,9 +331,9 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         // Re-read after acquisition: a verified index merges its revocations
         // into the ledger, so this is the post-merge view the decision needs.
         if toolchain_revocations_corrupt(store_base) {
-            print("error: the local revocation ledger is unreadable; refusing to install");
-            print("  " + toolchain_revocations_path(store_base));
-            print("  delete that file to re-fetch revocation state");
+            print.err("error: the local revocation ledger is unreadable; refusing to install");
+            print.err("  " + toolchain_revocations_path(store_base));
+            print.err("  delete that file to re-fetch revocation state");
             remove_tree(temp);
             return 1;
         }
@@ -341,7 +341,7 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         if is_channel {
             version = toolchain_channel_resolve(index, known, channel, host.triple);
             if version.length == 0 {
-                print("error: " + toolchain_channel_refusal(index, known, channel, host.triple));
+                print.err("error: " + toolchain_channel_refusal(index, known, channel, host.triple));
                 remove_tree(temp);
                 return 1;
             }
@@ -350,7 +350,7 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
             // this one must too, rather than trusting a signed payload's map
             // key to be well-formed.
             if !toolchain_is_valid_install_version(version) {
-                print("error: the signed index resolved " + channel
+                print.err("error: the signed index resolved " + channel
                     + " to a malformed version: \""
                     + version
                     + "\"");
@@ -399,15 +399,15 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     let sums_text = fs.readFile(sums_path);
     let signature = _toml_trim_cmd(fs.readFile(sig_path));
     if sums_text.length == 0 || signature.length == 0 {
-        print("error: downloaded release manifest or signature is empty for "
+        print.err("error: downloaded release manifest or signature is empty for "
             + tag);
-        print("  the fetch returned no content (transport error or unfollowed redirect)");
+        print.err("  the fetch returned no content (transport error or unfollowed redirect)");
         remove_tree(temp);
         return 1;
     }
     if !ed25519_verify_utf8(release_signing_public_key_hex(), sums_text, signature) {
-        print("error: SHA256SUMS signature verification failed for " + tag);
-        print("  the release manifest is unsigned or tampered; refusing to install");
+        print.err("error: SHA256SUMS signature verification failed for " + tag);
+        print.err("  the release manifest is unsigned or tampered; refusing to install");
         remove_tree(temp);
         return 1;
     }
@@ -421,7 +421,7 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         // `archive = temp + "/" + asset` below, so a separator or a parent
         // reference here escapes the staging directory.
         if !_is_safe_capsule_version_cmd(policy.asset) {
-            print("error: the signed index names an unsafe asset filename: "
+            print.err("error: the signed index names an unsafe asset filename: "
                 + policy.asset);
             remove_tree(temp);
             return 1;
@@ -430,7 +430,7 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     }
     let expected = _digest_for_asset(sums_text, asset);
     if expected.length == 0 {
-        print("error: asset not listed in the signed manifest: " + asset);
+        print.err("error: asset not listed in the signed manifest: " + asset);
         remove_tree(temp);
         return 1;
     }
@@ -440,10 +440,10 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     if policy.listed {
         if policy.asset_sha256.length > 0 {
             if !strings_equal(policy.asset_sha256, expected) {
-                print("error: the signed index and the release manifest disagree on the digest for "
+                print.err("error: the signed index and the release manifest disagree on the digest for "
                     + asset);
-                print("  index:    " + policy.asset_sha256);
-                print("  manifest: " + expected);
+                print.err("  index:    " + policy.asset_sha256);
+                print.err("  manifest: " + expected);
                 remove_tree(temp);
                 return 1;
             }
@@ -483,14 +483,15 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     }
     let actual = _sha256_of_file(archive);
     if actual.length == 0 {
-        print("error: could not compute sha256 of the downloaded asset");
+        print.err("error: could not compute sha256 of the downloaded asset");
         remove_tree(temp);
         return 1;
     }
     if !strings_equal(actual, expected) {
-        print("error: digest mismatch for " + asset + " — refusing to install");
-        print("  expected " + expected);
-        print("  actual   " + actual);
+        print.err("error: digest mismatch for " + asset
+            + " — refusing to install");
+        print.err("  expected " + expected);
+        print.err("  actual   " + actual);
         remove_tree(temp);
         return 1;
     }
@@ -505,10 +506,10 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
         : { },
         Result.Err { error }
         : {
-            print("error [E0615]: failed to extract " + asset);
-            print("  " + error.message);
+            print.err("error [E0615]: failed to extract " + asset);
+            print.err("  " + error.message);
             if error.member.length > 0 {
-                print("  member: " + error.member);
+                print.err("  member: " + error.member);
             }
             remove_tree(temp);
             return 1;
@@ -516,14 +517,14 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     }
     let root = toolchain_find_extracted_root(extract_dir);
     if root.length == 0 {
-        print("error: no sailfin binary found in " + asset);
+        print.err("error: no sailfin binary found in " + asset);
         remove_tree(temp);
         return 1;
     }
 
     let staged_dir = toolchain_staging_dir(store_dir);
     if staged_dir.length == 0 {
-        print("error: failed to create atomic toolchain staging directory beside "
+        print.err("error: failed to create atomic toolchain staging directory beside "
             + store_dir);
         remove_tree(temp);
         return 1;
@@ -543,8 +544,8 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     // verdict from earlier in the process must not stand in for it.
     let staged_ok = toolchain_verify_entry(staged_dir);
     if !staged_ok.ok {
-        print("error: the staged toolchain payload failed install-manifest verification");
-        print("  " + staged_ok.detail);
+        print.err("error: the staged toolchain payload failed install-manifest verification");
+        print.err("  " + staged_ok.detail);
         toolchain_discard_staged_entry(staged_dir);
         remove_tree(temp);
         return 1;
@@ -554,7 +555,7 @@ fn _toolchain_install(version_arg: string, store_base: string, work_root: string
     // Adding a second discard would be a double-remove; dropping the
     // helper's own cleanup would leak staging dirs.
     if !toolchain_commit_staged_entry(staged_dir, store_dir) {
-        print("error: failed to atomically commit the verified toolchain to "
+        print.err("error: failed to atomically commit the verified toolchain to "
             + store_dir);
         remove_tree(temp);
         return 1;
@@ -584,10 +585,6 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
 fn toolchain_install_to_user_store(version_arg: string, store_base: string, work_root: string, allow_yanked: boolean) -> int ![clock, io, net] {
     let refusal = toolchain_network_refusal();
     if refusal.length > 0 {
-        // This file's other errors use `print` by historical convention, but
-        // this gate is reachable from an implicit dispatch (`sfn run` in a
-        // project pinning an uninstalled toolchain): under `disabled`, a
-        // `print` here would land the refusal on the *program's* stdout.
         print.err("error: " + refusal);
         return 1;
     }

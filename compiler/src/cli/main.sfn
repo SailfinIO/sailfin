@@ -275,8 +275,8 @@ fn _v2_help_or_usage(root: Command, matches: Matches, parse_err: ParseError) -> 
     // A real usage error: lead with the parser's diagnostic when it carries
     // one (`unknown subcommand 'quantum'` and friends, which the e2e parity
     // oracles assert on), then the same derived help.
-    if parse_err.message.length > 0 { print(parse_err.message); }
-    print(text);
+    if parse_err.message.length > 0 { print.err(parse_err.message); }
+    print.err(text);
     return 2;
 }
 
@@ -1019,7 +1019,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // argv): print usage, exit 2 — matching the legacy `args.length == 0`
     // guard.
     if args.length == 0 {
-        print(_usage(root));
+        print.err(_usage(root));
         return 2;
     }
 
@@ -1057,7 +1057,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         return sailfin_cli_main_with_paths(["run", cmd], runtime_root, ctx.binary_dir, ctx.compiler_path);
     }
 
-    print("unknown command: " + cmd);
-    print(_usage(root));
+    print.err("unknown command: " + cmd);
+    print.err(_usage(root));
     return 2;
 }

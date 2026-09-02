@@ -198,20 +198,21 @@ fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: stri
     let src_bin = _binary_in_root(root);
     ensure_dir_p(store_dir);
     if !_copy_file(src_bin, bin_path) {
-        print("error: failed to install the toolchain binary into " + store_dir);
+        print.err("error: failed to install the toolchain binary into "
+            + store_dir);
         return false;
     }
     fs.set_perms(bin_path, 493);
 
     let alias_path = host_exe_name(store_dir + "/sfn");
     if !_toolchain_link_alias(bin_path, alias_path) {
-        print("error: failed to create the sfn alias in " + store_dir);
+        print.err("error: failed to create the sfn alias in " + store_dir);
         return false;
     }
     if fs.exists(root + "/runtime") {
         remove_tree(store_dir + "/runtime");
         if !copy_tree(root + "/runtime", store_dir + "/runtime") {
-            print("error: failed to install the runtime bundle into "
+            print.err("error: failed to install the runtime bundle into "
                 + store_dir);
             return false;
         }
@@ -219,26 +220,26 @@ fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: stri
     if fs.exists(root + "/capsules") {
         remove_tree(store_dir + "/capsules");
         if !copy_tree(root + "/capsules", store_dir + "/capsules") {
-            print("error: failed to install the workspace capsules into "
+            print.err("error: failed to install the workspace capsules into "
                 + store_dir);
             return false;
         }
     }
     if fs.exists(root + "/workspace.toml") {
         if !fs.exists(store_dir + "/capsules") {
-            print("error: installed workspace manifest has no capsule payload in "
+            print.err("error: installed workspace manifest has no capsule payload in "
                 + store_dir);
             return false;
         }
         if !_copy_file(root + "/workspace.toml", store_dir + "/workspace.toml") {
-            print("error: failed to install the workspace manifest into "
+            print.err("error: failed to install the workspace manifest into "
                 + store_dir);
             return false;
         }
     }
     let records = toolchain_build_records(store_dir);
     if records.length == 0 {
-        print("error: failed to hash the installed payload in " + store_dir);
+        print.err("error: failed to hash the installed payload in " + store_dir);
         return false;
     }
     let meta = ToolchainManifestMeta {
@@ -250,13 +251,13 @@ fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: stri
         manifest_key_id: manifest_key_id
     };
     if !toolchain_manifest_write(store_dir, meta, records) {
-        print("error: failed to write the install manifest in " + store_dir);
+        print.err("error: failed to write the install manifest in " + store_dir);
         return false;
     }
 
     fs.writeFile(sha_path, expected + "\n");
     if !fs.exists(sha_path) {
-        print("error: failed to write the store marker " + sha_path);
+        print.err("error: failed to write the store marker " + sha_path);
         return false;
     }
     return true;
@@ -300,9 +301,9 @@ fn toolchain_commit_staged_entry(staged_dir: string, store_dir: string) -> boole
     let restored = _atomic_rename_into_place(backup_dir, store_dir);
     remove_tree(staged_dir);
     if !restored {
-        print("error: failed to restore the prior toolchain entry at "
+        print.err("error: failed to restore the prior toolchain entry at "
             + store_dir);
-        print("  preserved backup: " + backup_dir);
+        print.err("  preserved backup: " + backup_dir);
     }
     return false;
 }

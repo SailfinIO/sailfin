@@ -388,7 +388,8 @@ test "toolchain install: a signed manifest refuses an asset digest mismatch" ![i
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
-    assert contains(out + err, "digest mismatch");
+    assert contains(err, "digest mismatch");
+    assert ! contains(out, "digest mismatch");
     assert ! _installed(store, ver);
     assert ! _installed(install_base, ver);
     assert fs.readFile(legacy + "/sailfin") == legacy_bin_before;
@@ -478,7 +479,8 @@ test "toolchain install: a windows host with no msvc entry falls back to the pla
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
-    assert contains(out + err, "digest mismatch for sailfin_0.9.5_windows_x86_64.tar.gz");
+    assert contains(err, "digest mismatch for sailfin_0.9.5_windows_x86_64.tar.gz");
+    assert ! contains(out, "digest mismatch");
     assert ! _installed(store, ver);
 }
 
