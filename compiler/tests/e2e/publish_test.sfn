@@ -242,7 +242,10 @@ test "publish: no capsule.toml fails" ![io] {
     let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    assert contains(out + err, "no capsule.toml found");
+    // SFN-732: failure diagnostics belong on stderr, so `2>/dev/null`
+    // suppresses them and a caller parsing stdout never sees one.
+    assert contains(err, "no capsule.toml found");
+    assert ! contains(out, "no capsule.toml found");
 }
 
 // ---- Test 3: publish with path arg finds capsule.toml ----
@@ -529,6 +532,9 @@ test "publish: private capsule is rejected before credential discovery" ![io] {
     assert ! contains(all, "no auth token found");
     assert ! contains(all, "packaging");
     assert contains(all, "E0612");
+    // SFN-732: the refusal is a diagnostic, so it lands on stderr only.
+    assert contains(err, "E0612");
+    assert ! contains(out, "E0612");
 }
 
 // ---- Test 15: private capsule makes no network call ----
