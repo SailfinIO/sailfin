@@ -86,6 +86,21 @@ let BINOP_CHAIN: string = "fn binop() -> i64 {\n    let y = 1 + // leading term\
 
 let IF_CONDITION: string = "fn cond(a: i64) -> boolean {\n    if a > 0 && // positive\n        a < 10 {\n        return true;\n    }\n    return false;\n}";
 
+// SFN-763: every element carries a trailing comment, the shape `ARRAY_LIT`
+// above does not cover (it comments only the first of three). Modeled on the
+// real `trust_store_default_paths()` regression, where a flat re-emit left
+// every element after the first stranded at the enclosing block's indent.
+let ARRAY_ALL_COMMENTED: string = "fn paths() -> string[] {\n    return [\n        \"/a\", // first\n        \"/b\", // second\n        \"/c\", // third\n    ];\n}";
+
+// SFN-1105 gap: with only three short elements the enclosing function body
+// itself collapses onto one line, so `[` is reached with `in_inline == true`
+// and takes the no-expand path unconditionally — the assertion below would
+// pass even if the comment-free expansion predicate always returned true.
+// Four elements keeps the block from collapsing (the inline threshold has an
+// `items > 3` arm), so the bracket is reached through the non-inline path
+// this test actually means to guard.
+let ARRAY_PLAIN: string = "fn a() -> string[] {\n    return [\"aaaa\", \"bbbb\", \"cccc\", \"dddd\"];\n}";
+
 // All four shapes collapse onto one line, so all four could swallow. Each is
 // asserted independently: they reach the collapse through different roles
 // (`separator` inside `paren_open`, inside `bracket_open`, and an `operator`
@@ -104,6 +119,13 @@ test "fmt: an operator chain with a trailing comment still parses after formatti
 
 test "fmt: an if condition with a trailing comment still parses after formatting" ![io] {
     assert _formats_and_parses("cond", IF_CONDITION);
+}
+
+// SFN-763: with every element commented, there is no un-commented element for
+// a flat re-emit to fall back on, so this is the shape most likely to still
+// swallow tokens if the fix only handled the single-comment case.
+test "fmt: an array literal with a comment on every element still parses after formatting" ![io] {
+    assert _formats_and_parses("array_all", ARRAY_ALL_COMMENTED);
 }
 
 // Pins the emitted form for the canonical case, in the exact-output style
@@ -125,6 +147,31 @@ test "fmt: the wrapped trailing-comment form is idempotent" ![io] {
     let once = _fmt("idem_1", CALL_ARGS);
     let twice = _fmt("idem_2", once);
     assert once == twice;
+}
+
+// Pins SFN-763's exact fix: a commented array literal expands to one element
+// per line instead of the flat re-emit that stranded every element after the
+// first at the enclosing block's indent. Two spaces precede each trailing
+// comment, matching the formatter's existing comment-spacing convention.
+test "fmt: a commented array literal keeps one element per line" ![io] {
+    let want = "fn paths() -> string[] {\n    return [\n        \"/a\",  // first\n        \"/b\",  // second\n        \"/c\",  // third\n    ];\n}";
+    assert _fmt("array_all_exact", ARRAY_ALL_COMMENTED) == want;
+}
+
+// Same fixed-point requirement as the wrapped-call form above: the expanded
+// array must survive a second formatting pass unchanged.
+test "fmt: the expanded array form is idempotent" ![io] {
+    let once = _fmt("array_idem_1", ARRAY_ALL_COMMENTED);
+    let twice = _fmt("array_idem_2", once);
+    assert once == twice;
+}
+
+// Regression guard: SFN-763 only widens comment-carrying literals. A
+// comment-free array must stay on the collapsed form the formatter already
+// produces for short expressions, not get reflowed by the same fix.
+test "fmt: a comment-free array literal is not expanded" ![io] {
+    let want = "fn a() -> string[] {\n    return [\"aaaa\", \"bbbb\", \"cccc\", \"dddd\"];\n}";
+    assert _fmt("array_plain_exact", ARRAY_PLAIN) == want;
 }
 
 // The one place a single token collects MORE than one trailing comment: at
