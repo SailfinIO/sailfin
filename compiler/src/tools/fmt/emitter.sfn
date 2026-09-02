@@ -232,6 +232,63 @@ fn _line_pos_from_end(out: string) -> int {
     return pos;
 }
 
+// Stores `value` at `depth` in the delimiter-flag array, growing it as
+// needed. Returned rather than mutated in place so the caller reassigns.
+fn _set_delim_flag(flags: int[], depth: int, value: int) -> int[] {
+    let mut out = flags;
+    loop {
+        if out.length > depth { break; }
+        out.push(0);
+    }
+    out[depth] = value;
+    return out;
+}
+
+// True when the innermost open delimiter is an expanded bracket literal.
+// `depth` is the current `paren_depth`, so the innermost sits at `depth - 1`.
+fn _innermost_expanded(flags: int[], depth: int) -> boolean {
+    if depth <= 0 { return false; }
+    if flags.length < depth { return false; }
+    return flags[depth - 1] == 1;
+}
+
+// A bracket literal expands to one element per line when — and only when —
+// it carries a comment. A `//` comment ends its line by definition, so the
+// elements after it cannot share that line; emitting them flat leaves each
+// continuation at the enclosing block's indent instead of the element's
+// (SFN-763). Comment-free literals keep the flat form, so this never reflows
+// existing source.
+//
+// Scans from the opening bracket to its match, tracking nesting so a comment
+// inside a nested call or block still expands this literal — it has to, since
+// that comment ends a line that lives inside these brackets.
+fn _bracket_needs_expansion(fmt_tokens: FmtToken[], start: int) -> boolean {
+    let mut depth = 0;
+    let mut pos = start;
+    loop {
+        if pos >= fmt_tokens.length { return false; }
+        let ft = fmt_tokens[pos];
+        let role = ft.role;
+        if pos > start {
+            if ft.leading_comments.length > 0 { return true; }
+        }
+        if strings_equal(role, "bracket_open") { depth += 1; }
+        if strings_equal(role, "paren_open") { depth += 1; }
+        if strings_equal(role, "block_open") { depth += 1; }
+        if strings_equal(role, "bracket_close") {
+            depth -= 1;
+            if depth == 0 { return false; }
+        }
+        if strings_equal(role, "paren_close") { depth -= 1; }
+        if strings_equal(role, "block_close") { depth -= 1; }
+        if ft.trailing_comment.length > 0 {
+            if depth > 0 { return true; }
+        }
+        pos += 1;
+    }
+    return false;
+}
+
 fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
     let mut out = "";
     let mut indent = 0;
@@ -242,6 +299,10 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
     let mut inline_block_depth = 0;
     let mut inline_block_end = -1;
     let mut wrap_operators = false;
+    // Per-delimiter-depth flag: 1 marks an expanded bracket literal (SFN-763).
+    // Indexed by the depth `paren_depth` holds while that delimiter is open,
+    // so it answers "is the innermost open delimiter an expanded literal?".
+    let mut delim_expanded: int[] = [];
 
     let mut i = 0;
     loop {
@@ -250,6 +311,8 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         let role = ft.role;
         let lexeme = ft.token.lexeme;
         let in_inline = inline_block_depth > 0;
+        // Set when this token is the `]` of an expanded literal (SFN-763).
+        let mut force_close_nl = false;
 
         // ── Check if this block_open should be inlined ──
         if strings_equal(role, "block_open") {
@@ -353,6 +416,16 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         if strings_equal(role, "bracket_close") {
             paren_depth -= 1;
             if paren_depth < 0 { paren_depth = 0; }
+            // `paren_depth` now indexes the bracket being closed.
+            if !in_inline {
+                if delim_expanded.length > paren_depth {
+                    if delim_expanded[paren_depth] == 1 {
+                        indent -= 1;
+                        if indent < 0 { indent = 0; }
+                        force_close_nl = true;
+                    }
+                }
+            }
         }
         if strings_equal(role, "generic_close") {
             // `>>` closes two nested generic levels in one token.
@@ -391,7 +464,8 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             }
             at_line_start = false;
         } else {
-            let needs_nl = _needs_newline_before(role, prev_role, lexeme, prev_lexeme);
+            let mut needs_nl = _needs_newline_before(role, prev_role, lexeme, prev_lexeme);
+            if force_close_nl { needs_nl = true; }
             if needs_nl {
                 if !at_line_start { out = out + "\n"; }
                 out = out + _emit_indent(indent);
@@ -460,9 +534,25 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         if inline_block_depth == 0 {
             if strings_equal(role, "block_open") { indent += 1; }
         }
-        if strings_equal(role, "paren_open") { paren_depth += 1; }
-        if strings_equal(role, "bracket_open") { paren_depth += 1; }
-        if strings_equal(role, "generic_open") { paren_depth += 1; }
+        // Record, at this delimiter's own depth, whether it is an expanded
+        // bracket literal — only `[` is ever expanded (SFN-763).
+        if strings_equal(role, "paren_open") {
+            delim_expanded = _set_delim_flag(delim_expanded, paren_depth, 0);
+            paren_depth += 1;
+        }
+        if strings_equal(role, "generic_open") {
+            delim_expanded = _set_delim_flag(delim_expanded, paren_depth, 0);
+            paren_depth += 1;
+        }
+        if strings_equal(role, "bracket_open") {
+            let mut want = 0;
+            if !in_inline {
+                if _bracket_needs_expansion(fmt_tokens, i) { want = 1; }
+            }
+            delim_expanded = _set_delim_flag(delim_expanded, paren_depth, want);
+            paren_depth += 1;
+            if want == 1 { indent += 1; }
+        }
 
         // ── Track inline block exit ──
         if strings_equal(role, "block_close") {
@@ -522,9 +612,23 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                 wrap_operators = false;
             }
 
+            // ── Newline after the `[` of an expanded literal ──
+            if strings_equal(role, "bracket_open") {
+                if _innermost_expanded(delim_expanded, paren_depth) {
+                    if !at_line_start { out = out + "\n"; }
+                    at_line_start = true;
+                }
+            }
+
             // ── Newline after comma at statement level ──
             if strings_equal(role, "separator") {
                 if paren_depth == 0 {
+                    if !at_line_start { out = out + "\n"; }
+                    at_line_start = true;
+                } else if _innermost_expanded(delim_expanded, paren_depth) {
+                    // One element per line. A comma inside a nested call keeps
+                    // the flat form, because the nested `(` owns the innermost
+                    // depth and is never expanded.
                     if !at_line_start { out = out + "\n"; }
                     at_line_start = true;
                 }
