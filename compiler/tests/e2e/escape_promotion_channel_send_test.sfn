@@ -119,6 +119,31 @@ test "IR: channel send from closing scope emits no sender-side rc_release call (
     assert ! _has_forbidden_call(ir, "sfn_rc_release");
 }
 
+// Escape promotion (`_channel_send_arguments_text`, `core_scopes.sfn`) keys
+// on the same `channel`/`channel:` binding sentinel the SFN-695 alias
+// adoption copies, so an alias must promote the sent value exactly as the
+// direct binding does — otherwise the sender releases a buffer the
+// receiver still owns.
+test "IR: channel send through a local alias also suppresses the sender drop (SFN-695)" ![io] {
+    let ir = _emit_llvm("send_alias", "fn main() ![io] {\n"
+        + "    let ch = channel(4);\n"
+        + "    let alias = ch;\n"
+        + "    let mut i: int = 0;\n"
+        + "    loop {\n"
+        + "        if i >= 1 { break; }\n"
+        + "        let msg = \"hello\" + \" world\";\n"
+        + "        alias.send(msg);\n"
+        + "        i += 1;\n"
+        + "    }\n"
+        + "    let got: string = ch.receive();\n"
+        + "}");
+    assert ir != "EMIT_FAILED";
+    // Proves the boundary actually lowered.
+    assert contains(ir, "sfn_channel_send");
+    // The suppressed sender-side release must not be called.
+    assert ! _has_forbidden_call(ir, "sfn_rc_release");
+}
+
 // ── (2) IR: channel-typed parameter base — same suppression ──────────
 test "IR: channel-typed parameter base also suppresses the sender drop (#1094)" ![io] {
     let ir = _emit_llvm("send_param_base", "fn producer(ch: channel) ![io] {\n"

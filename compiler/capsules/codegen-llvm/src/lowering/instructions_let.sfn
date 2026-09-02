@@ -51,6 +51,7 @@ import {
     extend_diag_array,
     is_identifier_part_char,
     is_identifier_start_char,
+    is_simple_identifier,
     lowering_error_diag,
     number_to_string,
     starts_with,
@@ -881,6 +882,42 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                         local_type_annotation = "channel:" + kind_text;
                     } else { local_type_annotation = "channel"; }
                 } else { local_type_annotation = "channel"; }
+            } else {
+                // SFN-695: `let alias = ch;` (or `let alias: Channel<int> =
+                // ch;`) names an existing channel binding instead of a
+                // constructor, so neither prefix above matches and the alias
+                // was recorded with its raw source annotation ("" or
+                // "Channel<int>"). `try_lower_channel_method` and the
+                // `close` guards key on the canonical `channel` /
+                // `channel:<kind>` sentinel, so `alias.send` fell through to
+                // generic call resolution and fataled with E1007. Adopt the
+                // source binding's canonical annotation — element kind
+                // included — whenever the initializer is a bare identifier
+                // bound to a channel. `current_locals` is seeded with the
+                // module globals (`emission.sfn`), so a global channel
+                // source resolves through the same lookup as a local one.
+                if is_simple_identifier(trimmed_init) {
+                    let mut source_annotation: string = "";
+                    let source_local = find_local_binding(current_locals, trimmed_init);
+                    if source_local != null {
+                        source_annotation = source_local.type_annotation;
+                    } else {
+                        let source_param = find_parameter_binding(current_bindings, trimmed_init);
+                        if source_param != null {
+                            source_annotation = source_param.type_annotation;
+                        }
+                    }
+                    let mut source_is_channel: boolean = false;
+                    if source_annotation == "channel" {
+                        source_is_channel = true;
+                    }
+                    if starts_with(source_annotation, "channel:") {
+                        source_is_channel = true;
+                    }
+                    if source_is_channel {
+                        local_type_annotation = source_annotation;
+                    }
+                }
             }
         }
     }
