@@ -52,6 +52,16 @@ docs/site-only PRs after `CI scope` marks compiler CI out of scope, and
 fails any in-scope PR where a compiler build, shard, shard-cover,
 fast-check, or Windows smoke job does not succeed.
 
+One carve-out, and it never applies to a head you can merge: when the PR
+has already moved past the commit a run tested, that run's gate reports
+"superseded -- no signal" and passes instead of reporting red on a dead
+head (SFN-1170). The check still lands on the superseded commit, never on
+the current one, so the head branch protection actually evaluates is
+always gated by its own run. Supersession is judged by comparing the PR's
+live head SHA against the one the run tested, so a job timeout, a manual
+cancellation, and a genuine failure all still fail the gate — only a
+replaced head is excused. `merge_group` runs are never excused at all.
+
 It also fails **any draft PR**, docs-only ones included, reporting
 "deferred -- draft pull request". `CI scope` defers the whole heavy matrix
 while a PR is a draft (its `ready` output), and the gate fails closed rather

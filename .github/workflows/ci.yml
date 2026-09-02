@@ -1159,6 +1159,18 @@ jobs:
     if: ${{ always() && needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # `pull-requests: read` is what lets the supersede classifier below read
+    # this PR's current head SHA. Declaring the block overrides the
+    # workflow-level grant, so `contents: read` is restated rather than
+    # inherited.
+    permissions:
+      contents: read
+      pull-requests: read
+    # Consumed by `required-ci`: a superseded aggregate exits 0, so its
+    # `result` alone is indistinguishable from a genuine pass and would let
+    # the gate report the ARM matrix as validated when it never ran.
+    outputs:
+      superseded: ${{ steps.summarize.outputs.superseded }}
     env:
       CROSS_VEHICLE: ${{ needs.build-aarch64-cross-vehicle.result }}
       CROSS_ARTIFACT: ${{ needs.build-aarch64-cross-vehicle.outputs.artifact_ready }}
@@ -1166,8 +1178,14 @@ jobs:
       NATIVE_ARTIFACT: ${{ needs.build-compiler-aarch64-linux.outputs.artifact_ready }}
       SHARD_COVER: ${{ needs.shard-cover.result }}
       ARM_SHARDS: ${{ needs.build-aarch64-linux.result }}
+      EVENT_NAME: ${{ github.event_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Summarize aarch64-Linux result
+        id: summarize
         shell: bash
         run: |
           set -euo pipefail
@@ -1194,7 +1212,87 @@ jobs:
           check "Native compiler artifact" "$NATIVE_ARTIFACT" "true"
           check "Shard-cover lint" "$SHARD_COVER" "success"
           check "ARM test shards" "$ARM_SHARDS" "success"
+          # A superseded run is not a failing run. This workflow's top-level
+          # `concurrency` block sets
+          # `cancel-in-progress: true`, so a newer push kills the in-flight run
+          # for this PR -- correct, and what stops us burning runners on stale
+          # commits. But `always()` still schedules this gate on the dead head,
+          # where every dependency reads `cancelled`, the comparisons above
+          # turn those no-signals into a red required check, and a reviewer
+          # glancing at the list sees red on a PR whose completed jobs all
+          # passed (SFN-1170).
+          #
+          # Classified by asking whether THIS PULL REQUEST has moved past the
+          # head this run tested -- not by testing `cancelled()`, and not by
+          # scoring a `cancelled` result as a pass. Neither of those separates
+          # supersession from a job `timeout-minutes` expiry, which also
+          # surfaces as a `cancelled` conclusion (see the `always()` rationale
+          # on `notify-failure` in build-quality.yml; observed on
+          # nightly-selfhost run 33202903428, whose macOS verify leg ran
+          # 2h59m24s into a `timeout-minutes: 180` cap and reported
+          # `cancelled`). A hung shard must stay red. "Is anyone still waiting
+          # on this head?" is the question that actually distinguishes them,
+          # and it leaves a timeout, a manual cancel and a genuine failure all
+          # reporting red on the head they happened on.
+          #
+          # Scoring `cancelled` as a pass would not even have sufficed: a
+          # cancelled job's *outputs* expand to the empty string rather than
+          # `cancelled` (run 33572114693 logged `CROSS_ARTIFACT:` blank beside
+          # `CROSS_VEHICLE: cancelled`), so the two artifact checks below would
+          # have stayed red anyway.
+          #
+          # `if: !cancelled()` was the other candidate, and is rejected for the
+          # reason already recorded in `required-ci` below: GitHub counts a
+          # *skipped* job as success for a required status check, so a
+          # superseded run would advertise a green gate rather than no gate.
+          #
+          # Scoped to the PR *number*, deliberately, and NOT to `head_ref` the
+          # way the "Classify cancellation (supersede vs timeout)" step in
+          # windows-native-selfhost.yml is: `head_branch` is not unique to a
+          # pull request. On a fork PR it is the branch name inside the fork,
+          # so two contributors editing through the GitHub web UI both produce
+          # `patch-1`, and their runs sit in different concurrency groups and
+          # never cancel each other. A branch-scoped query would then read a
+          # sibling PR's newer run as this PR's successor and exit 0 on a live
+          # head carrying a genuine failure -- and with `main` not yet
+          # queue-protected (docs/runbooks/merge-queue.md), this gate is the
+          # only thing standing there. A misclassification costs that
+          # workflow an unfiled issue; here it would cost a merge gate.
+          # Comparing head SHAs is exact, needs no list-ordering assumption,
+          # and correctly declines to call a same-SHA rerun a supersession.
+          #
+          # Fails closed: an API error leaves `current` empty and the run is
+          # treated as live, so the gate still reports. That is deliberately
+          # indistinguishable from a genuinely live head, so the empty case
+          # also logs -- a missing permission or a persistent 5xx would
+          # otherwise leave the classifier permanently broken and invisible,
+          # and the equivalent windows-native-selfhost.yml step shipped its
+          # first round missing exactly such a permission.
+          #
+          # Keep this body identical to the copy in `required-ci` below apart
+          # from the log prefix: they guard the same merge gate, and a
+          # hardening applied to only one would diverge silently.
+          superseded() {
+            [ "${EVENT_NAME:-}" = "pull_request" ] || return 1
+            [ -n "${PR_NUMBER:-}" ] && [ -n "${HEAD_SHA:-}" ] || return 1
+            current="$(
+              gh api "/repos/${REPO}/pulls/${PR_NUMBER}" \
+                --jq '.head.sha // empty' 2>/dev/null || true
+            )"
+            if [ -z "$current" ]; then
+              echo "[aarch64-linux] supersede check: could not read PR ${PR_NUMBER} head SHA; treating this run as live." >&2
+              return 1
+            fi
+            [ "$current" != "${HEAD_SHA}" ]
+          }
+
           if [ "$fail" -gt 0 ]; then
+            if superseded; then
+              echo "[aarch64-linux] $fail result(s) did not succeed, but PR ${PR_NUMBER} has moved past ${HEAD_SHA}; the current head's run is the authority."
+              echo "| AArch64 Linux result | superseded -- no signal |" >> "$GITHUB_STEP_SUMMARY"
+              echo "superseded=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "[aarch64-linux] $fail ARM prerequisite or shard result(s) did not succeed." >&2
             exit 1
           fi
@@ -2684,6 +2782,13 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # `pull-requests: read` is what lets the supersede classifier below read
+    # this PR's current head SHA. Declaring the block overrides the
+    # workflow-level grant, so `contents: read` is restated rather than
+    # inherited.
+    permissions:
+      contents: read
+      pull-requests: read
     env:
       CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
       EVENT_NAME: ${{ github.event_name }}
@@ -2703,6 +2808,11 @@ jobs:
       WINDOWS_HOST_GUARD: ${{ needs.windows-host-guard.result }}
       BUILD_COMPILER_WINDOWS: ${{ needs.build-compiler-windows.result }}
       AARCH64_LINUX: ${{ needs.aarch64-linux-result.result }}
+      AARCH64_SUPERSEDED: ${{ needs.aarch64-linux-result.outputs.superseded }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Summarize required CI result
         shell: bash
@@ -2718,6 +2828,54 @@ jobs:
             echo "| CI scope output | ${SOURCE_CI:-unset} |"
             echo "| Public-claim scope output | ${PUBLIC_CLAIMS_CI:-unset} |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # A superseded run is not a failing run -- see the identical
+          # classifier on `aarch64-linux-result` above for why supersession is
+          # detected by "has this PR moved past the head we tested?" rather
+          # than by `cancelled()`, by scoring a `cancelled` dependency as a
+          # pass, or by a branch-scoped run query. Keep the two bodies
+          # identical: they guard the same merge gate, and a hardening applied
+          # to only one would diverge silently 1,500 lines apart.
+          #
+          # Deliberately inert outside `pull_request`: `github.event.pull_request`
+          # is unset on `merge_group`, `schedule` and `workflow_dispatch`, so
+          # `superseded` returns false and those events keep failing closed
+          # exactly as before. That is load-bearing for the queue -- a
+          # `merge_group` run gets its own concurrency ref and is never
+          # superseded by a PR push, so a cancelled queue run is always an
+          # abort rather than coalescing, and the queue's premise is that it
+          # never lands an untested combination (SFEP-0037 3.1).
+          #
+          # Fails closed: an API error leaves `current` empty and the run is
+          # treated as live, so the gate still reports.
+          superseded() {
+            [ "${EVENT_NAME:-}" = "pull_request" ] || return 1
+            [ -n "${PR_NUMBER:-}" ] && [ -n "${HEAD_SHA:-}" ] || return 1
+            current="$(
+              gh api "/repos/${REPO}/pulls/${PR_NUMBER}" \
+                --jq '.head.sha // empty' 2>/dev/null || true
+            )"
+            if [ -z "$current" ]; then
+              echo "[required-ci] supersede check: could not read PR ${PR_NUMBER} head SHA; treating this run as live." >&2
+              return 1
+            fi
+            [ "$current" != "${HEAD_SHA}" ]
+          }
+
+          # `ci-scope` is the first job in the run, so a push that supersedes
+          # early cancels it before any output is set -- every scope output
+          # below would then read unset and this gate would fail closed on a
+          # head nobody is waiting on. Only a cancellation is routed through
+          # the classifier; a genuine `failure` still fails closed.
+          if [ "${CI_SCOPE_RESULT:-}" = "cancelled" ] && superseded; then
+            echo "[required-ci] PR ${PR_NUMBER} moved past ${HEAD_SHA} before CI scope completed; nothing to gate."
+            {
+              echo "| Required CI gate | superseded -- no signal |"
+              echo ""
+              echo "This run was replaced by a newer push. The gate on the current head is the authority."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
           if [ "${CI_SCOPE_RESULT:-}" != "success" ]; then
             echo "[required-ci] CI scope did not succeed; failing closed." >&2
@@ -2740,6 +2898,11 @@ jobs:
           # window, between the ready transition and the new run registering a
           # pending check, where the last known state of that check is green.
           # Red is the only state with no ambiguous window.
+          # Ordering is load-bearing: this branch stays ABOVE the `superseded`
+          # call in the `fail > 0` tail, so a superseded draft still reports
+          # red. Hoisting supersession above it would hand a draft the green
+          # window the comment directly above exists to prevent -- SFN-1170
+          # relaxed the superseded case only, and never the draft gate.
           if [ "${READY_CI:-}" = "false" ]; then
             echo "[required-ci] draft pull request: heavy CI deferred until it is marked ready for review." >&2
             {
@@ -2806,7 +2969,22 @@ jobs:
               echo "[required-ci] native Windows CI is out of scope for this PR."
               echo "| Native Windows CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
             fi
-            check "AArch64 Linux result" "$AARCH64_LINUX"
+            # `aarch64-linux-result` exits 0 when the PR moved past its head,
+            # so its `result` alone cannot distinguish "the ARM matrix passed"
+            # from "the ARM matrix never ran". Scoring that as a pass is how a
+            # superseded run reports a fully green gate with no trace of the
+            # excusal -- reachable whenever the ARM legs are the only ones
+            # still running when the push lands, which is the common shape
+            # since they are the long pole. Count it as no-signal instead; the
+            # `fail > 0` tail then re-checks supersession and exits 0 only
+            # because the PR really did move (SFN-1170).
+            if [ "${AARCH64_SUPERSEDED:-}" = "true" ]; then
+              echo "[required-ci] AArch64 Linux result: superseded -- no signal"
+              echo "| AArch64 Linux result | superseded -- no signal |" >> "$GITHUB_STEP_SUMMARY"
+              fail=$((fail + 1))
+            else
+              check "AArch64 Linux result" "$AARCH64_LINUX"
+            fi
           else
             echo "[required-ci] compiler CI is out of scope for this PR."
             echo "| Compiler CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
@@ -2820,6 +2998,11 @@ jobs:
           fi
 
           if [ "$fail" -gt 0 ]; then
+            if superseded; then
+              echo "[required-ci] $fail job(s) did not succeed, but PR ${PR_NUMBER} has moved past ${HEAD_SHA}; the current head's gate is the authority."
+              echo "| Required CI gate | superseded -- no signal |" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             echo "[required-ci] $fail required CI job(s) did not succeed." >&2
             exit 1
           fi

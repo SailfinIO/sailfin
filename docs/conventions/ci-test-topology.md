@@ -385,6 +385,10 @@ The design for the content-addressed key derivation lives in
   shard-cover, and matrix result into one check. `required-ci` consumes that
   aggregate, so any ARM prerequisite or shard failure blocks source PRs and
   merge queues without depending on every matrix child separately (SFN-476).
+  A run superseded by a newer push is the one case the aggregate does not
+  red: it reports "superseded -- no signal" and publishes a `superseded`
+  output that `required-ci` scores as no-signal rather than as a pass, so a
+  cancelled ARM matrix can never read as a validated one (SFN-1170).
 - **Scheduled aarch64-Linux soak** — `soak-aarch64-linux` downloads the same
   verified native compiler artifact but runs one unsharded full suite with
   `--no-test-cache`. It restores no test-bin cache, pins no `SAILFIN_TEST_JOBS`, and a
@@ -400,8 +404,25 @@ The design for the content-addressed key derivation lives in
   `linear-branch-claim` is the gate that
   fails an `sfn-<N>` branch whose PR body does not close `SFN-<N>`; see
   `CLAUDE.md` (## Task tracking).
-  The gate has one non-path failure mode: a **draft** PR fails it with
-  "deferred -- draft pull request". `ci-scope` forces every scope output
+  The gate has two non-path outcomes beyond the ordinary pass/fail. A
+  **draft** PR fails it with "deferred -- draft pull request". A run whose
+  PR has since moved to a newer head *passes* it with
+  "superseded -- no signal" (SFN-1170). Supersession is judged from the
+  PR's live head SHA, so a job `timeout-minutes` expiry (which also reports
+  a `cancelled` conclusion), a manual cancellation, and a genuine failure
+  all still fail the gate.
+
+  The two interact at two separate points, and the asymmetry is
+  deliberate. `required-ci` checks supersession once early — only when
+  `ci-scope` itself was `cancelled`, since a supersession that lands before
+  `ci-scope` finishes leaves every scope output unset — and once in the
+  `fail > 0` tail. The draft branch sits between them. So a superseded
+  draft whose `ci-scope` completed still reports red, while one superseded
+  before `ci-scope` finished passes at the early check. Both are safe for
+  the same reason: either check-run lands on the superseded commit, never
+  on the live head, which has its own run and its own gate. Do not "tidy"
+  this by hoisting the tail check above the draft branch — that is the
+  green-by-deferral window the draft branch exists to prevent. `ci-scope` forces every scope output
   false while a PR is a draft, so only `ci-scope`, `linear-branch-claim` and
   `required-ci` run at all -- the scarce macOS pool (5 account-wide) is not
   spent on a change that cannot merge. An in-scope PR asks this workflow for
