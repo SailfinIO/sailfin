@@ -61,15 +61,7 @@ fn trust_store_env_vars() -> string[] {
     return ["SAILFIN_TLS_CAFILE", "SSL_CERT_FILE"];
 }
 
-// Well-known CA-bundle locations, in probe order:
-//
-//   /etc/ssl/certs/ca-certificates.crt      Debian, Ubuntu, Alpine
-//   /etc/pki/tls/certs/ca-bundle.crt        RHEL, Fedora, CentOS
-//   /etc/ssl/ca-bundle.pem                  openSUSE
-//   /etc/pki/tls/cacert.pem                 older RHEL
-//   /etc/ssl/cert.pem                       macOS, FreeBSD, Alpine
-//   /opt/homebrew/etc/openssl@3/cert.pem    Homebrew, Apple silicon
-//   /usr/local/etc/openssl@3/cert.pem       Homebrew, Intel
+// Well-known CA-bundle locations, in probe order.
 //
 // macOS is the honest caveat: the real system trust store is the Keychain,
 // which is not a file and is not readable through this path. `/etc/ssl/cert.pem`
@@ -79,13 +71,16 @@ fn trust_store_env_vars() -> string[] {
 // Keychain fidelity must supply anchors explicitly via `trust_store_from_pem`.
 // Reading the Keychain would need a Security.framework binding, which is
 // outside SFEP-0048's chosen cut.
-//
-// The annotations live above rather than inline deliberately: `sfn fmt`
-// collapses a multi-line array literal onto one line and folds any trailing
-// `//` comment into it, commenting out every element that follows and leaving
-// source that does not parse. Inline them again once SFN-763 is fixed.
 fn trust_store_default_paths() -> string[] {
-    return ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem", "/etc/pki/tls/cacert.pem", "/etc/ssl/cert.pem", "/opt/homebrew/etc/openssl@3/cert.pem", "/usr/local/etc/openssl@3/cert.pem"];
+    return [
+        "/etc/ssl/certs/ca-certificates.crt",  // Debian, Ubuntu, Alpine
+        "/etc/pki/tls/certs/ca-bundle.crt",  // RHEL, Fedora, CentOS
+        "/etc/ssl/ca-bundle.pem",  // openSUSE
+        "/etc/pki/tls/cacert.pem",  // older RHEL
+        "/etc/ssl/cert.pem",  // macOS, FreeBSD, Alpine
+        "/opt/homebrew/etc/openssl@3/cert.pem",  // Homebrew, Apple silicon
+        "/usr/local/etc/openssl@3/cert.pem",  // Homebrew, Intel
+    ];
 }
 
 // The largest number of PEM blocks a bundle may declare. `pem.sfn`'s own
