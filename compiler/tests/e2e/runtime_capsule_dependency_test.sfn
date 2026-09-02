@@ -110,6 +110,44 @@ fn _stage_runtime_fixture(scratch: string, dep_spec: string, probe_rel: string, 
     return runtime_copy;
 }
 
+// Stage the same runtime dependency through a workspace member whose physical
+// path is unrelated to the installed `capsules/<scope>/<name>` projection.
+// No sibling installed copy is present, so success proves signature staging
+// consulted canonical workspace identity rather than deriving a path.
+fn _stage_workspace_runtime_fixture(scratch: string, dep_spec: string, probe_rel: string, probe_source: string) -> string ![io] {
+    let runtime_copy = scratch + "/runtime-copy";
+    let cp_rt = process.run_capture(["cp", "-R", "runtime", runtime_copy], _child_env(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_rt == 0;
+
+    fs.createDirectory(scratch + "/stdlib", true);
+    let cp_crypto = process.run_capture(["cp", "-R", "capsules/sfn/crypto", scratch
+        + "/stdlib/crypto"], _child_env(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_crypto == 0;
+
+    let cp_strings = process.run_capture(["cp", "-R", "stdlib/strings", scratch
+        + "/stdlib/strings"], _child_env(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_strings == 0;
+
+    fs.writeFile(scratch + "/workspace.toml", "[workspace]\n"
+        + "members = [\"runtime-copy\", \"stdlib/*\"]\n");
+
+    let manifest_path = runtime_copy + "/capsule.toml";
+    let manifest = fs.readFile(manifest_path);
+    assert manifest.length > 0;
+    let with_dep = manifest + "\n[dependencies]\n\"" + dep_spec + "\" = \"*\"\n";
+    let seeded = _insert_probe_source(with_dep, probe_rel);
+    assert seeded.length > with_dep.length;
+    fs.writeFile(manifest_path, seeded);
+    fs.writeFile(runtime_copy + "/" + probe_rel, probe_source);
+    return runtime_copy;
+}
+
 // Build a trivial program against the staged runtime root. The program never
 // calls the probe. That is the point — the probe is an `sfn-source`, so its
 // call into the capsule is emitted into EVERY binary, and `--gc-sections` runs
@@ -146,6 +184,49 @@ test "runtime capsule dep: a runtime module calls a capsule provider out-of-tree
         + "}\n");
     let build_exit = _build_against_runtime(scratch, runtime_copy);
     assert build_exit == 0;
+}
+
+test "runtime capsule dep: canonical workspace member wins at stdlib path" ![io] {
+    let scratch = fs.mkdtemp("sfn-rtcapdep-workspace-");
+    let runtime_copy = _stage_workspace_runtime_fixture(scratch, "sfn/crypto", "sfn/rtcapdep_workspace_probe.sfn", "import { sha1_hex } from \"sfn/crypto\";\n"
+        + "\n"
+        + "fn rtcapdep_workspace_probe_render(value: string) -> string {\n"
+        + "    return sha1_hex(value);\n"
+        + "}\n");
+    let build_exit = _build_against_runtime(scratch, runtime_copy);
+    assert build_exit == 0;
+}
+
+test "runtime capsule dep: missing workspace member rejects stale installed mirror" ![io] {
+    let scratch = fs.mkdtemp("sfn-rtcapdep-stale-mirror-");
+    let runtime_copy = _stage_workspace_runtime_fixture(scratch, "sfn/crypto", "sfn/rtcapdep_stale_probe.sfn", "import { sha1_hex } from \"sfn/crypto\";\n"
+        + "\n"
+        + "fn rtcapdep_stale_probe_render(value: string) -> string {\n"
+        + "    return sha1_hex(value);\n"
+        + "}\n");
+
+    // Remove crypto from the authoritative inventory while leaving both its
+    // old workspace tree and a stale installed projection on disk. Neither
+    // may repair the missing canonical workspace-member declaration.
+    fs.writeFile(scratch + "/workspace.toml", "[workspace]\n"
+        + "members = [\"runtime-copy\"]\n");
+    fs.createDirectory(scratch + "/capsules/sfn", true);
+    let cp_stale = process.run_capture(["cp", "-R", "capsules/sfn/crypto", scratch
+        + "/capsules/sfn/crypto"], _child_env(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_stale == 0;
+
+    let prog = scratch + "/prog.sfn";
+    fs.writeFile(prog, "fn main() -> int { return 0; }\n");
+    let mut build_env = clean_runner_env_without(scratch, ["SAILFIN_RUNTIME_ROOT"]);
+    build_env.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy);
+    let build_exit = process.run_capture([sfn_bin_path(), "build", prog, "-o", scratch
+        + "/prog-out"], build_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert build_exit != 0;
+    assert _contains_text(out + err, "is not a usable member of the workspace containing");
 }
 
 // SFN-800: the provider symbol is reached through `export { sha1_hex } from
