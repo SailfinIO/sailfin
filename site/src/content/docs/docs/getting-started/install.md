@@ -103,14 +103,25 @@ The script will:
 > `sfn toolchain install` downloads verify both the Ed25519 signature and SHA-256
 > digest automatically (fail-closed).
 
-Example output:
+Example output (abridged — every real line is prefixed with a timestamp, shown
+here as `[...]`):
 
 ```
-Detected: linux/x86_64
-Downloading sfn <version>...
-Installed sailfin -> /home/you/.local/bin/sailfin
-Installed sfn    -> /home/you/.local/bin/sfn
-Done. Run 'sfn --version' to verify.
+[...] Detected OS: linux
+[...] Detected ARCH: x86_64
+...
+[...] Installed: ~/.local/share/sailfin/versions/x86_64-unknown-linux-gnu/<version>/sailfin
+[...] entry toolchain: <version> (~/.local/bin/sfn)
+[...] default toolchain: none recorded; unpinned commands use the entry toolchain
+[...] Manage this installation natively:
+[...]   sfn toolchain active
+[...]   sfn toolchain update --check
+[...]   sfn toolchain default <version>
+[...] This installer is the one-time on-ramp onto management protocol 1.
+[...] An 'sfn' predating that protocol cannot route the native lifecycle
+[...] commands, so crossing over takes one run of this installer or of your
+[...] package manager's upgrade. After that, 'sfn toolchain update' is the
+[...] supported update path, and it never replaces this entry executable.
 ```
 
 ### Windows (PowerShell)
@@ -125,15 +136,25 @@ The script installs `sailfin.exe` and `sfn.exe` to
 `%LOCALAPPDATA%\sailfin\bin` and adds that directory to your user `PATH`
 automatically. You do not need to run PowerShell as Administrator.
 
-Example output:
+Example output (abridged — every real line is prefixed with a timestamp, shown
+here as `[...]`):
 
 ```
-Detected: windows/x86_64
-Downloading sfn <version>...
-Installed sailfin.exe -> C:\Users\you\AppData\Local\sailfin\bin\sailfin.exe
-Installed sfn.exe     -> C:\Users\you\AppData\Local\sailfin\bin\sfn.exe
-Added C:\Users\you\AppData\Local\sailfin\bin to user PATH.
-Done. Restart your terminal, then run 'sfn --version' to verify.
+[...] Detected OS: windows
+[...] Detected ARCH: x86_64
+...
+[...] Installed: C:\Users\you\AppData\Local\sailfin\versions\x86_64-pc-windows-msvc\<version>\sailfin.exe
+[...] entry toolchain: <version> (C:\Users\you\AppData\Local\sailfin\bin\sfn.exe)
+[...] default toolchain: none recorded; unpinned commands use the entry toolchain
+[...] Manage this installation natively:
+[...]   sfn toolchain active
+[...]   sfn toolchain update --check
+[...]   sfn toolchain default <version>
+[...] This installer is the one-time on-ramp onto management protocol 1.
+[...] An 'sfn' predating that protocol cannot route the native lifecycle
+[...] commands, so crossing over takes one run of this installer or of your
+[...] package manager's upgrade. After that, 'sfn toolchain update' is the
+[...] supported update path, and it never replaces this entry executable.
 ```
 
 > **Windows users:** Restart your terminal after installation so that the updated
@@ -400,8 +421,36 @@ checkout.
 
 ## Updating
 
-To update to the latest release, re-run the install script. It overwrites the
-existing binaries in-place:
+### Entry toolchain, selected toolchain, and the one-time upgrade
+
+The `sfn` this installer places on `PATH` is the **entry toolchain**: a stable
+router that reads the recorded default (or a project's `[toolchain]` pin) and
+dispatches to the **selected toolchain** — the exact versioned payload that
+actually parses and runs an ordinary command. Starting with the first release
+whose install manifest carries **management protocol 1**, the entry toolchain
+also routes `sfn toolchain ...` itself to the newest compatible installed
+payload instead of handling it directly, so later `sfn toolchain update`
+installs can add management commands without ever replacing the entry
+executable on `PATH`. The installer does not record a per-user default for
+you — with none recorded, unpinned commands fall back to running the entry
+toolchain directly. See [Toolchain Pinning
+Flags](/docs/reference/cli#toolchain-pinning-flags) in the CLI reference for
+the full selection precedence and management-routing behavior.
+
+This router is new behavior, and a `sfn` installed before it shipped cannot
+learn it after the fact — an old entry executable only understands the
+command tree it was built to parse, and the router is one of the things it
+was never built to parse. Adopting it therefore requires **one** explicit
+entry upgrade: re-run this installer, or upgrade through the package manager
+that owns your `sfn`, one time. From the first release that carries
+management protocol 1 onward, [`sfn toolchain
+update`](/docs/reference/cli#updating-a-toolchain) is the supported way to
+move forward, and it never replaces the entry executable itself.
+
+### Re-running the installer
+
+To perform that one-time entry upgrade — or to install for the first time —
+re-run the install script. It overwrites the existing binaries in-place:
 
 ```bash
 # Linux / macOS: update to latest
@@ -417,8 +466,19 @@ curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh |
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 
+Re-running the installer replaces the entry toolchain but never touches a
+per-user default you have already recorded. If one exists, the completion
+output says so instead of reporting `none recorded`, because that default —
+not the release you just installed — is what unpinned commands will select.
+Run [`sfn toolchain
+active`](/docs/reference/cli#exact-toolchain-selection) to see which toolchain
+wins, and `sfn toolchain default <version>` to move it.
+
 As with the initial install, pinning to a known release version is recommended
-for CI and reproducible environments.
+for CI and reproducible environments. Once your entry toolchain carries
+management protocol 1, prefer [`sfn toolchain
+update`](/docs/reference/cli#updating-a-toolchain) for day-to-day updates
+instead of re-running this script.
 
 ---
 
@@ -529,6 +589,7 @@ This change only affects the current PowerShell session and does not persist.
 
 - [Downloads](/dl) — Pre-built binaries for every platform
 - [Verifying Your Download](/docs/getting-started/verify-download) — Verify release signatures and checksums
+- [Toolchain Pinning Flags](/docs/reference/cli#toolchain-pinning-flags) — Manage what you just installed: `sfn toolchain active`, `list`, `update --check`, and `default`
 - [Editor Setup](/docs/getting-started/editor-setup) — Install the Sailfin VS Code extension for syntax highlighting and snippets
 - [Hello, World!](/docs/getting-started/hello-world) — Write and run your first Sailfin program
 - [Tour of Sailfin](/docs/getting-started/tour) — A guided introduction to the language

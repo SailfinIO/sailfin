@@ -999,6 +999,46 @@ fi
 
 log "Installed: ${TARGET_DIR_ABS}/${DEST_BASENAME}"
 
+# A seed-store install populates a repo-local bootstrap seed, not the user's
+# entry toolchain, so none of the lifecycle guidance below is true of it.
+if [ "${SAILFIN_BOOTSTRAP_SEED_STORE:-0}" != "1" ]; then
+  log "entry toolchain: ${VERSION} (${ALIAS_PATH})"
+  # The installer deliberately does not write a user default record: with none
+  # recorded, selection falls back to the entry toolchain, which is the release
+  # just installed (SFEP-0073 Sec3.5). Re-running on a machine that already has
+  # one must not claim otherwise -- a stale default is precisely the
+  # entry-vs-selected confusion this block exists to surface. Presence only:
+  # parsing the schema-versioned, host-keyed record here would duplicate
+  # user_default.sfn in shell, so the wording says a record exists rather than
+  # claiming it binds this host, and defers the authoritative answer to
+  # `sfn toolchain active`.
+  #
+  # Resolved the long way because install.sh runs under `set -u` and this is
+  # the only $HOME dereference on a path where INSTALL_BASE and GLOBAL_BIN_DIR
+  # are both supplied, so the defaults at the top of the script never ran.
+  # Aborting here would report a finished install as a failure. An
+  # unresolvable home means "no record", matching
+  # user_default.sfn::toolchain_user_default_dir.
+  sfn_config_dir="${SAILFIN_CONFIG_DIR:-}"
+  if [ -z "$sfn_config_dir" ] && [ -n "${HOME:-}" ]; then
+    sfn_config_dir="${HOME}/.sfn"
+  fi
+  if [ -n "$sfn_config_dir" ] && [ -s "${sfn_config_dir}/toolchain-default" ]; then
+    log "default toolchain: a user default record exists; run 'sfn toolchain active' to see what unpinned commands select"
+  else
+    log "default toolchain: none recorded; unpinned commands use the entry toolchain"
+  fi
+  log "Manage this installation natively:"
+  log "  sfn toolchain active"
+  log "  sfn toolchain update --check"
+  log "  sfn toolchain default <version>"
+  log "This installer is the one-time on-ramp onto management protocol 1."
+  log "An 'sfn' predating that protocol cannot route the native lifecycle"
+  log "commands, so crossing over takes one run of this installer or of your"
+  log "package manager's upgrade. After that, 'sfn toolchain update' is the"
+  log "supported update path, and it never replaces this entry executable."
+fi
+
 if [[ ":$PATH:" != *":${GLOBAL_BIN_DIR}:"* ]]; then
   echo
   echo "Add this to your shell profile to use '${BINARY}':"

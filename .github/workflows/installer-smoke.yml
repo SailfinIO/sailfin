@@ -237,6 +237,17 @@ jobs:
             || { echo "::error::installer did not report a verified archive digest"; exit 1; }
           grep -q 'UNVERIFIED' "${RUNNER_TEMP}/install.log" \
             && { echo "::error::installer reported an unverified install for a signed release"; exit 1; }
+          # Assert the completion output names the entry toolchain and the
+          # one-time management-protocol boundary (SFN-1072, SFEP-0073 Sec3.5/3.9).
+          # Matched whole, not by prefix: `entry toolchain:` alone would pass on
+          # an empty version and an empty path, which is the failure this line
+          # exists to catch (D-07 treats these as a contract, not a log).
+          grep -qF "entry toolchain: ${SEED_VERSION} (${GLOBAL_BIN_DIR}/sfn)" "${RUNNER_TEMP}/install.log" \
+            || { echo "::error::installer did not name the entry toolchain version and path"; exit 1; }
+          grep -qE 'default toolchain: (none recorded|a user default record exists)' "${RUNNER_TEMP}/install.log" \
+            || { echo "::error::installer did not report a known default toolchain state"; exit 1; }
+          grep -q 'management protocol 1' "${RUNNER_TEMP}/install.log" \
+            || { echo "::error::installer did not report the management protocol boundary"; exit 1; }
           case '${{ matrix.slug }}' in
             linux_x86_64) expected_host='x86_64-unknown-linux-gnu' ;;
             linux_arm64) expected_host='aarch64-unknown-linux-gnu' ;;
@@ -390,6 +401,22 @@ jobs:
           }
           if ($logText -match 'UNVERIFIED') {
             throw "installer reported an unverified install for a signed release"
+          }
+          # Assert the completion output names the entry toolchain and the
+          # one-time management-protocol boundary (SFN-1072, SFEP-0073 Sec3.5/3.9).
+          # Compared as a literal, not a regex: the expected path is full of
+          # backslashes, and `entry toolchain:` alone would pass on an empty
+          # version and an empty path -- the failure this line exists to catch
+          # (D-07 treats these as a contract, not a log).
+          $expectedEntry = "entry toolchain: $env:SEED_VERSION ($(Join-Path $env:GLOBAL_BIN_DIR 'sfn.exe'))"
+          if (-not $logText.Contains($expectedEntry)) {
+            throw "installer did not name the entry toolchain version and path; expected '$expectedEntry'"
+          }
+          if ($logText -notmatch 'default toolchain: (none recorded|a user default record exists)') {
+            throw "installer did not report a known default toolchain state"
+          }
+          if ($logText -notmatch 'management protocol 1') {
+            throw "installer did not report the management protocol boundary"
           }
           $expectedHost = if ($env:HAS_MSVC -eq 'True') {
             'x86_64-pc-windows-msvc'
