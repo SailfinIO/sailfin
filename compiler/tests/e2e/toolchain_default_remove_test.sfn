@@ -25,6 +25,7 @@ import {
     sfn_bin_path
 } from "sfn/test";
 
+import { _sha256_of_file } from "../../src/build/fs";
 import { host_exe_name } from "../../src/build/target";
 import { toolchain_current_host } from "../../src/toolchain/host";
 import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
@@ -198,6 +199,36 @@ test "toolchain default: records an installed exact version, and reports it back
     assert read_exit == 0;
     assert contains(read_out, ver);
     assert fs.exists(_record_path(cfg));
+}
+
+// A package-manager-owned entry executable is never overwritten by `sfn`;
+// native `default` only adds store payloads and moves Sailfin's user default
+// (SFEP-0073 §3.5). That property holds by construction today — nothing
+// under `compiler/src/toolchain/` writes to `ctx.binary_dir` — but nothing
+// asserted it, so a future change could regress it silently. This test pins
+// the entry executable's bytes as unchanged across a real `default` write.
+test "toolchain default: never overwrites the entry executable" ![io] {
+    let store = _scratch_root() + "/default-entry-untouched-store";
+    let cfg = _scratch_root() + "/default-entry-untouched-cfg";
+    let ver = "306.0.0";
+    _seed_installed(store, ver);
+    let run_env = _env_with_cfg(["INSTALL_BASE=" + store], cfg);
+    let entry = sfn_bin_abs_path();
+    let before = _sha256_of_file(entry);
+    assert before.length > 0;
+
+    let set_exit = process.run_capture([sfn_bin_path(), "toolchain", "default", ver], run_env);
+    let set_out = process.capture_take_stdout();
+    let set_err = process.capture_take_stderr();
+    report_child_failure("toolchain-default entry-untouched set run", set_exit, set_out, set_err);
+    assert set_exit == 0;
+    // The default was actually recorded, so this exercised the real write
+    // path rather than an early refusal.
+    assert fs.exists(_record_path(cfg));
+    assert contains(fs.readFile(_record_path(cfg)), ver);
+
+    let after = _sha256_of_file(entry);
+    assert after == before;
 }
 
 test "toolchain default: records no implicit update track" ![io] {

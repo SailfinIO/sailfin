@@ -956,4 +956,54 @@ if ($UserPath -split ";" -notcontains $GlobalBinDir) {
 Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
 
 Log "Installed: $DestPath"
-Log "Ready! Run 'sfn version' to verify."
+
+$SfnAliasName = if ($DestName -match '\.exe$') { "sfn.exe" } else { "sfn" }
+$SfnAliasPath = Join-Path $GlobalBinDir $SfnAliasName
+Log "entry toolchain: $Version ($SfnAliasPath)"
+# See install.sh for the rationale: presence only, never a parse of the
+# schema-versioned record, and a re-install must not claim "none recorded"
+# when a stale user default is what unpinned commands will actually select.
+#
+# The home probe mirrors runtime/sfn/io.sfn::sfn_home_dir -- HOME first, then
+# USERPROFILE, then HOMEDRIVE+HOMEPATH. Reading USERPROFILE alone would look in
+# a different directory than `sfn` does under Git-for-Windows and other shells
+# that export HOME, and report "none recorded" against a default that really
+# does decide what unpinned commands select. An unresolvable home means "no
+# record", and the empty guard keeps Join-Path from throwing under the
+# script's $ErrorActionPreference = "Stop".
+$SfnHome = if ($env:HOME) {
+    $env:HOME
+} elseif ($env:USERPROFILE) {
+    $env:USERPROFILE
+} elseif ($env:HOMEDRIVE -and $env:HOMEPATH) {
+    "$env:HOMEDRIVE$env:HOMEPATH"
+} else {
+    ""
+}
+$SfnConfigDir = if ($env:SAILFIN_CONFIG_DIR) {
+    $env:SAILFIN_CONFIG_DIR
+} elseif ($SfnHome) {
+    Join-Path $SfnHome ".sfn"
+} else {
+    ""
+}
+$SfnHasDefault = $false
+if ($SfnConfigDir) {
+    $SfnDefaultRecord = Join-Path $SfnConfigDir "toolchain-default"
+    $SfnRecordItem = Get-Item -LiteralPath $SfnDefaultRecord -ErrorAction SilentlyContinue
+    $SfnHasDefault = $null -ne $SfnRecordItem -and -not $SfnRecordItem.PSIsContainer -and $SfnRecordItem.Length -gt 0
+}
+if ($SfnHasDefault) {
+    Log "default toolchain: a user default record exists; run 'sfn toolchain active' to see what unpinned commands select"
+} else {
+    Log "default toolchain: none recorded; unpinned commands use the entry toolchain"
+}
+Log "Manage this installation natively:"
+Log "  sfn toolchain active"
+Log "  sfn toolchain update --check"
+Log "  sfn toolchain default <version>"
+Log "This installer is the one-time on-ramp onto management protocol 1."
+Log "An 'sfn' predating that protocol cannot route the native lifecycle"
+Log "commands, so crossing over takes one run of this installer or of your"
+Log "package manager's upgrade. After that, 'sfn toolchain update' is the"
+Log "supported update path, and it never replaces this entry executable."

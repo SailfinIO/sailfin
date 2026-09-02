@@ -31,6 +31,7 @@ import {
     sfn_bin_path
 } from "sfn/test";
 
+import { _sha256_of_file } from "../../src/build/fs";
 import { host_exe_name } from "../../src/build/target";
 import { toolchain_current_host } from "../../src/toolchain/host";
 import { toolchain_host_store_base, toolchain_version_dir } from "../../src/toolchain/store";
@@ -405,4 +406,40 @@ test "toolchain update: SAILFIN_TOOLCHAIN=local forbids fetching" ![io] {
     let err = process.capture_take_stderr();
     assert exit == 2;
     assert contains(err, "forbids fetching");
+}
+
+// ---------------------------------------------------------------------------
+// Case 11: a package-manager-owned entry executable is never overwritten
+// ---------------------------------------------------------------------------
+// A package-manager-owned entry executable is never overwritten by `sfn`;
+// native `update` only adds store payloads and moves Sailfin's user default
+// (SFEP-0073 §3.5). That property holds by construction today — nothing
+// under `compiler/src/toolchain/` writes to `ctx.binary_dir` — but nothing
+// asserted it, so a future change could regress it silently. The `manual`
+// policy leg reaches the furthest into update logic while staying offline
+// and deterministic: it clears the policy gate and reaches the refused
+// connection-refused index fetch, rather than exiting on an earlier usage
+// or policy check.
+test "toolchain update: policy manual never overwrites the entry executable" ![io] {
+    let store = _scratch_root() + "/manual-entry-untouched-store";
+    let home = _home_dir("manual-entry-untouched");
+    let cfg = _config_dir("manual-entry-untouched");
+    _seed_policy(home, "manual");
+    let run_env = _env_with([], home, cfg, store);
+    let entry = sfn_bin_abs_path();
+    let before = _sha256_of_file(entry);
+    assert before.length > 0;
+
+    let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    // Positively pin where it stopped: index acquisition, past the usage and
+    // policy gates. Asserting only that some earlier message is *absent*
+    // would keep passing if the leg later regressed into a different early
+    // exit that happens not to mention policy.
+    assert contains(err, "could not be fetched");
+
+    let after = _sha256_of_file(entry);
+    assert after == before;
 }
