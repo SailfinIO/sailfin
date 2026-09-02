@@ -65,6 +65,17 @@ struct ToolchainManifest {
     detail: string;
 }
 
+// Header-only reader outcome (SFN-1201): the same `status`/`meta`/`detail`
+// contract as `ToolchainManifest`, minus the records. OK here means the
+// magic, schema, and header fields parsed and the record separator was
+// found — it says nothing about the record section, which a caller that
+// needs it verifies in full through `toolchain_manifest_read`.
+struct ToolchainManifestHeader {
+    status: int;
+    meta: ToolchainManifestMeta;
+    detail: string;
+}
+
 fn toolchain_manifest_path(store_dir: string) -> string {
     return store_dir + "/.install-manifest";
 }
@@ -105,7 +116,14 @@ fn toolchain_manifest_normalize_key(rel: string) -> string {
     return ascii_lowercase(rel);
 }
 
-fn _manifest_split_lines(text: string) -> string[] {
+// `header_only` stops after the first empty line — the header/record
+// separator — so a header read allocates one string per header line and
+// never one per recorded file (SFN-1201). The separator itself is kept so
+// the header parser can prove it was present. A CRLF document has no empty
+// line (its separator is `"\r"`), so the early return never fires there;
+// that costs nothing but the split, on a document both readers already
+// reject at the schema line.
+fn _manifest_split_lines(text: string, header_only: boolean) -> string[] {
     let mut lines: string[] = [];
     let mut start: int = 0;
     let length = text.length;
@@ -114,12 +132,26 @@ fn _manifest_split_lines(text: string) -> string[] {
         if i >= length { break; }
         if char_code_at_text(text, i) == 10 {
             lines.push(substring(text, start, i));
+            if header_only && i == start { return lines; }
             start = i + 1;
         }
         i += 1;
     }
     if start <= length { lines.push(substring(text, start, length)); }
     return lines;
+}
+
+// The position of the header/record separator in a line list the header
+// parser has already accepted, so `toolchain_manifest_parse` need not carry
+// it out of `_manifest_parse_header_lines` on the public header struct.
+fn _manifest_separator_index(lines: string[]) -> int {
+    let mut i: int = 1;
+    loop {
+        if i >= lines.length { break; }
+        if lines[i].length == 0 { return i; }
+        i += 1;
+    }
+    return -1;
 }
 
 // Strict, no partial parse: any non-digit byte, or an empty string, fails.
@@ -207,48 +239,33 @@ fn _manifest_empty_meta() -> ToolchainManifestMeta {
     };
 }
 
-// Pure — every parsing decision lives here so it is unit-testable with no
-// filesystem.
-fn toolchain_manifest_parse(text: string) -> ToolchainManifest {
-    let empty_meta = _manifest_empty_meta();
-    if _toml_trim_cmd(text).length == 0 {
-        return ToolchainManifest {
-            status: TOOLCHAIN_MANIFEST_MALFORMED,
-            meta: empty_meta,
-            records: [],
-            detail: "empty manifest"
-        };
-    }
+fn _manifest_header_failure(status: int, detail: string) -> ToolchainManifestHeader {
+    return ToolchainManifestHeader {
+        status: status,
+        meta: _manifest_empty_meta(),
+        detail: detail
+    };
+}
 
-    let lines = _manifest_split_lines(text);
+// Pure. The magic, schema, and header-field grammar, shared by the full and
+// header-only readers so the two cannot disagree on any header-level case.
+// `lines` is either the whole document or the prefix up to and including
+// the separator; the parse is the same either way.
+fn _manifest_parse_header_lines(lines: string[]) -> ToolchainManifestHeader {
     let magic_prefix = TOOLCHAIN_MANIFEST_MAGIC + " ";
     if !starts_with(lines[0], magic_prefix) {
-        return ToolchainManifest {
-            status: TOOLCHAIN_MANIFEST_MALFORMED,
-            meta: empty_meta,
-            records: [],
-            detail: "bad magic"
-        };
+        return _manifest_header_failure(TOOLCHAIN_MANIFEST_MALFORMED, "bad magic");
     }
     let schema = _manifest_parse_uint(substring(lines[0], magic_prefix.length, lines[0].length));
     if schema < 1 {
-        return ToolchainManifest {
-            status: TOOLCHAIN_MANIFEST_MALFORMED,
-            meta: empty_meta,
-            records: [],
-            detail: "invalid schema version"
-        };
+        return _manifest_header_failure(TOOLCHAIN_MANIFEST_MALFORMED, "invalid schema version");
     }
     if schema > TOOLCHAIN_MANIFEST_MAX_SCHEMA {
-        return ToolchainManifest {
-            status: TOOLCHAIN_MANIFEST_TOO_NEW,
-            meta: empty_meta,
-            records: [],
-            detail: "manifest schema " + int_to_string(schema)
-                + " is newer than this toolchain understands (max "
-                + int_to_string(TOOLCHAIN_MANIFEST_MAX_SCHEMA)
-                + ")"
-        };
+        return _manifest_header_failure(TOOLCHAIN_MANIFEST_TOO_NEW, "manifest schema "
+            + int_to_string(schema)
+            + " is newer than this toolchain understands (max "
+            + int_to_string(TOOLCHAIN_MANIFEST_MAX_SCHEMA)
+            + ")");
     }
 
     // Unknown header keys are ignored, not errors — this is the
@@ -258,23 +275,19 @@ fn toolchain_manifest_parse(text: string) -> ToolchainManifest {
     let mut version: string = "";
     let mut host: string = "";
     let mut archive_sha256: string = "";
-    let mut separator_index: int = -1;
+    let mut found_separator: boolean = false;
     let mut i: int = 1;
     loop {
         if i >= lines.length { break; }
         let line = lines[i];
         if line.length == 0 {
-            separator_index = i;
+            found_separator = true;
             break;
         }
         let eq = index_of(line, " = ");
         if eq < 0 {
-            return ToolchainManifest {
-                status: TOOLCHAIN_MANIFEST_MALFORMED,
-                meta: empty_meta,
-                records: [],
-                detail: "malformed header line: " + line
-            };
+            return _manifest_header_failure(TOOLCHAIN_MANIFEST_MALFORMED, "malformed header line: "
+                + line);
         }
         let key = substring(line, 0, eq);
         let value = substring(line, eq + 3, line.length);
@@ -285,30 +298,65 @@ fn toolchain_manifest_parse(text: string) -> ToolchainManifest {
         } else if key == "archive_sha256" { archive_sha256 = value; }
         i += 1;
     }
-    if separator_index < 0 {
-        return ToolchainManifest {
-            status: TOOLCHAIN_MANIFEST_MALFORMED,
-            meta: empty_meta,
-            records: [],
-            detail: "missing header/record separator"
-        };
+    if !found_separator {
+        return _manifest_header_failure(TOOLCHAIN_MANIFEST_MALFORMED, "missing header/record separator");
     }
     if management_protocol < 0 {
+        return _manifest_header_failure(TOOLCHAIN_MANIFEST_MALFORMED, "missing or invalid management_protocol");
+    }
+
+    return ToolchainManifestHeader {
+        status: TOOLCHAIN_MANIFEST_OK,
+        meta: ToolchainManifestMeta {
+            schema: schema,
+            management_protocol: management_protocol,
+            version: version,
+            host: host,
+            archive_sha256: archive_sha256
+        },
+        detail: ""
+    };
+}
+
+// Pure. Header only: stops at the record separator and never validates a
+// record, so its cost is the header parse rather than the per-record
+// substring, digest, path, and duplicate checks (SFN-1201). The caller still
+// reads the whole file — the win is the discarded per-record work, not the
+// I/O. Agrees with `toolchain_manifest_parse` on
+// `status`, `meta`, and `detail` for every header-level outcome; the one
+// divergence is a well-formed header over a malformed record section,
+// which reads OK here and MALFORMED in full.
+fn toolchain_manifest_parse_header(text: string) -> ToolchainManifestHeader {
+    if _toml_trim_cmd(text).length == 0 {
+        return _manifest_header_failure(TOOLCHAIN_MANIFEST_MALFORMED, "empty manifest");
+    }
+    return _manifest_parse_header_lines(_manifest_split_lines(text, true));
+}
+
+// Pure — every parsing decision lives here so it is unit-testable with no
+// filesystem.
+fn toolchain_manifest_parse(text: string) -> ToolchainManifest {
+    if _toml_trim_cmd(text).length == 0 {
         return ToolchainManifest {
             status: TOOLCHAIN_MANIFEST_MALFORMED,
-            meta: empty_meta,
+            meta: _manifest_empty_meta(),
             records: [],
-            detail: "missing or invalid management_protocol"
+            detail: "empty manifest"
         };
     }
 
-    let meta = ToolchainManifestMeta {
-        schema: schema,
-        management_protocol: management_protocol,
-        version: version,
-        host: host,
-        archive_sha256: archive_sha256
-    };
+    let lines = _manifest_split_lines(text, false);
+    let header = _manifest_parse_header_lines(lines);
+    if header.status != TOOLCHAIN_MANIFEST_OK {
+        return ToolchainManifest {
+            status: header.status,
+            meta: header.meta,
+            records: [],
+            detail: header.detail
+        };
+    }
+    let meta = header.meta;
+    let separator_index = _manifest_separator_index(lines);
 
     let mut records: ToolchainManifestRecord[] = [];
     let mut seen_keys: string[] = [];
@@ -401,6 +449,22 @@ fn toolchain_manifest_read(store_dir: string) -> ToolchainManifest ![io] {
     return toolchain_manifest_parse(fs.readFile(manifest_path));
 }
 
+// `toolchain_manifest_read`'s header-only sibling, with the same ABSENT
+// boundary. For the management survey (SFN-1201), which wants only the
+// status, protocol, version, and host of every store entry on every
+// `sfn toolchain` invocation.
+fn toolchain_manifest_read_header(store_dir: string) -> ToolchainManifestHeader ![io] {
+    let manifest_path = toolchain_manifest_path(store_dir);
+    if !fs.exists(manifest_path) {
+        return ToolchainManifestHeader {
+            status: TOOLCHAIN_MANIFEST_ABSENT,
+            meta: _manifest_empty_meta(),
+            detail: ""
+        };
+    }
+    return toolchain_manifest_parse_header(fs.readFile(manifest_path));
+}
+
 // Single source of truth for the reinstall command §3.8 requires callers
 // to print on an integrity failure.
 fn toolchain_manifest_reinstall_hint(version: string) -> string {
@@ -419,12 +483,15 @@ export {
     TOOLCHAIN_MANIFEST_SCHEMA,
     TOOLCHAIN_MANIFEST_TOO_NEW,
     ToolchainManifest,
+    ToolchainManifestHeader,
     ToolchainManifestMeta,
     ToolchainManifestRecord,
     toolchain_manifest_normalize_key,
     toolchain_manifest_parse,
+    toolchain_manifest_parse_header,
     toolchain_manifest_path,
     toolchain_manifest_read,
+    toolchain_manifest_read_header,
     toolchain_manifest_reinstall_hint,
     toolchain_manifest_render,
     toolchain_manifest_validate_path,

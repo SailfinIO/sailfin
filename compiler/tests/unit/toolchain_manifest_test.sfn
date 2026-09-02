@@ -1,11 +1,16 @@
 // Unit coverage for the install-manifest schema (`compiler/src/toolchain/manifest.sfn`,
-// SFEP-0073 §3.8, SFN-1064). `toolchain_manifest_parse` / `_render` /
-// `_validate_path` / `_normalize_key` are pure — no filesystem, no `![io]`.
+// SFEP-0073 §3.8, SFN-1064). `toolchain_manifest_parse` / `_parse_header` /
+// `_render` / `_validate_path` / `_normalize_key` are pure — no filesystem,
+// no `![io]`. The one `![io]` case below covers the readers' shared ABSENT
+// boundary, which only a missing file can produce.
+import { remove_all } from "sfn/fs";
 import { int_to_string } from "sfn/strings";
+import { default_scratch_dir } from "sfn/test";
 
 import { index_of, substring } from "../../src/string_utils";
 import {
     TOOLCHAIN_MANAGEMENT_PROTOCOL,
+    TOOLCHAIN_MANIFEST_ABSENT,
     TOOLCHAIN_MANIFEST_MALFORMED,
     TOOLCHAIN_MANIFEST_OK,
     TOOLCHAIN_MANIFEST_SCHEMA,
@@ -13,6 +18,9 @@ import {
     ToolchainManifestMeta,
     ToolchainManifestRecord,
     toolchain_manifest_parse,
+    toolchain_manifest_parse_header,
+    toolchain_manifest_read,
+    toolchain_manifest_read_header,
     toolchain_manifest_reinstall_hint,
     toolchain_manifest_render,
     toolchain_manifest_validate_path
@@ -89,6 +97,28 @@ fn _good_records() -> ToolchainManifestRecord[] {
         digest: _digest("b"), path: "runtime/prelude.sfn"
     });
     return records;
+}
+
+// The header-only reader (SFN-1201) must be indistinguishable from the
+// full reader on everything above the record separator: `_management_candidate`
+// routes on exactly these fields, so any drift here would change which
+// payload answers a management command.
+fn _assert_header_agrees(text: string) -> void {
+    let full = toolchain_manifest_parse(text);
+    let header = toolchain_manifest_parse_header(text);
+    assert header.status == full.status;
+    assert header.detail == full.detail;
+    assert header.meta.schema == full.meta.schema;
+    assert header.meta.management_protocol == full.meta.management_protocol;
+    assert header.meta.version == full.meta.version;
+    assert header.meta.host == full.meta.host;
+    assert header.meta.archive_sha256 == full.meta.archive_sha256;
+}
+
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    return dir + "/sfn-toolchain-manifest-unit";
 }
 
 test "toolchain manifest: the digest fixture is exactly 64 chars" {
@@ -306,4 +336,121 @@ test "toolchain manifest: a dotted spelling cannot smuggle a duplicate past the 
     records.push(_digest("b") + "  runtime/./prelude.sfn");
     let parsed = toolchain_manifest_parse(_manifest_text(_good_magic(), _good_header(), records));
     assert parsed.status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: the header reader agrees with the full reader on a well-formed manifest" {
+    let text = toolchain_manifest_render(_good_meta(), _good_records());
+    assert text.length > 0;
+    _assert_header_agrees(text);
+    let header = toolchain_manifest_parse_header(text);
+    assert header.status == TOOLCHAIN_MANIFEST_OK;
+    assert header.meta.management_protocol == TOOLCHAIN_MANAGEMENT_PROTOCOL;
+    assert header.meta.version == "0.10.5";
+    assert header.meta.host == "aarch64-apple-darwin";
+}
+
+test "toolchain manifest: the header reader agrees with the full reader on a malformed header" {
+    // Empty document.
+    _assert_header_agrees("");
+    _assert_header_agrees("  \n\n");
+    assert toolchain_manifest_parse_header("").status == TOOLCHAIN_MANIFEST_MALFORMED;
+    assert toolchain_manifest_parse_header("  \n\n").status == TOOLCHAIN_MANIFEST_MALFORMED;
+    // Bad magic.
+    _assert_header_agrees(_manifest_text("not-the-magic 1", _good_header(), _good_record_lines()));
+    // Unparseable schema.
+    let bad_schema = _manifest_text("sailfin-install-manifest x", _good_header(), _good_record_lines());
+    _assert_header_agrees(bad_schema);
+    assert toolchain_manifest_parse_header(bad_schema).status == TOOLCHAIN_MANIFEST_MALFORMED;
+    // A header line with no ` = `.
+    let mut bad_line = _good_header();
+    bad_line.push("no-equals-here");
+    let bad_line_text = _manifest_text(_good_magic(), bad_line, _good_record_lines());
+    _assert_header_agrees(bad_line_text);
+    assert toolchain_manifest_parse_header(bad_line_text).status == TOOLCHAIN_MANIFEST_MALFORMED;
+    // No separator at all: header lines run straight into end-of-text. The
+    // trailing newline is stripped deliberately — with it, the split yields
+    // a final empty line that both readers accept as the separator, and the
+    // verdict becomes the record-section one ("records no files").
+    let mut no_separator: string = _good_magic();
+    let header = _good_header();
+    let mut i: int = 0;
+    loop {
+        if i >= header.length { break; }
+        no_separator = no_separator + "\n" + header[i];
+        i += 1;
+    }
+    _assert_header_agrees(no_separator);
+    assert toolchain_manifest_parse_header(no_separator).status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: the header reader agrees with the full reader on a bad management_protocol" {
+    let mut missing: string[] = [];
+    missing.push("version = 0.10.5");
+    missing.push("host = aarch64-apple-darwin");
+    missing.push("archive_sha256 = " + _digest("a"));
+    let missing_text = _manifest_text(_good_magic(), missing, _good_record_lines());
+    _assert_header_agrees(missing_text);
+    assert toolchain_manifest_parse_header(missing_text).status == TOOLCHAIN_MANIFEST_MALFORMED;
+
+    let mut invalid: string[] = [];
+    invalid.push("management_protocol = abc");
+    invalid.push("version = 0.10.5");
+    invalid.push("host = aarch64-apple-darwin");
+    invalid.push("archive_sha256 = " + _digest("a"));
+    let invalid_text = _manifest_text(_good_magic(), invalid, _good_record_lines());
+    _assert_header_agrees(invalid_text);
+    assert toolchain_manifest_parse_header(invalid_text).status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: the header reader agrees with the full reader on a too-new schema" {
+    let text = _manifest_text("sailfin-install-manifest 2", _good_header(), _good_record_lines());
+    _assert_header_agrees(text);
+    let header = toolchain_manifest_parse_header(text);
+    assert header.status == TOOLCHAIN_MANIFEST_TOO_NEW;
+    assert index_of(header.detail, "2") >= 0;
+}
+
+test "toolchain manifest: the header reader ignores an unknown header key like the full reader" {
+    let mut header = _good_header();
+    header.push("future_key = whatever");
+    let text = _manifest_text(_good_magic(), header, _good_record_lines());
+    _assert_header_agrees(text);
+    assert toolchain_manifest_parse_header(text).status == TOOLCHAIN_MANIFEST_OK;
+}
+
+// The one deliberate divergence (SFN-1201): a well-formed header over a
+// malformed record section reads OK header-only, because the header reader
+// never looks past the separator. `_management_candidate` therefore admits
+// such a payload, and the pre-exec `toolchain_verify_executable` — which
+// reads in full — is what keeps it from ever running. The full reader's
+// verdict is pinned here so that guarantee is not silently lost.
+test "toolchain manifest: a malformed record section is OK header-only and MALFORMED in full" {
+    let mut records: string[] = [];
+    records.push(_digest("a") + "  sailfin");
+    records.push("not-a-record-line");
+    let text = _manifest_text(_good_magic(), _good_header(), records);
+    let header = toolchain_manifest_parse_header(text);
+    assert header.status == TOOLCHAIN_MANIFEST_OK;
+    assert header.meta.version == "0.10.5";
+    assert toolchain_manifest_parse(text).status == TOOLCHAIN_MANIFEST_MALFORMED;
+
+    // Zero records is likewise a record-section verdict.
+    let empty: string[] = [];
+    let no_records = _manifest_text(_good_magic(), _good_header(), empty);
+    assert toolchain_manifest_parse_header(no_records).status == TOOLCHAIN_MANIFEST_OK;
+    assert toolchain_manifest_parse(no_records).status == TOOLCHAIN_MANIFEST_MALFORMED;
+}
+
+test "toolchain manifest: the header reader agrees with the full reader on an absent manifest" ![io] {
+    let dir = _scratch_root() + "/absent";
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    let full = toolchain_manifest_read(dir);
+    let header = toolchain_manifest_read_header(dir);
+    assert full.status == TOOLCHAIN_MANIFEST_ABSENT;
+    assert header.status == full.status;
+    assert header.detail == full.detail;
+    assert header.meta.management_protocol == full.meta.management_protocol;
+    assert header.meta.version == full.meta.version;
+    assert header.meta.host == full.meta.host;
 }

@@ -31,6 +31,7 @@ import {
     TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN,
     TOOLCHAIN_MANIFEST_OK,
     toolchain_manifest_read,
+    toolchain_manifest_read_header,
     toolchain_manifest_reinstall_hint
 } from "./manifest";
 import {
@@ -137,10 +138,12 @@ fn _management_host_triples(host: ToolchainHostIdentity) -> string[] {
 
 // Qualify one store directory as a management candidate.
 //
-// Only the manifest is read here, never the payload's bytes: a store may hold
-// many entries, and hashing all of them to answer one `sfn toolchain` command
-// would make routing cost proportional to installed bytes. The full check runs
-// on the single candidate actually chosen, immediately before it is executed.
+// Only the manifest header is read here, never the record section and never
+// the payload's bytes: a store may hold many entries, and hashing all of them
+// — or even parsing every recorded file of each — to answer one
+// `sfn toolchain` command would make routing cost proportional to installed
+// bytes rather than to store size (SFN-1201). The full check runs on the
+// single candidate actually chosen, immediately before it is executed.
 fn _management_candidate(base: string, host_triple: string, version: string) -> ToolchainManagementCandidate ![io] {
     let dir = toolchain_version_dir(base, version);
     let mut out = _management_none();
@@ -152,11 +155,14 @@ fn _management_candidate(base: string, host_triple: string, version: string) -> 
     // abandoned install rather than a management implementation.
     if !toolchain_store_ready(dir) { return out; }
 
-    let manifest = toolchain_manifest_read(dir);
+    let manifest = toolchain_manifest_read_header(dir);
     // Anything but OK disqualifies. ABSENT is SFN-1064's legacy boundary: such
     // an entry still runs ordinary commands, but it records no protocol at all,
     // and claiming it speaks protocol 1 is precisely what §3.5 forbids.
-    // MALFORMED and TOO_NEW are corrupt or unreadable and fail closed.
+    // MALFORMED and TOO_NEW are corrupt or unreadable and fail closed. A
+    // well-formed header over a malformed record section passes this gate;
+    // the pre-exec `toolchain_verify_executable` reads the records in full,
+    // so such a payload is skipped there and never runs.
     if manifest.status != TOOLCHAIN_MANIFEST_OK { return out; }
 
     // A payload whose manifest disagrees with where it is stored has no
@@ -234,8 +240,22 @@ fn toolchain_management_survey(versions_base: string, host: ToolchainHostIdentit
                     let candidate = _management_candidate(base, triple, version);
                     if candidate.ok {
                         if candidate.protocol > TOOLCHAIN_MANAGEMENT_PROTOCOL_MAX {
-                            let beats = semver_compare(semver_parse(candidate.version), semver_parse(blocked.version));
-                            if !blocked.ok || beats > 0 { blocked = candidate; }
+                            // The header-only survey (SFN-1201) cannot see a
+                            // corrupt record section, and unlike a compatible
+                            // candidate this one is never handed to
+                            // `toolchain_verify_executable` — it is reported,
+                            // not executed. Admitting it on the header alone
+                            // would refuse every management leaf over a
+                            // payload that is merely corrupt, with upgrade
+                            // guidance for what is a reinstall problem. So
+                            // pay one full read here, on the outranged
+                            // entries only; a store normally has none.
+                            if toolchain_manifest_read(candidate.dir).status == TOOLCHAIN_MANIFEST_OK {
+                                let beats = semver_compare(semver_parse(candidate.version), semver_parse(blocked.version));
+                                if !blocked.ok || beats > 0 {
+                                    blocked = candidate;
+                                }
+                            }
                         } else {
                             if candidate.protocol >= TOOLCHAIN_MANAGEMENT_PROTOCOL_MIN {
                                 compatible.push(candidate);
