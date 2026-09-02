@@ -24,7 +24,8 @@ import {
 
 struct Run {
     exit: int,
-    out: string
+    out: string,
+    err: string
 }
 
 // A private cache base for `tag`, wiped first so each run starts clean.
@@ -87,7 +88,7 @@ fn _run_cache(cache_base: string, args: string[]) -> Run ![io] {
     let exit = process.run_capture(argv, e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    return Run { exit: exit, out: out + err };
+    return Run { exit: exit, out: out, err: err };
 }
 
 // Materialize a synthetic cache entry `<base>/v2/<prefix>/<key>` with a
@@ -123,7 +124,7 @@ fn _build(cache_base: string, work: string, src: string, out: string) -> Run ![i
     let so = process.capture_take_stdout();
     let se = process.capture_take_stderr();
     report_child_failure("cache-command build", exit, so, se);
-    return Run { exit: exit, out: so + se };
+    return Run { exit: exit, out: so, err: se };
 }
 
 // ---- info ----
@@ -259,7 +260,8 @@ test "cache: no subcommand prints usage and exits non-zero" ![io] {
     let base = _cache_base("usage");
     let r = _run_cache(base, []);
     assert r.exit != 0;
-    assert find(r.out, "usage", 0) >= 0;
+    assert find(r.err, "usage", 0) >= 0;
+    assert find(r.out, "usage", 0) < 0;
 }
 
 // ---- mtime-on-hit (real build) ----

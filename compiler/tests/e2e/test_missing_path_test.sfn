@@ -11,7 +11,8 @@
 // instead of a diagnostic naming the missing path. Following
 // `fmt.sfn` `run()`, `run()` now validates every positional suite path up
 // front and fails the whole invocation — before any suite/collection
-// work — printing `error: path not found: <path>` for each and exiting 2.
+// work — printing `error: path not found: <path>` to stderr for each
+// (SFN-1244) and exiting 2.
 // This test drives the real CLI as a subprocess and pins: the diagnostic
 // text, the exact exit code, and that neither an ICE nor a "failing IR"
 // note is emitted. See `.claude/rules/no-bash-e2e.md`.
@@ -48,8 +49,9 @@ test "test-missing-path: sfn test on an absent .sfn path fails without an ICE" !
     // exited non-zero, and `sfn test` reserves 1 for a red suite. Pinning the
     // code is what keeps a typo'd path distinguishable from a test failure.
     assert rc == 2;
-    assert contains(out, "path not found");
-    assert contains(out, absent);
+    assert contains(err, "path not found");
+    assert contains(err, absent);
+    assert ! contains(out, "path not found");
     assert ! contains(out, "internal compiler error");
     assert ! contains(err, "internal compiler error");
     assert ! contains(out, "failing IR");
@@ -67,12 +69,15 @@ test "test-missing-path: an absent directory is named, not reported as empty" ![
     let absent = dir + "/absent-suite-dir";
     let rc = process.run_capture([sfn_bin_path(), "test", absent], _child_env());
     let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
 
     assert rc == 2;
-    assert contains(out, "path not found");
-    assert contains(out, absent);
-    assert ! contains(out, "no *_test.sfn files found");
+    assert contains(err, "path not found");
+    assert contains(err, absent);
+    assert ! contains(out, "path not found");
+    assert ! contains(err, "no *_test.sfn files found");
     assert ! contains(out, "internal compiler error");
+    assert ! contains(err, "internal compiler error");
 }
 
 // The check counts misses instead of returning on the first one, so that a
@@ -84,10 +89,13 @@ test "test-missing-path: every absent suite path is reported, not just the first
     let absent_b = dir + "/absent-b";
     let rc = process.run_capture([sfn_bin_path(), "test", absent_a, "compiler/tests/unit", absent_b], _child_env());
     let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
 
     assert rc == 2;
-    assert contains(out, absent_a);
-    assert contains(out, absent_b);
+    assert contains(err, absent_a);
+    assert contains(err, absent_b);
+    assert ! contains(out, absent_a);
+    assert ! contains(out, absent_b);
     // Nothing compiled: the real suite in the middle must not have run.
     assert ! contains(out, "passed");
 }

@@ -16,7 +16,8 @@ import { host_is_windows } from "../../src/build/target";
 
 struct LoginRun {
     exit: int,
-    out: string
+    out: string,
+    err: string
 }
 
 // A private, freshly-cleaned HOME under the runner's scratch dir (or
@@ -58,7 +59,7 @@ fn _run(home: string, args: string[]) -> LoginRun ![io] {
     let exit = process.run_capture(argv, _env(home));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    return LoginRun { exit: exit, out: out + err };
+    return LoginRun { exit: exit, out: out, err: err };
 }
 
 // ---- Test 1: login with token argument writes credentials ----
@@ -103,7 +104,8 @@ test "login: rejects empty token" ![io] {
 test "login: too many args shows usage" ![io] {
     let home = _home("too_many_args");
     let r = _run(home, ["login", "a", "b"]);
-    assert find(to_lower_all(r.out), "usage", 0) >= 0;
+    assert find(to_lower_all(r.err), "usage", 0) >= 0;
+    assert find(to_lower_all(r.out), "usage", 0) < 0;
 }
 
 // ---- Test 6: login output confirms save path ----

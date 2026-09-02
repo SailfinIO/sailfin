@@ -16,7 +16,8 @@ import { host_is_windows } from "../../src/build/target";
 
 struct CfgRun {
     exit: int,
-    out: string
+    out: string,
+    err: string
 }
 
 // A private HOME under the runner's scratch dir (or /tmp), keyed by
@@ -55,14 +56,14 @@ fn _run(home: string, args: string[], extra_env: string[]) -> CfgRun ![io] {
     let exit = process.run_capture(argv, e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    return CfgRun { exit: exit, out: out + err };
+    return CfgRun { exit: exit, out: out, err: err };
 }
 
 // ---- Test 1: no args shows usage ----
 test "config: no args shows usage" ![io] {
     let home = _home("no_args");
     let r = _run(home, ["config"], []);
-    assert find(to_lower_all(r.out), "usage", 0) >= 0;
+    assert find(to_lower_all(r.err), "usage", 0) >= 0;
 }
 
 // ---- Test 2: set registry writes config.toml ----
@@ -179,7 +180,8 @@ test "config: invalid SFN_REGISTRY env falls back to default" ![io] {
 test "config: rejects unknown subcommand" ![io] {
     let home = _home("unknown_sub");
     let r = _run(home, ["config", "quantum", "registry"], []);
-    assert find(to_lower_all(r.out), "unknown subcommand", 0) >= 0;
+    assert find(to_lower_all(r.err), "unknown subcommand", 0) >= 0;
+    assert find(to_lower_all(r.out), "unknown subcommand", 0) < 0;
 }
 
 // ---- Test 13: ~/.sfn and config.toml have restrictive permissions ----

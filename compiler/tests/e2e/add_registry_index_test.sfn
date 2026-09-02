@@ -90,6 +90,22 @@ fn _run_add(workdir: string, home: string, capsule: string) -> string ![io] {
     return out + err;
 }
 
+struct AddRun {
+    out: string,
+    err: string
+}
+
+// Same as `_run_add`, but keeps stdout/stderr separate so a caller can
+// assert which stream a diagnostic landed on (SFN-1244).
+fn _run_add_split(workdir: string, home: string, capsule: string) -> AddRun ![io] {
+    let sfn_abs = sfn_bin_abs_path();
+    let e = _env_for(home);
+    let _exit = process.run_capture_cwd([sfn_abs, "add", capsule], e, workdir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return AddRun { out: out, err: err };
+}
+
 // ── Fixture registry server (SFN-496) ──────────────────────────────
 //
 // A generated `sfn/http` capsule, built once and run as a background
@@ -253,9 +269,10 @@ test "add: reports not found when capsule absent from index" ![clock, io, net] {
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "add-idx-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready();
-        let all = _run_add(workdir, home, "acme/router");
-        assert contains(all, "capsule not found in registry: acme/router");
-        assert ! contains(all, "downloading");
+        let r = _run_add_split(workdir, home, "acme/router");
+        assert contains(r.err, "capsule not found in registry: acme/router");
+        assert ! contains(r.out, "capsule not found in registry: acme/router");
+        assert ! contains(r.out + r.err, "downloading");
         return 0;
     });
 }
