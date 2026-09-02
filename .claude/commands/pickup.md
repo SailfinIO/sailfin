@@ -383,6 +383,20 @@ Fixes SFN-<N>
 <short list>
 ```
 
+**Follow-ups are gated** by `.claude/rules/follow-up-filing.md`. Anything you
+noticed that does not clear the bar goes on the Linear issue as one comment:
+
+```
+mcp__Linear__save_comment issueId="SFN-<N>" body="Noticed in passing:
+- <path>: <one line>
+- <path>: <one line>"
+```
+
+Anything that does clear it is created directly in `Backlog` — never `Triage` —
+with labels, priority, the parent's Project, a `related to SFN-<N>` relation,
+and `Spawned from SFN-<N>` as the body's first line. At most two per PR; a third
+means stop and report an epic in the PR summary instead.
+
 Then move the issue to review and subscribe the session to the PR:
 
 ```
@@ -413,6 +427,8 @@ Never mark an SFEP `Implemented` for "parsed but not enforced".
   fallback (merge SHA orphaned but content present in the seed), note it — a
   human may want to know why the SHA fell out of seed ancestry.
 - Anything that surprised you (worth recording for future grooming)
+- Follow-ups: issues filed (must be ≤ 2, each citing which bar clause it
+  cleared) and the `Noticed in passing` comment, or "none"
 
 Surface any deferral or mid-flight scope adjustment explicitly.
 

@@ -18,6 +18,7 @@ item actually is, kill what shouldn't exist, and groom the survivors to the
 | `groom` | **Pass 2 — GROOM.** Groom the next batch (default 5) of items you approved for `Ready`. |
 | `groom <n>` | Pass 2 with an explicit batch size. |
 | `SFN-123 SFN-456 …` | Pass 2 on exactly these issues, regardless of batch order. |
+| `age` | **Disposal floor.** Read-only sweep of `Backlog` for issues past the floor in `.claude/rules/follow-up-filing.md`; propose KILL; stop. |
 
 Pass 1 is **read-only**. It never writes. The two passes are separate so the
 keep/kill calls land in front of a human before grooming effort is spent, and so
@@ -54,6 +55,7 @@ Fetch `includeRelations=true` only for items whose blocker state you must resolv
 | **BACKLOG** | Real and understood, but not now: no current project, superseded soon, or deliberately deferred. | Set `type:*`/`area:*` + priority, → `Backlog`. No body work. |
 | **EPIC** | Too big for one session (an `L`, or "parent of many"). | Propose a Linear **Project**; hand to `/groom`. Never groom in place. |
 | **KILL** | Stale, already fixed, duplicate, or not actually a defect. | **Propose only.** Terminal states are a human call — see Constraints. |
+| **MERGE** | One root cause filed as several symptoms — same session, same file or subsystem, fixed by one change. | **Propose only.** Name the survivor; the others become `Duplicate` of it (human confirms) and their observations are folded into the survivor's body as a checklist before it is groomed. |
 | **MISFILED** | Not leaf work at all — a note, or an epic status thread. | Route to its real home (a Project description, an SFEP). |
 
 **Skip release trackers outright.** An issue titled `Release: vX.Y.Z` carrying
@@ -62,6 +64,12 @@ mirrored in from GitHub, which is why it lands in `Triage`. It is owned by
 release automation, enriched by `/release-plan`, and walks itself to `Done` when
 the cut closes its GitHub issue. Never groom, classify, or close one — exclude
 it from the counts and note it in one line under a `Skipped` heading.
+
+**Look for siblings before anything else.** Sort the lane by creator and
+creation time; issues filed minutes apart by the same session against the same
+file or subsystem are the MERGE candidates. One root cause groomed as one issue
+is one session and one CI run; three issues are three of each
+(`.claude/rules/pr-discipline.md` — the pool is sized for one PR).
 
 **Verify before proposing KILL.** "Already fixed" and "stale" are claims about
 the tree, not about the issue text — check the current source, a test, or the
@@ -118,6 +126,9 @@ EPIC (<n>)
 KILL (<n>) — proposed, awaiting your call
   SFN-321  <title> — <claim> (verified: <what you checked>)
 
+MERGE (<n>) — proposed, awaiting your call
+  SFN-233 ← SFN-234, SFN-235  <one-line root cause>; survivor keeps the checklist
+
 MISFILED (<n>)
   SFN-456  <title> — belongs in <destination>
 
@@ -128,6 +139,40 @@ Next: /triage groom   (grooms the first 5 READY items)
 ```
 
 Then **stop**. No writes in Pass 1.
+
+---
+
+## `age` — the disposal floor
+
+Read-only, like Pass 1. Proposes; never writes.
+
+```
+mcp__Linear__list_issues team="Sailfin" state="Backlog" limit=250 orderBy="updatedAt"
+```
+
+`state="Backlog"` matches the state **type** and returns `Ready` and `Blocked`
+too (`docs/conventions/linear-workflow.md` § Querying lanes) — filter to
+`status == "Backlog"` client-side before applying the floor. Page until
+`hasNextPage` is false.
+
+An issue is past the floor when **all** hold: status `Backlog`; priority Medium,
+Low, or none; no Project; `updatedAt` older than 45 days. Report:
+
+```
+Triage age — <date>
+
+<N> Backlog issues; <n> past the disposal floor.
+
+KILL (<n>) — proposed, awaiting your call
+  SFN-321  <title> — idle <d>d, <priority>, no project
+
+Near the floor (<n>) — idle 30–45d, same shape; no action proposed
+  SFN-322  <title>
+```
+
+Then **stop**. Confirmed kills are set to `Canceled` by a human with a one-line
+reason; an issue that is still real gets a Project or a priority, which takes
+it off the floor.
 
 ---
 
@@ -186,6 +231,7 @@ Remaining approved: <n>   → /triage groom
 - **Pass 1 writes nothing.** Not a label, not a priority. Its output is a report.
 - **Only the Triage lane.** Do not touch `Ready`, `In Progress`, `In Review`, or
   `Blocked` issues. Hygiene elsewhere in the queue is not this command's job.
+  The one exception is `age`, which *reads* `Backlog` and writes nothing.
 - **Native fields only.** Status, priority, estimate, project, and blockers are
   Linear-native. Labels are `type:*`/`area:*` (plus `seed-blocker`/`release:*`).
   Never a `size:*`/`priority:*`/`blocked` label — see
