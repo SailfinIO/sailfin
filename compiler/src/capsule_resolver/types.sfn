@@ -111,6 +111,16 @@ struct ResolverConsumer {
     // demand computation has not been audited against it — not because that
     // one symbol still forces it. Revisiting it is separate work.
     retain_full_runtime: boolean;
+    // SFN-988 (SFEP-0006 §4.6): merge the ROOT manifest's `[dev-dependencies]`
+    // into the resolved graph alongside `[dependencies]`. Set only by the
+    // `sfn test` consumers; `build`/`run`/`check` leave it off, since a
+    // dev-dep reaching a library or binary build would re-inflate the link set
+    // SFEP-0070 narrowed. Never transitive: a staged dep's own
+    // `[dev-dependencies]` are not walked regardless of this flag. The merge
+    // reaches only the source worklist — `manifest_dep_specs` stays
+    // `[dependencies]`-only by construction, so a `kind = "runtime"` capsule
+    // named under `[dev-dependencies]` is dropped rather than enumerated.
+    include_dev_dependencies: boolean;
 }
 
 fn empty_resolver_consumer() -> ResolverConsumer {
@@ -120,7 +130,8 @@ fn empty_resolver_consumer() -> ResolverConsumer {
         walk_project_src: false,
         include_host_as_dep: false,
         runtime_root: "",
-        retain_full_runtime: false
+        retain_full_runtime: false,
+        include_dev_dependencies: false
     };
 }
 

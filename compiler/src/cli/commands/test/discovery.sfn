@@ -194,7 +194,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
             walk_project_src: false,
             include_host_as_dep: true,
             runtime_root: runtime_root,
-            retain_full_runtime: true
+            retain_full_runtime: true,
+            include_dev_dependencies: true
         };
     }
     let manifest_path = _path_join_cmd(project_root, "capsule.toml");
@@ -205,7 +206,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
             walk_project_src: false,
             include_host_as_dep: true,
             runtime_root: runtime_root,
-            retain_full_runtime: true
+            retain_full_runtime: true,
+            include_dev_dependencies: true
         };
     }
     let manifest_text = fs.readFile(manifest_path);
@@ -217,7 +219,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
             walk_project_src: false,
             include_host_as_dep: true,
             runtime_root: runtime_root,
-            retain_full_runtime: true
+            retain_full_runtime: true,
+            include_dev_dependencies: true
         };
     }
     let parts = parse_scope_name(capsule_name);
@@ -231,7 +234,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
             walk_project_src: false,
             include_host_as_dep: true,
             runtime_root: runtime_root,
-            retain_full_runtime: true
+            retain_full_runtime: true,
+            include_dev_dependencies: true
         };
     }
     return ResolverConsumer {
@@ -240,7 +244,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
         walk_project_src: false,
         include_host_as_dep: true,
         runtime_root: runtime_root,
-        retain_full_runtime: true
+        retain_full_runtime: true,
+        include_dev_dependencies: true
     };
 }
 

@@ -1,0 +1,258 @@
+// Regressions for SFN-988: `[dev-dependencies]` are merged into the root
+// manifest's resolved graph for `sfn test` only. They are never merged for
+// `sfn build`/`run`/`check`, and never transitively — a dev-dep declared by a
+// dependency of the root manifest is not walked, only the root's own
+// `[dev-dependencies]` are (SFEP-0006 §4.6).
+//
+// The provider here is a fixture-local capsule, never a bundled stdlib one. A
+// bundled capsule would resolve from the compiler's own binary_dir regardless
+// of workspace/dev-dep status (SFN-352), which would test the wrong
+// mechanism.
+//
+// Fixtures are standalone (no `workspace.toml` anywhere in the tmp root, and
+// the tmp root sits outside the repo so no ancestor has one either). Inside a
+// workspace, membership alone resolves a sibling import (SFEP-0006 §4.5,
+// SFN-986) independent of `[dependencies]`/`[dev-dependencies]`, which would
+// make the effect under test unobservable.
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path,
+    with_tmp_dir
+} from "sfn/test";
+
+fn _build_env(label: string) -> string[] ![io] {
+    let mut child = clean_runner_env(nested_runner_scratch(label));
+    let repo = env.get("PWD");
+    child.push("SAILFIN_RUNTIME_ROOT=" + repo + "/runtime");
+    return child;
+}
+
+// `with_tmp_dir` removes its root on both the normal and the throwing path, so
+// anything written there is gone by the time a CI failure is read. Land build
+// output under the runner scratch instead, where it survives the assert.
+fn _log_failure(label: string, body: string) -> void ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/sfn-988-" + label + ".out", body);
+}
+
+// A minimal library provider. Not marked `[build] implicit = true`: that flag
+// selects the SFEP-0072 no-import-needed prelude leg, a different resolver
+// path than the written-import leg under test here.
+fn _write_provider(dir: string, name: string, value: string) -> void ![io] {
+    fs.createDirectory(dir + "/src", true);
+    fs.writeFile(dir + "/capsule.toml", "[capsule]\n" + "name = \"" + name
+        + "\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[dependencies]\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "kind = \"library\"\n"
+        + "entry = \"src/mod.sfn\"\n");
+    fs.writeFile(dir + "/src/mod.sfn", "fn lib_value() -> int {\n"
+        + "    return "
+        + value
+        + ";\n"
+        + "}\n\n"
+        + "export { lib_value };\n");
+}
+
+// The `app/` consumer manifest, parameterised on the `[dependencies]` and
+// `[dev-dependencies]` bodies so each test can choose which section declares
+// `demo/lib`.
+fn _write_app_manifest(dir: string, deps_body: string, dev_deps_body: string) -> void ![io] {
+    fs.writeFile(dir + "/capsule.toml", "[capsule]\n" + "name = \"demo/app\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[dependencies]\n"
+        + deps_body
+        + "\n"
+        + "[dev-dependencies]\n"
+        + dev_deps_body
+        + "\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+}
+
+test "dev-dependencies: a test target resolves a dev-dependency" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        // Positive control, run through the same `sfn test` plumbing but with
+        // no scoped import. If this does not pass, the harness itself is
+        // broken and the probe below would be unattributable.
+        fs.createDirectory(root + "/control/src", true);
+        fs.createDirectory(root + "/control/tests", true);
+        fs.writeFile(root + "/control/capsule.toml", "[capsule]\n"
+            + "name = \"demo/control\"\n"
+            + "version = \"0.1.0\"\n\n"
+            + "[dependencies]\n\n"
+            + "[capabilities]\n"
+            + "required = []\n\n"
+            + "[build]\n"
+            + "kind = \"binary\"\n"
+            + "entry = \"src/main.sfn\"\n");
+        fs.writeFile(root + "/control/src/main.sfn", "fn main() -> int {\n"
+            + "    return 0;\n"
+            + "}\n");
+        fs.writeFile(root + "/control/tests/control_test.sfn", "test \"control: "
+            + "harness runs\" {\n"
+            + "    assert 1 + 1 == 2;\n"
+            + "}\n");
+        let control_exit = process.run_capture([sfn_bin_path(), "test", root
+            + "/control/tests/control_test.sfn"], _build_env("sfn-988-control"));
+        let control_out = process.capture_take_stdout();
+        let control_err = process.capture_take_stderr();
+        if control_exit != 0 {
+            _log_failure("control", control_out + control_err);
+            return 2;
+        }
+
+        // `app/` declares `demo/lib` under `[dev-dependencies]` only.
+        fs.createDirectory(root + "/app/src", true);
+        fs.createDirectory(root + "/app/tests", true);
+        _write_app_manifest(root + "/app", "", "\"demo/lib\" = \"*\"\n");
+        _write_provider(root + "/app/capsules/demo/lib", "demo/lib", "41");
+        fs.writeFile(root + "/app/src/main.sfn", "fn main() -> int {\n"
+            + "    return 0;\n"
+            + "}\n");
+        fs.writeFile(root + "/app/tests/lib_test.sfn", "import { lib_value } "
+            + "from \"demo/lib\";\n\n"
+            + "test \"dev-dep probe: provider resolves\" {\n"
+            + "    assert lib_value() == 41;\n"
+            + "}\n");
+
+        let exit = process.run_capture([sfn_bin_path(), "test", root
+            + "/app/tests/lib_test.sfn"], _build_env("sfn-988-test"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        if exit != 0 { _log_failure("test", out + err); }
+        return exit;
+    });
+    assert result == 0;
+}
+
+test "dev-dependencies: a build target does not see a dev-dependency" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        // Same `app/` layout as the positive test, but `main.sfn` reaches for
+        // the dev-dep from a `sfn build` target rather than a test file.
+        // Dev-deps are test-target only (SFEP-0006 §4.6); a dev-dep reaching
+        // a library/binary build would re-inflate the link set SFEP-0070
+        // narrowed.
+        fs.createDirectory(root + "/app/src", true);
+        _write_provider(root + "/app/capsules/demo/lib", "demo/lib", "41");
+        fs.writeFile(root + "/app/src/main.sfn", "import { lib_value } from "
+            + "\"demo/lib\";\n\n"
+            + "fn main() -> int {\n"
+            + "    return lib_value() - 41;\n"
+            + "}\n");
+
+        // Positive control: the identical layout with `demo/lib` under
+        // `[dependencies]` must build and produce an artifact. Without it,
+        // any unrelated build failure would satisfy the negative below.
+        _write_app_manifest(root + "/app", "\"demo/lib\" = \"*\"\n", "");
+        let control_out = root + "/control-out";
+        let control_exit = process.run_capture([sfn_bin_path(), "build", "-o", control_out, root
+            + "/app/src/main.sfn"], _build_env("sfn-988-build-control"));
+        let control_text = process.capture_take_stdout() + process.capture_take_stderr();
+        if control_exit != 0 || !fs.exists(control_out) {
+            _log_failure("build-control", control_text);
+            return 2;
+        }
+
+        // Now the same manifest with the sections swapped.
+        _write_app_manifest(root + "/app", "", "\"demo/lib\" = \"*\"\n");
+        let output = root + "/app-out";
+        let exit = process.run_capture([sfn_bin_path(), "build", "-o", output, root
+            + "/app/src/main.sfn"], _build_env("sfn-988-build"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        _log_failure("build", out + err);
+        if exit == 0 { return 0; }
+        // Assert on the artifact, not on the message. Today an unresolved
+        // import surfaces as an ICE from the linker rather than a resolver
+        // diagnostic (SFN-990) — pinning current text would make this
+        // regression fail the day that is fixed, which is the wrong signal.
+        if fs.exists(output) { return 0; }
+        return 1;
+    });
+    assert result == 1;
+}
+
+test "dev-dependencies: a dependency's own dev-dependencies are not walked" ![io] {
+    let result = with_tmp_dir(fn (root: string) -> int {
+        // `app/` declares `demo/lib` as a normal dependency, so it is walked
+        // under both build and test. `demo/lib` itself declares
+        // `demo/hidden` under its own `[dev-dependencies]` — that section is
+        // never merged into the consumer's graph, transitively or otherwise.
+        fs.createDirectory(root + "/app/src", true);
+        fs.createDirectory(root + "/app/tests", true);
+        _write_app_manifest(root + "/app", "\"demo/lib\" = \"*\"\n", "");
+
+        fs.createDirectory(root + "/app/capsules/demo/lib/src", true);
+        fs.writeFile(root + "/app/capsules/demo/lib/capsule.toml", "[capsule]\n"
+            + "name = \"demo/lib\"\n"
+            + "version = \"0.1.0\"\n\n"
+            + "[dependencies]\n\n"
+            + "[dev-dependencies]\n"
+            + "\"demo/hidden\" = \"*\"\n\n"
+            + "[capabilities]\n"
+            + "required = []\n\n"
+            + "[build]\n"
+            + "kind = \"library\"\n"
+            + "entry = \"src/mod.sfn\"\n");
+        fs.writeFile(root + "/app/capsules/demo/lib/src/mod.sfn", "fn lib_value() -> int {\n"
+            + "    return 41;\n"
+            + "}\n\n"
+            + "export { lib_value };\n");
+
+        // `demo/hidden` must be present and in-tree-locatable for this test
+        // to be meaningful — without it, a resolver that had simply lost the
+        // capsule would look identical to one correctly excluding it. Do not
+        // delete it as unused setup.
+        _write_provider(root + "/app/capsules/demo/hidden", "demo/hidden", "7");
+
+        fs.writeFile(root + "/app/src/main.sfn", "fn main() -> int {\n"
+            + "    return 0;\n"
+            + "}\n");
+
+        // Positive control under this exact layout: the normal dep walks, so
+        // an import of `demo/lib` alone must pass. If this fails, the
+        // negative result below is unattributable to the transitive-dev-dep
+        // exclusion specifically.
+        fs.writeFile(root + "/app/tests/lib_test.sfn", "import { lib_value } "
+            + "from \"demo/lib\";\n\n"
+            + "test \"dev-dep probe: normal dep resolves\" {\n"
+            + "    assert lib_value() == 41;\n"
+            + "}\n");
+        let control_exit = process.run_capture([sfn_bin_path(), "test", root
+            + "/app/tests/lib_test.sfn"], _build_env("sfn-988-transitive-control"));
+        let control_out = process.capture_take_stdout();
+        let control_err = process.capture_take_stderr();
+        if control_exit != 0 {
+            _log_failure("transitive-control", control_out + control_err);
+            return 2;
+        }
+
+        fs.writeFile(root + "/app/tests/hidden_test.sfn", "import { lib_value }"
+            + " from \"demo/lib\";\n"
+            + "import { lib_value as hidden_value } from \"demo/hidden\";\n\n"
+            + "test \"dev-dep probe: transitive dev-dep is not walked\" {\n"
+            + "    assert lib_value() + hidden_value() == 48;\n"
+            + "}\n");
+        let exit = process.run_capture([sfn_bin_path(), "test", root
+            + "/app/tests/hidden_test.sfn"], _build_env("sfn-988-transitive"));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        _log_failure("transitive", out + err);
+        // Distinct from the control's 2 above: a broken harness must not be
+        // able to satisfy the negative assertion by accident.
+        if exit == 0 { return 0; }
+        return 1;
+    });
+    assert result == 1;
+}

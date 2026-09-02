@@ -272,7 +272,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         walk_project_src: false,
         include_host_as_dep: false,
         runtime_root: runtime_root,
-        retain_full_runtime: false
+        retain_full_runtime: false,
+        include_dev_dependencies: false
     };
     let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, run_consumer, "", ctx.compiler_path, "", binary_dir);
     if !run_capsule_result.success {
