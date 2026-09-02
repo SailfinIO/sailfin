@@ -1,0 +1,199 @@
+// compiler/tests/e2e/process_path_precedence_test.sfn
+//
+// SFN-1132: `_pw_app_name` (`runtime/sfn/platform/process_windows.sfn`) left
+// `lpApplicationName` NULL for a separator-free `argv[0]`, so `CreateProcessA`
+// ran its own module search — which consults `%SystemRoot%\System32` BEFORE
+// `PATH`. A bare `find`/`sort`/`timeout` therefore ran the DOS tool regardless
+// of `PATH`, silently: the DOS tool exits non-zero and callers read that as an
+// empty result rather than a wrong program. The fix resolves a bare `argv[0]`
+// against the calling process's `PATH` explicitly (`_pw_resolve_on_path`,
+// `SearchPathA` with an explicit directory list), matching `posix_spawnp`.
+// POSIX is unchanged.
+//
+// The regression test spawns a Sailfin-built `find.exe` placed ahead of
+// `%SystemRoot%\System32` on `PATH` and asserts on the GRANDCHILD's stdout
+// marker rather than on the driver's exit code. DOS `find` given `--sfn1132`
+// prints `FIND: Parameter format not correct` to stderr and exits 2, but the
+// DRIVER that spawns it via `process.run_capture` still exits 0 either way —
+// it only reports what happened. A test that asserted "driver rc == 0" would
+// pass identically against the broken runtime, which is exactly how this bug
+// stayed silent: the wrong program ran and looked like "nothing found."
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): both fixtures are compiled
+// Sailfin programs, spawned through `process.run_capture`. The nested builds
+// need `clang` and its linker, so `clean_runner_env(nested_runner_scratch(...))`
+// supplies the environment per `docs/conventions/e2e-tests.md`.
+import { contains } from "sfn/strings";
+import {
+    clean_runner_env,
+    clean_runner_env_without,
+    expect_eq_bool,
+    host_is_windows,
+    nested_runner_scratch,
+    sfn_bin_abs_path,
+    skip
+} from "sfn/test";
+
+// Prints a marker unique to this test so the assertion cannot be satisfied by
+// any other program that happens to be named `find` on the host.
+let MARKER_SRC: string = "fn main() -> int ![io] {\n"
+    + "    print(\"SFN1132_PATH_WINS\");\n"
+    + "    return 0;\n"
+    + "}\n";
+
+// Spawns the BARE name `find` with an empty child environment and echoes the
+// outcome, so the test observes the grandchild's identity through the
+// driver's own stdout rather than through the driver's exit code.
+let DRIVER_SRC: string = "fn main() -> int ![io] {\n"
+    + "    let _rc = process.run_capture([\"find\", \"--sfn1132\"], []);\n"
+    + "    let out = process.capture_take_stdout();\n"
+    + "    let _err = process.capture_take_stderr();\n"
+    + "    print(out);\n"
+    + "    return 0;\n"
+    + "}\n";
+
+fn _child_env(label: string) -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch(label));
+}
+
+// The DRIVER's built path. `-o` is honoured verbatim, so it carries `.exe`
+// only where the target adds one; both spellings are probed rather than
+// branching on the host, which keeps the selection an observation instead of
+// an assumption. The marker does NOT go through this — its name is the thing
+// under test, so `_build_marker` spells `.exe` itself.
+fn _built_path(base: string) -> string ![io] {
+    if fs.exists(base + ".exe") { return base + ".exe"; }
+    return base;
+}
+
+// The fixture directory. `fs.mkdtemp` rather than `scratch_root()`: this
+// directory becomes a `PATH` entry for the driver, and a `PATH` entry must be
+// absolute — `SAILFIN_TEST_SCRATCH` is commonly the relative `build/sailfin`,
+// which `SearchPathA` would resolve against whatever cwd the driver happens
+// to have. A bare-prefix `mkdtemp` anchors under `%TEMP%`, which is absolute,
+// and is unique per call, so two pooled runs cannot build into one another's
+// `bin/find.exe`.
+fn _fixture_dir() -> string ![io] {
+    return fs.mkdtemp("sfn1132-path-precedence-");
+}
+
+// Builds the marker binary at `<dir>/bin/find.exe`, returning its path or ""
+// when the build failed.
+//
+// The `.exe` is spelled out rather than left to `_built_path`: `-o` is
+// honoured verbatim, and both the PATH resolver and `CreateProcessA` append
+// `.exe` to an extensionless bare name, so a fixture written as plain `find`
+// is invisible to the lookup under test and the DOS tool wins by default —
+// which would make this test fail against the fixed runtime, not the broken
+// one.
+fn _build_marker(dir: string, label: string) -> string ![io] {
+    let bin_dir = dir + "/bin";
+    fs.createDirectory(bin_dir, true);
+    let src = dir + "/marker.sfn";
+    fs.writeFile(src, MARKER_SRC);
+    let out_path = bin_dir + "/find.exe";
+    let rc = process.run_capture([sfn_bin_abs_path(), "build", "-o", out_path, src], _child_env("pathprec-marker-"
+        + label));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if rc != 0 { return ""; }
+    if !fs.exists(out_path) { return ""; }
+    return out_path;
+}
+
+// Builds the driver binary at `<dir>/driver`, returning its launchable path
+// or "" when the build failed.
+fn _build_driver(dir: string, label: string) -> string ![io] {
+    let src = dir + "/driver.sfn";
+    fs.writeFile(src, DRIVER_SRC);
+    let base = dir + "/driver";
+    let rc = process.run_capture([sfn_bin_abs_path(), "build", "-o", base, src], _child_env("pathprec-driver-"
+        + label));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if rc != 0 { return ""; }
+    let built = _built_path(base);
+    if !fs.exists(built) { return ""; }
+    return built;
+}
+
+test "process: a bare argv[0] resolves on PATH ahead of System32" ![io] {
+    if !host_is_windows() {
+        skip("System32 precedence is a Win32 CreateProcessA behaviour");
+    }
+
+    let system_root = env.get("SystemRoot");
+    if system_root.length == 0 || !fs.exists(system_root
+        + "\\System32\\find.exe") {
+        skip("no System32 find.exe to collide with");
+    }
+
+    let dir = _fixture_dir();
+    assert dir.length > 0;
+    let marker = _build_marker(dir, "run");
+    let driver = _build_driver(dir, "run");
+    assert marker.length > 0;
+    assert driver.length > 0;
+
+    // The fixture directory goes FIRST so it wins the resolution, then the
+    // original `PATH` follows so `System32` (and its `find.exe`) is still
+    // reachable AFTER it — proving this measures precedence, not presence.
+    // Both spellings of the key are stripped because `getenv` returns the
+    // FIRST match and Windows conventionally spells it `Path`. An unset
+    // outer `PATH` is not appended: an empty trailing element would mean
+    // "the current directory" to `SearchPathA`.
+    let mut child_env = clean_runner_env_without(nested_runner_scratch("path-precedence-run"), ["PATH", "Path"]);
+    let outer_path = env.get("PATH");
+    let mut path_entry = "PATH=" + dir + "/bin";
+    if outer_path.length > 0 { path_entry = path_entry + ";" + outer_path; }
+    child_env.push(path_entry);
+
+    let rc = process.run_capture([driver], child_env);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 0;
+    assert contains(out, "SFN1132_PATH_WINS");
+}
+
+// The PATH resolver returns null on a miss and lets `CreateProcessA` fail the
+// spawn, so "not found" must stay a spawn failure, never a wrong-program
+// success. Not Windows-gated: POSIX `posix_spawnp` reports the same `-1`, and
+// running both legs pins the contract cross-platform.
+test "process: a bare argv[0] found nowhere is a spawn failure" ![io] {
+    let rc = process.run_capture(["sfn1132_definitely_absent_program", "--x"], []);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert rc == -1;
+}
+
+// The PATH branch is entered only for a separator-free name; an absolute or
+// relative path takes the SFN-1144 branch unchanged.
+test "process: an absolute argv[0] bypasses PATH resolution" ![io] {
+    let rc = process.run_capture([sfn_bin_abs_path(), "--version"], []);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert rc == 0;
+}
+
+// ── The Linux-runnable half of the guard ──────────────────────────────
+// `process_windows.sfn` is compiled only for a Windows target, and the one
+// test above that exercises the fix skips everywhere else — while Windows CI
+// does not yet run the test tier (SFN-981). Without a static check the fix
+// could be reverted with every gating leg green. Same whole-file `contains`
+// form as the SFN-1104 guard in `process_relative_argv0_test.sfn`, for the
+// same reason: tokens unique to the fix, no string slicing, no in-loop array
+// growth.
+test "process: the Windows spawn resolves a bare argv[0] on PATH explicitly (SFN-1132)" ![io] {
+    let src = fs.readFile("runtime/sfn/platform/process_windows.sfn");
+
+    // The explicit-directory-list `SearchPathA` is what bypasses the
+    // system-directory-first order; a NULL first argument would re-enter it.
+    assert expect_eq_bool(contains(src, "extern fn SearchPathA(path: *u8, file: *u8, ext: *u8, cap: i32, buf: *u8, file_part: *u8) -> i32;"), true).ok;
+    assert expect_eq_bool(contains(src, "fn _pw_resolve_on_path(name: *u8) -> *u8 ![io] {"), true).ok;
+    assert expect_eq_bool(contains(src, "SearchPathA(path_env, name, ext, cap as i32, buf, null)"), true).ok;
+
+    // The bare-name branch of `_pw_app_name` routes through it rather than
+    // returning NULL.
+    assert expect_eq_bool(contains(src, "if !has_separator && !has_drive_prefix { return _pw_resolve_on_path(a); }"), true).ok;
+}

@@ -28,7 +28,9 @@
 // asserted here because no single bare executable name is guaranteed on all
 // three CI hosts. It is covered continuously instead: every build in the
 // repo spawns `clang` and `llvm-link` by bare name, so a regression there
-// fails the build before it could reach a test.
+// fails the build before it could reach a test. The ORDER of that search
+// (`PATH` ahead of `System32`) is SFN-1132's concern and is pinned in
+// `process_path_precedence_test.sfn`.
 //
 // No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives the compiler binary as
 // a subprocess through the os capsule, with no shell.
@@ -132,11 +134,12 @@ test "process: the Windows spawn resolves a relative argv[0] itself (SFN-1104)" 
     // `CreateProcessA` resolves against the working directory...
     assert expect_eq_bool(contains(src, "if b == 47 || b == 92 {"), true).ok;
 
-    // ...and a bare name yields NULL, keeping the `PATH` search that `clang`
-    // and `llvm-link` are spawned by. Naming a bare one in
-    // `lpApplicationName` would break it twice over, since that also
-    // suppresses the implicit `.exe` suffix.
-    assert expect_eq_bool(contains(src, "return 0 as *u8;"), true).ok;
+    // ...and a bare name is resolved on `PATH` explicitly (SFN-1132), which
+    // keeps the `PATH` search that `clang` and `llvm-link` are spawned by
+    // while putting `PATH` ahead of the system directory. The resolver
+    // re-applies the implicit `.exe` suffix `CreateProcessA` would have, and
+    // yields NULL on a miss so the legacy search still runs.
+    assert expect_eq_bool(contains(src, "return _pw_resolve_on_path(a);"), true).ok;
 
     // Null-cwd calls pass through a relative path, while the cwd-aware capture
     // and spawn calls resolve it from the requested directory.
