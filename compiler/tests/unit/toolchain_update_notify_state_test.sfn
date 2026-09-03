@@ -1,0 +1,274 @@
+// Unit coverage for `compiler/src/toolchain/update_notify_state.sfn`
+// (SFEP-0073 §3.6, SFN-1073). The eligibility grammar, lease staleness, and
+// notice parse/render are pure — no `![io]`, no filesystem — matching
+// `toolchain_user_default_test.sfn`'s discipline.
+//
+// The `![io]` lease round-trip (`toolchain_update_lease_acquire`/`_release`
+// against a scratch `SAILFIN_CONFIG_DIR`) is intentionally NOT covered here:
+// there is no process-global setenv fixture in this codebase (mutating
+// process env is unsound under the parallel unit-test runner — see
+// `docs/conventions/e2e-tests.md`), and `toolchain_user_default_dir` reads
+// `SAILFIN_CONFIG_DIR` internally with no override parameter, so a scratch
+// directory cannot be threaded into it from an in-process unit test. That
+// effectful round-trip needs an e2e subprocess test in the SFN-1073 CLI
+// slice instead.
+import { index_of, starts_with } from "../../src/string_utils";
+import {
+    ToolchainUpdateNotice,
+    toolchain_update_check_parse,
+    toolchain_update_check_render,
+    toolchain_update_check_text_schema,
+    toolchain_update_eligible_at,
+    toolchain_update_lease_is_stale,
+    toolchain_update_notice_line,
+    toolchain_update_notice_parse,
+    toolchain_update_notice_render
+} from "../../src/toolchain/update_notify_state";
+
+fn _linux() -> string { return "x86_64-unknown-linux-gnu"; }
+
+fn _darwin() -> string { return "aarch64-apple-darwin"; }
+
+// -- eligibility record: parse/render --------------------------------------
+test "toolchain update check: parse of empty text yields no record" {
+    let parsed = toolchain_update_check_parse("", _linux());
+    assert parsed.next_epoch == 0;
+}
+
+test "toolchain update check: parse of missing host yields no record" {
+    let text = toolchain_update_check_render("", _darwin(), 1000);
+    let parsed = toolchain_update_check_parse(text, _linux());
+    assert parsed.next_epoch == 0;
+}
+
+test "toolchain update check: parse rejects a wrong magic" {
+    let text = "not-the-magic 1\n" + _linux() + ".next_epoch = 1000\n";
+    let parsed = toolchain_update_check_parse(text, _linux());
+    assert parsed.next_epoch == 0;
+}
+
+test "toolchain update check: parse rejects a schema above max" {
+    let text = "sailfin-toolchain-update-check 2\n" + _linux()
+        + ".next_epoch = 1000\n";
+    let parsed = toolchain_update_check_parse(text, _linux());
+    assert parsed.next_epoch == 0;
+}
+
+test "toolchain update check: round-trip preserves a recorded eligibility" {
+    let text = toolchain_update_check_render("", _linux(), 1700000000);
+    let parsed = toolchain_update_check_parse(text, _linux());
+    assert parsed.next_epoch == 1700000000;
+}
+
+test "toolchain update check: render into empty text produces header and lines" {
+    let text = toolchain_update_check_render("", _linux(), 1700000000);
+    assert starts_with(text, "sailfin-toolchain-update-check 1\n");
+    assert index_of(text, _linux() + ".next_epoch = 1700000000") >= 0;
+}
+
+test "toolchain update check: render preserves an unrelated host verbatim" {
+    let seeded = toolchain_update_check_render("", _darwin(), 1600000000);
+    let text = toolchain_update_check_render(seeded, _linux(), 1700000000);
+    assert index_of(text, _darwin() + ".next_epoch = 1600000000") >= 0;
+    let parsed_darwin = toolchain_update_check_parse(text, _darwin());
+    assert parsed_darwin.next_epoch == 1600000000;
+}
+
+test "toolchain update check: render replaces an existing record rather than duplicating" {
+    let seeded = toolchain_update_check_render("", _linux(), 1600000000);
+    let text = toolchain_update_check_render(seeded, _linux(), 1700000000);
+    assert index_of(text, _linux() + ".next_epoch = 1700000000") >= 0;
+    assert index_of(text, _linux() + ".next_epoch = 1600000000") < 0;
+}
+
+test "toolchain update check: text_schema is 0 for empty and well-formed text" {
+    assert toolchain_update_check_text_schema("") == 0;
+    let text = toolchain_update_check_render("", _linux(), 1000);
+    assert toolchain_update_check_text_schema(text) == 1;
+}
+
+test "toolchain update check: text_schema surfaces a newer build's schema" {
+    let text = "sailfin-toolchain-update-check 2\n" + _linux()
+        + ".next_epoch = 1000\n";
+    // Above `TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA` (1): this is what
+    // `toolchain_update_check_write`'s downgrade guard refuses to write
+    // over, since the `![io]` write path is not reachable from an
+    // in-process unit test (see file header).
+    assert toolchain_update_check_text_schema(text) == 2;
+}
+
+// -- eligibility timing -----------------------------------------------------
+test "toolchain update eligible_at: now equal to next_epoch is eligible" {
+    assert toolchain_update_eligible_at(1000, 1000);
+}
+
+test "toolchain update eligible_at: one second before next_epoch is not eligible" {
+    assert ! toolchain_update_eligible_at(1000, 999);
+}
+
+test "toolchain update eligible_at: a never-recorded next_epoch of 0 is always eligible" {
+    assert toolchain_update_eligible_at(0, 0);
+}
+
+// -- lease staleness ----------------------------------------------------
+test "toolchain update lease: a fresh lease is not stale" {
+    assert ! toolchain_update_lease_is_stale(1000, 1000);
+}
+
+test "toolchain update lease: exactly the lease window is stale" {
+    assert toolchain_update_lease_is_stale(1000, 1030);
+}
+
+test "toolchain update lease: one second past the lease window is stale" {
+    assert toolchain_update_lease_is_stale(1000, 1031);
+}
+
+test "toolchain update lease: one second short of the lease window is not stale" {
+    assert ! toolchain_update_lease_is_stale(1000, 1029);
+}
+
+test "toolchain update lease: an unparsable held_epoch of 0 is stale" {
+    assert toolchain_update_lease_is_stale(0, 1000);
+}
+
+test "toolchain update lease: a negative held_epoch is stale" {
+    assert toolchain_update_lease_is_stale(-1, 1000);
+}
+
+test "toolchain update lease: a held_epoch in the future is stale" {
+    assert toolchain_update_lease_is_stale(2000, 1000);
+}
+
+// -- notice line: render/parse ----------------------------------------------
+test "toolchain update notice: line round-trips through parse" {
+    let line = toolchain_update_notice_line("0.10.6", "0.10.7", "stable", "ok");
+    let parsed = toolchain_update_notice_parse(line);
+    assert parsed.ok;
+    assert parsed.current == "0.10.6";
+    assert parsed.candidate == "0.10.7";
+    assert parsed.channel == "stable";
+    assert parsed.state == "ok";
+}
+
+test "toolchain update notice: parse rejects an empty line" {
+    let parsed = toolchain_update_notice_parse("");
+    assert ! parsed.ok;
+}
+
+test "toolchain update notice: parse rejects a wrong magic" {
+    let parsed = toolchain_update_notice_parse("not-the-magic 1\t0.10.6\t0.10.7\tstable\tok");
+    assert ! parsed.ok;
+}
+
+test "toolchain update notice: parse rejects a schema above max" {
+    let parsed = toolchain_update_notice_parse("sailfin-update-notice 2\t0.10.6\t0.10.7\tstable\tok");
+    assert ! parsed.ok;
+}
+
+test "toolchain update notice: parse rejects a truncated field list" {
+    let parsed = toolchain_update_notice_parse("sailfin-update-notice 1\t0.10.6\t0.10.7");
+    assert ! parsed.ok;
+}
+
+// -- notice line: the child's `print` newline must not leak into `state` ----
+// `print` (`runtime/sfn/io.sfn`) appends "\n" to the child's single stdout
+// line, and the parent hands the raw captured bytes straight to
+// `toolchain_update_notice_parse` (SFN-1073). Before the transport fix, that
+// trailing newline rode on the LAST field — `state` — so `"revoked"` arrived
+// as `"revoked\n"`, compared unequal to `"revoked"` everywhere downstream,
+// and every security notice silently downgraded to the plain "update
+// available" text.
+test "toolchain update notice: a trailing newline does not leak into the state field" {
+    let line = toolchain_update_notice_line("0.10.6", "0.11.0", "stable", "revoked");
+    let parsed = toolchain_update_notice_parse(line + "\n");
+    assert parsed.ok;
+    assert parsed.state == "revoked";
+}
+
+test "toolchain update notice: a trailing CRLF does not leak into the state field" {
+    let line = toolchain_update_notice_line("0.10.6", "0.11.0", "stable", "revoked");
+    let parsed = toolchain_update_notice_parse(line + "\r\n");
+    assert parsed.ok;
+    assert parsed.state == "revoked";
+}
+
+test "toolchain update notice: a trailing newline does not leak into an advisory state" {
+    let line = toolchain_update_notice_line("0.10.6", "0.11.0", "stable", "advisory");
+    let parsed = toolchain_update_notice_parse(line + "\n");
+    assert parsed.ok;
+    assert parsed.state == "advisory";
+}
+
+test "toolchain update notice: trailing content after the first newline is ignored" {
+    let line = toolchain_update_notice_line("0.10.6", "0.11.0", "stable", "revoked");
+    let parsed = toolchain_update_notice_parse(line + "\ntrailing junk");
+    assert parsed.ok;
+    assert parsed.state == "revoked";
+}
+
+// Render, end to end through the transport: pins the actual user-visible
+// behavior a bare parse-field assertion cannot — that a real spawned child's
+// line, newline included, still produces the correct security wording.
+test "toolchain update notice: a revoked line renders the security-required text through the transport" {
+    let line = toolchain_update_notice_line("0.10.6", "0.11.0", "stable", "revoked");
+    let rendered = toolchain_update_notice_render(toolchain_update_notice_parse(line
+        + "\n"));
+    assert index_of(rendered, "security update required") >= 0;
+}
+
+test "toolchain update notice: an advisory line renders the security-available text through the transport" {
+    let line = toolchain_update_notice_line("0.10.6", "0.11.0", "stable", "advisory");
+    let rendered = toolchain_update_notice_render(toolchain_update_notice_parse(line
+        + "\n"));
+    assert index_of(rendered, "security update available") >= 0;
+}
+
+// -- notice render: all states plus the empty-candidate case ----------------
+fn _notice(candidate: string, state: string) -> ToolchainUpdateNotice {
+    return ToolchainUpdateNotice {
+        ok: true,
+        current: "0.10.6",
+        candidate: candidate,
+        channel: "stable",
+        state: state
+    };
+}
+
+test "toolchain update notice render: ok state names the install command" {
+    let text = toolchain_update_notice_render(_notice("0.10.7", "ok"));
+    assert text == "update available: sfn 0.10.7 (current: 0.10.6)\n"
+        + "  install it with: sfn toolchain update stable";
+}
+
+test "toolchain update notice render: advisory state names the advisory" {
+    let text = toolchain_update_notice_render(_notice("0.10.7", "advisory"));
+    assert text == "security update available: sfn 0.10.7 (current: 0.10.6 has a published advisory)\n"
+        + "  install it with: sfn toolchain update stable";
+}
+
+test "toolchain update notice render: revoked state names the revocation" {
+    let text = toolchain_update_notice_render(_notice("0.10.7", "revoked"));
+    assert text == "security update required: sfn 0.10.7 (current: 0.10.6 is revoked)\n"
+        + "  install it with: sfn toolchain update stable";
+}
+
+test "toolchain update notice render: an unrecognized state renders as ok" {
+    let text = toolchain_update_notice_render(_notice("0.10.7", "bogus"));
+    assert text == "update available: sfn 0.10.7 (current: 0.10.6)\n"
+        + "  install it with: sfn toolchain update stable";
+}
+
+test "toolchain update notice render: an empty candidate renders nothing" {
+    assert toolchain_update_notice_render(_notice("", "ok")) == "";
+}
+
+test "toolchain update notice render: a not-ok notice renders nothing" {
+    let notice = ToolchainUpdateNotice {
+        ok: false,
+        current: "0.10.6",
+        candidate: "0.10.7",
+        channel: "stable",
+        state: "ok"
+    };
+    assert toolchain_update_notice_render(notice) == "";
+}

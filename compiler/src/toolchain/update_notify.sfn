@@ -1,0 +1,320 @@
+// compiler/src/toolchain/update_notify.sfn
+//
+// The bounded, opportunistic update-notice epilogue (SFEP-0073 §3.6,
+// SFN-1073). After an eligible, successful, interactive command, the parent
+// spawns a child `sfn toolchain notify-check` that performs one signed-index
+// check, polls it against a `monotonic_millis()` deadline, and SIGKILLs it at
+// `TOOLCHAIN_UPDATE_BUDGET_MS`. Every failure arm — depth, exit status,
+// argv shape, CI, non-interactive, policy, ineligible, lease contention,
+// spawn failure, timeout, non-zero exit, unparsable output — is silent: it
+// never changes the wrapped command's exit status or ordinary output.
+// Design gate: `docs/proposals/design-notes/sfn-1073-bounded-update-check.md`.
+import { _resolve_test_self_path } from "../cli/commands/test/pool";
+import { CliContext } from "../cli/context";
+import { starts_with, strings_equal } from "../string_utils";
+import { resolve_compiler_version } from "../version";
+import {
+    TOOLCHAIN_RELEASE_REVOKED,
+    toolchain_channel_canonical,
+    toolchain_release_state
+} from "./channel";
+import { toolchain_current_host } from "./host";
+import {
+    toolchain_revocations_corrupt,
+    toolchain_revocations_read,
+    toolchain_sequence_record
+} from "./index_cache";
+import { toolchain_fetch_index } from "./install";
+import { toolchain_policy_decide, toolchain_policy_now_epoch } from "./release_policy";
+import { toolchain_versions_base } from "./store";
+import {
+    TOOLCHAIN_UPDATE_INTERVAL_SECS,
+    toolchain_update_assume_tty,
+    toolchain_update_check_read,
+    toolchain_update_check_write,
+    toolchain_update_eligible_at,
+    toolchain_update_env_is_ci,
+    toolchain_update_lease_acquire,
+    toolchain_update_lease_release,
+    toolchain_update_notice_line,
+    toolchain_update_notice_parse,
+    toolchain_update_notice_render,
+    toolchain_update_streams_interactive
+} from "./update_notify_state";
+import {
+    TOOLCHAIN_UPDATE_POLICY_NOTIFY,
+    toolchain_network_refusal,
+    toolchain_update_plan,
+    toolchain_update_policy_read
+} from "./update_policy";
+import { toolchain_user_default_read } from "./user_default";
+
+// SFEP-0073 §3.6 hard bound — the whole additional wall time this epilogue
+// may cost, including process creation, DNS, connect, TLS, and body read.
+// See the design note §2 for why `SIGKILL` makes this bound real regardless
+// of where the child is blocked.
+let TOOLCHAIN_UPDATE_BUDGET_MS: int = 500;
+
+// Funnel re-entry depth, the same pattern as `cli/verdict.sfn::_verdict_depth`
+// (mirrored, not shared: `verdict_funnel_exit` has already decremented its own
+// counter by the time this module runs, so a shared counter would read one
+// re-entry level shallower than the CLI's actual descent). Bare-file dispatch
+// re-enters `sailfin_cli_main_with_paths` as `["run", <file>]`, so without
+// this guard the notice would fire once per re-entry rather than once per
+// outer invocation.
+let mut _update_notify_depth: int = 0;
+
+fn update_notify_enter() -> void { _update_notify_depth += 1; }
+
+fn _update_notify_requests_json(args: string[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= args.length { break; }
+        if args[index] == "--json" { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// `toolchain` excludes the child leaf itself and prevents recursion; `dev` is
+// the high-frequency compiler-developer surface; the rest are already
+// config/help/meta verbs where a notice is noise.
+fn _update_notify_excluded_head(head: string) -> boolean {
+    if strings_equal(head, "toolchain") { return true; }
+    if strings_equal(head, "config") { return true; }
+    if strings_equal(head, "dev") { return true; }
+    if strings_equal(head, "login") { return true; }
+    if strings_equal(head, "completion") { return true; }
+    if strings_equal(head, "help") { return true; }
+    return strings_equal(head, "version");
+}
+
+fn _update_notify_work_root() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let temp = env.get("TMPDIR");
+    if temp.length > 0 { return temp; }
+    return "/tmp";
+}
+
+// Spawn `<self> toolchain notify-check`, bounded to `TOOLCHAIN_UPDATE_BUDGET_MS`
+// of total wall time from just before `spawn_with_env` (process creation is
+// charged against the budget, not added to it). Mirrors
+// `dev_verify.sfn::_dv_run_bounded` / `test/pool.sfn::_reap_test_child`,
+// narrowed to a single stdout accumulator and no re-emission — this is a
+// silent background check, not a supervised phase. `handle_wait` is the sole
+// reaper and runs unconditionally, including after a kill, or the child is
+// left a zombie. Returns "" on every failure arm: spawn failure, timeout, or a
+// non-zero exit.
+fn _update_notify_run_bounded(compiler_path: string, binary_dir: string) -> string ![clock, io] {
+    let mut self_exe = compiler_path;
+    if self_exe.length == 0 {
+        self_exe = _resolve_test_self_path(binary_dir);
+    }
+    if self_exe.length == 0 { return ""; }
+
+    // Full environment passthrough: the child must resolve the same
+    // `HOME`/`SAILFIN_CONFIG_DIR`/`INSTALL_BASE`/`SAILFIN_TOOLCHAIN_RELEASE_BASE`
+    // as the parent. The "never thread raw `process.environ()`" rule in
+    // `.claude/rules/no-bash-e2e.md` is about a nested *test runner* inheriting
+    // the parent pool's orchestration keys — this is a production notice
+    // child, not a nested test runner, so that rule does not apply here.
+    let env_snapshot = process.environ();
+
+    let start_ms = monotonic_millis();
+    let handle = process.spawn_with_env([self_exe, "toolchain", "notify-check"], env_snapshot);
+    if handle == 0 { return ""; }
+
+    let mut out_buf: string = "";
+    let mut killed: boolean = false;
+    loop {
+        if process.handle_stdout_at_eof(handle) && process.handle_stderr_at_eof(handle) {
+            break;
+        }
+        let remaining: int = TOOLCHAIN_UPDATE_BUDGET_MS - ((monotonic_millis() - start_ms) as int);
+        if remaining <= 0 {
+            process.handle_kill(handle);
+            killed = true;
+            break;
+        }
+        let out_fd = process.handle_stdout_fd(handle);
+        let err_fd = process.handle_stderr_fd(handle);
+        let mut fds: int[] = [];
+        if out_fd >= 0 { fds.push(out_fd); }
+        if err_fd >= 0 { fds.push(err_fd); }
+        let mut read_out: boolean = false;
+        let mut read_err: boolean = false;
+        if fds.length == 0 {
+            // Windows: the fd accessors are -1 by design and `io.poll_any` is
+            // a -1 stub (#1540). Drive the framed reads directly.
+            read_out = !process.handle_stdout_at_eof(handle);
+            read_err = !process.handle_stderr_at_eof(handle);
+        } else {
+            let ready = io.poll_any(fds, remaining);
+            if ready < 0 {
+                if ((monotonic_millis() - start_ms) as int) >= TOOLCHAIN_UPDATE_BUDGET_MS {
+                    process.handle_kill(handle);
+                    killed = true;
+                    break;
+                }
+                continue;
+            }
+            read_out = ready == out_fd;
+            read_err = ready == err_fd;
+        }
+        if read_out {
+            let chunk = process.handle_read_bytes_stdout(handle, 65536);
+            if chunk.length > 0 { out_buf = out_buf + chunk; }
+        }
+        if read_err {
+            // Drained and discarded, not accumulated. The child is contracted
+            // to print nothing on stderr, but a pipe that is never read fills
+            // and blocks the writer — which would park the child until the
+            // deadline kills it and turn "the child said nothing" into a lost
+            // 500 ms on every check.
+            let _ = process.handle_read_bytes_stderr(handle, 65536);
+        }
+    }
+    let rc = process.handle_wait(handle);
+    if killed { return ""; }
+    if rc != 0 { return ""; }
+    return out_buf;
+}
+
+// Called at the CLI's single exit funnel, after `verdict_funnel_exit` and
+// before the funnel returns. Cheapest gate first, and no network access until
+// every gate has passed — a suppressed invocation must never read a file it
+// does not need and must never touch the network (§1b of the SFN-1073 spec).
+fn update_notify_exit(rc: int, argv: string[], compiler_path: string, binary_dir: string) -> void ![clock, io] {
+    _update_notify_depth -= 1;
+    if _update_notify_depth > 0 { return; }
+    if rc != 0 { return; }
+    if argv.length == 0 { return; }
+    if starts_with(argv[0], "-") { return; }
+    if _update_notify_excluded_head(argv[0]) { return; }
+    if _update_notify_requests_json(argv) { return; }
+    // CI detection is unconditional: the test seam below deliberately cannot
+    // reach it, so no way of setting that seam can cause a network check on a
+    // CI runner — and the CI gate stays testable for real rather than
+    // tautologically.
+    if toolchain_update_env_is_ci() { return; }
+    // The TTY gate is the only one the seam bypasses, and it bypasses nothing
+    // below this point — policy, eligibility, the lease, and every network
+    // refusal still apply. See
+    // `update_notify_state.sfn::toolchain_update_assume_tty` for why it exists.
+    if !toolchain_update_assume_tty() {
+        if !toolchain_update_streams_interactive() { return; }
+    }
+    // `manual` must suppress the opportunistic check while still permitting
+    // explicit commands, unlike `toolchain_network_refusal()` which
+    // deliberately treats `notify` and `manual` alike
+    // (`update_policy.sfn:88-90`, naming SFN-1073). Only `notify` proceeds.
+    if !strings_equal(toolchain_update_policy_read(), TOOLCHAIN_UPDATE_POLICY_NOTIFY) {
+        return;
+    }
+
+    let now = toolchain_policy_now_epoch();
+    let host = toolchain_current_host();
+    let rec = toolchain_update_check_read(host.triple);
+    if !toolchain_update_eligible_at(rec.next_epoch, now) { return; }
+    // Without a recorded update track the child has no channel to resolve and
+    // declines (see `update_notify_child_run`), so checking here — one file
+    // read on an already-eligible path — avoids acquiring the lease, burning
+    // the seven-day window, and paying up to the full budget to reach a
+    // decision that was available before the spawn. This is every user who
+    // installed via the bootstrap script and has never run
+    // `sfn toolchain update <channel>`.
+    if toolchain_user_default_read(host.triple).track.length == 0 { return; }
+    // False means another process is already checking; contenders proceed
+    // with their original command (SFEP-0073 §3.6).
+    if !toolchain_update_lease_acquire(host.triple, now) { return; }
+
+    // Load-bearing: advance eligibility BEFORE any network access, so
+    // success, timeout, offline, and malformed all wait the same interval.
+    // Never conditional on the child's outcome. If the write itself fails,
+    // release the lease and decline — we must not check without having
+    // recorded that we did.
+    if !toolchain_update_check_write(host.triple, now
+        + TOOLCHAIN_UPDATE_INTERVAL_SECS) {
+        toolchain_update_lease_release(host.triple, now);
+        return;
+    }
+
+    let stdout = _update_notify_run_bounded(compiler_path, binary_dir);
+    toolchain_update_lease_release(host.triple, now);
+
+    if stdout.length == 0 { return; }
+    let notice = toolchain_update_notice_parse(stdout);
+    let rendered = toolchain_update_notice_render(notice);
+    // stderr only — stdout is the wrapped command's output contract.
+    if rendered.length > 0 { print.err(rendered); }
+}
+
+// SFN-1073 internal: the hidden `sfn toolchain notify-check` leaf spawned
+// only by `update_notify_exit`'s bounded child. Performs the one signed-index
+// check, records the accepted sequence, and prints exactly one
+// machine-readable line to stdout — nothing else, ever, since the parent
+// parses this stream.
+fn update_notify_child_run(ctx: CliContext) -> int ![clock, io, net] {
+    // The parent's gate chain already proved the policy is `notify`, but this
+    // leaf is reachable directly (`sfn toolchain notify-check`), and
+    // `toolchain_fetch_index` documents that its caller enforces the refusal
+    // first (`install.sfn:596`). Without this, typing the leaf under the
+    // `disabled` air-gap policy contacts the release endpoint — the one thing
+    // SFEP-0073 §3.6 says that policy must make impossible. Silent, like
+    // every other arm here: the parent parses this stream.
+    if toolchain_network_refusal().length > 0 { return 1; }
+
+    let host = toolchain_current_host();
+    if host.triple.length == 0 { return 1; }
+    let versions_base = toolchain_versions_base();
+    if versions_base.length == 0 { return 1; }
+
+    let index = toolchain_fetch_index(versions_base, _update_notify_work_root());
+    if !index.ok { return 1; }
+
+    let recorded = toolchain_user_default_read(host.triple);
+    let mut current: string = recorded.version;
+    if current.length == 0 {
+        current = resolve_compiler_version(ctx.binary_dir);
+    }
+
+    // No recorded track means `sfn toolchain update` itself would refuse for
+    // want of an explicit channel (`update.sfn:139-152`); there is no default
+    // channel to fall back to, so decline rather than inventing one.
+    let mut channel: string = "";
+    if recorded.track.length > 0 {
+        channel = toolchain_channel_canonical(recorded.track);
+    }
+    if channel.length == 0 { return 1; }
+
+    if toolchain_revocations_corrupt(versions_base) { return 1; }
+    let known = toolchain_revocations_read(versions_base);
+
+    let plan = toolchain_update_plan(index, known, channel, host.triple, current);
+    if !plan.ok { return 1; }
+
+    // SFEP-0073 §3.6: a successful check records the accepted signed-index
+    // sequence.
+    if !toolchain_sequence_record(versions_base, index.sequence) { return 1; }
+
+    // `revoked` is read from the release state, never from
+    // `toolchain_policy_decide`'s verdict. That verdict answers "may this be
+    // installed", and it is false for three refusals that are not
+    // revocations — no published asset for this host triple, an
+    // unestablishable signing key, and an unavailable index
+    // (`release_policy.sfn:258-280`). Inferring revocation from it would tell
+    // a user whose triple simply has no asset that their toolchain is
+    // cryptographically unsafe, which is both false and exactly the kind of
+    // security overclaim this repo refuses to ship.
+    let outcome = toolchain_policy_decide(index, known, current, host.triple, true);
+    let mut state: string = "ok";
+    if toolchain_release_state(index, known, current) == TOOLCHAIN_RELEASE_REVOKED {
+        state = "revoked";
+    } else if outcome.advisories.length > 0 { state = "advisory"; }
+
+    print(toolchain_update_notice_line(current, plan.candidate, plan.channel, state));
+    return 0;
+}
+
+export { update_notify_enter, update_notify_exit, update_notify_child_run };
