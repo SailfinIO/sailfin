@@ -65,11 +65,27 @@ fn _set_old_mtime(path: string, year: string) -> int ![io] {
 }
 
 fn _age_cache_tree(path: string) -> int ![io] {
-    if host_is_windows() {
-        return _run_powershell("Get-ChildItem -LiteralPath $args[0] -Directory -Recurse | ForEach-Object { $_.LastWriteTime = [datetime]'2000-01-01T00:00:00' }", [path]);
+    let prefixes = fs.listDirectory(path);
+    let mut i = 0;
+    loop {
+        if i >= prefixes.length { break; }
+        let prefix_dir = path + "/" + prefixes[i];
+        if fs.is_directory(prefix_dir) {
+            let entries = fs.listDirectory(prefix_dir);
+            let mut j = 0;
+            loop {
+                if j >= entries.length { break; }
+                let entry_dir = prefix_dir + "/" + entries[j];
+                if fs.is_directory(entry_dir) {
+                    let rc = _set_old_mtime(entry_dir, "2000");
+                    if rc != 0 { return rc; }
+                }
+                j += 1;
+            }
+        }
+        i += 1;
     }
-    return process.run(["bash", "-c", "find '" + path
-        + "' -mindepth 2 -maxdepth 2 -type d -exec touch -t 200001010000 {} +"]);
+    return 0;
 }
 
 // Run `sfn cache <args...>` with the scratch cache root threaded to the

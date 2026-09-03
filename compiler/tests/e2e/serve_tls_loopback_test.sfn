@@ -9,11 +9,10 @@
 // Why an external TLS client. The Sailfin-native TLS *client* + the full
 // client↔server / verify-failure matrix is issue #4 of SFEP-0036 (§8 test
 // plan); this test's job is only to pin that `sfn_serve_tls` handshakes and
-// responds. `openssl s_client` is the minimal, ubiquitous TLS driver, run
-// via a `bash -c` pipe vehicle (`.claude/rules/no-bash-e2e.md` — an `![io]`
-// test may spawn external tools; there is no bash *script*). It doubles as
-// the cert generator (`openssl req`), so the only external dependency is
-// `openssl` (+ a wall-clock `timeout` to reap the never-returning server).
+// responds. `openssl s_client` is the minimal, ubiquitous TLS driver. The
+// request is written through the child process handle, with no shell pipeline.
+// It doubles as the cert generator (`openssl req`), so `openssl` is the only
+// external dependency.
 //
 // Handler ABI. The fixture imports the typed `sfn/http` `serve_tls` wrapper,
 // so the user handler is a top-level `fn(Request) -> Response`. The capsule
@@ -24,7 +23,13 @@
 // called from an `![io]` test; assert on captured output with
 // `sfn/strings::contains`.
 import { remove_all } from "sfn/fs";
-import { Env, env_from_current, run_bounded } from "sfn/os";
+import {
+    Env,
+    drain_to_exit,
+    env_from_current,
+    handle_write,
+    spawn_with_env
+} from "sfn/os";
 import { contains } from "sfn/strings";
 import {
     Background,
@@ -42,7 +47,7 @@ import {
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
 // The same environment in `sfn/os`'s typed form, for `with_background` and
-// `run_bounded`.
+// the bounded OpenSSL child.
 fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // Fixed loopback port for this test (sole TLS-serve e2e in the pool, so no
@@ -126,23 +131,18 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
     return bin;
 }
 
-// Drive the live server once over TLS: `printf <request> | openssl s_client`
-// completes a handshake and sends the request; the server's `Connection:
-// close` makes s_client exit after the response. Bounded by `run_bounded`
-// (6s) so a stuck handshake cannot hang the pool — the previous embedded
-// `timeout 6` argv vehicle required the external binary for a purpose
-// unrelated to reaping the background server; `run_bounded` owns the
-// deadline itself (`sfn/test`'s `process_control.sfn` header). Returns the
-// captured response text.
+// Drive the live server once over TLS by passing the request directly to
+// `openssl s_client` on stdin. The server's `Connection:
+// close` makes s_client exit after the response. `drain_to_exit` owns a 6s
+// deadline so a stuck handshake cannot hang the pool. Returns the captured
+// response text.
 fn _tls_get() -> string ![clock, io] {
-    let cmd = "printf 'GET / HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n' | openssl s_client -connect 127.0.0.1:"
-        + _tls_port_str()
-        + " -quiet 2>/dev/null";
-    // `sh -c` (not `bash -c`): the command is POSIX-shell compatible (printf
-    // + pipe + redirect) and `sh` is more universally present. This is a
-    // genuine pipeline, not a PATH lookup — the tool probes above no longer
-    // spawn a shell at all (SFN-840); retiring this one needs SFN-885.
-    let outcome = run_bounded(["sh", "-c", cmd], _child_env_typed(), "", 6000);
+    let request = "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+    let child = spawn_with_env(["openssl", "s_client", "-connect", "127.0.0.1:"
+        + _tls_port_str(), "-quiet"], _child_env_typed(), "");
+    let written = handle_write(child, request);
+    let outcome = drain_to_exit(child, 6000);
+    if written != request.length { return ""; }
     return outcome.stdout;
 }
 

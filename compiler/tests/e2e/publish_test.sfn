@@ -661,9 +661,8 @@ test "publish: registry override cannot bypass the private gate" ![clock, io, ne
 }
 
 // ---- Test 17: cwd discovery cannot bypass the private gate ----
-// run_capture (two-arg form) cannot chdir, so this exercises the no-path
-// codepath via `sh -c "cd ... && exec ..."` instead, which requires an
-// absolute binary path since the shell has already changed directory.
+// Exercise the no-path codepath from the capsule directory itself. The binary
+// path is absolute so child cwd selection cannot affect compiler discovery.
 test "publish: cwd discovery cannot bypass the private gate" ![io] {
     let root = _test_root("t17");
     let home = root + "/home";
@@ -672,10 +671,7 @@ test "publish: cwd discovery cannot bypass the private gate" ![io] {
     _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
     let bin = sfn_bin_abs_path();
     let e = _env_for(home, []);
-    let _exit = process.run_capture(["sh", "-c", "cd '" + workdir
-        + "' && exec '"
-        + bin
-        + "' publish"], e);
+    let _exit = process.run_capture_cwd([bin, "publish"], e, workdir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let all = out + err;

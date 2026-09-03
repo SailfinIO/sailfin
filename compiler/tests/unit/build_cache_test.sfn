@@ -24,6 +24,7 @@
 // var contract is intentionally read-only. Each test cleans up
 // its tmp tree on exit.
 import { remove_all } from "sfn/fs";
+import { find } from "sfn/strings";
 import { expect_eq_bool, expect_eq_str, scratch_root } from "sfn/test";
 
 import {
@@ -58,6 +59,17 @@ import {
     test_bin_compiler_identity
 } from "../../src/build_cache";
 import { _strip_build_metadata } from "../../src/version";
+
+fn _has_stage_residue(dir: string) -> bool ![io] {
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        if find(entries[i], "sfn_stage", 0) >= 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
 
 // --------------------------------------------------------------
 // Fixture helpers
@@ -881,7 +893,7 @@ test "build_cache: cache_copy_artifact_to creates dst dir on demand" ![io] {
 // corruption the rename prevents.
 //
 // The temp prefix is `_mktemp_sibling_cmd`'s and must stay in sync with
-// it: these greps went vacuously green once before, when SFN-490 moved
+// it: these checks went vacuously green once before, when SFN-490 moved
 // the cache off its own `.sfn_pub.*` template onto the shared helper.
 test "build_cache: cache_store_artifact publishes atomically, no temp residue" ![io] {
     let scratch = _test_tmp_root("artifact_atomic");
@@ -901,13 +913,10 @@ test "build_cache: cache_store_artifact publishes atomically, no temp residue" !
     assert fs.exists(paths.ll);
     assert fs.readFile(paths.ll) == "; ModuleID = 'atomic'";
 
-    // No `.sfn_pub.*` temp survives in the entry dir. `grep -q`
-    // exits 0 when it finds a match, so a non-zero exit means the
-    // temp was renamed into place rather than left behind.
+    // No `.sfn_pub.*` temp survives in the entry dir: the temp was renamed
+    // into place rather than left behind.
     let entry_dir = cache_root + "/66/" + key.digest;
-    let residue = process.run(["sh", "-c", "ls -a '" + entry_dir
-        + "' | grep -q sfn_stage"]);
-    assert residue != 0;
+    assert ! _has_stage_residue(entry_dir);
 
     _cleanup(scratch);
 }
@@ -933,9 +942,7 @@ test "build_cache: cache_store publishes four artifacts with no temp residue" ![
     assert cache_lookup_complete(cache_root, key);
 
     let entry_dir = cache_root + "/77/" + key.digest;
-    let residue = process.run(["sh", "-c", "ls -a '" + entry_dir
-        + "' | grep -q sfn_stage"]);
-    assert residue != 0;
+    assert ! _has_stage_residue(entry_dir);
 
     _cleanup(scratch);
 }
