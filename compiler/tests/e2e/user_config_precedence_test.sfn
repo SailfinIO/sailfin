@@ -31,6 +31,7 @@ import {
 } from "sfn/test";
 
 import { build_target_triple } from "../../src/build/target";
+import { build_cache_schema_version } from "../../src/build_cache";
 
 fn _dir(tag: string) -> string ![io] {
     return scratch_root() + "/user-config-precedence-" + tag;
@@ -88,8 +89,12 @@ fn _build(tag: string, home: string, extra_env: string[]) -> int ![io] {
     // resolve implementation-defined. SAILFIN_CC is deliberately NOT stripped —
     // no test here asserts on `cc`, and a native-Darwin runner supplies it as a
     // real toolchain hint the four nested links should keep.
+    // SAILFIN_BUILD_CACHE_DIR sits ABOVE the `[build] cache-dir` config rung
+    // in `cache_root_from` (SFN-1260 / SFEP-0076 section 3.4); left inherited,
+    // it would shadow the config value and make any assertion on where the
+    // cache materialised vacuous.
     let mut e = clean_runner_env_without(nested_runner_scratch("user-config-precedence-"
-        + tag), ["HOME", "SAILFIN_LINKER", "SAILFIN_TARGET_TRIPLE"]);
+        + tag), ["HOME", "SAILFIN_LINKER", "SAILFIN_TARGET_TRIPLE", "SAILFIN_BUILD_CACHE_DIR"]);
     e.push("HOME=" + home);
     e.push("SAILFIN_TRACE_LINK=1");
     let target_env = _target_env();
@@ -202,4 +207,22 @@ test "user_config: a relative [build] cache-dir warns to stderr without failing 
     let err = fs.readFile(_dir("build-relative-cache-dir") + "/build.err");
     assert find(err, "~/.sfn/config.toml [build] cache-dir must be an absolute path; ignoring:", 0) >= 0;
     assert find(out, "must be an absolute path", 0) < 0;
+}
+
+// SFN-1260 / SFEP-0076 section 8: every admitted key needs one test proving
+// the resolved value actually reaches its consumer, not merely that it
+// parses. The two tests above only cover the negative path (an unadmitted
+// key, a relative path) — both warn and never touch the cache root. This is
+// the positive path: a VALID absolute `[build] cache-dir` must make the
+// build actually populate that directory (not `$HOME/.cache/sailfin`).
+test "user_config: a valid [build] cache-dir is where the build cache materialises" ![io] {
+    let tag = "build-cache-dir-valid";
+    let home = _home(tag);
+    let configured_root = _dir(tag) + "/cache";
+    _write_config(home, "[build]\ncache-dir = \"" + configured_root + "\"\n");
+    let rc = _build(tag, home, []);
+    assert rc == 0;
+    let schema = build_cache_schema_version();
+    assert fs.exists(configured_root + "/" + schema);
+    assert ! fs.exists(home + "/.cache/sailfin");
 }

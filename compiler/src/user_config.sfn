@@ -88,6 +88,11 @@ let mut _uc_text: string = "";
 // `SAILFIN_CONFIG_DIR` consultation: that override is SFN-1258's decision, and
 // this seam must not pre-empt it. The five existing hand-rolled sites are left
 // alone here for the same reason.
+// The provenance label, exposed so a warning emitted from another module
+// cannot drift from the path this one actually reads. SFN-1258 may change what
+// that path is; there must be exactly one place it is spelled.
+fn user_config_origin() -> string { return _UC_ORIGIN; }
+
 fn user_config_dir() -> string ![io] {
     let home = _get_home_cmd();
     if home.length == 0 { return ""; }
@@ -271,6 +276,12 @@ fn user_config_build_jobs_from_text(text: string) -> int {
 //
 // Never fatal, per SFEP-0076 section 8: the same file may roam onto a host
 // with a different toolchain, and a warning must not brick a build there.
+//
+// The latch is process-wide, so it is shared with the explicit-path `_at`
+// forms even though those bypass the `_uc_text` cache. A process that reads two
+// different files therefore warns for the first only — correct in production,
+// where there is one file per process, but a test that wants warning text for a
+// second file has to assert it some other way.
 fn _uc_warn_build_ignored(text: string) -> void ![io] {
     if _uc_build_warned { return; }
     _uc_build_warned = true;
