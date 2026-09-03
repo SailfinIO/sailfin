@@ -1,0 +1,184 @@
+// compiler/tests/e2e/installed_toolchain_test_command_test.sfn
+//
+// End-to-end regression for SFN-1088: `sfn test` resolves its runtime-bundle
+// root through the shared `cli/runtime_root.sfn` contract, the same way
+// `build`/`run`/bare-file dispatch already did — before this fix
+// `commands/test/mod.sfn` consumed `ctx.runtime_root` raw, so an installed
+// toolchain whose startup probe came back empty failed the link stage with a
+// diagnostic that named `/capsule.toml`. This file drives the compiler under
+// test as a subprocess from OUTSIDE a Sailfin checkout, across the three
+// installed-layout shapes `resolve_runtime_root`
+// (`runtime/sfn/platform/exec.sfn`) and the SFN-1124 install-root pointer
+// cover: a version-manager install (copied exe + pointer), a script install
+// (exe beside its payload), and a runtime-less install (names what it
+// probed).
+//
+// Staging goes through the product's own installer
+// (`sfn dev bootstrap install`) rather than hand-copying `runtime/`/
+// `capsules/`/`workspace.toml` from the checkout: the checkout's
+// `workspace.toml` names source-tree members (`compiler`, `stdlib/*`, …) that
+// a real install never ships, and the checkout's `capsules/` tree is not the
+// installed dependency closure `installer_staging.sfn` actually stages
+// (`sfn/strings` lives at `stdlib/strings/` there, not `capsules/sfn/
+// strings/`). Re-deriving that closure in a test fixture would duplicate
+// `installer_staging.sfn` and silently rot the next time it changes; running
+// the real installer never can. Modeled on `dev_bootstrap_prefix_install_test.sfn`'s
+// `_physical_scratch` / `_run_install` shape, and on
+// `install_root_pointer_test.sfn`'s copied-exe + pointer staging for the
+// SFN-1124 shape layered on top of a genuine install.
+import { copy } from "sfn/fs";
+import { find } from "sfn/strings";
+import {
+    clean_runner_env,
+    clean_runner_env_without,
+    nested_runner_scratch,
+    sfn_bin_abs_path
+} from "sfn/test";
+
+import { host_exe_name } from "../../src/build/target";
+
+// macOS spells its temporary directory beneath `/var`, whose physical path
+// starts at `/private/var`; absolutizing the created root keeps every staged
+// path (in particular the install-root pointer's contents) unambiguous
+// regardless of where the scratch root lexically resolves. Mirrors
+// `_physical_scratch` in `dev_bootstrap_prefix_install_test.sfn`.
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+fn _physical_scratch(label: string) -> string ![io] {
+    let root = nested_runner_scratch(label);
+    if !fs.exists(root) && !fs.createDirectory(root, true) { return root; }
+    let resolved: *u8 = realpath(root as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    return root;
+}
+
+// Publish a genuine install under `--prefix` via `sfn dev bootstrap install`,
+// mirroring `_run_install` in `dev_bootstrap_prefix_install_test.sfn`.
+fn _run_install(root: string, extra: string[]) -> int ![io] {
+    let bin = sfn_bin_abs_path();
+    let mut argv = [bin, "dev", "bootstrap", "install", "--from", bin];
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        argv.push(extra[i]);
+        i += 1;
+    }
+    return process.run_capture(argv, clean_runner_env(root));
+}
+
+fn _probe_src() -> string {
+    return "test \"probe: arithmetic\" ![pure] {\n" + "    assert 1 + 1 == 2;\n"
+        + "}\n";
+}
+
+fn _write_probe(dir: string) ![io] {
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/probe_test.sfn", _probe_src());
+}
+
+// Runtime-less install: the exe exists with no payload and no pointer
+// anywhere reachable from it, so every candidate `resolve_runtime_root`
+// walks comes back absent.
+fn _layout_runtimeless_install(root: string) ![io] {
+    let gbin = root + "/bin";
+    fs.createDirectory(gbin, true);
+    let exe = gbin + "/" + host_exe_name("sfn");
+    assert copy(sfn_bin_abs_path(), exe);
+    fs.set_perms(exe, 493);
+}
+
+test "installed toolchain: a version-manager install runs sfn test outside a checkout" ![io] {
+    let root = _physical_scratch("installed_toolchain_pointer");
+    let prefix = root + "/prefix";
+    let install_rc = _run_install(root, ["--prefix", prefix]);
+    let _install_out = process.capture_take_stdout();
+    let install_err = process.capture_take_stderr();
+    assert install_rc == 0;
+    assert install_err.length == 0;
+
+    let prefix_bin = prefix + "/bin";
+    let installed_exe = host_exe_name(prefix_bin + "/sfn");
+    assert fs.is_executable(installed_exe);
+
+    // Layer the SFN-1124 copied-exe + pointer shape on top of the genuine
+    // install: a bin dir with no payload of its own, whose pointer names the
+    // directory that owns `runtime/` (`installed_payload_dir` validates
+    // exactly that shape).
+    let gbin = root + "/gbin";
+    fs.createDirectory(gbin, true);
+    let gexe = gbin + "/" + host_exe_name("sfn");
+    assert copy(installed_exe, gexe);
+    fs.set_perms(gexe, 493);
+    fs.writeFile(gbin + "/sailfin-install-root", prefix_bin);
+
+    // The exe-relative walk must NOT be what resolves this layout — only the
+    // pointer may.
+    assert ! fs.exists(gbin + "/runtime");
+
+    let away = root + "/away";
+    _write_probe(away);
+
+    let env = clean_runner_env(nested_runner_scratch("installed-toolchain-pointer"));
+    let test_rc = process.run_capture_cwd([gexe, "test", "probe_test.sfn"], env, away);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert test_rc == 0;
+    assert find(out + err, "runtime bundle/manifest missing", 0) < 0;
+}
+
+test "installed toolchain: a script install runs sfn test outside a checkout" ![io] {
+    let root = _physical_scratch("installed_toolchain_sibling");
+    let prefix = root + "/prefix";
+    let install_rc = _run_install(root, ["--prefix", prefix]);
+    let _install_out = process.capture_take_stdout();
+    let install_err = process.capture_take_stderr();
+    assert install_rc == 0;
+    assert install_err.length == 0;
+
+    let prefix_bin = prefix + "/bin";
+    // The exe-relative walk must resolve this layout on its own — assert the
+    // pointer file is absent so the test cannot silently pass through the
+    // version-manager path instead.
+    assert ! fs.exists(prefix_bin + "/sailfin-install-root");
+
+    let exe = host_exe_name(prefix_bin + "/sfn");
+    assert fs.is_executable(exe);
+
+    let away = root + "/away";
+    _write_probe(away);
+
+    let env = clean_runner_env(nested_runner_scratch("installed-toolchain-sibling"));
+    let test_rc = process.run_capture_cwd([exe, "test", "probe_test.sfn"], env, away);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert test_rc == 0;
+    assert find(out + err, "runtime bundle/manifest missing", 0) < 0;
+}
+
+test "installed toolchain: a runtime-less install names the probed locations" ![io] {
+    let root = _physical_scratch("installed_toolchain_runtimeless");
+    _layout_runtimeless_install(root);
+
+    let away = root + "/away";
+    _write_probe(away);
+
+    let exe = root + "/bin/" + host_exe_name("sfn");
+    // Strip any inherited `SAILFIN_RUNTIME_ROOT` and push an explicit empty
+    // value: `env.get` resolves through libc `getenv`, which returns the
+    // FIRST matching entry, so an inherited value earlier in the array would
+    // silently defeat this override and let the startup probe rescue the
+    // run (`clean_runner_env_without`, SFN-1114's documented shape).
+    let mut env = clean_runner_env_without(nested_runner_scratch("installed-toolchain-runtimeless"), ["SAILFIN_RUNTIME_ROOT"]);
+    env.push("SAILFIN_RUNTIME_ROOT=");
+
+    let rc = process.run_capture_cwd([exe, "test", "probe_test.sfn"], env, away);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert rc != 0;
+    assert find(err, "no runtime capsule resolved", 0) >= 0;
+    assert find(err, "probed runtime/capsule.toml", 0) >= 0;
+    assert find(err, "expected /capsule.toml", 0) < 0;
+}

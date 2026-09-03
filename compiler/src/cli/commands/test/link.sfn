@@ -6,6 +6,7 @@ import { assemble_runtime_capsule_link_inputs } from "../../../build/runtime_obj
 import { runtime_demanded_dep_specs, select_runtime_sfn_sources } from "../../../build/runtime_selection";
 import { _get_env_cmd } from "../../../build_flags";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
+import { runtime_bundle_probe_lines } from "../../runtime_root";
 
 // Resolver-driven test linker. Takes a list of dependency `.ll` paths
 // produced by `prepare_project_capsules_for_test` and adds them to
@@ -105,9 +106,20 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     // to disagree about it.
     let runtime_caps = select_runtime_sfn_sources(runtime_capsule_from_root(runtime_root), runtime_demand);
     if runtime_caps.length == 0 {
-        print.err("sfn test: runtime bundle/manifest missing — expected "
-            + runtime_root
-            + "/capsule.toml (kind = \"runtime\")");
+        // Report the candidate list `resolve_runtime_bundle_root` actually
+        // walked rather than interpolating the resolved root (SFN-1088). The
+        // old form rendered `expected /capsule.toml` whenever resolution
+        // came back empty — the exact case an installed toolchain hits, and
+        // the one where naming a location is worth the most.
+        print.err("sfn test: runtime bundle/manifest missing — no runtime capsule resolved");
+        let probed = runtime_bundle_probe_lines(runtime_root);
+        let mut probe_i: int = 0;
+        loop {
+            if probe_i >= probed.length { break; }
+            print.err(probed[probe_i]);
+            probe_i += 1;
+        }
+        print.err("     hint: ensure the runtime bundle ships alongside the compiler binary");
         // Pre-backend bailout: this preflight diagnostic stands alone; the
         // backend never ran, so the caller must not stack the ICE banner
         // (SFN-212).

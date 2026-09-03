@@ -205,9 +205,9 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     // fails, so the retired C driver's `realpath(argv[0], ...)`
     // fallback is preserved below to give the runtime-root walk a
     // directory to start from. argv[0] is not guaranteed to be canonical (a bare
-    // `$PATH` name fails the walk on its own), but `_runtime_bundle_exists`
-    // in `sailfin_cli_main_v2`'s bare-file dispatch provides the final
-    // CWD-relative `runtime` fallback either way.
+    // `$PATH` name fails the walk on its own), but `cli/runtime_root.sfn`'s
+    // `resolve_runtime_bundle_root` (SFN-1088) supplies the CWD-relative
+    // `runtime` bundle for every command when this walk yields nothing.
     let exe_raw: *u8 = exe_path();
     let mut exe_str: string = exe_raw as string;
     if exe_str.length == 0 {

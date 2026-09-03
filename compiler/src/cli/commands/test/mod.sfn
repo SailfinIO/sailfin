@@ -119,6 +119,7 @@ import { toml_get_name } from "../../../toml_parser";
 import { load_imported_interfaces_from_paths } from "../../../typecheck_import_loader";
 import { resolve_test_bin_identity_for_cache } from "../../../version";
 import { CliContext } from "../../context";
+import { resolve_runtime_bundle_root } from "../../runtime_root";
 import { _package_basename } from "../cmd_shared";
 import { toolchain_gate_or_dispatch } from "../toolchain";
 import {
@@ -246,7 +247,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // non-integer value is rejected by `parse()` as a `type_error`
     // before `run` is reached). `runtime_root` / `binary_dir` come from
     // the driver-parsed `CliContext` instead of the old extra params.
-    let runtime_root: string = ctx.runtime_root;
+    // `runtime_root` then goes through the shared `cli/runtime_root.sfn`
+    // contract, exactly as `build` / `run` / bare-file dispatch do
+    // (SFN-1088): before that, `sfn test` alone consumed the field raw, so
+    // a toolchain whose startup probe came back empty reached the link
+    // stage with "" and reported `expected /capsule.toml`.
+    let runtime_root: string = resolve_runtime_bundle_root(ctx.runtime_root);
     let binary_dir: string = ctx.binary_dir;
     let _tc_suites: string[] = positionals(matches, "suite");
     let mut _tc_hint: string = ".";
