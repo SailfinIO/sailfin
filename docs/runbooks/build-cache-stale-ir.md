@@ -344,6 +344,8 @@ rm -rf <work_dir>/compiler/import-context     # when built with --work-dir
 seed toolchain store (`SAILFIN_CLEAN_KEEP_SEED`) — which additionally takes out
 the self-host shared root at `build/cache/v2`, but **not** a shared root under
 `~/.cache/sailfin/v2`, where non-self-host capsules land.
+`sfn dev bootstrap build --clean-tree` does the same removal and then
+self-hosts, in one step.
 
 **Confirming it worked.** `SAILFIN_CACHE_TRACE=1` (or `--cache-trace`) prints
 per-module `[cache hit]` / `[cache miss]` lines and the `[stage cache]` summary;
