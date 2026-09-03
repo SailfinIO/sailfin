@@ -98,6 +98,7 @@ import {
     toolchain_revocations_path,
     toolchain_revocations_read
 } from "../../toolchain/index_cache";
+import { toolchain_print_integrity_failure, toolchain_verify_entry } from "../../toolchain/integrity";
 import { TOOLCHAIN_MANIFEST_OK, toolchain_manifest_read_header } from "../../toolchain/manifest";
 import { toolchain_versions_base } from "../../toolchain/store";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
@@ -688,6 +689,30 @@ fn _bootstrap_commit_dev_payload(staging: string, out: string, record_owner: boo
 // store (SFEP-0047 §3.3 keeps it as a transitional shim, and install.sh writes
 // no marker), which is ready to use as-is — requiring the marker there would
 // force a needless re-fetch of an already-usable seed.
+//
+// It ALSO requires the payload to verify against its own `.install-manifest`
+// (SFN-1205). Without that this predicate was existence-only, and both
+// `_dev_bootstrap_fetch` and `_bootstrap_ensure_seed` short-circuited on it —
+// the exact shape `_toolchain_install` refuses to short-circuit on, for the
+// reason recorded verbatim at its own guard in `toolchain/install.sfn`:
+// "short-circuiting on that alone made reinstall a no-op over a corrupt
+// entry". A seed is the root of the self-host chain, so a modified payload
+// silently built the compiler instead of being repaired.
+// `toolchain_verify_entry` is purely local, and reports `ok` (with
+// `unverified`) for a manifest-ABSENT entry, so the migration shim above is
+// preserved exactly: only an entry that HAS a manifest and fails it is
+// refused, and `_bootstrap_fetch` then repairs it by the same route a missing
+// entry takes — after saying so, so the refusal is never mistaken for a
+// network failure.
+//
+// The pipeline guard's other half — `recorded == expected` — deliberately
+// does NOT move here. `expected` comes from the signed `SHA256SUMS`, so
+// comparing it would make this gate network-dependent and couple every
+// `sfn dev bootstrap build` and `sfn build -p compiler` dispatch to
+// release-endpoint liveness. That is the coupling the bootstrap path's index
+// exemption exists to prevent (`toolchain/install.sfn`, SFN-1069). The
+// `.sha256` marker therefore stays a completeness marker here, never a
+// checked digest.
 fn _bootstrap_store_ready(install_base: string, ver: string) -> boolean ![io] {
     let store_dir = install_base + "/" + ver;
     if !fs.exists(_bootstrap_seed_bin(install_base, ver)) { return false; }
@@ -695,6 +720,17 @@ fn _bootstrap_store_ready(install_base: string, ver: string) -> boolean ![io] {
     if fs.exists(sha_path) {
         let recorded = _toml_trim_cmd(fs.readFile(sha_path));
         if recorded.length == 0 { return false; }
+    }
+    let verified = toolchain_verify_entry(store_dir);
+    if !verified.ok {
+        // Never a silent refusal. Without this the caller reports "could not
+        // obtain the pinned seed" (or, offline, a transport error from the
+        // download that follows), pointing at the network for what is a
+        // LOCAL entry failing its own manifest. This is the SFEP-0073 3.8
+        // diagnostic every other integrity consumer prints: what failed,
+        // which entry, and how to reinstall.
+        toolchain_print_integrity_failure(store_dir, ver, verified);
+        return false;
     }
     return true;
 }
