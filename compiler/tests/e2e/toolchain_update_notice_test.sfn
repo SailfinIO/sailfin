@@ -99,15 +99,18 @@ fn _neutral_cwd(label: string) -> string ![io] {
 fn _env_with(extra: string[], home: string, config_dir: string, store: string, release_base: string, assume_interactive: boolean) -> string[] ![io] {
     let host_os = env.get("SAILFIN_HOST_OS");
     let target_os = env.get("SAILFIN_TARGET_OS");
-    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-update-notice-child"), ["HOME", "INSTALL_BASE", "SAILFIN_CONFIG_DIR", "SAILFIN_SKIP_TOOLCHAIN_CHECK", "SAILFIN_TOOLCHAIN_RELEASE_BASE", "SAILFIN_UPDATE_NOTIFY_ASSUME_TTY", "CI"]);
+    // Strip every CI-detection signal `toolchain_update_env_is_ci` consults
+    // (`update_notify_state.sfn`), plus `TERM` (its `== "dumb"` clause), not
+    // just `CI` — a real CI runner sets several of these at once, and any one
+    // reaching the child would suppress every test in this file that does not
+    // explicitly re-add it, dormant exactly where this suite matters most.
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-update-notice-child"), ["HOME", "INSTALL_BASE", "SAILFIN_CONFIG_DIR", "SAILFIN_SKIP_TOOLCHAIN_CHECK", "SAILFIN_TOOLCHAIN_RELEASE_BASE", "SAILFIN_UPDATE_NOTIFY_ASSUME_TTY", "CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "CIRCLECI", "JENKINS_URL", "TEAMCITY_VERSION", "TF_BUILD", "TERM"]);
     e.push("HOME=" + home);
     e.push("SAILFIN_CONFIG_DIR=" + config_dir);
     e.push("INSTALL_BASE=" + store);
     e.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + release_base);
     e.push("SAILFIN_SKIP_TOOLCHAIN_CHECK=1");
-    if assume_interactive {
-        e.push("SAILFIN_UPDATE_NOTIFY_ASSUME_TTY=1");
-    }
+    if assume_interactive { e.push("SAILFIN_UPDATE_NOTIFY_ASSUME_TTY=1"); }
     let mut i: int = 0;
     loop {
         if i >= extra.length { break; }
@@ -212,6 +215,11 @@ test "toolchain update notice: an eligible check advances the window even though
     // that this is "about a week", not "unset" (0) or "immediate".
     assert next_epoch > before_now + 604800 - 600;
     assert next_epoch < before_now + 604800 + 600;
+    // The lease is acquired before the child runs and released right after
+    // (`update_notify_exit`) regardless of the child's outcome — a leaked
+    // lease file would wedge every later check for
+    // `TOOLCHAIN_UPDATE_LEASE_SECS` and is otherwise invisible to this suite.
+    assert ! fs.exists(_lease_path(cfg));
 }
 
 test "toolchain update notice: a second attempt inside the window is suppressed" ![clock, io] {
@@ -341,13 +349,35 @@ test "toolchain update notice: seam off (ordinary non-TTY child) writes no recor
     assert ! _eligibility_exists(cfg);
 }
 
-test "toolchain update notice: CI=true with the seam off writes no record" ![clock, io] {
+// Seam ON (unlike every other Group B case's own gate, `CI` fires AHEAD of
+// the TTY gate — see `update_notify_exit`), so the seam-off experiment above
+// this one cannot be the reason nothing happened: only `toolchain_update_env_is_ci()`
+// can be.
+test "toolchain update notice: seam on, CI=true writes no record" ![clock, io] {
     let label = "ci-gate";
     let cwd = _neutral_cwd(label);
     let fixture = _ok_fixture(cwd);
     let cfg = _config_dir(label);
     _seed_user_default_with_track(cfg, "500.0.0", "stable");
-    let run_env = _refused_env(label, ["CI=true"], false);
+    let run_env = _refused_env(label, ["CI=true"], true);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! _eligibility_exists(cfg);
+}
+
+// A second CI signal, `CI` itself left unset, so the list in
+// `toolchain_update_env_is_ci` is covered at more than the one entry every
+// other CI-detecting tool defaults to checking first.
+test "toolchain update notice: seam on, GITHUB_ACTIONS=true (CI unset) writes no record" ![clock, io] {
+    let label = "ci-gate-gha";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let run_env = _refused_env(label, ["GITHUB_ACTIONS=true"], true);
 
     let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
     let _out = process.capture_take_stdout();
@@ -460,6 +490,7 @@ fn _stall_harness_c() -> string {
         + "int main(int argc, char **argv) {\n"
         + "    signal(SIGPIPE, SIG_IGN);\n"
         + "    const char *portfile = argc > 1 ? argv[1] : \"/tmp/sfn_stall_port\";\n"
+        + "    const char *markerfile = argc > 2 ? argv[2] : \"/tmp/sfn_stall_marker\";\n"
         + "    int fd = socket(AF_INET, SOCK_STREAM, 0);\n"
         + "    if (fd < 0) return 1;\n"
         + "    int one = 1;\n"
@@ -480,6 +511,11 @@ fn _stall_harness_c() -> string {
         + "    for (;;) {\n"
         + "        int c = accept(fd, NULL, NULL);\n"
         + "        if (c >= 0) {\n"
+        + "            /* Record that the child actually connected, so the test\n"
+        + "               can tell \"budget SIGKILL fired\" apart from \"the\n"
+        + "               child never spawned/dialed in the first place\". */\n"
+        + "            FILE *mf = fopen(markerfile, \"a\");\n"
+        + "            if (mf) { fputc('x', mf); fclose(mf); }\n"
         + "            char buf[256];\n"
         + "            /* Drain the request but NEVER send a byte back and\n"
         + "               NEVER close: the test harness kills this process\n"
@@ -516,7 +552,8 @@ test "toolchain update notice: a stalling endpoint does not hang the wrapped com
     }
 
     let portfile = dir + "/port";
-    let bg = start_background([bin, portfile], env_empty(), "", "stall-listener");
+    let marker = dir + "/connected";
+    let bg = start_background([bin, portfile, marker], env_empty(), "", "stall-listener");
     let ready = wait_until(fn () -> boolean {
         return fs.exists(portfile) && trim(fs.readFile(portfile)).length > 0;
     }, 5000, 50);
@@ -551,4 +588,67 @@ test "toolchain update notice: a stalling endpoint does not hang the wrapped com
     // Generous hang-detector ceiling, not a precise timing assertion — see
     // the comment above the test.
     assert elapsed_ms < 5000;
+    // Upgrades the claim from "the wrapped command did not hang" to "the
+    // notify child actually dialed the stalling endpoint and was killed at
+    // the budget" — without this, the test above would pass identically if
+    // the child never spawned at all (e.g. `_resolve_test_self_path`
+    // returning "" and `_update_notify_run_bounded` bailing before spawning).
+    assert fs.exists(marker);
+}
+
+// ---------------------------------------------------------------------------
+// Group F: the hidden child leaf itself (`sfn toolchain notify-check`),
+// driven directly rather than through the parent's spawn/pipe/kill machinery
+// exercised above. Every case here asserts the leaf's own silence contract —
+// nothing on stdout, since the parent parses that stream as the machine-
+// readable notice line (`update_notify_state.sfn::toolchain_update_notice_parse`)
+// and any stray byte on it is a protocol break, not cosmetic noise.
+//
+// NOT covered: the full success path (`state == "ok"`/`"advisory"`/`"revoked"`
+// and a printed notice line). That requires a signed index the pinned trust
+// root (`compiler/src/release_trust.sfn`) accepts, and that module has no test
+// seam — fabricating a signature here would mean either weakening the trust
+// root for tests (never) or hand-rolling a real Ed25519 signer in this file,
+// which is its own capability decision, not a mechanical test addition. Both
+// cases below instead prove the two silent-failure arms that do not need one:
+// the policy refusal ahead of any fetch, and a refused endpoint.
+// ---------------------------------------------------------------------------
+test "toolchain update notice: notify-check leaf under a disabled policy refuses before any endpoint contact and stays silent" ![clock, io] {
+    let label = "leaf-disabled";
+    let home = _home_dir(label);
+    _seed_policy(home, "disabled");
+    let cfg = _config_dir(label);
+    let store = _scratch_root() + "/" + label + "-store";
+    let cwd = _neutral_cwd(label);
+    // `toolchain_network_refusal()` is the leaf's very first gate
+    // (`update_notify_child_run`), evaluated before `toolchain_versions_base`
+    // or `toolchain_fetch_index` are ever reached — the refused loopback
+    // endpoint below would refuse the connection anyway, but the point of
+    // this case is that the policy gate fires FIRST and no attempt is made.
+    let run_env = _env_with([], home, cfg, store, "http://127.0.0.1:9", false);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "notify-check"], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 1;
+    assert out.length == 0;
+}
+
+test "toolchain update notice: notify-check leaf under a refused endpoint fails silently with a recorded track" ![clock, io] {
+    let label = "leaf-notify-refused";
+    let home = _home_dir(label);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let store = _scratch_root() + "/" + label + "-store";
+    let cwd = _neutral_cwd(label);
+    // Policy defaults to `notify` (no config.toml written), so this run
+    // clears the policy gate and reaches `toolchain_fetch_index`, which fails
+    // against the refused loopback endpoint — the leaf's `!index.ok` arm.
+    let run_env = _env_with([], home, cfg, store, "http://127.0.0.1:9", false);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "toolchain", "notify-check"], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 1;
+    assert out.length == 0;
 }
