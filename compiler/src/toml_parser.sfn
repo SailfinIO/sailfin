@@ -909,6 +909,64 @@ fn toml_get_string(text: string, section: string, key: string) -> string {
     return "";
 }
 
+// Key names of every `key = value` line inside `section`, in file order.
+// Lets an ad-hoc-config reader (SFEP-0076 section 3.5) report the keys it is
+// ignoring; `toml_get_string` itself stays diagnostic-free like the rest of
+// this module, so the warning policy belongs to the caller, not here.
+fn toml_section_key_names(text: string, section: string) -> string[] {
+    let lines = _toml_split_lines(text);
+    let mut out: string[] = [];
+    let mut current_section: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] == "[" {
+            let close = find_char_local(line, "]", 0);
+            if close > 0 {
+                current_section = _toml_trim(substring(line, 1, close));
+            }
+            continue;
+        }
+        if !strings_equal(current_section, section) { continue; }
+        let eq_pos = find_char_local(line, "=", 0);
+        if eq_pos < 0 { continue; }
+        out.push(_toml_strip_quotes(_toml_trim(substring(line, 0, eq_pos))));
+    }
+    return out;
+}
+
+// Lines inside `section` that are neither blank, a comment, nor a
+// `key = value` pair — the lines `toml_get_string` silently skips. Companion
+// to `toml_section_key_names` so a reader can warn about what it dropped
+// rather than failing the build on it.
+fn toml_section_malformed_lines(text: string, section: string) -> string[] {
+    let lines = _toml_split_lines(text);
+    let mut out: string[] = [];
+    let mut current_section: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] == "[" {
+            let close = find_char_local(line, "]", 0);
+            if close > 0 {
+                current_section = _toml_trim(substring(line, 1, close));
+            }
+            continue;
+        }
+        if !strings_equal(current_section, section) { continue; }
+        if find_char_local(line, "=", 0) < 0 { out.push(line); }
+    }
+    return out;
+}
+
 // Return dependencies as a newline-separated string of "capsule=version" pairs.
 // Callers can split on "\n" and "=" to recover individual entries without
 // needing the SailToml struct across module boundaries.

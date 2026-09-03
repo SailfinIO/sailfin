@@ -1,0 +1,134 @@
+// compiler/src/user_config.sfn
+//
+// Rung 4 of the SFEP-0076 section 3.3 precedence chain: user-level defaults
+// read from `~/.sfn/config.toml`. Every resolver returns "" when the key is
+// absent, so each caller keeps ownership of its own rung-1 flag, rung-2
+// environment variable, and compiled-in default; this module never supplies a
+// default of its own.
+//
+// Reading the file can never fail a build. A missing home directory, a missing
+// file, a missing section, an unadmitted key, and an unparseable line all
+// resolve to "". Unadmitted keys and unparseable lines warn to stderr
+// (SFN-1244 / SFN-1246) and are otherwise ignored.
+//
+// `[target.<triple>]` is keyed by triple (SFEP-0076 section 3.2) so one home
+// directory serves a machine that cross-compiles and a roaming profile cannot
+// carry a Darwin linker path onto a Linux host. The environment variables above
+// this rung keep their flat, host-agnostic meaning by design.
+import { _get_home_cmd } from "./build_flags";
+import {
+    toml_get_string,
+    toml_section_key_names,
+    toml_section_malformed_lines
+} from "./toml_parser";
+
+// The `[target.<triple>]` keys this rung admits, per the SFEP-0076 section 3.1
+// admission rule. Extending this list is a design decision, not a mechanical
+// one: a key that changes what a program *means* is never admissible.
+let USER_CONFIG_TARGET_LINKER: string = "linker";
+let USER_CONFIG_TARGET_CC: string = "cc";
+
+// Provenance label used in caller-side traces and warnings, so a user reading
+// `SAILFIN_TRACE_LINK` output can tell a persisted default from a one-shot
+// environment override.
+let USER_CONFIG_ORIGIN: string = "~/.sfn/config.toml";
+
+// The user configuration directory. Deliberately `env.home() + "/.sfn"` with no
+// `SAILFIN_CONFIG_DIR` consultation: that override is SFN-1258's decision, and
+// this seam must not pre-empt it. The five existing hand-rolled sites are left
+// alone here for the same reason.
+fn user_config_dir() -> string ![io] {
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    return home + "/.sfn";
+}
+
+fn user_config_path() -> string ![io] {
+    let dir = user_config_dir();
+    if dir.length == 0 { return ""; }
+    return dir + "/config.toml";
+}
+
+fn user_config_target_section(triple: string) -> string {
+    if triple.length == 0 { return ""; }
+    return "target." + triple;
+}
+
+fn user_config_key_is_admitted(key: string) -> boolean {
+    if strings_equal(key, USER_CONFIG_TARGET_LINKER) { return true; }
+    if strings_equal(key, USER_CONFIG_TARGET_CC) { return true; }
+    return false;
+}
+
+// Human-readable provenance for a resolved `[target.<triple>]` linker, so a
+// `SAILFIN_TRACE_LINK` trace distinguishes a persisted default from a one-shot
+// environment override. Shaped to substitute for the literal "SAILFIN_LINKER"
+// in the messages the link paths already emit.
+fn user_config_linker_origin(triple: string) -> string {
+    return USER_CONFIG_ORIGIN + " target." + triple + "."
+        + USER_CONFIG_TARGET_LINKER;
+}
+
+// Pure resolver over already-read file text. The whole parse contract lives
+// here so it is testable without a home directory or a filesystem: section
+// selection, key lookup, and the absent-key "" are all decided from `text`.
+fn user_config_target_value_from_text(text: string, triple: string, key: string) -> string {
+    let section = user_config_target_section(triple);
+    if section.length == 0 { return ""; }
+    if !user_config_key_is_admitted(key) { return ""; }
+    return toml_get_string(text, section, key);
+}
+
+// Warn about what the section contains that this rung will not act on. Emitted
+// to stderr and never fatal: the same file may be roamed onto a host whose
+// toolchain admits a different key set, and a warning must not brick a build
+// there.
+fn user_config_warn_ignored(text: string, triple: string) -> void ![io] {
+    let section = user_config_target_section(triple);
+    if section.length == 0 { return; }
+
+    let malformed = toml_section_malformed_lines(text, section);
+    let mut i: int = 0;
+    loop {
+        if i >= malformed.length { break; }
+        print.err("warning: " + USER_CONFIG_ORIGIN + " [" + section
+            + "] line is not `key = value`; ignoring: "
+            + malformed[i]);
+        i += 1;
+    }
+
+    let keys = toml_section_key_names(text, section);
+    let mut j: int = 0;
+    loop {
+        if j >= keys.length { break; }
+        if !user_config_key_is_admitted(keys[j]) {
+            print.err("warning: " + USER_CONFIG_ORIGIN + " [" + section + "] "
+                + keys[j]
+                + " is not a recognised key; ignoring");
+        }
+        j += 1;
+    }
+}
+
+// Read one admitted `[target.<triple>]` key from an explicit path. Callers in
+// the compiler use `user_config_linker` / `user_config_cc`; the explicit-path
+// form exists so tests can exercise the file path without reading the real
+// `~/.sfn`, which would be non-hermetic and, on CI, silently vacuous.
+fn user_config_target_value_at(path: string, triple: string, key: string) -> string ![io] {
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    let text = fs.readFile(path);
+    if text.length == 0 { return ""; }
+    user_config_warn_ignored(text, triple);
+    return user_config_target_value_from_text(text, triple, key);
+}
+
+// Rung 4 of the SFEP-0076 section 3.3 precedence chain. Returns "" when the key
+// is absent, letting the caller fall through to its compiled-in default.
+fn user_config_linker(triple: string) -> string ![io] {
+    return user_config_target_value_at(user_config_path(), triple, USER_CONFIG_TARGET_LINKER);
+}
+
+fn user_config_cc(triple: string) -> string ![io] {
+    return user_config_target_value_at(user_config_path(), triple, USER_CONFIG_TARGET_CC);
+}

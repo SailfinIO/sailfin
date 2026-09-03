@@ -22,6 +22,7 @@
 // lowering the self-hosting compiler does not resolve, #1389).
 import { _env_flag, _get_env_cmd } from "../build_flags";
 import { starts_with, substring } from "../string_utils";
+import { user_config_linker, user_config_linker_origin } from "../user_config";
 import { _shell_read_cmd } from "./fs";
 import { build_target_triple, triple_target_arch } from "./target";
 
@@ -153,10 +154,20 @@ fn resolve_direct_ld_lld(target_os: string) -> DirectLinkContract ![io] {
     if arch != "x86_64" && arch != "aarch64" {
         return _direct_fail("host arch is unsupported (" + arch + ")");
     }
-    let forced = _get_env_cmd("SAILFIN_LINKER");
+    // SFEP-0076 section 3.3: rung 2 (environment) above rung 4 (user config).
+    // Threaded here as well as in `build/link.sfn` so the two link paths cannot
+    // disagree about which linker the user asked for.
+    let mut forced = _get_env_cmd("SAILFIN_LINKER");
+    let mut forced_origin: string = "SAILFIN_LINKER";
+    if forced.length == 0 {
+        let config_triple = build_target_triple();
+        forced = user_config_linker(config_triple);
+        forced_origin = user_config_linker_origin(config_triple);
+    }
     if forced.length > 0 {
         if forced != "lld" && forced != "ld.lld" {
-            return _direct_fail("SAILFIN_LINKER=" + forced + " defers to clang");
+            return _direct_fail(forced_origin + "=" + forced
+                + " defers to clang");
         }
     }
     if _which("ld.lld").length == 0 {

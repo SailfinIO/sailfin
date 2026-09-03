@@ -76,6 +76,7 @@ import {
 // "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs;
 // `_get_env_cmd` reads a single env var (the macOS SDK probe below).
 import { _env_flag, _get_env_cmd } from "./build_flags";
+import { user_config_cc } from "./user_config";
 
 // Reserved opaque object-file handle for later backend stages (#347, or a
 // future `sfn/codegen-native` provider per SFEP-0066 §3.2, produce these
@@ -142,7 +143,14 @@ fn _clang_link_driver(target_os: string) -> string ![io] {
     if host_os == "Darwin" {
         apple_clang_available = fs.exists("/usr/bin/clang");
     }
-    return _clang_link_driver_for(target_os, host_os, _get_env_cmd("SAILFIN_CC"), apple_clang_available);
+    // SFEP-0076 section 3.3: rung 2 (environment) above rung 4 (user config).
+    // The pure `_clang_link_driver_for` keeps owning the compiled-in default,
+    // so an absent config file changes nothing here.
+    let mut cc_override = _get_env_cmd("SAILFIN_CC");
+    if cc_override.length == 0 {
+        cc_override = user_config_cc(build_target_triple());
+    }
+    return _clang_link_driver_for(target_os, host_os, cc_override, apple_clang_available);
 }
 
 export { _clang_link_driver_for };
