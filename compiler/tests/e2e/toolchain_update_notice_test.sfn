@@ -14,7 +14,7 @@
 // connectivity probe that always returned empty let a wholly broken TLS
 // trust store report PASS for a full release cycle). The load-bearing case
 // in this file is Group A test 1: with
-// `SAILFIN_UPDATE_NOTIFY_ASSUME_INTERACTIVE=1` bypassing only the CI/TTY
+// `SAILFIN_UPDATE_NOTIFY_ASSUME_TTY=1` bypassing only the CI/TTY
 // gates, a refused-network check still advances the eligibility window —
 // proof the machinery ran. Every suppression test in Group B/D that asserts
 // "nothing happened" runs with the SAME seam ON (so only the gate under
@@ -99,14 +99,14 @@ fn _neutral_cwd(label: string) -> string ![io] {
 fn _env_with(extra: string[], home: string, config_dir: string, store: string, release_base: string, assume_interactive: boolean) -> string[] ![io] {
     let host_os = env.get("SAILFIN_HOST_OS");
     let target_os = env.get("SAILFIN_TARGET_OS");
-    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-update-notice-child"), ["HOME", "INSTALL_BASE", "SAILFIN_CONFIG_DIR", "SAILFIN_SKIP_TOOLCHAIN_CHECK", "SAILFIN_TOOLCHAIN_RELEASE_BASE", "SAILFIN_UPDATE_NOTIFY_ASSUME_INTERACTIVE", "CI"]);
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-update-notice-child"), ["HOME", "INSTALL_BASE", "SAILFIN_CONFIG_DIR", "SAILFIN_SKIP_TOOLCHAIN_CHECK", "SAILFIN_TOOLCHAIN_RELEASE_BASE", "SAILFIN_UPDATE_NOTIFY_ASSUME_TTY", "CI"]);
     e.push("HOME=" + home);
     e.push("SAILFIN_CONFIG_DIR=" + config_dir);
     e.push("INSTALL_BASE=" + store);
     e.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + release_base);
     e.push("SAILFIN_SKIP_TOOLCHAIN_CHECK=1");
     if assume_interactive {
-        e.push("SAILFIN_UPDATE_NOTIFY_ASSUME_INTERACTIVE=1");
+        e.push("SAILFIN_UPDATE_NOTIFY_ASSUME_TTY=1");
     }
     let mut i: int = 0;
     loop {

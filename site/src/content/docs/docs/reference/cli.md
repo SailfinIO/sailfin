@@ -651,7 +651,7 @@ Or put it in `~/.sfn/config.toml` once per workstation with `sfn config set regi
 
 | Value | Effect |
 |---|---|
-| `notify` (default when unset) | Permits `sfn toolchain install`, `update`, and `update --check`, and enables the opportunistic post-command update notice (SFEP-0073 §3.6, SFN-1073): after a successful, interactive command, at most once per seven days, `sfn` performs one signed-index check and may print a notice to stderr naming the current and candidate versions and the exact update command — silently, on any failure, without changing the command's exit status, and without touching the store, a default, or a project manifest. |
+| `notify` (default when unset) | Permits `sfn toolchain install`, `update`, and `update --check`, and enables the opportunistic post-command update notice (SFEP-0073 §3.6, SFN-1073) once `sfn toolchain update <channel>` has recorded an update track: after a successful, interactive command, at most once per seven days, `sfn` performs one signed-index check and may print a notice to stderr naming the current and candidate versions and the exact update command — silently, on any failure, without changing the command's exit status, and without touching the store, a default, or a project manifest. |
 | `manual` | Also permits all three explicit commands, identically to `notify`. It differs only by suppressing the opportunistic check above — `manual` never performs it. |
 | `disabled` | Refuses every release-network operation — `install`, `update` (with or without `--check`), `default <version>` when it would have to fetch, and the automatic fetch of a missing selected toolchain — before any request, naming the policy and `sfn config set toolchain.update-policy manual` as the remedy. Local selection, `list`/`active`/`verify`, reporting or recording an already-installed `default`, and `remove` are unaffected. |
 
@@ -941,6 +941,7 @@ These variables enable verbose runtime diagnostics. They are intended for compil
 | `SAILFIN_DUMP_ARENA_STATS` | Print runtime arena statistics on exit. |
 | `SAILFIN_DEBUG_FORCE_PANIC` | Force an internal panic in a named compiler stage for ICE-path testing. |
 | `SAILFIN_INJECT_FAULT` | Inject transient emit failures for retry-path testing. |
+| `SAILFIN_UPDATE_NOTIFY_ASSUME_TTY` | Bypass only the TTY suppression gate on the post-command update notice, for testing it non-interactively; CI detection, the update policy, the seven-day eligibility window, the lease, and every network refusal still apply. |
 
 ---
 

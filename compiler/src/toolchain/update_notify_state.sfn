@@ -19,6 +19,7 @@ import {
     _toml_trim_cmd
 } from "../build/fs";
 import { ensure_dir_p } from "../build/fs_tree";
+import { _env_flag } from "../build_flags";
 import {
     char_code_at_text,
     index_of,
@@ -419,7 +420,10 @@ fn _lease_publish(path: string, now_epoch: int) -> boolean ![io] {
     let tmp = _mktemp_sibling_cmd(path);
     if tmp.length == 0 { return false; }
     fs.writeFile(tmp, int_to_string(now_epoch));
-    if !fs.exists(tmp) { return false; }
+    if !fs.exists(tmp) {
+        fs.deleteFile(tmp);
+        return false;
+    }
     if _rename_noreplace_preserving_source_on_failure(tmp, path) { return true; }
     fs.deleteFile(tmp);
     return false;
@@ -454,6 +458,17 @@ fn toolchain_update_lease_acquire(host_triple: string, now_epoch: int) -> boolea
 // process's live lease — turning a slow checker into one that silently
 // unlocks its own successor. A missing file is success: there is nothing of
 // ours left to release.
+//
+// It is not a complete holder identity, and does not claim to be. The epoch
+// is the only thing in the file, so two processes that reclaim the same
+// stale lease within the same second write the same bytes and this check
+// cannot separate them — in that one path a releaser can still delete a
+// successor's live lease. Closing it needs a real nonce in the lease body
+// (epoch plus a unique token), which the tree cannot spell today: there is
+// no self-PID accessor in Sailfin source, only child PIDs from spawning.
+// The exposure is two concurrent checks and one redundant eligibility write
+// once per seven days, never corruption, so it is recorded rather than
+// worked around.
 fn toolchain_update_lease_release(host_triple: string, held_epoch: int) -> boolean ![io] {
     let path = toolchain_update_lease_path(host_triple);
     if path.length == 0 { return false; }
@@ -492,25 +507,32 @@ fn toolchain_update_streams_interactive() -> boolean ![io] {
     return sfn_stream_is_terminal(1) && sfn_stream_is_terminal(2);
 }
 
-// Test-only seam. Bypasses the CI and TTY suppression gates, and NOTHING
-// else — policy, eligibility, the lease, the signed-index trust root, and
+// Test-only seam. Bypasses the TTY suppression gate and NOTHING else — the
+// CI gate, policy, eligibility, the lease, the signed-index trust root, and
 // every network refusal are untouched and still enforced. It cannot make a
 // `disabled` or `manual` policy check, and it cannot weaken verification.
 //
 // It exists because the suppression, budget, and lease behavior are
-// otherwise untestable: every subprocess an `![io]` test spawns is
-// non-interactive by construction, so the TTY gate would suppress the check
-// in every test and each assertion would pass whether the feature worked,
-// was broken, or was absent. That is the dormant-test failure mode SFN-807
-// was lost to — a probe that always returned empty let a wholly broken TLS
-// trust store report PASS for a full release cycle. A seam that makes the
-// behavior observable is the cost of tests that can actually fail.
+// otherwise untestable: every subprocess an `![io]` test spawns is non-TTY
+// by construction, so the gate would suppress the check in every test and
+// each assertion would pass whether the feature worked, was broken, or was
+// absent. That is the dormant-test failure mode SFN-807 was lost to — a
+// probe that always returned empty let a wholly broken TLS trust store
+// report PASS for a full release cycle. A seam that makes the behavior
+// observable is the cost of tests that can actually fail.
 //
-// Deliberately absent from the CLI reference: it is not a user-facing knob.
-// Precedent for a test-only env seam: `SAILFIN_INJECT_FAULT`,
-// `SAILFIN_DEBUG_FORCE_PANIC`.
-fn toolchain_update_assume_interactive() -> boolean ![io] {
-    return env.get("SAILFIN_UPDATE_NOTIFY_ASSUME_INTERACTIVE").length > 0;
+// Scoped to the TTY gate alone, deliberately. Leaving CI detection
+// unconditional means the seam cannot cause a network check on a CI runner
+// however it is set, and it lets the CI gate be tested for real (seam on,
+// `CI` set, assert suppressed) rather than tautologically.
+//
+// Routed through `_env_flag` so `=0` and `=false` read as OFF, matching
+// every other compiler toggle: a seam whose "off" value turns it on is a
+// trap. Documented in the CLI reference's debug/testing table alongside
+// `SAILFIN_INJECT_FAULT` and `SAILFIN_DEBUG_FORCE_PANIC` — someone who sets
+// it by accident should be able to look it up.
+fn toolchain_update_assume_tty() -> boolean ![io] {
+    return _env_flag("SAILFIN_UPDATE_NOTIFY_ASSUME_TTY");
 }
 
 export {
@@ -521,12 +543,12 @@ export {
     TOOLCHAIN_UPDATE_NOTICE_SCHEMA,
     ToolchainUpdateEligibility,
     ToolchainUpdateNotice,
+    toolchain_update_assume_tty,
     toolchain_update_check_parse,
     toolchain_update_check_path,
     toolchain_update_check_read,
     toolchain_update_check_render,
     toolchain_update_check_text_schema,
-    toolchain_update_assume_interactive,
     toolchain_update_check_write,
     toolchain_update_eligible_at,
     toolchain_update_env_is_ci,

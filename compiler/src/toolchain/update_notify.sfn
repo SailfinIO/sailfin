@@ -29,7 +29,7 @@ import { toolchain_policy_decide, toolchain_policy_now_epoch } from "./release_p
 import { toolchain_versions_base } from "./store";
 import {
     TOOLCHAIN_UPDATE_INTERVAL_SECS,
-    toolchain_update_assume_interactive,
+    toolchain_update_assume_tty,
     toolchain_update_check_read,
     toolchain_update_check_write,
     toolchain_update_eligible_at,
@@ -193,13 +193,16 @@ fn update_notify_exit(rc: int, argv: string[], compiler_path: string, binary_dir
     if starts_with(argv[0], "-") { return; }
     if _update_notify_excluded_head(argv[0]) { return; }
     if _update_notify_requests_json(argv) { return; }
-    // The CI and TTY gates are the only two the test seam may bypass, and it
-    // bypasses nothing below this point — policy, eligibility, the lease, and
-    // every network refusal still apply. See
-    // `update_notify_state.sfn::toolchain_update_assume_interactive` for why
-    // the seam exists at all.
-    if !toolchain_update_assume_interactive() {
-        if toolchain_update_env_is_ci() { return; }
+    // CI detection is unconditional: the test seam below deliberately cannot
+    // reach it, so no way of setting that seam can cause a network check on a
+    // CI runner — and the CI gate stays testable for real rather than
+    // tautologically.
+    if toolchain_update_env_is_ci() { return; }
+    // The TTY gate is the only one the seam bypasses, and it bypasses nothing
+    // below this point — policy, eligibility, the lease, and every network
+    // refusal still apply. See
+    // `update_notify_state.sfn::toolchain_update_assume_tty` for why it exists.
+    if !toolchain_update_assume_tty() {
         if !toolchain_update_streams_interactive() { return; }
     }
     // `manual` must suppress the opportunistic check while still permitting
