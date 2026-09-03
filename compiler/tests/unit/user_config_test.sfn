@@ -12,6 +12,12 @@ import { scratch_root } from "sfn/test";
 
 import { toml_section_key_names, toml_section_malformed_lines } from "../../src/toml_parser";
 import {
+    _uc_parse_jobs,
+    user_config_build_cache_dir_at,
+    user_config_build_cache_dir_from_text,
+    user_config_build_jobs_at,
+    user_config_build_jobs_from_text,
+    user_config_build_key_is_admitted,
     user_config_key_is_admitted,
     user_config_linker_origin,
     user_config_target_section,
@@ -136,4 +142,145 @@ test "user_config: garbage content resolves to empty string without panicking" !
     let path = _dir() + "/garbage.toml";
     fs.writeFile(path, "!!! not toml <<<");
     assert user_config_target_value_at(path, "x86_64-unknown-linux-gnu", "linker") == "";
+}
+
+// ---------------------------------------------------------------------------
+// Group C — [build] section (SFN-1260, SFEP-0076 section 3.4).
+// ---------------------------------------------------------------------------
+test "user_config: both [build] keys are admitted, unrelated keys are not" ![pure] {
+    assert user_config_build_key_is_admitted("cache-dir") == true;
+    assert user_config_build_key_is_admitted("jobs") == true;
+    assert user_config_build_key_is_admitted("linker") == false;
+    assert user_config_build_key_is_admitted("cc") == false;
+    assert user_config_build_key_is_admitted("sysroot") == false;
+    // The two admission predicates are disjoint: a `[build]` key is never
+    // admitted by the `[target.<triple>]` predicate.
+    assert user_config_key_is_admitted("jobs") == false;
+    assert user_config_key_is_admitted("cache-dir") == false;
+}
+
+test "user_config: an absolute POSIX cache-dir and jobs resolve together" ![pure] {
+    let text = "[build]\ncache-dir = \"/var/cache/sfn\"\njobs = 4\n";
+    assert user_config_build_cache_dir_from_text(text) == "/var/cache/sfn";
+    assert user_config_build_jobs_from_text(text) == 4;
+}
+
+test "user_config: a Windows drive-absolute cache-dir resolves" ![pure] {
+    let text = "[build]\ncache-dir = \"C:/Users/dev/cache\"\n";
+    assert user_config_build_cache_dir_from_text(text) == "C:/Users/dev/cache";
+}
+
+test "user_config: a relative cache-dir resolves to empty string" ![pure] {
+    let text = "[build]\ncache-dir = \".cache/sfn\"\n";
+    assert user_config_build_cache_dir_from_text(text) == "";
+}
+
+test "user_config: a bare relative cache-dir with no separator resolves to empty string" ![pure] {
+    let text = "[build]\ncache-dir = \"cache\"\n";
+    assert user_config_build_cache_dir_from_text(text) == "";
+}
+
+test "user_config: absent [build] section resolves to empty string and zero" ![pure] {
+    let text = "[target.x86_64-unknown-linux-gnu]\nlinker = \"mold\"\n";
+    assert user_config_build_cache_dir_from_text(text) == "";
+    assert user_config_build_jobs_from_text(text) == 0;
+}
+
+test "user_config: present [build] section, absent key resolves to empty string and zero" ![pure] {
+    let with_dir_only = "[build]\ncache-dir = \"/var/cache/sfn\"\n";
+    assert user_config_build_jobs_from_text(with_dir_only) == 0;
+    let with_jobs_only = "[build]\njobs = 4\n";
+    assert user_config_build_cache_dir_from_text(with_jobs_only) == "";
+}
+
+// Acceptance criterion: a `[target.<triple>]` section carrying build-shaped
+// keys must never leak into the `[build]` lookup, and a `[build]` section
+// carrying a target-shaped key must never leak into the `[target.<triple>]`
+// lookup.
+test "user_config: [target.<triple>] and [build] sections do not leak into each other" ![pure] {
+    let triple = "x86_64-unknown-linux-gnu";
+    let target_only = "[target." + triple
+        + "]\ncache-dir = \"/wrong\"\njobs = 4\n";
+    assert user_config_build_cache_dir_from_text(target_only) == "";
+    assert user_config_build_jobs_from_text(target_only) == 0;
+
+    let build_only = "[build]\nlinker = \"mold\"\n";
+    assert user_config_target_value_from_text(build_only, triple, "linker") == "";
+}
+
+test "user_config: build jobs parses valid positive decimals up to the ceiling" ![pure] {
+    assert user_config_build_jobs_from_text("[build]\njobs = 4\n") == 4;
+    assert user_config_build_jobs_from_text("[build]\njobs = 1\n") == 1;
+    assert user_config_build_jobs_from_text("[build]\njobs = 8\n") == 8;
+    // The resolver does NOT clamp to the [1, 8] worker ceiling — that clamp
+    // is `_cr_jobs_from_config`'s job (`capsule_emit_parallel.sfn`); this
+    // rung only validates "is it a usable positive decimal".
+    assert user_config_build_jobs_from_text("[build]\njobs = 12\n") == 12;
+    assert user_config_build_jobs_from_text("[build]\njobs = 1000000\n") == 1000000;
+
+    assert _uc_parse_jobs("4") == 4;
+    assert _uc_parse_jobs("1") == 1;
+    assert _uc_parse_jobs("8") == 8;
+    assert _uc_parse_jobs("12") == 12;
+    assert _uc_parse_jobs("1000000") == 1000000;
+}
+
+test "user_config: build jobs rejects empty, non-positive, non-decimal, and out-of-range input" ![pure] {
+    assert user_config_build_jobs_from_text("[build]\njobs = \n") == 0;
+    assert user_config_build_jobs_from_text("[build]\njobs = 0\n") == 0;
+    assert user_config_build_jobs_from_text("[build]\njobs = -2\n") == 0;
+    assert user_config_build_jobs_from_text("[build]\njobs = abc\n") == 0;
+    assert user_config_build_jobs_from_text("[build]\njobs = 2.5\n") == 0;
+    assert user_config_build_jobs_from_text("[build]\njobs = 1000001\n") == 0;
+
+    assert _uc_parse_jobs("") == 0;
+    assert _uc_parse_jobs("0") == 0;
+    assert _uc_parse_jobs("-2") == 0;
+    assert _uc_parse_jobs("abc") == 0;
+    assert _uc_parse_jobs("2.5") == 0;
+    assert _uc_parse_jobs("1000001") == 0;
+    // Unlike `_cr_parse_positive_int`, which tolerates trailing whitespace
+    // because it parses `nproc` output, a TOML value already arrives trimmed
+    // by `toml_get_string`, so trailing space here means the user typed
+    // something that is not a number — exercised directly since a value
+    // routed through `toml_get_string` would already have it trimmed away.
+    assert _uc_parse_jobs("4 ") == 0;
+}
+
+test "user_config: quoted and unquoted jobs values agree" ![pure] {
+    assert user_config_build_jobs_from_text("[build]\njobs = \"4\"\n") == user_config_build_jobs_from_text("[build]\njobs = 4\n");
+    assert user_config_build_jobs_from_text("[build]\njobs = \"4\"\n") == 4;
+}
+
+test "user_config: build_cache_dir_at and build_jobs_at on an empty path resolve to empty string and zero" ![io] {
+    assert user_config_build_cache_dir_at("") == "";
+    assert user_config_build_jobs_at("") == 0;
+}
+
+test "user_config: build_cache_dir_at and build_jobs_at on an absent path resolve to empty string and zero" ![io] {
+    let path = _dir() + "/build-absent.toml";
+    if fs.exists(path) { fs.deleteFile(path); }
+    assert user_config_build_cache_dir_at(path) == "";
+    assert user_config_build_jobs_at(path) == 0;
+}
+
+test "user_config: build_cache_dir_at and build_jobs_at on an existing empty file resolve to empty string and zero" ![io] {
+    let path = _dir() + "/build-empty.toml";
+    fs.writeFile(path, "");
+    assert user_config_build_cache_dir_at(path) == "";
+    assert user_config_build_jobs_at(path) == 0;
+}
+
+test "user_config: build_cache_dir_at and build_jobs_at on garbage content resolve to empty string and zero without panicking" ![io] {
+    let path = _dir() + "/build-garbage.toml";
+    fs.writeFile(path, "!!! not toml <<<");
+    assert user_config_build_cache_dir_at(path) == "";
+    assert user_config_build_jobs_at(path) == 0;
+}
+
+test "user_config: build_cache_dir_at and build_jobs_at resolve a real file's values" ![io] {
+    let path = _dir() + "/build-present.toml";
+    fs.writeFile(path, "[build]\ncache-dir = \"/tmp/sfn-cache\"\njobs = 2\n");
+    assert user_config_build_cache_dir_at(path) == "/tmp/sfn-cache";
+    assert user_config_build_jobs_at(path) == 2;
 }

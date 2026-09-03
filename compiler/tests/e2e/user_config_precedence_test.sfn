@@ -176,3 +176,30 @@ test "user_config: an unadmitted key warns to stderr without failing the build" 
     assert find(err, "is not a recognised key", 0) >= 0;
     assert find(out, "is not a recognised key", 0) < 0;
 }
+
+// SFN-1260 / SFEP-0076 section 3.4: `[build]` admits only `cache-dir` and
+// `jobs`. An unrecognised `[build]` key warns the same way an unrecognised
+// `[target.<triple>]` key does, and never fails the build.
+test "user_config: an unadmitted [build] key warns to stderr without failing the build" ![io] {
+    let home = _home("build-unadmitted-key");
+    _write_config(home, "[build]\nsysroot = \"/x\"\n");
+    let rc = _build("build-unadmitted-key", home, []);
+    assert rc == 0;
+    let out = fs.readFile(_dir("build-unadmitted-key") + "/build.out");
+    let err = fs.readFile(_dir("build-unadmitted-key") + "/build.err");
+    assert find(err, "~/.sfn/config.toml [build] sysroot is not a recognised key; ignoring", 0) >= 0;
+    assert find(out, "is not a recognised key", 0) < 0;
+}
+
+// A relative `[build] cache-dir` fails validation and warns rather than
+// silently resolving against the process cwd (`user_config_build_cache_dir_from_text`).
+test "user_config: a relative [build] cache-dir warns to stderr without failing the build" ![io] {
+    let home = _home("build-relative-cache-dir");
+    _write_config(home, "[build]\ncache-dir = \".cache/sfn\"\n");
+    let rc = _build("build-relative-cache-dir", home, []);
+    assert rc == 0;
+    let out = fs.readFile(_dir("build-relative-cache-dir") + "/build.out");
+    let err = fs.readFile(_dir("build-relative-cache-dir") + "/build.err");
+    assert find(err, "~/.sfn/config.toml [build] cache-dir must be an absolute path; ignoring:", 0) >= 0;
+    assert find(out, "must be an absolute path", 0) < 0;
+}
