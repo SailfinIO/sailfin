@@ -385,7 +385,7 @@ sfn cache clean --all-schemas            # also remove stale prior-schema trees
 
 ---
 
-### `sfn dev bootstrap build [--force] [-- <build-arg>...]`
+### `sfn dev bootstrap build [--clean-tree] [--force] [-- <build-arg>...]`
 
 Build and install the compiler with the exact released seed pinned by
 `bootstrap.toml`. By default, an unchanged source fingerprint and an existing
@@ -393,6 +393,7 @@ Build and install the compiler with the exact released seed pinned by
 
 ```bash
 sfn dev bootstrap build
+sfn dev bootstrap build --clean-tree
 sfn dev bootstrap build --force
 sfn dev bootstrap build -- --no-cache --cache-trace
 ```
@@ -403,6 +404,29 @@ A bare `--` ends bootstrap option parsing; every later token is appended
 unchanged to the pinned seed's `build -p compiler` invocation. This provides
 the native cache-diagnostic and future build-flag passthrough directly on the
 command line.
+
+`--clean-tree` removes every top-level entry under `build/` except the fetched
+seed toolchain store, then runs the ordinary self-host build in the same
+invocation. It implies `--force`, and refuses to build if the removal fails.
+It does not accept `--include-seed` or `--dry-run` — use `sfn dev clean build`
+for those. It is **not** the same as `sfn build --clean`; see
+[`--clean-tree` vs `--clean`](#--clean-tree-vs---clean) below.
+
+---
+
+### `--clean-tree` vs `--clean`
+
+These two flags sound alike and clear different things — never conflate them.
+
+| Command | Clears |
+|---|---|
+| `sfn build --clean` / `sfn run --clean` | The content-addressed build cache and the runtime object cache. That cache root lives outside the repo unless neither `XDG_CACHE_HOME` nor `HOME` is set. |
+| `sfn dev bootstrap build --clean-tree` | `build/*` except the fetched seed toolchain store, then self-hosts. Never touches the cache. |
+| `sfn dev clean build` | The same removal as `--clean-tree`, standalone (no rebuild), with `--include-seed` / `--dry-run` available. |
+
+**`sfn dev bootstrap build -- --clean` is not a spelling of `--clean-tree`** —
+the tail after `--` reaches the seed's `sfn build -p compiler` verbatim, so it
+clears the cache, leaves the tree intact, and exits 0.
 
 ---
 
@@ -474,6 +498,7 @@ sfn dev clean all                        # build/ and dist/ together
 - It refuses to run unless the current directory is a compiler checkout — `bootstrap.toml` must be present *and* parse with a `[seed].version`.
 - It takes no path argument. Every target is a literal repo-relative `build/`/`dist/` path, checked against traversal and absolute-path escape before anything is unlinked, and symlinked entries are unlinked rather than followed.
 - An absent tree is a clean no-op (exit 0), not an error, and the tree is not recreated.
+- To clean and rebuild in one step, use `sfn dev bootstrap build --clean-tree` instead of running this command followed by `sfn dev bootstrap build`.
 
 ---
 

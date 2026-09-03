@@ -20,7 +20,7 @@ Use this skill whenever a task touches Sailfin compiler sources, runtime code, t
 2. Sailfin source edit inner loop: run `sfn check <touched files>` (or `build/bin/sfn check <path>`) to catch parse/type/effect errors quickly.
 3. Test-only or example change: run the targeted test first; run a broader suite only when the issue asks for it or risk warrants it.
 4. Compiler/runtime source change: run `sfn dev bootstrap build` when the change touches compiler self-hosting surface, then run the targeted `build/bin/sfn test <path>` / `-k` / `--tag` commands.
-5. Structural compiler change: run `sfn dev clean build` before rebuilding.
+5. Structural compiler change: rebuild with `sfn dev bootstrap build --clean-tree`.
 
 Use `sfn test`, `sfn dev verify`, or `sfn dev verify --strict` only when the issue
 explicitly requests a full-suite, release, determinism, or self-host fixed-point
