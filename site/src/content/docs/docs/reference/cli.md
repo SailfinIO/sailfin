@@ -651,8 +651,8 @@ Or put it in `~/.sfn/config.toml` once per workstation with `sfn config set regi
 
 | Value | Effect |
 |---|---|
-| `notify` (default when unset) | Permits `sfn toolchain install`, `update`, and `update --check`. |
-| `manual` | Also permits all three — in this slice `notify` and `manual` behave identically for explicit commands. They differ only for the opportunistic post-command update notice designed in SFEP-0073 §3.6, which is not yet shipped (SFN-1073). |
+| `notify` (default when unset) | Permits `sfn toolchain install`, `update`, and `update --check`, and enables the opportunistic post-command update notice (SFEP-0073 §3.6, SFN-1073): after a successful, interactive command, at most once per seven days, `sfn` performs one signed-index check and may print a notice to stderr naming the current and candidate versions and the exact update command — silently, on any failure, without changing the command's exit status, and without touching the store, a default, or a project manifest. |
+| `manual` | Also permits all three explicit commands, identically to `notify`. It differs only by suppressing the opportunistic check above — `manual` never performs it. |
 | `disabled` | Refuses every release-network operation — `install`, `update` (with or without `--check`), `default <version>` when it would have to fetch, and the automatic fetch of a missing selected toolchain — before any request, naming the policy and `sfn config set toolchain.update-policy manual` as the remedy. Local selection, `list`/`active`/`verify`, reporting or recording an already-installed `default`, and `remove` are unaffected. |
 
 `sfn config set toolchain.update-policy <value>` rejects anything else (`error: toolchain.update-policy must be one of notify, manual, disabled`, exit `1`). A hand-edited value outside this set is reported verbatim by `sfn config get toolchain.update-policy`, but every network operation fails closed against it, naming the config file and the three valid values. `sfn config set`/`unset registry` and `sfn config set`/`unset toolchain.update-policy` each rewrite only their own section — setting one never clobbers the other. `sfn config list` prints both keys; an unknown key names both in its `known keys:` message.
@@ -742,7 +742,7 @@ A revoked identity is additionally recorded in a local, append-only revocation l
 
 The bootstrap seed path (`bootstrap.toml [seed].version`, SFEP-0047) does not consult the signed index — gating the self-host build on index liveness would couple it to the index's expiry.
 
-> **Not yet shipped:** opportunistic update notification (a passive notice surfaced after an unrelated command) and `sfn toolchain default <channel>` (recording a track by setting the default directly, rather than through `update`) are designed in SFEP-0073 §3.6 but not implemented (SFN-1073). `sfn toolchain default`, `sfn toolchain remove`, and [`sfn toolchain update`](#updating-a-toolchain) have shipped — see below.
+> **Not yet shipped:** `sfn toolchain default <channel>` (recording a track by setting the default directly, rather than through `update`) is designed in SFEP-0073 §3.6 but not implemented (SFN-1073). The opportunistic post-command update notice from that same section has shipped — see [`toolchain.update-policy`](#sfn-config-getsetunsetlist-key-value) above. `sfn toolchain default`, `sfn toolchain remove`, and [`sfn toolchain update`](#updating-a-toolchain) have shipped — see below.
 >
 > **Testing boundary:** channel resolution, yank handling, and index-listed asset binding are covered at unit level only — an end-to-end test cannot forge a signature against the pinned release-signing trust root. Offline execution refusal for an already-known-revoked release is covered end-to-end, since it consults only the local ledger and needs no signature to verify.
 
@@ -821,7 +821,7 @@ management-protocol: 1-1
 
 Management routing never reads the project `[toolchain]` pin, so `sfn toolchain ...` commands stay reachable even when ordinary selection (above) is broken or unsatisfiable. A payload the local revocation ledger knows to be revoked is excluded from the survey, offline included — see [Installing a toolchain](#installing-a-toolchain).
 
-> **Not yet shipped:** opportunistic update notification is designed in SFEP-0073 §3.6 but not implemented (SFN-1073). `sfn toolchain default`, `sfn toolchain remove`, and [`sfn toolchain update`](#updating-a-toolchain) have shipped — see [Default toolchain and removal](#default-toolchain-and-removal) and [Updating a toolchain](#updating-a-toolchain). See [`docs/status.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md) for current per-leaf status.
+> `sfn toolchain default`, `sfn toolchain remove`, [`sfn toolchain update`](#updating-a-toolchain), and the opportunistic post-command update notice (SFEP-0073 §3.6, SFN-1073) have all shipped — see [Default toolchain and removal](#default-toolchain-and-removal), [Updating a toolchain](#updating-a-toolchain), and [`toolchain.update-policy`](#sfn-config-getsetunsetlist-key-value). See [`docs/status.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md) for current per-leaf status.
 
 ---
 
