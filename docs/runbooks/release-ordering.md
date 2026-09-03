@@ -193,6 +193,31 @@ The same recovery applies when the reserved Git tag still exists but its
 GitHub Release object was deleted: the workflow detects the missing release
 object through the API and recreates it against the existing verified tag.
 
+**`bootstrap_index` is out of the release train's reach, by design.**
+`release-train.yml` dispatches `release.yml` with `channel`, `bump`, `dry_run`
+and `verified_sha` only. Withholding `bootstrap_index` is deliberate
+authorization scoping, not an oversight (SFN-1123): it is the one input that
+resets the canonical index's monotonic signed history to sequence 1, that reset
+has no undo, and a scheduled, unattended job must not hold that authority. The
+first publication is a once-ever operator act on a manual `release.yml` or
+`release-tag.yml` run.
+
+This does **not** constrain repair. The gate demands `bootstrap_index` only when
+there is no authenticated candidate anywhere — no canonical release object *and*
+no versioned release carrying a complete `toolchain-index.json{,.sig}` pair.
+Restoring a deleted canonical release object while versioned pairs survive takes
+the recovery branch above and needs no authorization, so it runs through the
+automatic train unchanged.
+
+Because the train cannot supply the input, it **preflights** the condition
+before dispatching: if no canonical release object exists and no versioned
+release carries a complete pair, the train refuses to dispatch, names
+`bootstrap_index` in the failure, and posts the same reason to the cadence
+comment and Slack. Previously that state was only discovered inside
+`release-tag.yml`, after four green platform builds. A blocked train is an
+operator task, not a retry: perform the manual bootstrap once, then re-run the
+train.
+
 This remediation does **not** work for tags before v0.10.3. A re-run checks
 out the tag's own tree, which predates
 `.github/actions/sailfin-build-windows`, so `native-windows-build` fails,

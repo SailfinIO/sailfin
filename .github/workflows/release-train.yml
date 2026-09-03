@@ -26,6 +26,11 @@ name: Release Train (weekly stable)
 #      cadence runs when the cut gate is green. Manual runs stay
 #      human-confirmable: re-run with `confirm_dispatch=true` to fire an
 #      off-clock or repair cut once the cadence comment looks right.
+#   4. Preflights the canonical toolchain index before dispatching (SFN-1123).
+#      `bootstrap_index` is deliberately withheld from the train — a scheduled
+#      job must not be able to reset signed index history to sequence 1 — so a
+#      repo with no authenticated index anywhere is refused here rather than
+#      after four green platform builds.
 #
 # It is a PLAIN, deterministic Actions workflow in the spirit of
 # `seed-cut-advisor.yml` — NOT a gh-aw `.md` source. No compiled `.lock.yml`,
@@ -327,6 +332,69 @@ jobs:
               }
             }
 
+            // --- 4b. Toolchain-index preflight (SFN-1123) ----------------------
+            // `bootstrap_index` is deliberately NOT threaded into this workflow's
+            // `release.yml` dispatch. It is the only input that can reset the
+            // canonical index's monotonic signed history to sequence 1, and that
+            // reset has no undo — so authorizing it stays a deliberate human act on
+            // a manual `release.yml` / `release-tag.yml` run. A scheduled, unattended
+            // job must not hold that authority.
+            //
+            // The cost of that posture is that a cut dispatched into a repo with no
+            // authenticated index anywhere is GUARANTEED to fail at
+            // `release-tag.yml`'s "Build and sign canonical toolchain index" step —
+            // after four green platform builds. This preflight mirrors that gate's
+            // absent-canonical branch and refuses to dispatch instead, naming the
+            // input the operator needs.
+            //
+            // It mirrors the gate's real condition, which is narrower than "the
+            // canonical release is missing": the gate demands `bootstrap_index` only
+            // when there is no authenticated candidate at all. Restoring a deleted
+            // canonical release object while versioned releases still carry complete
+            // pairs takes the recovery branch and needs no authorization, so it runs
+            // through the train unchanged and this preflight does not block it.
+            const TOOLCHAIN_INDEX_TAG = 'toolchain-index-v1';
+            let indexPreflightMemo = null;
+            async function toolchainIndexPreflight() {
+              if (indexPreflightMemo) return indexPreflightMemo;
+              try {
+                await github.rest.repos.getReleaseByTag({
+                  owner, repo, tag: TOOLCHAIN_INDEX_TAG,
+                });
+                indexPreflightMemo = {
+                  ok: true,
+                  reason: `canonical index release \`${TOOLCHAIN_INDEX_TAG}\` is present.`,
+                };
+                return indexPreflightMemo;
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+              const releases = await github.paginate(github.rest.repos.listReleases, {
+                owner, repo, per_page: 100,
+              });
+              const indexed = releases.filter((r) => {
+                if (r.tag_name === TOOLCHAIN_INDEX_TAG) return false;
+                const names = (r.assets || []).map(a => a.name);
+                return names.includes('toolchain-index.json')
+                  && names.includes('toolchain-index.json.sig');
+              });
+              indexPreflightMemo = indexed.length
+                ? {
+                    ok: true,
+                    reason: `canonical index release \`${TOOLCHAIN_INDEX_TAG}\` is absent, but ${indexed.length} versioned release(s) carry a complete signed pair (e.g. \`${indexed[0].tag_name}\`); release-tag.yml restores from the highest authenticated candidate without authorization.`,
+                  }
+                : {
+                    ok: false,
+                    reason: `no canonical index release \`${TOOLCHAIN_INDEX_TAG}\` and no versioned release carrying a complete \`toolchain-index.json\` + \`toolchain-index.json.sig\` pair. release-tag.yml would refuse to infer a fresh sequence-1 history, failing the cut after the full build matrix. The first publication requires \`bootstrap_index: true\`, which the train deliberately cannot set: run \`release.yml\` manually once with \`bootstrap_index: true\`, then re-run the train. See docs/runbooks/release-ordering.md.`,
+                  };
+              return indexPreflightMemo;
+            }
+            // Probed only when the cut gate is otherwise clear — an unclear gate is
+            // not cutting anyway, and the probe costs API calls on every nightly
+            // completion.
+            const indexReady = cutGateClear ? await toolchainIndexPreflight() : null;
+            if (indexReady) note(`Toolchain-index preflight: ${indexReady.ok ? 'clear' : 'BLOCKED'} — ${indexReady.reason}`);
+
             // --- 5. Idempotent cadence comment --------------------------------
             // One comment per target window — re-runs for the same target do not
             // double-post.
@@ -343,11 +411,13 @@ jobs:
                 : (verifiedRun
                     ? `⛔ Cut gate NOT clear — compiler/runtime changed since the last green nightly \`${verifiedRun.head_sha.slice(0, 8)}\`; holding HEAD \`${headSha.slice(0, 8)}\` for a fresh nightly.`
                     : `⛔ Cut gate NOT clear — no green nightly covers HEAD \`${headSha.slice(0, 8)}\` yet; hold the cut.`);
-              const dispatchLine = cutGateClear
-                ? (isSchedule
-                    ? `**Auto-dispatching.** This scheduled train run will cut the stable release (\`channel=stable bump=${bump}\` → \`${target}\`).`
-                    : `**Ready to cut.** To dispatch the stable release (\`channel=stable bump=${bump}\` → \`${target}\`), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`)
-                : `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`;
+              const dispatchLine = !cutGateClear
+                ? `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`
+                : (indexReady && !indexReady.ok
+                    ? `⛔ **Blocked before dispatch** — ${indexReady.reason}`
+                    : (isSchedule
+                        ? `**Auto-dispatching.** This scheduled train run will cut the stable release (\`channel=stable bump=${bump}\` → \`${target}\`).`
+                        : `**Ready to cut.** To dispatch the stable release (\`channel=stable bump=${bump}\` → \`${target}\`), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`));
               const cadenceBody = [
                 `${cadenceMarker}`, '',
                 `Weekly stable train boundary reached for **${target}**.`, '',
@@ -400,6 +470,14 @@ jobs:
               note(`[dry-run] would ${cutGateClear ? 'cut' : 'dispatch a fresh nightly and hold'} for ${target}.`);
             } else if (await tagExists(target)) {
               note(`Release tag ${target} already exists — skipping.`);
+            } else if (cutGateClear && indexReady && !indexReady.ok) {
+              // Refuse here rather than letting release-tag.yml discover it after
+              // four green platform builds. `bootstrap_index` is out of the train's
+              // reach by design (see the 4b preflight), so this state needs an
+              // operator, not a retry.
+              note(`Refusing to dispatch release.yml — ${indexReady.reason}`);
+              await postSlack(`:no_entry: Sailfin release train refused to dispatch ${target}: ${indexReady.reason}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
+              core.setFailed(`Toolchain-index preflight blocked the cut: ${indexReady.reason}`);
             } else if (cutGateClear) {
               await github.rest.actions.createWorkflowDispatch({
                 owner, repo, workflow_id: 'release.yml', ref: defaultBranch,
