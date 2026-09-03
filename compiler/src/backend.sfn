@@ -147,7 +147,12 @@ fn _clang_link_driver(target_os: string) -> string ![io] {
     // The pure `_clang_link_driver_for` keeps owning the compiled-in default,
     // so an absent config file changes nothing here.
     let mut cc_override = _get_env_cmd("SAILFIN_CC");
-    if cc_override.length == 0 {
+    // `_clang_link_driver_for` returns "clang" for every host/target pair that
+    // is not native Darwin, before it ever looks at an override. Gating the
+    // rung-4 read on the same condition keeps it from being a per-link file
+    // read whose result cannot be used. The rung-2 read is left unconditional
+    // so `SAILFIN_CC` behaves exactly as it did before.
+    if cc_override.length == 0 && target_os == "Darwin" && host_os == "Darwin" {
         cc_override = user_config_cc(build_target_triple());
     }
     return _clang_link_driver_for(target_os, host_os, cc_override, apple_clang_available);

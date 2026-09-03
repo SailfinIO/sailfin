@@ -932,8 +932,12 @@ fn toml_section_key_names(text: string, section: string) -> string[] {
             continue;
         }
         if !strings_equal(current_section, section) { continue; }
+        // `<= 0`, not `< 0`: a line like `= mold` has an empty key, which would
+        // otherwise be reported to the user as an unrecognised key with no name.
+        // `toml_section_malformed_lines` uses the same threshold so the two
+        // walkers classify every line in the section identically.
         let eq_pos = find_char_local(line, "=", 0);
-        if eq_pos < 0 { continue; }
+        if eq_pos <= 0 { continue; }
         out.push(_toml_strip_quotes(_toml_trim(substring(line, 0, eq_pos))));
     }
     return out;
@@ -962,7 +966,7 @@ fn toml_section_malformed_lines(text: string, section: string) -> string[] {
             continue;
         }
         if !strings_equal(current_section, section) { continue; }
-        if find_char_local(line, "=", 0) < 0 { out.push(line); }
+        if find_char_local(line, "=", 0) <= 0 { out.push(line); }
     }
     return out;
 }

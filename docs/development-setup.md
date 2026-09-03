@@ -197,7 +197,8 @@ invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
 | `bootstrap.toml [seed].version` | `sfn dev bootstrap build` / `sfn dev bootstrap fetch` | pinned version | Edit the pin directly, or use `sfn dev bootstrap pin <v>`, to fetch a different released seed intentionally. Normal development should use the checked-in pin. |
 | `sfn dev bootstrap build -- <args>` | self-host rebuild | none | Extra args forwarded to `sfn build -p compiler`, for example `sfn dev bootstrap build -- --no-cache --cache-trace`. |
 | `--json` | `sfn test` / `sfn check` / `sfn dev verify` | off | Writes structured reports under `build/agent-report.*.json` and related JSONL files. |
-| `SAILFIN_CC` | Native macOS final links | `/usr/bin/clang` | Explicit Darwin clang-driver override; object assembly still follows `PATH`. |
+| `SAILFIN_LINKER` | Native final links | platform default (auto-detect on Linux) | Override the linker by name (e.g. `mold`, `lld`) or force the platform linker with `ld`/`system`/`default`. Falls through to `[target.<triple>] linker` in a hand-edited `~/.sfn/config.toml` when unset, ahead of the compiled-in default (SFEP-0076). |
+| `SAILFIN_CC` | Native macOS final links | `/usr/bin/clang` | Explicit Darwin clang-driver override; object assembly still follows `PATH`. Only consulted for native Darwin final links — every other host/target links via `clang` regardless. Falls through to `[target.<triple>] cc` in a hand-edited `~/.sfn/config.toml` when unset, ahead of the compiled-in default (SFEP-0076). |
 | `sfn dev verify --test-timeout N` | `sfn dev verify` | `1800` | Per-test timeout for the cold full-suite leg. |
 | `sfn dev verify --full-pass1` | `sfn dev verify` | off | Restores the older full first-pass suite before seedcheck; useful for bisects. |
 | `sfn dev verify --strict` | `sfn dev verify` | off locally | Makes a seedcheck/fixed-point rebuild mismatch fatal. |
@@ -205,6 +206,12 @@ invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
 | Flags passed directly to `sfn bench` | compiler/runtime benchmarks | empty | Extra args for compile-time and runtime execution benchmarks. |
 | Flags passed directly to `sfn dev arena` | arena IR gate | empty | Args forwarded to the native arena IR gate, e.g. `--all` or a module path. |
 | `SAILFIN_CLEAN_KEEP_SEED=0`, or `sfn dev clean build --include-seed` | `sfn dev clean build`/`all` only | keep seed | Also removes `build/toolchains/` during cleanup. Deliberately not honored by `sfn dev bootstrap build --clean-tree`, which always preserves the seed store. |
+
+`SAILFIN_LINKER` and `SAILFIN_CC` are the only two settings with a user-level
+config fallback today; the config file is keyed by target triple so one
+`~/.sfn/config.toml` can serve a machine that cross-compiles. See the
+[CLI reference](https://sailfin.dev/docs/reference/cli/#environment-variables)
+for the full precedence chain (SFEP-0076).
 
 Build parallelism is owned natively by the driver — see `SAILFIN_BUILD_JOBS`
 below.

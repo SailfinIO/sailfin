@@ -82,8 +82,14 @@ fn _build(tag: string, home: string, extra_env: string[]) -> int ![io] {
     fs.createDirectory(dir, true);
     let src = dir + "/main.sfn";
     fs.writeFile(src, _src());
+    // Name every key `_target_env` goes on to push, per `clean_runner_env_without`'s
+    // own contract: SAILFIN_TARGET_TRIPLE is re-pushed below, and an inherited
+    // copy left in place would reach the child twice, where duplicate entries
+    // resolve implementation-defined. SAILFIN_CC is deliberately NOT stripped —
+    // no test here asserts on `cc`, and a native-Darwin runner supplies it as a
+    // real toolchain hint the four nested links should keep.
     let mut e = clean_runner_env_without(nested_runner_scratch("user-config-precedence-"
-        + tag), ["HOME", "SAILFIN_LINKER", "SAILFIN_CC"]);
+        + tag), ["HOME", "SAILFIN_LINKER", "SAILFIN_TARGET_TRIPLE"]);
     e.push("HOME=" + home);
     e.push("SAILFIN_TRACE_LINK=1");
     let target_env = _target_env();
