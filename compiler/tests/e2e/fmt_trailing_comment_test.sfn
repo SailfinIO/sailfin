@@ -1,5 +1,12 @@
-// End-to-end regression for SFN-1105: `sfn fmt` must never emit a token after
-// a `//` comment on the same line.
+// End-to-end regression for `sfn fmt` never losing source content. Two
+// distinct invariants live here:
+//
+//   SFN-1105/SFN-763 — never emit a token after a `//` comment on the same
+//   line, which makes the output unparseable.
+//   SFN-1248 — never delete a comment outright, which leaves the output
+//   perfectly valid and so passes unnoticed.
+//
+// The first invariant, which the rest of this header describes:
 //
 // The formatter collapses multi-line expressions onto one line, and
 // `emitter.sfn` only ended a line on a `semicolon`, or on a `separator` at
@@ -236,6 +243,20 @@ test "fmt: the re-attached trailing comment is idempotent" ![io] {
     assert once == twice;
 }
 
+// Pins the struct shape's exact output. The `_formats_and_parses` assertion
+// below is NOT sufficient on its own: deleting the comment yields `y: 2` and a
+// bare `}`, which typechecks perfectly, so the defective emitter passed it.
+// Only an output comparison distinguishes re-attached from deleted, which
+// leaves the import case above as the sole pre-fix failure otherwise.
 test "fmt: a struct literal keeps the comment on its trailing comma" ![io] {
-    assert _formats_and_parses("struct_comma", STRUCT_TRAILING);
+    let want = "struct P {\n    x: i64;\n    y: i64;\n}\n\nfn mk() -> P {\n    return P {\n        x: 1,\n        y: 2  // the important one\n    };\n}";
+    assert _fmt("struct_comma", STRUCT_TRAILING) == want;
+}
+
+// The weaker companion to the above, kept for the separate invariant it
+// carries: whatever layout `fmt` picks, the compiler must read the result
+// back. Same split as the SFN-1105 cases, where the round-trip assertions are
+// deliberately not merged into the exact-output ones.
+test "fmt: the formatted struct literal still typechecks" ![io] {
+    assert _formats_and_parses("struct_comma_rt", STRUCT_TRAILING);
 }

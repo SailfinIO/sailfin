@@ -590,11 +590,12 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                     // (SFN-1248). Re-emit it where the comma stood, turning
                     // `beta,  // c` into `beta  // c`.
                     //
-                    // `indent` is still the inner block's — `block_close`
-                    // de-indents on its own iteration, which has not run yet —
-                    // so a second comment lines up with the block, as in the
-                    // normal path. Not gated on `!in_inline`, for the reason
-                    // `_emit_trailing_comments` documents.
+                    // Passes the block's own `indent` for symmetry with the
+                    // normal path, not because it can be observed: a comma
+                    // followed by `block_close` is never the last token, and
+                    // only the EOF fold in `tokens.sfn` gives one token a
+                    // second trailing comment. Not gated on `!in_inline`, for
+                    // the reason `_emit_trailing_comments` documents.
                     out = out + _emit_trailing_comments(ft.trailing_comment, indent, at_line_start);
                     if ft.trailing_comment.length > 0 { at_line_start = true; }
                     prev_role = role;
