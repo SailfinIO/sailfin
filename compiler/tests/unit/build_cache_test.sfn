@@ -109,12 +109,12 @@ test "build_cache: cache_root_with_override non-empty -> override + version" {
 test "build_cache: cache_root_from explicit override wins over all" {
     // Explicit ($SAILFIN_BUILD_CACHE_DIR) beats even the self-host
     // pin, so CI can redirect the compiler's own cache.
-    assert cache_root_from("/ci/cache", true, "/xdg", "/home/dev") == "/ci/cache/v2";
-    assert cache_root_from("/ci/cache", false, "/xdg", "/home/dev") == "/ci/cache/v2";
+    assert cache_root_from("/ci/cache", true, "/cfg", "/xdg", "/home/dev") == "/ci/cache/v2";
+    assert cache_root_from("/ci/cache", false, "/cfg", "/xdg", "/home/dev") == "/ci/cache/v2";
 }
 
 test "build_cache: cache_root_from self-host pins in-tree over XDG/HOME" {
-    assert cache_root_from("", true, "/xdg", "/home/dev") == "build/cache/v2";
+    assert cache_root_from("", true, "/cfg", "/xdg", "/home/dev") == "build/cache/v2";
 }
 
 test "build_cache: scoped compiler identity selects the self-host cache" {
@@ -124,16 +124,16 @@ test "build_cache: scoped compiler identity selects the self-host cache" {
 }
 
 test "build_cache: cache_root_from XDG_CACHE_HOME beats HOME" {
-    assert cache_root_from("", false, "/xdg", "/home/dev") == "/xdg/sailfin/v2";
+    assert cache_root_from("", false, "", "/xdg", "/home/dev") == "/xdg/sailfin/v2";
 }
 
 test "build_cache: cache_root_from HOME is the global default" {
-    assert cache_root_from("", false, "", "/home/dev") == "/home/dev/.cache/sailfin/v2";
+    assert cache_root_from("", false, "", "", "/home/dev") == "/home/dev/.cache/sailfin/v2";
 }
 
 test "build_cache: cache_root_from all-empty falls back in-tree" {
     // Hermetic fallback when $HOME is unresolvable (containers, CI).
-    assert cache_root_from("", false, "", "") == "build/cache/v2";
+    assert cache_root_from("", false, "", "", "") == "build/cache/v2";
 }
 
 // --------------------------------------------------------------
