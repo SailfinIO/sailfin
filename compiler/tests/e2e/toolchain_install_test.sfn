@@ -52,6 +52,7 @@ import {
     tool_present
 } from "sfn/test";
 
+import { host_exe_name } from "../../src/build/target";
 import { starts_with } from "../../src/string_utils";
 
 // A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
@@ -125,6 +126,44 @@ fn _installed(store: string, ver: string) -> boolean ![io] {
         i += 1;
     }
     return false;
+}
+
+// Plant a flat `install_base/<ver>` bootstrap store entry — the exact layout
+// `_bootstrap_seed_bin`/`_bootstrap_store_ready` compute
+// (`compiler/src/cli/commands/dev.sfn`) and the one `toolchain_install_to_base`
+// writes, as distinct from the host-qualified layout `_installed` walks.
+// `sha` is the `.sha256` completeness marker's content; `manifest` is the
+// `.install-manifest` text, or `""` to write none — the manifest-ABSENT
+// migration-era store SFEP-0047 3.3 keeps as a transitional shim.
+fn _plant_flat_entry(install_base: string, ver: string, sha: string, manifest: string) -> void ![io] {
+    let dir = install_base + "/" + ver;
+    fs.createDirectory(dir, true);
+    fs.writeFile(host_exe_name(dir + "/sailfin"), "planted-not-a-real-seed\n");
+    fs.writeFile(dir + "/.sha256", sha);
+    if manifest.length > 0 {
+        fs.writeFile(dir + "/.install-manifest", manifest);
+    }
+}
+
+// A syntactically valid `.install-manifest` recording the planted binary
+// under a digest that deliberately does not match it, so
+// `toolchain_verify_entry` reports `modified: <path>` and `ok: false`
+// without the test ever hashing anything.
+fn _mismatched_manifest(ver: string) -> string ![io] {
+    let wrong = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    return "sailfin-install-manifest 1\n" + "management_protocol = 1\n"
+        + "version = "
+        + ver
+        + "\n"
+        + "host = x86_64-unknown-linux-gnu\n"
+        + "archive_sha256 = "
+        + wrong
+        + "\n"
+        + "\n"
+        + wrong
+        + "  "
+        + host_exe_name("sailfin")
+        + "\n";
 }
 
 test "toolchain install: missing version is a usage error" ![io] {
@@ -625,4 +664,89 @@ test "toolchain install: a 404 manifest fetch reports the http status reason" ![
     assert exit != 0;
     assert contains(out + err, "reason: http-status-404");
     assert ! _installed(store, ver);
+}
+
+// SFN-1205: the "a legacy/unverifiable entry must never let an install
+// short-circuit" property, restored at the layer where it is still reachable.
+//
+// It was originally pinned on the user-store path through `sfn toolchain
+// install`. SFN-1069's signed-index consult now refuses that command whenever
+// no signed index is reachable, and no test can produce one — the trust root
+// is the pinned `release_signing_public_key_hex()`. So the property is pinned
+// here on the index-exempt bootstrap door instead, which is not a second-best
+// stand-in: `_dev_bootstrap_fetch` has its OWN short-circuit, on
+// `_bootstrap_store_ready`, that fires BEFORE the `_toolchain_install` guard
+// runs at all, so this is the layer where an unverifiable entry could actually
+// win. The digest-mismatch leg above records the same loss from the other side.
+//
+// These legs point `SAILFIN_TOOLCHAIN_RELEASE_BASE` at TCP discard
+// (`http://127.0.0.1:9`), so "did not short-circuit" is observable offline and
+// deterministically as a transport failure from the download pipeline the
+// short-circuit would have skipped. A successful re-commit is deliberately not
+// asserted: it needs an archive whose digest matches a genuinely signed
+// `SHA256SUMS`, which cannot be produced in-repo for the same trust-root reason
+// the file header gives.
+test "toolchain install: a bootstrap seed failing its install manifest does not short-circuit" ![io] {
+    let ver = "0.0.0-e2e-manifest-fail.1";
+    let store = _scratch_root() + "/manifest-fail-store";
+    let bootstrap_dir = _scratch_root() + "/manifest-fail-bootstrap";
+    assert remove_all(store);
+    assert remove_all(bootstrap_dir);
+    let wrong = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    _plant_flat_entry(store, ver, wrong + "\n", _mismatched_manifest(ver));
+    _seed_bootstrap_manifest(bootstrap_dir, ver, store);
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9"]);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The property under test: a manifest verification failure must not let
+    // the store-ready short-circuit fire.
+    assert ! contains(out, "already present");
+    assert exit != 0;
+    // Proves it reached the pipeline the short-circuit would have skipped.
+    assert contains(out + err, "failed to download release manifest");
+    assert contains(out + err, "reason: connect-failed");
+}
+
+// Pins the SFEP-0047 3.3 migration shim as deliberate, and pins that the
+// `.sha256` marker's CONTENT is never compared against a release digest (only
+// its non-emptiness matters) — that half of the pipeline guard cannot move
+// into this gate without coupling the self-host build to release-endpoint
+// liveness.
+test "toolchain install: a manifest-less legacy bootstrap seed is still ready" ![io] {
+    let ver = "0.0.0-e2e-legacy-shim.1";
+    let store = _scratch_root() + "/legacy-shim-store";
+    let bootstrap_dir = _scratch_root() + "/legacy-shim-bootstrap";
+    assert remove_all(store);
+    assert remove_all(bootstrap_dir);
+    _plant_flat_entry(store, ver, "not-a-real-digest\n", "");
+    _seed_bootstrap_manifest(bootstrap_dir, ver, store);
+    // The discard-port release base is what makes "never touched the network"
+    // observable: any real fetch attempt would surface `connect-failed`.
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9"]);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "already present");
+    assert ! contains(out + err, "connect-failed");
+}
+
+// Pins the documented torn-install branch (marker written LAST, so
+// present-but-empty means torn).
+test "toolchain install: a torn bootstrap seed with an empty marker does not short-circuit" ![io] {
+    let ver = "0.0.0-e2e-torn-marker.1";
+    let store = _scratch_root() + "/torn-marker-store";
+    let bootstrap_dir = _scratch_root() + "/torn-marker-bootstrap";
+    assert remove_all(store);
+    assert remove_all(bootstrap_dir);
+    _plant_flat_entry(store, ver, "   \n", "");
+    _seed_bootstrap_manifest(bootstrap_dir, ver, store);
+    let child_env = _env_with(["SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9"]);
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "dev", "bootstrap", "fetch"], child_env, bootstrap_dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert ! contains(out, "already present");
+    assert exit != 0;
+    assert contains(out + err, "reason: connect-failed");
 }
