@@ -9,8 +9,8 @@
 // spawn failure, timeout, non-zero exit, unparsable output — is silent: it
 // never changes the wrapped command's exit status or ordinary output.
 // Design gate: `docs/proposals/design-notes/sfn-1073-bounded-update-check.md`.
-import { CliContext } from "../cli/context";
 import { _resolve_test_self_path } from "../cli/commands/test/pool";
+import { CliContext } from "../cli/context";
 import { starts_with, strings_equal } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import { toolchain_channel_canonical } from "./channel";
@@ -102,7 +102,9 @@ fn _update_notify_work_root() -> string ![io] {
 // non-zero exit.
 fn _update_notify_run_bounded(compiler_path: string, binary_dir: string) -> string ![io] {
     let mut self_exe = compiler_path;
-    if self_exe.length == 0 { self_exe = _resolve_test_self_path(binary_dir); }
+    if self_exe.length == 0 {
+        self_exe = _resolve_test_self_path(binary_dir);
+    }
     if self_exe.length == 0 { return ""; }
 
     // Full environment passthrough: the child must resolve the same
@@ -188,7 +190,9 @@ fn update_notify_exit(rc: int, argv: string[], compiler_path: string, binary_dir
     // explicit commands, unlike `toolchain_network_refusal()` which
     // deliberately treats `notify` and `manual` alike
     // (`update_policy.sfn:88-90`, naming SFN-1073). Only `notify` proceeds.
-    if !strings_equal(toolchain_update_policy_read(), TOOLCHAIN_UPDATE_POLICY_NOTIFY) { return; }
+    if !strings_equal(toolchain_update_policy_read(), TOOLCHAIN_UPDATE_POLICY_NOTIFY) {
+        return;
+    }
 
     let now = toolchain_policy_now_epoch();
     let host = toolchain_current_host();
@@ -203,7 +207,8 @@ fn update_notify_exit(rc: int, argv: string[], compiler_path: string, binary_dir
     // Never conditional on the child's outcome. If the write itself fails,
     // release the lease and decline — we must not check without having
     // recorded that we did.
-    if !toolchain_update_check_write(host.triple, now + TOOLCHAIN_UPDATE_INTERVAL_SECS, rec.sequence) {
+    if !toolchain_update_check_write(host.triple, now
+        + TOOLCHAIN_UPDATE_INTERVAL_SECS, rec.sequence) {
         toolchain_update_lease_release(host.triple);
         return;
     }
@@ -234,13 +239,17 @@ fn update_notify_child_run(ctx: CliContext) -> int ![clock, io, net] {
 
     let recorded = toolchain_user_default_read(host.triple);
     let mut current: string = recorded.version;
-    if current.length == 0 { current = resolve_compiler_version(ctx.binary_dir); }
+    if current.length == 0 {
+        current = resolve_compiler_version(ctx.binary_dir);
+    }
 
     // No recorded track means `sfn toolchain update` itself would refuse for
     // want of an explicit channel (`update.sfn:139-152`); there is no default
     // channel to fall back to, so decline rather than inventing one.
     let mut channel: string = "";
-    if recorded.track.length > 0 { channel = toolchain_channel_canonical(recorded.track); }
+    if recorded.track.length > 0 {
+        channel = toolchain_channel_canonical(recorded.track);
+    }
     if channel.length == 0 { return 1; }
 
     if toolchain_revocations_corrupt(versions_base) { return 1; }
@@ -255,9 +264,9 @@ fn update_notify_child_run(ctx: CliContext) -> int ![clock, io, net] {
 
     let outcome = toolchain_policy_decide(index, known, current, host.triple, true);
     let mut state: string = "ok";
-    if !outcome.ok {
-        state = "revoked";
-    } else if outcome.advisories.length > 0 { state = "advisory"; }
+    if !outcome.ok { state = "revoked"; } else if outcome.advisories.length > 0 {
+        state = "advisory";
+    }
 
     print(toolchain_update_notice_line(current, plan.candidate, plan.channel, state));
     return 0;

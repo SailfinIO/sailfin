@@ -49,7 +49,6 @@ import {
     toolchain_versions_base
 } from "../../toolchain/store";
 import { toolchain_update_run } from "../../toolchain/update";
-import { update_notify_child_run } from "../../toolchain/update_notify";
 import {
     toolchain_user_default_clear,
     toolchain_user_default_corrupt,
@@ -506,13 +505,6 @@ fn command_def() -> Command {
     verify_cmd = with_flag(verify_cmd, flag("all", "Verify every complete store entry"));
     verify_cmd = with_flag(verify_cmd, flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
     let entry_version_cmd = command("entry-version", "Report this entry toolchain's identity and management-protocol range, without dispatch");
-    // SFN-1073 internal: registered only so it parses and dispatches — never
-    // surfaced as a user command. Spawned exclusively by the bounded update-
-    // notice epilogue (`toolchain/update_notify.sfn::update_notify_exit`), so
-    // it carries no description and is deliberately absent from both the
-    // hand-written fallback usage string below and `with_usage`'s grouped
-    // top-level listing.
-    let notify_check_cmd = command("notify-check", "");
     let default_cmd = with_arg(command("default", "Show or set the per-user default toolchain"), arg_optional("version", "Exact version to make the user default (default: report the current one)", ""));
     let mut update_cmd = with_arg(command("update", "Check for, or install, a newer toolchain on a channel — never a downgrade"), arg_optional("channel", "Channel to follow (stable|rc|beta|alpha|latest); default: the recorded user-default track", ""));
     update_cmd = with_flag(update_cmd, flag("check", "Report whether a newer release exists and change nothing"));
@@ -522,7 +514,6 @@ fn command_def() -> Command {
     remove_cmd = with_flag(remove_cmd, flag("force", "Override the project and user-default protections; never removes the running toolchain"));
     let mut cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
     cmd = with_subcommand(cmd, entry_version_cmd);
-    cmd = with_subcommand(cmd, notify_check_cmd);
     cmd = with_subcommand(cmd, run_cmd_full);
     cmd = with_subcommand(cmd, list_cmd);
     cmd = with_subcommand(cmd, active_cmd);
@@ -547,9 +538,6 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         return 2;
     }
     if sub == "entry-version" { return _toolchain_entry_version(ctx); }
-    // SFN-1073 internal: spawned only by the notice epilogue, never typed by
-    // a user; see the registration comment in `command_def()` above.
-    if sub == "notify-check" { return update_notify_child_run(ctx); }
     if sub == "list" {
         return _toolchain_list(ctx, has_flag(matches, "json"));
     }

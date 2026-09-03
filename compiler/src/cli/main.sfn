@@ -52,7 +52,7 @@ import { handle_selfhost_command } from "../cli_selfhost";
 import { ice_set_binary_dir } from "../ice";
 import { starts_with, substring } from "../string_utils";
 import { configure_terminal_output } from "../terminal_output";
-import { update_notify_enter, update_notify_exit } from "../toolchain/update_notify";
+import { update_notify_child_run, update_notify_enter, update_notify_exit } from "../toolchain/update_notify";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
 import { command_def as bench_command_def, run as bench_run } from "./commands/bench";
 import { command_def as build_command_def, run as build_run } from "./commands/build";
@@ -297,6 +297,15 @@ fn _is_help_json_args(args: string[]) -> boolean {
     return false;
 }
 
+// The exact internal argv the notice epilogue spawns (SFN-1073). Matched as a
+// whole two-token argv rather than by head alone, so nothing a user can type
+// with extra arguments is silently swallowed by the intercept.
+fn _v2_is_notify_check(args: string[]) -> boolean {
+    if args.length != 2 { return false; }
+    if !strings_equal(args[0], "toolchain") { return false; }
+    return strings_equal(args[1], "notify-check");
+}
+
 fn _requests_json(args: string[]) -> boolean {
     let mut index: int = 0;
     loop {
@@ -532,6 +541,24 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // pinned toolchain on a re-exec. Captured here (not in `parse_driver_prefix`)
     // because the prefix slice is computed at this level.
     ctx.orig_args = args;
+
+    // SFN-1073: the bounded update check the notice epilogue spawns, peeled
+    // here for the same reason the selector above is — before the command tree
+    // is built, let alone parsed.
+    //
+    // It is deliberately not a registered `toolchain` subcommand. `sfn/cli`'s
+    // `render_help_tree` recurses over every entry in `subcmds` unconditionally
+    // (`capsules/sfn/cli/src/help.sfn:62-68`), and `category` opts a command
+    // out of the grouped top-level listing only — there is no per-subcommand
+    // help suppression. Registering it would therefore print a bare
+    // `notify-check` row under `sfn toolchain --help`, which is a user-facing
+    // surface this issue has no business adding. Peeling it here keeps it
+    // dispatchable without ever entering the tree that help renders from.
+    //
+    // This also lands ahead of `toolchain_route_management` below, so the
+    // child is never re-routed to another installed payload (SFEP-0073 §3.5) —
+    // it must run in *this* entry, whose version the notice compares against.
+    if _v2_is_notify_check(args) { return update_notify_child_run(ctx); }
 
     if selection.form.length > 0 {
         // The entry hint is empty, so the project floor this selection is
