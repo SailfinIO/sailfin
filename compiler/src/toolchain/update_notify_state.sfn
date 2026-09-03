@@ -7,17 +7,14 @@
 // a spawned child prints on its single stdout line. Splits the same way
 // `user_default.sfn` does — pure grammar first, `![io]` persistence after —
 // so the grammar is unit-testable with no filesystem. This module does not
-// spawn the child, does not decide command eligibility, and is not wired
-// into the CLI; those are separate slices of SFN-1073.
+// spawn the child and does not decide command eligibility; those are
+// separate slices of SFN-1073.
 import { ascii_lowercase, int_to_string } from "sfn/strings";
 
 import {
-    CREATE_EXCLUSIVE_CREATED,
-    CREATE_EXCLUSIVE_EXISTS,
-    CREATE_EXCLUSIVE_MODE_FILE,
     _atomic_rename_into_place,
-    _create_exclusive_cmd,
     _mktemp_sibling_cmd,
+    _rename_noreplace_preserving_source_on_failure,
     _set_perms_or_skip,
     _toml_trim_cmd
 } from "../build/fs";
@@ -45,7 +42,6 @@ let TOOLCHAIN_UPDATE_NOTICE_SCHEMA: int = 1;
 
 struct ToolchainUpdateEligibility {
     next_epoch: int;  // 0 == no record recorded => eligible now
-    sequence: int;  // last accepted signed-index sequence, 0 == none
 }
 
 struct ToolchainUpdateNotice {
@@ -57,7 +53,7 @@ struct ToolchainUpdateNotice {
 }
 
 fn _check_empty() -> ToolchainUpdateEligibility {
-    return ToolchainUpdateEligibility { next_epoch: 0, sequence: 0 };
+    return ToolchainUpdateEligibility { next_epoch: 0 };
 }
 
 fn _notice_empty() -> ToolchainUpdateNotice {
@@ -123,12 +119,12 @@ fn toolchain_update_check_text_schema(text: string) -> int {
     return schema;
 }
 
-// Pure. Returns `{0, 0}` when `text` is empty, the header is
-// missing/corrupt, the schema is above `TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA`,
-// or `host_triple` has no record — all of which read as "eligible now"
-// through `toolchain_update_eligible_at`. A key present but not a valid
-// unsigned integer reads as 0 for that field rather than failing the whole
-// parse, matching `toolchain_update_check_render`'s per-key granularity.
+// Pure. Returns `{0}` when `text` is empty, the header is missing/corrupt,
+// the schema is above `TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA`, or `host_triple`
+// has no record — all of which read as "eligible now" through
+// `toolchain_update_eligible_at`. A value present but not a valid unsigned
+// integer reads as 0 rather than failing the whole parse, matching
+// `toolchain_update_check_render`'s per-key granularity.
 fn toolchain_update_check_parse(text: string, host_triple: string) -> ToolchainUpdateEligibility {
     if _toml_trim_cmd(text).length == 0 { return _check_empty(); }
     let lines = _split_lines(text);
@@ -141,9 +137,7 @@ fn toolchain_update_check_parse(text: string, host_triple: string) -> ToolchainU
     }
 
     let epoch_key = host_triple + ".next_epoch";
-    let sequence_key = host_triple + ".sequence";
     let mut next_epoch: int = 0;
-    let mut sequence: int = 0;
     let mut i: int = 1;
     loop {
         if i >= lines.length { break; }
@@ -156,18 +150,12 @@ fn toolchain_update_check_parse(text: string, host_triple: string) -> ToolchainU
                 if key == epoch_key {
                     let parsed = _parse_uint(value);
                     if parsed >= 0 { next_epoch = parsed; }
-                } else if key == sequence_key {
-                    let parsed = _parse_uint(value);
-                    if parsed >= 0 { sequence = parsed; }
                 }
             }
         }
         i += 1;
     }
-    return ToolchainUpdateEligibility {
-        next_epoch: next_epoch,
-        sequence: sequence
-    };
+    return ToolchainUpdateEligibility { next_epoch: next_epoch };
 }
 
 // Pure. `current_text` is the CURRENT full file text (`""` when absent);
@@ -177,9 +165,8 @@ fn toolchain_update_check_parse(text: string, host_triple: string) -> ToolchainU
 // clear-on-empty path that record needs and this one does not (an
 // eligibility record has no "unset" value; 0 already means "never
 // recorded").
-fn toolchain_update_check_render(current_text: string, host_triple: string, next_epoch: int, sequence: int) -> string {
+fn toolchain_update_check_render(current_text: string, host_triple: string, next_epoch: int) -> string {
     let epoch_key = host_triple + ".next_epoch";
-    let sequence_key = host_triple + ".sequence";
 
     let mut body_lines: string[] = [];
     if current_text.length > 0 {
@@ -197,7 +184,6 @@ fn toolchain_update_check_render(current_text: string, host_triple: string, next
 
     let mut out_lines: string[] = [];
     let mut epoch_emitted: boolean = false;
-    let mut sequence_emitted: boolean = false;
     let mut i: int = 0;
     loop {
         if i >= body_lines.length { break; }
@@ -211,21 +197,12 @@ fn toolchain_update_check_render(current_text: string, host_triple: string, next
                 i += 1;
                 continue;
             }
-            if key == sequence_key {
-                out_lines.push(sequence_key + " = " + int_to_string(sequence));
-                sequence_emitted = true;
-                i += 1;
-                continue;
-            }
         }
         out_lines.push(line);
         i += 1;
     }
     if !epoch_emitted {
         out_lines.push(epoch_key + " = " + int_to_string(next_epoch));
-    }
-    if !sequence_emitted {
-        out_lines.push(sequence_key + " = " + int_to_string(sequence));
     }
 
     let mut out: string = TOOLCHAIN_UPDATE_CHECK_MAGIC + " " + int_to_string(TOOLCHAIN_UPDATE_CHECK_SCHEMA)
@@ -271,6 +248,24 @@ fn toolchain_update_notice_line(current: string, candidate: string, channel: str
         + state;
 }
 
+// The child emits its line with `print`, which appends a newline
+// (`runtime/sfn/io.sfn`), and the parent hands the raw captured bytes
+// straight here. Without this the trailing "\n" rides on the LAST field —
+// `state` — so `"revoked"` arrives as `"revoked\n"` and compares equal to
+// nothing, silently downgrading every security notice to the plain one.
+// Trimming lives in the parser rather than at the call site so the grammar
+// owns its own transport hygiene and cannot be bypassed by a second caller.
+fn _notice_first_line(text: string) -> string {
+    let mut end: int = 0;
+    loop {
+        if end >= text.length { break; }
+        let code = char_code_at_text(text, end);
+        if code == 10 || code == 13 { break; }
+        end += 1;
+    }
+    return substring(text, 0, end);
+}
+
 fn _notice_split_tabs(line: string) -> string[] {
     let mut fields: string[] = [];
     let mut start: int = 0;
@@ -292,7 +287,7 @@ fn _notice_split_tabs(line: string) -> string[] {
 // the magic, a schema `<= TOOLCHAIN_UPDATE_NOTICE_SCHEMA`, and 4 more
 // TAB-separated fields.
 fn toolchain_update_notice_parse(line: string) -> ToolchainUpdateNotice {
-    let fields = _notice_split_tabs(line);
+    let fields = _notice_split_tabs(_notice_first_line(line));
     if fields.length != 5 { return _notice_empty(); }
     let magic_prefix = TOOLCHAIN_UPDATE_NOTICE_MAGIC + " ";
     if !starts_with(fields[0], magic_prefix) { return _notice_empty(); }
@@ -344,7 +339,7 @@ fn toolchain_update_check_path() -> string ![io] {
     return dir + "/toolchain-update-check";
 }
 
-// Missing/corrupt file reads as `{0, 0}` — "eligible now", distinct from
+// Missing/corrupt file reads as `{0}` — "eligible now", distinct from
 // nothing this record needs to surface separately: unlike
 // `toolchain_user_default_corrupt`, a garbage eligibility record only ever
 // makes a check happen sooner, never skips one, so there is no fail-closed
@@ -361,7 +356,7 @@ fn toolchain_update_check_read(host_triple: string) -> ToolchainUpdateEligibilit
 // publishes through a sibling temp plus rename — mirrors
 // `user_default.sfn::toolchain_user_default_write`'s shape exactly,
 // including the schema-downgrade refusal.
-fn toolchain_update_check_write(host_triple: string, next_epoch: int, sequence: int) -> boolean ![io] {
+fn toolchain_update_check_write(host_triple: string, next_epoch: int) -> boolean ![io] {
     let dir = toolchain_user_default_dir();
     if dir.length == 0 { return false; }
     let created = !fs.exists(dir);
@@ -378,7 +373,7 @@ fn toolchain_update_check_write(host_triple: string, next_epoch: int, sequence: 
     if toolchain_update_check_text_schema(current) > TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA {
         return false;
     }
-    let text = toolchain_update_check_render(current, host_triple, next_epoch, sequence);
+    let text = toolchain_update_check_render(current, host_triple, next_epoch);
 
     let tmp = _mktemp_sibling_cmd(path);
     if tmp.length == 0 { return false; }
@@ -399,27 +394,37 @@ fn toolchain_update_lease_path(host_triple: string) -> string ![io] {
 }
 
 // Claim the per-host lease, reclaiming a stale one left behind by a crashed
-// holder. The reclaim (delete-then-exclusive-create) is NOT atomic, and the
-// window is reachable on every acquisition rather than only under an exact
-// tie: `_create_exclusive_cmd` publishes a zero-length file, and the holder
-// writes its epoch only afterwards. A second process arriving in between
-// reads "", parses 0, judges the lease stale, and reclaims it — so two
-// processes can briefly both believe they hold it.
+// holder.
 //
-// That is accepted rather than closed, and the direction of the trade is
-// deliberate. Treating an empty lease as *held* would close this window but
-// open a worse one: a holder that dies between the create and the write
-// would leave a file that is never stale and never reclaimed, wedging every
-// later check. SFEP-0073 §3.6 requires the opposite ("a crashed lease holder
-// cannot block unrelated management work"), so a self-healing lease that can
-// briefly double-admit beats a tight one that can wedge.
+// The lease file is published with its epoch already in it — staged to a
+// sibling temp, then moved with `_rename_noreplace_preserving_source_on_failure`,
+// which lands the file only when the destination is absent. That matters:
+// an `O_EXCL` create would publish a ZERO-LENGTH file and write the epoch
+// only afterwards, and a concurrent acquirer arriving in that window reads
+// "", parses it as unset, judges the lease stale, and reclaims a lease that
+// is very much alive. The window is reachable on every acquisition, not just
+// under an exact tie, so it is closed here rather than tolerated.
 //
-// The cost is bounded because this lease is not the real stampede guard —
-// the eligibility record is. The holder advances eligibility by
-// `TOOLCHAIN_UPDATE_INTERVAL_SECS` BEFORE any network access, so a lost race
-// costs two opportunistic requests once per seven days, never a per-command
-// check. Closing it properly needs a held lock; this tree has no file-locking
-// primitive, only the one-shot `_create_exclusive_cmd`.
+// Reading an empty lease as *held* would close it too, but at a worse price:
+// a holder dying between create and write would leave a file that is never
+// stale and never reclaimed, wedging every later check — which SFEP-0073
+// §3.6 forbids outright ("a crashed lease holder cannot block unrelated
+// management work"). Publishing atomically avoids the choice: the content is
+// there from the instant the file exists, and `TOOLCHAIN_UPDATE_LEASE_SECS`
+// still reclaims a dead holder.
+//
+// A losing racer leaves its staged temp behind, which the no-replace
+// contract guarantees is still its own file to remove.
+fn _lease_publish(path: string, now_epoch: int) -> boolean ![io] {
+    let tmp = _mktemp_sibling_cmd(path);
+    if tmp.length == 0 { return false; }
+    fs.writeFile(tmp, int_to_string(now_epoch));
+    if !fs.exists(tmp) { return false; }
+    if _rename_noreplace_preserving_source_on_failure(tmp, path) { return true; }
+    fs.deleteFile(tmp);
+    return false;
+}
+
 fn toolchain_update_lease_acquire(host_triple: string, now_epoch: int) -> boolean ![io] {
     let path = toolchain_update_lease_path(host_triple);
     if path.length == 0 { return false; }
@@ -428,28 +433,32 @@ fn toolchain_update_lease_acquire(host_triple: string, now_epoch: int) -> boolea
     if !ensure_dir_p(dir) { return false; }
     if created { _set_perms_or_skip(dir, 448); }
 
-    let rc = _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE);
-    if rc == CREATE_EXCLUSIVE_CREATED {
-        fs.writeFile(path, int_to_string(now_epoch));
-        return true;
-    }
-    if rc != CREATE_EXCLUSIVE_EXISTS { return false; }
+    if _lease_publish(path, now_epoch) { return true; }
 
+    // Publication refused, so a lease already exists. Reclaim it only when it
+    // is stale; a live holder means this process is a contender and proceeds
+    // with its original command (SFEP-0073 §3.6).
     let held = _parse_uint(fs.readFile(path));
     if !toolchain_update_lease_is_stale(held, now_epoch) { return false; }
     fs.deleteFile(path);
-    let reclaimed = _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE);
-    if reclaimed != CREATE_EXCLUSIVE_CREATED { return false; }
-    fs.writeFile(path, int_to_string(now_epoch));
-    return true;
+    return _lease_publish(path, now_epoch);
 }
 
-// A missing lease file is success, not failure — releasing a lease this
-// process never held (or that a stale-reclaim already displaced) is a no-op.
-fn toolchain_update_lease_release(host_triple: string) -> boolean ![io] {
+// Release only a lease this process still owns. `held_epoch` is the value
+// `toolchain_update_lease_acquire` published, and the file is removed only
+// when it still carries it.
+//
+// The ownership check is not ceremony. A holder that overran
+// `TOOLCHAIN_UPDATE_LEASE_SECS` has already been legitimately reclaimed by
+// another process, and an unconditional delete here would remove that
+// process's live lease — turning a slow checker into one that silently
+// unlocks its own successor. A missing file is success: there is nothing of
+// ours left to release.
+fn toolchain_update_lease_release(host_triple: string, held_epoch: int) -> boolean ![io] {
     let path = toolchain_update_lease_path(host_triple);
     if path.length == 0 { return false; }
     if !fs.exists(path) { return true; }
+    if _parse_uint(fs.readFile(path)) != held_epoch { return true; }
     fs.deleteFile(path);
     return true;
 }
@@ -483,6 +492,27 @@ fn toolchain_update_streams_interactive() -> boolean ![io] {
     return sfn_stream_is_terminal(1) && sfn_stream_is_terminal(2);
 }
 
+// Test-only seam. Bypasses the CI and TTY suppression gates, and NOTHING
+// else — policy, eligibility, the lease, the signed-index trust root, and
+// every network refusal are untouched and still enforced. It cannot make a
+// `disabled` or `manual` policy check, and it cannot weaken verification.
+//
+// It exists because the suppression, budget, and lease behavior are
+// otherwise untestable: every subprocess an `![io]` test spawns is
+// non-interactive by construction, so the TTY gate would suppress the check
+// in every test and each assertion would pass whether the feature worked,
+// was broken, or was absent. That is the dormant-test failure mode SFN-807
+// was lost to — a probe that always returned empty let a wholly broken TLS
+// trust store report PASS for a full release cycle. A seam that makes the
+// behavior observable is the cost of tests that can actually fail.
+//
+// Deliberately absent from the CLI reference: it is not a user-facing knob.
+// Precedent for a test-only env seam: `SAILFIN_INJECT_FAULT`,
+// `SAILFIN_DEBUG_FORCE_PANIC`.
+fn toolchain_update_assume_interactive() -> boolean ![io] {
+    return env.get("SAILFIN_UPDATE_NOTIFY_ASSUME_INTERACTIVE").length > 0;
+}
+
 export {
     TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA,
     TOOLCHAIN_UPDATE_CHECK_SCHEMA,
@@ -496,6 +526,7 @@ export {
     toolchain_update_check_read,
     toolchain_update_check_render,
     toolchain_update_check_text_schema,
+    toolchain_update_assume_interactive,
     toolchain_update_check_write,
     toolchain_update_eligible_at,
     toolchain_update_env_is_ci,

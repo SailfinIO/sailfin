@@ -13,7 +13,11 @@ import { _resolve_test_self_path } from "../cli/commands/test/pool";
 import { CliContext } from "../cli/context";
 import { starts_with, strings_equal } from "../string_utils";
 import { resolve_compiler_version } from "../version";
-import { toolchain_channel_canonical } from "./channel";
+import {
+    TOOLCHAIN_RELEASE_REVOKED,
+    toolchain_channel_canonical,
+    toolchain_release_state
+} from "./channel";
 import { toolchain_current_host } from "./host";
 import {
     toolchain_revocations_corrupt,
@@ -25,6 +29,7 @@ import { toolchain_policy_decide, toolchain_policy_now_epoch } from "./release_p
 import { toolchain_versions_base } from "./store";
 import {
     TOOLCHAIN_UPDATE_INTERVAL_SECS,
+    toolchain_update_assume_interactive,
     toolchain_update_check_read,
     toolchain_update_check_write,
     toolchain_update_eligible_at,
@@ -38,6 +43,7 @@ import {
 } from "./update_notify_state";
 import {
     TOOLCHAIN_UPDATE_POLICY_NOTIFY,
+    toolchain_network_refusal,
     toolchain_update_plan,
     toolchain_update_policy_read
 } from "./update_policy";
@@ -100,7 +106,7 @@ fn _update_notify_work_root() -> string ![io] {
 // reaper and runs unconditionally, including after a kill, or the child is
 // left a zombie. Returns "" on every failure arm: spawn failure, timeout, or a
 // non-zero exit.
-fn _update_notify_run_bounded(compiler_path: string, binary_dir: string) -> string ![io] {
+fn _update_notify_run_bounded(compiler_path: string, binary_dir: string) -> string ![clock, io] {
     let mut self_exe = compiler_path;
     if self_exe.length == 0 {
         self_exe = _resolve_test_self_path(binary_dir);
@@ -120,7 +126,6 @@ fn _update_notify_run_bounded(compiler_path: string, binary_dir: string) -> stri
     if handle == 0 { return ""; }
 
     let mut out_buf: string = "";
-    let mut err_buf: string = "";
     let mut killed: boolean = false;
     loop {
         if process.handle_stdout_at_eof(handle) && process.handle_stderr_at_eof(handle) {
@@ -162,8 +167,12 @@ fn _update_notify_run_bounded(compiler_path: string, binary_dir: string) -> stri
             if chunk.length > 0 { out_buf = out_buf + chunk; }
         }
         if read_err {
-            let chunk = process.handle_read_bytes_stderr(handle, 65536);
-            if chunk.length > 0 { err_buf = err_buf + chunk; }
+            // Drained and discarded, not accumulated. The child is contracted
+            // to print nothing on stderr, but a pipe that is never read fills
+            // and blocks the writer — which would park the child until the
+            // deadline kills it and turn "the child said nothing" into a lost
+            // 500 ms on every check.
+            let _ = process.handle_read_bytes_stderr(handle, 65536);
         }
     }
     let rc = process.handle_wait(handle);
@@ -184,8 +193,15 @@ fn update_notify_exit(rc: int, argv: string[], compiler_path: string, binary_dir
     if starts_with(argv[0], "-") { return; }
     if _update_notify_excluded_head(argv[0]) { return; }
     if _update_notify_requests_json(argv) { return; }
-    if toolchain_update_env_is_ci() { return; }
-    if !toolchain_update_streams_interactive() { return; }
+    // The CI and TTY gates are the only two the test seam may bypass, and it
+    // bypasses nothing below this point — policy, eligibility, the lease, and
+    // every network refusal still apply. See
+    // `update_notify_state.sfn::toolchain_update_assume_interactive` for why
+    // the seam exists at all.
+    if !toolchain_update_assume_interactive() {
+        if toolchain_update_env_is_ci() { return; }
+        if !toolchain_update_streams_interactive() { return; }
+    }
     // `manual` must suppress the opportunistic check while still permitting
     // explicit commands, unlike `toolchain_network_refusal()` which
     // deliberately treats `notify` and `manual` alike
@@ -198,6 +214,14 @@ fn update_notify_exit(rc: int, argv: string[], compiler_path: string, binary_dir
     let host = toolchain_current_host();
     let rec = toolchain_update_check_read(host.triple);
     if !toolchain_update_eligible_at(rec.next_epoch, now) { return; }
+    // Without a recorded update track the child has no channel to resolve and
+    // declines (see `update_notify_child_run`), so checking here — one file
+    // read on an already-eligible path — avoids acquiring the lease, burning
+    // the seven-day window, and paying up to the full budget to reach a
+    // decision that was available before the spawn. This is every user who
+    // installed via the bootstrap script and has never run
+    // `sfn toolchain update <channel>`.
+    if toolchain_user_default_read(host.triple).track.length == 0 { return; }
     // False means another process is already checking; contenders proceed
     // with their original command (SFEP-0073 §3.6).
     if !toolchain_update_lease_acquire(host.triple, now) { return; }
@@ -208,13 +232,13 @@ fn update_notify_exit(rc: int, argv: string[], compiler_path: string, binary_dir
     // release the lease and decline — we must not check without having
     // recorded that we did.
     if !toolchain_update_check_write(host.triple, now
-        + TOOLCHAIN_UPDATE_INTERVAL_SECS, rec.sequence) {
-        toolchain_update_lease_release(host.triple);
+        + TOOLCHAIN_UPDATE_INTERVAL_SECS) {
+        toolchain_update_lease_release(host.triple, now);
         return;
     }
 
     let stdout = _update_notify_run_bounded(compiler_path, binary_dir);
-    toolchain_update_lease_release(host.triple);
+    toolchain_update_lease_release(host.triple, now);
 
     if stdout.length == 0 { return; }
     let notice = toolchain_update_notice_parse(stdout);
@@ -229,6 +253,15 @@ fn update_notify_exit(rc: int, argv: string[], compiler_path: string, binary_dir
 // machine-readable line to stdout — nothing else, ever, since the parent
 // parses this stream.
 fn update_notify_child_run(ctx: CliContext) -> int ![clock, io, net] {
+    // The parent's gate chain already proved the policy is `notify`, but this
+    // leaf is reachable directly (`sfn toolchain notify-check`), and
+    // `toolchain_fetch_index` documents that its caller enforces the refusal
+    // first (`install.sfn:596`). Without this, typing the leaf under the
+    // `disabled` air-gap policy contacts the release endpoint — the one thing
+    // SFEP-0073 §3.6 says that policy must make impossible. Silent, like
+    // every other arm here: the parent parses this stream.
+    if toolchain_network_refusal().length > 0 { return 1; }
+
     let host = toolchain_current_host();
     if host.triple.length == 0 { return 1; }
     let versions_base = toolchain_versions_base();
@@ -262,11 +295,20 @@ fn update_notify_child_run(ctx: CliContext) -> int ![clock, io, net] {
     // sequence.
     if !toolchain_sequence_record(versions_base, index.sequence) { return 1; }
 
+    // `revoked` is read from the release state, never from
+    // `toolchain_policy_decide`'s verdict. That verdict answers "may this be
+    // installed", and it is false for three refusals that are not
+    // revocations — no published asset for this host triple, an
+    // unestablishable signing key, and an unavailable index
+    // (`release_policy.sfn:258-280`). Inferring revocation from it would tell
+    // a user whose triple simply has no asset that their toolchain is
+    // cryptographically unsafe, which is both false and exactly the kind of
+    // security overclaim this repo refuses to ship.
     let outcome = toolchain_policy_decide(index, known, current, host.triple, true);
     let mut state: string = "ok";
-    if !outcome.ok { state = "revoked"; } else if outcome.advisories.length > 0 {
-        state = "advisory";
-    }
+    if toolchain_release_state(index, known, current) == TOOLCHAIN_RELEASE_REVOKED {
+        state = "revoked";
+    } else if outcome.advisories.length > 0 { state = "advisory"; }
 
     print(toolchain_update_notice_line(current, plan.candidate, plan.channel, state));
     return 0;
