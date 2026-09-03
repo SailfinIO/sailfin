@@ -1,0 +1,89 @@
+// Cross-checks the member-form builtin arity mirror (SFN-1090) against the
+// lowering-side `RuntimeHelperDescriptor` registry it shadows.
+//
+// `call_signature.sfn` cannot import the registry directly — it lives in
+// `compiler/capsules/codegen-llvm/src/`, inside the `sfn/compiler` graph,
+// which already depends on `sfn/analyzer`, so importing it would close a
+// capsule cycle. `builtin_member_arity` is therefore a deliberate mirror,
+// pinned honest by this test, which sits in the root `sfn/compiler` capsule
+// and can import both sides.
+//
+// A failure here means a target was renamed or removed on the lowering side,
+// or gained/lost a parameter, without the mirror following. Fix the table,
+// do not relax the test.
+import { builtin_member_arity } from "sfn/analyzer/typecheck/call_signature";
+import { find_runtime_helper, runtime_helper_descriptors } from "sfn/codegen-llvm/runtime_helpers/mod";
+
+fn _pinned_targets() -> string[] {
+    return ["fs.appendFile", "fs.createDirectory", "fs.deleteFile", "fs.exists", "fs.get_perms", "fs.is_directory", "fs.is_executable", "fs.listDirectory", "fs.mkdtemp", "fs.readFile", "fs.read_link", "fs.removeDirectory", "fs.set_perms", "fs.symlink", "fs.writeFile", "fs.writeLines", "http.download", "http.get_body", "http.post", "io.poll_any", "io.poll_readable", "io.read_fd", "io.read_line", "process.capture_take_peak_rss_kb", "process.capture_take_stderr", "process.capture_take_stdout", "process.capture_take_wall_ms", "process.environ", "process.exec", "process.exit", "process.handle_close_stdin", "process.handle_kill", "process.handle_read_bytes_stderr", "process.handle_read_bytes_stdout", "process.handle_read_line_stdout", "process.handle_read_stderr", "process.handle_read_stdout", "process.handle_stderr_at_eof", "process.handle_stderr_fd", "process.handle_stdout_at_eof", "process.handle_stdout_fd", "process.handle_wait", "process.handle_write", "process.handle_write_bytes", "process.run", "process.run_capture", "process.run_capture_cwd", "process.run_capture_metered", "process.run_capture_rlimit_as", "process.spawn_with_env", "process.spawn_with_env_cwd", "print.err", "print.info", "print.error", "print.warn", "tls.last_alert", "tls.last_error"];
+}
+
+// Every pinned target must still resolve to a lowering descriptor — a
+// renamed or removed intrinsic would otherwise leave a stale mirror entry
+// that silently stops firing (E0420 catches the callee itself before this
+// check ever runs, but a rename to a *different existing* target would not).
+//
+// The equality assertion, not a one-directional bound: argument lowering is
+// a strict 1:1 walk (one `lower_expression` + one `operands.push` per source
+// argument), and any ptr+len expansion for a string/array argument happens
+// *inside* the coercion of that single operand — it never changes the
+// argument count. So `parameter_types.length` equals source arity for every
+// target pinned here. (`env.get`/`env.home` are excluded from the mirror
+// precisely because their lowering splices a synthetic trailing `ptr` arena
+// operand after the source-argument walk, breaking the identity —
+// `core_call_lowering.sfn:653-670`.) A mismatch here means an intrinsic
+// gained or lost a parameter on the lowering side without the mirror
+// following.
+test "call signature: every pinned member target's arity matches its lowering descriptor" {
+    let targets = _pinned_targets();
+    let mut i: int = 0;
+    loop {
+        if i >= targets.length { break; }
+        let descriptor = find_runtime_helper(targets[i]);
+        assert descriptor != null;
+        assert descriptor.parameter_types.length == builtin_member_arity(targets[i]);
+        i += 1;
+    }
+}
+
+// The reverse direction, and the one that matters for a mirror that will be
+// extended. The loop above walks `_pinned_targets()`, a second hand-kept
+// list, so a row added to `builtin_member_arity` without touching that list
+// is checked by nothing. This loop instead walks the registry itself and
+// holds every dotted descriptor to the same identity: the mirror either
+// declines to pin it (-1) or agrees with its parameter count. A future row
+// carrying a wrong count therefore fails here regardless of whether anyone
+// remembered to update `_pinned_targets()`.
+//
+// Bare (non-dotted) targets are skipped — those belong to `builtin_arity`
+// and its own sync test.
+fn _contains_dot(text: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if strings_equal(text.substring(i, i + 1), ".") { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "call signature: no mirror row contradicts its lowering descriptor" {
+    let descriptors = runtime_helper_descriptors();
+    let mut i: int = 0;
+    let mut checked: int = 0;
+    loop {
+        if i >= descriptors.length { break; }
+        let descriptor = descriptors[i];
+        if _contains_dot(descriptor.target) {
+            let pinned = builtin_member_arity(descriptor.target);
+            if pinned >= 0 {
+                assert pinned == descriptor.parameter_types.length;
+                checked += 1;
+            }
+        }
+        i += 1;
+    }
+    // Guards the loop itself: an empty registry or a broken dotted-target
+    // filter would otherwise make every assertion above vacuous.
+    assert checked >= 57;
+}

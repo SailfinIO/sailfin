@@ -18,8 +18,8 @@ test "import-context reader: a work dir gets an isolated explicit root" {
 test "import-context reader: native-only capsule entry takes the mod fallback" ![io] {
     let root = fs.mkdtemp("sfn-import-context-");
     let provider_dir = root + "/sfn/example";
-    fs.createDirectory(root + "/sfn");
-    fs.createDirectory(provider_dir);
+    fs.createDirectory(root + "/sfn", true);
+    fs.createDirectory(provider_dir, true);
     let native_text = ".module sfn/example/mod\n";
     fs.writeFile(provider_dir + "/mod.sfn-asm", native_text);
 

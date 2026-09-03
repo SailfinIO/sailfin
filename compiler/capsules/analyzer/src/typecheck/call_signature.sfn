@@ -30,11 +30,12 @@
 // registry and the typecheck allowlist by
 // `compiler/tests/unit/call_signature_builtin_sync_test.sfn`, which records
 // why it cannot also reach the lowering recognizers.
-import { Expression } from "sfn/syntax";
+import { Expression, SourceSpan } from "sfn/syntax";
 
 import { ImportedFunctionSignature, lookup_imported_function } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
 import { is_builtin_call_name } from "../typecheck_types/extern_abi";
+import { find_value_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { token_from_name, trim_text, typecheck_int_to_string } from "../typecheck_types/text_utils";
 import { TypeckCtx } from "./context";
 import {
@@ -108,6 +109,108 @@ fn builtin_arity(name: string) -> int {
     if strings_equal(name, "atomic_fence") { return 0; }
     if strings_equal(name, "load_byte") { return 1; }
     if strings_equal(name, "secure_zero") { return 2; }
+    return -1;
+}
+
+// Source-level argument counts for member-form builtin calls
+// (`fs.removeDirectory(...)`), keyed on the dotted `receiver.member` target.
+// This mirrors `parameter_types.length` on the lowering registry's
+// `RuntimeHelperDescriptor` for the target — argument lowering is a strict
+// 1:1 walk (one `lower_expression` + one `operands.push` per source
+// argument), and any ptr+len expansion for a string/array argument happens
+// *inside* the coercion of that single operand, so it never changes the
+// argument count. The analyzer cannot import the registry directly to read
+// this off live — it lives in `compiler/capsules/codegen-llvm/src/`, inside
+// the `sfn/compiler` graph, which already depends on `sfn/analyzer`, and
+// importing it here would close a capsule cycle — so the count is
+// duplicated here and pinned against the registry by
+// `compiler/tests/unit/call_signature_builtin_member_sync_test.sfn`. Counts
+// below are also cross-checked empirically against every in-tree call site
+// across `compiler/`, `runtime/` and `capsules/`; each was unanimous.
+//
+// Deliberately excluded, and why: `env.get` / `env.home` — the one
+// documented exception to the 1:1 identity above: their lowering splices a
+// synthetic trailing `ptr` arena operand onto the argument list *after* the
+// source-argument walk, so `parameter_types.length` overcounts their source
+// arity by one; `console.*` — no lowering target at all; `string.concat` /
+// `string.append` / `string.eq_lv` / `string.cmp_lv` / `array.to_string` —
+// reached only from operator/interpolation desugaring, which builds operand
+// arrays programmatically, so whether they are legally writable as literal
+// dotted calls is unverified; `intrinsic.*` — the registry rows are
+// per-platform internal sentinels (`intrinsic.errno_location.glibc`, …), not
+// user-writable call forms. Every other dotted registry target — among them
+// `fs.read_bytes`, `fs.write_bytes`, `http.get`, `http.post_json`,
+// `number.to_string`, `rc.release`, `runtime.*`, `crypto.*`, `base64.*`,
+// `websocket.*` and the remaining `string.*` — is simply not pinned yet
+// rather than unpinnable; several do have in-tree call sites that agree with
+// their descriptor. Adding one is safe: the reverse loop in
+// `call_signature_builtin_member_sync_test.sfn` checks every dotted
+// descriptor, so a new row with a wrong count fails there. Returning -1
+// means "not pinned", same convention as `builtin_arity`.
+fn builtin_member_arity(target: string) -> int {
+    if strings_equal(target, "fs.appendFile") { return 2; }
+    if strings_equal(target, "fs.createDirectory") { return 2; }
+    if strings_equal(target, "fs.deleteFile") { return 1; }
+    if strings_equal(target, "fs.exists") { return 1; }
+    if strings_equal(target, "fs.get_perms") { return 1; }
+    if strings_equal(target, "fs.is_directory") { return 1; }
+    if strings_equal(target, "fs.is_executable") { return 1; }
+    if strings_equal(target, "fs.listDirectory") { return 1; }
+    if strings_equal(target, "fs.mkdtemp") { return 1; }
+    if strings_equal(target, "fs.readFile") { return 1; }
+    if strings_equal(target, "fs.read_link") { return 1; }
+    if strings_equal(target, "fs.removeDirectory") { return 1; }
+    if strings_equal(target, "fs.set_perms") { return 2; }
+    if strings_equal(target, "fs.symlink") { return 2; }
+    if strings_equal(target, "fs.writeFile") { return 2; }
+    if strings_equal(target, "fs.writeLines") { return 2; }
+    if strings_equal(target, "http.download") { return 2; }
+    if strings_equal(target, "http.get_body") { return 1; }
+    if strings_equal(target, "http.post") { return 2; }
+    if strings_equal(target, "io.poll_any") { return 2; }
+    if strings_equal(target, "io.poll_readable") { return 2; }
+    if strings_equal(target, "io.read_fd") { return 2; }
+    if strings_equal(target, "io.read_line") { return 1; }
+    if strings_equal(target, "process.capture_take_peak_rss_kb") { return 0; }
+    if strings_equal(target, "process.capture_take_stderr") { return 0; }
+    if strings_equal(target, "process.capture_take_stdout") { return 0; }
+    if strings_equal(target, "process.capture_take_wall_ms") { return 0; }
+    if strings_equal(target, "process.environ") { return 0; }
+    if strings_equal(target, "process.exec") { return 2; }
+    if strings_equal(target, "process.exit") { return 1; }
+    if strings_equal(target, "process.handle_close_stdin") { return 1; }
+    if strings_equal(target, "process.handle_kill") { return 1; }
+    if strings_equal(target, "process.handle_read_bytes_stderr") { return 2; }
+    if strings_equal(target, "process.handle_read_bytes_stdout") { return 2; }
+    if strings_equal(target, "process.handle_read_line_stdout") { return 1; }
+    if strings_equal(target, "process.handle_read_stderr") { return 1; }
+    if strings_equal(target, "process.handle_read_stdout") { return 1; }
+    if strings_equal(target, "process.handle_stderr_at_eof") { return 1; }
+    if strings_equal(target, "process.handle_stderr_fd") { return 1; }
+    if strings_equal(target, "process.handle_stdout_at_eof") { return 1; }
+    if strings_equal(target, "process.handle_stdout_fd") { return 1; }
+    if strings_equal(target, "process.handle_wait") { return 1; }
+    if strings_equal(target, "process.handle_write") { return 2; }
+    if strings_equal(target, "process.handle_write_bytes") { return 3; }
+    if strings_equal(target, "process.run") { return 1; }
+    if strings_equal(target, "process.run_capture") { return 2; }
+    if strings_equal(target, "process.run_capture_cwd") { return 3; }
+    if strings_equal(target, "process.run_capture_metered") { return 2; }
+    if strings_equal(target, "process.run_capture_rlimit_as") { return 3; }
+    if strings_equal(target, "process.spawn_with_env") { return 2; }
+    if strings_equal(target, "process.spawn_with_env_cwd") { return 3; }
+    if strings_equal(target, "tls.last_alert") { return 0; }
+    if strings_equal(target, "tls.last_error") { return 0; }
+    // `builtin_arity`'s caution above is about *bare* `print(...)`, whose
+    // arity the parser aggregates into one operand. The prefixed member
+    // forms carry a real single-parameter registry row each and are
+    // unanimous at 1 across every in-tree call site; if the parser ever
+    // does aggregate one, this check simply never fires — fail-open, this
+    // check's whole posture.
+    if strings_equal(target, "print.err") { return 1; }
+    if strings_equal(target, "print.info") { return 1; }
+    if strings_equal(target, "print.error") { return 1; }
+    if strings_equal(target, "print.warn") { return 1; }
     return -1;
 }
 
@@ -215,9 +318,54 @@ fn void_argument_diagnostics(call: Expression, index: int, ctx: TypeckCtx) -> Di
 fn call_arity_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
     if expression.variant != "Call" { return []; }
     if expression.callee == null { return []; }
-    if expression.callee.variant != "Identifier" { return []; }
-    let name = expression.callee.name;
-    let signature = resolve_call_signature(name, ctx);
+    if expression.callee.variant == "Identifier" {
+        let name = expression.callee.name;
+        let signature = resolve_call_signature(name, ctx);
+        return _arity_diagnostics_for(name, signature, expression, expression.callee.span);
+    }
+    return _member_call_arity_diagnostics(expression, ctx);
+}
+
+// The member-form counterpart of `call_arity_diagnostics`, for calls like
+// `fs.removeDirectory(...)`. Only a plain-identifier receiver naming an
+// unshadowed builtin namespace is checked; anything else stays silent.
+fn _member_call_arity_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee.variant != "Member" { return []; }
+    if callee.object == null { return []; }
+    if callee.object.variant != "Identifier" { return []; }
+    let receiver = callee.object;
+    // A user-declared value shadows the builtin namespace of the same name
+    // (mirrors the precedence in `expression_walk.sfn`'s `Member` arm).
+    let mut entry = find_value_symbol(ctx.bindings, receiver.name);
+    if entry == null {
+        entry = find_value_symbol(ctx.top_level, receiver.name);
+    }
+    if entry != null { return []; }
+    let target = receiver.name + "." + callee.member;
+    let arity = builtin_member_arity(target);
+    if arity < 0 { return []; }
+    let signature = CallSignature {
+        known: true,
+        arity_known: true,
+        minimum: arity,
+        maximum: arity,
+        returns_void: false,
+        return_known: false
+    };
+    // `token_from_name` positions the caret at the span's start and sizes
+    // it to the lexeme, so a dotted lexeme anchored on the `Member` span
+    // (which begins at the member name) would underline into the argument
+    // list. Anchor on the receiver instead; fall back to the callee span
+    // when the receiver carries none.
+    let mut anchor = receiver.span;
+    if anchor == null { anchor = callee.span; }
+    return _arity_diagnostics_for(target, signature, expression, anchor);
+}
+
+// Shared arity comparison and E0423 construction, keyed on the display name
+// used in the message (a bare identifier or a dotted member target).
+fn _arity_diagnostics_for(name: string, signature: CallSignature, expression: Expression, span: SourceSpan?) -> Diagnostic[] {
     if !signature.known { return []; }
     if !signature.arity_known { return []; }
     let supplied = expression.arguments.length;
@@ -230,7 +378,7 @@ fn call_arity_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[
             + ", but "
             + _supplied_text(supplied)
             + " — "
-            + _direction_text(supplied, signature), file_path: "", primary: token_from_name(name, expression.callee.span), suggestion: null
+            + _direction_text(supplied, signature), file_path: "", primary: token_from_name(name, span), suggestion: null
     }];
 }
 
