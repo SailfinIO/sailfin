@@ -229,6 +229,49 @@ pooled-test children are pinned to `SAILFIN_BUILD_JOBS=1` so the two cannot nest
 (SFN-547). Admitting a user-level test job count would reopen that interaction
 for no user-visible gain; test parallelism stays a CI and harness concern.
 
+### 3.4.1 `[build] cache-dir` and the self-host pin
+
+§3.3 states the precedence chain as env → manifest → user config → compiled-in
+default, with no self-host rung, because at the time it was written no admitted
+key interacted with SFEP-0040 §3.1's compiler self-host cache pin. The
+implementation (SFN-1260) shows that `[build] cache-dir` does, and resolves it
+in a way that is a deliberate deviation from a literal reading of §3.3, not an
+oversight — recorded here so a later reader does not "fix" it back into one.
+
+**(a) It sits below the SFEP-0040 §3.1 self-host pin, not directly below the
+environment variable.** The pin is a hermeticity invariant — `make compile` /
+`make check` must never read a developer's global store — not a preference
+rung, so nothing below rung 1 may outrank it. `[build] cache-dir` is itself a
+developer-global ambient store: exactly the hazard the pin exists to block, so
+it cannot sit above it. An environment variable is different in kind, not just
+in rank: it is typed next to the specific build it redirects, while a config
+file value set months ago is passive and would otherwise silently pull the
+self-host cache out of tree on every checkout its owner touches. The env var
+therefore stays above the pin, so CI can still redirect the self-host cache
+deliberately, while the config file cannot redirect it at all. The full ladder
+implemented by `cache_root_from` (`build_cache.sfn`) is: `$SAILFIN_BUILD_CACHE_DIR`
+→ self-host pin → `[build] cache-dir` → `$XDG_CACHE_HOME/sailfin` →
+`$HOME/.cache/sailfin` → in-tree default.
+
+**(b) It resolves as `<value>/<schema>`, matching the environment variable
+rather than the XDG rung's extra `sailfin/` segment.** The XDG segment exists
+because `$XDG_CACHE_HOME` is a directory shared across every application on the
+host, so Sailfin must namespace itself under it. A directory the user names
+specifically in `[build] cache-dir` is not shared — they typed it for Sailfin —
+so adding the same segment would be redundant and, worse, would relocate the
+store out from under a user who moves a value from `SAILFIN_BUILD_CACHE_DIR`
+into the persisted file expecting no change in behavior.
+
+**(c) It deliberately does not extend to `test_bin_cache_root` /
+`runtime_obj_cache_root`.** Both stay in-tree (or follow
+`SAILFIN_BUILD_CACHE_DIR` alone) regardless of `[build] cache-dir` — a
+divergence already documented above `runtime_obj_cache_root` in
+`build_cache.sfn`, predating this key and not created by it. The known UX
+consequence: a user who sets `cache-dir` gets a partial move — the per-module
+`.ll`/`.o` cache relocates, the runtime-object and per-test-binary caches do
+not — and `sfn cache info` reports only the moved half. Closing that gap was
+out of scope for SFN-1260.
+
 ### 3.5 Resolver seam
 
 Each admitted key gets a resolver function in one module — proposed

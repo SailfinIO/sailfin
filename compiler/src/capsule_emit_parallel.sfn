@@ -13,6 +13,7 @@ import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { build_host_os } from "./build/target";
 import { validate_llvm_ir } from "./llvm_validation";
 import { substring } from "./string_utils";
+import { user_config_build_jobs, user_config_origin } from "./user_config";
 
 // Windows physical-RAM primitive (SFN-980), defined once per target in the
 // already target-conditioned `rlimit` pair
@@ -54,7 +55,95 @@ fn _cr_resolve_jobs() -> int ![io] {
         }
     }
     let host = build_host_os();
-    return _cr_jobs_from_probe(_cr_host_cpu_count(host), _cr_host_memsize_bytes(host));
+    let memsize = _cr_host_memsize_bytes(host);
+
+    // Rung 4: `[build] jobs` from `~/.sfn/config.toml` (SFEP-0076 section 3.4).
+    // An UPPER BOUND THE USER MAY LOWER, NEVER RAISE — the 8 GiB `RLIMIT_AS`
+    // each child self-applies bounds a process, not the fleet, so `N` workers
+    // is `N x 8 GiB` with nothing enforcing the aggregate and the failure mode
+    // is the OS killing the host, not an `sfn` error
+    // (`.claude/rules/compiler-safety.md`, #1245). A persisted value therefore
+    // goes through the same RAM budget the probe path uses.
+    //
+    // Clamping WARNS rather than fails: the same file may roam onto a smaller
+    // host, and a config written on a 64 GiB workstation must not brick the
+    // build on a 8 GiB laptop.
+    //
+    // Setting this skips the CPU probe entirely (one fewer subprocess per
+    // build). Exceeding the host's core count is a legitimate choice the user
+    // is allowed to make; exceeding its memory is not, which is the only axis
+    // clamped here.
+    let configured = user_config_build_jobs();
+    if configured > 0 {
+        // Two independent bounds lower a configured count, and they blame
+        // different resources: the fixed 8-worker ceiling and the host's RAM
+        // budget. Reported separately because a single "memory budget" message
+        // is an actively wrong hint whenever the ceiling is what bound — on a
+        // 64 GiB box the budget is 16, so `jobs = 16` is cut to 8 by the
+        // ceiling alone, and telling that user their host is memory-starved
+        // sends them to lower the value again for no reason.
+        let ceilinged = _cr_jobs_ceiling(configured);
+        if ceilinged < configured {
+            print.err(_cr_jobs_ceiling_warning(configured, ceilinged));
+        }
+        let effective = _cr_ram_budget_jobs(memsize, ceilinged);
+        if effective < ceilinged {
+            print.err(_cr_jobs_memory_warning(ceilinged, effective));
+        }
+        return effective;
+    }
+
+    return _cr_jobs_from_probe(_cr_host_cpu_count(host), memsize);
+}
+
+// Clamp a configured `[build] jobs` to what the host can actually hold. Pure,
+// so the clamp is unit-testable without depending on the runner's real RAM.
+//
+// The [1, 8] ceiling is the same one `_cr_resolve_jobs` applies to
+// `SAILFIN_BUILD_JOBS` and `_cr_jobs_from_probe` applies to the CPU probe; it
+// bounds worker memory independently of the RAM budget below it, and applying
+// it first means `_cr_ram_budget_jobs` never sees a count the rest of the
+// module assumes cannot occur.
+//
+// `_cr_ram_budget_jobs(memsize, n)` returns `min(n, floor(usable / reserve))`
+// and fails open to `n` on an unmeasurable host, so passing the configured
+// count as its `nproc` argument yields exactly the
+// `min(configured, ram_budget)` this rung owes — with the same fail-open the
+// probe path already has. Its 2.5 GiB/job out of 66% of RAM sizing (SFN-626)
+// is untouched.
+// The two clamp warnings, built purely so a test can pin that each names BOTH
+// the requested and the resulting count — the user's only clue that the number
+// they persisted is not the number in force. Emitting either requires a host
+// that actually binds, which a test cannot arrange without depending on the
+// runner's real memory (SFN-1260). Both compose their provenance from
+// `user_config_origin()` so the path cannot drift from the module that reads
+// it (SFN-1258 may change it).
+fn _cr_jobs_ceiling_warning(configured: int, ceilinged: int) -> string {
+    return "sfn: warning: " + user_config_origin() + " [build] jobs = "
+        + int_to_string(configured)
+        + " exceeds the 8-worker emit ceiling; using "
+        + int_to_string(ceilinged);
+}
+
+fn _cr_jobs_memory_warning(requested: int, effective: int) -> string {
+    return "sfn: warning: " + user_config_origin() + " [build] jobs = "
+        + int_to_string(requested)
+        + " exceeds this host's memory budget; using "
+        + int_to_string(effective);
+}
+
+// The fixed worker ceiling, split out so `_cr_resolve_jobs` can tell which of
+// the two bounds actually bound and warn about that one.
+fn _cr_jobs_ceiling(configured: int) -> int {
+    if configured < 1 { return 0; }
+    if configured > 8 { return 8; }
+    return configured;
+}
+
+fn _cr_jobs_from_config(configured: int, memsize_bytes: int) -> int {
+    let ceilinged = _cr_jobs_ceiling(configured);
+    if ceilinged < 1 { return 0; }
+    return _cr_ram_budget_jobs(memsize_bytes, ceilinged);
 }
 
 // Clamp a raw CPU-count probe to [1, 8] — the 8-job ceiling bounds
@@ -254,8 +343,16 @@ fn _cr_parse_meminfo_bytes(text: string) -> int {
 // and the OS). Pure arithmetic so it is unit-testable apart from the
 // host RAM probe. `memsize_bytes <= 0` means "unknown" — return
 // `nproc` unchanged (fail-open: never starve a build on a host we
-// cannot measure). The clamp only ever *lowers* the CPU-derived
+// cannot measure). The clamp only ever *lowers* the requested
 // count, never raises it.
+//
+// "Requested", not "CPU-derived": `nproc` is whatever count the caller
+// wants clamped against RAM, and there are now two callers supplying it
+// from different places — `_cr_jobs_from_probe` (the CPU probe) and
+// `_cr_jobs_from_config` (a persisted `[build] jobs`, SFN-1260). The
+// contract is "clamp any requested count against RAM"; do not
+// reintroduce a core-count meaning for this parameter without fixing
+// both callers, since the arithmetic tests pin values, not semantics.
 fn _cr_ram_budget_jobs(memsize_bytes: int, nproc: int) -> int {
     if memsize_bytes <= 0 { return nproc; }
     // 2.5 GiB — sized from the heaviest emit worker in the tree,
@@ -703,6 +800,10 @@ export {
     ParallelProcessRun,
     ParallelProcessTask,
     _cr_count_cpuinfo_processors,
+    _cr_jobs_ceiling,
+    _cr_jobs_ceiling_warning,
+    _cr_jobs_from_config,
+    _cr_jobs_memory_warning,
     _cr_jobs_from_probe,
     _cr_parse_cpu_online,
     _cr_parse_meminfo_bytes,

@@ -6,6 +6,7 @@
 // (`_cr_ram_budget_jobs`) in isolation.
 import {
     _cr_count_cpuinfo_processors,
+    _cr_jobs_from_config,
     _cr_jobs_from_probe,
     _cr_parse_cpu_online,
     _cr_parse_meminfo_bytes
@@ -71,4 +72,71 @@ test "job sizing: meminfo_bytes without a leading MemTotal line yields zero" {
 
 test "job sizing: cpuinfo_processors counts processor lines only" {
     assert _cr_count_cpuinfo_processors("processor\t: 0\nvendor\nprocessor\t: 1\n") == 2;
+}
+
+// SFN-1260: `_cr_jobs_from_config` clamps a persisted `[build] jobs` to the
+// same [1, 8] worker ceiling as the CPU probe, then defers to
+// `_cr_ram_budget_jobs`, whose arithmetic is `cr_ram_budget_jobs_test.sfn`'s
+// job. These pin the composition, not the RAM-budget arithmetic itself.
+// 64 GiB: usable = 68719476736*0.66 = 45,354,854,645 B; budget =
+// 45354854645/2684354560 = 16 (floored). 16 >= 4, so the configured count
+// passes through unchanged.
+test "job sizing: a configured count below the RAM budget passes through unchanged" {
+    assert _cr_jobs_from_config(4, 68719476736) == 4;
+}
+
+// 7 GiB: usable = 7516192768*0.66 = 4,960,687,226 B; budget =
+// 4960687226/2684354560 = 1 (floored). 1 < 8, so the configured count clamps
+// down to the RAM budget.
+test "job sizing: a configured count above the RAM budget clamps down" {
+    assert _cr_jobs_from_config(8, 7516192768) == 1;
+}
+
+// Same 7 GiB box: the budget is still 1, so a smaller configured count still
+// clamps.
+test "job sizing: the same RAM budget still clamps a smaller configured count" {
+    assert _cr_jobs_from_config(2, 7516192768) == 1;
+}
+
+// Already at the 7 GiB box's budget of 1: unchanged.
+test "job sizing: a configured count already at the RAM budget is unchanged" {
+    assert _cr_jobs_from_config(1, 7516192768) == 1;
+}
+
+// 16 GiB: usable = 17179869184*0.66 = 11,338,713,661 B; budget =
+// 11338713661/2684354560 = 4 (floored). 4 >= 3, so 3 passes through.
+test "job sizing: a configured count under a 16 GiB budget passes through" {
+    assert _cr_jobs_from_config(3, 17179869184) == 3;
+}
+
+// Same 16 GiB box, budget 4: a configured 6 clamps down to 4.
+test "job sizing: a configured count over a 16 GiB budget clamps to it" {
+    assert _cr_jobs_from_config(6, 17179869184) == 4;
+}
+
+// The [1, 8] ceiling is applied BEFORE the RAM budget: a configured 16 clamps
+// to 8 first, and the 64 GiB box's budget of 16 does not bind after that.
+test "job sizing: the [1, 8] ceiling applies before the RAM budget" {
+    assert _cr_jobs_from_config(16, 68719476736) == 8;
+}
+
+// An unmeasurable RAM figure (<= 0) fails open to the configured count,
+// mirroring `_cr_ram_budget_jobs`'s existing fail-open — a host we cannot
+// measure must never starve a build the user explicitly sized.
+test "job sizing: an unmeasurable RAM figure fails open to the configured count" {
+    assert _cr_jobs_from_config(4, 0) == 4;
+    assert _cr_jobs_from_config(4, -1) == 4;
+}
+
+// A non-positive configured count means "no opinion": the caller falls
+// through to its own probe ladder rather than the config rung.
+test "job sizing: a non-positive configured count means no opinion" {
+    assert _cr_jobs_from_config(0, 68719476736) == 0;
+    assert _cr_jobs_from_config(-3, 68719476736) == 0;
+}
+
+// The clamp only ever lowers the configured count, never raises it: the 64
+// GiB budget of 16 does not push a configured 2 upward.
+test "job sizing: the clamp never raises the configured count" {
+    assert _cr_jobs_from_config(2, 68719476736) == 2;
 }

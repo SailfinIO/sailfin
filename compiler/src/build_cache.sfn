@@ -178,6 +178,7 @@ import { sha256_hex_of_string } from "./build/hash";
 import { host_is_windows } from "./build/target";
 import { _get_env_cmd } from "./build_flags";
 import { char_code_at_text, find_last_index_of_char, substring } from "./string_utils";
+import { user_config_build_cache_dir } from "./user_config";
 
 // The Windows-only native probes backing the cache GC helpers below
 // (SFN-754). Declared module-locally per the SFN-720 convention
@@ -778,10 +779,25 @@ fn _parse_schema_num(name: string) -> int {
 // All inputs are explicit so the ladder is unit-testable without any
 // process-global env mutation. The `<version>` schema suffix is
 // appended uniformly across every branch.
-fn cache_root_from(explicit: string, is_selfhost: boolean, xdg: string, home: string) -> string {
+// `configured` is `[build] cache-dir` from `~/.sfn/config.toml` (SFEP-0076
+// section 3.4, rung 4). It shapes the root exactly as `explicit` does —
+// `<value>/<schema>`, not the `<value>/sailfin/<schema>` the XDG rung adds —
+// because the key is the persisted form of `SAILFIN_BUILD_CACHE_DIR` and a
+// user who moves a value from the environment into the file must not find
+// their store relocated by the move.
+//
+// It sits BELOW the self-host pin, not directly below `explicit`. The pin
+// keeps the compiler's own build hermetic (SFEP-0040 section 3.1), and a
+// persisted default is passive in a way an environment variable is not:
+// `SAILFIN_BUILD_CACHE_DIR` is typed next to the build it redirects, whereas a
+// config file the user set months ago for their own projects would otherwise
+// silently pull the self-host cache out of tree on every checkout they own.
+// The rung is still above both XDG fallbacks, which is what the key is for.
+fn cache_root_from(explicit: string, is_selfhost: boolean, configured: string, xdg: string, home: string) -> string {
     let schema = build_cache_schema_version();
     if explicit.length > 0 { return explicit + "/" + schema; }
     if is_selfhost { return "build/cache/" + schema; }
+    if configured.length > 0 { return configured + "/" + schema; }
     if xdg.length > 0 { return xdg + "/sailfin/" + schema; }
     if home.length > 0 { return home + "/.cache/sailfin/" + schema; }
     return "build/cache/" + schema;
@@ -792,7 +808,7 @@ fn cache_root_from(explicit: string, is_selfhost: boolean, xdg: string, home: st
 // `build/cache/<version>`; non-empty → `<override>/<version>`.
 // Equivalent to the non-self-host, no-XDG/HOME slice of the ladder.
 fn cache_root_with_override(override_path: string) -> string {
-    return cache_root_from(override_path, false, "", "");
+    return cache_root_from(override_path, false, "", "", "");
 }
 
 // The root capsule's scoped identity is the self-host discriminator for
@@ -811,9 +827,14 @@ fn is_compiler_selfhost_capsule(capsule_name: string) -> boolean {
 fn cache_root(capsule_name: string) -> string ![io] {
     let explicit = _get_env_cmd("SAILFIN_BUILD_CACHE_DIR");
     let is_selfhost = is_compiler_selfhost_capsule(capsule_name);
+    // Read unconditionally rather than only when the rungs above miss, so a
+    // malformed `[build]` section is reported once even to a user whose
+    // environment currently overrides it — otherwise the file stays broken
+    // and silent until the day they unset the variable.
+    let configured = user_config_build_cache_dir();
     let xdg = _get_env_cmd("XDG_CACHE_HOME");
     let home = _get_env_cmd("HOME");
-    return cache_root_from(explicit, is_selfhost, xdg, home);
+    return cache_root_from(explicit, is_selfhost, configured, xdg, home);
 }
 
 // ----------------------------------------------------------------
@@ -1601,7 +1622,7 @@ fn test_bin_cache_root() -> string ![io] {
 // build/run path uses, so a runtime object emitted by `sfn build` serves a
 // later `sfn test` link and vice versa.
 //
-// `cache_root_with_override` is `cache_root_from(x, false, "", "")`, which
+// `cache_root_with_override` is `cache_root_from(x, false, "", "", "")`, which
 // is string-identical to `cache_root("sfn/compiler")` in both branches that
 // can be reached here: an explicit `$SAILFIN_BUILD_CACHE_DIR` short-circuits
 // at the top of the ladder, and otherwise the self-host pin resolves to the

@@ -109,12 +109,25 @@ test "build_cache: cache_root_with_override non-empty -> override + version" {
 test "build_cache: cache_root_from explicit override wins over all" {
     // Explicit ($SAILFIN_BUILD_CACHE_DIR) beats even the self-host
     // pin, so CI can redirect the compiler's own cache.
-    assert cache_root_from("/ci/cache", true, "/xdg", "/home/dev") == "/ci/cache/v2";
-    assert cache_root_from("/ci/cache", false, "/xdg", "/home/dev") == "/ci/cache/v2";
+    assert cache_root_from("/ci/cache", true, "/cfg", "/xdg", "/home/dev") == "/ci/cache/v2";
+    assert cache_root_from("/ci/cache", false, "/cfg", "/xdg", "/home/dev") == "/ci/cache/v2";
 }
 
 test "build_cache: cache_root_from self-host pins in-tree over XDG/HOME" {
-    assert cache_root_from("", true, "/xdg", "/home/dev") == "build/cache/v2";
+    assert cache_root_from("", true, "/cfg", "/xdg", "/home/dev") == "build/cache/v2";
+}
+
+// SFN-1260 / SFEP-0076 section 3.4: `[build] cache-dir` is the persisted
+// form of `SAILFIN_BUILD_CACHE_DIR`. Pins two properties: (1) the rung is
+// actually read and sits ABOVE both XDG fallbacks, so a configured value
+// short-circuits before either is consulted; (2) it shapes the root as
+// `<value>/<schema>` exactly like the `explicit` rung, NOT as the XDG
+// rung's `<value>/sailfin/<schema>` — moving a value out of the
+// environment and into the file must not relocate the store. The
+// `/cfg/v2` (not `/cfg/sailfin/v2`) assertion below is what pins that.
+test "build_cache: cache_root_from config cache-dir beats both XDG fallbacks" {
+    assert cache_root_from("", false, "/cfg", "/xdg", "/home/dev") == "/cfg/v2";
+    assert cache_root_from("", false, "/cfg", "", "") == "/cfg/v2";
 }
 
 test "build_cache: scoped compiler identity selects the self-host cache" {
@@ -124,16 +137,16 @@ test "build_cache: scoped compiler identity selects the self-host cache" {
 }
 
 test "build_cache: cache_root_from XDG_CACHE_HOME beats HOME" {
-    assert cache_root_from("", false, "/xdg", "/home/dev") == "/xdg/sailfin/v2";
+    assert cache_root_from("", false, "", "/xdg", "/home/dev") == "/xdg/sailfin/v2";
 }
 
 test "build_cache: cache_root_from HOME is the global default" {
-    assert cache_root_from("", false, "", "/home/dev") == "/home/dev/.cache/sailfin/v2";
+    assert cache_root_from("", false, "", "", "/home/dev") == "/home/dev/.cache/sailfin/v2";
 }
 
 test "build_cache: cache_root_from all-empty falls back in-tree" {
     // Hermetic fallback when $HOME is unresolvable (containers, CI).
-    assert cache_root_from("", false, "", "") == "build/cache/v2";
+    assert cache_root_from("", false, "", "", "") == "build/cache/v2";
 }
 
 // --------------------------------------------------------------

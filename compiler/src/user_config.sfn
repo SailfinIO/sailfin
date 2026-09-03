@@ -15,7 +15,10 @@
 // directory serves a machine that cross-compiles and a roaming profile cannot
 // carry a Darwin linker path onto a Linux host. The environment variables above
 // this rung keep their flat, host-agnostic meaning by design.
+import { int_to_string } from "sfn/strings";
+
 import { _get_home_cmd } from "./build_flags";
+import { is_absolute_path, substring } from "./string_utils";
 import {
     toml_get_string,
     toml_section_key_names,
@@ -33,6 +36,26 @@ import {
 let _UC_TARGET_LINKER: string = "linker";
 let _UC_TARGET_CC: string = "cc";
 
+// The `[build]` keys this rung admits (SFEP-0076 section 3.4). Unlike
+// `[target.<triple>]` this section is host-agnostic: both keys name a
+// machine-local resource (a directory, a worker count) rather than a
+// toolchain component, so keying them by triple would only fragment one
+// user's answer across the triples they happen to build for.
+//
+// `jobs` is deliberately NOT extended to the test pool. `SAILFIN_TEST_JOBS` /
+// `_test_jobs_budget` (`cli/commands/test/arg_and_jobs.sfn`) are sized against
+// a different workload (SFN-781), and pooled test children are pinned to
+// `SAILFIN_BUILD_JOBS=1` so the two fan-outs cannot nest and multiply
+// (SFN-547). SFEP-0076 section 3.4 records that as a deliberate exclusion.
+let _UC_BUILD_SECTION: string = "build";
+let _UC_BUILD_CACHE_DIR: string = "cache-dir";
+let _UC_BUILD_JOBS: string = "jobs";
+
+// Refuse an absurd `jobs` before the accumulator can overflow. Every consumer
+// clamps to at most 8 anyway, so the exact ceiling only has to be far above
+// any legitimate value and far below the int range.
+let _UC_JOBS_MAX: int = 1000000;
+
 // Provenance label used in caller-side traces and warnings, so a user reading
 // `SAILFIN_TRACE_LINK` output can tell a persisted default from a one-shot
 // environment override.
@@ -45,11 +68,31 @@ let _UC_ORIGIN: string = "~/.sfn/config.toml";
 // invoked. Latching mirrors `_pg_scanned` (`prelude_globals.sfn`) and `_triple`
 // (`build/target_state.sfn`); the config file cannot change mid-process.
 let mut _uc_warned: boolean = false;
+let mut _uc_build_warned: boolean = false;
+
+// The file itself is read at most once per process, for the same reason the
+// warning latches exist and under the same assumption: `~/.sfn/config.toml`
+// cannot change mid-process. `cache_root` is reached from four build call
+// sites and `_cr_resolve_jobs` from three more, so an unlatched read would
+// stat and parse the file on each, turning what used to be a handful of
+// `env.get` calls into a handful of filesystem round-trips. `_uc_text` stays
+// "" for a missing home, a missing file, and an empty file alike — all three
+// mean the same thing to every resolver above.
+//
+// The explicit-path `_at` forms deliberately do NOT consult this cache: they
+// exist so tests can drive several different files in one process.
+let mut _uc_text_loaded: boolean = false;
+let mut _uc_text: string = "";
 
 // The user configuration directory. Deliberately `env.home() + "/.sfn"` with no
 // `SAILFIN_CONFIG_DIR` consultation: that override is SFN-1258's decision, and
 // this seam must not pre-empt it. The five existing hand-rolled sites are left
 // alone here for the same reason.
+// The provenance label, exposed so a warning emitted from another module
+// cannot drift from the path this one actually reads. SFN-1258 may change what
+// that path is; there must be exactly one place it is spelled.
+fn user_config_origin() -> string { return _UC_ORIGIN; }
+
 fn user_config_dir() -> string ![io] {
     let home = _get_home_cmd();
     if home.length == 0 { return ""; }
@@ -147,4 +190,190 @@ fn user_config_cc(triple: string) -> string ![io] {
     return user_config_target_value_at(user_config_path(), triple, _UC_TARGET_CC);
 }
 
-export { _uc_warn_ignored };
+// ---------------------------------------------------------------------------
+// `[build]` — SFEP-0076 section 3.4.
+// ---------------------------------------------------------------------------
+fn user_config_build_key_is_admitted(key: string) -> boolean {
+    if strings_equal(key, _UC_BUILD_CACHE_DIR) { return true; }
+    if strings_equal(key, _UC_BUILD_JOBS) { return true; }
+    return false;
+}
+
+// Strict decimal parse. Returns 0 for empty, non-digit, zero, and
+// out-of-range input — every one of which this rung ignores. Deliberately
+// stricter than `_cr_parse_positive_int` (`capsule_emit_parallel.sfn`), which
+// tolerates surrounding whitespace because it parses `nproc` output; a TOML
+// value arrives already trimmed by `toml_get_string`, so interior or trailing
+// space here means the user typed something that is not a number.
+//
+// A leading `-` is a non-digit and so lands on the same rejection path,
+// which is why a negative `jobs` needs no separate case.
+fn _uc_parse_jobs(value: string) -> int {
+    if value.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let ch = substring(value, i, i + 1);
+        let mut digit: int = -1;
+        if ch == "0" { digit = 0; }
+        if ch == "1" { digit = 1; }
+        if ch == "2" { digit = 2; }
+        if ch == "3" { digit = 3; }
+        if ch == "4" { digit = 4; }
+        if ch == "5" { digit = 5; }
+        if ch == "6" { digit = 6; }
+        if ch == "7" { digit = 7; }
+        if ch == "8" { digit = 8; }
+        if ch == "9" { digit = 9; }
+        if digit < 0 { return 0; }
+        n = n * 10 + digit;
+        if n > _UC_JOBS_MAX { return 0; }
+        i += 1;
+    }
+    return n;
+}
+
+// Raw admitted `[build]` value, before per-key validation.
+fn user_config_build_value_from_text(text: string, key: string) -> string {
+    if !user_config_build_key_is_admitted(key) { return ""; }
+    return toml_get_string(text, _UC_BUILD_SECTION, key);
+}
+
+// `[build] cache-dir`, or "" when absent or not usable.
+//
+// The value must be ABSOLUTE. A relative cache dir resolves against the
+// process cwd, so one persisted default would silently name a different store
+// per directory the user builds from — the opposite of what persisting it is
+// for — and would scatter cache trees through their source checkouts. The
+// same reasoning is already recorded for the in-tree default in
+// `runtime_obj_cache_root` (`build_cache.sfn`), which is cwd-bound and says
+// so. `SAILFIN_BUILD_CACHE_DIR` keeps accepting a relative value: it is a
+// one-shot override typed next to the build it applies to.
+fn user_config_build_cache_dir_from_text(text: string) -> string {
+    let value = user_config_build_value_from_text(text, _UC_BUILD_CACHE_DIR);
+    if value.length == 0 { return ""; }
+    if !is_absolute_path(value) { return ""; }
+    return value;
+}
+
+// `[build] jobs`, or 0 when absent or not a usable count. 0 is the "no
+// opinion" answer the caller falls through on, so zero, negative, and
+// non-integer values all land there — a hand-edited file must survive this
+// rung (rejection at `sfn config set` is SFN-1261's job).
+//
+// This is a count, NOT the effective job count: clamping it against the host
+// RAM budget belongs to the consumer, which is the only party that knows the
+// budget. See `_cr_resolve_jobs` (`capsule_emit_parallel.sfn`).
+fn user_config_build_jobs_from_text(text: string) -> int {
+    return _uc_parse_jobs(user_config_build_value_from_text(text, _UC_BUILD_JOBS));
+}
+
+// Warn about what `[build]` contains that this rung will not act on: malformed
+// lines, unadmitted keys, and admitted keys whose value fails validation. One
+// pass per process for the same reason as `_uc_warn_ignored` — `cache_root`
+// and `_cr_resolve_jobs` are each reached many times in one `sfn test` run.
+//
+// Never fatal, per SFEP-0076 section 8: the same file may roam onto a host
+// with a different toolchain, and a warning must not brick a build there.
+//
+// The latch is process-wide, so it is shared with the explicit-path `_at`
+// forms even though those bypass the `_uc_text` cache. A process that reads two
+// different files therefore warns for the first only — correct in production,
+// where there is one file per process, but a test that wants warning text for a
+// second file has to assert it some other way.
+fn _uc_warn_build_ignored(text: string) -> void ![io] {
+    if _uc_build_warned { return; }
+    _uc_build_warned = true;
+
+    let malformed = toml_section_malformed_lines(text, _UC_BUILD_SECTION);
+    let mut i: int = 0;
+    loop {
+        if i >= malformed.length { break; }
+        print.err("sfn: warning: " + _UC_ORIGIN + " [" + _UC_BUILD_SECTION
+            + "] line is not `key = value`; ignoring: "
+            + malformed[i]);
+        i += 1;
+    }
+
+    let keys = toml_section_key_names(text, _UC_BUILD_SECTION);
+    let mut j: int = 0;
+    loop {
+        if j >= keys.length { break; }
+        if !user_config_build_key_is_admitted(keys[j]) {
+            print.err("sfn: warning: " + _UC_ORIGIN + " [" + _UC_BUILD_SECTION
+                + "] "
+                + keys[j]
+                + " is not a recognised key; ignoring");
+        }
+        j += 1;
+    }
+
+    let raw_dir = user_config_build_value_from_text(text, _UC_BUILD_CACHE_DIR);
+    if raw_dir.length > 0 && !is_absolute_path(raw_dir) {
+        print.err("sfn: warning: " + _UC_ORIGIN + " [" + _UC_BUILD_SECTION
+            + "] "
+            + _UC_BUILD_CACHE_DIR
+            + " must be an absolute path; ignoring: "
+            + raw_dir);
+    }
+
+    let raw_jobs = user_config_build_value_from_text(text, _UC_BUILD_JOBS);
+    if raw_jobs.length > 0 && _uc_parse_jobs(raw_jobs) <= 0 {
+        print.err("sfn: warning: " + _UC_ORIGIN + " [" + _UC_BUILD_SECTION
+            + "] "
+            + _UC_BUILD_JOBS
+            + " must be a positive whole number (1-"
+            + int_to_string(_UC_JOBS_MAX)
+            + "); ignoring: "
+            + raw_jobs);
+    }
+}
+
+// Explicit-path forms, so tests can exercise the file path without reading the
+// real `~/.sfn` — non-hermetic, and on CI silently vacuous.
+fn user_config_build_cache_dir_at(path: string) -> string ![io] {
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    let text = fs.readFile(path);
+    if text.length == 0 { return ""; }
+    _uc_warn_build_ignored(text);
+    return user_config_build_cache_dir_from_text(text);
+}
+
+fn user_config_build_jobs_at(path: string) -> int ![io] {
+    if path.length == 0 { return 0; }
+    if !fs.exists(path) { return 0; }
+    let text = fs.readFile(path);
+    if text.length == 0 { return 0; }
+    _uc_warn_build_ignored(text);
+    return user_config_build_jobs_from_text(text);
+}
+
+// Rung 4 for `[build]`. "" / 0 mean "absent" so the caller keeps its own
+// ladder; neither resolver ever supplies a default.
+fn _uc_config_text() -> string ![io] {
+    if _uc_text_loaded { return _uc_text; }
+    _uc_text_loaded = true;
+    let path = user_config_path();
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    _uc_text = fs.readFile(path);
+    return _uc_text;
+}
+
+fn user_config_build_cache_dir() -> string ![io] {
+    let text = _uc_config_text();
+    if text.length == 0 { return ""; }
+    _uc_warn_build_ignored(text);
+    return user_config_build_cache_dir_from_text(text);
+}
+
+fn user_config_build_jobs() -> int ![io] {
+    let text = _uc_config_text();
+    if text.length == 0 { return 0; }
+    _uc_warn_build_ignored(text);
+    return user_config_build_jobs_from_text(text);
+}
+
+export { _uc_parse_jobs, _uc_warn_build_ignored, _uc_warn_ignored };
