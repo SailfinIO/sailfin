@@ -98,7 +98,7 @@ import {
     toolchain_revocations_path,
     toolchain_revocations_read
 } from "../../toolchain/index_cache";
-import { toolchain_verify_entry } from "../../toolchain/integrity";
+import { toolchain_print_integrity_failure, toolchain_verify_entry } from "../../toolchain/integrity";
 import { TOOLCHAIN_MANIFEST_OK, toolchain_manifest_read_header } from "../../toolchain/manifest";
 import { toolchain_versions_base } from "../../toolchain/store";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
@@ -702,7 +702,8 @@ fn _bootstrap_commit_dev_payload(staging: string, out: string, record_owner: boo
 // `unverified`) for a manifest-ABSENT entry, so the migration shim above is
 // preserved exactly: only an entry that HAS a manifest and fails it is
 // refused, and `_bootstrap_fetch` then repairs it by the same route a missing
-// entry takes.
+// entry takes — after saying so, so the refusal is never mistaken for a
+// network failure.
 //
 // The pipeline guard's other half — `recorded == expected` — deliberately
 // does NOT move here. `expected` comes from the signed `SHA256SUMS`, so
@@ -720,7 +721,17 @@ fn _bootstrap_store_ready(install_base: string, ver: string) -> boolean ![io] {
         let recorded = _toml_trim_cmd(fs.readFile(sha_path));
         if recorded.length == 0 { return false; }
     }
-    if !toolchain_verify_entry(store_dir).ok { return false; }
+    let verified = toolchain_verify_entry(store_dir);
+    if !verified.ok {
+        // Never a silent refusal. Without this the caller reports "could not
+        // obtain the pinned seed" (or, offline, a transport error from the
+        // download that follows), pointing at the network for what is a
+        // LOCAL entry failing its own manifest. This is the SFEP-0073 3.8
+        // diagnostic every other integrity consumer prints: what failed,
+        // which entry, and how to reinstall.
+        toolchain_print_integrity_failure(store_dir, ver, verified);
+        return false;
+    }
     return true;
 }
 

@@ -717,6 +717,10 @@ test "toolchain install: a bootstrap seed failing its install manifest does not 
     // the store-ready short-circuit fire.
     assert ! contains(out, "already present");
     assert exit != 0;
+    // The refusal names its LOCAL cause (SFEP-0073 3.8) and the offending
+    // path, so it cannot be read as the transport failure that follows it.
+    assert contains(err, "toolchain integrity check failed");
+    assert contains(err, "modified: ");
     // Proves it reached the pipeline the short-circuit would have skipped.
     assert contains(out + err, "failed to download release manifest");
     assert contains(out + err, "reason: connect-failed");
