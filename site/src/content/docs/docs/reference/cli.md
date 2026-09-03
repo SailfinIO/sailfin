@@ -383,7 +383,7 @@ sfn cache clean --all-schemas            # also remove stale prior-schema trees
 
 - `prune` is explicit and opt-in — it never runs automatically on `sfn build`/`sfn run`/`sfn check`/`sfn test`. With neither `--max-size` nor `--max-age` given, conservative defaults apply (~5 GiB total size, 30-day max age).
 - Eviction order is a true LRU: a cache *hit* touches the entry directory's mtime, so `prune` evicts by last-use recency rather than creation time.
-- The cache root follows the same resolution as the build cache generally: `$SAILFIN_BUILD_CACHE_DIR`, then `$XDG_CACHE_HOME/sailfin`, then `$HOME/.cache/sailfin`, falling back to the in-tree `build/cache` when `$HOME` is unresolvable. The compiler's own self-host build always pins the in-tree root and is unaffected by `sfn cache`.
+- The cache root follows the same resolution as the build cache generally: `$SAILFIN_BUILD_CACHE_DIR`, then (for the compiler's own self-host build only) the in-tree pin, then `~/.sfn/config.toml`'s `[build] cache-dir`, then `$XDG_CACHE_HOME/sailfin`, then `$HOME/.cache/sailfin`, falling back to the in-tree `build/cache` when `$HOME` is unresolvable. `cache-dir` must be an absolute path — a relative value is ignored with a warning. The compiler's own self-host build always pins the in-tree root and is unaffected by `sfn cache` or `cache-dir`.
 
 ---
 
@@ -422,7 +422,7 @@ These two flags sound alike and clear different things — never conflate them.
 
 | Command | Clears |
 |---|---|
-| `sfn build --clean` / `sfn run --clean` | The content-addressed build cache and the runtime object cache. That cache root lives outside the repo unless neither `XDG_CACHE_HOME` nor `HOME` is set. |
+| `sfn build --clean` / `sfn run --clean` | The content-addressed build cache and the runtime object cache. That cache root lives outside the repo unless neither `XDG_CACHE_HOME` nor `HOME` is set, or `~/.sfn/config.toml`'s `[build] cache-dir` is set. |
 | `sfn dev bootstrap build --clean-tree` | `build/*` except the fetched seed toolchain store, then self-hosts. Never touches the cache. |
 | `sfn dev clean build` | The same removal as `--clean-tree`, standalone (no rebuild), with `--include-seed` / `--dry-run` available. |
 
@@ -894,7 +894,7 @@ These environment variables influence the behavior of `sfn`.
 |---|---|---|
 | `SAILFIN_RUNTIME_ROOT` | `sfn` binary | Override the directory where `sfn` looks for the bundled runtime. By default, the runtime is resolved relative to the executable. |
 | `SAILFIN_MEM_LIMIT` | `sfn` binary | Override the compiler's Linux self-applied 8 GiB virtual-memory cap. Use bytes, `unlimited`, `off`, or `0`. |
-| `SAILFIN_BUILD_JOBS` | `sfn build -p compiler` | Override compiler module scheduling inside the build driver. Use `1` for serial bisects or a small value on memory-constrained hosts. |
+| `SAILFIN_BUILD_JOBS` | `sfn build -p compiler` | Override compiler module scheduling inside the build driver. Use `1` for serial bisects or a small value on memory-constrained hosts. Falls through to `~/.sfn/config.toml`'s `[build] jobs` when unset, ahead of the CPU/RAM probe. The two rungs clamp differently: this variable is clamped only to `[1, 8]` with no RAM-budget check, while `[build] jobs` is clamped to `[1, 8]` *and* the host RAM budget — see below. |
 | `SAILFIN_TEST_JOBS` | `sfn test` / `sfn dev shard run` | Override the native CPU/RAM-aware per-file worker default. An explicit `--jobs N` takes precedence; use `1` for serial execution. |
 | `SFN_REGISTRY` | `sfn add` / `sfn publish` | Override the package registry base URL for this shell. Takes precedence over `~/.sfn/config.toml`. See [`sfn config`](#sfn-config-getsetunsetlist-key-value). |
 | `SFN_TOKEN` | `sfn publish` | Bearer token used when uploading a capsule. Takes precedence over `~/.sfn/credentials` written by `sfn login`. |
@@ -912,29 +912,52 @@ These environment variables influence the behavior of `sfn`.
 | `SAILFIN_LINKER` | `sfn` binary (native final links) | Override the linker for the final link step. `ld`/`system`/`default` force the platform linker; any other value selects that linker by name (e.g. `mold`, `lld`). Auto-detect (mold, then lld) is Linux-only. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] linker` when unset, ahead of the compiled-in default — see below. |
 | `SAILFIN_CC` | `sfn` binary (native macOS final links) | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] cc` when unset, ahead of the compiled-in default — see below. |
 
-`SAILFIN_LINKER` and `SAILFIN_CC` are also the two settings admitted to a
-hand-edited `~/.sfn/config.toml` (SFEP-0076), under a `[target.<triple>]`
-section keyed by target triple — not flat, so one config file can serve a
-machine that cross-compiles without a roaming profile carrying a Darwin
-linker path onto a Linux host:
+`SAILFIN_LINKER` and `SAILFIN_CC` are two of four settings admitted to a
+hand-edited `~/.sfn/config.toml` (SFEP-0076): `linker` and `cc` live under a
+`[target.<triple>]` section keyed by target triple — not flat, so one config
+file can serve a machine that cross-compiles without a roaming profile
+carrying a Darwin linker path onto a Linux host — and `cache-dir` and `jobs`
+live under a flat `[build]` section, since both name a machine-local resource
+rather than a toolchain component:
 
 ```toml
 [target.x86_64-unknown-linux-gnu]
 linker = "lld"
 cc = "clang-18"
+
+[build]
+cache-dir = "/data/sailfin-cache"
+jobs = 4
 ```
 
-Precedence, highest first: CLI flag (none exists for either setting today) >
-environment variable > project manifest (a reserved rung; no key is admitted
-there yet) > `~/.sfn/config.toml` > compiled-in default. The environment
-variable deliberately outranks the config file, so `SAILFIN_LINKER=... sfn
-build` stays a working one-shot override and CI can override a developer's
-file without editing it. `cc` (like `SAILFIN_CC` itself) is only consulted
-for native Darwin final links; every other host/target links via `clang`
-regardless. An absent `~/.sfn/config.toml` changes nothing; an unrecognised
-key or an unparseable line in a `[target.<triple>]` section warns to stderr
-and is ignored, never fatal. `sfn config set` does not yet manage these
-keys — hand-edit the file for now.
+Precedence, highest first: CLI flag (none exists for any of the four settings
+today) > environment variable > project manifest (a reserved rung; no key is
+admitted there yet) > `~/.sfn/config.toml` > compiled-in default. The
+environment variable deliberately outranks the config file, so
+`SAILFIN_LINKER=... sfn build` stays a working one-shot override and CI can
+override a developer's file without editing it. `cc` (like `SAILFIN_CC`
+itself) is only consulted for native Darwin final links; every other
+host/target links via `clang` regardless.
+
+`[build] cache-dir` must be an absolute path (a relative value is ignored
+with a warning) and shapes the cache root as `<value>/<schema>`, exactly like
+`SAILFIN_BUILD_CACHE_DIR` — not the extra `sailfin/` segment the
+`$XDG_CACHE_HOME` rung adds. It sits below the compiler's own in-tree
+self-host pin, so `sfn dev bootstrap build` is unaffected, and it does not
+relocate the runtime-object or per-test-binary caches — only
+`SAILFIN_BUILD_CACHE_DIR` moves those (see
+[`sfn cache`](#sfn-cache-infopruneclean)). `[build] jobs` is
+an upper bound the user may lower but never raise: it is clamped first to the
+fixed 8-worker emit ceiling, then to the host RAM budget, and each bound that
+binds warns to stderr naming both the requested and effective count — the
+build still succeeds. Zero, negative, non-integer, and absurd values are
+ignored with a warning. `jobs` does not extend to the test pool
+(`SAILFIN_TEST_JOBS`/`--jobs`).
+
+An absent `~/.sfn/config.toml` changes nothing; an unrecognised key or an
+unparseable line in an admitted section warns to stderr and is ignored, never
+fatal. `sfn config set` does not yet manage these keys — hand-edit the file
+for now.
 
 `sfn dev bootstrap build -- <arg>...` replaces the retired `BUILD_ARGS` Makefile
 variable — arguments after a bare `--` are appended unchanged to the pinned
