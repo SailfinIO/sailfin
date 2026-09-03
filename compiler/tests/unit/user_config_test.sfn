@@ -1,0 +1,139 @@
+// compiler/tests/unit/user_config_test.sfn
+//
+// Resolver-contract coverage for `compiler/src/user_config.sfn` (SFN-1259,
+// SFEP-0076 section 3.3 rung 4: `~/.sfn/config.toml`). Exercises the pure
+// text-level resolvers directly (no filesystem) and the explicit-path `_at`
+// variant against a file the test materialises itself — never the real home
+// directory, which would be non-hermetic and, on CI, silently vacuous. The
+// no-argument `user_config_linker` / `user_config_cc` (which read the real
+// `~/.sfn`) are deliberately never called here; the e2e precedence contract
+// lives in `compiler/tests/e2e/user_config_precedence_test.sfn`.
+import { scratch_root } from "sfn/test";
+
+import { toml_section_key_names, toml_section_malformed_lines } from "../../src/toml_parser";
+import {
+    user_config_key_is_admitted,
+    user_config_linker_origin,
+    user_config_target_section,
+    user_config_target_value_at,
+    user_config_target_value_from_text
+} from "../../src/user_config";
+
+// ---------------------------------------------------------------------------
+// Group A — pure, text-level (no filesystem, no ![io]).
+// ---------------------------------------------------------------------------
+test "user_config: target section with both admitted keys resolves each" ![pure] {
+    let text = "[target.x86_64-unknown-linux-gnu]\nlinker = \"mold\"\ncc = \"clang-18\"\n";
+    let triple = "x86_64-unknown-linux-gnu";
+    assert user_config_target_section(triple) == "target.x86_64-unknown-linux-gnu";
+    assert user_config_target_value_from_text(text, triple, "linker") == "mold";
+    assert user_config_target_value_from_text(text, triple, "cc") == "clang-18";
+}
+
+test "user_config: absent section resolves to empty string" ![pure] {
+    let text = "[target.x86_64-unknown-linux-gnu]\nlinker = \"mold\"\n";
+    assert user_config_target_value_from_text(text, "aarch64-apple-darwin", "linker") == "";
+}
+
+test "user_config: present section, absent key resolves to empty string" ![pure] {
+    let text = "[target.x86_64-unknown-linux-gnu]\nlinker = \"mold\"\n";
+    assert user_config_target_value_from_text(text, "x86_64-unknown-linux-gnu", "cc") == "";
+}
+
+// Acceptance criterion: a `[target.<other-triple>]` section in the same file
+// must never leak its value onto a different triple's lookup.
+test "user_config: a darwin section is not consulted for a linux triple" ![pure] {
+    let text = "[target.aarch64-apple-darwin]\nlinker = \"ld64\"\n\n"
+        + "[target.x86_64-unknown-linux-gnu]\nlinker = \"mold\"\n";
+    assert user_config_target_value_from_text(text, "x86_64-unknown-linux-gnu", "linker") == "mold";
+    assert user_config_target_value_from_text(text, "aarch64-apple-darwin", "linker") == "ld64";
+}
+
+test "user_config: empty text and empty triple both resolve to empty string" ![pure] {
+    let text = "[target.x86_64-unknown-linux-gnu]\nlinker = \"mold\"\n";
+    assert user_config_target_value_from_text("", "x86_64-unknown-linux-gnu", "linker") == "";
+    assert user_config_target_value_from_text(text, "", "linker") == "";
+    assert user_config_target_section("") == "";
+}
+
+test "user_config: an unadmitted key resolves to empty string and is not admitted" ![pure] {
+    let text = "[target.x86_64-unknown-linux-gnu]\nsysroot = \"/x\"\n";
+    assert user_config_target_value_from_text(text, "x86_64-unknown-linux-gnu", "sysroot") == "";
+    assert user_config_key_is_admitted("sysroot") == false;
+    assert user_config_key_is_admitted("linker") == true;
+    assert user_config_key_is_admitted("cc") == true;
+}
+
+test "user_config: quoted and unquoted values strip to the same result" ![pure] {
+    let quoted = "[target.x86_64-unknown-linux-gnu]\nlinker = \"mold\"\n";
+    let unquoted = "[target.x86_64-unknown-linux-gnu]\nlinker = mold\n";
+    let triple = "x86_64-unknown-linux-gnu";
+    assert user_config_target_value_from_text(quoted, triple, "linker") == user_config_target_value_from_text(unquoted, triple, "linker");
+    assert user_config_target_value_from_text(quoted, triple, "linker") == "mold";
+}
+
+test "user_config: linker_origin names the config path, section, and key" ![pure] {
+    assert user_config_linker_origin("x86_64-unknown-linux-gnu") == "~/.sfn/config.toml target.x86_64-unknown-linux-gnu.linker";
+}
+
+test "user_config: malformed lines are reported only for the named section" ![pure] {
+    let text = "[target.x86_64-unknown-linux-gnu]\n" + "# comment\n" + "\n"
+        + "badline-no-equals\n"
+        + "linker = \"mold\"\n"
+        + "\n"
+        + "[target.aarch64-apple-darwin]\n"
+        + "other-bad-line\n";
+    let malformed = toml_section_malformed_lines(text, "target.x86_64-unknown-linux-gnu");
+    assert malformed.length == 1;
+    assert malformed[0] == "badline-no-equals";
+}
+
+test "user_config: section key names come back in file order, section-scoped" ![pure] {
+    let text = "[target.x86_64-unknown-linux-gnu]\n" + "cc = \"clang-18\"\n"
+        + "linker = \"mold\"\n"
+        + "\n"
+        + "[target.aarch64-apple-darwin]\n"
+        + "linker = \"ld64\"\n";
+    let keys = toml_section_key_names(text, "target.x86_64-unknown-linux-gnu");
+    assert keys.length == 2;
+    assert keys[0] == "cc";
+    assert keys[1] == "linker";
+}
+
+// ---------------------------------------------------------------------------
+// Group B — explicit-path, ![io]. The file is materialised by the test, so
+// this never touches the real `~/.sfn`.
+// ---------------------------------------------------------------------------
+fn _dir() -> string ![io] {
+    let dir = scratch_root() + "/user-config-unit";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+test "user_config: a path that does not exist resolves to empty string" ![io] {
+    let path = _dir() + "/absent.toml";
+    if fs.exists(path) { fs.deleteFile(path); }
+    assert user_config_target_value_at(path, "x86_64-unknown-linux-gnu", "linker") == "";
+}
+
+test "user_config: an empty path string resolves to empty string" ![io] {
+    assert user_config_target_value_at("", "x86_64-unknown-linux-gnu", "linker") == "";
+}
+
+test "user_config: an existing file with the right section and key resolves the value" ![io] {
+    let path = _dir() + "/present.toml";
+    fs.writeFile(path, "[target.x86_64-unknown-linux-gnu]\nlinker = \"mold\"\n");
+    assert user_config_target_value_at(path, "x86_64-unknown-linux-gnu", "linker") == "mold";
+}
+
+test "user_config: an existing but empty file resolves to empty string" ![io] {
+    let path = _dir() + "/empty.toml";
+    fs.writeFile(path, "");
+    assert user_config_target_value_at(path, "x86_64-unknown-linux-gnu", "linker") == "";
+}
+
+test "user_config: garbage content resolves to empty string without panicking" ![io] {
+    let path = _dir() + "/garbage.toml";
+    fs.writeFile(path, "!!! not toml <<<");
+    assert user_config_target_value_at(path, "x86_64-unknown-linux-gnu", "linker") == "";
+}

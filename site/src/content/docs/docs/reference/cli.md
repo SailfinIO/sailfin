@@ -909,7 +909,32 @@ These environment variables influence the behavior of `sfn`.
 | `SAILFIN_EFFECT_ENFORCE` | `sfn` binary | Control runtime effect-enforcement (the seal, SFEP-0016); partial on macOS arm64 (#613). |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
 | `GITHUB_TOKEN` | installer / `sfn dev bootstrap fetch` | GitHub token used to raise API rate limits and access release assets. |
-| `SAILFIN_CC` | `sfn` binary (native macOS final links) | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. |
+| `SAILFIN_LINKER` | `sfn` binary (native final links) | Override the linker for the final link step. `ld`/`system`/`default` force the platform linker; any other value selects that linker by name (e.g. `mold`, `lld`). Auto-detect (mold, then lld) is Linux-only. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] linker` when unset, ahead of the compiled-in default — see below. |
+| `SAILFIN_CC` | `sfn` binary (native macOS final links) | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] cc` when unset, ahead of the compiled-in default — see below. |
+
+`SAILFIN_LINKER` and `SAILFIN_CC` are also the two settings admitted to a
+hand-edited `~/.sfn/config.toml` (SFEP-0076), under a `[target.<triple>]`
+section keyed by target triple — not flat, so one config file can serve a
+machine that cross-compiles without a roaming profile carrying a Darwin
+linker path onto a Linux host:
+
+```toml
+[target.x86_64-unknown-linux-gnu]
+linker = "lld"
+cc = "clang-18"
+```
+
+Precedence, highest first: CLI flag (none exists for either setting today) >
+environment variable > project manifest (a reserved rung; no key is admitted
+there yet) > `~/.sfn/config.toml` > compiled-in default. The environment
+variable deliberately outranks the config file, so `SAILFIN_LINKER=... sfn
+build` stays a working one-shot override and CI can override a developer's
+file without editing it. `cc` (like `SAILFIN_CC` itself) is only consulted
+for native Darwin final links; every other host/target links via `clang`
+regardless. An absent `~/.sfn/config.toml` changes nothing; an unrecognised
+key or an unparseable line in a `[target.<triple>]` section warns to stderr
+and is ignored, never fatal. `sfn config set` does not yet manage these
+keys — hand-edit the file for now.
 
 `sfn dev bootstrap build -- <arg>...` replaces the retired `BUILD_ARGS` Makefile
 variable — arguments after a bare `--` are appended unchanged to the pinned

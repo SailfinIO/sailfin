@@ -9,6 +9,7 @@ import { LinkPlan, LlvmTextBackend } from "../backend";
 import { CacheStats, empty_cache_stats } from "../build_cache";
 import { _env_flag, _get_env_cmd } from "../build_flags";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
+import { user_config_linker, user_config_linker_origin } from "../user_config";
 import { assemble_link_inputs } from "./clang_argv";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
 import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "./link_contract";
@@ -74,16 +75,26 @@ fn _trace_linker_choice(message: string) ![io] {
 }
 
 fn _resolve_linker() -> string ![io] {
-    let linker_override = _get_env_cmd("SAILFIN_LINKER");
+    // SFEP-0076 section 3.3: rung 2 (environment) above rung 4 (user config).
+    // `origin` carries which rung supplied the value into the existing traces,
+    // so a persisted default is distinguishable from a one-shot override.
+    let mut linker_override = _get_env_cmd("SAILFIN_LINKER");
+    let mut linker_origin: string = "SAILFIN_LINKER";
+    if linker_override.length == 0 {
+        let config_triple = build_target_triple();
+        linker_override = user_config_linker(config_triple);
+        linker_origin = user_config_linker_origin(config_triple);
+    }
     if linker_override.length > 0 {
         if linker_override == "ld" || linker_override == "system"
             || linker_override == "default" {
-            _trace_linker_choice("system default (SAILFIN_LINKER="
+            _trace_linker_choice("system default (" + linker_origin + "="
                 + linker_override
                 + ")");
             return "";
         }
-        _trace_linker_choice(linker_override + " (SAILFIN_LINKER override)");
+        _trace_linker_choice(linker_override + " (" + linker_origin
+            + " override)");
         return "-fuse-ld=" + linker_override;
     }
 

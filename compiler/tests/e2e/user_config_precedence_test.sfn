@@ -1,0 +1,178 @@
+// compiler/tests/e2e/user_config_precedence_test.sfn
+//
+// End-to-end precedence coverage for SFN-1259 / SFEP-0076 section 3.3 rung 4
+// (`~/.sfn/config.toml`) at the real link call site (`_resolve_linker` in
+// `compiler/src/build/link.sfn`). Drives the compiler-under-test as a
+// subprocess against an isolated fake `HOME` so the real `~/.sfn` is never
+// read or written (`.claude/rules/no-bash-e2e.md`).
+//
+// Observable contract pinned here:
+//   - the config supplies the linker when `SAILFIN_LINKER` is unset, and the
+//     `[link] linker:` trace names the config path/section/key as the
+//     origin,
+//   - `SAILFIN_LINKER` still wins over a persisted config default (the
+//     SFEP-0076 section 3.3 rung ordering),
+//   - an absent config file changes nothing observable,
+//   - an unadmitted key warns to stderr (SFN-1244/SFN-1246) and never fails
+//     the build,
+//   - the `[link] linker:` trace and any warning land on STDERR only.
+//
+// `ld` (not `lld`) is used for the forcing cases so the assertions do not
+// depend on lld being installed — `ld`/`system`/`default` take the "system
+// default" branch in `_resolve_linker`, the same branch
+// `linker_selection_test.sfn` exercises for `SAILFIN_LINKER=ld`.
+import { find } from "sfn/strings";
+import {
+    clean_runner_env_without,
+    nested_runner_scratch,
+    report_child_failure,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
+
+import { build_target_triple } from "../../src/build/target";
+
+fn _dir(tag: string) -> string ![io] {
+    return scratch_root() + "/user-config-precedence-" + tag;
+}
+
+fn _home(tag: string) -> string ![io] {
+    let dir = _dir(tag) + "/home";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _bin(tag: string) -> string ![io] { return _dir(tag) + "/main.bin"; }
+
+// A trivial program with a known, exact stdout.
+fn _src() -> string { return "fn main() ![io] {\n    print(\"UC_OK\");\n}\n"; }
+
+fn _write_config(home: string, body: string) -> void ![io] {
+    fs.createDirectory(home + "/.sfn", true);
+    fs.writeFile(home + "/.sfn/config.toml", body);
+}
+
+// `build_target_triple()` also honours `SAILFIN_TARGET_OS` /
+// `SAILFIN_TARGET_TRIPLE`; re-thread whichever the outer test process
+// carries so the triple this file computes (for the config section header)
+// matches the triple the spawned child actually resolves — `_env_with` in
+// `toolchain_update_test.sfn` re-threads the same pair for the same reason.
+fn _target_env() -> string[] ![io] {
+    let mut extra: string[] = [];
+    let target_os = env.get("SAILFIN_TARGET_OS");
+    if target_os.length > 0 {
+        extra.push("SAILFIN_TARGET_OS=" + target_os);
+    }
+    let target_triple = env.get("SAILFIN_TARGET_TRIPLE");
+    if target_triple.length > 0 {
+        extra.push("SAILFIN_TARGET_TRIPLE=" + target_triple);
+    }
+    let host_os = env.get("SAILFIN_HOST_OS");
+    if host_os.length > 0 { extra.push("SAILFIN_HOST_OS=" + host_os); }
+    return extra;
+}
+
+// Build the probe under `home` as `HOME`, capturing stdout/stderr to
+// SEPARATE marker files (so the stdout-purity assertion is meaningful).
+// `SAILFIN_TRACE_LINK=1` is threaded so the trace-gated `[link] linker:`
+// diagnostic is emitted for the assertions below. `extra_env` carries any
+// per-test override (e.g. `SAILFIN_LINKER=ld`).
+fn _build(tag: string, home: string, extra_env: string[]) -> int ![io] {
+    let dir = _dir(tag);
+    fs.createDirectory(dir, true);
+    let src = dir + "/main.sfn";
+    fs.writeFile(src, _src());
+    // Name every key `_target_env` goes on to push, per `clean_runner_env_without`'s
+    // own contract: SAILFIN_TARGET_TRIPLE is re-pushed below, and an inherited
+    // copy left in place would reach the child twice, where duplicate entries
+    // resolve implementation-defined. SAILFIN_CC is deliberately NOT stripped —
+    // no test here asserts on `cc`, and a native-Darwin runner supplies it as a
+    // real toolchain hint the four nested links should keep.
+    let mut e = clean_runner_env_without(nested_runner_scratch("user-config-precedence-"
+        + tag), ["HOME", "SAILFIN_LINKER", "SAILFIN_TARGET_TRIPLE"]);
+    e.push("HOME=" + home);
+    e.push("SAILFIN_TRACE_LINK=1");
+    let target_env = _target_env();
+    let mut i: int = 0;
+    loop {
+        if i >= target_env.length { break; }
+        e.push(target_env[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= extra_env.length { break; }
+        e.push(extra_env[j]);
+        j += 1;
+    }
+    let rc = process.run_capture([sfn_bin_path(), "build", "-o", _bin(tag), src], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.writeFile(dir + "/build.out", out);
+    fs.writeFile(dir + "/build.err", err);
+    report_child_failure("user-config-precedence build " + tag, rc, out, err);
+    return rc;
+}
+
+test "user_config: config supplies the linker when SAILFIN_LINKER is unset" ![io] {
+    let triple = build_target_triple();
+    let home = _home("config-only");
+    _write_config(home, "[target." + triple + "]\nlinker = \"ld\"\n");
+    let rc = _build("config-only", home, []);
+    assert rc == 0;
+    let err = fs.readFile(_dir("config-only") + "/build.err");
+    assert find(err, "[link] linker: system default (~/.sfn/config.toml target."
+        + triple
+        + ".linker=ld)", 0) >= 0;
+    let run_rc = process.run_capture([_bin("config-only")], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("user-config-precedence config-only run", run_rc, run_out, run_err);
+    assert run_rc == 0;
+    assert find(run_out, "UC_OK", 0) >= 0;
+}
+
+test "user_config: SAILFIN_LINKER beats a persisted config default" ![io] {
+    let triple = build_target_triple();
+    let home = _home("env-wins");
+    _write_config(home, "[target." + triple + "]\nlinker = \"lld\"\n");
+    let rc = _build("env-wins", home, ["SAILFIN_LINKER=ld"]);
+    assert rc == 0;
+    let err = fs.readFile(_dir("env-wins") + "/build.err");
+    assert find(err, "[link] linker: system default (SAILFIN_LINKER=ld)", 0) >= 0;
+    assert find(err, "~/.sfn/config.toml", 0) < 0;
+    let run_rc = process.run_capture([_bin("env-wins")], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("user-config-precedence env-wins run", run_rc, run_out, run_err);
+    assert run_rc == 0;
+    assert find(run_out, "UC_OK", 0) >= 0;
+}
+
+test "user_config: an absent config file changes nothing" ![io] {
+    // `_home` creates only the `HOME` dir itself, never `.sfn/config.toml`.
+    let home = _home("no-config");
+    let rc = _build("no-config", home, []);
+    assert rc == 0;
+    let err = fs.readFile(_dir("no-config") + "/build.err");
+    assert find(err, "~/.sfn/config.toml", 0) < 0;
+    let run_rc = process.run_capture([_bin("no-config")], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("user-config-precedence no-config run", run_rc, run_out, run_err);
+    assert run_rc == 0;
+    assert find(run_out, "UC_OK", 0) >= 0;
+}
+
+test "user_config: an unadmitted key warns to stderr without failing the build" ![io] {
+    let triple = build_target_triple();
+    let home = _home("unadmitted-key");
+    _write_config(home, "[target." + triple
+        + "]\nsysroot = \"/nope\"\nlinker = \"ld\"\n");
+    let rc = _build("unadmitted-key", home, []);
+    assert rc == 0;
+    let out = fs.readFile(_dir("unadmitted-key") + "/build.out");
+    let err = fs.readFile(_dir("unadmitted-key") + "/build.err");
+    assert find(err, "is not a recognised key", 0) >= 0;
+    assert find(out, "is not a recognised key", 0) < 0;
+}

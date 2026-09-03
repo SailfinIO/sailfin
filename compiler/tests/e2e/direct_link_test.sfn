@@ -18,7 +18,7 @@
 // `.claude/rules/no-bash-e2e.md`.
 import { contains, find } from "sfn/strings";
 import {
-    clean_runner_env,
+    clean_runner_env_without,
     default_scratch_dir,
     nested_runner_scratch,
     report_child_failure,
@@ -34,20 +34,23 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
-// A clean nested-build env (PATH/HOME/TMPDIR for the linker, isolated
-// scratch), minus any ambient SAILFIN_TRACE_LINK / SAILFIN_LINKER so this
-// test alone decides the child's values.
+// A clean nested-build env (PATH/TMPDIR for the linker, isolated scratch),
+// minus any ambient SAILFIN_TRACE_LINK / SAILFIN_LINKER so this test alone
+// decides the child's values.
+//
+// HOME is redirected at an empty scratch directory because the linker choice
+// now has a rung-4 source: `resolve_direct_ld_lld` falls through to
+// `~/.sfn/config.toml`'s `[target.<triple>] linker` when SAILFIN_LINKER is
+// unset (SFEP-0076 section 3.3, SFN-1259). Inheriting the real HOME would let
+// a developer who has persisted `linker = "mold"` — exactly what the SFEP tells
+// them to do — send leg 1 down the clang fallback and fail an assertion that
+// has nothing to do with their change. CI has no config file, so the failure
+// would reproduce only on contributor machines.
 fn _child_env(linker: string) -> string[] ![io] {
-    let base = clean_runner_env(nested_runner_scratch("direct-link"));
-    let mut e: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= base.length { break; }
-        let keep_trace = find(base[i], "SAILFIN_TRACE_LINK=", 0) != 0;
-        let keep_linker = find(base[i], "SAILFIN_LINKER=", 0) != 0;
-        if keep_trace && keep_linker { e.push(base[i]); }
-        i += 1;
-    }
+    let mut e = clean_runner_env_without(nested_runner_scratch("direct-link"), ["HOME", "SAILFIN_TRACE_LINK", "SAILFIN_LINKER"]);
+    let home = _scratch_dir() + "/home";
+    fs.createDirectory(home, true);
+    e.push("HOME=" + home);
     e.push("SAILFIN_TRACE_LINK=1");
     if linker.length > 0 { e.push("SAILFIN_LINKER=" + linker); }
     return e;
