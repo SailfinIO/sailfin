@@ -80,25 +80,25 @@ fn sfn_bin_path() -> string ![io] {
 }
 
 // `realpath(path, resolved)` with `resolved = null` has libc allocate the
-// resolved buffer; `_cwd` below calls it as `realpath(".", null)`. On a
-// native Windows host this resolves against
+// resolved buffer; `current_working_dir` below calls it as
+// `realpath(".", null)`. On a native Windows host this resolves against
 // `runtime/sfn/platform/realpath_windows.sfn` (over `_fullpath`), appended
 // for the Windows target by `target_condition_runtime_sfn_sources`
 // (`compiler/src/build/target.sfn`) — the same sibling-module treatment
 // `compiler/src/build/fs.sfn:57` documents for its own inline copy of this
 // extern. This is the sanctioned way to get the cwd without a shell; do not
-// "fix" `_cwd` below into a `pwd` shellout.
+// "fix" `current_working_dir` below into a `pwd` shellout.
 extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 
-// The current working directory, mirroring `_cwd_cmd` in
-// `compiler/src/build/fs.sfn:184-190`: `realpath(".", null)` first, `PWD`
+// current_working_dir returns the current working directory. It mirrors
+// `_cwd_cmd` in `compiler/src/build/fs.sfn:184-190`: `realpath(".", null)` first, `PWD`
 // only as a fallback (it is shell-maintained, so it is absent under a
 // non-shell parent and on native Windows), and `"."` as the terminus rather
 // than fabricating a root. Duplicated rather than imported — `sfn/test` is
 // a narrow-stdlib library and cannot depend on the `sfn/compiler` binary
 // capsule, the same capsule-boundary constraint documented above this file
 // at lines 41-46.
-fn _cwd() -> string ![io] {
+fn current_working_dir() -> string ![io] {
     let resolved: *u8 = realpath("." as *u8, null);
     if resolved as i64 != 0 { return resolved as string; }
     let pwd = env.get("PWD");
@@ -158,5 +158,5 @@ fn _is_absolute_bin_path(path: string) -> boolean {
 fn sfn_bin_abs_path() -> string ![io] {
     let bin = sfn_bin_path();
     if _is_absolute_bin_path(bin) { return bin; }
-    return _cwd() + "/" + bin;
+    return current_working_dir() + "/" + bin;
 }
