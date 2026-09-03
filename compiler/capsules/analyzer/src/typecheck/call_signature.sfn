@@ -138,11 +138,15 @@ fn builtin_arity(name: string) -> int {
 // arrays programmatically, so whether they are legally writable as literal
 // dotted calls is unverified; `intrinsic.*` — the registry rows are
 // per-platform internal sentinels (`intrinsic.errno_location.glibc`, …), not
-// user-writable call forms; and registry targets with no in-tree call site
-// to cross-check against: `fs.read_bytes`, `fs.write_bytes`, `http.get`,
-// `http.post_json`, `number.to_string`, `rc.release`, `runtime.*`,
-// `crypto.*`, `base64.*`, `websocket.*`, the remaining `string.*`. Returning
-// -1 means "not pinned", same convention as `builtin_arity`.
+// user-writable call forms. Every other dotted registry target — among them
+// `fs.read_bytes`, `fs.write_bytes`, `http.get`, `http.post_json`,
+// `number.to_string`, `rc.release`, `runtime.*`, `crypto.*`, `base64.*`,
+// `websocket.*` and the remaining `string.*` — is simply not pinned yet
+// rather than unpinnable; several do have in-tree call sites that agree with
+// their descriptor. Adding one is safe: the reverse loop in
+// `call_signature_builtin_member_sync_test.sfn` checks every dotted
+// descriptor, so a new row with a wrong count fails there. Returning -1
+// means "not pinned", same convention as `builtin_arity`.
 fn builtin_member_arity(target: string) -> int {
     if strings_equal(target, "fs.appendFile") { return 2; }
     if strings_equal(target, "fs.createDirectory") { return 2; }

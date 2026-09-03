@@ -205,8 +205,13 @@ test "call arity: correct-arity member-form builtins are accepted" ![io] {
     assert _e0423_for("fn main() ![io] { fs.writeFile(\"x\", \"y\"); }") == 0;
 }
 
-// `env.*` has no descriptor in the lowering registry, so the sync test
-// cannot pin it — it must stay silent regardless of argument count.
+// `env.get` DOES have a lowering descriptor (`registry_values.sfn:360`);
+// it is unpinned because its lowering splices a synthetic trailing `ptr`
+// arena operand onto the argument list after the source-argument walk
+// (`core_call_lowering.sfn:653-670`), so `parameter_types.length`
+// overcounts its source arity by one. Pinning it from the descriptor would
+// reject every correct one-argument `env.get` in the tree. It must stay
+// silent regardless of argument count.
 test "call arity: an unpinned member-form target stays silent" ![io] {
     assert _e0423_for("fn main() ![io] { let a = env.get(\"A\", \"B\"); }") == 0;
 }
