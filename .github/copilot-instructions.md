@@ -47,6 +47,7 @@ sfn test compiler/tests/integration # Run Sailfin-native integration tests
 sfn dev clean dist              # Remove dist/ artifacts
 sfn dev clean build             # Remove build/* artifacts; keep the seed by default
 sfn dev clean all --dry-run     # Preview cleaning build/ and dist/
+sfn dev bootstrap build --clean-tree # Remove build/* (keep the seed), then self-host
 ```
 
 System installation writes outside the repository and is not an agent-default
@@ -56,8 +57,10 @@ Use the validation ladder consistently: `sfn check <files>` for the fast
 parse/type/effect loop; `sfn dev bootstrap build` for compiler self-hosting;
 targeted `build/bin/sfn test <path>` / `-k <name>` for issue acceptance; and
 `sfn dev verify` only for shipped, release, structural, or otherwise high-risk
-work. Run `sfn dev clean build` before rebuilding after structural compiler
-changes.
+work. Rebuild with `sfn dev bootstrap build --clean-tree` after structural
+compiler changes (on a toolchain older than the release carrying SFN-1252:
+`sfn dev clean build`, then `sfn dev bootstrap build` — drop this note once
+`bootstrap.toml` pins a seed at or past that release).
 
 For debugging, place scripts in `/scratch`.
 

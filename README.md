@@ -205,6 +205,7 @@ build/bin/sfn test                 # Run the test suite against the compiler you
 build/bin/sfn dev verify           # Build as needed, build seedcheck, run the full gate
 build/bin/sfn dev bootstrap install --from build/bin/sfn --prefix "$HOME/.local"
 build/bin/sfn dev clean dist       # Remove packaged artifacts under dist/ (also: `dev clean build`, `dev clean all`)
+build/bin/sfn dev bootstrap build --clean-tree  # Structural rebuild: wipe build/ (keep the seed) then self-host, in one step
 ```
 
 `./install.sh` installs a released compiler to `~/.local/bin`; add it to `PATH`

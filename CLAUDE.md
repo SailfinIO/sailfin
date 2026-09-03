@@ -49,7 +49,9 @@ catches the error.
    `compiler/tests/e2e/check_build_agree_module_global_test.sfn`).
 2. **`sfn dev bootstrap build`** — self-hosts. **Required before any `.sfn` change under
    `compiler/src/` or `compiler/capsules/` is done.** Structural changes (file splits, new modules, renamed
-   exports) need `sfn dev clean build` first.
+   exports) need `sfn dev bootstrap build --clean-tree` (on a toolchain older than the
+   release carrying SFN-1252: `sfn dev clean build`, then `sfn dev bootstrap build` —
+   drop this note once `bootstrap.toml` pins a seed at or past that release).
 3. **Targeted tests** — `build/bin/sfn test <path>`, `-k <name>` for one test.
    Issue acceptance should name these narrow commands.
 4. **`sfn dev verify`** — full triple-pass self-host + suite. **Over an hour** —
@@ -167,8 +169,9 @@ one into `Triage` (agent follow-ups land in `Backlog`, classified).
 
 ## Approval gates
 
-Most work proceeds autonomously, including `sfn dev clean build` (it only touches
-the repo's own `build/`/`dist/`), pushing to `claude/*`, and opening PRs. Pause
+Most work proceeds autonomously, including `sfn dev clean build` and
+`sfn dev bootstrap build --clean-tree` (both only touch the repo's own
+`build/`/`dist/`), pushing to `claude/*`, and opening PRs. Pause
 for explicit approval only before genuinely irreversible or high-blast-radius
 actions: cutting releases, merging or closing PRs, and history-destructive git
 (force-push, branch/ref deletion, `reset --hard`) — several of which the

@@ -24,7 +24,7 @@
 - The compiler self-applies an 8 GiB Linux `RLIMIT_AS` at startup (`SAILFIN_MEM_LIMIT` overrides; `unlimited`/`off`/`0` disables it). Do **not** add caller-side `ulimit` guards or Codex/Claude pre-tool hooks for ordinary compiler runs.
 - Timeouts still matter: wrap direct single-file compiler invocations with `timeout 60`; native pipeline commands manage their own timeouts.
 - Before committing changes to `compiler/src/*.sfn` or `compiler/capsules/**/*.sfn`, run `sfn dev bootstrap build` (or `sfn dev verify`) before test-only validation so targeted tests do not run against a stale compiler binary.
-- If a change is structural (file splits, module graph changes, renamed exports), run `sfn dev clean build` before rebuilding.
+- If a change is structural (file splits, module graph changes, renamed exports), rebuild with `sfn dev bootstrap build --clean-tree` (on a toolchain older than the release carrying SFN-1252: `sfn dev clean build`, then `sfn dev bootstrap build` — drop this note once `bootstrap.toml` pins a seed at or past that release).
 - Fix compiler failures in `compiler/src/*.sfn`; the build driver (`compiler/src/cli/` + `compiler/src/capsule_resolver.sfn`) is pure orchestration and must not grow fixups.
 
 ## Style, Tests, and Documentation

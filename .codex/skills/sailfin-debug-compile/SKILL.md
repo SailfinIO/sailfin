@@ -44,4 +44,4 @@ If a similar construct works elsewhere, compare emitted `.sfn-asm` or `.ll` and 
 
 - The compiler self-caps memory on Linux; no `ulimit` prefix is needed.
 - Timeouts still apply to direct single-file compiler invocations.
-- Structural compiler changes should use `sfn dev clean build` before rebuilding.
+- Structural compiler changes should rebuild with `sfn dev bootstrap build --clean-tree`.

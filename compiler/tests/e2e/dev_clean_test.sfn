@@ -8,6 +8,7 @@ import { remove_all } from "sfn/fs";
 import { find } from "sfn/strings";
 import {
     clean_runner_env,
+    clean_runner_env_without,
     default_scratch_dir,
     nested_runner_scratch,
     sfn_bin_abs_path
@@ -26,6 +27,17 @@ fn _scratch_repo(name: string) -> string ![io] {
 fn _write_bootstrap_toml(repo: string) -> void ![io] {
     fs.writeFile(repo + "/bootstrap.toml", "[seed]\n" + "version = \"0.0.0\"\n"
         + "source = \"github-release\"\n"
+        + "repo = \"SailfinIO/sailfin\"\n"
+        + "asset_prefix = \"sailfin\"\n"
+        + "policy = \"exact\"\n\n"
+        + "[store]\n"
+        + "install_base = \"build/toolchains/seed/versions\"\n"
+        + "bin_dir = \"build/toolchains/seed/bin\"\n");
+}
+
+fn _write_local_path_bootstrap_toml(repo: string) -> void ![io] {
+    fs.writeFile(repo + "/bootstrap.toml", "[seed]\n" + "version = \"0.0.0\"\n"
+        + "source = \"local-path\"\n"
         + "repo = \"SailfinIO/sailfin\"\n"
         + "asset_prefix = \"sailfin\"\n"
         + "policy = \"exact\"\n\n"
@@ -157,7 +169,11 @@ test "dev clean: env opt-out removes the seed store" ![io] {
     let repo = _scratch_repo("dev-clean-keep-seed-env");
     _seed_repo(repo);
     let sfn = sfn_bin_abs_path();
-    let mut child_env = clean_runner_env(nested_runner_scratch("dev_clean_keep_seed_env"));
+    // `_without` rather than a bare `clean_runner_env` push: the plain helper
+    // strips only pool-managed keys, so it inherits an ambient
+    // SAILFIN_CLEAN_KEEP_SEED — and under first-match `getenv` an exported
+    // `=1` would win over the push below and fail this test (SFN-1252).
+    let mut child_env = clean_runner_env_without(nested_runner_scratch("dev_clean_keep_seed_env"), ["SAILFIN_CLEAN_KEEP_SEED"]);
     child_env.push("SAILFIN_CLEAN_KEEP_SEED=0");
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
@@ -299,6 +315,152 @@ test "dev clean: refuses to run outside a compiler checkout" ![io] {
     assert exit != 0;
     assert find(out + err, "bootstrap.toml", 0) >= 0;
     assert fs.exists(repo + "/build/marker.txt");
+
+    assert remove_all(repo);
+}
+
+// --------------------------------------------------------------
+// `sfn dev bootstrap build --clean-tree` (SFN-1252). A synthetic repo has
+// `bootstrap.toml` but no `workspace.toml`, so
+// `compute_workspace_source_fingerprint` returns "" and
+// `_dev_bootstrap_build` exits 1 with "could not compute the compiler
+// source fingerprint" — after the clean, before any seed fetch or build.
+// No network, no build.
+// --------------------------------------------------------------
+test "dev clean: bootstrap build --clean-tree wipes build/ and preserves the seed store" ![io] {
+    let repo = _scratch_repo("dev-bootstrap-clean-tree");
+    _seed_repo(repo);
+    let sfn = sfn_bin_abs_path();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_bootstrap_clean_tree"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--clean-tree"], child_env, repo);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 1;
+    assert find(err, "could not compute the compiler source fingerprint", 0) >= 0;
+    assert ! fs.exists(repo + "/build/native/marker.txt");
+    assert ! fs.exists(repo + "/build/sailfin/marker.txt");
+    assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
+    assert fs.exists(repo + "/dist/marker.txt");
+
+    assert remove_all(repo);
+}
+
+test "dev clean: bootstrap build --clean-tree ignores SAILFIN_CLEAN_KEEP_SEED" ![io] {
+    let repo = _scratch_repo("dev-bootstrap-clean-tree-keep-seed-env");
+    _seed_repo(repo);
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env_without(nested_runner_scratch("bootstrap_clean_keep_seed"), ["SAILFIN_CLEAN_KEEP_SEED"]);
+    child_env.push("SAILFIN_CLEAN_KEEP_SEED=0");
+
+    let exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--clean-tree"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 1;
+    // The seed store surviving is the point, but assert the wipe happened at
+    // all — otherwise a regression making `--clean-tree` a no-op would pass
+    // this test for the wrong reason.
+    assert ! fs.exists(repo + "/build/native/marker.txt");
+    assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
+
+    assert remove_all(repo);
+}
+
+// The paired positive proving the pinning is scoped, not a global disable:
+// the same env var reaches the direct `sfn dev clean build` surface and
+// removes the seed store there.
+test "dev clean: SAILFIN_CLEAN_KEEP_SEED=0 still reaches dev clean build" ![io] {
+    let repo = _scratch_repo("dev-clean-build-keep-seed-env-scoped");
+    _seed_repo(repo);
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env_without(nested_runner_scratch("clean_build_keep_seed_scoped"), ["SAILFIN_CLEAN_KEEP_SEED"]);
+    child_env.push("SAILFIN_CLEAN_KEEP_SEED=0");
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! fs.exists(repo + "/build/toolchains");
+
+    assert remove_all(repo);
+}
+
+// Pins the parser's exact-match behaviour so a future prefix-matching change
+// cannot silently alias `--clean` onto `--clean-tree` — `--clean` is the
+// unrelated `sfn build`/`sfn run` content-addressed cache flag.
+test "dev clean: bootstrap build rejects the cache-flag spelling" ![io] {
+    let repo = _scratch_repo("dev-bootstrap-clean-flag-spelling");
+    _seed_repo(repo);
+    let sfn = sfn_bin_abs_path();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_bootstrap_clean_flag_spelling"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--clean"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(err, "unknown flag --clean", 0) >= 0;
+    assert fs.exists(repo + "/build/native/marker.txt");
+    assert fs.exists(repo + "/build/sailfin/marker.txt");
+    assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
+    assert fs.exists(repo + "/dist/marker.txt");
+
+    assert remove_all(repo);
+}
+
+// Pins the insertion point against a future reorder: a local-path seed is
+// rejected before the clean phase runs, not after.
+test "dev clean: bootstrap build --clean-tree removes nothing when the seed is local-path" ![io] {
+    let repo = _scratch_repo("dev-bootstrap-clean-tree-local-path");
+    assert remove_all(repo);
+    fs.createDirectory(repo, true);
+    _write_local_path_bootstrap_toml(repo);
+    fs.createDirectory(repo + "/build/native", true);
+    fs.writeFile(repo + "/build/native/marker.txt", "native\n");
+    fs.createDirectory(repo + "/build/sailfin", true);
+    fs.writeFile(repo + "/build/sailfin/marker.txt", "sailfin\n");
+    fs.createDirectory(repo + "/build/toolchains/seed/bin", true);
+    fs.writeFile(repo + "/build/toolchains/seed/bin/marker.txt", "seed\n");
+    fs.createDirectory(repo + "/dist", true);
+    fs.writeFile(repo + "/dist/marker.txt", "dist\n");
+    let sfn = sfn_bin_abs_path();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_bootstrap_clean_tree_local_path"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--clean-tree"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(err, "local-path", 0) >= 0;
+    assert fs.exists(repo + "/build/native/marker.txt");
+    assert fs.exists(repo + "/build/sailfin/marker.txt");
+    assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
+    assert fs.exists(repo + "/dist/marker.txt");
+
+    assert remove_all(repo);
+}
+
+test "dev clean: bootstrap build --clean-tree removes nothing outside a compiler checkout" ![io] {
+    let repo = _scratch_repo("dev-bootstrap-clean-tree-outside-checkout");
+    assert remove_all(repo);
+    fs.createDirectory(repo, true);
+    fs.createDirectory(repo + "/build/native", true);
+    fs.writeFile(repo + "/build/native/marker.txt", "native\n");
+    let sfn = sfn_bin_abs_path();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_bootstrap_clean_tree_outside_checkout"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--clean-tree"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    // Pin WHICH refusal fired. `exit != 0` plus a surviving marker is equally
+    // satisfied by a dropped flag (argv rejected) and by the clean being
+    // reordered ahead of the manifest checks — in the latter case
+    // `clean_build_tree`'s own gate refuses, removing nothing. Both would pass
+    // a bare exit assertion. The bootstrap manifest error must be the one
+    // reported, and the `[clean]` prefix must be absent: its presence would
+    // mean the wipe was attempted before the build refused.
+    assert find(err, "bootstrap.toml: not found at", 0) >= 0;
+    assert find(err, "[clean]", 0) < 0;
+    assert fs.exists(repo + "/build/native/marker.txt");
 
     assert remove_all(repo);
 }

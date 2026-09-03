@@ -49,6 +49,7 @@ sfn run [<file.sfn>]
 
 | Flag | Description |
 |---|---|
+| `--clean` | Clear the content-addressed build cache (and the runtime object cache) before running. Clears the cache, not the `build/` tree — see [`--clean-tree` vs `--clean`](#--clean-tree-vs---clean) |
 | `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 
 **Examples:**
@@ -326,6 +327,7 @@ sfn build [<file.sfn> | -p <capsule-path>] [-o <output>]
 |---|---|
 | `-o <output>` | Write the compiled binary to `output` instead of the default path |
 | `-p <capsule-path>` | Build the capsule at this directory or manifest path, using its `[build]` configuration |
+| `--clean` | Clear the content-addressed build cache (and the runtime object cache) before building. Clears the cache, not the `build/` tree — see [`--clean-tree` vs `--clean`](#--clean-tree-vs---clean) |
 | `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 
 **Examples:**
@@ -385,7 +387,7 @@ sfn cache clean --all-schemas            # also remove stale prior-schema trees
 
 ---
 
-### `sfn dev bootstrap build [--force] [-- <build-arg>...]`
+### `sfn dev bootstrap build [--clean-tree] [--force] [-- <build-arg>...]`
 
 Build and install the compiler with the exact released seed pinned by
 `bootstrap.toml`. By default, an unchanged source fingerprint and an existing
@@ -393,6 +395,7 @@ Build and install the compiler with the exact released seed pinned by
 
 ```bash
 sfn dev bootstrap build
+sfn dev bootstrap build --clean-tree
 sfn dev bootstrap build --force
 sfn dev bootstrap build -- --no-cache --cache-trace
 ```
@@ -403,6 +406,29 @@ A bare `--` ends bootstrap option parsing; every later token is appended
 unchanged to the pinned seed's `build -p compiler` invocation. This provides
 the native cache-diagnostic and future build-flag passthrough directly on the
 command line.
+
+`--clean-tree` removes every top-level entry under `build/` except the fetched
+seed toolchain store, then runs the ordinary self-host build in the same
+invocation. It implies `--force`, and refuses to build if the removal fails.
+It does not accept `--include-seed` or `--dry-run` — use `sfn dev clean build`
+for those. It is **not** the same as `sfn build --clean`; see
+[`--clean-tree` vs `--clean`](#--clean-tree-vs---clean) below.
+
+---
+
+### `--clean-tree` vs `--clean`
+
+These two flags sound alike and clear different things — never conflate them.
+
+| Command | Clears |
+|---|---|
+| `sfn build --clean` / `sfn run --clean` | The content-addressed build cache and the runtime object cache. That cache root lives outside the repo unless neither `XDG_CACHE_HOME` nor `HOME` is set. |
+| `sfn dev bootstrap build --clean-tree` | `build/*` except the fetched seed toolchain store, then self-hosts. Never touches the cache. |
+| `sfn dev clean build` | The same removal as `--clean-tree`, standalone (no rebuild), with `--include-seed` / `--dry-run` available. |
+
+**`sfn dev bootstrap build -- --clean` is not a spelling of `--clean-tree`** —
+the tail after `--` reaches the seed's `sfn build -p compiler` verbatim, so it
+clears the cache, leaves the tree intact, and exits 0.
 
 ---
 
@@ -474,6 +500,7 @@ sfn dev clean all                        # build/ and dist/ together
 - It refuses to run unless the current directory is a compiler checkout — `bootstrap.toml` must be present *and* parse with a `[seed].version`.
 - It takes no path argument. Every target is a literal repo-relative `build/`/`dist/` path, checked against traversal and absolute-path escape before anything is unlinked, and symlinked entries are unlinked rather than followed.
 - An absent tree is a clean no-op (exit 0), not an error, and the tree is not recreated.
+- To clean and rebuild in one step, use `sfn dev bootstrap build --clean-tree` instead of running this command followed by `sfn dev bootstrap build`.
 
 ---
 
@@ -829,6 +856,7 @@ guide, see
 | Remove `dist/` packaged artifacts. Does not remove build intermediates. | `sfn dev clean dist` |
 | Remove `build/` artifacts (keeps the seed toolchain under `build/toolchains/` by default). Pass `--include-seed` to also remove it. | `sfn dev clean build` (`sfn dev clean build --include-seed` to also remove the seed) |
 | Remove both `dist/` and `build/` artifacts completely. | `sfn dev clean all` |
+| Structural rebuild from a released seed. | `sfn dev bootstrap build --clean-tree` |
 | Print a summary of available commands. | `sfn --help`, `sfn dev --help` |
 
 ---
@@ -876,7 +904,7 @@ These environment variables influence the behavior of `sfn`.
 | `SAILFIN_TOOLCHAIN_MANAGEMENT` | `sfn toolchain ...` | Set automatically by `sfn` before re-exec'ing a routed management payload (`=<version>`) as a re-entrancy guard; not intended to be set by hand. See [Management-command routing](#management-command-routing). |
 | `SAILFIN_TOOLCHAIN_RELEASE_BASE` | `sfn toolchain install` | Override the release host for air-gapped mirrors (signature/digest verification stays mandatory). Also serves the signed toolchain index and its detached signature that `sfn toolchain install <version \| channel>` consults before any release-specific fetch — see [Installing a toolchain](#installing-a-toolchain). |
 | `SAILFIN_CONFIG_DIR` | `sfn toolchain default` / `remove` | Override the directory holding the per-user toolchain-default record (`toolchain-default`), in place of `~/.sfn`. Read only by that record — it does not relocate `~/.sfn/config.toml` (`sfn config`, including `toolchain.update-policy`) or `~/.sfn/credentials` (`sfn login`); those always live under the real home. See [Default toolchain and removal](#default-toolchain-and-removal). |
-| `SAILFIN_CLEAN_KEEP_SEED` | `sfn dev clean build`/`all` | Set to `0` (equivalent to `--include-seed`) to also delete the seed toolchain store. Defaults to `1` (the seed toolchain is preserved). |
+| `SAILFIN_CLEAN_KEEP_SEED` | `sfn dev clean build`/`all` | Set to `0` (equivalent to `--include-seed`) to also delete the seed toolchain store. Defaults to `1` (the seed toolchain is preserved). Applies to `sfn dev clean build`/`all` only — deliberately not honored by `sfn dev bootstrap build --clean-tree`, which always preserves the seed store. |
 | `SAILFIN_TEST_SCRATCH` | `sfn test` | Override the scratch directory a test's subprocess builds are isolated into. |
 | `SAILFIN_EFFECT_ENFORCE` | `sfn` binary | Control runtime effect-enforcement (the seal, SFEP-0016); partial on macOS arm64 (#613). |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |

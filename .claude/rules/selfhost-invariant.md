@@ -1,5 +1,5 @@
 The Sailfin compiler must always be able to compile itself. Before committing any change to compiler source under `compiler/src/` or `compiler/capsules/`:
 
 1. Run `sfn dev bootstrap build` (or `sfn dev verify`) before targeted `build/bin/sfn test <path>` or suite validation so tests do not run against a stale compiler binary
-2. If the change is structural (file splits, new modules, renamed exports), run `sfn dev clean build` before rebuilding
+2. If the change is structural (file splits, new modules, renamed exports), rebuild with `sfn dev bootstrap build --clean-tree`
 3. Fix the compiler source, never the build driver — the driver (`compiler/src/cli/` + `compiler/src/capsule_resolver.sfn`) is pure orchestration with no fixups

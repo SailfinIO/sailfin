@@ -45,7 +45,9 @@ never language syntax.
    still pass `check` — green is not a build guarantee** (#1389).
 2. **`sfn dev bootstrap build`** — self-hosts. **Required before any `.sfn` change under
    `compiler/src/` or `compiler/capsules/` is done.** Structural changes (file splits, new modules, renamed
-   exports) need `sfn dev clean build` first.
+   exports) need `sfn dev bootstrap build --clean-tree` (on a toolchain older than the
+   release carrying SFN-1252: `sfn dev clean build`, then `sfn dev bootstrap build` —
+   drop this note once `bootstrap.toml` pins a seed at or past that release).
 3. **Targeted tests** — `build/bin/sfn test <path>`, `-k <name>` for one test.
    Issue acceptance should name these narrow commands.
 4. **`sfn dev verify`** — full triple-pass self-host + suite. **Over an hour** —
@@ -135,7 +137,8 @@ occurrence in a branch name, commit message, or PR body links that issue.
 
 ## Approval gates
 
-Most work proceeds autonomously, including `sfn dev clean build`, pushing to `gemini/*`,
+Most work proceeds autonomously, including `sfn dev clean build` and
+`sfn dev bootstrap build --clean-tree`, pushing to `gemini/*`,
 and opening PRs. Pause for explicit approval only before genuinely irreversible or
 high-blast-radius actions: cutting releases, merging or closing PRs, and
 history-destructive git (`reset --hard`, force-push, branch deletion).

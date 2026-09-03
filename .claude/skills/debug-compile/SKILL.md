@@ -64,4 +64,4 @@ structural fixes, also run the `check` skill.
 
 ## Constraints
 
-- If the fix is structural, run `sfn dev clean build` before rebuilding.
+- If the fix is structural, rebuild with `sfn dev bootstrap build --clean-tree`.

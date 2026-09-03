@@ -1,6 +1,6 @@
 ---
 name: check
-description: Run the full Sailfin compiler validation pipeline (sfn dev clean build then sfn dev verify). Use before declaring a feature shipped, before cutting a release, or when you need to verify self-hosting still works after a structural change.
+description: Run the full Sailfin compiler validation pipeline (wipes the build tree, then runs `sfn dev verify`). Use before declaring a feature shipped, before cutting a release, or when you need to verify self-hosting still works after a structural change.
 allowed-tools: Bash, Read
 ---
 

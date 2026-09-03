@@ -5,10 +5,12 @@
 // toolchain; the forwarded tail must still come last, which is what pins the
 // flag to the prefix rather than the end of the argv.
 import {
+    has_flag,
     parse,
     parse_is_ok,
     parse_matches,
-    positionals
+    positionals,
+    subcommand_path
 } from "sfn/cli";
 import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
 
@@ -26,4 +28,42 @@ test "dev-bootstrap: bare build argv is unchanged" {
     let no_build_args: string[] = [];
     let argv = _bootstrap_compiler_build_argv("/seed/sfn", no_build_args);
     assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check"]).ok;
+}
+
+test "dev-bootstrap: --clean-tree parses alongside --force and a forwarded tail" {
+    let parsed = parse(command_def(), ["dev", "bootstrap", "build", "--clean-tree", "--force", "--", "--no-cache"]);
+    assert expect_eq_bool(parse_is_ok(parsed), true).ok;
+
+    let m = parse_matches(parsed);
+    assert expect_eq_bool(has_flag(m, "clean-tree"), true).ok;
+    assert expect_eq_bool(has_flag(m, "force"), true).ok;
+}
+
+test "dev-bootstrap: --clean-tree never reaches the seed argv" {
+    let parsed = parse(command_def(), ["dev", "bootstrap", "build", "--clean-tree", "--force", "--", "--no-cache"]);
+    assert expect_eq_bool(parse_is_ok(parsed), true).ok;
+
+    let m = parse_matches(parsed);
+    let argv = _bootstrap_compiler_build_argv("/seed/sfn", positionals(m, "build-arg"));
+    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check", "--no-cache"]).ok;
+}
+
+test "dev-bootstrap: --clean-tree adds no element to the descent path" {
+    let bare = parse(command_def(), ["dev", "bootstrap", "build"]);
+    assert expect_eq_bool(parse_is_ok(bare), true).ok;
+
+    let parsed = parse(command_def(), ["dev", "bootstrap", "build", "--clean-tree", "--force", "--", "--no-cache"]);
+    assert expect_eq_bool(parse_is_ok(parsed), true).ok;
+
+    // A flag is not a path element, which is what keeps `--clean-tree` clear
+    // of `_v2_arm_verdict` (`cli/main.sfn`) — it arms on the descent path
+    // alone, so a path identical with and without the flag cannot perturb it.
+    // Asserted as bare-vs-flagged rather than against a literal: this parse
+    // roots at `command_def()`, which IS the `dev` Command, and `parse()`
+    // skips argv[0] as the program name, so the descent here starts at
+    // `bootstrap`. The three-element `["dev", "bootstrap", "build"]` that
+    // `_v2_arm_verdict` matches comes from the root `sfn` parse, which this
+    // test does not construct — pinning the shape here would pin the wrong
+    // root. The invariant that carries over is the equality below.
+    assert expect_eq_str_array(subcommand_path(parse_matches(parsed)), subcommand_path(parse_matches(bare))).ok;
 }

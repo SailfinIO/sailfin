@@ -204,7 +204,7 @@ invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
 | `sfn test --no-test-cache` | `sfn test` | empty | Bypasses the test artifact cache; `sfn dev verify` sets this itself. |
 | Flags passed directly to `sfn bench` | compiler/runtime benchmarks | empty | Extra args for compile-time and runtime execution benchmarks. |
 | Flags passed directly to `sfn dev arena` | arena IR gate | empty | Args forwarded to the native arena IR gate, e.g. `--all` or a module path. |
-| `SAILFIN_CLEAN_KEEP_SEED=0`, or `sfn dev clean build --include-seed` | `sfn dev clean build` | keep seed | Also removes `build/toolchains/` during cleanup. |
+| `SAILFIN_CLEAN_KEEP_SEED=0`, or `sfn dev clean build --include-seed` | `sfn dev clean build`/`all` only | keep seed | Also removes `build/toolchains/` during cleanup. Deliberately not honored by `sfn dev bootstrap build --clean-tree`, which always preserves the seed store. |
 
 Build parallelism is owned natively by the driver — see `SAILFIN_BUILD_JOBS`
 below.
@@ -301,4 +301,10 @@ changes, start with a clean build:
 ```bash
 sfn dev clean build
 sfn dev bootstrap build
+```
+
+Or combine both steps in one invocation:
+
+```bash
+sfn dev bootstrap build --clean-tree
 ```
