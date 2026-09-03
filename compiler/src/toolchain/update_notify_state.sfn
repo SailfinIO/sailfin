@@ -1,0 +1,510 @@
+// compiler/src/toolchain/update_notify_state.sfn
+//
+// Pure/state substrate for the bounded, opt-out update notice SFEP-0073 §3.6
+// attaches to eligible interactive commands (SFN-1073): the 7-day
+// per-host eligibility record, the 30-second per-host crash-recovery lease,
+// CI/TTY suppression detection, and the pure parse/render of the notice line
+// a spawned child prints on its single stdout line. Splits the same way
+// `user_default.sfn` does — pure grammar first, `![io]` persistence after —
+// so the grammar is unit-testable with no filesystem. This module does not
+// spawn the child, does not decide command eligibility, and is not wired
+// into the CLI; those are separate slices of SFN-1073.
+import { ascii_lowercase, int_to_string } from "sfn/strings";
+
+import {
+    CREATE_EXCLUSIVE_CREATED,
+    CREATE_EXCLUSIVE_EXISTS,
+    CREATE_EXCLUSIVE_MODE_FILE,
+    _atomic_rename_into_place,
+    _create_exclusive_cmd,
+    _mktemp_sibling_cmd,
+    _set_perms_or_skip,
+    _toml_trim_cmd
+} from "../build/fs";
+import { ensure_dir_p } from "../build/fs_tree";
+import {
+    char_code_at_text,
+    index_of,
+    starts_with,
+    substring
+} from "../string_utils";
+import { toolchain_user_default_dir } from "./user_default";
+
+// Declared as an extern here rather than imported, matching the SFN-635
+// cross-module workaround `capsules/sfn/cli/src/style.sfn:16` already uses
+// for the same runtime symbol (`runtime/sfn/platform/terminal.sfn`).
+extern fn sfn_stream_is_terminal(fd: i32) -> bool;
+
+let TOOLCHAIN_UPDATE_CHECK_MAGIC: string = "sailfin-toolchain-update-check";
+let TOOLCHAIN_UPDATE_CHECK_SCHEMA: int = 1;  // what this build writes
+let TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA: int = 1;  // highest this build reads
+let TOOLCHAIN_UPDATE_INTERVAL_SECS: int = 604800;  // 7 days, SFEP-0073 §3.6
+let TOOLCHAIN_UPDATE_LEASE_SECS: int = 30;  // SFEP-0073 §3.6 crash recovery
+let TOOLCHAIN_UPDATE_NOTICE_MAGIC: string = "sailfin-update-notice";
+let TOOLCHAIN_UPDATE_NOTICE_SCHEMA: int = 1;
+
+struct ToolchainUpdateEligibility {
+    next_epoch: int;  // 0 == no record recorded => eligible now
+    sequence: int;  // last accepted signed-index sequence, 0 == none
+}
+
+struct ToolchainUpdateNotice {
+    ok: boolean;
+    current: string;
+    candidate: string;  // "" => nothing to say
+    channel: string;
+    state: string;  // "ok" | "advisory" | "revoked"
+}
+
+fn _check_empty() -> ToolchainUpdateEligibility {
+    return ToolchainUpdateEligibility { next_epoch: 0, sequence: 0 };
+}
+
+fn _notice_empty() -> ToolchainUpdateNotice {
+    return ToolchainUpdateNotice {
+        ok: false,
+        current: "",
+        candidate: "",
+        channel: "",
+        state: ""
+    };
+}
+
+fn _split_lines(text: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut start: int = 0;
+    let length = text.length;
+    let mut i: int = 0;
+    loop {
+        if i >= length { break; }
+        if char_code_at_text(text, i) == 10 {
+            lines.push(substring(text, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start <= length { lines.push(substring(text, start, length)); }
+    return lines;
+}
+
+// Strict, no partial parse: any non-digit byte, or an empty string, fails.
+// Mirrors `user_default.sfn::_user_default_parse_uint`'s discipline (module-
+// private there, so not reused across the module boundary). Returns -1 on
+// failure, which every caller here treats as "unparsable" — a stale lease or
+// a zeroed eligibility field, never a crash.
+fn _parse_uint(s: string) -> int {
+    if s.length == 0 || s.length > 18 { return -1; }
+    let mut value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let code = char_code_at_text(s, i);
+        if code < 48 || code > 57 { return -1; }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    return value;
+}
+
+// The header's schema, or `0` when there is no well-formed header. Separate
+// from parsing because the *writer* needs it: rendering always stamps this
+// build's schema, so writing over a record produced by a newer build would
+// silently relabel that build's body as schema 1 and let it misread its own
+// record afterwards — the same forward-compatibility seam
+// `user_default.sfn::toolchain_user_default_text_schema` implements.
+fn toolchain_update_check_text_schema(text: string) -> int {
+    if _toml_trim_cmd(text).length == 0 { return 0; }
+    let lines = _split_lines(text);
+    if lines.length == 0 { return 0; }
+    let magic_prefix = TOOLCHAIN_UPDATE_CHECK_MAGIC + " ";
+    if !starts_with(lines[0], magic_prefix) { return 0; }
+    let schema = _parse_uint(substring(lines[0], magic_prefix.length, lines[0].length));
+    if schema < 1 { return 0; }
+    return schema;
+}
+
+// Pure. Returns `{0, 0}` when `text` is empty, the header is
+// missing/corrupt, the schema is above `TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA`,
+// or `host_triple` has no record — all of which read as "eligible now"
+// through `toolchain_update_eligible_at`. A key present but not a valid
+// unsigned integer reads as 0 for that field rather than failing the whole
+// parse, matching `toolchain_update_check_render`'s per-key granularity.
+fn toolchain_update_check_parse(text: string, host_triple: string) -> ToolchainUpdateEligibility {
+    if _toml_trim_cmd(text).length == 0 { return _check_empty(); }
+    let lines = _split_lines(text);
+    if lines.length == 0 { return _check_empty(); }
+    let magic_prefix = TOOLCHAIN_UPDATE_CHECK_MAGIC + " ";
+    if !starts_with(lines[0], magic_prefix) { return _check_empty(); }
+    let schema = _parse_uint(substring(lines[0], magic_prefix.length, lines[0].length));
+    if schema < 1 || schema > TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA {
+        return _check_empty();
+    }
+
+    let epoch_key = host_triple + ".next_epoch";
+    let sequence_key = host_triple + ".sequence";
+    let mut next_epoch: int = 0;
+    let mut sequence: int = 0;
+    let mut i: int = 1;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if line.length > 0 {
+            let eq = index_of(line, " = ");
+            if eq >= 0 {
+                let key = substring(line, 0, eq);
+                let value = substring(line, eq + 3, line.length);
+                if key == epoch_key {
+                    let parsed = _parse_uint(value);
+                    if parsed >= 0 { next_epoch = parsed; }
+                } else if key == sequence_key {
+                    let parsed = _parse_uint(value);
+                    if parsed >= 0 { sequence = parsed; }
+                }
+            }
+        }
+        i += 1;
+    }
+    return ToolchainUpdateEligibility {
+        next_epoch: next_epoch,
+        sequence: sequence
+    };
+}
+
+// Pure. `current_text` is the CURRENT full file text (`""` when absent);
+// returns the new full file text with `host_triple`'s record set. Every
+// other host's lines are preserved verbatim and in order — mirrors
+// `user_default.sfn::toolchain_user_default_render`'s shape, minus the
+// clear-on-empty path that record needs and this one does not (an
+// eligibility record has no "unset" value; 0 already means "never
+// recorded").
+fn toolchain_update_check_render(current_text: string, host_triple: string, next_epoch: int, sequence: int) -> string {
+    let epoch_key = host_triple + ".next_epoch";
+    let sequence_key = host_triple + ".sequence";
+
+    let mut body_lines: string[] = [];
+    if current_text.length > 0 {
+        let lines = _split_lines(current_text);
+        let magic_prefix = TOOLCHAIN_UPDATE_CHECK_MAGIC + " ";
+        let mut start: int = 0;
+        if lines.length > 0 && starts_with(lines[0], magic_prefix) { start = 1; }
+        let mut i: int = start;
+        loop {
+            if i >= lines.length { break; }
+            if lines[i].length > 0 { body_lines.push(lines[i]); }
+            i += 1;
+        }
+    }
+
+    let mut out_lines: string[] = [];
+    let mut epoch_emitted: boolean = false;
+    let mut sequence_emitted: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= body_lines.length { break; }
+        let line = body_lines[i];
+        let eq = index_of(line, " = ");
+        if eq >= 0 {
+            let key = substring(line, 0, eq);
+            if key == epoch_key {
+                out_lines.push(epoch_key + " = " + int_to_string(next_epoch));
+                epoch_emitted = true;
+                i += 1;
+                continue;
+            }
+            if key == sequence_key {
+                out_lines.push(sequence_key + " = " + int_to_string(sequence));
+                sequence_emitted = true;
+                i += 1;
+                continue;
+            }
+        }
+        out_lines.push(line);
+        i += 1;
+    }
+    if !epoch_emitted {
+        out_lines.push(epoch_key + " = " + int_to_string(next_epoch));
+    }
+    if !sequence_emitted {
+        out_lines.push(sequence_key + " = " + int_to_string(sequence));
+    }
+
+    let mut out: string = TOOLCHAIN_UPDATE_CHECK_MAGIC + " " + int_to_string(TOOLCHAIN_UPDATE_CHECK_SCHEMA)
+        + "\n";
+    let mut j: int = 0;
+    loop {
+        if j >= out_lines.length { break; }
+        out = out + out_lines[j] + "\n";
+        j += 1;
+    }
+    return out;
+}
+
+// `now_epoch >= next_epoch`. `next_epoch == 0` (never recorded) is therefore
+// always eligible.
+fn toolchain_update_eligible_at(next_epoch: int, now_epoch: int) -> boolean {
+    return now_epoch >= next_epoch;
+}
+
+// `held_epoch <= 0` is an unparsable or garbage lease body: stale. A
+// `held_epoch` in the future is ALSO stale — a clock that jumped backwards
+// must not wedge the lease for an unbounded time. Otherwise stale once
+// `TOOLCHAIN_UPDATE_LEASE_SECS` have elapsed since the lease was taken.
+fn toolchain_update_lease_is_stale(held_epoch: int, now_epoch: int) -> boolean {
+    if held_epoch <= 0 { return true; }
+    if held_epoch > now_epoch { return true; }
+    return now_epoch - held_epoch >= TOOLCHAIN_UPDATE_LEASE_SECS;
+}
+
+// The child's single stdout line: magic, this build's schema (space-
+// separated, matching every other record header in this tree), then four
+// TAB-separated fields. TAB rather than space because `current`/`candidate`
+// are exact semver and never contain one, so the parse never needs quoting.
+fn toolchain_update_notice_line(current: string, candidate: string, channel: string, state: string) -> string {
+    return TOOLCHAIN_UPDATE_NOTICE_MAGIC + " " + int_to_string(TOOLCHAIN_UPDATE_NOTICE_SCHEMA)
+        + "\t"
+        + current
+        + "\t"
+        + candidate
+        + "\t"
+        + channel
+        + "\t"
+        + state;
+}
+
+fn _notice_split_tabs(line: string) -> string[] {
+    let mut fields: string[] = [];
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= line.length { break; }
+        if char_code_at_text(line, i) == 9 {
+            fields.push(substring(line, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    fields.push(substring(line, start, line.length));
+    return fields;
+}
+
+// Pure. Never panics on malformed input — this parses output from another
+// process, not trusted source. `ok=false` for anything that is not exactly
+// the magic, a schema `<= TOOLCHAIN_UPDATE_NOTICE_SCHEMA`, and 4 more
+// TAB-separated fields.
+fn toolchain_update_notice_parse(line: string) -> ToolchainUpdateNotice {
+    let fields = _notice_split_tabs(line);
+    if fields.length != 5 { return _notice_empty(); }
+    let magic_prefix = TOOLCHAIN_UPDATE_NOTICE_MAGIC + " ";
+    if !starts_with(fields[0], magic_prefix) { return _notice_empty(); }
+    let schema = _parse_uint(substring(fields[0], magic_prefix.length, fields[0].length));
+    if schema < 1 || schema > TOOLCHAIN_UPDATE_NOTICE_SCHEMA {
+        return _notice_empty();
+    }
+    return ToolchainUpdateNotice {
+        ok: true,
+        current: fields[1],
+        candidate: fields[2],
+        channel: fields[3],
+        state: fields[4]
+    };
+}
+
+// "" when `!ok` or `candidate` is empty (nothing to say). Shape matches
+// `update_policy.sfn::toolchain_network_refusal`: first line bare,
+// continuation indented two spaces. An unrecognized `state` renders as
+// `"ok"` — the parse side already restricts `state` to what the child
+// emits, so this is a forward-compatibility floor, not a normal path.
+fn toolchain_update_notice_render(notice: ToolchainUpdateNotice) -> string {
+    if !notice.ok || notice.candidate.length == 0 { return ""; }
+    if notice.state == "advisory" {
+        return "security update available: sfn " + notice.candidate
+            + " (current: "
+            + notice.current
+            + " has a published advisory)\n"
+            + "  install it with: sfn toolchain update "
+            + notice.channel;
+    }
+    if notice.state == "revoked" {
+        return "security update required: sfn " + notice.candidate
+            + " (current: "
+            + notice.current
+            + " is revoked)\n"
+            + "  install it with: sfn toolchain update "
+            + notice.channel;
+    }
+    return "update available: sfn " + notice.candidate + " (current: " + notice.current
+        + ")\n"
+        + "  install it with: sfn toolchain update "
+        + notice.channel;
+}
+
+fn toolchain_update_check_path() -> string ![io] {
+    let dir = toolchain_user_default_dir();
+    if dir.length == 0 { return ""; }
+    return dir + "/toolchain-update-check";
+}
+
+// Missing/corrupt file reads as `{0, 0}` — "eligible now", distinct from
+// nothing this record needs to surface separately: unlike
+// `toolchain_user_default_corrupt`, a garbage eligibility record only ever
+// makes a check happen sooner, never skips one, so there is no fail-closed
+// case to protect here.
+fn toolchain_update_check_read(host_triple: string) -> ToolchainUpdateEligibility ![io] {
+    let path = toolchain_update_check_path();
+    if path.length == 0 { return _check_empty(); }
+    if !fs.exists(path) { return _check_empty(); }
+    return toolchain_update_check_parse(fs.readFile(path), host_triple);
+}
+
+// Atomic and other-host-preserving: reads the current text (`""` when
+// absent), threads it through `toolchain_update_check_render`, and
+// publishes through a sibling temp plus rename — mirrors
+// `user_default.sfn::toolchain_user_default_write`'s shape exactly,
+// including the schema-downgrade refusal.
+fn toolchain_update_check_write(host_triple: string, next_epoch: int, sequence: int) -> boolean ![io] {
+    let dir = toolchain_user_default_dir();
+    if dir.length == 0 { return false; }
+    let created = !fs.exists(dir);
+    if !ensure_dir_p(dir) { return false; }
+    if created { _set_perms_or_skip(dir, 448); }
+
+    let path = toolchain_update_check_path();
+    if path.length == 0 { return false; }
+    let mut current: string = "";
+    if fs.exists(path) { current = fs.readFile(path); }
+    // Never write over a record a newer build wrote. Rendering stamps this
+    // build's schema unconditionally, so proceeding would downgrade the
+    // header while leaving that build's body intact.
+    if toolchain_update_check_text_schema(current) > TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA {
+        return false;
+    }
+    let text = toolchain_update_check_render(current, host_triple, next_epoch, sequence);
+
+    let tmp = _mktemp_sibling_cmd(path);
+    if tmp.length == 0 { return false; }
+    fs.writeFile(tmp, text);
+    if !fs.exists(tmp) {
+        fs.deleteFile(tmp);
+        return false;
+    }
+    return _atomic_rename_into_place(tmp, path);
+}
+
+// Per-host per SFEP-0073 §3.6: two hosts sharing a config dir (e.g. a
+// cross-mounted `$HOME`) must not serialize each other's checks.
+fn toolchain_update_lease_path(host_triple: string) -> string ![io] {
+    let dir = toolchain_user_default_dir();
+    if dir.length == 0 { return ""; }
+    return dir + "/toolchain-update-lease." + host_triple;
+}
+
+// Claim the per-host lease, reclaiming a stale one left behind by a crashed
+// holder. The reclaim (delete-then-exclusive-create) is NOT atomic, and the
+// window is reachable on every acquisition rather than only under an exact
+// tie: `_create_exclusive_cmd` publishes a zero-length file, and the holder
+// writes its epoch only afterwards. A second process arriving in between
+// reads "", parses 0, judges the lease stale, and reclaims it — so two
+// processes can briefly both believe they hold it.
+//
+// That is accepted rather than closed, and the direction of the trade is
+// deliberate. Treating an empty lease as *held* would close this window but
+// open a worse one: a holder that dies between the create and the write
+// would leave a file that is never stale and never reclaimed, wedging every
+// later check. SFEP-0073 §3.6 requires the opposite ("a crashed lease holder
+// cannot block unrelated management work"), so a self-healing lease that can
+// briefly double-admit beats a tight one that can wedge.
+//
+// The cost is bounded because this lease is not the real stampede guard —
+// the eligibility record is. The holder advances eligibility by
+// `TOOLCHAIN_UPDATE_INTERVAL_SECS` BEFORE any network access, so a lost race
+// costs two opportunistic requests once per seven days, never a per-command
+// check. Closing it properly needs a held lock; this tree has no file-locking
+// primitive, only the one-shot `_create_exclusive_cmd`.
+fn toolchain_update_lease_acquire(host_triple: string, now_epoch: int) -> boolean ![io] {
+    let path = toolchain_update_lease_path(host_triple);
+    if path.length == 0 { return false; }
+    let dir = toolchain_user_default_dir();
+    let created = !fs.exists(dir);
+    if !ensure_dir_p(dir) { return false; }
+    if created { _set_perms_or_skip(dir, 448); }
+
+    let rc = _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE);
+    if rc == CREATE_EXCLUSIVE_CREATED {
+        fs.writeFile(path, int_to_string(now_epoch));
+        return true;
+    }
+    if rc != CREATE_EXCLUSIVE_EXISTS { return false; }
+
+    let held = _parse_uint(fs.readFile(path));
+    if !toolchain_update_lease_is_stale(held, now_epoch) { return false; }
+    fs.deleteFile(path);
+    let reclaimed = _create_exclusive_cmd(path, CREATE_EXCLUSIVE_MODE_FILE);
+    if reclaimed != CREATE_EXCLUSIVE_CREATED { return false; }
+    fs.writeFile(path, int_to_string(now_epoch));
+    return true;
+}
+
+// A missing lease file is success, not failure — releasing a lease this
+// process never held (or that a stale-reclaim already displaced) is a no-op.
+fn toolchain_update_lease_release(host_triple: string) -> boolean ![io] {
+    let path = toolchain_update_lease_path(host_triple);
+    if path.length == 0 { return false; }
+    if !fs.exists(path) { return true; }
+    fs.deleteFile(path);
+    return true;
+}
+
+// True when any conventional CI/non-interactive environment signal
+// (SFEP-0073 §3.6) is set to a non-empty value that is not `false`/`0`
+// (case-insensitive), or when `TERM` is exactly `dumb`. There is no prior CI
+// detection anywhere in this repo — this is the first, authored for this
+// notice's suppression gate specifically.
+fn toolchain_update_env_is_ci() -> boolean ![io] {
+    if env.get("TERM") == "dumb" { return true; }
+    let names: string[] = ["CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "CIRCLECI", "JENKINS_URL", "TEAMCITY_VERSION", "TF_BUILD"];
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        let value = env.get(names[i]);
+        if value.length > 0 {
+            let lowered = ascii_lowercase(value);
+            if lowered != "false" && lowered != "0" { return true; }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// The notice prints to stderr, but a redirected stdout means the invocation
+// is being consumed by something else — a pipe, a script, a CI log
+// collector — so both descriptors must be terminals for the notice to be
+// welcome.
+fn toolchain_update_streams_interactive() -> boolean ![io] {
+    return sfn_stream_is_terminal(1) && sfn_stream_is_terminal(2);
+}
+
+export {
+    TOOLCHAIN_UPDATE_CHECK_MAX_SCHEMA,
+    TOOLCHAIN_UPDATE_CHECK_SCHEMA,
+    TOOLCHAIN_UPDATE_INTERVAL_SECS,
+    TOOLCHAIN_UPDATE_LEASE_SECS,
+    TOOLCHAIN_UPDATE_NOTICE_SCHEMA,
+    ToolchainUpdateEligibility,
+    ToolchainUpdateNotice,
+    toolchain_update_check_parse,
+    toolchain_update_check_path,
+    toolchain_update_check_read,
+    toolchain_update_check_render,
+    toolchain_update_check_text_schema,
+    toolchain_update_check_write,
+    toolchain_update_eligible_at,
+    toolchain_update_env_is_ci,
+    toolchain_update_lease_acquire,
+    toolchain_update_lease_is_stale,
+    toolchain_update_lease_path,
+    toolchain_update_lease_release,
+    toolchain_update_notice_line,
+    toolchain_update_notice_parse,
+    toolchain_update_notice_render,
+    toolchain_update_streams_interactive
+};
