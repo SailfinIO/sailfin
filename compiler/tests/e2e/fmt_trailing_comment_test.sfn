@@ -1,5 +1,12 @@
-// End-to-end regression for SFN-1105: `sfn fmt` must never emit a token after
-// a `//` comment on the same line.
+// End-to-end regression for `sfn fmt` never losing source content. Two
+// distinct invariants live here:
+//
+//   SFN-1105/SFN-763 — never emit a token after a `//` comment on the same
+//   line, which makes the output unparseable.
+//   SFN-1248 — never delete a comment outright, which leaves the output
+//   perfectly valid and so passes unnoticed.
+//
+// The first invariant, which the rest of this header describes:
 //
 // The formatter collapses multi-line expressions onto one line, and
 // `emitter.sfn` only ended a line on a `semicolon`, or on a `separator` at
@@ -185,4 +192,71 @@ test "fmt: a run of comments at EOF keeps one line each" ![io] {
     let src = "fn f() -> i64 { return 1; }\n// tail one\n// tail two\n// tail three";
     let want = "fn f() -> i64 {\n    return 1;\n}  // tail one\n// tail two\n// tail three";
     assert _fmt("eof_run", src) == want;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SFN-1248: the trailing-comma normaliser must not take the comment with it
+// ═══════════════════════════════════════════════════════════════════
+//
+// `emit_formatted` drops a `separator` immediately followed by a
+// `block_close`, normalising `{ a, b, }` to `{ a, b }`. It did so with a
+// `continue` that jumped past the trailing-comment emission as well, so a
+// comment attached to that comma was deleted from the file rather than
+// re-attached. Distinct from the SFN-1105 shapes above: those swallowed the
+// comment's line INTO the comment, which stops parsing and so fails loudly at
+// the next `sfn check`. This one removes source outright and leaves a valid,
+// stable fixed point behind — `--check` passes immediately afterwards, so a
+// contributor following `.claude/rules/formatting.md` commits the deletion
+// without a signal.
+
+// The issue's verbatim reproduction. An import brace is the shape the
+// normaliser was written for, so it is the one most likely to regress.
+let IMPORT_TRAILING: string = "import {\n    alpha,\n    beta,  // the important one\n} from \"sfn/strings\";";
+
+// A struct literal reaches the same `separator` + `block_close` pair through a
+// different construct, and unlike the import above it names only local
+// symbols, so the formatted result can be typechecked rather than just
+// compared.
+let STRUCT_TRAILING: string = "struct P {\n    x: i64;\n    y: i64;\n}\n\nfn mk() -> P {\n    return P {\n        x: 1,\n        y: 2,  // the important one\n    };\n}";
+
+// The same import with no comment on the comma. Guards the other half of the
+// contract: re-attaching the comment must not stop the comma itself being
+// normalised away.
+let IMPORT_TRAILING_PLAIN: string = "import {\n    alpha,\n    beta,\n} from \"sfn/strings\";";
+
+test "fmt: a comment on the trailing comma before a brace survives formatting" ![io] {
+    let got = _fmt("brace_comma_comment", IMPORT_TRAILING);
+    let want = "import {\n    alpha,\n    beta  // the important one\n} from \"sfn/strings\";";
+    assert got == want;
+}
+
+test "fmt: the trailing comma before a brace is still normalised away" ![io] {
+    let want = "import { alpha, beta } from \"sfn/strings\";";
+    assert _fmt("brace_comma_plain", IMPORT_TRAILING_PLAIN) == want;
+}
+
+// Fixed-point requirement, as for the SFN-1105 shapes: a fix that merely moved
+// the deletion one pass later would still look green above.
+test "fmt: the re-attached trailing comment is idempotent" ![io] {
+    let once = _fmt("brace_comma_idem_1", IMPORT_TRAILING);
+    let twice = _fmt("brace_comma_idem_2", once);
+    assert once == twice;
+}
+
+// Pins the struct shape's exact output. The `_formats_and_parses` assertion
+// below is NOT sufficient on its own: deleting the comment yields `y: 2` and a
+// bare `}`, which typechecks perfectly, so the defective emitter passed it.
+// Only an output comparison distinguishes re-attached from deleted, which
+// leaves the import case above as the sole pre-fix failure otherwise.
+test "fmt: a struct literal keeps the comment on its trailing comma" ![io] {
+    let want = "struct P {\n    x: i64;\n    y: i64;\n}\n\nfn mk() -> P {\n    return P {\n        x: 1,\n        y: 2  // the important one\n    };\n}";
+    assert _fmt("struct_comma", STRUCT_TRAILING) == want;
+}
+
+// The weaker companion to the above, kept for the separate invariant it
+// carries: whatever layout `fmt` picks, the compiler must read the result
+// back. Same split as the SFN-1105 cases, where the round-trip assertions are
+// deliberately not merged into the exact-output ones.
+test "fmt: the formatted struct literal still typechecks" ![io] {
+    assert _formats_and_parses("struct_comma_rt", STRUCT_TRAILING);
 }
