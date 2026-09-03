@@ -279,6 +279,10 @@ fn toolchain_is_management_prefix(args: string[]) -> boolean {
     // would answer with the wrong binary — it is entry-only by definition.
     if args.length >= 2 {
         if strings_equal(args[1], "entry-version") { return false; }
+        // `notify-check` (SFN-1073) is spawned by *this* entry's own bounded
+        // update-notice epilogue and must run against *this* binary's signed
+        // index and cache state, never a routed payload.
+        if strings_equal(args[1], "notify-check") { return false; }
     }
     return true;
 }
