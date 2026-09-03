@@ -6,68 +6,15 @@
 // `compiler/capsules/codegen-llvm/src/runtime_helpers/registry_process.sfn` flip the builtin surface onto
 // them. These pin the raw builtins independently of any `sfn/os` wrapper,
 // mirroring `process_framed_stdio_test.sfn` and `io_poll_any_test.sfn`.
-// POSIX keeps the direct fd/poll assertions and `sh` fixtures; Windows uses a
-// self-built Sailfin child and the framed HANDLE contract instead.
+// POSIX keeps the direct fd/poll assertions while Windows uses the framed
+// HANDLE contract; both drive the same shared Sailfin-native child.
 //
 // The demux test is the load-bearing one: it drives the exact
 // stdout(user)+stderr(records) multiplex the streamed test runner will use —
 // `io.poll_any` over the two raw handle fds, a single-`read(2)` chunk from
 // the ready stream, terminating on the two `*_at_eof` predicates — proving
 // the transport before the runner (a separate seed-gated PR) depends on it.
-import {
-    clean_runner_env,
-    host_is_windows,
-    report_child_failure,
-    scratch_root,
-    sfn_bin_path
-} from "sfn/test";
-
-fn _child_env() -> string[] ![io] {
-    return clean_runner_env(env.get("SAILFIN_TEST_SCRATCH"));
-}
-
-fn _built_path(base: string) -> string ![io] {
-    if fs.exists(base + ".exe") { return base + ".exe"; }
-    return base;
-}
-
-// A native fixture replaces `sh` on Windows. It writes argv[1]/argv[2] to
-// stdout/stderr with raw writes. When argv[3] is present it then blocks on
-// stdin, giving `handle_kill` a live child without relying on `sleep`.
-fn _process_fixture_bin() -> string ![io] {
-    let dir = scratch_root() + "/sfn-process-stderr-fixture";
-    fs.createDirectory(dir, true);
-    let existing = _built_path(dir + "/child");
-    if fs.exists(existing) { return existing; }
-    let src = dir + "/child.sfn";
-    fs.writeFile(src, "struct OwnedBuf {\n"
-        + "    ptr_addr: i64;\n"
-        + "    len: i64;\n"
-        + "    cap: i64;\n"
-        + "    arena_addr: i64;\n"
-        + "}\n\n"
-        + "extern fn sfn_write_fd(fd: i32, buf: *u8, count: usize) -> i64;\n\n"
-        + "fn main(argv: string[]) -> int ![io] {\n"
-        + "    if argv.length > 1 {\n"
-        + "        let out = argv[1];\n"
-        + "        let _wo = sfn_write_fd(1, out as *u8, out.length as usize);\n"
-        + "    }\n"
-        + "    if argv.length > 2 {\n"
-        + "        let err = argv[2];\n"
-        + "        let _we = sfn_write_fd(2, err as *u8, err.length as usize);\n"
-        + "    }\n"
-        + "    if argv.length > 3 {\n"
-        + "        let _blocked: OwnedBuf = io.read_fd(0, 1);\n"
-        + "    }\n"
-        + "    return 0;\n"
-        + "}\n");
-    let exit = process.run_capture([sfn_bin_path(), "build", "-o", dir + "/child", src], _child_env());
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    report_child_failure("process-stderr fixture build", exit, out, err);
-    assert exit == 0;
-    return _built_path(dir + "/child");
-}
+import { host_is_windows, process_fixture_bin } from "sfn/test";
 
 test "handle fd/kill/eof accessors: zero handle reports the dead-handle sentinels" ![io] {
     // No child: the zero-handle contract must match the sibling read
@@ -84,7 +31,7 @@ test "handle_stdout_fd/handle_stderr_fd: expose distinct live child fds" ![io] {
         // HANDLE streams intentionally expose `-1` instead of borrowed CRT
         // descriptors. Distinct framed drains assert the equivalent contract:
         // bytes from one child pipe never appear in the other.
-        let id = process.spawn_with_env([_process_fixture_bin(), "out", "err"], []);
+        let id = process.spawn_with_env([process_fixture_bin(), "emit", "out", "err", "0", "0"], []);
         assert id != 0;
         assert process.handle_stdout_fd(id) == -1;
         assert process.handle_stderr_fd(id) == -1;
@@ -93,7 +40,7 @@ test "handle_stdout_fd/handle_stderr_fd: expose distinct live child fds" ![io] {
         assert process.handle_wait(id) == 0;
         return;
     }
-    let id = process.spawn_with_env(["sh", "-c", "printf 'out'; printf 'err' 1>&2"], []);
+    let id = process.spawn_with_env([process_fixture_bin(), "emit", "out", "err", "0", "0"], []);
     assert id != 0;
     let ofd = process.handle_stdout_fd(id);
     let efd = process.handle_stderr_fd(id);
@@ -110,7 +57,7 @@ test "handle_stdout_fd/handle_stderr_fd: expose distinct live child fds" ![io] {
 
 test "handle_read_bytes_stderr: returns at most n bytes preserving the remainder" ![io] {
     if host_is_windows() {
-        let id = process.spawn_with_env([_process_fixture_bin(), "", "abcdefgh"], []);
+        let id = process.spawn_with_env([process_fixture_bin(), "emit", "", "abcdefgh", "0", "0"], []);
         assert id != 0;
         assert process.handle_stderr_at_eof(id) == false;
         let p1 = process.handle_read_bytes_stderr(id, 3);
@@ -123,7 +70,7 @@ test "handle_read_bytes_stderr: returns at most n bytes preserving the remainder
         assert process.handle_wait(id) == 0;
         return;
     }
-    let id = process.spawn_with_env(["sh", "-c", "printf 'abcdefgh' 1>&2"], []);
+    let id = process.spawn_with_env([process_fixture_bin(), "emit", "", "abcdefgh", "0", "0"], []);
     assert id != 0;
     // Live stderr, not yet drained.
     assert process.handle_stderr_at_eof(id) == false;
@@ -147,7 +94,7 @@ test "poll_any demux: stdout(user) and stderr(records) separate cleanly" ![io] {
     if host_is_windows() {
         // Each framed read pumps both HANDLE pipes, providing the deadlock-free
         // demultiplexing that `poll_any` provides to the POSIX branch below.
-        let id = process.spawn_with_env([_process_fixture_bin(), "OUT1OUT2", "ERR1ERR2"], []);
+        let id = process.spawn_with_env([process_fixture_bin(), "alternate", "OUT1", "ERR1", "OUT2", "ERR2", "1"], []);
         assert id != 0;
         let mut out_acc: string = "";
         let mut err_acc: string = "";
@@ -172,12 +119,12 @@ test "poll_any demux: stdout(user) and stderr(records) separate cleanly" ![io] {
         assert process.handle_wait(id) == 0;
         return;
     }
-    // The child writes distinct payloads to each stream. The loop is the
+    // The child alternates distinct payloads between streams. The loop is the
     // streamed-runner transport in miniature: poll both raw fds, read one
     // chunk from whichever is ready, accumulate per stream, terminate when
     // both are at EOF. The per-stream accumulators must come out cleanly
     // partitioned regardless of interleaving.
-    let id = process.spawn_with_env(["sh", "-c", "printf 'OUT1'; printf 'ERR1' 1>&2; printf 'OUT2'; printf 'ERR2' 1>&2"], []);
+    let id = process.spawn_with_env([process_fixture_bin(), "alternate", "OUT1", "ERR1", "OUT2", "ERR2", "1"], []);
     assert id != 0;
     let mut out_acc: string = "";
     let mut err_acc: string = "";
@@ -217,7 +164,7 @@ test "poll_any demux: stdout(user) and stderr(records) separate cleanly" ![io] {
 
 test "handle_kill: SIGKILLs a running child; handle_wait reports signal death" ![io] {
     if host_is_windows() {
-        let id = process.spawn_with_env([_process_fixture_bin(), "", "", "block"], []);
+        let id = process.spawn_with_env([process_fixture_bin(), "wait-stdin"], []);
         assert id != 0;
         assert process.handle_kill(id) == 0;
         // `TerminateProcess` forces 137 and `handle_wait` returns that raw
@@ -228,7 +175,7 @@ test "handle_kill: SIGKILLs a running child; handle_wait reports signal death" !
     // A child that would outlive the test by far; kill it through the handle
     // (no external `timeout(1)`), then reap. `handle_wait` after SIGKILL(9)
     // returns 128 + 9 = 137 — signal death, never a clean 0.
-    let id = process.spawn_with_env(["sh", "-c", "sleep 30"], []);
+    let id = process.spawn_with_env([process_fixture_bin(), "wait-stdin"], []);
     assert id != 0;
     let k = process.handle_kill(id);
     assert k == 0;

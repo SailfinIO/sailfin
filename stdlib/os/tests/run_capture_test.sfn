@@ -1,5 +1,7 @@
 // Tests for sfn/os process.run_capture — typed stdout/stderr capture
 // over the runtime fork+pipe+poll scaffolding (issue #365).
+import { process_fixture_bin } from "sfn/test";
+
 import {
     Env,
     EnvEntry,
@@ -10,15 +12,14 @@ import {
 } from "../src/mod";
 
 test "run_capture: captures stdout from a simple command" ![io] {
-    let result = run_capture(["sh", "-c", "printf hello"], env_empty(), "");
+    let result = run_capture([process_fixture_bin(), "emit", "hello", "", "0"], env_empty(), "");
     assert result.exit == 0;
     assert strings_equal(result.stdout, "hello");
     assert strings_equal(result.stderr, "");
 }
 
 test "run_capture: captures stderr separately from stdout" ![io] {
-    // printf to stderr only — stdout should be empty, stderr populated.
-    let result = run_capture(["sh", "-c", "printf err 1>&2"], env_empty(), "");
+    let result = run_capture([process_fixture_bin(), "emit", "", "err", "0"], env_empty(), "");
     assert result.exit == 0;
     assert strings_equal(result.stdout, "");
     assert strings_equal(result.stderr, "err");
@@ -27,31 +28,30 @@ test "run_capture: captures stderr separately from stdout" ![io] {
 test "run_capture: captures both stdout and stderr from one child" ![io] {
     // Interleaved writes — concurrent drain must keep both streams
     // intact regardless of timing.
-    let result = run_capture(["sh", "-c", "printf out; printf err 1>&2"], env_empty(), "");
+    let result = run_capture([process_fixture_bin(), "emit", "out", "err", "0"], env_empty(), "");
     assert result.exit == 0;
     assert strings_equal(result.stdout, "out");
     assert strings_equal(result.stderr, "err");
 }
 
 test "run_capture: non-zero exit code surfaces in ProcessOutput.exit" ![io] {
-    let result = run_capture(["sh", "-c", "exit 7"], env_empty(), "");
+    let result = run_capture([process_fixture_bin(), "emit", "", "", "7"], env_empty(), "");
     assert result.exit == 7;
 }
 
 test "run_capture: env overrides propagate to the child" ![io] {
-    // `env` SfnArray contains a single KEY=VALUE entry; printenv FOO
-    // should print the value followed by a newline.
+    // `env` contains a single KEY=VALUE entry; the fixture prints its value.
     let env = env_set(env_empty(), "FOO", "bar");
-    let result = run_capture(["printenv", "FOO"], env, "");
+    let result = run_capture([process_fixture_bin(), "env", "FOO"], env, "");
     assert result.exit == 0;
-    assert strings_equal(result.stdout, "bar\n");
+    assert strings_equal(result.stdout, "bar");
 }
 
 test "run_capture: env_set replaces existing entries (last write wins)" ![io] {
     let env = env_set(env_set(env_empty(), "FOO", "first"), "FOO", "second");
-    let result = run_capture(["printenv", "FOO"], env, "");
+    let result = run_capture([process_fixture_bin(), "env", "FOO"], env, "");
     assert result.exit == 0;
-    assert strings_equal(result.stdout, "second\n");
+    assert strings_equal(result.stdout, "second");
 }
 
 test "run_capture: drains output larger than the pipe buffer" ![io] {
@@ -61,11 +61,7 @@ test "run_capture: drains output larger than the pipe buffer" ![io] {
     // is broken (e.g. blocked on stderr while stdout fills), this
     // test deadlocks.
     //
-    // `head | tr` avoids `yes`'s SIGPIPE-on-broken-pipe diagnostic
-    // (GNU coreutils' `yes` writes "yes: standard output: Broken pipe"
-    // to stderr when its downstream consumer closes the pipe — a real
-    // CI hazard since the stderr assertion below would catch it).
-    let result = run_capture(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' x"], env_empty(), "");
+    let result = run_capture([process_fixture_bin(), "fill", "x", "200000", "E", "0"], env_empty(), "");
     assert result.exit == 0;
     assert result.stdout.length == 200000;
     assert strings_equal(result.stderr, "");
@@ -80,14 +76,12 @@ test "run_capture: spawn failure surfaces as exit == -1" ![io] {
 }
 
 test "run_capture: cwd runs the child in the given directory (#1167)" ![io] {
-    // `pwd` reports the inherited logical `PWD` under Git Bash on Windows,
-    // even when CreateProcessA placed the child somewhere else. Prove the
-    // real cwd instead: this marker exists only in the requested directory.
+    // This marker exists only in the requested directory.
     let dir = "build/sailfin/run-capture-cwd-probe";
     fs.createDirectory(dir, true);
     fs.writeFile(dir + "/cwd-probe", "present\n");
     let child_env = env_set(env_empty(), "PWD", "/stale-parent-cwd");
-    let result = run_capture(["sh", "-c", "test -f cwd-probe"], child_env, dir);
+    let result = run_capture([process_fixture_bin(), "exists", "cwd-probe"], child_env, dir);
     assert result.exit == 0;
     assert strings_equal(result.stdout, "");
     assert strings_equal(result.stderr, "");
@@ -101,15 +95,15 @@ test "run_capture: empty cwd inherits parent cwd and leaves it unchanged (#1167)
 
     // The inherited parent cwd is the repository root, where the compiler
     // manifest exists. A stale `PWD` must not affect that real cwd.
-    let before = run_capture(["sh", "-c", "test -f compiler/capsule.toml"], child_env, "");
+    let before = run_capture([process_fixture_bin(), "exists", "compiler/capsule.toml"], child_env, "");
     assert before.exit == 0;
 
     // The marker is visible only after the per-child cwd is applied.
-    let moved = run_capture(["sh", "-c", "test -f cwd-probe"], child_env, dir);
+    let moved = run_capture([process_fixture_bin(), "exists", "cwd-probe"], child_env, dir);
     assert moved.exit == 0;
 
     // A subsequent inherit-cwd child still sees the repository root, proving
     // the parent process was never moved.
-    let after = run_capture(["sh", "-c", "test -f compiler/capsule.toml"], child_env, "");
+    let after = run_capture([process_fixture_bin(), "exists", "compiler/capsule.toml"], child_env, "");
     assert after.exit == 0;
 }

@@ -1,0 +1,38 @@
+// sfn/test — deterministic native child fixture for process tests (SFN-1140).
+import { report_child_failure } from "./child_diag";
+import { clean_runner_env, nested_runner_scratch } from "./fixtures";
+import { sfn_bin_abs_path } from "./sfn_bin";
+
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+fn _fixture_built_path(base: string) -> string ![io] {
+    if fs.exists(base + ".exe") { return base + ".exe"; }
+    return base;
+}
+
+fn _fixture_absolute(path: string) -> string ![io] {
+    let resolved: *u8 = realpath(path as *u8, null);
+    if resolved as i64 == 0 {
+        throw "process_fixture_bin: built fixture path could not be made absolute";
+    }
+    return resolved as string;
+}
+
+// process_fixture_bin builds the shared Sailfin process-test child once and
+// returns its absolute, host-correct executable path.
+fn process_fixture_bin() -> string ![io] {
+    let dir = nested_runner_scratch("sfn-process-child-v1");
+    fs.createDirectory(dir, true);
+    let base = dir + "/process-child";
+    let existing = _fixture_built_path(base);
+    if fs.exists(existing) { return _fixture_absolute(existing); }
+
+    let source = dir + "/process_child.sfn";
+    fs.writeFile(source, fs.readFile("compiler/tests/fixtures/process_child.sfn"));
+    let exit = process.run_capture([sfn_bin_abs_path(), "build", "-o", base, source], clean_runner_env(dir));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("process fixture build", exit, out, err);
+    assert exit == 0;
+    return _fixture_absolute(_fixture_built_path(base));
+}

@@ -12,6 +12,8 @@
 // minimum — the runner spawns children through it), so the
 // non-empty / PATH assertions hold without the suite setting any
 // dedicated variable.
+import { process_fixture_bin } from "sfn/test";
+
 // Index of the first '=' in `text`, or -1 when absent. Local copy of
 // the split helper — the entry shape contract is "everything before
 // the FIRST '=' is the key".
@@ -101,36 +103,18 @@ test "process.environ: snapshot propagates a parent variable to a spawned child"
     // exact pattern the post-pin `_pool_env_snapshot` migration (scoped
     // out of #1242) will rely on.
     //
-    // The probe variable is synthetic rather than PATH, and that is
-    // load-bearing rather than incidental (SFN-1115). On a native
-    // Windows host `printenv` is the MSYS2 build, which rewrites
-    // path-shaped variables into POSIX form on the way out: the parent
-    // holds `C:\...\build\bin;C:\...` while the child prints
-    // `/c/.../build/bin:/c/...` — different separators AND different
-    // slashes, so an equality check against `env.get("PATH")` compares
-    // a Windows-form value against a translated one and fails for a
-    // reason that has nothing to do with environment propagation. A
-    // variable MSYS2 does not recognise as a path round-trips
-    // byte-for-byte, so it tests the propagation contract and nothing
-    // else.
+    // A synthetic variable tests the environment block without depending on
+    // host utilities or their platform-specific output conventions.
     let probe = "SFN_ENVIRON_PROBE";
     let expected = "propagated-snapshot-value";
     let mut snapshot = process.environ();
     snapshot.push(probe + "=" + expected);
-    let mut argv = ["printenv", probe];
-    let mut expected_out = expected + "\n";
-    if _host_env_keys_case_insensitive() {
-        // Use the native command processor rather than MSYS `printenv` on
-        // Windows. Besides being present on every host, it leaves path-shaped
-        // values untouched and therefore tests only the environment block.
-        argv = [env.get("ComSpec"), "/d", "/c", "echo %" + probe + "%"];
-        expected_out = expected + "\r\n";
-    }
+    let argv = [process_fixture_bin(), "env", probe];
     let id = process.spawn_with_env(argv, snapshot);
     assert id != 0;
     process.handle_close_stdin(id);
     let out = process.handle_read_stdout(id);
-    assert out == expected_out;
+    assert out == expected;
     let exit = process.handle_wait(id);
     assert exit == 0;
 }

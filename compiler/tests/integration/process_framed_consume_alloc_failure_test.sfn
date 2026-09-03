@@ -13,13 +13,14 @@ import { find } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
+    process_fixture_bin,
     report_child_failure,
     sfn_bin_path
 } from "sfn/test";
 
 fn _fixture_source() -> string {
-    return "fn _drain() -> string ![io] {\n"
-        + "    let id = process.spawn_with_env([\"sh\", \"-c\", \"printf abcdef\"], []);\n"
+    return "fn _drain(child: string) -> string ![io] {\n"
+        + "    let id = process.spawn_with_env([child, \"emit\", \"abcdef\", \"\", \"0\", \"0\"], []);\n"
         + "    if id == 0 { return \"SPAWN_FAILED\"; }\n"
         + "    let mut out: string = \"\";\n"
         + "    let mut spins: int = 0;\n"
@@ -38,9 +39,9 @@ fn _fixture_source() -> string {
         + "    if exit != 0 { return \"CHILD_FAILED\"; }\n"
         + "    return out;\n"
         + "}\n\n"
-        + "fn main() -> i32 ![io] {\n"
+        + "fn main(argv: string[]) -> i32 ![io] {\n"
         + "    let mode = env.get(\"SAILFIN_TEST_FRAMED_CONSUME_ALLOC_FAILURE\");\n"
-        + "    let out = _drain();\n"
+        + "    let out = _drain(argv[1]);\n"
         + "    if mode == \"result\" {\n"
         + "        if out != \"\" { print.err(\"result=\" + out); return 11; }\n"
         + "        print(\"RESULT_OOM_TERMINATED\");\n"
@@ -84,14 +85,15 @@ test "framed consume: allocation failures terminate and never expose uncompacted
     report_child_failure("SFN-505 fixture build", build_exit, build_out, build_err);
     assert build_exit == 0;
 
-    let result_exit = process.run_capture([binary], _fixture_env("sfn505-result", "result"));
+    let child = process_fixture_bin();
+    let result_exit = process.run_capture([binary, child], _fixture_env("sfn505-result", "result"));
     let result_out = process.capture_take_stdout();
     let result_err = process.capture_take_stderr();
     report_child_failure("SFN-505 result allocation", result_exit, result_out, result_err);
     assert result_exit == 0;
     assert find(result_out, "RESULT_OOM_TERMINATED", 0) >= 0;
 
-    let compact_exit = process.run_capture([binary], _fixture_env("sfn505-compact", "compact"));
+    let compact_exit = process.run_capture([binary, child], _fixture_env("sfn505-compact", "compact"));
     let compact_out = process.capture_take_stdout();
     let compact_err = process.capture_take_stderr();
     report_child_failure("SFN-505 compaction allocation", compact_exit, compact_out, compact_err);

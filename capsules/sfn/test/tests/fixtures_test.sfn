@@ -34,6 +34,7 @@ import {
     git_bash_path,
     host_is_windows,
     nested_runner_scratch,
+    process_fixture_bin,
     scratch_root,
     with_cwd,
     with_env,
@@ -74,41 +75,16 @@ fn _cleanup(path: string) ![io] {
     if fs.exists(path) { fs.deleteFile(path); }
 }
 
-fn _is_windows() -> bool ![io] { return env.get("COMSPEC").length > 0; }
-
-// Windows must name cmd.exe by its absolute COMSPEC path because the child
-// environment is intentionally empty in several cases below. CreateProcess
-// resolves that application path before installing the child's environment.
 fn _env_probe_args(name: string) -> string[] ![io] {
-    if _is_windows() {
-        return [env.get("COMSPEC"), "/d", "/c", "set " + name];
-    }
-    return ["printenv", name];
+    return [process_fixture_bin(), "env", name];
 }
 
 fn _exit_args(code: int) -> string[] ![io] {
-    if _is_windows() {
-        if code == 7 {
-            return [env.get("COMSPEC"), "/d", "/c", "exit /b 7"];
-        }
-        return [env.get("COMSPEC"), "/d", "/c", "exit /b 5"];
-    }
-    if code == 7 { return ["sh", "-c", "exit 7"]; }
-    return ["sh", "-c", "exit 5"];
+    return [process_fixture_bin(), "emit", "", "", number_to_string(code)];
 }
 
-fn _list_cwd_args() -> string[] ![io] {
-    if _is_windows() {
-        return [env.get("COMSPEC"), "/d", "/c", "dir /b"];
-    }
-    return ["ls"];
-}
-
-fn _print_cwd_args() -> string[] ![io] {
-    if _is_windows() {
-        return [env.get("COMSPEC"), "/d", "/c", "cd"];
-    }
-    return ["pwd"];
+fn _exists_args(path: string) -> string[] ![io] {
+    return [process_fixture_bin(), "exists", path];
 }
 
 // The body observes a directory that exists and is named `sfn-test-*`,
@@ -202,11 +178,8 @@ test "with_tmp_dir: body captures an enclosing local" ![io] {
 // the child sees the override, the parent is unchanged, and an empty `Env`
 // yields a child with no environment.
 //
-// POSIX subprocesses use coreutils; Windows uses cmd.exe named by the
-// parent's absolute COMSPEC path. A bare POSIX name is resolved through the
-// parent's PATH before the explicit child environment is installed, while
-// the absolute Win32 application path needs no child PATH. Each body lambda
-// captures nothing, staying within the single-capture constraint above.
+// The shared Sailfin-native child is named by an absolute path, so the scoped
+// environment needs no PATH and behaves identically on Windows and POSIX.
 // The child process sees a variable set only in the scoped `Env`.
 test "with_env: child sees the scoped override" ![io] {
     let r = with_env(_env_probe_args("SFN_WITH_ENV_CHILD"), env_set(env_empty(), "SFN_WITH_ENV_CHILD", "scoped-value"), fn (out: ProcessOutput) -> int {
@@ -243,7 +216,7 @@ test "with_env: parent environment is unchanged by a scoped child env" ![io] {
 test "with_env: empty Env yields a child with no environment" ![io] {
     assert env.get("SAILFIN_TEST_SCRATCH").length > 0;
     let r = with_env(_env_probe_args("SAILFIN_TEST_SCRATCH"), env_empty(), fn (out: ProcessOutput) -> int {
-        if out.exit != 1 { return -1; }
+        if out.exit != 0 { return -1; }
         return out.stdout.length;
     });
     assert r == 0;
@@ -266,52 +239,40 @@ test "with_env: body return value threads back out" ![io] {
 // via `os::run_capture(args, env, cwd)` (#1167 per-child cwd, no global
 // `chdir`), threading the captured `ProcessOutput` to `body`. These tests
 // prove: the child runs in the scoped cwd, it composes with `with_tmp_dir`,
-// and the parent's cwd is untouched. `env_empty()` is fine because the POSIX
-// utilities resolve before the child environment is installed and Windows
-// names cmd.exe by absolute COMSPEC path. Each body lambda captures at most
-// one local, honoring the single-capture constraint.
-// The child runs in the temp dir handed down by `with_tmp_dir`: a marker
-// file written into that dir shows up in a bare `ls` (which lists the cwd),
-// proving the child's cwd is the scoped dir. Also exercises nesting.
+// and the parent's cwd is untouched. The child uses an absolute executable
+// path, so `env_empty()` is sufficient on every host. Each body lambda
+// captures at most one local, honoring the single-capture constraint.
+// The child runs in the temp dir handed down by `with_tmp_dir`, where a marker
+// is visible only when the scoped cwd was applied. Also exercises nesting.
 test "with_cwd: child runs in the scoped cwd (nested under with_tmp_dir)" ![io] {
     let r = with_tmp_dir(fn (dir: string) -> int {
         fs.writeFile(dir + "/sfn-cwd-marker.txt", "x");
-        return with_cwd(_list_cwd_args(), env_empty(), dir, fn (out: ProcessOutput) -> int {
-            if out.exit != 0 { return -1; }
-            if find(out.stdout, "sfn-cwd-marker.txt", 0) >= 0 { return 1; }
-            return 0;
-        });
-    });
-    assert r == 1;
-}
-
-// A scoped cwd never leaks into the parent: an inherited-cwd child (empty
-// cwd) reports the parent's working directory, and that reading is identical
-// before and after a `with_cwd` into a different directory — proving no
-// process-global `chdir` happened. The pwd strings are ferried out through
-// marker files (the body returns `int`, so it cannot return the string).
-test "with_cwd: parent process cwd is unchanged by a scoped child cwd" ![io] {
-    let m_before = _marker("cwd-before");
-    let m_after = _marker("cwd-after");
-    let _a = with_cwd(_print_cwd_args(), env_empty(), "", fn (out: ProcessOutput) -> int {
-        fs.writeFile(m_before, out.stdout);
-        return 0;
-    });
-    let _mid = with_tmp_dir(fn (dir: string) -> int {
-        return with_cwd(_print_cwd_args(), env_empty(), dir, fn (out: ProcessOutput) -> int {
+        return with_cwd(_exists_args("sfn-cwd-marker.txt"), env_empty(), dir, fn (out: ProcessOutput) -> int {
             return out.exit;
         });
     });
-    let _b = with_cwd(_print_cwd_args(), env_empty(), "", fn (out: ProcessOutput) -> int {
-        fs.writeFile(m_after, out.stdout);
-        return 0;
+    assert r == 0;
+}
+
+// A scoped cwd never leaks into the parent: an inherited-cwd child (empty
+// cwd) sees a repository-root marker both before and after a `with_cwd` into
+// a different directory, proving no process-global `chdir` happened.
+test "with_cwd: parent process cwd is unchanged by a scoped child cwd" ![io] {
+    let before = with_cwd(_exists_args("compiler/capsule.toml"), env_empty(), "", fn (out: ProcessOutput) -> int {
+        return out.exit;
     });
-    let before = fs.readFile(m_before);
-    let after = fs.readFile(m_after);
-    assert before.length > 0;
-    assert before == after;
-    _cleanup(m_before);
-    _cleanup(m_after);
+    let mid = with_tmp_dir(fn (dir: string) -> int {
+        fs.writeFile(dir + "/cwd-probe", "present\n");
+        return with_cwd(_exists_args("cwd-probe"), env_empty(), dir, fn (out: ProcessOutput) -> int {
+            return out.exit;
+        });
+    });
+    let after = with_cwd(_exists_args("compiler/capsule.toml"), env_empty(), "", fn (out: ProcessOutput) -> int {
+        return out.exit;
+    });
+    assert before == 0;
+    assert mid == 0;
+    assert after == 0;
 }
 
 // The captured `ProcessOutput` threads back through the helper: a body

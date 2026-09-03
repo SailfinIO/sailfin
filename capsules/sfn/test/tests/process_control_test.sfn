@@ -11,24 +11,22 @@
 // asynchronously and bails out at its deadline rather than beyond it — the
 // properties a shell vehicle could not guarantee.
 //
-// Absolute binary paths are used throughout: `env` here is a genuinely empty
-// child environment (not an inherited one), so bare-name `PATH` lookup is not
-// available. Each binary is probed with `fs.exists` and the test skips itself
-// (`assert true`) when absent, mirroring the `command -v` skip precedent this
-// module retires (`docs/conventions/e2e-tests.md`).
+// Absolute binary paths are used throughout because each child receives a
+// genuinely empty environment with no PATH lookup. The shared native fixture
+// makes the same scenarios runnable on Windows and POSIX.
 import { ProcessDrain, ProcessHandle, env_empty } from "sfn/os";
 import { find } from "sfn/strings";
 
 import {
     Background,
     describe_outcome,
+    process_fixture_bin,
+    scratch_root,
     start_background,
     stop_background,
     wait_until,
     with_background
 } from "../src/mod";
-
-fn _has_bin(path: string) -> boolean ![io] { return fs.exists(path); }
 
 // Fixed marker path for the `wait_until` readiness test. A file-local
 // helper (not a captured local) so the probe lambda below can call it
@@ -39,18 +37,14 @@ fn _has_bin(path: string) -> boolean ![io] { return fs.exists(path); }
 // avoids it; the helper keeps the probe capture-free either way. Mirrors
 // `_scratch()` in `fixtures_test.sfn`.
 fn _marker_path() -> string ![io] {
-    let dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length > 0 { return dir + "/sfn-process-control-wait-until.marker"; }
-    return "/tmp/sfn-process-control-wait-until.marker";
+    return scratch_root() + "/sfn-process-control-wait-until.marker";
 }
 
 // A distinct marker for the stdin-EOF test, so the two never alias when
 // both run under the same scratch dir. Same capture-free helper shape as
 // `_marker_path` above, and for the same reason.
 fn _stdin_marker_path() -> string ![io] {
-    let dir = env.get("SAILFIN_TEST_SCRATCH");
-    if dir.length > 0 { return dir + "/sfn-process-control-stdin-eof.marker"; }
-    return "/tmp/sfn-process-control-stdin-eof.marker";
+    return scratch_root() + "/sfn-process-control-stdin-eof.marker";
 }
 
 // `wait_until` polls in-process rather than forking `sleep` per tick. The
@@ -62,15 +56,9 @@ fn _stdin_marker_path() -> string ![io] {
 // shows up, exercising the same "false, then true" behavior asynchronously
 // instead of via a captured clock reading.
 test "process control: wait_until returns true once the probe becomes true" ![clock, io] {
-    if !_has_bin("/bin/sh") || !_has_bin("/bin/sleep") || !_has_bin("/bin/touch") {
-        assert true;
-        return;
-    }
     let marker = _marker_path();
     if fs.exists(marker) { fs.deleteFile(marker); }
-    let bg = start_background(["/bin/sh", "-c", "/bin/sleep 0.2; /bin/touch '"
-        + marker
-        + "'"], env_empty(), "", "wait-until-marker");
+    let bg = start_background([process_fixture_bin(), "touch-after", "200", marker], env_empty(), "", "wait-until-marker");
     let became_true = wait_until(fn () -> boolean {
         return fs.exists(_marker_path());
     }, 5000, 20);
@@ -92,11 +80,7 @@ test "process control: wait_until returns false when the deadline expires" ![clo
 // The body's return value threads back out through the fixture, proving it
 // actually ran against the live `Background` rather than being skipped.
 test "process control: with_background runs the body and threads its result" ![clock, io] {
-    if !_has_bin("/bin/sleep") {
-        assert true;
-        return;
-    }
-    let result = with_background(["/bin/sleep", "30"], env_empty(), "", "bg-normal", fn (bg: Background) -> int {
+    let result = with_background([process_fixture_bin(), "emit", "", "", "0", "30000"], env_empty(), "", "bg-normal", fn (bg: Background) -> int {
         if bg.handle.handle_id == 0 { return -1; }
         return 99;
     });
@@ -106,13 +90,9 @@ test "process control: with_background runs the body and threads its result" ![c
 // A throwing body still gets its background child reaped, and the original
 // error propagates rather than being swallowed by teardown.
 test "process control: with_background reaps on the throwing path" ![clock, io] {
-    if !_has_bin("/bin/sleep") {
-        assert true;
-        return;
-    }
     let mut threw = false;
     try {
-        let _ = with_background(["/bin/sleep", "30"], env_empty(), "", "bg-throw", fn (bg: Background) -> int {
+        let _ = with_background([process_fixture_bin(), "emit", "", "", "0", "30000"], env_empty(), "", "bg-throw", fn (bg: Background) -> int {
             throw "process-control-body-boom";
         });
     } catch (e) { threw = true; }
@@ -125,11 +105,7 @@ test "process control: with_background reaps on the throwing path" ![clock, io] 
 // assertion would fail rather than silently pass, unlike a test that only
 // checks a thrown error propagated.
 test "process control: stop_background reaps a SIGKILLed child" ![clock, io] {
-    if !_has_bin("/bin/sleep") {
-        assert true;
-        return;
-    }
-    let bg = start_background(["/bin/sleep", "30"], env_empty(), "", "bg-reap-check");
+    let bg = start_background([process_fixture_bin(), "emit", "", "", "0", "30000"], env_empty(), "", "bg-reap-check");
     let outcome = stop_background(bg);
     assert outcome.exit == 137;
     assert ! outcome.timed_out;
@@ -147,18 +123,12 @@ test "process control: stop_background reaps a SIGKILLed child" ![clock, io] {
 // are only distinguishable if the kill loses a race. Here the child drains
 // stdin and only then creates a marker, so the marker exists if and only
 // if stdin reached EOF while the child was running in the background.
-// Without the close in `start_background`, `cat` blocks forever, the
+// Without the close in `start_background`, the fixture blocks forever, the
 // marker never appears, and `wait_until` reports false.
 test "process control: start_background closes stdin so a reading child sees EOF" ![clock, io] {
-    if !_has_bin("/bin/sh") || !_has_bin("/bin/cat") || !_has_bin("/bin/touch") {
-        assert true;
-        return;
-    }
     let marker = _stdin_marker_path();
     if fs.exists(marker) { fs.deleteFile(marker); }
-    let bg = start_background(["/bin/sh", "-c", "/bin/cat > /dev/null; /bin/touch '"
-        + marker
-        + "'"], env_empty(), "", "bg-stdin-eof");
+    let bg = start_background([process_fixture_bin(), "wait-stdin", marker], env_empty(), "", "bg-stdin-eof");
     let saw_eof = wait_until(fn () -> boolean {
         return fs.exists(_stdin_marker_path());
     }, 5000, 20);

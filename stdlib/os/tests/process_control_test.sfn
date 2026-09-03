@@ -2,9 +2,10 @@
 // handle_kill, the EOF/fd accessors, and the stderr chunk-read twin).
 // `drain_to_exit` demultiplexes a child's stdout/stderr with an optional
 // wall-clock deadline; `run_bounded` layers `spawn_with_env` on top.
-// POSIX `sh`/`cat` assumed, matching the sibling `handle_framed_stdio_test`.
+// The shared Sailfin-native child keeps the scenarios identical on Windows
+// and POSIX without relying on a shell or host utilities.
 import { find } from "sfn/strings";
-import { sfn_bin_abs_path, skip } from "sfn/test";
+import { process_fixture_bin, sfn_bin_abs_path, skip } from "sfn/test";
 
 import {
     ProcessDrain,
@@ -33,7 +34,7 @@ fn _is_windows() -> bool ![io] {
 }
 
 test "drain_to_exit: collects stdout from a child that exits on its own" ![clock, io] {
-    let h = spawn_with_env(["sh", "-c", "printf 'hello'"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "hello", "", "0", "0"], env_empty(), "");
     assert h.handle_id != 0;
     let d = drain_to_exit(h, 0);
     assert strings_equal(d.stdout, "hello");
@@ -42,7 +43,7 @@ test "drain_to_exit: collects stdout from a child that exits on its own" ![clock
 }
 
 test "drain_to_exit: keeps stdout and stderr separate" ![clock, io] {
-    let h = spawn_with_env(["sh", "-c", "printf 'out-side' >&1; printf 'err-side' >&2"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "out-side", "err-side", "0", "0"], env_empty(), "");
     assert h.handle_id != 0;
     let d = drain_to_exit(h, 0);
     assert strings_equal(d.stdout, "out-side");
@@ -52,7 +53,7 @@ test "drain_to_exit: keeps stdout and stderr separate" ![clock, io] {
 }
 
 test "drain_to_exit: deadline_ms <= 0 waits indefinitely for a fast child" ![clock, io] {
-    let h = spawn_with_env(["sh", "-c", "printf 'done'"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "done", "", "0", "0"], env_empty(), "");
     assert h.handle_id != 0;
     let d = drain_to_exit(h, -1);
     assert strings_equal(d.stdout, "done");
@@ -61,7 +62,7 @@ test "drain_to_exit: deadline_ms <= 0 waits indefinitely for a fast child" ![clo
 }
 
 test "drain_to_exit: fires the deadline on a long-sleeping child" ![clock, io] {
-    let h = spawn_with_env(["sh", "-c", "sleep 30"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "", "", "0", "30000"], env_empty(), "");
     assert h.handle_id != 0;
     let start = monotonic_millis();
     let d = drain_to_exit(h, 500);
@@ -85,14 +86,14 @@ test "run_bounded: a stdin filter sees EOF and exits rather than hanging" ![cloc
     // would hang forever with no deadline set, unless `drain_to_exit`
     // closes stdin first. No deadline here on purpose: a deadline would
     // mask the hang as a timeout instead of failing.
-    let d = run_bounded(["cat"], env_empty(), "", 0);
+    let d = run_bounded([process_fixture_bin(), "echo"], env_empty(), "", 0);
     assert strings_equal(d.stdout, "");
     assert d.timed_out == false;
     assert d.exit == 0;
 }
 
 test "run_bounded: normal child returns output and exit 0" ![clock, io] {
-    let d = run_bounded(["sh", "-c", "printf 'ran'"], env_empty(), "", 0);
+    let d = run_bounded([process_fixture_bin(), "emit", "ran", "", "0", "0"], env_empty(), "", 0);
     assert strings_equal(d.stdout, "ran");
     assert d.exit == 0;
     assert d.timed_out == false;
@@ -105,7 +106,7 @@ test "run_bounded: nonexistent binary returns exit 127" ![clock, io] {
 }
 
 test "handle_kill: kills a live child then handle_wait reaps it" ![io] {
-    let h = spawn_with_env(["cat"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "wait-stdin"], env_empty(), "");
     assert h.handle_id != 0;
     let rc = handle_kill(h);
     assert rc == 0;
@@ -175,7 +176,7 @@ test "handle_read_chunk_stdout: a live silent child yields empty rather than par
 }
 
 test "handle_read_chunk_stdout: bounded incremental read, empty string at EOF" ![io] {
-    let h = spawn_with_env(["sh", "-c", "printf 'abcdefgh'"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "abcdefgh", "", "0", "0"], env_empty(), "");
     assert h.handle_id != 0;
     // Retried rather than read once. Since SFN-1092 the Windows chunk
     // reads are bounded, so a single read can return empty simply because
@@ -201,7 +202,7 @@ test "handle_read_chunk_stdout: bounded incremental read, empty string at EOF" !
 }
 
 test "handle_read_chunk_stderr: reads the stderr twin" ![io] {
-    let h = spawn_with_env(["sh", "-c", "printf 'oops' >&2"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "", "oops", "0", "0"], env_empty(), "");
     assert h.handle_id != 0;
     // Retried for the same reason as the stdout twin above: a bounded read
     // can return empty before the child has written (SFN-1092).
@@ -221,7 +222,7 @@ test "handle_read_chunk_stderr: reads the stderr twin" ![io] {
 }
 
 test "handle_stdout_at_eof / handle_stderr_at_eof: false mid-stream, true after drain" ![io] {
-    let h = spawn_with_env(["sh", "-c", "printf 'x' >&1; printf 'y' >&2"], env_empty(), "");
+    let h = spawn_with_env([process_fixture_bin(), "emit", "x", "y", "0", "0"], env_empty(), "");
     assert h.handle_id != 0;
     // Mid-stream: neither pipe has been drained to EOF yet.
     assert handle_stdout_at_eof(h) == false;
