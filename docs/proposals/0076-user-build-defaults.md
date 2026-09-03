@@ -1,11 +1,11 @@
 ---
 sfep: 76
 title: User-Level Build Defaults
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-09-03
 updated: 2026-09-03
-author: "agent:Sailbot; owner-directed investigation; human review pending"
+author: "agent:Sailbot; owner-directed investigation; project owner acceptance"
 tracking: SFN-1257, SFN-1256, SFN-1258
 supersedes:
 superseded-by:

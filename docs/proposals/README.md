@@ -98,7 +98,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0073](./0073-toolchain-lifecycle.md) | Installed Toolchain Lifecycle, Exact Selection, and Update Policy | Accepted | tooling |
 | [0074](./0074-repo-tooling-ownership.md) | Repo Tooling Ownership — Retiring `scripts/` into Native Verbs | Accepted | tooling |
 | [0075](./0075-struct-value-semantics.md) | Struct Value Semantics and the Mutability Floor | Draft | language |
-| [0076](./0076-user-build-defaults.md) | User-Level Build Defaults | Draft | tooling |
+| [0076](./0076-user-build-defaults.md) | User-Level Build Defaults | Accepted | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
