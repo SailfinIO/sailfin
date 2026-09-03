@@ -1,0 +1,91 @@
+// Unit coverage for the shared runtime-bundle resolution contract
+// (SFN-1088, `compiler/src/cli/runtime_root.sfn`). `resolve_runtime_bundle_root`
+// and `runtime_bundle_probe_lines` both derive from `runtime_bundle_candidates`,
+// so the string-shape assertions here pin the one definition every linking
+// command (`build`, `run`, bare-file dispatch, `test`) now shares.
+import {
+    expect_contains_str,
+    expect_eq_int,
+    expect_eq_str,
+    expect_eq_str_array,
+    with_tmp_dir
+} from "sfn/test";
+
+import {
+    resolve_runtime_bundle_root,
+    runtime_bundle_candidates,
+    runtime_bundle_probe_lines
+} from "../../src/cli/runtime_root";
+
+test "cli runtime root: an empty context root yields the cwd-relative candidate only" ![pure] {
+    assert expect_eq_str_array(runtime_bundle_candidates(""), ["runtime"]).ok;
+}
+
+// The candidate set is precedence, not a ladder: a startup root is used as
+// given and the cwd bundle never stands in for one that fails to validate.
+// That is what keeps an explicit `$SAILFIN_RUNTIME_ROOT` (which
+// `resolve_runtime_root` returns verbatim, unvalidated) from being silently
+// replaced by whatever `runtime/` the cwd happens to hold — and it is what
+// makes `runtime_bundle_probe_lines` exact when re-derived from a resolved
+// root, since the set then depends only on whether that root is empty.
+test "cli runtime root: a non-empty context root is the only candidate" ![pure] {
+    let candidates = runtime_bundle_candidates("/opt/sailfin/store/0.10.6");
+    assert expect_eq_str_array(candidates, ["/opt/sailfin/store/0.10.6"]).ok;
+}
+
+test "cli runtime root: a context root that does not exist is still not substituted" ![pure] {
+    assert expect_eq_str_array(runtime_bundle_candidates("/no/such/store/0.0.0"), ["/no/such/store/0.0.0"]).ok;
+}
+
+// Windows path shapes are pure string assertions with no `host_is_windows()`
+// gate — they exercise byte-for-byte preservation only, so they must run on
+// every host.
+test "cli runtime root: a drive-letter backslash root survives byte-for-byte" ![pure] {
+    let root = "C:\\Users\\me\\.sailfin\\store\\0.10.6";
+    assert expect_eq_str_array(runtime_bundle_candidates(root), [root]).ok;
+}
+
+test "cli runtime root: a UNC root survives byte-for-byte" ![pure] {
+    let root = "\\\\server\\share\\sailfin";
+    assert expect_eq_str_array(runtime_bundle_candidates(root), [root]).ok;
+}
+
+test "cli runtime root: probe lines name the drive-letter root verbatim" ![pure] {
+    let root = "C:\\Users\\me\\.sailfin\\store\\0.10.6";
+    let lines = runtime_bundle_probe_lines(root);
+    assert expect_contains_str(lines[0], root + "/capsule.toml").ok;
+}
+
+test "cli runtime root: an empty root probe report has one line and no stale phrasing" ![pure] {
+    let lines = runtime_bundle_probe_lines("");
+    assert expect_eq_int(lines.length, 1).ok;
+    assert expect_eq_str(lines[0], "     probed runtime/capsule.toml").ok;
+    // Regression: the pre-SFN-1088 diagnostic interpolated the empty root
+    // directly into "expected <root>/capsule.toml" and rendered
+    // "expected /capsule.toml" when the root came back empty.
+    assert expect_contains_str(lines[0], "expected /capsule.toml").ok == false;
+}
+
+test "cli runtime root: probe line count matches candidate count" ![pure] {
+    assert expect_eq_int(runtime_bundle_probe_lines("").length, runtime_bundle_candidates("").length).ok;
+    assert expect_eq_int(runtime_bundle_probe_lines("/opt/x").length, runtime_bundle_candidates("/opt/x").length).ok;
+}
+
+// `resolve_runtime_bundle_root` returning its input unchanged when nothing
+// resolves is deliberately NOT covered here: the unit suite runs with the
+// repo root as cwd, where `runtime/capsule.toml` already exists, so the
+// cwd-relative candidate always resolves and that assertion would be wrong
+// for this suite's cwd. That case belongs to
+// `compiler/tests/e2e/installed_toolchain_test_command_test.sfn`, which
+// controls cwd via a child process.
+test "cli runtime root: resolves a real bundle root over the io boundary" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let rt = dir + "/rt";
+        fs.createDirectory(rt, true);
+        fs.writeFile(rt + "/capsule.toml", "[capsule]\nname = \"runtime\"\n");
+        let resolved = resolve_runtime_bundle_root(rt);
+        if resolved != rt { return 1; }
+        return 0;
+    });
+    assert outcome == 0;
+}

@@ -30,41 +30,60 @@
 // fourth consumer proves the drift already happened.
 //
 // `resolve_runtime_bundle_root` and `runtime_bundle_probe_lines` share
-// `runtime_bundle_candidates` so the diagnostic can only ever name the
-// locations resolution actually considered. They take the raw context root
-// as a `string` rather than a `CliContext` so the deep link sites
-// (`build/link.sfn`, `commands/test/link.sfn`), which hold only the resolved
-// path, can render the report without threading the context down to them.
+// `runtime_bundle_candidates` so the diagnostic can only ever name locations
+// resolution actually walked. That identity is what makes the candidate list
+// PRECEDENCE rather than a ladder: the cwd bundle is consulted only when the
+// startup probe produced nothing at all, never as a rescue for a startup root
+// that failed to validate. A ladder would break the identity in both
+// directions. `_runtime_bundle_exists` accepts any `capsule.toml`, while the
+// link stage additionally requires `kind = "runtime"`
+// (`runtime_capsule_from_root`), so a ladder could resolve candidate 0,
+// bail at the link anyway, and leave the report re-deriving a two-entry list
+// from a root that was reached without ever probing the second — naming a
+// location nothing looked at, and in the mirror case printing the cwd bundle
+// twice while omitting the install path that actually failed. It would also
+// let an explicit `$SAILFIN_RUNTIME_ROOT` that failed to validate be silently
+// replaced by whatever `runtime/` the cwd happens to hold, linking a runtime
+// the invocation did not ask for. With exactly one candidate per input the
+// report is exact by construction, and this is byte-for-byte the rule
+// `build`/`run` carried before SFN-1088.
+//
+// Both take the raw context root as a `string` rather than a `CliContext` so
+// `commands/test/link.sfn` can render the report from the value it already
+// holds. `build/link.sfn` keeps its own message: it imports nothing from
+// `cli/` today, and inverting that direction to reword a diagnostic that
+// already guards its empty case is not worth the layering cost.
 import { _runtime_bundle_exists } from "../build/runtime_objs";
 
-// The ordered runtime-bundle candidates for a CLI command, given the
-// process-startup root the driver prefix carried. The sole definition of
-// what "the runtime bundle root" may be:
+// The runtime-bundle candidates for a CLI command, given the process-startup
+// root the driver prefix carried. The sole definition of what "the runtime
+// bundle root" may be — and it is a choice of one, not a search:
 //
-//   1. `ctx.runtime_root` — the startup probe's answer, already
-//      install-root-pointer corrected by `cli/entry.sfn`. Absent (empty)
-//      whenever that probe found nothing.
-//   2. `runtime` relative to the cwd — the in-checkout shape, which is how
-//      a compiler invoked by a name it cannot walk back from still finds the
-//      bundle it was built beside.
+//   * `ctx.runtime_root` when the startup probe produced one, already
+//     install-root-pointer corrected by `cli/entry.sfn`. It is used as given;
+//     nothing overrides it, so an explicit `$SAILFIN_RUNTIME_ROOT` or an
+//     installed toolchain's own payload cannot be silently swapped out.
+//   * `runtime` relative to the cwd otherwise — the in-checkout shape, which
+//     is how a compiler invoked by a name it cannot walk back from still
+//     finds the bundle it was built beside.
 //
-// Order is precedence: an installed toolchain's own bundle always outranks
-// whatever `runtime/` the cwd happens to contain.
+// Returning a `string[]` rather than a single string is what lets
+// `runtime_bundle_probe_lines` report the set without restating the rule.
 fn runtime_bundle_candidates(ctx_root: string) -> string[] {
-    let mut candidates: string[] = [];
-    if ctx_root.length > 0 { candidates.push(ctx_root); }
-    candidates.push("runtime");
-    return candidates;
+    if ctx_root.length > 0 { return [ctx_root]; }
+    return ["runtime"];
 }
 
-// The first candidate that is a real runtime bundle, else `ctx_root`
-// unchanged.
+// The candidate when it is a real runtime bundle, else `ctx_root` unchanged.
 //
-// Returning `ctx_root` rather than "" on total failure is deliberate: it
-// preserves the pre-SFN-1088 value every caller already passed downstream,
-// so a failing invocation reaches the same link-stage diagnostic it always
-// did, and `runtime_bundle_probe_lines` re-derives the identical candidate
-// list from it.
+// Returning `ctx_root` rather than "" on failure is deliberate: it preserves
+// the pre-SFN-1088 value every caller already passed downstream, so a failing
+// invocation reaches the same link-stage diagnostic it always did, and
+// `runtime_bundle_probe_lines` re-derives the identical candidate list from
+// it. That re-derivation is exact for every input, because the candidate set
+// depends only on whether the root is empty — a property this function never
+// changes: it returns either the non-empty candidate it validated, or a
+// non-empty `ctx_root`, or the empty `ctx_root` it was given.
 fn resolve_runtime_bundle_root(ctx_root: string) -> string ![io] {
     let candidates = runtime_bundle_candidates(ctx_root);
     let mut i: int = 0;
@@ -80,10 +99,13 @@ fn resolve_runtime_bundle_root(ctx_root: string) -> string ![io] {
 // pre-indented to sit under a `sfn <command>: ...` headline.
 //
 // Rendered from `runtime_bundle_candidates`, so a candidate added to
-// resolution cannot silently go unreported. When the startup probe came back
-// empty the list is just the cwd bundle — which is the honest report, and
-// strictly better than interpolating an empty root into a message that then
-// reads `expected /capsule.toml`.
+// resolution cannot silently go unreported. Callers pass the resolved root:
+// `resolve_runtime_bundle_root` preserves emptiness, and the candidate set is
+// a function of emptiness alone, so the resolved root re-derives exactly the
+// set that was walked. When the startup probe came back empty the list is
+// just the cwd bundle — the honest report, and strictly better than
+// interpolating an empty root into a message that reads
+// `expected /capsule.toml`.
 fn runtime_bundle_probe_lines(ctx_root: string) -> string[] {
     let candidates = runtime_bundle_candidates(ctx_root);
     let mut lines: string[] = [];

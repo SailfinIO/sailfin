@@ -17,11 +17,11 @@
 // `compiler/tests/e2e/build_diagnostics_format_test.sfn`,
 // `compiler/tests/e2e/capsule_artifact_sidecar_test.sfn`).
 //
-// The `runtime_root` empty→"runtime" bundle fallback is reproduced from
-// the legacy caller (see `run` body below, Step 1d): `parse_driver_prefix`
-// deliberately does NOT apply it, so it lives here. `binary_dir` is
-// threaded from the driver-parsed `CliContext`, replacing the legacy
-// handler's extra param.
+// The runtime-bundle probe `parse_driver_prefix` deliberately does NOT
+// apply — it is a filesystem question, not argv parsing — now lives in
+// `cli/runtime_root.sfn` (SFN-1088), shared with `run`, bare-file dispatch
+// and `test`. `binary_dir` is threaded from the driver-parsed `CliContext`,
+// replacing the legacy handler's extra param.
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import {
     Command,
@@ -148,8 +148,9 @@ fn _unsupported_ambient_target_diagnostic(triple: string) -> Diagnostic {
 
 // Reproduce the legacy `_legacy_dispatch_build` body against typed matches.
 // Flag reads replace the hand-rolled argv walk; the build body is verbatim.
-// The `runtime_root` empty→"runtime" fallback is applied here (not in
-// `parse_driver_prefix`) because it is a filesystem probe, not argv parsing.
+// `runtime_root` resolves through `cli/runtime_root.sfn` (SFN-1088) rather
+// than inline: the startup root is used as given when there is one, and the
+// cwd bundle stands in only when there is not.
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let out_path: string = get_or(matches, "o", "");
     let mut capsule_path: string = get_or(matches, "p", "");

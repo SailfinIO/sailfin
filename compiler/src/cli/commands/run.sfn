@@ -22,11 +22,11 @@
 // routes back through `sailfin_cli_main_v2` to this command — so the
 // bare-file path shares this exact body.
 //
-// The `runtime_root` empty→"runtime" bundle fallback is reproduced from the
-// legacy caller (it is a filesystem probe, not argv parsing, so
-// `parse_driver_prefix` deliberately does not apply it). `binary_dir` is
-// threaded from the driver-parsed `CliContext`, replacing the legacy
-// handler's extra param.
+// The runtime-bundle probe `parse_driver_prefix` deliberately does not
+// apply — it is a filesystem question, not argv parsing — now lives in
+// `cli/runtime_root.sfn` (SFN-1088), shared with `build`, bare-file dispatch
+// and `test`. `binary_dir` is threaded from the driver-parsed `CliContext`,
+// replacing the legacy handler's extra param.
 import {
     Command,
     Matches,
@@ -131,8 +131,9 @@ fn _release_run_stem(claimed: boolean, exe_path: string, ll_path: string, work_d
 
 // Reproduce the legacy `_legacy_dispatch_run` body against typed matches.
 // Flag reads replace the hand-rolled argv walk; the build-then-exec body is
-// verbatim. The `runtime_root` empty→"runtime" fallback is applied here (not
-// in `parse_driver_prefix`) because it is a filesystem probe, not argv parsing.
+// verbatim. `runtime_root` resolves through `cli/runtime_root.sfn`
+// (SFN-1088) rather than inline: the startup root is used as given when there
+// is one, and the cwd bundle stands in only when there is not.
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let no_cache_flag: boolean = has_flag(matches, "no-cache");
     let clean_flag: boolean = has_flag(matches, "clean");
