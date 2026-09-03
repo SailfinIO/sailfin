@@ -1,0 +1,38 @@
+// Cross-checks the member-form builtin arity mirror (SFN-1090) against the
+// lowering-side `RuntimeHelperDescriptor` registry it shadows.
+//
+// `call_signature.sfn` cannot import the registry directly — it lives in
+// `compiler/capsules/codegen-llvm/src/`, inside the `sfn/compiler` graph,
+// which already depends on `sfn/analyzer`, so importing it would close a
+// capsule cycle. `builtin_member_arity` is therefore a deliberate mirror,
+// pinned honest by this test, which sits in the root `sfn/compiler` capsule
+// and can import both sides.
+//
+// A failure here means a target was renamed or removed on the lowering side
+// without the mirror following. Fix the table, do not relax the test.
+import { builtin_member_arity } from "sfn/analyzer/typecheck/call_signature";
+import { find_runtime_helper } from "sfn/codegen-llvm/runtime_helpers/mod";
+
+fn _pinned_targets() -> string[] {
+    return ["fs.appendFile", "fs.createDirectory", "fs.deleteFile", "fs.exists", "fs.get_perms", "fs.is_directory", "fs.is_executable", "fs.mkdtemp", "fs.readFile", "fs.read_link", "fs.removeDirectory", "fs.set_perms", "fs.symlink", "fs.writeFile", "fs.writeLines", "http.download", "http.get_body", "http.post", "io.poll_any", "io.poll_readable", "io.read_fd", "io.read_line", "process.capture_take_peak_rss_kb", "process.capture_take_stderr", "process.capture_take_stdout", "process.capture_take_wall_ms", "process.exec", "process.exit", "process.handle_close_stdin", "process.handle_kill", "process.handle_read_bytes_stderr", "process.handle_read_bytes_stdout", "process.handle_read_line_stdout", "process.handle_read_stderr", "process.handle_read_stdout", "process.handle_stderr_at_eof", "process.handle_stderr_fd", "process.handle_stdout_at_eof", "process.handle_stdout_fd", "process.handle_wait", "process.handle_write", "process.handle_write_bytes", "process.run", "process.run_capture", "process.run_capture_cwd", "process.run_capture_metered", "process.run_capture_rlimit_as", "process.spawn_with_env", "process.spawn_with_env_cwd", "tls.last_alert", "tls.last_error"];
+}
+
+// Every pinned target must still resolve to a lowering descriptor — a
+// renamed or removed intrinsic would otherwise leave a stale mirror entry
+// that silently stops firing (E0420 catches the callee itself before this
+// check ever runs, but a rename to a *different existing* target would not).
+test "call signature: every pinned member target has a lowering descriptor" {
+    let targets = _pinned_targets();
+    let mut i: int = 0;
+    loop {
+        if i >= targets.length { break; }
+        let descriptor = find_runtime_helper(targets[i]);
+        assert descriptor != null;
+        // The ABI parameter list can only ever be longer than the source
+        // arity — strings and arrays expand to ptr+len slots before
+        // lowering (`fs.writeFile` is 2 source args, 3 ABI params) — so
+        // equality cannot be asserted, only this one-directional bound.
+        assert descriptor.parameter_types.length >= builtin_member_arity(targets[i]);
+        i += 1;
+    }
+}

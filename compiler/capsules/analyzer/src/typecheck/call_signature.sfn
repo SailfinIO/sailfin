@@ -35,6 +35,7 @@ import { Expression } from "sfn/syntax";
 import { ImportedFunctionSignature, lookup_imported_function } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
 import { is_builtin_call_name } from "../typecheck_types/extern_abi";
+import { find_value_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { token_from_name, trim_text, typecheck_int_to_string } from "../typecheck_types/text_utils";
 import { TypeckCtx } from "./context";
 import {
@@ -108,6 +109,81 @@ fn builtin_arity(name: string) -> int {
     if strings_equal(name, "atomic_fence") { return 0; }
     if strings_equal(name, "load_byte") { return 1; }
     if strings_equal(name, "secure_zero") { return 2; }
+    return -1;
+}
+
+// Source-level argument counts for member-form builtin calls
+// (`fs.removeDirectory(...)`), keyed on the dotted `receiver.member` target.
+// This is deliberately *not* derived from `parameter_types` on the lowering
+// registry's `RuntimeHelperDescriptor` — that list is the LLVM ABI, not
+// source arity: strings and arrays expand to ptr+len slots before lowering,
+// so `fs.writeFile(path, content)` is 2 source arguments but 3 ABI params.
+// Counts below are established empirically from every in-tree call site
+// across `compiler/`, `runtime/` and `capsules/`; each was unanimous.
+//
+// Deliberately excluded, and why: `print.*` — the `builtin_arity` comment
+// above already records that `print` takes a single aggregated operand whose
+// arity the parser does not preserve faithfully, and the member forms
+// inherit that same doubt; `console.*` — no lowering target at all, per the
+// same comment; `env.*`, `fs.listDirectory`, `process.environ` — no
+// descriptor in the lowering registry, so the sync test cannot pin them;
+// and registry targets with no in-tree call site to establish source arity
+// from: `fs.read_bytes`, `fs.write_bytes`, `http.get`, `http.post_json`,
+// `number.to_string`, `rc.release`, `runtime.*`, `string.*`, `websocket.*`,
+// `base64.*`, `crypto.*`, `array.*`, `intrinsic.*`. Returning -1 means "not
+// pinned", same convention as `builtin_arity`.
+fn builtin_member_arity(target: string) -> int {
+    if strings_equal(target, "fs.appendFile") { return 2; }
+    if strings_equal(target, "fs.createDirectory") { return 2; }
+    if strings_equal(target, "fs.deleteFile") { return 1; }
+    if strings_equal(target, "fs.exists") { return 1; }
+    if strings_equal(target, "fs.get_perms") { return 1; }
+    if strings_equal(target, "fs.is_directory") { return 1; }
+    if strings_equal(target, "fs.is_executable") { return 1; }
+    if strings_equal(target, "fs.mkdtemp") { return 1; }
+    if strings_equal(target, "fs.readFile") { return 1; }
+    if strings_equal(target, "fs.read_link") { return 1; }
+    if strings_equal(target, "fs.removeDirectory") { return 1; }
+    if strings_equal(target, "fs.set_perms") { return 2; }
+    if strings_equal(target, "fs.symlink") { return 2; }
+    if strings_equal(target, "fs.writeFile") { return 2; }
+    if strings_equal(target, "fs.writeLines") { return 2; }
+    if strings_equal(target, "http.download") { return 2; }
+    if strings_equal(target, "http.get_body") { return 1; }
+    if strings_equal(target, "http.post") { return 2; }
+    if strings_equal(target, "io.poll_any") { return 2; }
+    if strings_equal(target, "io.poll_readable") { return 2; }
+    if strings_equal(target, "io.read_fd") { return 2; }
+    if strings_equal(target, "io.read_line") { return 1; }
+    if strings_equal(target, "process.capture_take_peak_rss_kb") { return 0; }
+    if strings_equal(target, "process.capture_take_stderr") { return 0; }
+    if strings_equal(target, "process.capture_take_stdout") { return 0; }
+    if strings_equal(target, "process.capture_take_wall_ms") { return 0; }
+    if strings_equal(target, "process.exec") { return 2; }
+    if strings_equal(target, "process.exit") { return 1; }
+    if strings_equal(target, "process.handle_close_stdin") { return 1; }
+    if strings_equal(target, "process.handle_kill") { return 1; }
+    if strings_equal(target, "process.handle_read_bytes_stderr") { return 2; }
+    if strings_equal(target, "process.handle_read_bytes_stdout") { return 2; }
+    if strings_equal(target, "process.handle_read_line_stdout") { return 1; }
+    if strings_equal(target, "process.handle_read_stderr") { return 1; }
+    if strings_equal(target, "process.handle_read_stdout") { return 1; }
+    if strings_equal(target, "process.handle_stderr_at_eof") { return 1; }
+    if strings_equal(target, "process.handle_stderr_fd") { return 1; }
+    if strings_equal(target, "process.handle_stdout_at_eof") { return 1; }
+    if strings_equal(target, "process.handle_stdout_fd") { return 1; }
+    if strings_equal(target, "process.handle_wait") { return 1; }
+    if strings_equal(target, "process.handle_write") { return 2; }
+    if strings_equal(target, "process.handle_write_bytes") { return 3; }
+    if strings_equal(target, "process.run") { return 1; }
+    if strings_equal(target, "process.run_capture") { return 2; }
+    if strings_equal(target, "process.run_capture_cwd") { return 3; }
+    if strings_equal(target, "process.run_capture_metered") { return 2; }
+    if strings_equal(target, "process.run_capture_rlimit_as") { return 3; }
+    if strings_equal(target, "process.spawn_with_env") { return 2; }
+    if strings_equal(target, "process.spawn_with_env_cwd") { return 3; }
+    if strings_equal(target, "tls.last_alert") { return 0; }
+    if strings_equal(target, "tls.last_error") { return 0; }
     return -1;
 }
 
@@ -215,9 +291,47 @@ fn void_argument_diagnostics(call: Expression, index: int, ctx: TypeckCtx) -> Di
 fn call_arity_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
     if expression.variant != "Call" { return []; }
     if expression.callee == null { return []; }
-    if expression.callee.variant != "Identifier" { return []; }
-    let name = expression.callee.name;
-    let signature = resolve_call_signature(name, ctx);
+    if expression.callee.variant == "Identifier" {
+        let name = expression.callee.name;
+        let signature = resolve_call_signature(name, ctx);
+        return _arity_diagnostics_for(name, signature, expression);
+    }
+    return _member_call_arity_diagnostics(expression, ctx);
+}
+
+// The member-form counterpart of `call_arity_diagnostics`, for calls like
+// `fs.removeDirectory(...)`. Only a plain-identifier receiver naming an
+// unshadowed builtin namespace is checked; anything else stays silent.
+fn _member_call_arity_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee.variant != "Member" { return []; }
+    if callee.object == null { return []; }
+    if callee.object.variant != "Identifier" { return []; }
+    let receiver = callee.object;
+    // A user-declared value shadows the builtin namespace of the same name
+    // (mirrors the precedence in `expression_walk.sfn`'s `Member` arm).
+    let mut entry = find_value_symbol(ctx.bindings, receiver.name);
+    if entry == null {
+        entry = find_value_symbol(ctx.top_level, receiver.name);
+    }
+    if entry != null { return []; }
+    let target = receiver.name + "." + callee.member;
+    let arity = builtin_member_arity(target);
+    if arity < 0 { return []; }
+    let signature = CallSignature {
+        known: true,
+        arity_known: true,
+        minimum: arity,
+        maximum: arity,
+        returns_void: false,
+        return_known: false
+    };
+    return _arity_diagnostics_for(target, signature, expression);
+}
+
+// Shared arity comparison and E0423 construction, keyed on the display name
+// used in the message (a bare identifier or a dotted member target).
+fn _arity_diagnostics_for(name: string, signature: CallSignature, expression: Expression) -> Diagnostic[] {
     if !signature.known { return []; }
     if !signature.arity_known { return []; }
     let supplied = expression.arguments.length;

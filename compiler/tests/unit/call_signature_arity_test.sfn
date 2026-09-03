@@ -7,9 +7,11 @@
 //
 // The check is proof-based: it fires only when the callee's signature is
 // known (a same-module declaration carrying a `fnprim:` marker, a staged
-// cross-module import, or a pinned builtin). Generic callees, member-form
-// calls, and unresolved names stay silent, so these tests pin the silent
-// cases as carefully as the rejecting ones.
+// cross-module import, a pinned builtin, or — since SFN-1090 — a pinned
+// member-form builtin call whose receiver is an unshadowed namespace
+// identifier). Generic callees, unpinned member-form calls, and unresolved
+// names stay silent, so these tests pin the silent cases as carefully as
+// the rejecting ones.
 import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
 import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
@@ -175,4 +177,53 @@ test "call arity: atomic_cas takes exactly three arguments" ![io] {
 test "call arity: unpinned builtins stay silent" ![io] {
     assert _e0423_for("fn main() ![io] { print(\"a\"); }") == 0;
     assert _e0423_for("fn main() { let c = channel(); }") == 0;
+}
+
+// -------------------------------------------------------------------
+// Member-form builtins (SFN-1090) — the pinned mirror table.
+// -------------------------------------------------------------------
+test "call arity: a member-form builtin with an extra argument is rejected" ![io] {
+    assert _e0423_for("fn main() ![io] { let a = fs.removeDirectory(\"x\", true); }") == 1;
+}
+
+test "call arity: a member-form builtin with two extra arguments is rejected" ![io] {
+    assert _e0423_for("fn main() ![io] { let a = fs.removeDirectory(\"x\", true, 42); }") == 1;
+}
+
+// The correctness-critical half: a missing argument is silently zero-filled
+// rather than rejected without this check.
+test "call arity: a member-form builtin with a missing argument is rejected" ![io] {
+    assert _e0423_for("fn main() ![io] { fs.writeFile(\"x\"); }") == 1;
+}
+
+test "call arity: a member-form builtin with an unexpected extra argument is rejected" ![io] {
+    assert _e0423_for("fn main() ![io] { let a = fs.exists(\"x\", \"extra\"); }") == 1;
+}
+
+test "call arity: correct-arity member-form builtins are accepted" ![io] {
+    assert _e0423_for("fn main() ![io] { let a = fs.removeDirectory(\"x\"); }") == 0;
+    assert _e0423_for("fn main() ![io] { fs.writeFile(\"x\", \"y\"); }") == 0;
+}
+
+// `env.*` has no descriptor in the lowering registry, so the sync test
+// cannot pin it — it must stay silent regardless of argument count.
+test "call arity: an unpinned member-form target stays silent" ![io] {
+    assert _e0423_for("fn main() ![io] { let a = env.get(\"A\", \"B\"); }") == 0;
+}
+
+// A user-declared value named `fs` shadows the builtin namespace — the
+// receiver-shadowing guard must keep this path silent rather than
+// misreading a local method call as `fs.readFile`.
+test "call arity: a shadowed receiver name stays silent" ![io] {
+    let source = "struct Fs { a: int; }\n"
+        + "fn main() { let fs = Fs { a: 1 }; let v = fs.readFile(1, 2, 3); }";
+    assert _e0423_for(source) == 0;
+}
+
+test "call arity: member-form too-few and too-many read differently" ![io] {
+    let too_few = _first_message("fn main() ![io] { fs.writeFile(\"x\"); }", "E0423");
+    let too_many = _first_message("fn main() ![io] { let a = fs.removeDirectory(\"x\", true); }", "E0423");
+    assert too_few.length > 0;
+    assert too_many.length > 0;
+    assert ! strings_equal(too_few, too_many);
 }
