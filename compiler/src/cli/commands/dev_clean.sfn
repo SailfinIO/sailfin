@@ -48,6 +48,9 @@ import { CliContext } from "../context";
 // store — a verified network re-download to recover — so an unrelated
 // `KEEP_SEED=0` already in a developer's environment must not reach a direct
 // `sfn dev clean build`.
+//
+// Governs the direct `sfn dev clean` surface only — never an embedded clean
+// such as `sfn dev bootstrap build --clean-tree` (SFN-1252).
 fn _clean_keep_seed_env_optout() -> boolean ![io] {
     return strings_equal(env.get("SAILFIN_CLEAN_KEEP_SEED"), "0");
 }
@@ -272,6 +275,55 @@ fn _clean_execute(label: string, targets: string[], dry: boolean, preserved: str
     return 0;
 }
 
+// The gate on "is this the compiler checkout" has to be the manifest's
+// CONTENT, not its name. `bootstrap_manifest_exists()` is a bare
+// `fs.exists` (bootstrap_manifest.sfn:172), and `bootstrap.toml` is not a
+// name Sailfin owns — a rust-lang/rust checkout has one too, next to a
+// `build/` output tree this command would then happily wipe. Parsing it
+// and requiring `[seed].version` is what makes the gate mean what it says,
+// and costs no extra IO that `_preserved_build_children` was not already
+// paying.
+fn _clean_checkout_gate(hint_command: string) -> boolean ![io] {
+    if !bootstrap_manifest_exists() {
+        print.err("[clean] error: no bootstrap.toml in the current directory");
+        print.err("[clean] hint: run '" + hint_command
+            + "' from the compiler checkout root");
+        return false;
+    }
+    let manifest: BootstrapManifest = read_bootstrap_manifest(BOOTSTRAP_MANIFEST_PATH);
+    if !manifest.ok {
+        print.err("[clean] error: bootstrap.toml is not a Sailfin bootstrap manifest (no [seed].version)");
+        print.err("[clean] hint: run '" + hint_command
+            + "' from the compiler checkout root");
+        return false;
+    }
+    return true;
+}
+
+// The un-gated build-tree wipe, shared by the direct `sfn dev clean build`
+// and the embedded `sfn dev bootstrap build --clean-tree`. Callers must run
+// `_clean_checkout_gate` first — this function does not read the environment,
+// so it cannot be steered by `SAILFIN_CLEAN_KEEP_SEED`; only `clean_run`
+// (the direct surface) reads that variable.
+fn _clean_build_tree_unguarded(include_seed: boolean, dry: boolean) -> int ![io] {
+    // `--include-seed` removes the store, so there is nothing to report as
+    // preserved; an empty list is what keeps the notice off that path.
+    let mut preserved: string[] = [];
+    if !include_seed { preserved = _preserved_build_children(); }
+    return _clean_execute("build", _clean_build_targets(include_seed), dry, preserved, fs.exists("build"));
+}
+
+// The ordinary structural wipe: build/* minus the fetched seed toolchain
+// store, behind the same compiler-checkout gate `sfn dev clean build` uses.
+// Takes no include-seed or dry-run parameter on purpose: the preserved store
+// is exactly what the caller's next step needs, and SAILFIN_CLEAN_KEEP_SEED is
+// read only by `clean_run`, so an exported variable cannot escalate an
+// embedded clean into a seed deletion (SFN-1252).
+fn clean_build_tree(hint_command: string) -> int ![io] {
+    if !_clean_checkout_gate(hint_command) { return 1; }
+    return _clean_build_tree_unguarded(false, false);
+}
+
 // `ctx` is unused: every target this command touches is resolved from the
 // current working directory, not from the CLI context. The parameter stays to
 // match the `<group>_run(matches, ctx)` shape `dev.sfn::run` dispatches to.
@@ -282,44 +334,21 @@ fn clean_run(matches: Matches, ctx: CliContext) -> int ![io] {
         return 2;
     }
 
-    // The gate on "is this the compiler checkout" has to be the manifest's
-    // CONTENT, not its name. `bootstrap_manifest_exists()` is a bare
-    // `fs.exists` (bootstrap_manifest.sfn:172), and `bootstrap.toml` is not a
-    // name Sailfin owns — a rust-lang/rust checkout has one too, next to a
-    // `build/` output tree this command would then happily wipe. Parsing it
-    // and requiring `[seed].version` is what makes the gate mean what it says,
-    // and costs no extra IO that `_preserved_build_children` was not already
-    // paying.
-    if !bootstrap_manifest_exists() {
-        print.err("[clean] error: no bootstrap.toml in the current directory");
-        print.err("[clean] hint: run 'sfn dev clean ...' from the compiler checkout root");
-        return 1;
-    }
-    let manifest: BootstrapManifest = read_bootstrap_manifest(BOOTSTRAP_MANIFEST_PATH);
-    if !manifest.ok {
-        print.err("[clean] error: bootstrap.toml is not a Sailfin bootstrap manifest (no [seed].version)");
-        print.err("[clean] hint: run 'sfn dev clean ...' from the compiler checkout root");
-        return 1;
-    }
+    if !_clean_checkout_gate("sfn dev clean ...") { return 1; }
 
     let dry = has_flag(matches, "dry-run");
     let include_seed = has_flag(matches, "include-seed")
         || _clean_keep_seed_env_optout();
-
-    // `--include-seed` removes the store, so there is nothing to report as
-    // preserved; an empty list is what keeps the notice off that path.
-    let mut preserved: string[] = [];
-    if !include_seed { preserved = _preserved_build_children(); }
     let none: string[] = [];
 
     if strings_equal(sub, "build") {
-        return _clean_execute("build", _clean_build_targets(include_seed), dry, preserved, fs.exists("build"));
+        return _clean_build_tree_unguarded(include_seed, dry);
     }
     if strings_equal(sub, "dist") {
         return _clean_execute("dist", _clean_dist_targets(), dry, none, fs.exists("dist"));
     }
 
-    let build_rc = _clean_execute("build", _clean_build_targets(include_seed), dry, preserved, fs.exists("build"));
+    let build_rc = _clean_build_tree_unguarded(include_seed, dry);
     let dist_rc = _clean_execute("dist", _clean_dist_targets(), dry, none, fs.exists("dist"));
     if build_rc != 0 || dist_rc != 0 { return 1; }
     return 0;
@@ -348,6 +377,7 @@ fn clean_command_def() -> Command {
 export {
     clean_command_def,
     clean_run,
+    clean_build_tree,
     _clean_target_ok,
     _clean_abs_with,
     _clean_guard_cache_root_from

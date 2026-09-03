@@ -103,7 +103,7 @@ import { toolchain_versions_base } from "../../toolchain/store";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 import { arena_command_def, arena_run } from "./dev_arena";
-import { clean_command_def, clean_run } from "./dev_clean";
+import { clean_build_tree, clean_command_def, clean_run } from "./dev_clean";
 import { det_sweep_command_def, det_sweep_run } from "./dev_det_sweep";
 import { inventory_command_def, inventory_run } from "./dev_inventory";
 import { shard_command_def, shard_run } from "./dev_shard";
@@ -1049,7 +1049,7 @@ fn _bootstrap_force_env() -> boolean ![io] {
 // promoted after the binary is installed — never before — so an
 // interrupted run cannot leave a stored fingerprint claiming a binary
 // that was never installed.
-fn _dev_bootstrap_build(force: boolean, build_args: string[]) -> int ![clock, io, net] {
+fn _dev_bootstrap_build(clean: boolean, force: boolean, build_args: string[]) -> int ![clock, io, net] {
     let m = _bootstrap_resolve_manifest();
     if !m.ok {
         print.err("error: " + m.error);
@@ -1059,6 +1059,31 @@ fn _dev_bootstrap_build(force: boolean, build_args: string[]) -> int ![clock, io
     if lp.length > 0 {
         print.err("error: " + lp);
         return 1;
+    }
+
+    // Ordered deliberately (SFN-1252): after both manifest checks, so a build
+    // that will refuse to run refuses before deleting anything; before the
+    // fingerprint short-circuit, so the wipe can never be swallowed by an
+    // "up to date; skipping build" return; and before the pending-fingerprint
+    // write, so no record exists yet that this would strand. Every fingerprint
+    // input is source-tree, never build/, so the wipe cannot invalidate the
+    // fingerprint computed just below.
+    //
+    // POSIX note: this removes build/bin — the directory holding the running
+    // image — which is safe. `unlink` drops the directory entry while the
+    // kernel keeps the inode alive for the open image, and nothing downstream
+    // re-execs or reopens the binary by path: the compiler build spawns the
+    // preserved seed, and the publish step recreates build/bin with a new inode.
+    if clean {
+        print("sfn dev bootstrap: cleaning build/ before the self-host build (the fetched seed toolchain store is preserved)");
+        let clean_rc = clean_build_tree("sfn dev bootstrap build --clean-tree");
+        if clean_rc != 0 {
+            print.err("error: --clean-tree could not remove the build tree; nothing was rebuilt");
+            if host_is_windows() {
+                print.err("  a running build/bin/sfn.exe cannot be removed on Windows; run the clean from a compiler outside build/");
+            }
+            return clean_rc;
+        }
     }
 
     let pre = compute_workspace_source_fingerprint(".");
@@ -1071,7 +1096,10 @@ fn _dev_bootstrap_build(force: boolean, build_args: string[]) -> int ![clock, io
     // Explicit seed-build arguments are diagnostic intent: skipping here
     // would accept them without ever forwarding them to the pinned seed.
     // The empty-tail path keeps the existing fingerprint behavior exactly.
-    if !force && build_args.length == 0 {
+    // `--clean-tree` implies force: the wipe already removed the stored
+    // fingerprint record, but this states the intent directly so it survives
+    // any future relocation of that record out of build/ (SFN-1252).
+    if !force && !clean && build_args.length == 0 {
         let stored = read_stored_fingerprint(source_fingerprint_path());
         if fs.is_executable(out) && stored.length > 0 && stored == pre {
             print("sfn dev bootstrap: " + out
@@ -1500,6 +1528,11 @@ fn command_def() -> Command {
     let mut bootstrap: Command = command("bootstrap", "Compiler seed bootstrap (reads bootstrap.toml)");
     bootstrap = with_subcommand(bootstrap, command("fetch", "Acquire and verify the pinned seed"));
     let mut build = with_flag(command("build", "Build the compiler with the exact seed"), flag("force", "Rebuild even when the source fingerprint is unchanged"));
+    // No environment-variable form, deliberately (SFN-1252): SAILFIN_BOOTSTRAP_FORCE
+    // triggers a rebuild — wasted time at worst — while a SAILFIN_BOOTSTRAP_CLEAN
+    // would trigger a deletion from a variable a developer exported and forgot.
+    // Destructive behaviour stays argv-only.
+    build = with_flag(build, flag("clean-tree", "Remove build/* (keeping the fetched seed toolchain store) before building; not the build cache — see sfn build --clean"));
     // SFN-1120. Unlike `sfn test` / `sfn build`, this leaf spawns the seed
     // with a constructed argv, so the flag is never forwarded to the child.
     build = with_flag(build, flag("verdict", "Emit a machine-readable sailfin-run/2 verdict trailer after the run"));
@@ -1576,7 +1609,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }
     if strings_equal(sub, "build") {
         let force = has_flag(matches, "force") || _bootstrap_force_env();
-        return _dev_bootstrap_build(force, positionals(matches, "build-arg"));
+        return _dev_bootstrap_build(has_flag(matches, "clean-tree"), force, positionals(matches, "build-arg"));
     }
     if strings_equal(sub, "check") { return _dev_bootstrap_check(); }
     if strings_equal(sub, "pin") {
