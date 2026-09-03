@@ -8,31 +8,40 @@
 // pinned honest by this test, which sits in the root `sfn/compiler` capsule
 // and can import both sides.
 //
-// A failure here means a target was renamed or removed on the lowering side
-// without the mirror following. Fix the table, do not relax the test.
+// A failure here means a target was renamed or removed on the lowering side,
+// or gained/lost a parameter, without the mirror following. Fix the table,
+// do not relax the test.
 import { builtin_member_arity } from "sfn/analyzer/typecheck/call_signature";
 import { find_runtime_helper } from "sfn/codegen-llvm/runtime_helpers/mod";
 
 fn _pinned_targets() -> string[] {
-    return ["fs.appendFile", "fs.createDirectory", "fs.deleteFile", "fs.exists", "fs.get_perms", "fs.is_directory", "fs.is_executable", "fs.mkdtemp", "fs.readFile", "fs.read_link", "fs.removeDirectory", "fs.set_perms", "fs.symlink", "fs.writeFile", "fs.writeLines", "http.download", "http.get_body", "http.post", "io.poll_any", "io.poll_readable", "io.read_fd", "io.read_line", "process.capture_take_peak_rss_kb", "process.capture_take_stderr", "process.capture_take_stdout", "process.capture_take_wall_ms", "process.exec", "process.exit", "process.handle_close_stdin", "process.handle_kill", "process.handle_read_bytes_stderr", "process.handle_read_bytes_stdout", "process.handle_read_line_stdout", "process.handle_read_stderr", "process.handle_read_stdout", "process.handle_stderr_at_eof", "process.handle_stderr_fd", "process.handle_stdout_at_eof", "process.handle_stdout_fd", "process.handle_wait", "process.handle_write", "process.handle_write_bytes", "process.run", "process.run_capture", "process.run_capture_cwd", "process.run_capture_metered", "process.run_capture_rlimit_as", "process.spawn_with_env", "process.spawn_with_env_cwd", "tls.last_alert", "tls.last_error"];
+    return ["fs.appendFile", "fs.createDirectory", "fs.deleteFile", "fs.exists", "fs.get_perms", "fs.is_directory", "fs.is_executable", "fs.listDirectory", "fs.mkdtemp", "fs.readFile", "fs.read_link", "fs.removeDirectory", "fs.set_perms", "fs.symlink", "fs.writeFile", "fs.writeLines", "http.download", "http.get_body", "http.post", "io.poll_any", "io.poll_readable", "io.read_fd", "io.read_line", "process.capture_take_peak_rss_kb", "process.capture_take_stderr", "process.capture_take_stdout", "process.capture_take_wall_ms", "process.environ", "process.exec", "process.exit", "process.handle_close_stdin", "process.handle_kill", "process.handle_read_bytes_stderr", "process.handle_read_bytes_stdout", "process.handle_read_line_stdout", "process.handle_read_stderr", "process.handle_read_stdout", "process.handle_stderr_at_eof", "process.handle_stderr_fd", "process.handle_stdout_at_eof", "process.handle_stdout_fd", "process.handle_wait", "process.handle_write", "process.handle_write_bytes", "process.run", "process.run_capture", "process.run_capture_cwd", "process.run_capture_metered", "process.run_capture_rlimit_as", "process.spawn_with_env", "process.spawn_with_env_cwd", "print.err", "print.info", "print.error", "print.warn", "tls.last_alert", "tls.last_error"];
 }
 
 // Every pinned target must still resolve to a lowering descriptor — a
 // renamed or removed intrinsic would otherwise leave a stale mirror entry
 // that silently stops firing (E0420 catches the callee itself before this
 // check ever runs, but a rename to a *different existing* target would not).
-test "call signature: every pinned member target has a lowering descriptor" {
+//
+// The equality assertion, not a one-directional bound: argument lowering is
+// a strict 1:1 walk (one `lower_expression` + one `operands.push` per source
+// argument), and any ptr+len expansion for a string/array argument happens
+// *inside* the coercion of that single operand — it never changes the
+// argument count. So `parameter_types.length` equals source arity for every
+// target pinned here. (`env.get`/`env.home` are excluded from the mirror
+// precisely because their lowering splices a synthetic trailing `ptr` arena
+// operand after the source-argument walk, breaking the identity —
+// `core_call_lowering.sfn:653-670`.) A mismatch here means an intrinsic
+// gained or lost a parameter on the lowering side without the mirror
+// following.
+test "call signature: every pinned member target's arity matches its lowering descriptor" {
     let targets = _pinned_targets();
     let mut i: int = 0;
     loop {
         if i >= targets.length { break; }
         let descriptor = find_runtime_helper(targets[i]);
         assert descriptor != null;
-        // The ABI parameter list can only ever be longer than the source
-        // arity — strings and arrays expand to ptr+len slots before
-        // lowering (`fs.writeFile` is 2 source args, 3 ABI params) — so
-        // equality cannot be asserted, only this one-directional bound.
-        assert descriptor.parameter_types.length >= builtin_member_arity(targets[i]);
+        assert descriptor.parameter_types.length == builtin_member_arity(targets[i]);
         i += 1;
     }
 }
