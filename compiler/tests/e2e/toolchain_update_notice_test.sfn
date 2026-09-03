@@ -1,0 +1,554 @@
+// compiler/tests/e2e/toolchain_update_notice_test.sfn
+//
+// End-to-end coverage for the bounded, opt-out update notice
+// (SFEP-0073 §3.6, SFN-1073, `compiler/src/toolchain/update_notify.sfn` +
+// `update_notify_state.sfn`). Native (no-bash) `*_test.sfn` per
+// `.claude/rules/no-bash-e2e.md`.
+//
+// WHY A SEAM IS LOAD-BEARING HERE. Every subprocess `process.run_capture`
+// spawns is non-interactive by construction (no controlling TTY), so the
+// notice's TTY gate would suppress the check on every invocation regardless
+// of whether the feature works, is broken, or was deleted outright — a test
+// that only asserted "no notice appeared" would pass in all three cases.
+// That is exactly the dormant-test failure mode SFN-807 was lost to (a
+// connectivity probe that always returned empty let a wholly broken TLS
+// trust store report PASS for a full release cycle). The load-bearing case
+// in this file is Group A test 1: with
+// `SAILFIN_UPDATE_NOTIFY_ASSUME_INTERACTIVE=1` bypassing only the CI/TTY
+// gates, a refused-network check still advances the eligibility window —
+// proof the machinery ran. Every suppression test in Group B/D that asserts
+// "nothing happened" runs with the SAME seam ON (so only the gate under
+// test can be the reason), except the TTY-gate test itself (Group B case 6),
+// which is meaningful only because Group A test 1 proves the seam-on path
+// is live.
+//
+// Every child env carries a private `HOME` (`[toolchain] update-policy`
+// lives at `$HOME/.sfn/config.toml`) and `SAILFIN_CONFIG_DIR` (the
+// eligibility record and lease live there — see `user_default.sfn`), plus
+// `SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9` — connection refused,
+// so no real network is ever reached, mirroring
+// `toolchain_update_test.sfn`.
+import { env_empty } from "sfn/os";
+import {
+    contains,
+    int_to_string,
+    parse_int,
+    replace,
+    trim
+} from "sfn/strings";
+import {
+    clean_runner_env_without,
+    default_scratch_dir,
+    host_is_windows,
+    nested_runner_scratch,
+    run_external_c_oracle,
+    sfn_bin_abs_path,
+    skip,
+    start_background,
+    stop_background,
+    wait_until
+} from "sfn/test";
+
+import { toolchain_current_host } from "../../src/toolchain/host";
+import { toolchain_policy_now_epoch } from "../../src/toolchain/release_policy";
+import { toolchain_update_check_parse } from "../../src/toolchain/update_notify_state";
+
+// A per-invocation scratch root, mirroring `toolchain_update_test.sfn`.
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    return dir + "/sfn-toolchain-update-notice-e2e";
+}
+
+fn _home_dir(label: string) -> string ![io] {
+    let dir = _scratch_root() + "/" + label + "-home";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _config_dir(label: string) -> string ![io] {
+    let dir = _scratch_root() + "/" + label + "-cfg";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _neutral_cwd(label: string) -> string ![io] {
+    let dir = _scratch_root() + "/" + label + "-cwd";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Every child env in this file: a private `HOME`/`SAILFIN_CONFIG_DIR`/
+// `INSTALL_BASE`, and a `SAILFIN_TOOLCHAIN_RELEASE_BASE` pointed at a
+// refused (or, in Group E, deliberately stalling) endpoint. `assume_interactive`
+// toggles the ONE test seam this file exists to exercise; every other gate
+// (policy, eligibility, lease, network refusal) is untouched regardless.
+//
+// `SAILFIN_SKIP_TOOLCHAIN_CHECK=1` is unconditional here and orthogonal to
+// that seam: every case in this file seeds a fictitious per-user default
+// `version` purely so `toolchain_user_default_read(...).track` is non-empty
+// (`update_notify_exit`'s own eligibility gate — see
+// `_seed_user_default_with_track`), but SFEP-0073 rank 4
+// (`dispatch.sfn::toolchain_select_user_default`) reads that SAME record and
+// tries to select/fetch it as the ACTUAL running toolchain. Without this
+// flag every command in this file would first try to dispatch to the fake
+// version and fail before `update_notify_exit` ever runs. The flag stands
+// rank 4 down early (`dispatch.sfn`'s own
+// `if argv_skip || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK") { return 0; }`)
+// without touching anything the update notice itself gates on.
+fn _env_with(extra: string[], home: string, config_dir: string, store: string, release_base: string, assume_interactive: boolean) -> string[] ![io] {
+    let host_os = env.get("SAILFIN_HOST_OS");
+    let target_os = env.get("SAILFIN_TARGET_OS");
+    let mut e = clean_runner_env_without(nested_runner_scratch("toolchain-update-notice-child"), ["HOME", "INSTALL_BASE", "SAILFIN_CONFIG_DIR", "SAILFIN_SKIP_TOOLCHAIN_CHECK", "SAILFIN_TOOLCHAIN_RELEASE_BASE", "SAILFIN_UPDATE_NOTIFY_ASSUME_INTERACTIVE", "CI"]);
+    e.push("HOME=" + home);
+    e.push("SAILFIN_CONFIG_DIR=" + config_dir);
+    e.push("INSTALL_BASE=" + store);
+    e.push("SAILFIN_TOOLCHAIN_RELEASE_BASE=" + release_base);
+    e.push("SAILFIN_SKIP_TOOLCHAIN_CHECK=1");
+    if assume_interactive {
+        e.push("SAILFIN_UPDATE_NOTIFY_ASSUME_INTERACTIVE=1");
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    if host_os.length > 0 { e.push("SAILFIN_HOST_OS=" + host_os); }
+    if target_os.length > 0 { e.push("SAILFIN_TARGET_OS=" + target_os); }
+    return e;
+}
+
+fn _refused_env(label: string, extra: string[], assume_interactive: boolean) -> string[] ![io] {
+    let store = _scratch_root() + "/" + label + "-store";
+    return _env_with(extra, _home_dir(label), _config_dir(label), store, "http://127.0.0.1:9", assume_interactive);
+}
+
+// Write the `[toolchain] update-policy` key, at `<home>/.sfn/config.toml` —
+// the same file `sfn config set` owns (`compiler/src/cli/commands/config.sfn`).
+fn _seed_policy(home: string, value: string) -> void ![io] {
+    fs.createDirectory(home + "/.sfn", true);
+    fs.writeFile(home + "/.sfn/config.toml", "[toolchain]\nupdate-policy = \""
+        + value
+        + "\"\n");
+}
+
+// Write the per-host user-default record with a track recorded, the literal
+// text shape `user_default.sfn::toolchain_user_default_write` renders —
+// mirroring `toolchain_update_test.sfn::_seed_user_default_with_track`. A
+// track must be on record or both the child and the parent gate decline
+// before ever reaching eligibility (see `update_notify_exit`'s
+// `toolchain_user_default_read(...).track.length == 0` check).
+fn _seed_user_default_with_track(config_dir: string, ver: string, track: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/toolchain-default", "sailfin-toolchain-default 1\n"
+        + toolchain_current_host().triple
+        + ".version = "
+        + ver
+        + "\n"
+        + toolchain_current_host().triple
+        + ".track = "
+        + track
+        + "\n");
+}
+
+fn _eligibility_path(config_dir: string) -> string {
+    return config_dir + "/toolchain-update-check";
+}
+
+fn _lease_path(config_dir: string) -> string ![io] {
+    return config_dir + "/toolchain-update-lease." + toolchain_current_host().triple;
+}
+
+fn _eligibility_exists(config_dir: string) -> boolean ![io] {
+    return fs.exists(_eligibility_path(config_dir));
+}
+
+fn _eligibility_next_epoch(config_dir: string) -> int ![io] {
+    let path = _eligibility_path(config_dir);
+    if !fs.exists(path) { return 0; }
+    return toolchain_update_check_parse(fs.readFile(path), toolchain_current_host().triple).next_epoch;
+}
+
+fn _write_lease(config_dir: string, held_epoch: int) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(_lease_path(config_dir), int_to_string(held_epoch));
+}
+
+fn _ok_fixture(dir: string) -> string ![io] {
+    let path = dir + "/ok.sfn";
+    fs.writeFile(path, "fn add(a: int, b: int) -> int {\n    return a + b;\n}\n");
+    return path;
+}
+
+fn _bad_fixture(dir: string) -> string ![io] {
+    let path = dir + "/bad.sfn";
+    fs.writeFile(path, "fn add(a: int, b: int) -> int {\n    return \"oops\";\n}\n");
+    return path;
+}
+
+// ---------------------------------------------------------------------------
+// Group A: the eligibility invariant (SFEP-0073 §3.6's central guarantee).
+// ---------------------------------------------------------------------------
+test "toolchain update notice: an eligible check advances the window even though the network is refused" ![clock, io] {
+    let label = "eligible-advance";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    _seed_user_default_with_track(_config_dir(label), "500.0.0", "stable");
+    let run_env = _refused_env(label, [], true);
+    let cfg = _config_dir(label);
+
+    let before_now = toolchain_policy_now_epoch();
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+
+    assert _eligibility_exists(cfg);
+    let next_epoch = _eligibility_next_epoch(cfg);
+    // ~7 days (604800s) out from "now". A wide tolerance (10 minutes) absorbs
+    // process-spawn and CI-pool scheduling delay between reading `before_now`
+    // here and the child's own clock read, without weakening the assertion
+    // that this is "about a week", not "unset" (0) or "immediate".
+    assert next_epoch > before_now + 604800 - 600;
+    assert next_epoch < before_now + 604800 + 600;
+}
+
+test "toolchain update notice: a second attempt inside the window is suppressed" ![clock, io] {
+    let label = "eligible-window";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let run_env = _refused_env(label, [], true);
+
+    let exit1 = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _o1 = process.capture_take_stdout();
+    let _e1 = process.capture_take_stderr();
+    assert exit1 == 0;
+    assert _eligibility_exists(cfg);
+    let recorded = fs.readFile(_eligibility_path(cfg));
+
+    let exit2 = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _o2 = process.capture_take_stdout();
+    let _e2 = process.capture_take_stderr();
+    assert exit2 == 0;
+    // Byte-identical: the second, still-inside-the-window attempt must not
+    // touch the record at all.
+    assert fs.readFile(_eligibility_path(cfg)) == recorded;
+}
+
+// ---------------------------------------------------------------------------
+// Group B: suppression. Each case runs with the seam ON (except case 6,
+// which targets the seam itself) so the ONLY reason nothing happens is the
+// gate under test — Group A test 1 above is the positive control proving
+// the machinery acts whenever every gate opens.
+// ---------------------------------------------------------------------------
+test "toolchain update notice: policy manual writes no eligibility record" ![clock, io] {
+    let label = "policy-manual";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    let home = _home_dir(label);
+    _seed_policy(home, "manual");
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let run_env = _env_with([], home, cfg, _scratch_root() + "/" + label
+        + "-store", "http://127.0.0.1:9", true);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! _eligibility_exists(cfg);
+}
+
+test "toolchain update notice: policy disabled writes no eligibility record" ![clock, io] {
+    let label = "policy-disabled";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    let home = _home_dir(label);
+    _seed_policy(home, "disabled");
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let run_env = _env_with([], home, cfg, _scratch_root() + "/" + label
+        + "-store", "http://127.0.0.1:9", true);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! _eligibility_exists(cfg);
+}
+
+test "toolchain update notice: a --json invocation writes no record and matches a fully-suppressed --json run byte for byte" ![clock, io] {
+    let label = "json-gate";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+
+    let seam_on_env = _refused_env(label, [], true);
+    let exit_on = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture, "--json"], seam_on_env, cwd);
+    let out_on = process.capture_take_stdout();
+    let err_on = process.capture_take_stderr();
+    assert exit_on == 0;
+    assert ! _eligibility_exists(cfg);
+
+    // Same command, seam fully OFF this time (a fresh label so no eligibility
+    // state carries over): the `--json` gate in `update_notify_exit` fires
+    // before the seam is ever consulted, so both invocations should behave
+    // identically regardless of the seam.
+    let off_label = "json-gate-off";
+    let off_cwd = _neutral_cwd(off_label);
+    let off_fixture = _ok_fixture(off_cwd);
+    let off_cfg = _config_dir(off_label);
+    _seed_user_default_with_track(off_cfg, "500.0.0", "stable");
+    let seam_off_env = _refused_env(off_label, [], false);
+    let exit_off = process.run_capture_cwd([sfn_bin_abs_path(), "check", off_fixture, "--json"], seam_off_env, off_cwd);
+    let out_off = process.capture_take_stdout();
+    let err_off = process.capture_take_stderr();
+    assert exit_off == 0;
+    assert ! _eligibility_exists(off_cfg);
+
+    // Both fixtures are byte-identical ("ok.sfn" written the same way in
+    // both labels), just at different absolute paths, so compare the JSON
+    // payload with the path substituted out.
+    let normalized_on = replace(out_on, fixture, "<fixture>");
+    let normalized_off = replace(out_off, off_fixture, "<fixture>");
+    assert normalized_on == normalized_off;
+    assert err_on == err_off;
+}
+
+// This is the case that would be VACUOUS in isolation: every subprocess is
+// non-interactive, so the TTY gate suppresses the check on every run
+// regardless of whether the rest of the machinery works. It is meaningful
+// only paired with Group A test 1 in this same file, which proves that with
+// the seam ON (bypassing only this gate) the identical setup DOES write an
+// eligibility record. Seam OFF here, otherwise fully eligible (policy
+// notify, track recorded).
+test "toolchain update notice: seam off (ordinary non-TTY child) writes no record — meaningful only alongside the seam-on positive control above" ![clock, io] {
+    let label = "tty-gate";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let run_env = _refused_env(label, [], false);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! _eligibility_exists(cfg);
+}
+
+test "toolchain update notice: CI=true with the seam off writes no record" ![clock, io] {
+    let label = "ci-gate";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let run_env = _refused_env(label, ["CI=true"], false);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! _eligibility_exists(cfg);
+}
+
+// ---------------------------------------------------------------------------
+// Group C: neutrality — the notice must never change the wrapped command's
+// observable behavior.
+// ---------------------------------------------------------------------------
+test "toolchain update notice: an eligible command's exit and stdout are unaffected by the seam" ![clock, io] {
+    let on_label = "neutral-on";
+    let on_cwd = _neutral_cwd(on_label);
+    let on_fixture = _ok_fixture(on_cwd);
+    _seed_user_default_with_track(_config_dir(on_label), "500.0.0", "stable");
+    let on_env = _refused_env(on_label, [], true);
+    let exit_on = process.run_capture_cwd([sfn_bin_abs_path(), "check", on_fixture], on_env, on_cwd);
+    let out_on = process.capture_take_stdout();
+    let _e_on = process.capture_take_stderr();
+
+    let off_label = "neutral-off";
+    let off_cwd = _neutral_cwd(off_label);
+    let off_fixture = _ok_fixture(off_cwd);
+    _seed_user_default_with_track(_config_dir(off_label), "500.0.0", "stable");
+    let off_env = _refused_env(off_label, [], false);
+    let exit_off = process.run_capture_cwd([sfn_bin_abs_path(), "check", off_fixture], off_env, off_cwd);
+    let out_off = process.capture_take_stdout();
+    let _e_off = process.capture_take_stderr();
+
+    assert exit_on == exit_off;
+    assert replace(out_on, on_fixture, "<fixture>") == replace(out_off, off_fixture, "<fixture>");
+}
+
+test "toolchain update notice: a failing command keeps its own non-zero exit and the notice never fires" ![clock, io] {
+    let label = "failing-command";
+    let cwd = _neutral_cwd(label);
+    let fixture = _bad_fixture(cwd);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let run_env = _refused_env(label, [], true);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "E0309");
+    // The `rc != 0` gate in `update_notify_exit` returns before any file is
+    // touched.
+    assert ! _eligibility_exists(cfg);
+}
+
+// ---------------------------------------------------------------------------
+// Group D: the crash-recovery lease.
+// ---------------------------------------------------------------------------
+test "toolchain update notice: a live lease is respected — a contender declines and is never penalized" ![clock, io] {
+    let label = "lease-live";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let now = toolchain_policy_now_epoch();
+    _write_lease(cfg, now);
+    let run_env = _refused_env(label, [], true);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    // A contender is never penalized: exit and output are its ordinary
+    // `check` result.
+    assert exit == 0;
+    assert contains(out, "checked 1 files: ok");
+    assert ! _eligibility_exists(cfg);
+}
+
+test "toolchain update notice: a stale (31s+) lease is reclaimed and the check proceeds" ![clock, io] {
+    let label = "lease-stale";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let stale_epoch = toolchain_policy_now_epoch() - 31;
+    _write_lease(cfg, stale_epoch);
+    let run_env = _refused_env(label, [], true);
+
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], run_env, cwd);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert _eligibility_exists(cfg);
+}
+
+// ---------------------------------------------------------------------------
+// Group E: the 500ms budget bound. `127.0.0.1:9` (used everywhere above)
+// refuses instantly and never exercises the timeout at all — this uses a C
+// harness that binds a loopback listener and accepts a connection without
+// ever responding, so the ONLY way `update_notify_exit` returns is the
+// `TOOLCHAIN_UPDATE_BUDGET_MS` SIGKILL.
+// ---------------------------------------------------------------------------
+fn _stall_harness_c() -> string {
+    return "#include <stdio.h>\n" + "#include <stdlib.h>\n"
+        + "#include <string.h>\n"
+        + "#include <unistd.h>\n"
+        + "#include <signal.h>\n"
+        + "#include <arpa/inet.h>\n"
+        + "#include <sys/socket.h>\n"
+        + "#include <netinet/in.h>\n"
+        + "\n"
+        + "int main(int argc, char **argv) {\n"
+        + "    signal(SIGPIPE, SIG_IGN);\n"
+        + "    const char *portfile = argc > 1 ? argv[1] : \"/tmp/sfn_stall_port\";\n"
+        + "    int fd = socket(AF_INET, SOCK_STREAM, 0);\n"
+        + "    if (fd < 0) return 1;\n"
+        + "    int one = 1;\n"
+        + "    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));\n"
+        + "    struct sockaddr_in a; memset(&a, 0, sizeof(a));\n"
+        + "    a.sin_family = AF_INET;\n"
+        + "    a.sin_addr.s_addr = htonl(0x7f000001);\n"
+        + "    a.sin_port = htons(0);\n"
+        + "    if (bind(fd, (struct sockaddr*)&a, sizeof(a)) != 0) return 2;\n"
+        + "    if (listen(fd, 4) != 0) return 3;\n"
+        + "    socklen_t al = sizeof(a);\n"
+        + "    if (getsockname(fd, (struct sockaddr*)&a, &al) != 0) return 4;\n"
+        + "    int port = (int)ntohs(a.sin_port);\n"
+        + "    FILE *f = fopen(portfile, \"w\");\n"
+        + "    if (!f) return 5;\n"
+        + "    fprintf(f, \"%d\\n\", port);\n"
+        + "    fclose(f);\n"
+        + "    for (;;) {\n"
+        + "        int c = accept(fd, NULL, NULL);\n"
+        + "        if (c >= 0) {\n"
+        + "            char buf[256];\n"
+        + "            /* Drain the request but NEVER send a byte back and\n"
+        + "               NEVER close: the test harness kills this process\n"
+        + "               instead. */\n"
+        + "            recv(c, buf, sizeof(buf), 0);\n"
+        + "        }\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Not a measurement of the 500ms budget itself — CI pool scheduling jitter
+// would make a tight bound flaky. This is a hang-detector: it proves the
+// command RETURNS at all rather than blocking on the notify child's 10s
+// socket timeout, which only `TOOLCHAIN_UPDATE_BUDGET_MS`'s `SIGKILL`
+// (`update_notify.sfn::_update_notify_run_bounded`) can explain.
+test "toolchain update notice: a stalling endpoint does not hang the wrapped command" ![clock, io] {
+    if host_is_windows() {
+        skip("stalling-listener harness uses POSIX sockets only");
+    }
+    let label = "stall-budget";
+    let cwd = _neutral_cwd(label);
+    let fixture = _ok_fixture(cwd);
+    let dir = _scratch_root() + "/" + label + "-harness";
+    fs.createDirectory(dir, true);
+    let harness_c = dir + "/stall_harness.c";
+    fs.writeFile(harness_c, _stall_harness_c());
+    let bin = dir + "/stall_harness";
+    let link_exit = run_external_c_oracle([harness_c, "-o", bin]);
+    let _lo = process.capture_take_stdout();
+    let _le = process.capture_take_stderr();
+    if link_exit != 0 {
+        skip("could not compile the stalling-listener C harness");
+    }
+
+    let portfile = dir + "/port";
+    let bg = start_background([bin, portfile], env_empty(), "", "stall-listener");
+    let ready = wait_until(fn () -> boolean {
+        return fs.exists(portfile) && trim(fs.readFile(portfile)).length > 0;
+    }, 5000, 50);
+    if !ready {
+        let _ = stop_background(bg);
+        skip("stalling-listener harness never published its port");
+    }
+    let port_text = trim(fs.readFile(portfile));
+    let mut port: int = 0;
+    match parse_int(port_text) {
+        Result.Ok { value } => { port = value; },
+        Result.Err { error } => { port = 0; }
+    }
+    assert port > 0;
+
+    let cfg = _config_dir(label);
+    _seed_user_default_with_track(cfg, "500.0.0", "stable");
+    let store = _scratch_root() + "/" + label + "-store";
+    let stall_env = _env_with([], _home_dir(label), cfg, store, "http://127.0.0.1:"
+        + int_to_string(port), true);
+
+    let start_ms = monotonic_millis();
+    let exit = process.run_capture_cwd([sfn_bin_abs_path(), "check", fixture], stall_env, cwd);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    let elapsed_ms = monotonic_millis() - start_ms;
+
+    let _ = stop_background(bg);
+
+    assert exit == 0;
+    assert contains(out, "checked 1 files: ok");
+    // Generous hang-detector ceiling, not a precise timing assertion — see
+    // the comment above the test.
+    assert elapsed_ms < 5000;
+}
