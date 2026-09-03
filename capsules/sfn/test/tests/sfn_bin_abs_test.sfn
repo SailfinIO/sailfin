@@ -51,12 +51,13 @@ extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 //
 // `realpath(".", null)` rather than a `pwd` shellout (SFN-995): a Git-Bash
 // `pwd` prints the POSIX-mount spelling (`/c/Users/...`) on a native
-// Windows host, a path style `_cwd()` under test (`sfn_bin.sfn:101-107`)
+// Windows host, a path style `current_working_dir()` under test
+// (`sfn_bin.sfn:102-108`)
 // never produces — its own `realpath`-based resolution returns a
 // Win32-native path — so the two would never compare equal here regardless
-// of which case is being asserted. Mirrors `_cwd()`'s exact body so the
-// value computed for the assertion is produced by the same primitive as
-// the code under test, `PWD`-fallback included.
+// of which case is being asserted. Mirrors `current_working_dir()`'s exact
+// body so the assertion uses the same primitive as the code under test,
+// `PWD`-fallback included.
 fn _repo_root() -> string ![io] {
     let resolved: *u8 = realpath("." as *u8, null);
     if resolved as i64 != 0 { return resolved as string; }
@@ -185,7 +186,8 @@ test "sfn_bin_abs: a relative bin path is prefixed with the cwd it resolves in" 
 //    regardless of which cwd the child actually ran in. Test 2 already
 //    covers the passthrough itself under the inherited cwd; this adds only
 //    that a shifted cwd does not change it. Test 7 below is the case that
-//    actually discriminates between candidate `_cwd()` implementations.
+//    actually discriminates between candidate `current_working_dir()`
+//    implementations.
 test "sfn_bin_abs: SAILFIN_BIN set to an absolute Windows path passes through unchanged regardless of cwd" ![io] {
     let different_cwd = _abs_path(_scratch_dir());
     let out = _probe_bin_abs_path("win-abs-separate-cwd", "Linux", "C:\\other\\sfn.exe", different_cwd);
@@ -194,18 +196,20 @@ test "sfn_bin_abs: SAILFIN_BIN set to an absolute Windows path passes through un
 
 // 7. The discriminating case: a RELATIVE bin under a SHIFTED cwd.
 //
-//    This is what pins `_cwd()`'s `realpath(".")`-before-`PWD` order, which
+//    This is what pins `current_working_dir()`'s `realpath(".")`-before-`PWD`
+//    order, which
 //    `sfn_bin.sfn` calls load-bearing and which nothing else here exercises.
 //    Test 5 runs with the inherited cwd, where the parent's `PWD` and
 //    `realpath(".")` necessarily agree, so it cannot tell the two apart.
 //    Here they diverge: `with_cwd` scopes the child's env from
 //    `env_from_current()` (`capsules/sfn/test/src/fixtures.sfn:133-136`),
 //    which carries the PARENT's `PWD`, while the child actually runs in
-//    `different_cwd`. A `PWD`-first `_cwd()` would answer with the repo
-//    root and fail this assertion; a `realpath(".")`-first one answers with
-//    the directory the child is really in.
+//    `different_cwd`. A `PWD`-first `current_working_dir()` would answer with
+//    the repo root and fail this assertion; a `realpath(".")`-first one
+//    answers with the directory the child is really in.
 //
-//    (`_repo_root()` mirrors `_cwd()`'s `realpath(".")`-first body exactly
+//    (`_repo_root()` mirrors `current_working_dir()`'s
+//    `realpath(".")`-first body exactly
 //    now, rather than a `pwd` shellout's logical answer, so the two agree
 //    even under a symlinked checkout — SFN-995: a Git-Bash `pwd` returns
 //    the wrong path STYLE on a native Windows host, a divergence no

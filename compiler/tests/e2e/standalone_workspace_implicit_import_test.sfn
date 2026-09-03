@@ -11,6 +11,7 @@ import {
 } from "sfn/strings";
 import {
     clean_runner_env,
+    current_working_dir,
     default_scratch_dir,
     host_is_windows,
     nested_runner_scratch,
@@ -155,7 +156,7 @@ fn _copy_toolchain(root: string) -> string ![io] {
 
 fn _implicit_build_env(label: string) -> string[] ![io] {
     let mut child = clean_runner_env(nested_runner_scratch(label));
-    let repo = env.get("PWD");
+    let repo = current_working_dir();
     child.push("SAILFIN_RUNTIME_ROOT=" + repo + "/runtime");
     return child;
 }
