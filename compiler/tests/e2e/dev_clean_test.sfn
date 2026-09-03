@@ -169,7 +169,11 @@ test "dev clean: env opt-out removes the seed store" ![io] {
     let repo = _scratch_repo("dev-clean-keep-seed-env");
     _seed_repo(repo);
     let sfn = sfn_bin_abs_path();
-    let mut child_env = clean_runner_env(nested_runner_scratch("dev_clean_keep_seed_env"));
+    // `_without` rather than a bare `clean_runner_env` push: the plain helper
+    // strips only pool-managed keys, so it inherits an ambient
+    // SAILFIN_CLEAN_KEEP_SEED — and under first-match `getenv` an exported
+    // `=1` would win over the push below and fail this test (SFN-1252).
+    let mut child_env = clean_runner_env_without(nested_runner_scratch("dev_clean_keep_seed_env"), ["SAILFIN_CLEAN_KEEP_SEED"]);
     child_env.push("SAILFIN_CLEAN_KEEP_SEED=0");
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
@@ -353,6 +357,10 @@ test "dev clean: bootstrap build --clean-tree ignores SAILFIN_CLEAN_KEEP_SEED" !
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 1;
+    // The seed store surviving is the point, but assert the wipe happened at
+    // all — otherwise a regression making `--clean-tree` a no-op would pass
+    // this test for the wrong reason.
+    assert ! fs.exists(repo + "/build/native/marker.txt");
     assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
 
     assert remove_all(repo);
@@ -365,7 +373,7 @@ test "dev clean: SAILFIN_CLEAN_KEEP_SEED=0 still reaches dev clean build" ![io] 
     let repo = _scratch_repo("dev-clean-build-keep-seed-env-scoped");
     _seed_repo(repo);
     let sfn = sfn_bin_abs_path();
-    let mut child_env = clean_runner_env_without(nested_runner_scratch("bootstrap_clean_keep_seed"), ["SAILFIN_CLEAN_KEEP_SEED"]);
+    let mut child_env = clean_runner_env_without(nested_runner_scratch("clean_build_keep_seed_scoped"), ["SAILFIN_CLEAN_KEEP_SEED"]);
     child_env.push("SAILFIN_CLEAN_KEEP_SEED=0");
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
@@ -441,8 +449,17 @@ test "dev clean: bootstrap build --clean-tree removes nothing outside a compiler
 
     let exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--clean-tree"], child_env, repo);
     let _out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
     assert exit != 0;
+    // Pin WHICH refusal fired. `exit != 0` plus a surviving marker is equally
+    // satisfied by a dropped flag (argv rejected) and by the clean being
+    // reordered ahead of the manifest checks — in the latter case
+    // `clean_build_tree`'s own gate refuses, removing nothing. Both would pass
+    // a bare exit assertion. The bootstrap manifest error must be the one
+    // reported, and the `[clean]` prefix must be absent: its presence would
+    // mean the wipe was attempted before the build refused.
+    assert find(err, "bootstrap.toml: not found at", 0) >= 0;
+    assert find(err, "[clean]", 0) < 0;
     assert fs.exists(repo + "/build/native/marker.txt");
 
     assert remove_all(repo);

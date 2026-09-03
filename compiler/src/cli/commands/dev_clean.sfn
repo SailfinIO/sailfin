@@ -302,9 +302,17 @@ fn _clean_checkout_gate(hint_command: string) -> boolean ![io] {
 
 // The un-gated build-tree wipe, shared by the direct `sfn dev clean build`
 // and the embedded `sfn dev bootstrap build --clean-tree`. Callers must run
-// `_clean_checkout_gate` first — this function does not read the environment,
-// so it cannot be steered by `SAILFIN_CLEAN_KEEP_SEED`; only `clean_run`
-// (the direct surface) reads that variable.
+// `_clean_checkout_gate` first.
+//
+// What it preserves is decided by the `include_seed` PARAMETER alone — it
+// never consults `SAILFIN_CLEAN_KEEP_SEED`, which has exactly one call site
+// (`clean_run`, the direct surface), so an embedded clean cannot be steered
+// into deleting the seed store by an exported variable (SFN-1252).
+//
+// Not "reads no environment": `_clean_execute` guards the global cache root
+// via `cache_root`, which consults SAILFIN_BUILD_CACHE_DIR / XDG_CACHE_HOME /
+// HOME. That guard only ever preserves MORE, never less, and keeps the wipe
+// off the content-addressed cache — a different tree `sfn cache clean` owns.
 fn _clean_build_tree_unguarded(include_seed: boolean, dry: boolean) -> int ![io] {
     // `--include-seed` removes the store, so there is nothing to report as
     // preserved; an empty list is what keeps the notice off that path.
