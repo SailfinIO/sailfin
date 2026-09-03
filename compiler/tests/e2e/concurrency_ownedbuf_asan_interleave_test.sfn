@@ -58,7 +58,6 @@ import {
     c_math_link_flags,
     c_thread_link_flags,
     default_scratch_dir,
-    first_present_tool,
     run_external_c_oracle,
     sfn_bin_path
 } from "sfn/test";
@@ -452,10 +451,6 @@ fn _drive_echoes(port: i64, count: i64) -> i64 ![io, net] {
     return ok_count;
 }
 
-fn _timeout_cmd() -> string ![io] {
-    return first_present_tool(["timeout", "gtimeout"]);
-}
-
 // Lay out a consumer capsule depending on `sfn/http` whose handler echoes
 // the POST body. Lives INSIDE the repo tree so workspace discovery
 // resolves the `sfn/http` dependency (mirrors `serve_loopback_test`).
@@ -499,16 +494,16 @@ fn _write_server_app(port_str: string) -> string ![io] {
     return root + "/src/main.sfn";
 }
 
-// Spawn `bin` as a background server, wrapped in a wall-clock `timeout` so
-// it self-reaps (there is no process-kill primitive and `serve()` never
-// returns), with stdout+stderr redirected to `logpath` so an ASAN report
-// from a crashing worker is recoverable after the run. Caller guards on a
-// timeout command being present. `extra_env` is prepended to the child's
-// environment (used to inject the ASAN run vars).
-fn _spawn_server_logged(bin: string, logpath: string, extra_env: string[]) -> i64 ![io] {
-    let tcmd = _timeout_cmd();
-    let cmd = "exec " + tcmd + " 60 " + bin + " > " + logpath + " 2>&1";
-    return process.spawn_with_env(["bash", "-c", cmd], extra_env);
+// Stop and reap the never-returning server, then return both captured streams
+// so an ASAN report from a crashing worker remains observable.
+fn _stop_server(handle: i64) -> string ![io] {
+    if handle == 0 { return ""; }
+    process.handle_close_stdin(handle);
+    let _ = process.handle_kill(handle);
+    let out = process.handle_read_stdout(handle);
+    let err = process.handle_read_stderr(handle);
+    let _exit = process.handle_wait(handle);
+    return out + err;
 }
 
 // Poll `GET /probe` until the server answers (startup is just the binary
@@ -546,15 +541,6 @@ fn _await_server(port: i64) -> string ![io, net] {
 // deadlock-or-correct bounded channel) lives in the channel leg above;
 // here the worker reuse across 8 requests re-exercises the reclaim.
 test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-clean (#1550)" ![io, net] {
-    // Teardown of the never-returning server relies on a wall-clock
-    // timeout (no process-kill primitive). Without `timeout`/`gtimeout`,
-    // spawning would orphan the fixed port — skip cleanly. CI runners
-    // (Linux + coreutils) always have `timeout`.
-    if _timeout_cmd().length == 0 {
-        print.info("[asan-serve] SKIP: no timeout/gtimeout to reap the blocking server");
-        return;
-    }
-
     let dir = _scratch_dir();
     let main_path = _write_server_app(_sv_port_str());
 
@@ -587,17 +573,16 @@ test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-
     }
 
     let port = _sv_port();
-    let logpath = dir + "/server.log";
-    let _handle = _spawn_server_logged(server_bin, logpath, server_env);
+    let handle = process.spawn_with_env([server_bin], server_env);
+    assert handle != 0;
 
     let probe = _await_server(port);
     if probe.length == 0 {
         // The server never came up. Under ASAN this is the startup
         // shadow-reservation abort (vmem cap / missing runtime) — a SKIP,
         // unless the log carries a genuine finding.
-        let log = "";
-        let log2 = _read_if_exists(logpath);
-        if asan_active && _asan_reported(log, log2) { assert false; }
+        let log = _stop_server(handle);
+        if asan_active && _asan_reported(log, "") { assert false; }
         assert true;
         return;
     }
@@ -606,24 +591,15 @@ test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-
     // moved-OwnedBuf req/resp reclaim per request).
     let ok = _drive_echoes(port, 8);
 
-    if asan_active {
-        // Give a crashing worker a beat to flush its ASAN report, then
-        // inspect the server log. Only a genuine finding fails.
-        let _ = process.run(["sleep", "0.5"]);
-        let log = _read_if_exists(logpath);
-        if _asan_reported(log, "") { assert false; }
-    }
+    // Give a crashing worker a beat to flush its ASAN report, then stop the
+    // server and inspect both captured streams. Only a genuine finding fails.
+    if asan_active { let _ = process.run(["sleep", "0.5"]); }
+    let log = _stop_server(handle);
+    if asan_active && _asan_reported(log, "") { assert false; }
 
     // Typed round-trip (AC2): all 8 distinct bodies came back 200, each
     // from a handler run on a worker thread.
     assert ok == 8;
 
     assert remove_all(_server_app_root());
-}
-
-// Read a file if present, else "" — the server log may not exist yet if
-// the spawn failed outright.
-fn _read_if_exists(path: string) -> string ![io] {
-    if fs.exists(path) { return fs.readFile(path); }
-    return "";
 }

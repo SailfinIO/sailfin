@@ -63,12 +63,15 @@ test "test link: dep objects cached content-addressed in the shared objdir" ![io
     let _err = process.capture_take_stderr();
     assert exit == 0;
     // Verify link-obj was created and contains at least one cached object.
-    let ls_exit = process.run_capture(["sh", "-c", "ls '" + d
-        + "/link-obj' 2>/dev/null"], []);
-    let ls_out = process.capture_take_stdout();
-    let _ls_err = process.capture_take_stderr();
-    assert ls_exit == 0;
-    assert find(ls_out, ".o", 0) >= 0;
+    let objects = fs.listDirectory(d + "/link-obj");
+    let mut has_object = false;
+    let mut i = 0;
+    loop {
+        if i >= objects.length { break; }
+        if find(objects[i], ".o", 0) >= 0 { has_object = true; }
+        i += 1;
+    }
+    assert has_object;
 }
 
 test "test link: unwritable link-obj dir uses ephemeral objects" ![io] {
