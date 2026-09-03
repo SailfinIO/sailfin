@@ -6,7 +6,7 @@ type: tooling
 created: 2026-09-03
 updated: 2026-09-03
 author: "agent:Sailbot; owner-directed investigation; project owner acceptance"
-tracking: SFN-1257, SFN-1256, SFN-1258
+tracking: SFN-1257, SFN-1256, SFN-1258, SFN-1259, SFN-1260, SFN-1261, SFN-1262
 supersedes:
 superseded-by:
 graduates-to: reference/on-disk-layout.md
@@ -454,8 +454,16 @@ the test that must never be deleted.
 ## 9. References
 
 - SFN-1257 — this SFEP's design gate
+- Implementation slices, in delivery order:
+  - SFN-1259 (A) — resolver seam + `[target.<triple>]` linker/cc; blocks B and D
+  - SFN-1260 (B) — `[build] cache-dir` + clamped `[build] jobs` (§3.4)
+  - SFN-1261 (C) — `sfn config` dotted keys, validation, list provenance (§3.6);
+    independent of A and B
+  - SFN-1262 (D) — the §4 effect-boundary regression guard; never-delete
 - SFN-1256 — on-disk layout reference page (`graduates-to` target)
-- SFN-1258 — `SAILFIN_CONFIG_DIR` partial relocation; blocks §3.5's seam
+- SFN-1258 — `SAILFIN_CONFIG_DIR` partial relocation. Not a hard blocker:
+  SFN-1259 introduces the §3.5 helper preserving today's behaviour, and
+  SFN-1258 decides only whether that helper gains the override
 - SFEP-0073 — Installed Toolchain Lifecycle; §3.3 precedence and §3.5
   host-qualification are the models followed here
 - SFEP-0046 — Native Toolchain Version Pinning + Dispatch; establishes
