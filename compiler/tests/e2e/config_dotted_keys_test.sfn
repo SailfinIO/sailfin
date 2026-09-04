@@ -133,14 +133,22 @@ test "config: build.jobs rejects a non-integer" ![io] {
 }
 
 // ---- Test 7: build.jobs rejects zero and negative values ----
+//
+// `-1` needs the `--` end-of-options separator: `sfn/cli`'s `parse()`
+// classifies any dash-led token as a flag before positional binding, so a
+// bare `-1` is rejected as an unknown flag (exit 2) without ever reaching
+// this handler. That is CLI-wide argument handling, not config validation.
 test "config: build.jobs rejects zero and negative values" ![io] {
     let home = _home("jobs_nonpositive");
     let r0 = _run(home, ["config", "set", "build.jobs", "0"], []);
     assert r0.exit == 1;
     assert find(r0.err, "build.jobs must be a positive integer", 0) >= 0;
-    let rneg = _run(home, ["config", "set", "build.jobs", "-1"], []);
+    let rneg = _run(home, ["config", "set", "build.jobs", "--", "-1"], []);
     assert rneg.exit == 1;
     assert find(rneg.err, "build.jobs must be a positive integer", 0) >= 0;
+    let rword = _run(home, ["config", "set", "build.jobs", "3x"], []);
+    assert rword.exit == 1;
+    assert find(rword.err, "build.jobs must be a positive integer", 0) >= 0;
 }
 
 // ---- Test 8: build.cache-dir rejects a relative path ----

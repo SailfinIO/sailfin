@@ -295,10 +295,16 @@ fn _config_rewrite_cmd(text: string, section: string, field: string, rendered: s
         }
         if hdr >= 0 && sect_end < 0 && strings_equal(cur, section) {
             let name = _config_line_field_cmd(lines[i]);
-            if name.length > 0 {
-                sect_fields += 1;
-                if key_idx < 0 && strings_equal(name, field) { key_idx = i; }
+            if name.length > 0 && key_idx < 0 && strings_equal(name, field) {
+                key_idx = i;
             }
+            // Every line carrying content counts, not just well-formed
+            // `key = value` pairs: dropping the header off a section that
+            // still holds a malformed line would orphan that line at file
+            // scope, and `toml_section_malformed_lines` would stop
+            // attributing it to this section.
+            let content = _toml_trim_cmd(lines[i]);
+            if content.length > 0 && content[0] != "#" { sect_fields += 1; }
         }
         i += 1;
     }
@@ -362,7 +368,12 @@ fn _config_rewrite_cmd(text: string, section: string, field: string, rendered: s
             out.push(lines[k]);
             k += 1;
         }
-        if insert_at >= lines.length { out.push(rendered); }
+        if insert_at >= lines.length {
+            // The section ran to a final line with no newline after it;
+            // terminate the appended field rather than inheriting that.
+            out.push(rendered);
+            out.push("");
+        }
         return _config_join_cmd(out);
     }
 
@@ -416,6 +427,22 @@ fn _config_file_value_cmd(k: ConfigKey) -> string ![io] {
     return _toml_trim_cmd(toml_get_string(fs.readFile(path), k.section, k.field));
 }
 
+// A hand-edited value the reader will drop must not be credited to the file,
+// or `list` would name a rung the build does not use — the rule the registry
+// branch below already follows. The bar is exactly what `set` enforces, so
+// what `sfn config set` accepts is what `list` attributes to the file.
+// `target.*` values always pass: `_resolve_linker` takes them verbatim.
+fn _config_file_value_is_usable_cmd(k: ConfigKey, value: string) -> boolean {
+    if !_config_value_is_renderable_cmd(value) { return false; }
+    if strings_equal(k.section, "build") {
+        if strings_equal(k.field, "jobs") {
+            return _config_is_positive_int_cmd(value);
+        }
+        return is_absolute_path(value);
+    }
+    return true;
+}
+
 // Resolve `k` down SFEP-0076 section 3.3's ladder — environment, then user
 // config, then the compiled-in default — reporting which rung supplied the
 // value.
@@ -466,7 +493,7 @@ fn _config_resolve_cmd(k: ConfigKey) -> ConfigResolved ![io] {
         }
     }
     let from_file = _config_file_value_cmd(k);
-    if from_file.length > 0 {
+    if from_file.length > 0 && _config_file_value_is_usable_cmd(k, from_file) {
         return ConfigResolved {
             value: from_file,
             source: _CONFIG_FILE_ORIGIN
@@ -476,6 +503,27 @@ fn _config_resolve_cmd(k: ConfigKey) -> ConfigResolved ![io] {
         value: _CONFIG_AUTO,
         source: _CONFIG_DEFAULT_ORIGIN
     };
+}
+
+// Reject bytes that would break out of the quoted value the writer renders.
+// A value carrying `"` or a newline could forge a whole second section — a
+// `[registry]` block steering `sfn add`/`publish`, say — out of a single
+// `set`. `registry` and `toolchain.update-policy` are already constrained by
+// their own grammars; this covers the free-form keys.
+//
+// A backslash is deliberately allowed: this reader strips the surrounding
+// quotes without unescaping, so a Windows tool path round-trips, and
+// rejecting it would make those paths unsettable.
+fn _config_value_is_renderable_cmd(value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let code = char_code_at_text(value, i);
+        if code < 32 { return false; }
+        if code == 34 { return false; }
+        i += 1;
+    }
+    return true;
 }
 
 // Strict positive decimal. Matches `_uc_parse_jobs`'s shape (no sign, no
@@ -503,6 +551,11 @@ fn _config_is_positive_int_cmd(value: string) -> boolean {
 // erroring would make a legitimate multi-host file unwritable
 // (SFEP-0076 section 3.6).
 fn _config_validate_cmd(k: ConfigKey, value: string) -> int ![io] {
+    if k.quoted && !_config_value_is_renderable_cmd(value) {
+        print.err("error: " + k.cli
+            + " may not contain quotes, newlines, or control characters");
+        return 1;
+    }
     if strings_equal(k.section, "build") {
         if strings_equal(k.field, "jobs") {
             if !_config_is_positive_int_cmd(value) {
@@ -519,8 +572,13 @@ fn _config_validate_cmd(k: ConfigKey, value: string) -> int ![io] {
     }
     if starts_with(k.section, "target.") {
         if !is_absolute_path(value) {
+            // Not "ignored": `_resolve_linker` (`build/link.sfn`) passes the
+            // configured value through verbatim, and a bare tool name like
+            // `mold` is the idiomatic spelling. Still worth flagging — a value
+            // resolved through `PATH` makes the build depend on the ambient
+            // environment the config file exists to pin down.
             print.err("warning: " + k.cli
-                + " should be an absolute path; written, but it will be ignored on read");
+                + " is not an absolute path; it will be resolved through PATH at build time");
             return 0;
         }
         if !fs.exists(value) {
