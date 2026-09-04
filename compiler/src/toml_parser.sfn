@@ -943,6 +943,37 @@ fn toml_section_key_names(text: string, section: string) -> string[] {
     return out;
 }
 
+// Every `[section]` header name in `text`, in file order, deduplicated.
+// Lets a caller enumerate sections it cannot name in advance — `sfn config
+// list` reports each `[target.<triple>]` the file carries, and the triple is
+// user data (SFEP-0076 section 3.6).
+fn toml_section_names(text: string) -> string[] {
+    let lines = _toml_split_lines(text);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] != "[" { continue; }
+        let close = find_char_local(line, "]", 0);
+        if close <= 1 { continue; }
+        let name = _toml_trim(substring(line, 1, close));
+        if name.length == 0 { continue; }
+        let mut seen: boolean = false;
+        let mut j: int = 0;
+        loop {
+            if j >= out.length { break; }
+            if strings_equal(out[j], name) { seen = true; }
+            j += 1;
+        }
+        if !seen { out.push(name); }
+    }
+    return out;
+}
+
 // Lines inside `section` that are neither blank, a comment, nor a
 // `key = value` pair — the lines `toml_get_string` silently skips. Companion
 // to `toml_section_key_names` so a reader can warn about what it dropped

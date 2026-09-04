@@ -29,9 +29,18 @@ import {
 } from "sfn/cli";
 
 import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
+import { host_target_triple } from "../../build/target";
 import { _get_home_cmd } from "../../build_flags";
+import {
+    char_code_at_text,
+    find_char_local,
+    find_last_index_of_char,
+    is_absolute_path,
+    starts_with,
+    substring
+} from "../../string_utils";
 import { render_terminal_diagnostic } from "../../terminal_output";
-import { toml_get_string } from "../../toml_parser";
+import { toml_get_string, toml_section_names } from "../../toml_parser";
 import {
     TOOLCHAIN_UPDATE_POLICY_KEY,
     toolchain_update_policy_is_valid,
@@ -59,31 +68,330 @@ fn _home_dir_diagnostic() -> Diagnostic {
     };
 }
 
-// Raw `[toolchain] update-policy` value from the config file, "" when the
-// file or key is absent. Distinct from `toolchain_update_policy_read`, which
-// substitutes the `notify` default — a merge-write must not persist a
-// default that was never set.
-fn _config_update_policy_from_file_cmd() -> string ![io] {
-    let path = toolchain_user_config_path();
-    if path.length == 0 { return ""; }
-    if !fs.exists(path) { return ""; }
-    let text = fs.readFile(path);
-    return _toml_trim_cmd(toml_get_string(text, "toolchain", "update-policy"));
+// Where a value came from, for `list` provenance (SFEP-0076 section 3.6). A
+// settings file whose values you cannot trace is worse than no file.
+struct ConfigResolved {
+    value: string,
+    source: string
 }
 
-// Raw `[registry] url` value from the config file, "" when the file or key
-// is absent. Distinct from `_resolve_registry_url_cmd`, which layers in
-// `SFN_REGISTRY` and the compiled-in default — a merge-write must persist
-// only what is actually on disk.
-fn _config_registry_url_from_file_cmd() -> string ![io] {
-    let path = toolchain_user_config_path();
-    if path.length == 0 { return ""; }
-    if !fs.exists(path) { return ""; }
-    let text = fs.readFile(path);
-    return _toml_trim_cmd(toml_get_string(text, "registry", "url"));
+// One admitted setting (SFEP-0076 section 3.2): its CLI spelling, where it
+// lands in the TOML, the environment variable that outranks it, and how its
+// value is rendered. A single table replaces the three duplicated
+// `strings_equal` chains that could only ever know two keys.
+struct ConfigKey {
+    cli: string,
+    section: string,
+    field: string,
+    env_var: string,
+    quoted: boolean,
+    known: boolean
 }
 
-fn _write_config_cmd(registry_url: string, update_policy: string) -> int ![io] {
+let _CONFIG_FILE_ORIGIN: string = "~/.sfn/config.toml";
+let _CONFIG_DEFAULT_ORIGIN: string = "default";
+
+// Shown by `get`/`list` for a build or target key with no configured value:
+// the compiler probes for one rather than carrying a fixed default.
+let _CONFIG_AUTO: string = "auto";
+
+fn _config_known_keys_cmd() -> string {
+    return "registry, " + TOOLCHAIN_UPDATE_POLICY_KEY
+        + ", build.jobs, build.cache-dir, target.<triple>.linker, target.<triple>.cc";
+}
+
+fn _config_unknown_key_cmd(key: string) -> int ![io] {
+    print.err("unknown config key: " + key);
+    print.err("  known keys: " + _config_known_keys_cmd());
+    return 2;
+}
+
+// Split a dotted CLI key into TOML section and field on the **last** dot, not
+// the first: `target.aarch64-apple-darwin.linker` is section
+// `target.aarch64-apple-darwin`, field `linker`. A target triple carries
+// hyphens but never dots, so the last dot is unambiguous; splitting on the
+// first would misparse every triple. `registry` is the one legacy key with no
+// dot at all, and maps to `[registry] url`.
+fn _config_lookup_key_cmd(key: string) -> ConfigKey {
+    let unknown = ConfigKey {
+        cli: key,
+        section: "",
+        field: "",
+        env_var: "",
+        quoted: true,
+        known: false
+    };
+    if key.length == 0 { return unknown; }
+    if strings_equal(key, "registry") {
+        return ConfigKey {
+            cli: key,
+            section: "registry",
+            field: "url",
+            env_var: "SFN_REGISTRY",
+            quoted: true,
+            known: true
+        };
+    }
+    let dot = find_last_index_of_char(key, ".");
+    if dot <= 0 { return unknown; }
+    if dot + 1 >= key.length { return unknown; }
+    let section = substring(key, 0, dot);
+    let field = substring(key, dot + 1, key.length);
+    if strings_equal(section, "toolchain") && strings_equal(field, "update-policy") {
+        return ConfigKey {
+            cli: key,
+            section: section,
+            field: field,
+            env_var: "",
+            quoted: true,
+            known: true
+        };
+    }
+    if strings_equal(section, "build") {
+        // `jobs` is the one unquoted value: it is a TOML integer, and
+        // `user_config_build_jobs_from_text` reads `jobs = 8`, not `jobs = "8"`.
+        if strings_equal(field, "jobs") {
+            return ConfigKey {
+                cli: key,
+                section: section,
+                field: field,
+                env_var: "SAILFIN_BUILD_JOBS",
+                quoted: false,
+                known: true
+            };
+        }
+        if strings_equal(field, "cache-dir") {
+            return ConfigKey {
+                cli: key,
+                section: section,
+                field: field,
+                env_var: "SAILFIN_BUILD_CACHE_DIR",
+                quoted: true,
+                known: true
+            };
+        }
+        return unknown;
+    }
+    // Matched structurally, not enumerated: the triple is user data. The
+    // environment variables stay flat (`SAILFIN_LINKER`, not per-triple) —
+    // only the config file is triple-keyed (SFEP-0076 section 3.2).
+    if starts_with(section, "target.") && section.length > 7 {
+        if strings_equal(field, "linker") {
+            return ConfigKey {
+                cli: key,
+                section: section,
+                field: field,
+                env_var: "SAILFIN_LINKER",
+                quoted: true,
+                known: true
+            };
+        }
+        if strings_equal(field, "cc") {
+            return ConfigKey {
+                cli: key,
+                section: section,
+                field: field,
+                env_var: "SAILFIN_CC",
+                quoted: true,
+                known: true
+            };
+        }
+        return unknown;
+    }
+    return unknown;
+}
+
+// Split on "\n", keeping the trailing empty element so `_config_join_cmd`
+// reproduces the input byte-for-byte.
+fn _config_lines_cmd(text: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if text[i] == "\n" {
+            lines.push(substring(text, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start <= text.length {
+        lines.push(substring(text, start, text.length));
+    }
+    return lines;
+}
+
+fn _config_join_cmd(lines: string[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + lines[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _config_unquote_cmd(value: string) -> string {
+    if value.length < 2 { return value; }
+    if value[0] != "\"" { return value; }
+    if value[value.length - 1] != "\"" { return value; }
+    return substring(value, 1, value.length - 1);
+}
+
+// Section name of a `[section]` header line, or "" when the line is not one.
+fn _config_header_name_cmd(line: string) -> string {
+    let trimmed = _toml_trim_cmd(line);
+    if trimmed.length < 2 { return ""; }
+    if trimmed[0] != "[" { return ""; }
+    let close = find_char_local(trimmed, "]", 0);
+    if close <= 1 { return ""; }
+    return _toml_trim_cmd(substring(trimmed, 1, close));
+}
+
+// Field name of a `key = value` line, or "" when the line is blank, a
+// comment, a header, or malformed. Quotes are stripped so a hand-quoted key
+// is matched by the writer exactly as `toml_get_string` matches it on read.
+fn _config_line_field_cmd(line: string) -> string {
+    let trimmed = _toml_trim_cmd(line);
+    if trimmed.length == 0 { return ""; }
+    if trimmed[0] == "#" { return ""; }
+    if trimmed[0] == "[" { return ""; }
+    let eq = find_char_local(trimmed, "=", 0);
+    if eq <= 0 { return ""; }
+    return _config_unquote_cmd(_toml_trim_cmd(substring(trimmed, 0, eq)));
+}
+
+// Rewrite exactly one `[section] field` in the config text, leaving every
+// other line byte-identical (SFEP-0076 section 3.6). This replaces a
+// whole-file regeneration that took one positional parameter per section and
+// so could not accept a third, let alone one `[target.<triple>]` section per
+// triple: every caller had to read its sibling's value back and pass it
+// through just so it survived the write.
+//
+// `remove` drops the field, and drops the now-empty section header with it,
+// matching the old regeneration, which simply omitted a section whose value
+// was "".
+fn _config_rewrite_cmd(text: string, section: string, field: string, rendered: string, remove: boolean) -> string {
+    let lines = _config_lines_cmd(text);
+    let mut hdr: int = -1;
+    let mut key_idx: int = -1;
+    let mut sect_end: int = -1;
+    let mut sect_fields: int = 0;
+    let mut cur: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let header = _config_header_name_cmd(lines[i]);
+        if header.length > 0 {
+            if hdr >= 0 && sect_end < 0 && !strings_equal(header, section) {
+                sect_end = i;
+            }
+            if hdr < 0 && strings_equal(header, section) { hdr = i; }
+            cur = header;
+            i += 1;
+            continue;
+        }
+        if hdr >= 0 && sect_end < 0 && strings_equal(cur, section) {
+            let name = _config_line_field_cmd(lines[i]);
+            if name.length > 0 && key_idx < 0 && strings_equal(name, field) {
+                key_idx = i;
+            }
+            // Every line carrying content counts, not just well-formed
+            // `key = value` pairs: dropping the header off a section that
+            // still holds a malformed line would orphan that line at file
+            // scope, and `toml_section_malformed_lines` would stop
+            // attributing it to this section.
+            let content = _toml_trim_cmd(lines[i]);
+            if content.length > 0 && content[0] != "#" { sect_fields += 1; }
+        }
+        i += 1;
+    }
+    if hdr >= 0 && sect_end < 0 { sect_end = lines.length; }
+
+    if remove {
+        if key_idx < 0 { return text; }
+        // The section header goes only when this was its last field, so
+        // unsetting one target key never removes a sibling's `[target.*]`.
+        let drop_header = sect_fields <= 1;
+        let mut drop_blank: int = -1;
+        if drop_header {
+            if hdr > 0 && _toml_trim_cmd(lines[hdr - 1]).length == 0 {
+                drop_blank = hdr - 1;
+            } else if key_idx + 1 < lines.length && _toml_trim_cmd(lines[key_idx
+                + 1]).length == 0 { drop_blank = key_idx + 1; }
+        }
+        let mut out: string[] = [];
+        let mut j: int = 0;
+        loop {
+            if j >= lines.length { break; }
+            let mut skip: boolean = false;
+            if j == key_idx { skip = true; }
+            if drop_header && j == hdr { skip = true; }
+            if j == drop_blank { skip = true; }
+            if !skip { out.push(lines[j]); }
+            j += 1;
+        }
+        return _config_join_cmd(out);
+    }
+
+    if key_idx >= 0 {
+        let mut out: string[] = [];
+        let mut j: int = 0;
+        loop {
+            if j >= lines.length { break; }
+            if j == key_idx { out.push(rendered); } else {
+                out.push(lines[j]);
+            }
+            j += 1;
+        }
+        return _config_join_cmd(out);
+    }
+
+    if hdr >= 0 {
+        // Append after the section's last non-blank line, so the new field
+        // lands inside the section rather than after the blank that separates
+        // it from the next one.
+        let mut insert_at = hdr + 1;
+        let mut j = hdr + 1;
+        loop {
+            if j >= sect_end { break; }
+            if _toml_trim_cmd(lines[j]).length > 0 { insert_at = j + 1; }
+            j += 1;
+        }
+        let mut out: string[] = [];
+        let mut k: int = 0;
+        loop {
+            if k >= lines.length { break; }
+            if k == insert_at { out.push(rendered); }
+            out.push(lines[k]);
+            k += 1;
+        }
+        if insert_at >= lines.length {
+            // The section ran to a final line with no newline after it;
+            // terminate the appended field rather than inheriting that.
+            out.push(rendered);
+            out.push("");
+        }
+        return _config_join_cmd(out);
+    }
+
+    let mut appended = text;
+    if appended.length > 0 && appended[appended.length - 1] != "\n" {
+        appended = appended + "\n";
+    }
+    if appended.length > 0 { appended = appended + "\n"; }
+    return appended + "[" + section + "]\n" + rendered + "\n";
+}
+
+fn _config_render_line_cmd(k: ConfigKey, value: string) -> string {
+    if k.quoted { return k.field + " = \"" + value + "\""; }
+    return k.field + " = " + value;
+}
+
+// Read-modify-write `~/.sfn/config.toml` for a single key.
+fn _config_apply_cmd(k: ConfigKey, value: string, remove: boolean) -> int ![io] {
     let home = _get_home_cmd();
     if home.length == 0 {
         let empty_lines: string[] = [];
@@ -97,22 +405,228 @@ fn _write_config_cmd(registry_url: string, update_policy: string) -> int ![io] {
         return 1;
     }
     let path = sfn_dir + "/config.toml";
-    let mut out: string = "";
-    if registry_url.length > 0 {
-        out = out + "[registry]\n";
-        out = out + "url = \"" + registry_url + "\"\n";
-    }
-    if update_policy.length > 0 {
-        if registry_url.length > 0 { out = out + "\n"; }
-        out = out + "[toolchain]\n";
-        out = out + "update-policy = \"" + update_policy + "\"\n";
-    }
-    fs.writeFile(path, out);
+    let mut text: string = "";
+    if fs.exists(path) { text = fs.readFile(path); }
+    let rendered = _config_render_line_cmd(k, value);
+    fs.writeFile(path, _config_rewrite_cmd(text, k.section, k.field, rendered, remove));
     if !_set_perms_or_skip(path, 384) {
         print.err("error: failed to set permissions on " + path);
         return 1;
     }
     return 0;
+}
+
+// Raw configured value for `k`, "" when the file or key is absent. Distinct
+// from the resolvers below, which substitute defaults — provenance has to be
+// able to tell "set to the default" from "never set".
+fn _config_file_value_cmd(k: ConfigKey) -> string ![io] {
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    let path = home + "/.sfn/config.toml";
+    if !fs.exists(path) { return ""; }
+    return _toml_trim_cmd(toml_get_string(fs.readFile(path), k.section, k.field));
+}
+
+// A hand-edited value the reader will drop must not be credited to the file,
+// or `list` would name a rung the build does not use — the rule the registry
+// branch below already follows. The bar is exactly what `set` enforces, so
+// what `sfn config set` accepts is what `list` attributes to the file.
+// `target.*` values always pass: `_resolve_linker` takes them verbatim.
+fn _config_file_value_is_usable_cmd(k: ConfigKey, value: string) -> boolean {
+    if !_config_value_is_renderable_cmd(value) { return false; }
+    if strings_equal(k.section, "build") {
+        if strings_equal(k.field, "jobs") {
+            return _config_is_positive_int_cmd(value);
+        }
+        return is_absolute_path(value);
+    }
+    return true;
+}
+
+// Resolve `k` down SFEP-0076 section 3.3's ladder — environment, then user
+// config, then the compiled-in default — reporting which rung supplied the
+// value.
+fn _config_resolve_cmd(k: ConfigKey) -> ConfigResolved ![io] {
+    if strings_equal(k.cli, "registry") {
+        // Mirrors `_resolve_registry_url_cmd`'s fallthrough: a source that is
+        // set but invalid is skipped, so provenance must skip it too, or
+        // `list` would credit a rung the build does not use.
+        let env_url = _strip_trailing_slash_cmd(_toml_trim_cmd(env.get("SFN_REGISTRY")));
+        if env_url.length > 0 && _is_valid_registry_url_cmd(env_url) {
+            return ConfigResolved {
+                value: env_url,
+                source: "SFN_REGISTRY (env)"
+            };
+        }
+        let file_url = _strip_trailing_slash_cmd(_config_file_value_cmd(k));
+        if file_url.length > 0 && _is_valid_registry_url_cmd(file_url) {
+            return ConfigResolved {
+                value: file_url,
+                source: _CONFIG_FILE_ORIGIN
+            };
+        }
+        return ConfigResolved {
+            value: _resolve_registry_url_cmd(),
+            source: _CONFIG_DEFAULT_ORIGIN
+        };
+    }
+    if strings_equal(k.cli, TOOLCHAIN_UPDATE_POLICY_KEY) {
+        let policy = _config_file_value_cmd(k);
+        if policy.length > 0 {
+            return ConfigResolved {
+                value: policy,
+                source: _CONFIG_FILE_ORIGIN
+            };
+        }
+        return ConfigResolved {
+            value: toolchain_update_policy_read(),
+            source: _CONFIG_DEFAULT_ORIGIN
+        };
+    }
+    if k.env_var.length > 0 {
+        let from_env = _toml_trim_cmd(env.get(k.env_var));
+        if from_env.length > 0 {
+            return ConfigResolved {
+                value: from_env,
+                source: k.env_var + " (env)"
+            };
+        }
+    }
+    let from_file = _config_file_value_cmd(k);
+    if from_file.length > 0 && _config_file_value_is_usable_cmd(k, from_file) {
+        return ConfigResolved {
+            value: from_file,
+            source: _CONFIG_FILE_ORIGIN
+        };
+    }
+    return ConfigResolved {
+        value: _CONFIG_AUTO,
+        source: _CONFIG_DEFAULT_ORIGIN
+    };
+}
+
+// Reject bytes that would break out of the quoted value the writer renders.
+// A value carrying `"` or a newline could forge a whole second section — a
+// `[registry]` block steering `sfn add`/`publish`, say — out of a single
+// `set`. `registry` and `toolchain.update-policy` are already constrained by
+// their own grammars; this covers the free-form keys.
+//
+// A backslash is deliberately allowed: this reader strips the surrounding
+// quotes without unescaping, so a Windows tool path round-trips, and
+// rejecting it would make those paths unsettable.
+fn _config_value_is_renderable_cmd(value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let code = char_code_at_text(value, i);
+        if code < 32 { return false; }
+        if code == 34 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Strict positive decimal. Matches `_uc_parse_jobs`'s shape (no sign, no
+// whitespace, no separators) so `set` accepts exactly what the reader will
+// later honour.
+fn _config_is_positive_int_cmd(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    let mut nonzero: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let code = char_code_at_text(value, i);
+        if code < 48 { return false; }
+        if code > 57 { return false; }
+        if code != 48 { nonzero = true; }
+        i += 1;
+    }
+    return nonzero;
+}
+
+// Validate a value at `set` time. Returns non-zero to reject.
+//
+// `linker`/`cc` warn instead of failing on purpose: the same config file may
+// be shared across hosts or roamed onto one where the path is valid, and
+// erroring would make a legitimate multi-host file unwritable
+// (SFEP-0076 section 3.6).
+fn _config_validate_cmd(k: ConfigKey, value: string) -> int ![io] {
+    if k.quoted && !_config_value_is_renderable_cmd(value) {
+        print.err("error: " + k.cli
+            + " may not contain quotes, newlines, or control characters");
+        return 1;
+    }
+    if strings_equal(k.section, "build") {
+        if strings_equal(k.field, "jobs") {
+            if !_config_is_positive_int_cmd(value) {
+                print.err("error: build.jobs must be a positive integer");
+                return 1;
+            }
+            return 0;
+        }
+        if !is_absolute_path(value) {
+            print.err("error: build.cache-dir must be an absolute path");
+            return 1;
+        }
+        return 0;
+    }
+    if starts_with(k.section, "target.") {
+        if !is_absolute_path(value) {
+            // Not "ignored": `_resolve_linker` (`build/link.sfn`) passes the
+            // configured value through verbatim, and a bare tool name like
+            // `mold` is the idiomatic spelling. Still worth flagging — a value
+            // resolved through `PATH` makes the build depend on the ambient
+            // environment the config file exists to pin down.
+            print.err("warning: " + k.cli
+                + " is not an absolute path; it will be resolved through PATH at build time");
+            return 0;
+        }
+        if !fs.exists(value) {
+            print.err("warning: " + value
+                + " does not exist on this host; written anyway");
+            return 0;
+        }
+        if !fs.is_executable(value) {
+            print.err("warning: " + value + " is not executable");
+        }
+        return 0;
+    }
+    return 0;
+}
+
+fn _config_list_line_cmd(cli: string) -> string ![io] {
+    let resolved = _config_resolve_cmd(_config_lookup_key_cmd(cli));
+    return cli + " = " + resolved.value + "  " + resolved.source;
+}
+
+// The host triple first, then every other `[target.<triple>]` section the
+// file carries, so a cross-compiling user sees each persisted toolchain path
+// and not only this host's (SFEP-0076 section 2.2).
+fn _config_listed_triples_cmd() -> string[] ![io] {
+    let mut triples: string[] = [host_target_triple()];
+    let home = _get_home_cmd();
+    if home.length == 0 { return triples; }
+    let path = home + "/.sfn/config.toml";
+    if !fs.exists(path) { return triples; }
+    let sections = toml_section_names(fs.readFile(path));
+    let mut i: int = 0;
+    loop {
+        if i >= sections.length { break; }
+        let section = sections[i];
+        i += 1;
+        if !starts_with(section, "target.") { continue; }
+        if section.length <= 7 { continue; }
+        let triple = substring(section, 7, section.length);
+        let mut seen: boolean = false;
+        let mut j: int = 0;
+        loop {
+            if j >= triples.length { break; }
+            if strings_equal(triples[j], triple) { seen = true; }
+            j += 1;
+        }
+        if !seen { triples.push(triple); }
+    }
+    return triples;
 }
 
 fn handle_config_command(args: string[]) -> int ![io] {
@@ -126,8 +640,21 @@ fn handle_config_command(args: string[]) -> int ![io] {
             print.err("usage: sfn config list");
             return 2;
         }
-        print("registry = " + _resolve_registry_url_cmd());
-        print(TOOLCHAIN_UPDATE_POLICY_KEY + " = " + toolchain_update_policy_read());
+        // Every known key prints, including keys sitting at their default, so
+        // the file's full surface is discoverable before `config.toml` exists
+        // (SFEP-0076 section 2.2).
+        print(_config_list_line_cmd("registry"));
+        print(_config_list_line_cmd(TOOLCHAIN_UPDATE_POLICY_KEY));
+        print(_config_list_line_cmd("build.jobs"));
+        print(_config_list_line_cmd("build.cache-dir"));
+        let triples = _config_listed_triples_cmd();
+        let mut i: int = 0;
+        loop {
+            if i >= triples.length { break; }
+            print(_config_list_line_cmd("target." + triples[i] + ".linker"));
+            print(_config_list_line_cmd("target." + triples[i] + ".cc"));
+            i += 1;
+        }
         return 0;
     }
     if strings_equal(sub, "get") {
@@ -136,17 +663,10 @@ fn handle_config_command(args: string[]) -> int ![io] {
             return 2;
         }
         let key = args[2];
-        if strings_equal(key, "registry") {
-            print(_resolve_registry_url_cmd());
-            return 0;
-        }
-        if strings_equal(key, TOOLCHAIN_UPDATE_POLICY_KEY) {
-            print(toolchain_update_policy_read());
-            return 0;
-        }
-        print.err("unknown config key: " + key);
-        print.err("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
-        return 2;
+        let parsed = _config_lookup_key_cmd(key);
+        if !parsed.known { return _config_unknown_key_cmd(key); }
+        print(_config_resolve_cmd(parsed).value);
+        return 0;
     }
     if strings_equal(sub, "set") {
         if args.length != 4 {
@@ -155,38 +675,39 @@ fn handle_config_command(args: string[]) -> int ![io] {
         }
         let key = args[2];
         let value = _toml_trim_cmd(args[3]);
+        let parsed = _config_lookup_key_cmd(key);
+        if !parsed.known { return _config_unknown_key_cmd(key); }
+        if value.length == 0 {
+            print.err("error: empty value");
+            return 1;
+        }
         if strings_equal(key, "registry") {
-            if value.length == 0 {
-                print.err("error: empty value");
-                return 1;
-            }
             let normalized = _strip_trailing_slash_cmd(value);
             if !_is_valid_registry_url_cmd(normalized) {
                 print.err("error: registry must be an http(s) URL with no whitespace, quotes, or shell metacharacters");
                 return 1;
             }
-            let rc = _write_config_cmd(normalized, _config_update_policy_from_file_cmd());
+            let rc = _config_apply_cmd(parsed, normalized, false);
             if rc != 0 { return rc; }
             print("registry = " + normalized);
             return 0;
         }
         if strings_equal(key, TOOLCHAIN_UPDATE_POLICY_KEY) {
-            if value.length == 0 {
-                print.err("error: empty value");
-                return 1;
-            }
             if !toolchain_update_policy_is_valid(value) {
                 print.err("error: toolchain.update-policy must be one of notify, manual, disabled");
                 return 1;
             }
-            let rc = _write_config_cmd(_config_registry_url_from_file_cmd(), value);
+            let rc = _config_apply_cmd(parsed, value, false);
             if rc != 0 { return rc; }
             print(TOOLCHAIN_UPDATE_POLICY_KEY + " = " + value);
             return 0;
         }
-        print.err("unknown config key: " + key);
-        print.err("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
-        return 2;
+        let invalid = _config_validate_cmd(parsed, value);
+        if invalid != 0 { return invalid; }
+        let rc = _config_apply_cmd(parsed, value, false);
+        if rc != 0 { return rc; }
+        print(key + " = " + value);
+        return 0;
     }
     if strings_equal(sub, "unset") {
         if args.length != 3 {
@@ -194,21 +715,12 @@ fn handle_config_command(args: string[]) -> int ![io] {
             return 2;
         }
         let key = args[2];
-        if strings_equal(key, "registry") {
-            let rc = _write_config_cmd("", _config_update_policy_from_file_cmd());
-            if rc != 0 { return rc; }
-            print("unset " + key);
-            return 0;
-        }
-        if strings_equal(key, TOOLCHAIN_UPDATE_POLICY_KEY) {
-            let rc = _write_config_cmd(_config_registry_url_from_file_cmd(), "");
-            if rc != 0 { return rc; }
-            print("unset " + key);
-            return 0;
-        }
-        print.err("unknown config key: " + key);
-        print.err("  known keys: registry, " + TOOLCHAIN_UPDATE_POLICY_KEY);
-        return 2;
+        let parsed = _config_lookup_key_cmd(key);
+        if !parsed.known { return _config_unknown_key_cmd(key); }
+        let rc = _config_apply_cmd(parsed, "", true);
+        if rc != 0 { return rc; }
+        print("unset " + key);
+        return 0;
     }
     print.err("unknown subcommand: " + sub);
     print.err("usage: sfn config <get|set|unset|list> [key] [value]");

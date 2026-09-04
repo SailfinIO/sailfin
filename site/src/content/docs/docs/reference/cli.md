@@ -611,15 +611,26 @@ Rejects empty tokens. Overwrites any existing credentials file.
 
 ### `sfn config <get|set|unset|list> [key] [value]`
 
-Persist per-user toolchain settings to `~/.sfn/config.toml` (mode 600). Two keys are supported today: `registry`, which controls where `sfn add` and `sfn publish` look for capsules, and `toolchain.update-policy`, which controls whether `sfn toolchain install`/`update` (and the automatic fetch of a missing selected toolchain) may contact the release endpoint at all.
+Persist per-user, machine-scoped settings to `~/.sfn/config.toml` (mode 600). Six keys are admitted (SFEP-0076 §3.2): `registry`, which controls where `sfn add` and `sfn publish` look for capsules, `toolchain.update-policy`, which controls whether `sfn toolchain install`/`update` (and the automatic fetch of a missing selected toolchain) may contact the release endpoint at all, and four keys — `build.jobs`, `build.cache-dir`, `target.<triple>.linker`, `target.<triple>.cc` — for facts about the workstation itself, such as its linker or core count, rather than about the program being built.
+
+**Admitted keys:**
+
+| CLI key | TOML location | Value |
+|---|---|---|
+| `registry` | `[registry] url` | registry base URL |
+| `toolchain.update-policy` | `[toolchain] update-policy` | `notify` / `manual` / `disabled` |
+| `build.jobs` | `[build] jobs` | positive integer, written unquoted |
+| `build.cache-dir` | `[build] cache-dir` | absolute path |
+| `target.<triple>.linker` | `[target.<triple>] linker` | absolute path to a linker |
+| `target.<triple>.cc` | `[target.<triple>] cc` | absolute path to a C compiler |
 
 **Subcommands:**
 
 | Form | Description |
 |---|---|
-| `sfn config list` | Print every resolved setting. |
+| `sfn config list` | Print every known key, including keys at their compiled-in default, with a provenance column. |
 | `sfn config get <key>` | Print the resolved value for a single key. |
-| `sfn config set <key> <value>` | Persist `<value>` for `<key>`. |
+| `sfn config set <key> <value>` | Validate and persist `<value>` for `<key>`. |
 | `sfn config unset <key>` | Remove the key from `~/.sfn/config.toml`, reverting to the default. |
 
 **Usage:**
@@ -627,17 +638,36 @@ Persist per-user toolchain settings to `~/.sfn/config.toml` (mode 600). Two keys
 ```bash
 sfn config set registry https://registry.acme.internal   # point at a private registry
 sfn config get registry                                   # https://registry.acme.internal
-sfn config list                                           # registry = https://registry.acme.internal
-sfn config unset registry                                 # back to the default
+sfn config set build.jobs 8                                # cap local build parallelism
+sfn config set build.cache-dir /fast/scratch/sfn            # relocate the module emit cache
+sfn config set target.aarch64-apple-darwin.linker /opt/homebrew/opt/llvm/bin/ld64.lld
+sfn config list                                            # every key, with provenance
+sfn config unset registry                                  # back to the default
 ```
 
-**Resolution order** for the registry URL (highest priority first):
+**Dotted key paths split on the last dot**, not the first: `target.aarch64-apple-darwin.linker` parses as section `target.aarch64-apple-darwin`, key `linker`. A host triple contains hyphens of its own, so splitting on the first dot would misparse it as section `target`, key `aarch64-apple-darwin.linker`. `registry` is the one legacy key with no dot at all and maps directly to `[registry] url`.
 
-1. `SFN_REGISTRY` environment variable — a one-shot override useful for CI.
-2. `[registry] url` in `~/.sfn/config.toml` — persisted by `sfn config set`.
-3. Compiled-in default: `https://pkg.sfn.dev`.
+**Validation at `set` time:**
 
-The URL must start with `http://` or `https://` and may not contain whitespace, quotes, or shell metacharacters. Invalid values are rejected at `sfn config set` and silently ignored (with a warning to stderr) when coming from the environment or a hand-edited config file.
+| Key | Rule | On failure |
+|---|---|---|
+| `build.jobs` | positive integer | error, exit 1 |
+| `build.cache-dir` | absolute path | error, exit 1 |
+| `target.<triple>.linker` / `target.<triple>.cc` | absolute path, exists, executable | **warning to stderr; the value is still written** |
+
+`linker`/`cc` fail open rather than closed because the same config file may be shared or roamed onto a host where that path *is* valid even though it does not resolve on the host currently running `sfn config set` — a dotfiles repo synced between a laptop and a differently-laid-out CI image, for instance. Erroring at `set` time would make a legitimate multi-host file unwritable from whichever host last touched it (SFEP-0076 §3.6).
+
+**Resolution order**, highest priority first, applies to every admitted key:
+
+1. **CLI flag**, where one exists (for example `--jobs`).
+2. **Environment variable** — `SFN_REGISTRY`, `SAILFIN_BUILD_JOBS`, `SAILFIN_BUILD_CACHE_DIR`, `SAILFIN_LINKER`, `SAILFIN_CC` (`toolchain.update-policy` has no environment override).
+3. **Project manifest** (`capsule.toml` / `workspace.toml`) — reserved for project-scoped settings; no admitted key uses this rung today.
+4. **`~/.sfn/config.toml`** — persisted by `sfn config set`.
+5. **Compiled-in default.**
+
+The user config sits *below* the environment on purpose: `SAILFIN_LINKER=... sfn build` keeps working as a one-shot override even for a user who has persisted a different linker, and CI can override a developer's file without editing it.
+
+The `registry` URL must start with `http://` or `https://` and may not contain whitespace, quotes, or shell metacharacters. Invalid values are rejected at `sfn config set` and silently ignored (with a warning to stderr) when coming from the environment or a hand-edited config file.
 
 **Enterprise example:** host a mirror behind your firewall and opt everyone in by adding a single line to your shell profile:
 
@@ -647,6 +677,21 @@ export SFN_REGISTRY=https://registry.acme.internal
 
 Or put it in `~/.sfn/config.toml` once per workstation with `sfn config set registry ...` — no shell changes required.
 
+Two keys deviate from the plain precedence chain above:
+
+- **`build.jobs` is a ceiling the user may lower, never raise.** The effective job count is `min(configured, RAM budget)` — a configured value above the host's RAM budget is clamped down to the budget with a warning to stderr rather than an error, because the same config file may be roamed onto a smaller host and should not brick the build there (SFEP-0076 §3.4).
+- **`build.cache-dir` sits below the compiler's self-host cache pin, not directly below the environment.** The pin (SFEP-0040 §3.1) is a hermeticity invariant for `sfn dev bootstrap build` / `sfn dev verify` — self-hosting must never read a developer's global store — so `build.cache-dir` can never pull the self-host cache out of tree, even though `SAILFIN_BUILD_CACHE_DIR` still can (SFEP-0076 §3.4.1).
+
+**`sfn config list` provenance.** `list` prints every admitted key — including keys sitting at their compiled-in default, so the file's full surface is discoverable even before `~/.sfn/config.toml` exists — with a trailing source column naming where the value came from: `~/.sfn/config.toml`, `<ENVVAR> (env)`, or `default`. An unset `build.*` or `target.*` key reads `auto`, meaning the compiler probes for a value at build time rather than applying a fixed default. `list` reports the host triple's `target.*` keys plus any other `[target.<triple>]` section present in the file, so a cross-compiling user can see every triple they have configured, not only the one currently being built for:
+
+```
+registry = https://pkg.sfn.dev  default
+toolchain.update-policy = notify  default
+build.jobs = 8  ~/.sfn/config.toml
+build.cache-dir = auto  default
+target.aarch64-apple-darwin.linker = /usr/bin/ld.lld  SAILFIN_LINKER (env)
+```
+
 **`toolchain.update-policy`** (SFEP-0073 §3.6, SFN-1071) takes one of three values, stored as `[toolchain] update-policy` in the same `~/.sfn/config.toml`:
 
 | Value | Effect |
@@ -655,7 +700,9 @@ Or put it in `~/.sfn/config.toml` once per workstation with `sfn config set regi
 | `manual` | Also permits all three explicit commands, identically to `notify`. It differs only by suppressing the opportunistic check above — `manual` never performs it. |
 | `disabled` | Refuses every release-network operation — `install`, `update` (with or without `--check`), `default <version>` when it would have to fetch, and the automatic fetch of a missing selected toolchain — before any request, naming the policy and `sfn config set toolchain.update-policy manual` as the remedy. Local selection, `list`/`active`/`verify`, reporting or recording an already-installed `default`, and `remove` are unaffected. |
 
-`sfn config set toolchain.update-policy <value>` rejects anything else (`error: toolchain.update-policy must be one of notify, manual, disabled`, exit `1`). A hand-edited value outside this set is reported verbatim by `sfn config get toolchain.update-policy`, but every network operation fails closed against it, naming the config file and the three valid values. `sfn config set`/`unset registry` and `sfn config set`/`unset toolchain.update-policy` each rewrite only their own section — setting one never clobbers the other. `sfn config list` prints both keys; an unknown key names both in its `known keys:` message.
+`sfn config set toolchain.update-policy <value>` rejects anything else (`error: toolchain.update-policy must be one of notify, manual, disabled`, exit `1`). A hand-edited value outside this set is reported verbatim by `sfn config get toolchain.update-policy`, but every network operation fails closed against it, naming the config file and the three valid values.
+
+Every `sfn config set`/`unset` rewrites only its own TOML section — the same isolation `registry` and `toolchain.update-policy` have always had now extends to all six keys, so writing `target.aarch64-apple-darwin.linker` leaves an existing `[target.x86_64-unknown-linux-gnu]` section, or `[registry]`, or `[build]`, byte-identical. An unknown key is rejected with exit `2`, naming the full admitted set: `registry`, `toolchain.update-policy`, `build.jobs`, `build.cache-dir`, `target.<triple>.linker`, `target.<triple>.cc`.
 
 ---
 
