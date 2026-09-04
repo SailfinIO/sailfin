@@ -1,0 +1,262 @@
+// End-to-end tests for `sfn config`'s dotted-key surface: per-key
+// validation, last-dot section splitting (`target.<triple>.linker`), and
+// `list` provenance (SFN-1261, SFEP-0076 §3.6).
+//
+// Each test uses a private HOME (under the runner's scratch dir) so the
+// real ~/.sfn/config.toml is never touched, and threads it to the child
+// via the `run_capture` env array (an empty array is the *empty*
+// environment, not "inherit").
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test).
+import { contains, find, to_lower_all } from "sfn/strings";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+
+struct CfgRun {
+    exit: int,
+    out: string,
+    err: string
+}
+
+// A private HOME under the runner's scratch dir (or /tmp), keyed by `tag`
+// so concurrent tests in the parallel pool never collide. Any stale
+// config.toml is removed so each run starts clean. Uses a prefix distinct
+// from config_test.sfn's `sfn-config-` so the two files never collide.
+fn _home(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = default_scratch_dir(); }
+    let home = base + "/sfn-config-dotted-" + tag;
+    fs.createDirectory(home + "/.sfn", true);
+    let cfg = home + "/.sfn/config.toml";
+    if fs.exists(cfg) { fs.deleteFile(cfg); }
+    return home;
+}
+
+// Run `sfn <args...>` with HOME (+ PATH, + any extra env entries)
+// threaded to the child, returning the exit code and the two output
+// streams separately, so a test can assert which one a diagnostic landed
+// on.
+fn _run(home: string, args: string[], extra_env: string[]) -> CfgRun ![io] {
+    let mut e: string[] = ["HOME=" + home];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let mut i = 0;
+    loop {
+        if i >= extra_env.length { break; }
+        e.push(extra_env[i]);
+        i += 1;
+    }
+    let mut argv: string[] = [sfn_bin_path()];
+    let mut j = 0;
+    loop {
+        if j >= args.length { break; }
+        argv.push(args[j]);
+        j += 1;
+    }
+    let exit = process.run_capture(argv, e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CfgRun { exit: exit, out: out, err: err };
+}
+
+// ---- Test 1: build.jobs round-trips set -> get -> unset ----
+test "config: build.jobs round-trips set, get, unset" ![io] {
+    let home = _home("jobs_roundtrip");
+    let s = _run(home, ["config", "set", "build.jobs", "8"], []);
+    assert s.exit == 0;
+    let g = _run(home, ["config", "get", "build.jobs"], []);
+    assert g.exit == 0;
+    assert find(g.out, "8", 0) >= 0;
+    let u = _run(home, ["config", "unset", "build.jobs"], []);
+    assert u.exit == 0;
+    let g2 = _run(home, ["config", "get", "build.jobs"], []);
+    assert find(g2.out, "auto", 0) >= 0;
+}
+
+// ---- Test 2: build.cache-dir round-trips ----
+test "config: build.cache-dir round-trips and writes quoted" ![io] {
+    let home = _home("cache_dir_roundtrip");
+    let s = _run(home, ["config", "set", "build.cache-dir", "/tmp/sfn-cache"], []);
+    assert s.exit == 0;
+    let g = _run(home, ["config", "get", "build.cache-dir"], []);
+    assert g.exit == 0;
+    assert find(g.out, "/tmp/sfn-cache", 0) >= 0;
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    assert contains(body, "[build]");
+    assert contains(body, "cache-dir = \"/tmp/sfn-cache\"");
+}
+
+// ---- Test 3: build.jobs writes unquoted ----
+test "config: build.jobs writes unquoted" ![io] {
+    let home = _home("jobs_unquoted");
+    let s = _run(home, ["config", "set", "build.jobs", "8"], []);
+    assert s.exit == 0;
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    assert contains(body, "jobs = 8");
+    assert ! contains(body, "jobs = \"8\"");
+}
+
+// ---- Test 4: target.<triple>.linker splits on the LAST dot ----
+test "config: target linker key splits on the last dot" ![io] {
+    let home = _home("target_linker_split");
+    let s = _run(home, ["config", "set", "target.aarch64-apple-darwin.linker", "/usr/bin/ld64"], []);
+    assert s.exit == 0;
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    assert contains(body, "[target.aarch64-apple-darwin]");
+    assert contains(body, "linker = \"/usr/bin/ld64\"");
+}
+
+// ---- Test 5: target.<triple>.cc round-trips the same way ----
+test "config: target cc key round-trips" ![io] {
+    let home = _home("target_cc_roundtrip");
+    let s = _run(home, ["config", "set", "target.aarch64-apple-darwin.cc", "/usr/bin/clang"], []);
+    assert s.exit == 0;
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    assert contains(body, "[target.aarch64-apple-darwin]");
+    assert contains(body, "cc = \"/usr/bin/clang\"");
+    let g = _run(home, ["config", "get", "target.aarch64-apple-darwin.cc"], []);
+    assert g.exit == 0;
+    assert find(g.out, "/usr/bin/clang", 0) >= 0;
+}
+
+// ---- Test 6: build.jobs rejects a non-integer ----
+test "config: build.jobs rejects a non-integer" ![io] {
+    let home = _home("jobs_nonint");
+    let r = _run(home, ["config", "set", "build.jobs", "abc"], []);
+    assert r.exit == 1;
+    assert find(r.err, "build.jobs must be a positive integer", 0) >= 0;
+    if fs.exists(home + "/.sfn/config.toml") {
+        let body = fs.readFile(home + "/.sfn/config.toml");
+        assert ! contains(body, "jobs");
+    }
+}
+
+// ---- Test 7: build.jobs rejects zero and negative values ----
+test "config: build.jobs rejects zero and negative values" ![io] {
+    let home = _home("jobs_nonpositive");
+    let r0 = _run(home, ["config", "set", "build.jobs", "0"], []);
+    assert r0.exit == 1;
+    assert find(r0.err, "build.jobs must be a positive integer", 0) >= 0;
+    let rneg = _run(home, ["config", "set", "build.jobs", "-1"], []);
+    assert rneg.exit == 1;
+    assert find(rneg.err, "build.jobs must be a positive integer", 0) >= 0;
+}
+
+// ---- Test 8: build.cache-dir rejects a relative path ----
+test "config: build.cache-dir rejects a relative path" ![io] {
+    let home = _home("cache_dir_relative");
+    let r = _run(home, ["config", "set", "build.cache-dir", "relative/dir"], []);
+    assert r.exit == 1;
+    assert find(r.err, "build.cache-dir must be an absolute path", 0) >= 0;
+    if fs.exists(home + "/.sfn/config.toml") {
+        let body = fs.readFile(home + "/.sfn/config.toml");
+        assert ! contains(body, "cache-dir");
+    }
+}
+
+// ---- Test 9: target linker with a nonexistent path warns but writes ----
+test "config: target linker warns on nonexistent path but still writes" ![io] {
+    let home = _home("target_linker_warns");
+    let r = _run(home, ["config", "set", "target.x86_64-unknown-linux-gnu.linker", "/no/such/linker"], []);
+    assert r.exit == 0;
+    assert find(to_lower_all(r.err), "warning:", 0) >= 0;
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    assert contains(body, "linker = \"/no/such/linker\"");
+}
+
+// ---- Test 10: section isolation across every known key ----
+test "config: sections stay isolated across all known keys" ![io] {
+    let home = _home("section_isolation");
+    let s1 = _run(home, ["config", "set", "registry", "https://reg.test"], []);
+    assert s1.exit == 0;
+    let s2 = _run(home, ["config", "set", "toolchain.update-policy", "manual"], []);
+    assert s2.exit == 0;
+    let s3 = _run(home, ["config", "set", "build.jobs", "4"], []);
+    assert s3.exit == 0;
+    let s4 = _run(home, ["config", "set", "target.aarch64-apple-darwin.linker", "/usr/bin/ld64"], []);
+    assert s4.exit == 0;
+    let s5 = _run(home, ["config", "set", "target.x86_64-unknown-linux-gnu.linker", "/usr/bin/ld"], []);
+    assert s5.exit == 0;
+    // Re-set build.jobs to a new value; every other key must survive.
+    let s6 = _run(home, ["config", "set", "build.jobs", "16"], []);
+    assert s6.exit == 0;
+
+    let g1 = _run(home, ["config", "get", "registry"], []);
+    assert find(g1.out, "https://reg.test", 0) >= 0;
+    let g2 = _run(home, ["config", "get", "toolchain.update-policy"], []);
+    assert find(g2.out, "manual", 0) >= 0;
+    let g3 = _run(home, ["config", "get", "build.jobs"], []);
+    assert find(g3.out, "16", 0) >= 0;
+    let g4 = _run(home, ["config", "get", "target.aarch64-apple-darwin.linker"], []);
+    assert find(g4.out, "/usr/bin/ld64", 0) >= 0;
+    let g5 = _run(home, ["config", "get", "target.x86_64-unknown-linux-gnu.linker"], []);
+    assert find(g5.out, "/usr/bin/ld", 0) >= 0;
+
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    assert contains(body, "[target.aarch64-apple-darwin]");
+    assert contains(body, "[target.x86_64-unknown-linux-gnu]");
+}
+
+// ---- Test 11: unset isolation leaves other sections intact ----
+test "config: unset isolation leaves other sections intact" ![io] {
+    let home = _home("unset_isolation");
+    let _s1 = _run(home, ["config", "set", "registry", "https://reg.test"], []);
+    let _s2 = _run(home, ["config", "set", "target.aarch64-apple-darwin.linker", "/usr/bin/ld64"], []);
+    let _s3 = _run(home, ["config", "set", "target.x86_64-unknown-linux-gnu.linker", "/usr/bin/ld"], []);
+    let _s4 = _run(home, ["config", "set", "build.jobs", "4"], []);
+
+    let u = _run(home, ["config", "unset", "build.jobs"], []);
+    assert u.exit == 0;
+
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    assert contains(body, "[target.aarch64-apple-darwin]");
+    assert contains(body, "[target.x86_64-unknown-linux-gnu]");
+
+    let g1 = _run(home, ["config", "get", "registry"], []);
+    assert find(g1.out, "https://reg.test", 0) >= 0;
+    let g2 = _run(home, ["config", "get", "target.aarch64-apple-darwin.linker"], []);
+    assert find(g2.out, "/usr/bin/ld64", 0) >= 0;
+    let g3 = _run(home, ["config", "get", "target.x86_64-unknown-linux-gnu.linker"], []);
+    assert find(g3.out, "/usr/bin/ld", 0) >= 0;
+}
+
+// ---- Test 12: list shows file provenance ----
+test "config: list shows file provenance" ![io] {
+    let home = _home("list_file_provenance");
+    let _s = _run(home, ["config", "set", "build.jobs", "8"], []);
+    let r = _run(home, ["config", "list"], []);
+    assert r.exit == 0;
+    assert find(r.out, "build.jobs = ", 0) >= 0;
+    assert find(r.out, "~/.sfn/config.toml", 0) >= 0;
+}
+
+// ---- Test 13: list provenance flips to env when an env var is set ----
+test "config: list provenance flips to env" ![io] {
+    let home = _home("list_env_provenance");
+    let _s = _run(home, ["config", "set", "build.jobs", "8"], []);
+    let r = _run(home, ["config", "list"], ["SAILFIN_BUILD_JOBS=4"]);
+    assert r.exit == 0;
+    assert find(r.out, "(env)", 0) >= 0;
+    assert find(r.out, "SAILFIN_BUILD_JOBS", 0) >= 0;
+}
+
+// ---- Test 14: list includes keys at their compiled-in default ----
+test "config: list includes keys at their default" ![io] {
+    let home = _home("list_default_provenance");
+    let r = _run(home, ["config", "list"], []);
+    assert r.exit == 0;
+    assert find(r.out, "build.cache-dir = ", 0) >= 0;
+    assert find(r.out, "default", 0) >= 0;
+}
+
+// ---- Test 15: unknown dotted key names the known keys ----
+test "config: unknown dotted key names the known keys" ![io] {
+    let home = _home("unknown_dotted_key");
+    let r = _run(home, ["config", "set", "build.nope", "1"], []);
+    assert r.exit == 2;
+    assert find(r.err, "unknown config key: build.nope", 0) >= 0;
+    assert find(r.err, "known keys:", 0) >= 0;
+    assert find(r.err, "build.jobs", 0) >= 0;
+    assert find(r.out, "known keys:", 0) < 0;
+}
