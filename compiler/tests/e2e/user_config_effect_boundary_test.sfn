@@ -1,6 +1,6 @@
 // compiler/tests/e2e/user_config_effect_boundary_test.sfn
 //
-// NEVER DELETE. SFEP-0076 section 4 marks this guard permanent.
+// NEVER DELETE. SFEP-0076 section 8 marks this guard permanent.
 //
 // SFEP-0076 section 4 states the user-config boundary as a constraint
 // rather than a consequence:
@@ -15,23 +15,25 @@
 // describes the code, and shipping it as proof is a false claim.
 //
 // Section 3.1 clause (a) forbids this by construction, which is a rule in a
-// document. This file makes it a test, so a future session cannot admit
+// document. This file makes it executable, so a future session cannot admit
 // `SAILFIN_EFFECT_ENFORCE` (`compiler/src/effect_gate.sfn`),
 // `SAILFIN_CAPSULE_FILTER`
 // (`compiler/src/capsule_resolver/reachability.sfn`) or
 // `SAILFIN_RUNTIME_SOURCE_GATES`
 // (`compiler/src/build/runtime_selection.sfn`) as a convenience key without
-// a red suite explaining why not. Those three are permanently excluded at
-// any priority, not merely unimplemented.
+// a red suite explaining why not. Section 4 excludes those three
+// permanently, at any priority -- they are not merely unimplemented.
 //
 // A change that makes this file fail is a DESIGN VIOLATION TO ESCALATE, not
-// a test to re-baseline. Updating the expected diagnostic to match new
+// a test to re-baseline. Re-recording the expected diagnostic to match new
 // behaviour would delete the guarantee while leaving the file in place.
 //
-// Shape: stage each fixture ONCE, then drive `sfn check` over that single
-// path under three different `HOME`s. Holding the fixture path fixed is
-// what makes a byte-identical comparison meaningful -- a per-state scratch
-// dir would put a differing absolute path in every diagnostic and the
+// SHAPE
+//
+// Each fixture is staged ONCE, then `sfn check` runs over that single path
+// under three different `HOME`s. Holding the fixture path fixed is what
+// makes a byte-identical comparison meaningful: the diagnostic embeds the
+// source path, so a per-state scratch dir would differ in every run and the
 // comparison would assert nothing.
 //
 //   1. no `~/.sfn/config.toml` at all (baseline)
@@ -41,25 +43,50 @@
 //      passes admission and reaches its consumer) but can never be
 //      created, and `linker`/`cc` naming binaries that do not exist
 //
-// State 3 is the one that matters. It holds the boundary on the paths
-// where the config machinery is doing the most work, rather than only
-// where it is inert.
+// State 3 is the one that matters. It holds the boundary with the config
+// carrying values that genuinely change behaviour elsewhere in the
+// toolchain, rather than only values that are inert everywhere.
 //
-// Two controls keep the comparison from passing vacuously:
+// BOTH RENDERERS
 //
-//   - each test pins the baseline's E-code and its exit code explicitly,
-//     because three identical CLEAN runs would compare byte-identical too;
+// `--json` is the primary oracle: the envelope carries the code, message,
+// span and suggestion on STDOUT under a versioned schema, while any config
+// warning goes to stderr and so cannot pollute the comparison. The human
+// stream is compared too, because it is a separate renderer and it is what
+// a user actually reads.
+//
+// The `--json` envelope is safe to compare byte-for-byte because
+// `summary.duration_ms` is a hardcoded `0` at its sole construction site
+// (`compiler/src/check/engine.sfn`, `CheckJsonSummary`). If that ever
+// becomes real wall-clock timing, this comparison must narrow to the
+// `events` array rather than being deleted -- a timing field would make the
+// whole-envelope compare flaky, and a flaky never-delete guard is worse
+// than none.
+//
+// NON-VACUITY
+//
+// Three identical CLEAN runs would compare byte-identical too, and so would
+// three runs under a config nobody ever read. Both holes are closed:
+//
+//   - each test pins the baseline's E-code and exit code explicitly;
 //   - `_assert_config_is_live` proves, under the same `HOME`, that the
-//     config file really is well-formed and really is read (`sfn config
-//     get` reports the configured value). Without it, states 2 and 3 could
-//     be inert for a boring reason -- a typo'd section header -- and the
-//     guard would be asserting nothing at all.
+//     config really is well-formed and really is read, by asking `sfn
+//     config get` to report the configured value back.
 //
-// NOTE: assert on captured output with `sfn/strings` predicates. The
+// Without the second control this file would still pass if
+// `user_config_dir()` stopped resolving `HOME` at all, which is precisely
+// the regression that would make every other assertion here meaningless.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates -- the
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from an
 // `![io]` test.
 import { find } from "sfn/strings";
-import { clean_runner_env_without, nested_runner_scratch, scratch_root, sfn_bin_path } from "sfn/test";
+import {
+    clean_runner_env_without,
+    nested_runner_scratch,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
 
 import { build_target_triple } from "../../src/build/target";
 
@@ -79,8 +106,8 @@ fn _root() -> string ![io] {
 //
 // Keyed by `code` as well as `state` so the two tests in this file cannot
 // share a scratch path. Tests within one file run sequentially today, so
-// this buys nothing right now; it costs one string concat and removes the
-// file's dependence on that staying true.
+// this buys nothing right now; it costs one concat and removes the file's
+// dependence on that staying true.
 fn _home(code: string, state: string) -> string ![io] {
     let dir = _root() + "/" + code + "-home-" + state;
     fs.createDirectory(dir, true);
@@ -96,11 +123,11 @@ fn _write_config(home: string, body: string) -> void ![io] {
 // `[target.<triple>] linker`/`cc` and `[build] cache-dir`/`jobs`.
 fn _legal_config(triple: string, code: string) -> string ![io] {
     let cache = _root() + "/" + code + "-legal-cache";
-    return "[target." + triple + "]\n"
-        + "linker = \"ld\"\n"
-        + "cc = \"cc\"\n\n"
+    return "[target." + triple + "]\n" + "linker = \"ld\"\n" + "cc = \"cc\"\n\n"
         + "[build]\n"
-        + "cache-dir = \"" + cache + "\"\n"
+        + "cache-dir = \""
+        + cache
+        + "\"\n"
         + "jobs = 4\n";
 }
 
@@ -108,15 +135,15 @@ fn _legal_config(triple: string, code: string) -> string ![io] {
 //
 // `jobs = 9` sits one above the fixed 8-worker emit ceiling
 // (`_cr_jobs_ceiling`, `compiler/src/capsule_emit_parallel.sfn`), so the
-// clamp fires on every host. The host-RAM budget rung is deliberately not
-// probed: its threshold varies per runner, so a value chosen to cross it
+// clamp fires on every host. The host-RAM budget rung is deliberately left
+// alone: its threshold varies per runner, so a value picked to cross it
 // would assert something different on every machine.
 //
-// `cache-dir` points THROUGH a regular file, so it is absolute (and so
-// passes admission and reaches its consumer) yet can never be created.
-// A mode-000 directory would be the obvious alternative and is the wrong
-// one: CI containers routinely run as root, where mode 000 is not a
-// barrier at all and the case would silently degrade to "a legal path".
+// `cache-dir` points THROUGH a regular file, so it is absolute -- and so
+// passes admission and reaches its consumer -- yet can never be created. A
+// mode-000 directory is the obvious alternative and is the wrong one: CI
+// containers routinely run as root, where mode 000 is no barrier at all and
+// the case would silently degrade into "a second legal path".
 fn _boundary_config(triple: string, code: string) -> string ![io] {
     let blocker = _root() + "/" + code + "-blocker-file";
     fs.writeFile(blocker, "not a directory\n");
@@ -124,22 +151,28 @@ fn _boundary_config(triple: string, code: string) -> string ![io] {
         + "linker = \"/nonexistent/sfn-boundary-no-such-linker\"\n"
         + "cc = \"/nonexistent/sfn-boundary-no-such-cc\"\n\n"
         + "[build]\n"
-        + "cache-dir = \"" + blocker + "/cache\"\n"
+        + "cache-dir = \""
+        + blocker
+        + "/cache\"\n"
         + "jobs = 9\n";
 }
 
 // `build_target_triple()` also honours `SAILFIN_TARGET_OS` /
 // `SAILFIN_TARGET_TRIPLE`, so re-thread whichever the outer test process
-// carries. Without this the triple this file writes into the config
-// section header would not be the triple the spawned child resolves, and
-// `[target.<triple>]` would silently name a section for another host --
-// making states 2 and 3 partially inert.
+// carries. Without this, the triple written into the config section header
+// would not be the triple the spawned child resolves, `[target.<triple>]`
+// would name a section for some other host, and states 2 and 3 would be
+// half-inert while still passing.
 fn _target_env() -> string[] ![io] {
     let mut extra: string[] = [];
     let target_os = env.get("SAILFIN_TARGET_OS");
-    if target_os.length > 0 { extra.push("SAILFIN_TARGET_OS=" + target_os); }
+    if target_os.length > 0 {
+        extra.push("SAILFIN_TARGET_OS=" + target_os);
+    }
     let target_triple = env.get("SAILFIN_TARGET_TRIPLE");
-    if target_triple.length > 0 { extra.push("SAILFIN_TARGET_TRIPLE=" + target_triple); }
+    if target_triple.length > 0 {
+        extra.push("SAILFIN_TARGET_TRIPLE=" + target_triple);
+    }
     let host_os = env.get("SAILFIN_HOST_OS");
     if host_os.length > 0 { extra.push("SAILFIN_HOST_OS=" + host_os); }
     return extra;
@@ -147,19 +180,26 @@ fn _target_env() -> string[] ![io] {
 
 // Child env for a spawned `sfn`. `run_capture`'s `[]` is the EMPTY
 // environment rather than "inherit", and `check` stages per-module
-// subprocesses, so this goes through `clean_runner_env_without` to keep the
+// subprocesses, so this routes through `clean_runner_env_without` to keep
 // nested work under the pool's scratch tree (SFN-401).
 //
 // The strip list names every key pushed back below, per that helper's own
 // contract: `env.get` resolves through libc `getenv`, which returns the
-// FIRST match, so an inherited entry would silently defeat a later push.
-// `SAILFIN_LINKER`, `SAILFIN_CC` and `SAILFIN_BUILD_CACHE_DIR` are stripped
-// for a second reason -- each sits ABOVE the corresponding config rung in
-// the SFEP-0076 section 3.3 precedence chain, so an inherited copy would
-// shadow the config value and make states 2 and 3 vacuous.
+// FIRST match, so an inherited entry silently defeats a later push.
+// `SAILFIN_LINKER`, `SAILFIN_CC`, `SAILFIN_BUILD_CACHE_DIR` and
+// `SAILFIN_BUILD_JOBS` are stripped for a second reason -- each sits ABOVE
+// its config rung in the SFEP-0076 section 3.3 precedence chain, so an
+// inherited copy would shadow the config value and make states 2 and 3
+// vacuous.
+//
+// `SAILFIN_BUILD_JOBS` is the one that only bites under the parallel pool:
+// pooled test children are pinned to `SAILFIN_BUILD_JOBS=1` so the test and
+// emit fan-outs cannot nest and multiply (SFN-547,
+// `.claude/rules/compiler-safety.md`). Left inherited it reaches the child,
+// outranks `[build] jobs`, and `_assert_config_is_live` reads back `1`
+// instead of the configured value -- green serially, red under `--jobs N`.
 fn _child_env(home: string) -> string[] ![io] {
-    let mut e = clean_runner_env_without(nested_runner_scratch("effect-boundary"), ["HOME",
-        "SAILFIN_LINKER", "SAILFIN_CC", "SAILFIN_TARGET_TRIPLE", "SAILFIN_BUILD_CACHE_DIR"]);
+    let mut e = clean_runner_env_without(nested_runner_scratch("effect-boundary"), ["HOME", "SAILFIN_LINKER", "SAILFIN_CC", "SAILFIN_TARGET_TRIPLE", "SAILFIN_BUILD_CACHE_DIR", "SAILFIN_BUILD_JOBS"]);
     e.push("HOME=" + home);
     let target_env = _target_env();
     let mut i: int = 0;
@@ -185,22 +225,43 @@ fn _run(home: string, args: string[]) -> CheckRun ![io] {
     return CheckRun { exit: exit, out: out, err: err };
 }
 
-fn _check(home: string, fixture: string) -> CheckRun ![io] {
+fn _check_json(home: string, fixture: string) -> CheckRun ![io] {
+    return _run(home, ["check", "--json", fixture]);
+}
+
+fn _check_human(home: string, fixture: string) -> CheckRun ![io] {
     return _run(home, ["check", fixture]);
 }
 
 // Non-vacuity control. Proves the config file under `home` is well-formed
-// and actually read, so that a byte-identical `check` result is evidence of
-// the boundary holding rather than evidence of a config nobody parsed.
+// and actually read, so a byte-identical `check` result is evidence of the
+// boundary holding rather than evidence of a config nobody parsed.
+//
+// `config get` reports the value as written, before any consumer-side
+// clamp, which is why the boundary state expects `9` rather than the
+// clamped `8`.
 fn _assert_config_is_live(home: string, key: string, expected: string) -> void ![io] {
     let r = _run(home, ["config", "get", key]);
     assert r.exit == 0;
     assert find(r.out, expected, 0) >= 0;
 }
 
+// Compare one config state against the baseline on every observable: exit
+// code, the `--json` envelope on stdout, and the human diagnostic on
+// stderr.
+fn _assert_same_as_baseline(base_json: CheckRun, base_human: CheckRun, home: string, fixture: string) -> void ![io] {
+    let json = _check_json(home, fixture);
+    assert json.exit == base_json.exit;
+    assert json.out == base_json.out;
+    assert json.err == base_json.err;
+    let human = _check_human(home, fixture);
+    assert human.exit == base_human.exit;
+    assert human.err == base_human.err;
+    assert human.out == base_human.out;
+}
+
 fn _manifest(name: string) -> string {
-    return "[capsule]\n"
-        + "name = \"" + name + "\"\n"
+    return "[capsule]\n" + "name = \"" + name + "\"\n"
         + "version = \"0.0.0\"\n\n"
         + "[capabilities]\n"
         + "required = [\"io\"]\n";
@@ -223,6 +284,11 @@ fn _stage_e0403() -> string ![io] {
 // A capsule whose caller invokes an imported `![io]` helper without
 // declaring `![io]` -- the E0402 cross-module effect-transitivity gate.
 // Staged once, at a path shared by all three config states.
+//
+// Unlike `effect_gate_build_path_test.sfn`, which drives E0402 through
+// `sfn emit --import-context` on the BUILD path, a plain `sfn check` inside
+// a capsule is enough: the resolver builds the imported-function-effect
+// table itself (`compiler/src/main.sfn`, Phase E).
 fn _stage_e0402() -> string ![io] {
     let dir = _root() + "/cap-e0402";
     fs.createDirectory(dir + "/src", true);
@@ -240,31 +306,30 @@ fn _stage_e0402() -> string ![io] {
     return fixture;
 }
 
-// The shared body of both tests: pin the baseline, then assert every other
-// config state reproduces it byte for byte.
+// Shared body: pin the baseline, then assert every other config state
+// reproduces it byte for byte.
 fn _assert_boundary_holds(fixture: string, code: string) -> void ![io] {
     let triple = build_target_triple();
 
     let baseline_home = _home(code, "absent");
-    let base = _check(baseline_home, fixture);
+    let base_json = _check_json(baseline_home, fixture);
+    let base_human = _check_human(baseline_home, fixture);
     // Pin the baseline itself. Without this the comparisons below would
     // pass vacuously the day `check` stops diagnosing.
-    assert base.exit != 0;
-    assert find(base.out, code, 0) >= 0;
+    assert base_json.exit != 0;
+    assert base_human.exit == base_json.exit;
+    assert find(base_json.out, "\"code\":\"" + code + "\"", 0) >= 0;
+    assert find(base_human.err, "error[" + code + "]", 0) >= 0;
 
     let legal_home = _home(code, "legal");
     _write_config(legal_home, _legal_config(triple, code));
     _assert_config_is_live(legal_home, "build.jobs", "4");
-    let legal = _check(legal_home, fixture);
-    assert legal.exit == base.exit;
-    assert legal.out == base.out;
+    _assert_same_as_baseline(base_json, base_human, legal_home, fixture);
 
     let boundary_home = _home(code, "boundary");
     _write_config(boundary_home, _boundary_config(triple, code));
     _assert_config_is_live(boundary_home, "build.jobs", "9");
-    let boundary = _check(boundary_home, fixture);
-    assert boundary.exit == base.exit;
-    assert boundary.out == base.out;
+    _assert_same_as_baseline(base_json, base_human, boundary_home, fixture);
 }
 
 test "user_config boundary: no admitted key alters the E0403 capability cross-check" ![io] {
