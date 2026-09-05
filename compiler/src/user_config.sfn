@@ -116,6 +116,14 @@ fn user_config_dir() -> string ![io] {
     return home + "/.sfn";
 }
 
+// True when the config directory is sfn's own `~/.sfn` rather than a location
+// the user pointed `SAILFIN_CONFIG_DIR` at. Consulted only by callers that
+// adjust the directory's *mode*: tightening a directory sfn owns is
+// maintenance, tightening one the user named is overreach (SFN-1258).
+fn user_config_dir_is_default() -> boolean ![io] {
+    return _get_env_cmd("SAILFIN_CONFIG_DIR").length == 0;
+}
+
 fn user_config_path() -> string ![io] {
     let dir = user_config_dir();
     if dir.length == 0 { return ""; }

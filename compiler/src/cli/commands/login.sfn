@@ -62,7 +62,11 @@ import {
 import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
 import { host_is_windows } from "../../build/target";
 import { render_terminal_diagnostic } from "../../terminal_output";
-import { user_config_credentials_path, user_config_dir } from "../../user_config";
+import {
+    user_config_credentials_path,
+    user_config_dir,
+    user_config_dir_is_default
+} from "../../user_config";
 import { CliContext } from "../context";
 
 // E0616: `env.home` exhausted its `HOME` -> `USERPROFILE` ->
@@ -138,15 +142,18 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         return 1;
     }
 
-    // 0o700 only on a directory we created. `SAILFIN_CONFIG_DIR` can name a
-    // directory sfn does not own — `~/.config`, a shared team path — and
-    // narrowing that is not ours to do; on a directory owned by another user
-    // the chmod also fails outright, breaking a command that has no need to
-    // touch the mode at all. This is the guard `toolchain_user_default_write`
-    // already applies to the same directory (SFN-1258).
+    // 0o700 on the directory, but only where sfn owns it: its own `~/.sfn`
+    // (maintaining that mode is why `config_test.sfn`'s permission case
+    // exists), or a relocated directory this command just created.
+    // `SAILFIN_CONFIG_DIR` can otherwise name a directory sfn does not own —
+    // `~/.config`, a shared team path — where narrowing the mode is overreach,
+    // and where a directory owned by another user fails the chmod outright,
+    // breaking a command that need not touch the mode at all (SFN-1258).
     let created = !fs.exists(sfn_dir);
     _ensure_dir_recursive_cmd(sfn_dir);
-    if created { _set_perms_or_skip(sfn_dir, 448); }
+    if created || user_config_dir_is_default() {
+        _set_perms_or_skip(sfn_dir, 448);
+    }
 
     // 0o600 on the file is the restriction that actually protects the token,
     // so unlike the directory it is enforced on every write and its failure is

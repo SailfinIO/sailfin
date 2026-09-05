@@ -220,13 +220,14 @@ test "config_dir_relocation: empty SAILFIN_CONFIG_DIR= falls back to HOME like u
     assert trim(get_run.out) == "https://decoy.invalid.example";
 }
 
-// The directory mode is applied only to a directory `sfn` created itself.
-// `SAILFIN_CONFIG_DIR` can name a directory sfn does not own -- `~/.config`, a
-// shared team path -- and narrowing that is not ours to do; where it is owned
-// by another user the chmod fails outright and would break a command that need
-// not touch the mode at all. This is the guard `toolchain_user_default_write`
-// already applies to the same directory (SFN-1258). The credentials file is
-// 0o600 either way, because that is the mode actually protecting the token.
+// The directory mode is applied only where sfn owns the directory: its own
+// `~/.sfn` (whose maintenance `config_test.sfn`'s permission case pins), or a
+// relocated directory the command itself created. `SAILFIN_CONFIG_DIR` can
+// otherwise name a directory sfn does not own -- `~/.config`, a shared team
+// path -- where narrowing the mode is overreach, and where a directory owned
+// by another user fails the chmod outright, breaking a command that need not
+// touch the mode at all (SFN-1258). The credentials file is 0o600 either way,
+// because that is the mode actually protecting the token.
 //
 // 0o700 == 448, 0o755 == 493, 0o600 == 384 (`fs.get_perms` returns the low 12
 // bits of st_mode as a decimal int; it is a -1 stub on Windows, SFN-888).
