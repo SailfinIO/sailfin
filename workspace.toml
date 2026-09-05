@@ -62,5 +62,5 @@ members = [
 # subcommand actually registers/accepts the flag, since an unregistered flag
 # is rejected outright.
 [toolchain]
-sfn = "0.10.6"
+sfn = "0.11.0"
 channel = "alpha"
