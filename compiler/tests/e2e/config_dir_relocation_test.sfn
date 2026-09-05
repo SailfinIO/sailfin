@@ -1,0 +1,220 @@
+// compiler/tests/e2e/config_dir_relocation_test.sfn
+//
+// End-to-end coverage for SFN-1258 (SFEP-0076 section 3.6): `user_config_dir()`
+// (`compiler/src/user_config.sfn`) resolves `SAILFIN_CONFIG_DIR` over
+// `env.home() + "/.sfn"`, and every one of the three per-user records under
+// that directory now resolves through it -- `toolchain-default`
+// (`toolchain_user_default_dir()`), `config.toml` (`sfn config set/get/list`,
+// via `_config_apply_cmd`/`_config_file_value_cmd`/`_config_listed_triples_cmd`
+// and the registry reader in `cmd_shared.sfn`), and `credentials`
+// (`sfn login`, `sfn publish`, via `user_config_credentials_path()`). Before
+// this the override relocated `toolchain-default` alone; a set
+// `SAILFIN_CONFIG_DIR` left `config.toml` and `credentials` pointed at the
+// real `~/.sfn`, which is exactly the split behaviour this file guards
+// against regressing.
+//
+// The override is TOTAL, not a search path (see the comment on
+// `user_config_dir()`): once set, the real `~/.sfn` must not be consulted for
+// any of the three records. The decoy tests below are the highest-value
+// assertions in this file -- they are what would catch a future read-through
+// fallback that a "value ends up in the right place" test alone would miss.
+//
+// Every command here is driven as a real subprocess against a scratch `HOME`
+// (`.claude/rules/no-bash-e2e.md`); the real `~/.sfn` is never read or
+// written. `SAILFIN_CONFIG_DIR` is always in `clean_runner_env_without`'s
+// strip list -- an inherited value would outrank the per-case push below and
+// silently defeat every assertion, the same hazard
+// `user_config_effect_boundary_test.sfn` documents for its own child env.
+import { contains, trim } from "sfn/strings";
+import {
+    clean_runner_env_without,
+    nested_runner_scratch,
+    report_child_failure,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
+
+import { toolchain_current_host } from "../../src/toolchain/host";
+
+fn _dir(tag: string) -> string ![io] {
+    return scratch_root() + "/config-dir-relocation-" + tag;
+}
+
+fn _home(tag: string) -> string ![io] {
+    let dir = _dir(tag) + "/home";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// The relocation target. Not pre-created for every caller: the writers under
+// test (`sfn config set`, `sfn login`) must create it themselves.
+fn _cfg_path(tag: string) -> string ![io] { return _dir(tag) + "/cfg"; }
+
+struct Run {
+    exit: int,
+    out: string,
+    err: string
+}
+
+fn _run(argv: string[], env_vars: string[]) -> Run ![io] {
+    let exit = process.run_capture(argv, env_vars);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return Run { exit: exit, out: out, err: err };
+}
+
+// Child env for a spawned `sfn`. `mode` selects how `SAILFIN_CONFIG_DIR` is
+// pushed:
+//   "absent" -- not pushed at all (the default-`$HOME` path).
+//   "empty"  -- pushed as `SAILFIN_CONFIG_DIR=` (must read as unset, since
+//               `env.get` cannot distinguish empty from absent).
+//   "set"    -- pushed as `SAILFIN_CONFIG_DIR=<cfg>`.
+//
+// `SFN_REGISTRY` and `SFN_TOKEN` are stripped so an inherited value cannot
+// shadow the file-backed rungs this file exercises; `SAILFIN_TOOLCHAIN`,
+// `SAILFIN_TOOLCHAIN_DISPATCHED` and `INSTALL_BASE` are stripped for the same
+// reason `user_config_effect_boundary_test.sfn` and
+// `toolchain_default_remove_test.sfn` strip them -- these commands run the
+// toolchain gate, which can dispatch to a different compiler binary than
+// `sfn_bin_path()`, and a relocation guard must test the binary under test.
+fn _env(tag: string, home: string, mode: string, cfg: string) -> string[] ![io] {
+    let mut e = clean_runner_env_without(nested_runner_scratch("config-dir-relocation-"
+        + tag), ["HOME", "SAILFIN_CONFIG_DIR", "SFN_REGISTRY", "SFN_TOKEN", "SAILFIN_TOOLCHAIN", "SAILFIN_TOOLCHAIN_DISPATCHED", "INSTALL_BASE"]);
+    e.push("HOME=" + home);
+    if mode == "empty" { e.push("SAILFIN_CONFIG_DIR="); }
+    if mode == "set" { e.push("SAILFIN_CONFIG_DIR=" + cfg); }
+    return e;
+}
+
+// Decoy records under the real (scratch) `$HOME/.sfn`, carrying
+// clearly-marked sentinel values a relocated command must never observe.
+fn _seed_decoy(home: string) -> void ![io] {
+    fs.createDirectory(home + "/.sfn", true);
+    fs.writeFile(home + "/.sfn/config.toml", "[registry]\nurl = \"https://decoy.invalid.example\"\n");
+    fs.writeFile(home + "/.sfn/credentials", "DECOY-TOKEN-SHOULD-NEVER-BE-SEEN");
+}
+
+test "config_dir_relocation: SAILFIN_CONFIG_DIR relocates config.toml for sfn config set/get" ![io] {
+    let tag = "config-toml";
+    let home = _home(tag);
+    let cfg = _cfg_path(tag);
+    let e = _env(tag, home, "set", cfg);
+
+    let set_run = _run([sfn_bin_path(), "config", "set", "registry", "https://relocated.example.com"], e);
+    report_child_failure("config-dir-relocation config set", set_run.exit, set_run.out, set_run.err);
+    assert set_run.exit == 0;
+    assert fs.exists(cfg + "/config.toml");
+    assert ! fs.exists(home + "/.sfn");
+
+    let get_run = _run([sfn_bin_path(), "config", "get", "registry"], e);
+    report_child_failure("config-dir-relocation config get", get_run.exit, get_run.out, get_run.err);
+    assert get_run.exit == 0;
+    assert trim(get_run.out) == "https://relocated.example.com";
+    assert ! fs.exists(home + "/.sfn");
+}
+
+test "config_dir_relocation: SAILFIN_CONFIG_DIR relocates credentials for sfn login" ![io] {
+    let tag = "credentials";
+    let home = _home(tag);
+    let cfg = _cfg_path(tag);
+    let e = _env(tag, home, "set", cfg);
+
+    // A token supplied as a positional is used directly (`login.sfn::run`),
+    // so this drives the write non-interactively without touching stdin.
+    let run = _run([sfn_bin_path(), "login", "relocated-token-123"], e);
+    report_child_failure("config-dir-relocation login", run.exit, run.out, run.err);
+    assert run.exit == 0;
+    assert fs.exists(cfg + "/credentials");
+    assert trim(fs.readFile(cfg + "/credentials")) == "relocated-token-123";
+    assert ! fs.exists(home + "/.sfn");
+}
+
+test "config_dir_relocation: SAILFIN_CONFIG_DIR still relocates toolchain-default" ![io] {
+    let tag = "toolchain-default";
+    let home = _home(tag);
+    let cfg = _cfg_path(tag);
+    fs.createDirectory(cfg, true);
+    let triple = toolchain_current_host().triple;
+    let ver = "917.0.0";
+    fs.writeFile(cfg + "/toolchain-default", "sailfin-toolchain-default 1\n"
+        + triple
+        + ".version = "
+        + ver
+        + "\n");
+    let e = _env(tag, home, "set", cfg);
+
+    let run = _run([sfn_bin_path(), "toolchain", "default"], e);
+    report_child_failure("config-dir-relocation toolchain default", run.exit, run.out, run.err);
+    assert run.exit == 0;
+    assert contains(run.out, ver);
+    assert ! fs.exists(home + "/.sfn");
+}
+
+// The override is total: a decoy `$HOME/.sfn/config.toml` and
+// `$HOME/.sfn/credentials` must be invisible once `SAILFIN_CONFIG_DIR` names
+// a directory that does not carry the same keys. This is the assertion that
+// would catch a reintroduced read-through fallback.
+test "config_dir_relocation: the override is total -- a decoy under the real HOME is never read" ![io] {
+    let tag = "decoy-total";
+    let home = _home(tag);
+    _seed_decoy(home);
+    let cfg = _cfg_path(tag);
+    fs.createDirectory(cfg, true);
+    let e = _env(tag, home, "set", cfg);
+
+    // `config.toml`: the relocated directory has no file at all, so the
+    // resolved value must be the compiled-in default, never the decoy's.
+    let get_run = _run([sfn_bin_path(), "config", "get", "registry"], e);
+    report_child_failure("config-dir-relocation decoy config get", get_run.exit, get_run.out, get_run.err);
+    assert get_run.exit == 0;
+    assert ! contains(get_run.out, "decoy.invalid.example");
+    assert trim(get_run.out) == "https://pkg.sfn.dev";
+
+    // `credentials`: with no token in the environment and none at the
+    // relocated path, `sfn publish` must fail closed BEFORE ever reaching
+    // packaging or the network -- if the decoy leaked through, the command
+    // would find a token and proceed to "packaging ...". Never sees the
+    // decoy string either.
+    let capsule_dir = _dir(tag) + "/capsule";
+    fs.createDirectory(capsule_dir, true);
+    fs.writeFile(capsule_dir + "/capsule.toml", "[capsule]\nname = \"config-dir-relocation-probe\"\nversion = \"0.0.1\"\n");
+    let publish_run = _run([sfn_bin_path(), "publish", capsule_dir], e);
+    assert publish_run.exit == 1;
+    assert contains(publish_run.err, "no auth token found");
+    assert contains(publish_run.err, cfg + "/credentials");
+    assert ! contains(publish_run.out, "packaging");
+    assert ! contains(publish_run.err, "DECOY-TOKEN-SHOULD-NEVER-BE-SEEN");
+    assert ! contains(publish_run.out, "DECOY-TOKEN-SHOULD-NEVER-BE-SEEN");
+}
+
+// Non-vacuity control for the previous test: with `SAILFIN_CONFIG_DIR`
+// unset, the SAME decoy IS visible under the SAME `HOME`. Without this, the
+// "invisible" assertion above would pass just as well if `_seed_decoy` wrote
+// somewhere `sfn config get` never reads for any reason.
+test "config_dir_relocation: unset SAILFIN_CONFIG_DIR still reads the decoy under HOME" ![io] {
+    let tag = "decoy-absent-fallback";
+    let home = _home(tag);
+    _seed_decoy(home);
+    let e = _env(tag, home, "absent", "");
+
+    let get_run = _run([sfn_bin_path(), "config", "get", "registry"], e);
+    report_child_failure("config-dir-relocation absent-fallback config get", get_run.exit, get_run.out, get_run.err);
+    assert get_run.exit == 0;
+    assert trim(get_run.out) == "https://decoy.invalid.example";
+}
+
+// `env.get` cannot distinguish an empty `SAILFIN_CONFIG_DIR=` from an unset
+// one (documented on `user_config_dir()`), so an empty override must fall
+// back to `HOME` exactly like the absent case above -- same decoy, same
+// visible outcome.
+test "config_dir_relocation: empty SAILFIN_CONFIG_DIR= falls back to HOME like unset" ![io] {
+    let tag = "decoy-empty-fallback";
+    let home = _home(tag);
+    _seed_decoy(home);
+    let e = _env(tag, home, "empty", "");
+
+    let get_run = _run([sfn_bin_path(), "config", "get", "registry"], e);
+    report_child_failure("config-dir-relocation empty-fallback config get", get_run.exit, get_run.out, get_run.err);
+    assert get_run.exit == 0;
+    assert trim(get_run.out) == "https://decoy.invalid.example";
+}
