@@ -4,7 +4,7 @@ title: User-Level Build Defaults
 status: Accepted
 type: tooling
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-05
 author: "agent:Sailbot; owner-directed investigation; project owner acceptance"
 tracking: SFN-1257, SFN-1256, SFN-1258, SFN-1259, SFN-1260, SFN-1261, SFN-1262
 supersedes:
@@ -289,9 +289,15 @@ divergent chains onto shared machinery is a larger change with its own blast
 radius, and it is not needed to admit five keys. §6.4 records why.
 
 The one piece of shared machinery this does need is a config-directory
-resolver, because five call sites currently hand-roll `_get_home_cmd() +
-"/.sfn/..."`. SFN-1258 tracks that seam and the `SAILFIN_CONFIG_DIR` question it
-exposes; this SFEP depends on its outcome but does not decide it.
+resolver: six call sites hand-rolled `_get_home_cmd() + "/.sfn/..."` (three of
+them in `config.sfn` alone). SFN-1258 resolved that seam as `user_config_dir()`
+(`compiler/src/user_config.sfn`) and extended `SAILFIN_CONFIG_DIR` to cover all
+three per-user records rather than the toolchain-default record alone: the
+override is total, not a search path — when set, the real `~/.sfn` is not
+consulted for `config.toml`, `credentials`, or `toolchain-default`, with no
+read-through fallback. `toolchain_user_default_dir()`
+(`compiler/src/toolchain/user_default.sfn`) now delegates to `user_config_dir()`
+instead of re-deriving the path, so there is one resolver for the directory.
 
 ### 3.6 CLI surface
 
@@ -504,9 +510,11 @@ the test that must never be deleted.
     independent of A and B
   - SFN-1262 (D) — the §4 effect-boundary regression guard; never-delete
 - SFN-1256 — on-disk layout reference page (`graduates-to` target)
-- SFN-1258 — `SAILFIN_CONFIG_DIR` partial relocation. Not a hard blocker:
-  SFN-1259 introduces the §3.5 helper preserving today's behaviour, and
-  SFN-1258 decides only whether that helper gains the override
+- SFN-1258 — extended `SAILFIN_CONFIG_DIR` from the toolchain-default record
+  alone to all three per-user records (`config.toml`, `credentials`,
+  `toolchain-default`), with total, non-read-through override semantics. The
+  §3.5 resolver (`user_config_dir()`) SFN-1259 introduced is the single seam
+  that reads the variable
 - SFEP-0073 — Installed Toolchain Lifecycle; §3.3 precedence and §3.5
   host-qualification are the models followed here
 - SFEP-0046 — Native Toolchain Version Pinning + Dispatch; establishes

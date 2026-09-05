@@ -60,8 +60,8 @@ import {
 
 import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
 import { host_is_windows } from "../../build/target";
-import { _get_home_cmd } from "../../build_flags";
 import { render_terminal_diagnostic } from "../../terminal_output";
+import { user_config_credentials_path, user_config_dir } from "../../user_config";
 import { CliContext } from "../context";
 
 // E0616: `env.home` exhausted its `HOME` -> `USERPROFILE` ->
@@ -129,18 +129,20 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         return 1;
     }
 
-    let home = _get_home_cmd();
-    if home.length == 0 {
+    let sfn_dir = user_config_dir();
+    if sfn_dir.length == 0 {
         let empty_lines: string[] = [];
         print.err(render_terminal_diagnostic(diagnostic_to_diag(_home_dir_diagnostic(), "login"), empty_lines, "login"));
         return 1;
     }
 
-    let sfn_dir = home + "/.sfn";
+    // 0o700 on the directory and 0o600 on the file below are applied to the
+    // resolved path, so a relocated config dir is restricted exactly as the
+    // default one is — a relocation must not widen credential permissions.
     _ensure_dir_recursive_cmd(sfn_dir);
     _set_perms_or_skip(sfn_dir, 448);
 
-    let cred_path = sfn_dir + "/credentials";
+    let cred_path = user_config_credentials_path();
     fs.writeFile(cred_path, token);
     _set_perms_or_skip(cred_path, 384);
 

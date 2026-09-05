@@ -17,7 +17,7 @@
 // this rung keep their flat, host-agnostic meaning by design.
 import { int_to_string } from "sfn/strings";
 
-import { _get_home_cmd } from "./build_flags";
+import { _get_env_cmd, _get_home_cmd } from "./build_flags";
 import { is_absolute_path, substring } from "./string_utils";
 import {
     toml_get_string,
@@ -84,16 +84,32 @@ let mut _uc_build_warned: boolean = false;
 let mut _uc_text_loaded: boolean = false;
 let mut _uc_text: string = "";
 
-// The user configuration directory. Deliberately `env.home() + "/.sfn"` with no
-// `SAILFIN_CONFIG_DIR` consultation: that override is SFN-1258's decision, and
-// this seam must not pre-empt it. The five existing hand-rolled sites are left
-// alone here for the same reason.
 // The provenance label, exposed so a warning emitted from another module
-// cannot drift from the path this one actually reads. SFN-1258 may change what
-// that path is; there must be exactly one place it is spelled.
+// cannot drift from the path this one actually reads. There must be exactly
+// one place that path is spelled.
 fn user_config_origin() -> string { return _UC_ORIGIN; }
 
+// The one resolver for the per-user config directory: `SAILFIN_CONFIG_DIR`
+// when set, else `env.home() + "/.sfn"`. `""` means home is unresolvable and
+// the caller has no directory to read or write.
+//
+// The override is total, not a search path: when it is set the real `~/.sfn`
+// is not consulted for any of the three records under this directory. That is
+// what makes it usable for the CI-image, ephemeral-home and roaming-profile
+// cases it exists to serve — a read-through fallback would let a session that
+// believes it is relocated pick up the invoking user's real `credentials`.
+// `toolchain-default` has always behaved this way; SFN-1258 propagated that
+// single semantic to `config.toml` and `credentials` rather than inventing a
+// second one, and `toolchain_user_default_dir()` now delegates here so the
+// override cannot be read two ways.
+//
+// An empty `SAILFIN_CONFIG_DIR=` reads as unset: `env.get` cannot distinguish
+// it from an absent variable, so both fall through to home. Relying on that is
+// safe precisely because the alternative — treating `""` as a path — would
+// resolve to `/.sfn`.
 fn user_config_dir() -> string ![io] {
+    let override_dir = _get_env_cmd("SAILFIN_CONFIG_DIR");
+    if override_dir.length > 0 { return override_dir; }
     let home = _get_home_cmd();
     if home.length == 0 { return ""; }
     return home + "/.sfn";
@@ -103,6 +119,14 @@ fn user_config_path() -> string ![io] {
     let dir = user_config_dir();
     if dir.length == 0 { return ""; }
     return dir + "/config.toml";
+}
+
+// The credential file sits in the same directory and moves with it. Spelled
+// once here so `login.sfn` (write) and `publish.sfn` (read) cannot disagree.
+fn user_config_credentials_path() -> string ![io] {
+    let dir = user_config_dir();
+    if dir.length == 0 { return ""; }
+    return dir + "/credentials";
 }
 
 fn user_config_target_section(triple: string) -> string {
