@@ -22,9 +22,11 @@
 // which is meaningful only because Group A test 1 proves the seam-on path
 // is live.
 //
-// Every child env carries a private `HOME` (`[toolchain] update-policy`
-// lives at `$HOME/.sfn/config.toml`) and `SAILFIN_CONFIG_DIR` (the
-// eligibility record and lease live there — see `user_default.sfn`), plus
+// Every child env carries a private `HOME` and `SAILFIN_CONFIG_DIR`. Since
+// SFN-1258 that override relocates `config.toml` as well as the eligibility
+// record and lease, so `[toolchain] update-policy` is seeded into the config
+// directory rather than under `HOME` — seeding it under `HOME` would leave
+// the policy unread and silently default to `notify`. Plus
 // `SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9` — connection refused,
 // so no real network is ever reached, mirroring
 // `toolchain_update_test.sfn`.
@@ -127,11 +129,14 @@ fn _refused_env(label: string, extra: string[], assume_interactive: boolean) -> 
     return _env_with(extra, _home_dir(label), _config_dir(label), store, "http://127.0.0.1:9", assume_interactive);
 }
 
-// Write the `[toolchain] update-policy` key, at `<home>/.sfn/config.toml` —
-// the same file `sfn config set` owns (`compiler/src/cli/commands/config.sfn`).
-fn _seed_policy(home: string, value: string) -> void ![io] {
-    fs.createDirectory(home + "/.sfn", true);
-    fs.writeFile(home + "/.sfn/config.toml", "[toolchain]\nupdate-policy = \""
+// Write the `[toolchain] update-policy` key into the config directory the
+// child resolves — `SAILFIN_CONFIG_DIR`, which every env in this file sets,
+// so `<config_dir>/config.toml` and not `<home>/.sfn/config.toml` (SFN-1258
+// routed `config.toml` through that override). Same file `sfn config set`
+// owns (`compiler/src/cli/commands/config.sfn`).
+fn _seed_policy(config_dir: string, value: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/config.toml", "[toolchain]\nupdate-policy = \""
         + value
         + "\"\n");
 }
@@ -258,7 +263,7 @@ test "toolchain update notice: policy manual writes no eligibility record" ![clo
     let fixture = _ok_fixture(cwd);
     let cfg = _config_dir(label);
     let home = _home_dir(label);
-    _seed_policy(home, "manual");
+    _seed_policy(cfg, "manual");
     _seed_user_default_with_track(cfg, "500.0.0", "stable");
     let run_env = _env_with([], home, cfg, _scratch_root() + "/" + label
         + "-store", "http://127.0.0.1:9", true);
@@ -276,7 +281,7 @@ test "toolchain update notice: policy disabled writes no eligibility record" ![c
     let fixture = _ok_fixture(cwd);
     let cfg = _config_dir(label);
     let home = _home_dir(label);
-    _seed_policy(home, "disabled");
+    _seed_policy(cfg, "disabled");
     _seed_user_default_with_track(cfg, "500.0.0", "stable");
     let run_env = _env_with([], home, cfg, _scratch_root() + "/" + label
         + "-store", "http://127.0.0.1:9", true);
@@ -616,8 +621,8 @@ test "toolchain update notice: a stalling endpoint does not hang the wrapped com
 test "toolchain update notice: notify-check leaf under a disabled policy refuses before any endpoint contact and stays silent" ![clock, io] {
     let label = "leaf-disabled";
     let home = _home_dir(label);
-    _seed_policy(home, "disabled");
     let cfg = _config_dir(label);
+    _seed_policy(cfg, "disabled");
     let store = _scratch_root() + "/" + label + "-store";
     let cwd = _neutral_cwd(label);
     // `toolchain_network_refusal()` is the leaf's very first gate

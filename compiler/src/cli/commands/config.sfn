@@ -30,7 +30,6 @@ import {
 
 import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
 import { host_target_triple } from "../../build/target";
-import { _get_home_cmd } from "../../build_flags";
 import {
     char_code_at_text,
     find_char_local,
@@ -47,6 +46,7 @@ import {
     toolchain_update_policy_read,
     toolchain_user_config_path
 } from "../../toolchain/update_policy";
+import { user_config_dir, user_config_dir_is_default, user_config_path } from "../../user_config";
 import { CliContext } from "../context";
 import {
     _is_valid_registry_url_cmd,
@@ -390,21 +390,30 @@ fn _config_render_line_cmd(k: ConfigKey, value: string) -> string {
     return k.field + " = " + value;
 }
 
-// Read-modify-write `~/.sfn/config.toml` for a single key.
+// Read-modify-write the user `config.toml` for a single key. Resolved through
+// `user_config_dir()`, so a set `SAILFIN_CONFIG_DIR` writes to the relocated
+// directory rather than the real home (SFN-1258).
 fn _config_apply_cmd(k: ConfigKey, value: string, remove: boolean) -> int ![io] {
-    let home = _get_home_cmd();
-    if home.length == 0 {
+    let sfn_dir = user_config_dir();
+    if sfn_dir.length == 0 {
         let empty_lines: string[] = [];
         print.err(render_terminal_diagnostic(diagnostic_to_diag(_home_dir_diagnostic(), "config"), empty_lines, "config"));
         return 1;
     }
-    let sfn_dir = home + "/.sfn";
+    // 0o700 on the directory, but only where sfn owns it — see the same guard
+    // in `login.sfn`. A relocated `SAILFIN_CONFIG_DIR` this command did not
+    // create may be a directory sfn does not own, where narrowing the mode is
+    // both wrong and, if another user owns it, a hard failure of a command
+    // that need not touch it at all.
+    let created = !fs.exists(sfn_dir);
     _ensure_dir_recursive_cmd(sfn_dir);
-    if !_set_perms_or_skip(sfn_dir, 448) {
-        print.err("error: failed to set permissions on " + sfn_dir);
-        return 1;
+    if created || user_config_dir_is_default() {
+        if !_set_perms_or_skip(sfn_dir, 448) {
+            print.err("error: failed to set permissions on " + sfn_dir);
+            return 1;
+        }
     }
-    let path = sfn_dir + "/config.toml";
+    let path = user_config_path();
     let mut text: string = "";
     if fs.exists(path) { text = fs.readFile(path); }
     let rendered = _config_render_line_cmd(k, value);
@@ -420,9 +429,8 @@ fn _config_apply_cmd(k: ConfigKey, value: string, remove: boolean) -> int ![io] 
 // from the resolvers below, which substitute defaults — provenance has to be
 // able to tell "set to the default" from "never set".
 fn _config_file_value_cmd(k: ConfigKey) -> string ![io] {
-    let home = _get_home_cmd();
-    if home.length == 0 { return ""; }
-    let path = home + "/.sfn/config.toml";
+    let path = user_config_path();
+    if path.length == 0 { return ""; }
     if !fs.exists(path) { return ""; }
     return _toml_trim_cmd(toml_get_string(fs.readFile(path), k.section, k.field));
 }
@@ -604,9 +612,8 @@ fn _config_list_line_cmd(cli: string) -> string ![io] {
 // and not only this host's (SFEP-0076 section 2.2).
 fn _config_listed_triples_cmd() -> string[] ![io] {
     let mut triples: string[] = [host_target_triple()];
-    let home = _get_home_cmd();
-    if home.length == 0 { return triples; }
-    let path = home + "/.sfn/config.toml";
+    let path = user_config_path();
+    if path.length == 0 { return triples; }
     if !fs.exists(path) { return triples; }
     let sections = toml_section_names(fs.readFile(path));
     let mut i: int = 0;

@@ -5,9 +5,12 @@
 // compiler-under-test as a subprocess against a pre-seeded store and a
 // per-user config directory, and asserts on captured output plus exit codes.
 //
-// Every child env carries a private `HOME` (the update policy lives at
-// `$HOME/.sfn/config.toml`), `SAILFIN_CONFIG_DIR` (the per-user default
-// record), an `INSTALL_BASE` scratch store, and
+// Every child env carries a private `HOME` and `SAILFIN_CONFIG_DIR`. Since
+// SFN-1258 that override holds `config.toml` as well as the per-user default
+// record, so the update policy is seeded into the config directory rather
+// than under `HOME` — seeded under `HOME` it would go unread and silently
+// default to `notify`. Each env also carries an `INSTALL_BASE` scratch store,
+// and
 // `SAILFIN_TOOLCHAIN_RELEASE_BASE=http://127.0.0.1:9` — connection refused, so
 // no real network is ever reached. A genuine "update available -> install"
 // cannot be driven end-to-end here: the release trust root is pinned with no
@@ -84,11 +87,14 @@ fn _env_with(extra: string[], home: string, config_dir: string, store: string) -
     return e;
 }
 
-// Write the `[toolchain] update-policy` key `update_policy.sfn` reads, at
-// `<home>/.sfn/config.toml` — the same file `sfn config set` owns.
-fn _seed_policy(home: string, value: string) -> void ![io] {
-    fs.createDirectory(home + "/.sfn", true);
-    fs.writeFile(home + "/.sfn/config.toml", "[toolchain]\nupdate-policy = \""
+// Write the `[toolchain] update-policy` key `update_policy.sfn` reads, into
+// the config directory the child resolves — `SAILFIN_CONFIG_DIR`, which every
+// env in this file sets, so `<config_dir>/config.toml` and not
+// `<home>/.sfn/config.toml` (SFN-1258 routed `config.toml` through that
+// override). Same file `sfn config set` owns.
+fn _seed_policy(config_dir: string, value: string) -> void ![io] {
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/config.toml", "[toolchain]\nupdate-policy = \""
         + value
         + "\"\n");
 }
@@ -241,7 +247,7 @@ test "toolchain update: policy disabled refuses --check before the network" ![io
     let store = _scratch_root() + "/disabled-check-store";
     let home = _home_dir("disabled-check");
     let cfg = _config_dir("disabled-check");
-    _seed_policy(home, "disabled");
+    _seed_policy(cfg, "disabled");
     let run_env = _env_with([], home, cfg, store);
 
     let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
@@ -257,7 +263,7 @@ test "toolchain update: policy disabled refuses an argument-less update after re
     let store = _scratch_root() + "/disabled-track-store";
     let home = _home_dir("disabled-track");
     let cfg = _config_dir("disabled-track");
-    _seed_policy(home, "disabled");
+    _seed_policy(cfg, "disabled");
     _seed_user_default_with_track(cfg, "402.0.0", "stable");
     let run_env = _env_with([], home, cfg, store);
 
@@ -272,7 +278,7 @@ test "toolchain update: policy disabled refuses install too" ![io] {
     let store = _scratch_root() + "/disabled-install-store";
     let home = _home_dir("disabled-install");
     let cfg = _config_dir("disabled-install");
-    _seed_policy(home, "disabled");
+    _seed_policy(cfg, "disabled");
     let run_env = _env_with([], home, cfg, store);
 
     let exit = process.run_capture([sfn_bin_abs_path(), "toolchain", "install", "0.10.6"], run_env);
@@ -286,7 +292,7 @@ test "toolchain update: policy disabled leaves default/list/remove working" ![io
     let store = _scratch_root() + "/disabled-local-store";
     let home = _home_dir("disabled-local");
     let cfg = _config_dir("disabled-local");
-    _seed_policy(home, "disabled");
+    _seed_policy(cfg, "disabled");
     _seed_installed(store, "403.0.0");
     let run_env = _env_with([], home, cfg, store);
 
@@ -314,7 +320,7 @@ test "toolchain update: policy disabled --check --json emits no envelope on stdo
     let store = _scratch_root() + "/disabled-json-store";
     let home = _home_dir("disabled-json");
     let cfg = _config_dir("disabled-json");
-    _seed_policy(home, "disabled");
+    _seed_policy(cfg, "disabled");
     let run_env = _env_with([], home, cfg, store);
 
     let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check", "--json"], run_env);
@@ -331,7 +337,7 @@ test "toolchain update: policy manual reaches the (refused) network, not a polic
     let store = _scratch_root() + "/manual-store";
     let home = _home_dir("manual");
     let cfg = _config_dir("manual");
-    _seed_policy(home, "manual");
+    _seed_policy(cfg, "manual");
     let run_env = _env_with([], home, cfg, store);
 
     let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
@@ -361,7 +367,7 @@ test "toolchain update: an unrecognized policy value is refused and named" ![io]
     let store = _scratch_root() + "/unrecognized-store";
     let home = _home_dir("unrecognized");
     let cfg = _config_dir("unrecognized");
-    _seed_policy(home, "sometimes");
+    _seed_policy(cfg, "sometimes");
     let run_env = _env_with([], home, cfg, store);
 
     let exit = process.run_capture([sfn_bin_path(), "toolchain", "update", "stable", "--check"], run_env);
@@ -379,7 +385,7 @@ test "toolchain update: a refused update leaves the default record byte-identica
     let store = _scratch_root() + "/disabled-byte-identical-store";
     let home = _home_dir("disabled-byte-identical");
     let cfg = _config_dir("disabled-byte-identical");
-    _seed_policy(home, "disabled");
+    _seed_policy(cfg, "disabled");
     _seed_user_default_with_track(cfg, "0.10.6", "stable");
     let record_path = cfg + "/toolchain-default";
     let before = fs.readFile(record_path);
@@ -424,7 +430,7 @@ test "toolchain update: policy manual never overwrites the entry executable" ![i
     let store = _scratch_root() + "/manual-entry-untouched-store";
     let home = _home_dir("manual-entry-untouched");
     let cfg = _config_dir("manual-entry-untouched");
-    _seed_policy(home, "manual");
+    _seed_policy(cfg, "manual");
     let run_env = _env_with([], home, cfg, store);
     let entry = sfn_bin_abs_path();
     let before = _sha256_of_file(entry);

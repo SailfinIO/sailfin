@@ -15,13 +15,13 @@ import {
     _toml_trim_cmd
 } from "../build/fs";
 import { ensure_dir_p } from "../build/fs_tree";
-import { _get_home_cmd } from "../build_flags";
 import {
     char_code_at_text,
     index_of,
     starts_with,
     substring
 } from "../string_utils";
+import { user_config_dir } from "../user_config";
 
 let TOOLCHAIN_USER_DEFAULT_MAGIC: string = "sailfin-toolchain-default";
 let TOOLCHAIN_USER_DEFAULT_SCHEMA: int = 1;  // what this build writes
@@ -218,16 +218,11 @@ fn toolchain_user_default_text_corrupt(text: string) -> boolean {
     return schema < 1;
 }
 
-// `SAILFIN_CONFIG_DIR` is an explicit override (and the test seam); absent
-// that, the default lives under `~/.sfn` like the other per-user config
-// domains (`login.sfn`, `config.sfn`). `""` means home is unresolvable.
-fn toolchain_user_default_dir() -> string ![io] {
-    let override_dir = env.get("SAILFIN_CONFIG_DIR");
-    if override_dir.length > 0 { return override_dir; }
-    let home = _get_home_cmd();
-    if home.length == 0 { return ""; }
-    return home + "/.sfn";
-}
+// This record lives in the same per-user config directory as `config.toml`
+// and `credentials`, so it resolves through the same helper rather than
+// re-reading `SAILFIN_CONFIG_DIR` itself. The duplicate read this replaced
+// was the reason the override applied to one file out of three (SFN-1258).
+fn toolchain_user_default_dir() -> string ![io] { return user_config_dir(); }
 
 fn toolchain_user_default_path() -> string ![io] {
     let dir = toolchain_user_default_dir();

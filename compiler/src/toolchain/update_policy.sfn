@@ -14,7 +14,6 @@
 // `install.sfn`: validating a resolved version for the store is the
 // installer's job at its own boundary.
 import { _toml_trim_cmd } from "../build/fs";
-import { _get_home_cmd } from "../build_flags";
 import {
     semver_compare,
     semver_is_exact_release,
@@ -28,6 +27,7 @@ import {
     substring
 } from "../string_utils";
 import { toml_get_string } from "../toml_parser";
+import { user_config_path } from "../user_config";
 import { _strip_build_metadata } from "../version";
 import { toolchain_channel_refusal, toolchain_channel_resolve } from "./channel";
 import { ToolchainIndex } from "./index";
@@ -37,18 +37,18 @@ let TOOLCHAIN_UPDATE_POLICY_NOTIFY: string = "notify";
 let TOOLCHAIN_UPDATE_POLICY_MANUAL: string = "manual";
 let TOOLCHAIN_UPDATE_POLICY_DISABLED: string = "disabled";
 
-// The `sfn config` spelling of the key, and where it lives in
-// `~/.sfn/config.toml`. The file is the same one `sfn config set registry`
-// owns; `SAILFIN_CONFIG_DIR` relocates only the toolchain-default record,
-// never this file, so a policy is always read from the real home.
+// The `sfn config` spelling of the key, and where it lives in the user
+// `config.toml`. The file is the same one `sfn config set registry` owns, and
+// it resolves through `user_config_path()`, so a set `SAILFIN_CONFIG_DIR`
+// relocates the policy along with the rest of the per-user config (SFN-1258).
 let TOOLCHAIN_UPDATE_POLICY_KEY: string = "toolchain.update-policy";
 let TOOLCHAIN_UPDATE_POLICY_SECTION: string = "toolchain";
 let TOOLCHAIN_UPDATE_POLICY_FIELD: string = "update-policy";
 
 // The project manifest's `[toolchain]` table (SFEP-0073 §3.2) — the same
 // spelling as `TOOLCHAIN_UPDATE_POLICY_SECTION` above by coincidence, never
-// by dependency: that constant names a section of `~/.sfn/config.toml`, this
-// one names a section of `capsule.toml`/`workspace.toml`.
+// by dependency: that constant names a section of the user `config.toml`,
+// this one names a section of `capsule.toml`/`workspace.toml`.
 let TOOLCHAIN_MANIFEST_SECTION: string = "toolchain";
 
 fn toolchain_update_policy_is_valid(value: string) -> boolean {
@@ -68,14 +68,11 @@ fn toolchain_update_policy_from_config(text: string) -> string {
     return raw;
 }
 
-// "" when the home directory is unresolvable; the caller treats that as
+// "" when the config directory is unresolvable; the caller treats that as
 // "no configuration", never as an error, matching `cmd_shared.sfn`'s
-// registry reader.
-fn toolchain_user_config_path() -> string ![io] {
-    let home = _get_home_cmd();
-    if home.length == 0 { return ""; }
-    return home + "/.sfn/config.toml";
-}
+// registry reader. Delegates so this reader cannot disagree with the rest of
+// the toolchain about where the file lives (SFN-1258).
+fn toolchain_user_config_path() -> string ![io] { return user_config_path(); }
 
 fn toolchain_update_policy_read() -> string ![io] {
     let path = toolchain_user_config_path();

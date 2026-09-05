@@ -231,15 +231,17 @@ fn _target_env() -> string[] ![io] {
 // a permanent guard must test the binary under test, not an arbitrary
 // installed one.
 //
-// SFN-1258 hazard: `user_config_dir()` deliberately does NOT consult
-// `SAILFIN_CONFIG_DIR` today (see the note in
-// `compiler/src/user_config.sfn`). If SFN-1258 makes it honour that
-// variable, an inherited value would outrank the per-state `HOME`, every
-// state would read the same absent config, and this file would pass green
-// while asserting nothing. Stripping it prevents that. If SFN-1258 lands,
-// this test must push a per-state `SAILFIN_CONFIG_DIR` alongside `HOME`, and
-// `_assert_config_is_live` must be re-checked, because `sfn config get` uses
-// its own reader keyed on `HOME` rather than `user_config_path()`.
+// SFN-1258 hazard: `user_config_dir()` (`compiler/src/user_config.sfn`) now
+// honours `SAILFIN_CONFIG_DIR` over `env.home() + "/.sfn"`, and every
+// per-user record -- including the `config.toml` `_assert_config_is_live`
+// reads back below, via `sfn config get` -> `_config_file_value_cmd` ->
+// `user_config_path()` -- resolves through it. That makes this strip MORE
+// load-bearing than before, not less: with the override honoured, an
+// inherited `SAILFIN_CONFIG_DIR` would outrank the per-state `HOME` for
+// every resolver in the process, so every state would read the same
+// directory and this file would pass green while asserting nothing.
+// Stripping it here, and pushing no per-state replacement, keeps each
+// state's `HOME` the only rung `user_config_dir()` can resolve through.
 fn _child_env(home: string) -> string[] ![io] {
     let mut e = clean_runner_env_without(nested_runner_scratch("effect-boundary"), ["HOME", "SAILFIN_LINKER", "SAILFIN_CC", "SAILFIN_TARGET_TRIPLE", "SAILFIN_BUILD_CACHE_DIR", "SAILFIN_BUILD_JOBS", "SAILFIN_CONFIG_DIR", "SFN_REGISTRY", "SAILFIN_TOOLCHAIN", "SAILFIN_TOOLCHAIN_DISPATCHED", "INSTALL_BASE"]);
     e.push("HOME=" + home);

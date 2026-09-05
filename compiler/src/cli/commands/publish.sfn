@@ -9,7 +9,8 @@
 // `publish` takes a single optional positional `[path]` — the capsule
 // directory to publish, defaulting to `.` (the current directory). `run`
 // reproduces the legacy handler: the same token resolution (`SFN_TOKEN` env
-// then `~/.sfn/credentials`), the same packaging, the same registry upload,
+// then `credentials` in the user config directory), the same packaging, the
+// same registry upload,
 // and every message and exit code, plus the private-capsule gate below:
 //   - 0 — published (server response printed).
 //   - 1 — no `capsule.toml`, missing name/version, a private capsule or an
@@ -56,9 +57,10 @@ import {
     _sha256_of_file,
     _toml_trim_cmd
 } from "../../build/fs";
-import { _get_env_cmd, _get_home_cmd } from "../../build_flags";
+import { _get_env_cmd } from "../../build_flags";
 import { substring } from "../../string_utils";
 import { toml_get_name, toml_get_publish, toml_get_version } from "../../toml_parser";
+import { user_config_credentials_path } from "../../user_config";
 import { CliContext } from "../context";
 import { _registry_post_json_cmd, _resolve_registry_url_cmd } from "./cmd_shared";
 
@@ -69,8 +71,9 @@ fn command_def() -> Command {
 }
 
 // Package the capsule at `[path]` (or the current directory) and upload it
-// to the registry, authenticating with the token from `SFN_TOKEN` or
-// `~/.sfn/credentials`. Identical to the legacy `publish` command-handler body
+// to the registry, authenticating with the token from `SFN_TOKEN` or the
+// `credentials` file resolved by `user_config_credentials_path()`. Identical
+// to the legacy `publish` command-handler body
 // apart from the private-capsule gate (SFEP-0020 §3.6), which runs before the
 // token lookup. `ctx` is part of the per-command contract but unused here.
 fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
@@ -139,11 +142,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     }
 
     let mut token: string = "";
+    let cred_path = user_config_credentials_path();
     let env_token = _get_env_cmd("SFN_TOKEN");
     if env_token.length > 0 { token = env_token; } else {
-        let home = _get_home_cmd();
-        if home.length > 0 {
-            let cred_path = home + "/.sfn/credentials";
+        if cred_path.length > 0 {
             if fs.exists(cred_path) {
                 let cred = fs.readFile(cred_path);
                 token = _toml_trim_cmd(cred);
@@ -151,7 +153,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
         }
     }
     if token.length == 0 {
-        print.err("no auth token found — set SFN_TOKEN or create ~/.sfn/credentials");
+        // Name the resolved path rather than a literal `~/.sfn/credentials`:
+        // `SAILFIN_CONFIG_DIR` can relocate it, and a diagnostic pointing at a
+        // file the command never consulted is worse than none (SFN-1258).
+        if cred_path.length > 0 {
+            print.err("no auth token found — set SFN_TOKEN or create "
+                + cred_path);
+        } else { print.err("no auth token found — set SFN_TOKEN"); }
         return 1;
     }
 

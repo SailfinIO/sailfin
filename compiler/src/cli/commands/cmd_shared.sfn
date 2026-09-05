@@ -7,10 +7,11 @@
 // modules. Kept compiler-local — do NOT push into a stdlib capsule
 // (that is #345's call).
 import { _toml_trim_cmd } from "../../build/fs";
-import { _get_env_cmd, _get_home_cmd } from "../../build_flags";
+import { _get_env_cmd } from "../../build_flags";
 import { _string_contains_cmd } from "../../string_cmd_utils";
 import { find_char_local, substring } from "../../string_utils";
 import { toml_get_string } from "../../toml_parser";
+import { user_config_path } from "../../user_config";
 
 // Validate a path segment (scope, name) contains no traversal or illegal chars.
 fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
@@ -39,7 +40,8 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
 //
 // Registry URL resolution order (highest priority first):
 //   1. SFN_REGISTRY environment variable (one-shot override for CI)
-//   2. `[registry] url` in ~/.sfn/config.toml (persisted via `sfn config`)
+//   2. `[registry] url` in the user config.toml (persisted via `sfn config`;
+//      `~/.sfn`, or `SAILFIN_CONFIG_DIR` when set)
 //   3. Compiled-in default: https://pkg.sfn.dev
 //
 // Per-project overrides (e.g. `[registry]` in capsule.toml) are intentionally
@@ -95,11 +97,7 @@ fn _is_valid_registry_url_cmd(url: string) -> boolean {
     return true;
 }
 
-fn _config_file_path_cmd() -> string ![io] {
-    let home = _get_home_cmd();
-    if home.length == 0 { return ""; }
-    return home + "/.sfn/config.toml";
-}
+fn _config_file_path_cmd() -> string ![io] { return user_config_path(); }
 
 fn _config_registry_url_from_file_cmd() -> string ![io] {
     let path = _config_file_path_cmd();
