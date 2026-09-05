@@ -9,7 +9,8 @@
 // `publish` takes a single optional positional `[path]` — the capsule
 // directory to publish, defaulting to `.` (the current directory). `run`
 // reproduces the legacy handler: the same token resolution (`SFN_TOKEN` env
-// then `~/.sfn/credentials`), the same packaging, the same registry upload,
+// then `credentials` in the user config directory), the same packaging, the
+// same registry upload,
 // and every message and exit code, plus the private-capsule gate below:
 //   - 0 — published (server response printed).
 //   - 1 — no `capsule.toml`, missing name/version, a private capsule or an
@@ -70,8 +71,9 @@ fn command_def() -> Command {
 }
 
 // Package the capsule at `[path]` (or the current directory) and upload it
-// to the registry, authenticating with the token from `SFN_TOKEN` or
-// `~/.sfn/credentials`. Identical to the legacy `publish` command-handler body
+// to the registry, authenticating with the token from `SFN_TOKEN` or the
+// `credentials` file resolved by `user_config_credentials_path()`. Identical
+// to the legacy `publish` command-handler body
 // apart from the private-capsule gate (SFEP-0020 §3.6), which runs before the
 // token lookup. `ctx` is part of the per-command contract but unused here.
 fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {

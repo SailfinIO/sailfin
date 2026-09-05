@@ -1,7 +1,8 @@
 // compiler/src/user_config.sfn
 //
 // Rung 4 of the SFEP-0076 section 3.3 precedence chain: user-level defaults
-// read from `~/.sfn/config.toml`. Every resolver returns "" when the key is
+// read from `config.toml` in the user config directory (`~/.sfn`, or
+// `SAILFIN_CONFIG_DIR` when set). Every resolver returns "" when the key is
 // absent, so each caller keeps ownership of its own rung-1 flag, rung-2
 // environment variable, and compiled-in default; this module never supplies a
 // default of its own.
@@ -71,7 +72,7 @@ let mut _uc_warned: boolean = false;
 let mut _uc_build_warned: boolean = false;
 
 // The file itself is read at most once per process, for the same reason the
-// warning latches exist and under the same assumption: `~/.sfn/config.toml`
+// warning latches exist and under the same assumption: the file
 // cannot change mid-process. `cache_root` is reached from four build call
 // sites and `_cr_resolve_jobs` from three more, so an unlatched read would
 // stat and parse the file on each, turning what used to be a handful of

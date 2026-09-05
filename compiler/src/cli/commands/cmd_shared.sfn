@@ -40,7 +40,8 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
 //
 // Registry URL resolution order (highest priority first):
 //   1. SFN_REGISTRY environment variable (one-shot override for CI)
-//   2. `[registry] url` in ~/.sfn/config.toml (persisted via `sfn config`)
+//   2. `[registry] url` in the user config.toml (persisted via `sfn config`;
+//      `~/.sfn`, or `SAILFIN_CONFIG_DIR` when set)
 //   3. Compiled-in default: https://pkg.sfn.dev
 //
 // Per-project overrides (e.g. `[registry]` in capsule.toml) are intentionally

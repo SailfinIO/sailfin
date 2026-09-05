@@ -47,8 +47,8 @@ let TOOLCHAIN_UPDATE_POLICY_FIELD: string = "update-policy";
 
 // The project manifest's `[toolchain]` table (SFEP-0073 §3.2) — the same
 // spelling as `TOOLCHAIN_UPDATE_POLICY_SECTION` above by coincidence, never
-// by dependency: that constant names a section of `~/.sfn/config.toml`, this
-// one names a section of `capsule.toml`/`workspace.toml`.
+// by dependency: that constant names a section of the user `config.toml`,
+// this one names a section of `capsule.toml`/`workspace.toml`.
 let TOOLCHAIN_MANIFEST_SECTION: string = "toolchain";
 
 fn toolchain_update_policy_is_valid(value: string) -> boolean {

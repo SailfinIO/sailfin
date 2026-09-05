@@ -34,6 +34,7 @@ import {
     sfn_bin_path
 } from "sfn/test";
 
+import { host_is_windows } from "../../src/build/target";
 import { toolchain_current_host } from "../../src/toolchain/host";
 
 fn _dir(tag: string) -> string ![io] {
@@ -217,4 +218,45 @@ test "config_dir_relocation: empty SAILFIN_CONFIG_DIR= falls back to HOME like u
     report_child_failure("config-dir-relocation empty-fallback config get", get_run.exit, get_run.out, get_run.err);
     assert get_run.exit == 0;
     assert trim(get_run.out) == "https://decoy.invalid.example";
+}
+
+// The directory mode is applied only to a directory `sfn` created itself.
+// `SAILFIN_CONFIG_DIR` can name a directory sfn does not own -- `~/.config`, a
+// shared team path -- and narrowing that is not ours to do; where it is owned
+// by another user the chmod fails outright and would break a command that need
+// not touch the mode at all. This is the guard `toolchain_user_default_write`
+// already applies to the same directory (SFN-1258). The credentials file is
+// 0o600 either way, because that is the mode actually protecting the token.
+//
+// 0o700 == 448, 0o755 == 493, 0o600 == 384 (`fs.get_perms` returns the low 12
+// bits of st_mode as a decimal int; it is a -1 stub on Windows, SFN-888).
+test "config_dir_relocation: login restricts a config dir it creates and leaves a pre-existing one alone" ![io] {
+    let tag = "perms";
+    let home = _home(tag);
+
+    // Created by `sfn login` itself.
+    let fresh = _dir(tag) + "/fresh";
+    let e_fresh = _env(tag + "-fresh", home, "set", fresh);
+    let r1 = _run([sfn_bin_path(), "login", "tok-fresh"], e_fresh);
+    report_child_failure("config-dir-relocation perms fresh", r1.exit, r1.out, r1.err);
+    assert r1.exit == 0;
+
+    // Pre-existing and group/other-readable: the mode must survive untouched.
+    let existing = _dir(tag) + "/existing";
+    fs.createDirectory(existing, true);
+    fs.set_perms(existing, 493);
+    let e_existing = _env(tag + "-existing", home, "set", existing);
+    let r2 = _run([sfn_bin_path(), "login", "tok-existing"], e_existing);
+    report_child_failure("config-dir-relocation perms existing", r2.exit, r2.out, r2.err);
+    assert r2.exit == 0;
+
+    if host_is_windows() {
+        assert fs.exists(fresh + "/credentials");
+        assert fs.exists(existing + "/credentials");
+    } else {
+        assert fs.get_perms(fresh) == 448;
+        assert fs.get_perms(fresh + "/credentials") == 384;
+        assert fs.get_perms(existing) == 493;
+        assert fs.get_perms(existing + "/credentials") == 384;
+    }
 }

@@ -400,12 +400,19 @@ fn _config_apply_cmd(k: ConfigKey, value: string, remove: boolean) -> int ![io] 
         print.err(render_terminal_diagnostic(diagnostic_to_diag(_home_dir_diagnostic(), "config"), empty_lines, "config"));
         return 1;
     }
+    // 0o700 only on a directory we created — see the same guard in
+    // `login.sfn`. A pre-existing `SAILFIN_CONFIG_DIR` may be a directory sfn
+    // does not own, where narrowing the mode is both wrong and, if it is owned
+    // by another user, a hard failure of a command that need not touch it.
+    let created = !fs.exists(sfn_dir);
     _ensure_dir_recursive_cmd(sfn_dir);
-    if !_set_perms_or_skip(sfn_dir, 448) {
-        print.err("error: failed to set permissions on " + sfn_dir);
-        return 1;
+    if created {
+        if !_set_perms_or_skip(sfn_dir, 448) {
+            print.err("error: failed to set permissions on " + sfn_dir);
+            return 1;
+        }
     }
-    let path = sfn_dir + "/config.toml";
+    let path = user_config_path();
     let mut text: string = "";
     if fs.exists(path) { text = fs.readFile(path); }
     let rendered = _config_render_line_cmd(k, value);
