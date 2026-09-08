@@ -323,7 +323,8 @@ fn build_tensor_matmul_kernel_binary(kernel_module: TensorModule, kernel_fn_name
     if caps.length == 0 {
         caps = select_runtime_sfn_sources(runtime_capsule_from_root(runtime_root), dep_result.runtime_demand);
     }
-    let link = _clang_link_multi(link_lls, out_binary, runtime_root, caps, binary_dir, out_dir, "");
+    let no_root_link_libs: string[] = [];
+    let link = _clang_link_multi(link_lls, out_binary, runtime_root, caps, binary_dir, out_dir, "", no_root_link_libs);
     if link.rc != 0 {
         return TensorMatmulBuildResult {
             binary_path: "",

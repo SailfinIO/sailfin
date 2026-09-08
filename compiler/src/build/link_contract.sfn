@@ -93,6 +93,33 @@ fn missing_runtime_dep_specs(runtime_capsules: RuntimeCapsuleArtifacts[], ll_pat
     return missing;
 }
 
+// SFN-1269: merges a root capsule's own `[build] link-libs` into the
+// runtime-derived `base` libs for the final link argv. Dedup is required
+// because the runtime capsule already contributes `-lm`/`-lpthread`
+// (`runtime/capsule.toml`), so a root capsule that legitimately declares
+// `-lm` itself must not produce a duplicate `-lm` on the clang invocation.
+// `root_link_libs` empty must leave `base` element-wise unchanged — that is
+// what keeps a build with no declaration byte-identical to today's argv.
+fn merge_root_link_libs(base: string[], root_link_libs: string[]) -> string[] {
+    let mut result: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        result.push(base[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= root_link_libs.length { break; }
+        let lib = root_link_libs[j];
+        if !contains_string(result, lib) {
+            result.push(lib);
+        }
+        j += 1;
+    }
+    return result;
+}
+
 fn _lc_ll_paths_cover(ll_paths: string[], needle: string) -> boolean {
     let mut i: int = 0;
     loop {

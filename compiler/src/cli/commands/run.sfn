@@ -147,6 +147,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         return 2;
     }
     let mut input_path: string = "";
+    // SFN-1269: the root capsule's declared `[build] link-libs`, empty for
+    // the positional (file/executable) form — no capsule manifest is
+    // resolved in that case.
+    let mut run_link_libs: string[] = [];
     if _run_positionals.length == 1 { input_path = _run_positionals[0]; } else {
         if !fs.exists("capsule.toml") {
             print.err("sfn run: no capsule.toml in the current directory; pass a .sfn file to run");
@@ -161,6 +165,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             return 2;
         }
         input_path = cap_spec.entry_path;
+        run_link_libs = cap_spec.link_libs;
     }
 
     let binary_dir: string = ctx.binary_dir;
@@ -310,7 +315,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if run_cache_config.enabled {
         run_shared_cache_root = cache_root(run_cache_config.capsule_name);
     }
-    let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, run_work_dir, run_shared_cache_root);
+    let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, run_work_dir, run_shared_cache_root, run_link_libs);
     let link_rc = link_result.rc;
     if link_rc != 0 {
         // A native link failure is a real compiler/runtime bug to fix at the
