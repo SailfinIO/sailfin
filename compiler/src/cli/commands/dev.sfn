@@ -441,8 +441,9 @@ fn _bootstrap_dev_owns_install(out: string) -> boolean ![io] {
 
 // Stage the compiler's resolved runtime/dependency closure before touching an
 // install prefix. A compiler executable is not a complete local toolchain on
-// its own: through 0.10.5 both driver and analyzer discovery require the
-// adjacent runtime mirror (SFN-1124).
+// its own, and a dev install has no version store and no install-root pointer
+// to resolve one through: the closure staged beside the binary *is* the
+// discovery root for both the driver and the analyzer's prelude-global loader.
 fn _bootstrap_stage_dev_payload(src: string, out: string, record_owner: boolean) -> string ![io] {
     let bin_dir = _dirname(out);
     if !ensure_dir_p(bin_dir) { return ""; }

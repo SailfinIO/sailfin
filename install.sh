@@ -275,10 +275,29 @@ fetch_with_retry() {
   done
 }
 
-# D-06: naive MAJOR.MINOR.PATCH compare, prerelease ignored. Used only to pick
-# which of two diagnostic messages to show on a missing manifest/signature --
-# never to decide whether to enforce, which is version-independent.
+# Naive MAJOR.MINOR.PATCH compare, prerelease ignored. Two callers, and the
+# distinction between them matters:
+#
+#   - D-06 (SAILFIN_SIGNING_FLOOR): picks which of two diagnostic messages to
+#     show on a missing manifest/signature -- never whether to *enforce*, which
+#     is version-independent, because deciding enforcement from the version
+#     would hand an attacker the downgrade.
+#   - SAILFIN_INSTALL_ROOT_FLOOR: does decide behavior (whether to write the
+#     adjacent payload mirror), but only ever adds a redundant copy of the
+#     payload this installer just wrote. Getting it wrong costs disk, never
+#     verification, so it carries none of the D-06 hazard.
 SAILFIN_SIGNING_FLOOR="0.8.0"
+
+# The release that first routed BOTH runtime-root resolvers through the
+# install-root pointer (SFN-1124): the CLI driver and, critically, the
+# analyzer's prelude-global loader. A copied global command from any earlier
+# release re-derives the runtime root from its own directory and finds nothing,
+# contributing no prelude names -- so it still needs the adjacent mirror, even
+# from a post-SFN-937 archive that carries `workspace.toml`. Prerelease
+# ordering is ignored by `_version_lt` and that is sound here: no `0.11.0-*`
+# prerelease was ever tagged, and every prerelease that does exist is 0.8.x or
+# older, far below this floor.
+SAILFIN_INSTALL_ROOT_FLOOR="0.11.0"
 _version_lt() {
   local left="${1%%-*}" right="${2%%-*}"
   local -a lv rv
@@ -955,35 +974,39 @@ SAILFIN_ALIAS_PATH="${GLOBAL_BIN_DIR}/${SAILFIN_ALIAS_BASENAME}"
 install_global_command "$SAILFIN_ALIAS_PATH"
 
 if [ "$GLOBAL_COPY_FALLBACK" -eq 1 ]; then
-  for legacy_path in runtime capsules workspace.toml; do
-    if [ -e "${GLOBAL_BIN_DIR}/${legacy_path}" ] && [ "$GLOBAL_PAYLOAD_OWNED" -ne 1 ]; then
-      die "Refusing to replace unowned ${GLOBAL_BIN_DIR}/${legacy_path} for the adjacent payload mirror."
-    fi
-  done
-  # The pointer alone is not sufficient for any compiler published through
-  # 0.10.5. Only the CLI driver reads it; the analyzer's prelude-global loader
-  # re-derives the runtime root from the executable's own directory, which for
-  # a copied (non-symlinked) executable resolves nowhere. It then contributes
-  # no prelude names and every bare prelude call fails E0420 (SFN-1124). The
-  # adjacent runtime/ mirror is what that probe finds, so it is mirrored for
-  # every archive, not only pre-SFN-937 ones.
+  # An archive from SAILFIN_INSTALL_ROOT_FLOOR onward gets no adjacent mirror
+  # at all: the pointer written below is the discovery anchor for both the CLI
+  # driver and the analyzer's prelude-global loader, so a version-shared bin
+  # directory stays decoupled from any one version's payload (SFN-937).
   #
-  # This deliberately re-couples a version-shared bin directory to one
-  # version's payload, which SFN-937 set out to undo. Remove this mirror and
-  # restore the legacy-only guard once a release carrying the SFN-1124
-  # compiler fix is the pinned seed, deleting this comment with it (SFN-1125).
-  if [ -d "${TARGET_DIR}/runtime" ]; then
-    $MAYBE_SUDO cp -R "${TARGET_DIR}/runtime" "${GLOBAL_BIN_DIR}/runtime"
-    log "Installed adjacent runtime mirror for copied-executable discovery."
-  fi
-  # capsules/ stays legacy-only: the pointer already anchors dependency
-  # discovery for it, and it is the expensive tree SFN-937 exists to stop
-  # duplicating.
-  if [ ! -f "${ROOT_DIR}/workspace.toml" ]; then
+  # Two disjoint reasons an older release still needs the mirror, and both are
+  # required -- the archive shape and the compiler capability moved in
+  # different releases. A pre-SFN-937 archive carries no `workspace.toml` and
+  # its compiler predates the pointer entirely; a post-SFN-937 archive below
+  # the floor (0.10.6 is the worked example) carries `workspace.toml` but its
+  # analyzer still re-derives the runtime root from the executable's own
+  # directory, which for a copied executable resolves nowhere. Gating on
+  # archive shape alone would leave that second class installing green and
+  # failing E0420 on the first bare prelude call (SFN-1124).
+  if [ ! -f "${ROOT_DIR}/workspace.toml" ] \
+    || _version_lt "$VERSION" "$SAILFIN_INSTALL_ROOT_FLOOR"; then
+    # Scoped to the branch that writes: `cp -R src dst` nests as
+    # `dst/runtime/runtime` when `dst` already exists, so an unowned tree here
+    # is a real hazard. Outside this branch nothing is written, and dying
+    # would strand a copied global command with neither a mirror nor the
+    # pointer below -- the one shape that cannot resolve a runtime at all.
+    for legacy_path in runtime capsules workspace.toml; do
+      if [ -e "${GLOBAL_BIN_DIR}/${legacy_path}" ] && [ "$GLOBAL_PAYLOAD_OWNED" -ne 1 ]; then
+        die "Refusing to replace unowned ${GLOBAL_BIN_DIR}/${legacy_path} for the adjacent payload mirror."
+      fi
+    done
+    if [ -d "${TARGET_DIR}/runtime" ]; then
+      $MAYBE_SUDO cp -R "${TARGET_DIR}/runtime" "${GLOBAL_BIN_DIR}/runtime"
+    fi
     if [ -d "${TARGET_DIR}/capsules" ]; then
       $MAYBE_SUDO cp -R "${TARGET_DIR}/capsules" "${GLOBAL_BIN_DIR}/capsules"
     fi
-    log "Installed adjacent capsule mirror for pre-SFN-937 compiler compatibility."
+    log "Installed adjacent payload mirror for pre-${SAILFIN_INSTALL_ROOT_FLOOR} compiler compatibility."
   fi
   PAYLOAD_POINTER_TEMP="${TMPDIR}/sailfin-install-root"
   printf '%s' "$TARGET_DIR_ABS" > "$PAYLOAD_POINTER_TEMP"
