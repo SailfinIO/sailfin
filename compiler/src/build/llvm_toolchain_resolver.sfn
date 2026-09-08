@@ -32,13 +32,24 @@ import { _path_join } from "./paths";
 import { build_host_os } from "./target";
 
 let LLVM_SUPPORTED_MAJOR: int = 18;
-let LLVM_PIPELINE_SCHEMA: string = "llvm-family-v1";
+// Bumping this invalidates every cache keyed on the family fingerprint. It
+// moved to v2 when the canonical text switched to hashing `version_output`
+// per field and to absolute tool paths (SFN-948 review); it is also the
+// lever that would invalidate caches if executable content digests are ever
+// added as an ingredient (SFEP-0066 §3.8).
+let LLVM_PIPELINE_SCHEMA: string = "llvm-family-v2";
 
 struct LlvmTool {
     role: string;  // "llvm-as" | "opt" | "llc" | "ld.lld" | "lld-link"
-    path: string;  // spelling actually spawned (root-absolute, or bare name for PATH)
+    path: string;  // absolute path actually spawned, under either origin
     version_output: string;  // complete --version stdout
-    major: int;
+    major: int;  // -1 when `failure` is set
+    // "" when resolved; otherwise "not_found" | "probe_failed" |
+    // "version_unparseable". Collapsing these into one "could not be
+    // resolved" outcome is what let the LLD banner defect read as a missing
+    // linker: the tool was present, executable, and exited 0, and the only
+    // thing that failed was the version parse (SFN-948 review).
+    failure: string;
 }
 
 struct LlvmFamily {
@@ -64,6 +75,10 @@ struct _FamilyAttempt {
     skew_role: string;  // "" unless a member reported the wrong major
     skew_major: int;
     skew_path: string;
+    unparseable_role: string;  // "" unless a member ran but printed no parseable version
+    unparseable_path: string;
+    unparseable_output: string;
+    failure: string;  // the `LlvmTool.failure` behind `missing_role`, when set
 }
 
 fn llvm_supported_major() -> int { return LLVM_SUPPORTED_MAJOR; }
@@ -166,7 +181,13 @@ fn parse_llvm_major(version_output: string) -> int {
 // the first line that is empty or has no leading whitespace. Returns []
 // when the marker is absent.
 fn llc_registered_targets(version_output: string) -> string[] {
-    let marker = "  Registered Targets:";
+    // Matched without its leading indentation on purpose. Pinning the exact
+    // two-space column is the same brittleness that made the LLD banner a
+    // bug: if any packaging changes the indentation, an otherwise perfect
+    // `llc` reports no registered targets and the user gets a maximally
+    // confusing "target is not supported by the LLVM toolchain" (SFN-948
+    // review). The literal is distinctive enough on its own.
+    let marker = "Registered Targets:";
     let marker_pos = index_of(version_output, marker);
     let mut result: string[] = [];
     if marker_pos < 0 { return result; }
@@ -195,14 +216,20 @@ fn llc_registered_targets(version_output: string) -> string[] {
         let first_char = substring(line, 0, 1);
         if first_char != " " && first_char != "\t" { break; }
         let mut token_start: int = 0;
+        let mut lead_guard: int = 0;
         loop {
+            if lead_guard > line.length { break; }
+            lead_guard += 1;
             if token_start >= line.length { break; }
             let ch = substring(line, token_start, token_start + 1);
             if ch != " " && ch != "\t" { break; }
             token_start += 1;
         }
         let mut token_end: int = token_start;
+        let mut token_guard: int = 0;
         loop {
+            if token_guard > line.length { break; }
+            token_guard += 1;
             if token_end >= line.length { break; }
             let ch = substring(line, token_end, token_end + 1);
             if ch == " " || ch == "\t" { break; }
@@ -255,9 +282,10 @@ fn _llvm_governed_triples_hint() -> string {
     return hint + ")";
 }
 
-fn llvm_tool_missing_diagnostic(role: string, origin: string, root: string, searched: string) -> Diagnostic {
-    let mut message = "LLVM " + role + " could not be resolved (searched \""
-        + searched
+fn llvm_tool_missing_diagnostic(role: string, origin: string, root: string, searched: string, failure: string) -> Diagnostic {
+    let mut what = "could not be resolved";
+    if failure == "probe_failed" { what = "was found but failed to run"; }
+    let mut message = "LLVM " + role + " " + what + " (searched \"" + searched
         + "\")";
     if origin == "root" {
         message = message + "; SAILFIN_LLVM_ROOT=\"" + root
@@ -284,6 +312,27 @@ fn llvm_version_skew_diagnostic(role: string, path: string, found_major: int, ex
             + int_to_string(found_major)
             + ", but this build requires LLVM "
             + int_to_string(expected_major),
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+// The member ran and exited 0, but its `--version` banner matched neither
+// known marker. Distinct from E0621 on purpose: reporting this as "could not
+// be resolved" sends the user hunting for a missing file instead of showing
+// them the output the parser could not read (SFN-948 review).
+fn llvm_version_unparseable_diagnostic(role: string, path: string, version_output: string) -> Diagnostic {
+    let nl = index_of(version_output, "\n");
+    let mut first_line = version_output;
+    if nl >= 0 { first_line = substring(version_output, 0, nl); }
+    return Diagnostic {
+        code: "E0624",
+        severity: "error",
+        message: "LLVM " + role + " at \"" + path
+            + "\" ran but printed no recognizable version banner (first line: \""
+            + first_line
+            + "\"); expected an \"LLVM version <major>\" or \"LLD <major>\" banner",
         file_path: "",
         primary: null,
         suggestion: null
@@ -328,7 +377,15 @@ fn llvm_family_fingerprint(tools: LlvmTool[], major: int, triple: string, object
     loop {
         if i >= tools.length { break; }
         let t = tools[i];
-        text = text + t.role + "\t" + t.path + "\t" + t.version_output + "\n";
+        // `version_output` is complete `--version` stdout and contains
+        // newlines by construction, so it cannot be a field inside a
+        // newline-delimited record: a family of two tools and a family of
+        // one whose version text happens to contain the other's record
+        // would serialize identically. Hashing it first makes every field
+        // fixed-width and separator-free, so the encoding is injective
+        // (SFN-948 review).
+        text = text + t.role + "\t" + t.path + "\t" + sha256_hex_of_string(t.version_output)
+            + "\n";
         i += 1;
     }
     return sha256_hex_of_string(text);
@@ -347,76 +404,163 @@ fn _probe_version(path: string) -> string ![io] {
     return out;
 }
 
-// Resolve one family member. Under an explicit root the candidate must
-// exist, be executable, and NOT be a directory before it is probed — the
-// `!fs.is_directory` pairing is required because `fs.is_executable`
-// degrades to `access(path, 0)` on Windows and cannot itself distinguish a
-// file from a directory (`./paths.sfn:208-209`). Any failure of that guard
-// returns `major: -1` (unresolved) rather than probing a non-executable
-// path.
+// PATH entry separator. Windows uses ";" because a drive-letter path
+// ("C:\\LLVM\\bin") already contains ":".
+fn _path_list_sep(host_os: string) -> string {
+    if host_os == "Windows" { return ";"; }
+    return ":";
+}
+
+// Split a PATH-shaped list, dropping empty entries.
+fn _split_path_list(value: string, sep: string) -> string[] {
+    let mut parts: string[] = [];
+    let len = value.length;
+    let mut pos: int = 0;
+    let mut guard: int = 0;
+    loop {
+        if guard > len { break; }
+        guard += 1;
+        if pos > len { break; }
+        let rest = substring(value, pos, len);
+        let idx = index_of(rest, sep);
+        if idx < 0 {
+            if rest.length > 0 { parts.push(rest); }
+            break;
+        }
+        if idx > 0 { parts.push(substring(rest, 0, idx)); }
+        pos = pos + idx + sep.length;
+    }
+    return parts;
+}
+
+// A candidate is usable only when it exists, is executable, and is NOT a
+// directory. The `!fs.is_directory` pairing is required because
+// `fs.is_executable` degrades to `access(path, 0)` on Windows and cannot
+// itself distinguish a file from a directory (`./paths.sfn:208-209`).
+fn _is_usable_executable(candidate: string) -> boolean ![io] {
+    return fs.exists(candidate) && fs.is_executable(candidate) && !fs.is_directory(candidate);
+}
+
+// Walk PATH ourselves rather than handing a bare name to `posix_spawnp`.
+// Two reasons, both SFEP-0066 §3.8: a bare name carries no information
+// about WHICH `opt` was probed, so two identical LLVM trees at different
+// prefixes produced the same family fingerprint and caches did not
+// invalidate when PATH changed between them; and re-spawning a bare name
+// later re-runs the search, so a consumer could execute a different binary
+// than the one probed and fingerprinted. Resolving to an absolute path at
+// probe time closes both.
+fn _resolve_on_path(file_name: string, host_os: string) -> string ![io] {
+    let dirs = _split_path_list(_get_env_cmd("PATH"), _path_list_sep(host_os));
+    let mut i: int = 0;
+    loop {
+        if i >= dirs.length { break; }
+        let candidate = _path_join(dirs[i], file_name);
+        if _is_usable_executable(candidate) { return candidate; }
+        i += 1;
+    }
+    return "";
+}
+
+fn _failed_tool(role: string, path: string, version_output: string, failure: string) -> LlvmTool {
+    return LlvmTool {
+        role: role,
+        path: path,
+        version_output: version_output,
+        major: -1,
+        failure: failure
+    };
+}
+
+// Resolve one family member to an absolute path and a parsed major, or to a
+// precise failure kind. The three failure kinds are kept distinct because
+// they need different diagnostics: a member that is absent, one that is
+// present but will not run, and one that runs fine but whose banner the
+// parser does not recognize are three different things to tell a user, and
+// reporting the third as "could not be resolved" points them at a file that
+// is sitting right there and works (SFN-948 review).
 fn _resolve_role(role: string, major: int, suffixed: boolean, host_os: string, root: string) -> LlvmTool ![io] {
     let file_name = llvm_tool_file_name(role, major, suffixed, host_os);
-    let mut candidate = file_name;
+    let mut candidate = "";
     if root.length > 0 {
-        candidate = _path_join(_path_join(root, "bin"), file_name);
-        let usable = fs.exists(candidate) && fs.is_executable(candidate) && !fs.is_directory(candidate);
-        if !usable {
-            return LlvmTool {
-                role: role,
-                path: candidate,
-                version_output: "",
-                major: -1
-            };
+        let rooted = _path_join(_path_join(root, "bin"), file_name);
+        if !_is_usable_executable(rooted) {
+            return _failed_tool(role, rooted, "", "not_found");
+        }
+        candidate = rooted;
+    } else {
+        candidate = _resolve_on_path(file_name, host_os);
+        if candidate.length == 0 {
+            return _failed_tool(role, file_name, "", "not_found");
         }
     }
     let version_output = _probe_version(candidate);
     if version_output.length == 0 {
-        return LlvmTool {
-            role: role,
-            path: candidate,
-            version_output: version_output,
-            major: -1
-        };
+        return _failed_tool(role, candidate, "", "probe_failed");
+    }
+    let parsed = parse_llvm_major(version_output);
+    if parsed < 0 {
+        return _failed_tool(role, candidate, version_output, "version_unparseable");
     }
     return LlvmTool {
         role: role,
         path: candidate,
         version_output: version_output,
-        major: parse_llvm_major(version_output)
+        major: parsed,
+        failure: ""
+    };
+}
+
+// A failed `_FamilyAttempt` with every arm cleared; callers set the one arm
+// that applies.
+fn _failed_attempt(missing_role: string, searched: string, failure: string) -> _FamilyAttempt {
+    return _FamilyAttempt {
+        ok: false,
+        tools: [],
+        missing_role: missing_role,
+        searched: searched,
+        skew_role: "",
+        skew_major: 0,
+        skew_path: "",
+        unparseable_role: "",
+        unparseable_path: "",
+        unparseable_output: "",
+        failure: failure
     };
 }
 
 // Resolve every role as ONE complete family (SFEP-0066 §3.4), never tool by
-// tool: the first member that fails to resolve, or the first that resolves
-// to the wrong major, stops the attempt immediately.
+// tool: the first member that fails to resolve, that runs but prints an
+// unrecognized banner, or that resolves to the wrong major stops the attempt
+// immediately.
 fn _attempt_family(roles: string[], major: int, suffixed: boolean, host_os: string, root: string) -> _FamilyAttempt ![io] {
     let mut tools: LlvmTool[] = [];
+    // An empty role list must never read as a complete family. Unreachable
+    // today (`resolve_llvm_toolchain_for_host` rejects ungoverned triples
+    // before this point, and `llvm_family_roles` is total over the governed
+    // four), but "fails closed only because a later probe happens to reject
+    // it" is not a property worth relying on.
+    if roles.length == 0 { return _failed_attempt("", "", "not_found"); }
     let mut i: int = 0;
     loop {
         if i >= roles.length { break; }
         let role = roles[i];
         let tool = _resolve_role(role, major, suffixed, host_os, root);
-        if tool.major < 0 {
-            return _FamilyAttempt {
-                ok: false,
-                tools: tools,
-                missing_role: role,
-                searched: tool.path,
-                skew_role: "",
-                skew_major: 0,
-                skew_path: ""
-            };
+        if tool.failure == "version_unparseable" {
+            let mut attempt = _failed_attempt("", "", "");
+            attempt.unparseable_role = role;
+            attempt.unparseable_path = tool.path;
+            attempt.unparseable_output = tool.version_output;
+            return attempt;
+        }
+        if tool.failure.length > 0 {
+            return _failed_attempt(role, tool.path, tool.failure);
         }
         if tool.major != LLVM_SUPPORTED_MAJOR {
-            return _FamilyAttempt {
-                ok: false,
-                tools: tools,
-                missing_role: "",
-                searched: "",
-                skew_role: role,
-                skew_major: tool.major,
-                skew_path: tool.path
-            };
+            let mut attempt = _failed_attempt("", "", "");
+            attempt.skew_role = role;
+            attempt.skew_major = tool.major;
+            attempt.skew_path = tool.path;
+            return attempt;
         }
         tools.push(tool);
         i += 1;
@@ -428,7 +572,11 @@ fn _attempt_family(roles: string[], major: int, suffixed: boolean, host_os: stri
         searched: "",
         skew_role: "",
         skew_major: 0,
-        skew_path: ""
+        skew_path: "",
+        unparseable_role: "",
+        unparseable_path: "",
+        unparseable_output: "",
+        failure: ""
     };
 }
 
@@ -454,12 +602,7 @@ fn _llvm_unresolved_family(triple: string, object_format: string, diagnostic: Di
 // The target probe (step g/h): a complete, version-matched family is not
 // enough — its `llc` must also register the requested triple's backend.
 fn _llvm_finish_family(tools: LlvmTool[], origin: string, root: string, suffixed: boolean, triple: string, object_format: string) -> LlvmFamily {
-    let mut llc = LlvmTool {
-        role: "",
-        path: "",
-        version_output: "",
-        major: -1
-    };
+    let mut llc = _failed_tool("", "", "", "not_found");
     let mut i: int = 0;
     loop {
         if i >= tools.length { break; }
@@ -517,12 +660,28 @@ fn resolve_llvm_toolchain_for_host(triple: string, host_os: string) -> LlvmFamil
     if suffixed.ok {
         return _llvm_finish_family(suffixed.tools, origin, root, true, triple, object_format);
     }
-    // Both attempts failed: report the SUFFIXED attempt's reason, since it
-    // was tried last.
+    // Both attempts failed. Report the most actionable reason across BOTH,
+    // not simply the last one tried: a suffixed binary is either present or
+    // absent, while the unsuffixed one is the system default and is the
+    // thing that actually skews. On a box whose default LLVM is 17 with no
+    // `-18` binaries, reporting the suffixed attempt alone says "llvm-as-18
+    // could not be resolved" and never mentions that LLVM 17 was found and
+    // rejected — which is the fact the user needs (SFN-948 review).
+    // Precedence: a found-but-wrong-version member, then one that ran but
+    // could not be parsed, then a genuinely missing one.
+    if unsuffixed.skew_role.length > 0 {
+        return _llvm_unresolved_family(triple, object_format, llvm_version_skew_diagnostic(unsuffixed.skew_role, unsuffixed.skew_path, unsuffixed.skew_major, LLVM_SUPPORTED_MAJOR));
+    }
     if suffixed.skew_role.length > 0 {
         return _llvm_unresolved_family(triple, object_format, llvm_version_skew_diagnostic(suffixed.skew_role, suffixed.skew_path, suffixed.skew_major, LLVM_SUPPORTED_MAJOR));
     }
-    return _llvm_unresolved_family(triple, object_format, llvm_tool_missing_diagnostic(suffixed.missing_role, origin, root, suffixed.searched));
+    if unsuffixed.unparseable_role.length > 0 {
+        return _llvm_unresolved_family(triple, object_format, llvm_version_unparseable_diagnostic(unsuffixed.unparseable_role, unsuffixed.unparseable_path, unsuffixed.unparseable_output));
+    }
+    if suffixed.unparseable_role.length > 0 {
+        return _llvm_unresolved_family(triple, object_format, llvm_version_unparseable_diagnostic(suffixed.unparseable_role, suffixed.unparseable_path, suffixed.unparseable_output));
+    }
+    return _llvm_unresolved_family(triple, object_format, llvm_tool_missing_diagnostic(suffixed.missing_role, origin, root, suffixed.searched, suffixed.failure));
 }
 
 // The entry point: resolve the complete, version-matched LLVM family for
@@ -549,6 +708,7 @@ export {
     llvm_tool_missing_diagnostic,
     llvm_triple_is_governed,
     llvm_version_skew_diagnostic,
+    llvm_version_unparseable_diagnostic,
     parse_llvm_major,
     resolve_llvm_toolchain,
     resolve_llvm_toolchain_for_host

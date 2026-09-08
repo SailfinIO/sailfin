@@ -29,6 +29,7 @@ import {
     llvm_tool_missing_diagnostic,
     llvm_triple_is_governed,
     llvm_version_skew_diagnostic,
+    llvm_version_unparseable_diagnostic,
     parse_llvm_major,
     resolve_llvm_toolchain,
     resolve_llvm_toolchain_for_host
@@ -71,25 +72,25 @@ fn _role_version_fixture(role: string) -> string {
 
 fn _fingerprint_tools() -> LlvmTool[] {
     return [LlvmTool {
-        role: "llvm-as", path: "/opt/llvm/bin/llvm-as", version_output: "LLVM version 18.1.3\n", major: 18
+        role: "llvm-as", path: "/opt/llvm/bin/llvm-as", version_output: "LLVM version 18.1.3\n", major: 18, failure: ""
     }, LlvmTool {
-        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18
+        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18, failure: ""
     }];
 }
 
 fn _fingerprint_tools_diff_path() -> LlvmTool[] {
     return [LlvmTool {
-        role: "llvm-as", path: "/usr/bin/llvm-as", version_output: "LLVM version 18.1.3\n", major: 18
+        role: "llvm-as", path: "/usr/bin/llvm-as", version_output: "LLVM version 18.1.3\n", major: 18, failure: ""
     }, LlvmTool {
-        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18
+        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18, failure: ""
     }];
 }
 
 fn _fingerprint_tools_diff_version_output() -> LlvmTool[] {
     return [LlvmTool {
-        role: "llvm-as", path: "/opt/llvm/bin/llvm-as", version_output: "LLVM version 18.1.4\n", major: 18
+        role: "llvm-as", path: "/opt/llvm/bin/llvm-as", version_output: "LLVM version 18.1.4\n", major: 18, failure: ""
     }, LlvmTool {
-        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18
+        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18, failure: ""
     }];
 }
 
@@ -199,7 +200,7 @@ test "llvm-toolchain-resolver: fingerprint is stable and sensitive to every ingr
 }
 
 test "llvm-toolchain-resolver: diagnostics carry the right codes and detail" {
-    let missing = llvm_tool_missing_diagnostic("llc", "root", "/opt/llvm", "/opt/llvm/bin/llc");
+    let missing = llvm_tool_missing_diagnostic("llc", "root", "/opt/llvm", "/opt/llvm/bin/llc", "not_found");
     assert missing.code == "E0621";
     assert expect_contains_str(missing.message, "llc").ok;
     assert expect_contains_str(missing.message, "/opt/llvm").ok;
@@ -297,15 +298,54 @@ test "llvm-toolchain-resolver: a Windows host uses .exe conventions and fails cl
     } else { assert false; }
 }
 
-// The same seam proves the Linux leg is not accidentally host-independent:
-// the identical triple under a Linux host searches unsuffixed/`-18` names
-// with no `.exe` anywhere in the failure text.
+// The A/B for the test above: the SAME triple under a Linux host, so the
+// host is the only variable. A Linux host must never search `.exe`
+// spellings. Asserted unconditionally on the failure text rather than
+// inside an `if !family.ok`, because a test whose body only runs on one
+// branch asserts nothing on the other — which is precisely how the LLD
+// banner defect passed a green suite (SFN-948 review).
 test "llvm-toolchain-resolver: a Linux host never searches .exe spellings" ![io] {
-    let family = resolve_llvm_toolchain_for_host("arm64-apple-darwin", "Linux");
-    if !family.ok {
+    let family = resolve_llvm_toolchain_for_host("x86_64-pc-windows-msvc", "Linux");
+    // Both outcomes are legitimate here and both are asserted, so the test
+    // cannot pass by taking a branch that checks nothing. A Linux host with
+    // `lld-link` installed resolves this Windows target cross-wise; one
+    // without it fails closed. Either way, no `.exe` spelling is ever
+    // searched.
+    if family.ok {
+        let mut i: int = 0;
+        loop {
+            if i >= family.tools.length { break; }
+            assert expect_eq_bool(expect_contains_str(family.tools[i].path, ".exe").ok, false).ok;
+            i += 1;
+        }
+        assert family.tools.length > 0;
+    } else {
         if family.diagnostic != null {
             let diag = family.diagnostic;
             assert expect_eq_bool(expect_contains_str(diag.message, ".exe").ok, false).ok;
         } else { assert false; }
     }
+}
+
+// E0624 is the diagnostic the LLD defect should have produced: the member
+// ran fine, and only the banner was unreadable. Pinned so a future
+// unrecognized banner cannot silently regress into E0621's "could not be
+// resolved", which points the user at a file that is present and working.
+test "llvm-toolchain-resolver: an unreadable banner is E0624, not a missing tool" {
+    let diag = llvm_version_unparseable_diagnostic("ld.lld", "/opt/llvm/bin/ld.lld", "Vendor Linker 9.9\nmore\n");
+    assert diag.code == "E0624";
+    assert expect_contains_str(diag.message, "ld.lld").ok;
+    assert expect_contains_str(diag.message, "Vendor Linker 9.9").ok;
+    // Only the first line of the captured output is quoted.
+    assert expect_eq_bool(expect_contains_str(diag.message, "more").ok, false).ok;
+}
+
+// A probe that found the tool but could not run it must not read as absent.
+test "llvm-toolchain-resolver: a tool that fails to run is distinguished from a missing one" {
+    let absent = llvm_tool_missing_diagnostic("opt", "path", "", "opt-18", "not_found");
+    let broken = llvm_tool_missing_diagnostic("opt", "path", "", "opt-18", "probe_failed");
+    assert absent.code == "E0621";
+    assert broken.code == "E0621";
+    assert expect_eq_bool(absent.message == broken.message, false).ok;
+    assert expect_contains_str(broken.message, "failed to run").ok;
 }
