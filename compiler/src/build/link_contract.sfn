@@ -33,7 +33,7 @@ import { int_to_string } from "sfn/strings";
 // gated build before the backend ran.
 import { capsule_artifact_ir_dir, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
-import { contains_string, index_of } from "../string_utils";
+import { contains_string, index_of, starts_with } from "../string_utils";
 
 // Returns the distinct `[dependencies]` specs declared across
 // `runtime_capsules` whose per-capsule IR tree
@@ -94,12 +94,19 @@ fn missing_runtime_dep_specs(runtime_capsules: RuntimeCapsuleArtifacts[], ll_pat
 }
 
 // SFN-1269: merges a root capsule's own `[build] link-libs` into the
-// runtime-derived `base` libs for the final link argv. Dedup is required
-// because the runtime capsule already contributes `-lm`/`-lpthread`
-// (`runtime/capsule.toml`), so a root capsule that legitimately declares
-// `-lm` itself must not produce a duplicate `-lm` on the clang invocation.
-// `root_link_libs` empty must leave `base` element-wise unchanged — that is
-// what keeps a build with no declaration byte-identical to today's argv.
+// runtime-derived `base` libs for the final link argv. `link-libs` is a raw
+// flag list, not a list of `-l` libs, so dedup only applies to `-l` entries
+// and only against `base` — never against earlier root entries. A blanket
+// dedup would corrupt paired flags like `-framework <name>` (dropping the
+// second literal `-framework` token) and break intentional `-l` repetition
+// used to resolve mutually-referencing static archives in one linker pass
+// (and the analogous `-Xlinker`/`-Wl,--start-group` pairings). Dedup against
+// `base` is still needed because the runtime capsule already contributes
+// `-lm`/`-lpthread` (`runtime/capsule.toml`), so a root capsule that
+// legitimately declares `-lm` itself must not produce a duplicate `-lm` on
+// the clang invocation. `root_link_libs` empty must leave `base`
+// element-wise unchanged — that is what keeps a build with no declaration
+// byte-identical to today's argv.
 fn merge_root_link_libs(base: string[], root_link_libs: string[]) -> string[] {
     let mut result: string[] = [];
     let mut i: int = 0;
@@ -112,7 +119,11 @@ fn merge_root_link_libs(base: string[], root_link_libs: string[]) -> string[] {
     loop {
         if j >= root_link_libs.length { break; }
         let lib = root_link_libs[j];
-        if !contains_string(result, lib) { result.push(lib); }
+        if starts_with(lib, "-l") && contains_string(base, lib) {
+            j += 1;
+            continue;
+        }
+        result.push(lib);
         j += 1;
     }
     return result;
