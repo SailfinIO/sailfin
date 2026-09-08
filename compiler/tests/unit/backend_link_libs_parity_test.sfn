@@ -20,6 +20,7 @@
 import { expect_eq_bool } from "sfn/test";
 
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
+import { DirectLinkContract, direct_ld_lld_argv } from "../../src/build/direct_link";
 
 // Membership check over an emitted argv (`string[]`).
 fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
@@ -92,4 +93,31 @@ test "backend: parity check is meaningful (absent lib is not found)" ![pure] {
     let program_argv = _llvm_text_link_program_argv(plan, no_sdk);
     assert expect_eq_bool(_argv_contains(test_argv, "-lnot-a-real-lib"), false).ok;
     assert expect_eq_bool(_argv_contains(program_argv, "-lnot-a-real-lib"), false).ok;
+}
+
+// SFN-1268: the direct `ld.lld` static builder is a third link path
+// (`sfn build --static`) and must carry the same `plan.libs` parity as the
+// clang-driven test/program layouts above.
+test "backend: static argv reproduces every plan.libs entry" ![pure] {
+    let plan = _representative_plan();
+    let contract = DirectLinkContract {
+        ok: true,
+        reason: "",
+        linker_emulation: "elf_x86_64",
+        dynamic_linker: "",
+        static_link: true,
+        crt1: "/usr/lib/x86_64-linux-gnu/crt1.o",
+        crti: "/usr/lib/x86_64-linux-gnu/crti.o",
+        crtn: "/usr/lib/x86_64-linux-gnu/crtn.o",
+        crtbegin: "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginT.o",
+        crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtend.o",
+        search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"]
+    };
+    let argv = direct_ld_lld_argv(contract, plan.objects, plan.out_path, plan.libs, plan.link_flags);
+    let mut i: int = 0;
+    loop {
+        if i >= plan.libs.length { break; }
+        assert expect_eq_bool(_argv_contains(argv, plan.libs[i]), true).ok;
+        i += 1;
+    }
 }

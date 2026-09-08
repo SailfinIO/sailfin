@@ -329,6 +329,22 @@ sfn build [<file.sfn> | -p <capsule-path>] [-o <output>]
 | `-p <capsule-path>` | Build the capsule at this directory or manifest path, using its `[build]` configuration |
 | `--clean` | Clear the content-addressed build cache (and the runtime object cache) before building. Clears the cache, not the `build/` tree — see [`--clean-tree` vs `--clean`](#--clean-tree-vs---clean) |
 | `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
+| `--static` | Link with no `libc.so` in `DT_NEEDED` and no ELF interpreter — see the caveats below. Linux `x86_64-unknown-linux-gnu` / `aarch64-unknown-linux-gnu` only; any other resolved triple fails with `E0625`. Never degrades: if the static CRT objects or `libc.a` cannot be resolved the build fails with `E0626` rather than emitting a dynamic binary. |
+
+A statically linked glibc binary cannot resolve hostnames: glibc's NSS
+backends are `dlopen`ed at runtime, and a static executable has none of them
+available, so `getaddrinfo` fails inside a `--static` binary. IP-literal
+sockets are unaffected. A program that does not declare `![net]` never links
+the affected runtime modules at all, so this caveat only bites networked
+programs.
+
+`--static` is a supported configuration only against glibc >= 2.34. Before
+2.34, `libpthread.a` was a separate archive whose weak-symbol layout lets
+`pthread_create` resolve to the libc stub in a static link — the link
+succeeds and threading fails at run time, with no diagnostic from either
+`sfn build` or the linker. glibc 2.34 merged libpthread into libc, removing
+the weak-symbol ambiguity, so a host at or past that version is required;
+older hosts are not a supported target for `--static`.
 
 **Examples:**
 

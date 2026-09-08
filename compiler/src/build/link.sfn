@@ -5,12 +5,16 @@
 // module is pure `![io]` build-driver orchestration (no fixups, no
 // post-processing of compiler output). `_resolve_sailfin_cache_dir`
 // travels with its only consumer (`_clang_link_multi`).
+import { diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
+
 import { LinkPlan, LlvmTextBackend } from "../backend";
 import { CacheStats, empty_cache_stats } from "../build_cache";
 import { _env_flag, _get_env_cmd } from "../build_flags";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
+import { render_terminal_diagnostic } from "../terminal_output";
 import { user_config_linker, user_config_linker_origin } from "../user_config";
 import { assemble_link_inputs } from "./clang_argv";
+import { resolve_direct_ld_lld } from "./direct_link";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
 import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "./link_contract";
 import { _ensure_dir, _find_substring_from } from "./paths";
@@ -29,6 +33,8 @@ import {
     target_uses_gnu_link_gc,
     triple_target_os
 } from "./target";
+import { static_prerequisites_diagnostic } from "./target_diagnostics";
+import { active_static_link } from "./target_state";
 
 // True when `name` resolves to an executable on PATH. `command -v` is
 // POSIX and emits the resolved path (non-empty) on success, nothing on
@@ -394,6 +400,27 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         if lii >= link_input_result.object_paths.length { break; }
         link_objects.push(link_input_result.object_paths[lii]);
         lii += 1;
+    }
+    // Reachable, correctly-attributed refusal for `--static` (SFN-1268):
+    // `cli/commands/build.sfn` preflights this same contract before any
+    // compile, so this is reached only when the host changed underneath a
+    // multi-minute build (a static artifact removed, or the gcc dir
+    // version-bumped). It is a driver-side refusal before the backend
+    // runs, so `ran_backend: false` keeps the SFN-212 banner off a
+    // host-configuration error — the same reason the runtime-bundle and
+    // object-assembly bailouts above carry it.
+    if active_static_link() {
+        let static_triple = build_target_triple();
+        let static_contract = resolve_direct_ld_lld(build_target_os(), true);
+        if !static_contract.ok {
+            let empty_lines: string[] = [];
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(static_prerequisites_diagnostic(static_triple, static_contract.reason), "build"), empty_lines, "build"));
+            return LinkResult {
+                rc: 2,
+                stats: inputs.stats,
+                ran_backend: false
+            };
+        }
     }
     let backend = LlvmTextBackend { };
     let plan = LinkPlan {

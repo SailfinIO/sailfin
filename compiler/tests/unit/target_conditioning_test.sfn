@@ -64,7 +64,15 @@ import {
     triple_target_arch,
     triple_target_os
 } from "../../src/build/target";
-import { active_build_target, clear_build_target, set_build_target } from "../../src/build/target_state";
+import { static_prerequisites_diagnostic, static_unsupported_target_diagnostic } from "../../src/build/target_diagnostics";
+import {
+    active_build_target,
+    active_static_link,
+    clear_build_target,
+    clear_static_link,
+    set_build_target,
+    set_static_link
+} from "../../src/build/target_state";
 import {
     RuntimeCapsuleArtifacts,
     RuntimeTargetArtifacts,
@@ -747,6 +755,53 @@ test "target: clear_build_target is idempotent" ![io] {
     clear_build_target();
     clear_build_target();
     assert expect_eq_str(active_build_target(), "").ok;
+}
+
+// ---- SFN-1268: the `--static` process cell ----
+//
+// `set_static_link`/`clear_static_link`/`active_static_link` mirror the
+// `--target` cell's lifecycle contract above, for the same reason
+// (`resolve_direct_ld_lld` is reached ambiently from `backend.sfn:link`).
+test "target: static-link cell round-trips" ![io] {
+    assert expect_eq_bool(active_static_link(), false).ok;
+    set_static_link(true);
+    assert expect_eq_bool(active_static_link(), true).ok;
+    clear_static_link();
+    assert expect_eq_bool(active_static_link(), false).ok;
+}
+
+test "target: clear_static_link is idempotent" ![io] {
+    clear_static_link();
+    clear_static_link();
+    assert expect_eq_bool(active_static_link(), false).ok;
+}
+
+// E0625/E0626 diagnostic shapes (SFN-1268 review).
+test "target: E0625 names the unsupported triple in its message" ![pure] {
+    let diag = static_unsupported_target_diagnostic("arm64-apple-darwin");
+    assert expect_eq_str(diag.code, "E0625").ok;
+    assert expect_eq_str(diag.severity, "error").ok;
+    assert expect_eq_bool(contains(diag.message, "--static"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "arm64-apple-darwin"), true).ok;
+}
+
+test "target: E0626 names the triple, the reason, and the glibc-install hint" ![pure] {
+    let diag = static_prerequisites_diagnostic("x86_64-unknown-linux-gnu", "libc.a not found in standard libdirs");
+    assert expect_eq_str(diag.code, "E0626").ok;
+    assert expect_eq_bool(contains(diag.message, "x86_64-unknown-linux-gnu"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "libc.a not found in standard libdirs"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "glibc-static"), true).ok;
+}
+
+// Regression guard for the linker-override hint split (SFN-1268): a
+// `SAILFIN_LINKER`/user-config override reason must not send a
+// fully-provisioned host the "install static glibc" hint.
+test "target: E0626 gives the linker-override hint, not the glibc hint, for a defers-to-clang reason" ![pure] {
+    let diag = static_prerequisites_diagnostic("x86_64-unknown-linux-gnu", "SAILFIN_LINKER=mold defers to clang");
+    assert expect_eq_str(diag.code, "E0626").ok;
+    assert expect_eq_bool(contains(diag.message, "SAILFIN_LINKER=mold defers to clang"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "unset SAILFIN_LINKER"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "glibc-static"), false).ok;
 }
 
 // ---- SFN-923: the arch axis (`triple_target_arch`, `_resolve_llvm_target_arch`) ----

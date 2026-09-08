@@ -7,7 +7,7 @@
 // object/library ordering, and — critically — the translation of the
 // LinkPlan's clang-driver `link_flags` into raw linker flags. A drift here
 // is a silent ABI change, exactly what the acceptance criteria forbid.
-import { expect_eq_bool } from "sfn/test";
+import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
 
 import { DirectLinkContract, direct_ld_lld_argv } from "../../src/build/direct_link";
 
@@ -39,6 +39,7 @@ fn _contract() -> DirectLinkContract ![pure] {
         reason: "",
         linker_emulation: "elf_x86_64",
         dynamic_linker: "/lib64/ld-linux-x86-64.so.2",
+        static_link: false,
         crt1: "/usr/lib/x86_64-linux-gnu/Scrt1.o",
         crti: "/usr/lib/x86_64-linux-gnu/crti.o",
         crtn: "/usr/lib/x86_64-linux-gnu/crtn.o",
@@ -54,12 +55,31 @@ fn _aarch64_contract() -> DirectLinkContract ![pure] {
         reason: "",
         linker_emulation: "aarch64linux",
         dynamic_linker: "/lib/ld-linux-aarch64.so.1",
+        static_link: false,
         crt1: "/usr/lib/aarch64-linux-gnu/Scrt1.o",
         crti: "/usr/lib/aarch64-linux-gnu/crti.o",
         crtn: "/usr/lib/aarch64-linux-gnu/crtn.o",
         crtbegin: "/usr/lib/gcc/aarch64-linux-gnu/13/crtbeginS.o",
         crtend: "/usr/lib/gcc/aarch64-linux-gnu/13/crtendS.o",
         search_dirs: ["/usr/lib/gcc/aarch64-linux-gnu/13", "/usr/lib/aarch64-linux-gnu"]
+    };
+}
+
+// A representative resolved static (`sfn build --static`, SFN-1268)
+// contract: no dynamic linker, the crt1/crtbeginT/crtend static CRT family.
+fn _static_contract() -> DirectLinkContract ![pure] {
+    return DirectLinkContract {
+        ok: true,
+        reason: "",
+        linker_emulation: "elf_x86_64",
+        dynamic_linker: "",
+        static_link: true,
+        crt1: "/usr/lib/x86_64-linux-gnu/crt1.o",
+        crti: "/usr/lib/x86_64-linux-gnu/crti.o",
+        crtn: "/usr/lib/x86_64-linux-gnu/crtn.o",
+        crtbegin: "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginT.o",
+        crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtend.o",
+        search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"]
     };
 }
 
@@ -152,4 +172,69 @@ test "direct-link: test layout (empty link_flags) still links objects and libs" 
     // No retain-root / gc flags when link_flags is empty, and no clang.
     assert expect_eq_bool(_argv_contains(argv, "--gc-sections"), false).ok;
     assert expect_eq_bool(_argv_contains(argv, "clang"), false).ok;
+}
+
+test "direct-link: static contract carries -static and no -pie" ![pure] {
+    let c = _static_contract();
+    let argv = direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lm"], []);
+    assert expect_eq_bool(_argv_contains(argv, "-static"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-pie"), false).ok;
+}
+
+test "direct-link: static contract names no dynamic linker" ![pure] {
+    let c = _static_contract();
+    let argv = direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lm"], []);
+    assert expect_eq_bool(_argv_contains(argv, "-dynamic-linker"), false).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/lib64/ld-linux-x86-64.so.2"), false).ok;
+}
+
+test "direct-link: static contract selects the non-PIE CRT family" ![pure] {
+    let c = _static_contract();
+    let argv = direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lm"], []);
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/x86_64-linux-gnu/crt1.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginT.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/gcc/x86_64-linux-gnu/13/crtend.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/x86_64-linux-gnu/Scrt1.o"), false).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o"), false).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o"), false).ok;
+}
+
+test "direct-link: static tail groups libgcc_eh and libc" ![pure] {
+    let c = _static_contract();
+    let argv = direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lm"], []);
+    let start_group = _index_of(argv, "--start-group");
+    let lgcc_eh = _index_of(argv, "-lgcc_eh");
+    let end_group = _index_of(argv, "--end-group");
+    assert expect_eq_bool(start_group >= 0, true).ok;
+    assert expect_eq_bool(lgcc_eh >= 0, true).ok;
+    assert expect_eq_bool(end_group >= 0, true).ok;
+    assert expect_eq_bool(start_group < lgcc_eh, true).ok;
+    assert expect_eq_bool(lgcc_eh < end_group, true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-lgcc_s"), false).ok;
+    assert expect_eq_bool(_argv_contains(argv, "--as-needed"), false).ok;
+}
+
+test "direct-link: static argv keeps the crtend/crtn wrap last" ![pure] {
+    let c = _static_contract();
+    let argv = direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lm"], []);
+    assert expect_eq_bool(argv[argv.length - 2] == c.crtend, true).ok;
+    assert expect_eq_bool(argv[argv.length - 1] == c.crtn, true).ok;
+}
+
+// Whole-argv equality (SFN-1268 review): the tests above assert membership
+// and pairwise order, which would not catch a reordered tail or a dropped
+// `-z relro`. These two pin the complete argv token for token, independently
+// derived from `direct_ld_lld_argv`'s intended shape rather than pasted from
+// a run, so the file's header claim of being "the zero-behaviour gate" holds.
+test "direct-link: dynamic argv is byte-identical token for token" ![pure] {
+    let argv = _program_argv();
+    let expected: string[] = ["ld.lld", "-pie", "--eh-frame-hdr", "-z", "relro", "--hash-style=gnu", "--build-id", "-m", "elf_x86_64", "-dynamic-linker", "/lib64/ld-linux-x86-64.so.2", "-o", "a.out", "/usr/lib/x86_64-linux-gnu/Scrt1.o", "/usr/lib/x86_64-linux-gnu/crti.o", "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o", "-L/usr/lib/gcc/x86_64-linux-gnu/13", "-L/usr/lib/x86_64-linux-gnu", "--gc-sections", "-u", "sfn_provider_init", "runtime.o", "main.o", "-lm", "-lpthread", "-lgcc", "--as-needed", "-lgcc_s", "--no-as-needed", "-lc", "-lgcc", "--as-needed", "-lgcc_s", "--no-as-needed", "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o", "/usr/lib/x86_64-linux-gnu/crtn.o"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+test "direct-link: static argv is byte-identical token for token" ![pure] {
+    let c = _static_contract();
+    let argv = direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lm"], []);
+    let expected: string[] = ["ld.lld", "-static", "--eh-frame-hdr", "-z", "relro", "--hash-style=gnu", "--build-id", "-m", "elf_x86_64", "-o", "a.out", "/usr/lib/x86_64-linux-gnu/crt1.o", "/usr/lib/x86_64-linux-gnu/crti.o", "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginT.o", "-L/usr/lib/gcc/x86_64-linux-gnu/13", "-L/usr/lib/x86_64-linux-gnu", "runtime.o", "main.o", "-lm", "--start-group", "-lgcc", "-lgcc_eh", "-lc", "--end-group", "/usr/lib/gcc/x86_64-linux-gnu/13/crtend.o", "/usr/lib/x86_64-linux-gnu/crtn.o"];
+    assert expect_eq_str_array(argv, expected).ok;
 }

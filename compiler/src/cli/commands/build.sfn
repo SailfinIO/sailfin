@@ -48,13 +48,30 @@ import {
     _resolve_sailfin_cache_dir_for_work
 } from "../../build/cache";
 import { _do_determinism_check } from "../../build/determinism";
+// SFN-1268: preflight `--static`'s link prerequisites before compiling.
+import { resolve_direct_ld_lld } from "../../build/direct_link";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { clean_runtime_object_cache } from "../../build/runtime_objs";
 import { select_runtime_sfn_sources } from "../../build/runtime_selection";
-import { build_target_os, target_exe_name, triple_is_supported } from "../../build/target";
-import { supported_targets_hint, unsupported_target_diagnostic } from "../../build/target_diagnostics";
-import { clear_build_target, set_build_target } from "../../build/target_state";
+import {
+    build_target_os,
+    build_target_triple,
+    target_exe_name,
+    triple_is_supported
+} from "../../build/target";
+import {
+    static_prerequisites_diagnostic,
+    static_unsupported_target_diagnostic,
+    supported_targets_hint,
+    unsupported_target_diagnostic
+} from "../../build/target_diagnostics";
+import {
+    clear_build_target,
+    clear_static_link,
+    set_build_target,
+    set_static_link
+} from "../../build/target_state";
 import {
     cache_root,
     is_compiler_selfhost_capsule,
@@ -107,6 +124,9 @@ fn command_def() -> Command {
     // packaging PLATFORM LABEL (`linux-x86_64`), not a compilation triple —
     // the two are deliberately not unified.
     cmd = with_flag(cmd, flag_value("target", "Cross-compile for this triple (e.g. x86_64-w64-mingw32)"));
+    // SFN-1268: a self-contained, no-dynamic-dependency link. Linux-gnu
+    // only (x86_64/aarch64); never falls back to a dynamic link.
+    cmd = with_flag(cmd, flag("static", "Link a self-contained Linux binary with no dynamic dependencies (x86_64/aarch64 linux-gnu only)"));
     // SFN-1120: the `sailfin-run/2` trailer, opt-in so it can never be
     // appended to a `--json` document someone is teeing into a file.
     cmd = with_flag(cmd, flag("verdict", "Emit a machine-readable sailfin-run/2 verdict trailer after the run"));
@@ -115,11 +135,12 @@ fn command_def() -> Command {
 }
 
 fn _print_build_usage() ![io] {
-    print.err("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--target TRIPLE] [<file.sfn> | -p <capsule-path>]");
+    print.err("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--target TRIPLE] [--static] [<file.sfn> | -p <capsule-path>]");
     print.err("       with no target, builds the current capsule or [workspace].default-members (or all members)");
     print.err("       --target takes a compilation triple (x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu,");
     print.err("       x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, x86_64-w64-mingw32) —");
     print.err("       distinct from `sfn package --target`, which takes a platform label.");
+    print.err("       --static is Linux-gnu only (x86_64/aarch64) and fails rather than degrading to a dynamic link.");
 }
 
 // E0614: an unsupported triple reached `build_target_triple()` via the
@@ -170,10 +191,16 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // one immediately following.
     let target_flag: string = get_or(matches, "target", "");
     set_build_target(target_flag);
+    // Seeded alongside the target cell so the two cannot drift (SFN-1268):
+    // `--static` reads `build_target_triple()` through `resolve_direct_ld_lld`,
+    // so both must be in effect together for the whole invocation.
+    let static_flag: boolean = has_flag(matches, "static");
+    set_static_link(static_flag);
     if target_flag.length > 0 && !triple_is_supported(target_flag) {
         let empty_lines: string[] = [];
         print.err(render_terminal_diagnostic(diagnostic_to_diag(unsupported_target_diagnostic(target_flag), "build"), empty_lines, "build"));
         clear_build_target();
+        clear_static_link();
         return 2;
     }
     // Review A1/B1 (SFN-923): with no explicit `--target`, `--target`'s own
@@ -191,6 +218,33 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             let empty_lines: string[] = [];
             print.err(render_terminal_diagnostic(diagnostic_to_diag(_unsupported_ambient_target_diagnostic(ambient_triple), "build"), empty_lines, "build"));
             clear_build_target();
+            clear_static_link();
+            return 2;
+        }
+    }
+    // Preflighted here, before any compilation, rather than left to
+    // `backend.sfn:link` (SFN-1268): a nonzero linker rc there comes back as
+    // `LinkResult { ran_backend: true }`, which `_run_single_build` renders
+    // as the SFN-212 backend-failure ICE banner — misattributing a host
+    // configuration gap as a compiler bug. Preflighting also makes "no
+    // binary written" structural rather than positional (the same failure
+    // however far the build got), and guarantees the clang driver is never
+    // reached for a `--static` build.
+    if static_flag {
+        let static_triple: string = build_target_triple();
+        if static_triple != "x86_64-unknown-linux-gnu" && static_triple != "aarch64-unknown-linux-gnu" {
+            let empty_lines: string[] = [];
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(static_unsupported_target_diagnostic(static_triple), "build"), empty_lines, "build"));
+            clear_build_target();
+            clear_static_link();
+            return 2;
+        }
+        let static_contract = resolve_direct_ld_lld(build_target_os(), true);
+        if !static_contract.ok {
+            let empty_lines: string[] = [];
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(static_prerequisites_diagnostic(static_triple, static_contract.reason), "build"), empty_lines, "build"));
+            clear_build_target();
+            clear_static_link();
             return 2;
         }
     }
@@ -199,6 +253,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if _build_positionals.length > 1 {
         _print_build_usage();
         clear_build_target();
+        clear_static_link();
         return 2;
     }
     if _build_positionals.length == 1 { input_path = _build_positionals[0]; }
@@ -209,6 +264,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let _tc = toolchain_gate_or_dispatch(_tc_hint, ctx, has_flag(matches, "skip-toolchain-check"));
     if _tc != 0 {
         clear_build_target();
+        clear_static_link();
         return _tc;
     }
 
@@ -223,6 +279,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             if workspace_root.length == 0 {
                 _print_build_usage();
                 clear_build_target();
+                clear_static_link();
                 return 2;
             }
             let members = load_workspace_default_members(workspace_root);
@@ -240,12 +297,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                 mi += 1;
             }
             clear_build_target();
+            clear_static_link();
             return aggregate_rc;
         }
     }
 
     let rc = _run_single_build(capsule_path, input_path, out_path, no_cache_flag, clean_flag, cache_trace_flag, json_flag, work_dir, check_determinism_flag, ctx);
     clear_build_target();
+    clear_static_link();
     return rc;
 }
 

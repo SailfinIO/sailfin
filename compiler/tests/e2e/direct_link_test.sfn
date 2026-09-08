@@ -18,6 +18,7 @@
 // `.claude/rules/no-bash-e2e.md`.
 import { contains, find } from "sfn/strings";
 import {
+    clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
     nested_runner_scratch,
@@ -120,6 +121,27 @@ test "direct-link: supported Linux arch links via ld.lld with no clang driver" !
     report_child_failure("direct-link run", run_rc, run_out, run_err);
     assert run_rc == 0;
     assert find(run_out, "DIRECT_OK", 0) >= 0;
+}
+
+// E0625 (SFN-1268) is host-independent — it fails on the closed triple set
+// before any host probing, so unlike the two legs above it needs no
+// eligibility gate and runs on every host.
+test "direct-link: --static rejects an unsupported target with E0625 and writes no binary" ![io] {
+    let dir = _scratch_dir();
+    let main_path = _write_fixture(dir);
+    let bin = dir + "/e0625-bin";
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let env = clean_runner_env(nested_runner_scratch("static-e0625"));
+    let rc = process.run_capture([sfn_bin_path(), "build", "--static", "--target", "arm64-apple-darwin", "-o", bin, main_path], env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // rc == 2 is the expected refusal here, not a test failure, so this
+    // skips `report_child_failure` (which prints on any non-zero exit and
+    // would misreport an expected refusal as a broken child).
+    let _ = out;
+    assert rc == 2;
+    assert contains(err, "E0625");
+    assert ! fs.exists(bin);
 }
 
 test "direct-link: SAILFIN_LINKER=ld falls back to clang with a traced reason" ![io] {

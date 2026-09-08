@@ -34,7 +34,16 @@
 //   `active_build_target()` — a pure read, no effect. Empty means "no
 //   explicit `--target` was given this invocation" — callers fall through
 //   to the env-var / host-probe resolution in `build_target_triple()`.
+//
+//   `set_static_link(on)` / `clear_static_link()` / `active_static_link()`
+//   carry `sfn build --static` (SFN-1268) the same way, and for the same
+//   reason: `resolve_direct_ld_lld` is reached ambiently from
+//   `backend.sfn:link`, and Sailfin has no `setenv` to seed it from outside
+//   the process. `clear_static_link()` is paired with `clear_build_target()`
+//   on every return path of `cli/commands/build.sfn:run`. `sfn emit` seeds
+//   only the target cell above, never this one.
 let mut _triple: string = "";
+let mut _static_link: boolean = false;
 
 // Record the resolved `--target` triple for the running build invocation.
 fn set_build_target(triple: string) { _triple = triple; }
@@ -45,4 +54,20 @@ fn clear_build_target() { _triple = ""; }
 // The active `--target` triple, or "" when no explicit flag is in effect.
 fn active_build_target() -> string { return _triple; }
 
-export { active_build_target, clear_build_target, set_build_target };
+// Record whether `--static` was given for the running build invocation.
+fn set_static_link(on: boolean) { _static_link = on; }
+
+// Clear the cell. Called from every return path of `cli/commands/build.sfn:run`.
+fn clear_static_link() { _static_link = false; }
+
+// Whether `--static` is active for the running build invocation.
+fn active_static_link() -> boolean { return _static_link; }
+
+export {
+    active_build_target,
+    active_static_link,
+    clear_build_target,
+    clear_static_link,
+    set_build_target,
+    set_static_link
+};

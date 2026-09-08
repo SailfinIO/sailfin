@@ -34,10 +34,20 @@ struct DirectLinkContract {
     reason: string;
     // GNU/LLD linker emulation (`elf_x86_64` or `aarch64linux`).
     linker_emulation: string;
-    // The architecture's glibc ELF interpreter for -pie.
+    // The architecture's glibc ELF interpreter for -pie. Empty under
+    // `static_link` — a static executable has no ELF interpreter, which is
+    // the whole point of the contract (SFN-1268).
     dynamic_linker: string;
-    // PIE startup objects: Scrt1.o/crti.o/crtn.o (multiarch libdir) wrap
-    // crtbeginS.o/crtendS.o (gcc install dir).
+    // Whether this contract links a self-contained, non-PIE executable
+    // against glibc's static archives (`sfn build --static`, SFN-1268).
+    // Selects the CRT family below and the argv shape in
+    // `direct_ld_lld_argv`; the two must never be mixed.
+    static_link: boolean;
+    // Startup objects, taken as a family. Dynamic/PIE:
+    // Scrt1.o/crti.o/crtn.o (multiarch libdir) wrap crtbeginS.o/crtendS.o
+    // (gcc install dir). Static: crt1.o/crti.o/crtn.o wrap
+    // crtbeginT.o/crtend.o. Mixing the two families links cleanly and
+    // segfaults before `main`, so resolution takes all of one or fails.
     crt1: string;
     crti: string;
     crtn: string;
@@ -54,6 +64,7 @@ fn _direct_fail(reason: string) -> DirectLinkContract {
         reason: reason,
         linker_emulation: "",
         dynamic_linker: "",
+        static_link: false,
         crt1: "",
         crti: "",
         crtn: "",
@@ -84,23 +95,31 @@ fn _first_libdir_with(dirs: string[], filename: string) -> string ![io] {
     return "";
 }
 
-// Resolve the native gcc install directory that holds
-// crtbeginS.o/crtendS.o (e.g. /usr/lib/gcc/x86_64-linux-gnu/13 or
-// /usr/lib/gcc/aarch64-linux-gnu/13). gcc's minor version varies by distro,
+// Resolve the native gcc install directory that holds `crt_name` — the
+// begin-CRT of the requested family (crtbeginS.o for the PIE link,
+// crtbeginT.o for the static one), e.g. /usr/lib/gcc/x86_64-linux-gnu/13 or
+// /usr/lib/gcc/aarch64-linux-gnu/13. gcc's minor version varies by distro,
 // so probe the filesystem and pick the highest version present. Returns ""
 // when no gcc CRT directory matching `arch` is found.
 //
+// Keyed on the begin-CRT rather than a fixed name (SFN-1268) so the static
+// family resolves its own directory: a host can ship crtbeginS.o without
+// crtbeginT.o (the static libgcc split across distro packages), and probing
+// for the wrong one would resolve a directory whose end-CRT is absent.
+//
 // The denylist excludes non-native ABI/libc variants and cross-compilers
 // that may co-exist on a development machine. Without it, the version sort
-// can select a mismatched crtbeginS.o + `-lgcc` where clang's native-triple
+// can select a mismatched crtbegin + `-lgcc` where clang's native-triple
 // resolution would have succeeded.
-fn _gcc_crt_dir(arch: string) -> string ![io] {
-    let found = _shell_read_cmd("find /usr/lib/gcc /usr/lib64/gcc -maxdepth 3 -name crtbeginS.o 2>/dev/null | grep "
+fn _gcc_crt_dir(arch: string, crt_name: string) -> string ![io] {
+    let found = _shell_read_cmd("find /usr/lib/gcc /usr/lib64/gcc -maxdepth 3 -name "
+        + crt_name
+        + " 2>/dev/null | grep "
         + arch
         + " | grep -Ev 'gnux32|musl|uclibc|mingw|w64|-none-|-elf|-eabi|android' | sort -V | tail -1");
     if found.length == 0 { return ""; }
-    // Strip the trailing "/crtbeginS.o" (12 chars) to get the directory.
-    let suffix_len: int = 12;
+    // Strip the trailing "/<crt_name>" to get the directory.
+    let suffix_len: int = crt_name.length + 1;
     if found.length <= suffix_len { return ""; }
     return substring(found, 0, found.length - suffix_len);
 }
@@ -129,10 +148,18 @@ fn _which(name: string) -> string ![io] {
 // fallback (`ok=false`) with a reason. Gates, in order: target OS is
 // Linux; host arch is x86_64 or aarch64; `SAILFIN_LINKER` is unset or
 // `lld`/`ld.lld` (any other value defers to the clang path so mold/system
-// overrides are honored); `ld.lld` is on PATH; the dynamic linker,
-// multiarch CRT objects, and gcc CRT objects all exist. Re-probed per link
-// (cheap shell calls dwarfed by the link itself); env is stable per process.
-fn resolve_direct_ld_lld(target_os: string) -> DirectLinkContract ![io] {
+// overrides are honored); `ld.lld` is on PATH; then the family-specific
+// artifacts (dynamic linker + PIE CRTs, or the static CRTs + libc.a).
+// Re-probed per link (cheap shell calls dwarfed by the link itself); env
+// is stable per process.
+//
+// `static_link` selects the self-contained non-PIE contract (SFN-1268).
+// Note what `ok=false` MEANS differs by leg: on the dynamic leg it is a
+// controlled fallback to the clang driver; on the static leg the caller
+// must fail closed with `E0626` instead, because a dynamic binary is
+// precisely the outcome `--static` exists to prevent
+// (`cli/commands/build.sfn`, `backend.sfn:link`).
+fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
     if target_os != "Linux" {
         return _direct_fail("target is not Linux (" + target_os + ")");
     }
@@ -173,12 +200,11 @@ fn resolve_direct_ld_lld(target_os: string) -> DirectLinkContract ![io] {
     if _which("ld.lld").length == 0 {
         return _direct_fail("ld.lld not on PATH");
     }
-    let mut dyn = "/lib64/ld-linux-x86-64.so.2";
     let mut emulation = "elf_x86_64";
-    if arch == "aarch64" {
-        dyn = "/lib/ld-linux-aarch64.so.1";
-        emulation = "aarch64linux";
-    }
+    if arch == "aarch64" { emulation = "aarch64linux"; }
+    if static_link { return _resolve_static_contract(arch, emulation); }
+    let mut dyn = "/lib64/ld-linux-x86-64.so.2";
+    if arch == "aarch64" { dyn = "/lib/ld-linux-aarch64.so.1"; }
     if !fs.exists(dyn) {
         return _direct_fail("dynamic linker missing (" + dyn + ")");
     }
@@ -189,16 +215,39 @@ fn resolve_direct_ld_lld(target_os: string) -> DirectLinkContract ![io] {
     if !fs.exists(libdir + "/crti.o") || !fs.exists(libdir + "/crtn.o") {
         return _direct_fail("crti.o/crtn.o not found in " + libdir);
     }
-    let gccdir = _gcc_crt_dir(arch);
+    let gccdir = _gcc_crt_dir(arch, "crtbeginS.o");
     if gccdir.length == 0 {
         return _direct_fail("crtbeginS.o not found in a gcc libdir");
     }
     if !fs.exists(gccdir + "/crtendS.o") {
         return _direct_fail("crtendS.o not found in " + gccdir);
     }
+    return DirectLinkContract {
+        ok: true,
+        reason: "",
+        linker_emulation: emulation,
+        dynamic_linker: dyn,
+        static_link: false,
+        crt1: libdir + "/Scrt1.o",
+        crti: libdir + "/crti.o",
+        crtn: libdir + "/crtn.o",
+        crtbegin: gccdir + "/crtbeginS.o",
+        crtend: gccdir + "/crtendS.o",
+        search_dirs: _link_search_dirs(arch, gccdir, libdir, "")
+    };
+}
+
+// The `-L` search list: the gcc CRT dir first, then the multiarch libdir
+// that supplied the startup objects, then `libc_dir` (the static path's
+// libc.a home, which can differ from the CRT libdir; "" on the dynamic
+// path, where `_push_dir_if_new` drops it), then the arch's multiarch and
+// system dirs. Shared by both contracts so the two cannot drift; with
+// `libc_dir` empty the sequence is byte-identical to the pre-SFN-1268 one.
+fn _link_search_dirs(arch: string, gccdir: string, libdir: string, libc_dir: string) -> string[] ![io] {
     let mut dirs: string[] = [];
     dirs = _push_dir_if_new(dirs, gccdir);
     dirs = _push_dir_if_new(dirs, libdir);
+    dirs = _push_dir_if_new(dirs, libc_dir);
     if arch == "aarch64" {
         dirs = _push_dir_if_new(dirs, "/usr/lib/aarch64-linux-gnu");
         dirs = _push_dir_if_new(dirs, "/lib/aarch64-linux-gnu");
@@ -210,17 +259,70 @@ fn resolve_direct_ld_lld(target_os: string) -> DirectLinkContract ![io] {
     dirs = _push_dir_if_new(dirs, "/lib64");
     dirs = _push_dir_if_new(dirs, "/usr/lib");
     dirs = _push_dir_if_new(dirs, "/lib");
+    return dirs;
+}
+
+// Resolve the static (`sfn build --static`, SFN-1268) leg of the contract,
+// reached only after the shared Linux/arch/forced-linker/`ld.lld` gates
+// above have passed. No dynamic-linker probe: a static executable has no
+// ELF interpreter.
+//
+// Every prerequisite the contract itself names is checked here — the CRT
+// family, libc.a, and the libgcc archives — and each `reason` names the ONE
+// artifact that was missing. A development host with libc.so but no libc.a
+// is the common case, and the caller surfaces this reason verbatim in
+// `E0626` — "libc.a not found in standard libdirs" tells the user to
+// install glibc-static; `ld.lld: error: unable to find library -lc` does
+// not. `-l` entries arriving from `LinkPlan.libs` (`-lm`, `-lpthread`) are
+// resolved by `ld.lld` against `search_dirs` and are not probed here,
+// because this resolver does not see the plan (SFN-1268).
+fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContract ![io] {
+    let libdirs = _multiarch_libdirs(arch);
+    let libdir = _first_libdir_with(libdirs, "crt1.o");
+    if libdir.length == 0 {
+        return _direct_fail("crt1.o not found in standard libdirs");
+    }
+    if !fs.exists(libdir + "/crti.o") || !fs.exists(libdir + "/crtn.o") {
+        return _direct_fail("crti.o/crtn.o not found in " + libdir);
+    }
+    // Probed independently of the CRT libdir: a host can carry the startup
+    // objects in the multiarch dir and libc.a in /usr/lib64, and the `-L`
+    // list must cover both or the `--start-group` tail cannot resolve.
+    let libc_dir = _first_libdir_with(libdirs, "libc.a");
+    if libc_dir.length == 0 {
+        return _direct_fail("libc.a not found in standard libdirs");
+    }
+    let gccdir = _gcc_crt_dir(arch, "crtbeginT.o");
+    if gccdir.length == 0 {
+        return _direct_fail("crtbeginT.o not found in a gcc libdir");
+    }
+    if !fs.exists(gccdir + "/crtend.o") {
+        return _direct_fail("crtend.o not found in " + gccdir);
+    }
+    // The static tail's `--start-group -lgcc -lgcc_eh` resolves these two
+    // by name, and a distro can ship crtbeginT.o without the static
+    // libgcc split (libgcc_eh.a in particular is packaged separately on
+    // some distros), so probing them here is what makes the "one named
+    // artifact" promise of E0626 true rather than deferring to an
+    // `ld.lld: unable to find library` error (SFN-1268).
+    if !fs.exists(gccdir + "/libgcc.a") {
+        return _direct_fail("libgcc.a not found in " + gccdir);
+    }
+    if !fs.exists(gccdir + "/libgcc_eh.a") {
+        return _direct_fail("libgcc_eh.a not found in " + gccdir);
+    }
     return DirectLinkContract {
         ok: true,
         reason: "",
         linker_emulation: emulation,
-        dynamic_linker: dyn,
-        crt1: libdir + "/Scrt1.o",
+        dynamic_linker: "",
+        static_link: true,
+        crt1: libdir + "/crt1.o",
         crti: libdir + "/crti.o",
         crtn: libdir + "/crtn.o",
-        crtbegin: gccdir + "/crtbeginS.o",
-        crtend: gccdir + "/crtendS.o",
-        search_dirs: dirs
+        crtbegin: gccdir + "/crtbeginT.o",
+        crtend: gccdir + "/crtend.o",
+        search_dirs: _link_search_dirs(arch, gccdir, libdir, libc_dir)
     };
 }
 
@@ -284,15 +386,38 @@ fn _sanitize_direct_libs(libs: string[]) -> string[] {
     return out;
 }
 
-// Build the bare `ld.lld` argv for a glibc Linux PIE link. The flag set and
+// Build the bare `ld.lld` argv for a glibc Linux link. The flag set and
 // object/library ordering mirror what clang's driver passes to the linker
 // (hardening defaults, target emulation, `-dynamic-linker`, the
 // Scrt1/crti/crtbegin … crtend/crtn wrap, and the libc/libgcc tail) so target
 // identity and provider-symbol retention match the previous clang-driven
 // behavior. `link_flags` is empty for the `sfn test` layout, so the same
 // builder serves both program and test links.
+//
+// `contract.static_link` (SFN-1268) selects the self-contained non-PIE
+// form. Only the three positions marked below differ; the CRT paths
+// themselves already carry the right family from resolution, so this
+// builder never picks a filename. With `static_link` false the argv is
+// byte-identical to the pre-SFN-1268 one — the zero-behaviour gate
+// (`compiler/tests/unit/direct_link_argv_test.sfn`).
 fn direct_ld_lld_argv(contract: DirectLinkContract, objects: string[], out_path: string, libs: string[], link_flags: string[]) -> string[] {
-    let mut a: string[] = ["ld.lld", "-pie", "--eh-frame-hdr", "-z", "relro", "--hash-style=gnu", "--build-id", "-m", contract.linker_emulation, "-dynamic-linker", contract.dynamic_linker, "-o", out_path];
+    // Position 1: `-static` replaces `-pie`, and `-dynamic-linker <loader>`
+    // is dropped — a static executable has no ELF interpreter to name.
+    let mut a: string[] = ["ld.lld"];
+    if contract.static_link { a.push("-static"); } else { a.push("-pie"); }
+    a.push("--eh-frame-hdr");
+    a.push("-z");
+    a.push("relro");
+    a.push("--hash-style=gnu");
+    a.push("--build-id");
+    a.push("-m");
+    a.push(contract.linker_emulation);
+    if !contract.static_link {
+        a.push("-dynamic-linker");
+        a.push(contract.dynamic_linker);
+    }
+    a.push("-o");
+    a.push(out_path);
     a.push(contract.crt1);
     a.push(contract.crti);
     a.push(contract.crtbegin);
@@ -322,18 +447,37 @@ fn direct_ld_lld_argv(contract: DirectLinkContract, objects: string[], out_path:
         a.push(sanitized[li]);
         li += 1;
     }
-    // libc/libgcc tail (mirrors clang's SysV link line): the
-    // --as-needed toggle keeps libgcc_s out of the DT_NEEDED set unless a
-    // symbol actually pulls it in, matching the driver's behavior.
-    a.push("-lgcc");
-    a.push("--as-needed");
-    a.push("-lgcc_s");
-    a.push("--no-as-needed");
-    a.push("-lc");
-    a.push("-lgcc");
-    a.push("--as-needed");
-    a.push("-lgcc_s");
-    a.push("--no-as-needed");
+    // Position 2: the libc/libgcc tail.
+    //
+    // Dynamic (mirrors clang's SysV link line): the --as-needed toggle
+    // keeps libgcc_s out of the DT_NEEDED set unless a symbol actually
+    // pulls it in, matching the driver's behavior.
+    //
+    // Static: libgcc_s is the SHARED unwinder and has no place here, so
+    // the --as-needed pairs are dropped and libgcc_eh (its static
+    // counterpart) takes over. libc.a and libgcc_eh.a are mutually
+    // recursive — libc's stack unwinding calls into libgcc_eh, which calls
+    // back into libc — so the doubled single-pass tail cannot resolve them
+    // and --start-group/--end-group re-scans until closure.
+    if contract.static_link {
+        a.push("--start-group");
+        a.push("-lgcc");
+        a.push("-lgcc_eh");
+        a.push("-lc");
+        a.push("--end-group");
+    } else {
+        a.push("-lgcc");
+        a.push("--as-needed");
+        a.push("-lgcc_s");
+        a.push("--no-as-needed");
+        a.push("-lc");
+        a.push("-lgcc");
+        a.push("--as-needed");
+        a.push("-lgcc_s");
+        a.push("--no-as-needed");
+    }
+    // Position 3 is not here: the end-CRT pair reads its family from the
+    // contract (crtendS.o/crtend.o), resolved together with crtbegin.
     a.push(contract.crtend);
     a.push(contract.crtn);
     return a;
