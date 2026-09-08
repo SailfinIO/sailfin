@@ -112,7 +112,9 @@ Declares which effects this capsule uses. See the [Capability Declarations](#cap
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `entry` | string | `"src/mod.sfn"` | The source file the compiler starts from when building this capsule. For application capsules this is typically `"src/main.sfn"`. |
+| `kind` | string | `"binary"` | The artifact kind: `"binary"` produces an executable, `"library"` produces a library artifact with no entry-point requirement, `"runtime"` is reserved for `runtime/capsule.toml` and marks the one manifest whose `sfn-sources`/`link-libs` feed the runtime link. An unrecognized value is a manifest error. |
 | `full-runtime` | boolean | `false` | Opts this artifact out of demand-driven `sfn-sources` selection ([sfn-source-gates]) entirely, forcing every gated runtime source to compile regardless of the build's declared effect surface. Runtime-provider artifacts (the compiler binary itself) set this because they must carry every runtime module regardless of what their own sources declare (SFN-882). |
+| `link-libs` | array of strings | `[]` | Extra linker flags appended to the final link argv. Honored **only on the root capsule** being built — a dependency capsule's `link-libs` is ignored, and the build emits a non-fatal diagnostic naming that capsule, so a dependency cannot silently add a linker input to your binary. Root-declared flags are appended after the runtime's own `link-libs` and then flow through the same per-target filtering and extension as every other lib (SFN-1269). An entry declares a **build input, not provenance**: linking `-lSDL2` records that the build asked for it, not that the compiler vouches for what the host resolved it to. SFEP-0016 §3.5's `vetted-link-inputs` is the future digest-authoritative mechanism for that and is **not implemented** — see `docs/proposals/design-notes/sfn-1269-link-libs-build-input-not-provenance.md`. |
 
 #### `[sfn-source-gates]`
 
