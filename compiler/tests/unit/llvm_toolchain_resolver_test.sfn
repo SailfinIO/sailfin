@@ -1,0 +1,311 @@
+// compiler/tests/unit/llvm_toolchain_resolver_test.sfn
+//
+// Unit guard for the LLVM toolchain family resolver (SFN-948, SFEP-0066
+// §3.4): a mixed-major family (an `opt-18` beside a stray `llc-17`) must be
+// rejected as a whole, `SAILFIN_LLVM_ROOT` must never fall through to PATH,
+// and the target probe must cover exactly SFEP-0066 §3.2's four governed
+// triples.
+//
+// The Windows leg is driven in-process through
+// `resolve_llvm_toolchain_for_host`, NOT through `SAILFIN_HOST_OS=Windows`.
+// That override is compiler-global: it redirects the test harness's own
+// binary link as well as the code under test, so the run dies at
+// `clang: linker command failed` before any test body executes. The
+// explicit-host seam keeps Windows executable conventions covered by an
+// ordinary unit test on a Linux runner (SFN-948).
+import { expect_contains_str, expect_eq_bool } from "sfn/test";
+
+import {
+    LlvmTool,
+    llc_registered_targets,
+    llc_supports_triple,
+    llvm_family_fingerprint,
+    llvm_family_roles,
+    llvm_governed_triples,
+    llvm_object_format,
+    llvm_supported_major,
+    llvm_target_unsupported_diagnostic,
+    llvm_tool_file_name,
+    llvm_tool_missing_diagnostic,
+    llvm_triple_is_governed,
+    llvm_version_skew_diagnostic,
+    parse_llvm_major,
+    resolve_llvm_toolchain,
+    resolve_llvm_toolchain_for_host
+} from "../../src/build/llvm_toolchain_resolver";
+
+// Real captured `llc --version` text (Ubuntu LLVM 18 packaging).
+fn _llc_version_fixture() -> string {
+    return "Ubuntu LLVM version 18.1.3\n" + "  Optimized build.\n"
+        + "  Default target: x86_64-pc-linux-gnu\n"
+        + "  Host CPU: cascadelake\n"
+        + "\n"
+        + "  Registered Targets:\n"
+        + "    aarch64     - AArch64 (little endian)\n"
+        + "    aarch64_32  - AArch64 (little endian ILP32)\n"
+        + "    arm64       - ARM64 (little endian)\n"
+        + "    x86         - 32-bit X86: Pentium-Pro and above\n"
+        + "    x86-64      - 64-bit X86: EM64T and AMD64\n";
+}
+
+// Real captured `--version` text for EVERY role in a Linux/Windows family.
+// The LLD roles do not print the "LLVM version" banner the `llvm-as`/`opt`/
+// `llc` trio does, so a parser keyed only on that banner reports -1 for them
+// and the whole family is rejected as "ld.lld could not be resolved" even
+// when it is present and correct (SFN-948 review). Keyed by role so the
+// coverage test below cannot silently skip a member.
+fn _role_version_fixture(role: string) -> string {
+    if role == "llvm-as" {
+        return "Ubuntu LLVM version 18.1.3\n  Optimized build.\n";
+    }
+    if role == "opt" {
+        return "Ubuntu LLVM version 18.1.3\n  Optimized build.\n";
+    }
+    if role == "llc" { return _llc_version_fixture(); }
+    if role == "ld.lld" {
+        return "Ubuntu LLD 18.1.3 (compatible with GNU linkers)\n";
+    }
+    if role == "lld-link" { return "Ubuntu LLD 18.1.3\n"; }
+    return "";
+}
+
+fn _fingerprint_tools() -> LlvmTool[] {
+    return [LlvmTool {
+        role: "llvm-as", path: "/opt/llvm/bin/llvm-as", version_output: "LLVM version 18.1.3\n", major: 18
+    }, LlvmTool {
+        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18
+    }];
+}
+
+fn _fingerprint_tools_diff_path() -> LlvmTool[] {
+    return [LlvmTool {
+        role: "llvm-as", path: "/usr/bin/llvm-as", version_output: "LLVM version 18.1.3\n", major: 18
+    }, LlvmTool {
+        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18
+    }];
+}
+
+fn _fingerprint_tools_diff_version_output() -> LlvmTool[] {
+    return [LlvmTool {
+        role: "llvm-as", path: "/opt/llvm/bin/llvm-as", version_output: "LLVM version 18.1.4\n", major: 18
+    }, LlvmTool {
+        role: "llc", path: "/opt/llvm/bin/llc", version_output: "LLVM version 18.1.3\n", major: 18
+    }];
+}
+
+fn _contains(values: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if values[i] == target { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "llvm-toolchain-resolver: parse_llvm_major reads all real spellings" {
+    assert parse_llvm_major("Ubuntu LLVM version 18.1.3\n  Optimized build.\n") == 18;
+    assert parse_llvm_major("LLVM (http://llvm.org/):\n  LLVM version 18.1.8\n") == 18;
+    assert parse_llvm_major("Homebrew LLVM version 18.1.8\n") == 18;
+    assert parse_llvm_major("no version here") == -1;
+    assert parse_llvm_major("") == -1;
+}
+
+test "llvm-toolchain-resolver: family roles are target-OS-shaped" {
+    let linux_roles = llvm_family_roles("Linux");
+    assert linux_roles.length == 4;
+    assert linux_roles[linux_roles.length - 1] == "ld.lld";
+
+    let windows_roles = llvm_family_roles("Windows");
+    assert windows_roles.length == 4;
+    assert windows_roles[windows_roles.length - 1] == "lld-link";
+
+    let darwin_roles = llvm_family_roles("Darwin");
+    assert darwin_roles.length == 3;
+    assert expect_eq_bool(_contains(darwin_roles, "ld.lld"), false).ok;
+    assert expect_eq_bool(_contains(darwin_roles, "lld-link"), false).ok;
+
+    assert llvm_family_roles("Plan9").length == 0;
+}
+
+test "llvm-toolchain-resolver: tool file name spelling" {
+    assert llvm_tool_file_name("opt", 18, false, "Linux") == "opt";
+    assert llvm_tool_file_name("opt", 18, true, "Linux") == "opt-18";
+    assert llvm_tool_file_name("opt", 18, false, "Windows") == "opt.exe";
+    assert llvm_tool_file_name("opt", 18, true, "Windows") == "opt-18.exe";
+    assert llvm_tool_file_name("lld-link", 18, true, "Windows") == "lld-link-18.exe";
+}
+
+test "llvm-toolchain-resolver: registered targets stop before the description text" {
+    let targets = llc_registered_targets(_llc_version_fixture());
+    assert expect_eq_bool(_contains(targets, "aarch64"), true).ok;
+    assert expect_eq_bool(_contains(targets, "arm64"), true).ok;
+    assert expect_eq_bool(_contains(targets, "x86-64"), true).ok;
+    assert expect_eq_bool(_contains(targets, "-"), false).ok;
+    assert expect_eq_bool(_contains(targets, "Optimized"), false).ok;
+    assert llc_registered_targets("no markers here").length == 0;
+}
+
+test "llvm-toolchain-resolver: target probes cover all four governed triples" {
+    let triples = llvm_governed_triples();
+    assert triples.length == 4;
+    let fixture = _llc_version_fixture();
+    let mut i: int = 0;
+    loop {
+        if i >= triples.length { break; }
+        assert expect_eq_bool(llc_supports_triple(fixture, triples[i]), true).ok;
+        i += 1;
+    }
+}
+
+test "llvm-toolchain-resolver: governed triples exclude the two apple/mingw legacy triples" {
+    assert expect_eq_bool(llvm_triple_is_governed("x86_64-apple-darwin"), false).ok;
+    assert expect_eq_bool(llvm_triple_is_governed("x86_64-w64-mingw32"), false).ok;
+    assert expect_eq_bool(llvm_triple_is_governed(""), false).ok;
+    assert expect_eq_bool(llvm_triple_is_governed("x86_64-unknown-linux-gnu"), true).ok;
+}
+
+test "llvm-toolchain-resolver: object format by triple" {
+    assert llvm_object_format("x86_64-unknown-linux-gnu") == "elf";
+    assert llvm_object_format("aarch64-unknown-linux-gnu") == "elf";
+    assert llvm_object_format("arm64-apple-darwin") == "macho";
+    assert llvm_object_format("x86_64-pc-windows-msvc") == "coff";
+    assert llvm_object_format("x86_64-w64-mingw32") == "";
+}
+
+test "llvm-toolchain-resolver: fingerprint is stable and sensitive to every ingredient" {
+    let baseline = llvm_family_fingerprint(_fingerprint_tools(), 18, "x86_64-unknown-linux-gnu", "elf", true);
+    let repeat = llvm_family_fingerprint(_fingerprint_tools(), 18, "x86_64-unknown-linux-gnu", "elf", true);
+    assert expect_eq_bool(baseline == repeat, true).ok;
+    assert baseline.length == 64;
+
+    let diff_path = llvm_family_fingerprint(_fingerprint_tools_diff_path(), 18, "x86_64-unknown-linux-gnu", "elf", true);
+    assert expect_eq_bool(diff_path == baseline, false).ok;
+
+    let diff_version_output = llvm_family_fingerprint(_fingerprint_tools_diff_version_output(), 18, "x86_64-unknown-linux-gnu", "elf", true);
+    assert expect_eq_bool(diff_version_output == baseline, false).ok;
+
+    let diff_major = llvm_family_fingerprint(_fingerprint_tools(), 17, "x86_64-unknown-linux-gnu", "elf", true);
+    assert expect_eq_bool(diff_major == baseline, false).ok;
+
+    let diff_triple = llvm_family_fingerprint(_fingerprint_tools(), 18, "aarch64-unknown-linux-gnu", "elf", true);
+    assert expect_eq_bool(diff_triple == baseline, false).ok;
+
+    let diff_object_format = llvm_family_fingerprint(_fingerprint_tools(), 18, "x86_64-unknown-linux-gnu", "coff", true);
+    assert expect_eq_bool(diff_object_format == baseline, false).ok;
+
+    let diff_target_supported = llvm_family_fingerprint(_fingerprint_tools(), 18, "x86_64-unknown-linux-gnu", "elf", false);
+    assert expect_eq_bool(diff_target_supported == baseline, false).ok;
+}
+
+test "llvm-toolchain-resolver: diagnostics carry the right codes and detail" {
+    let missing = llvm_tool_missing_diagnostic("llc", "root", "/opt/llvm", "/opt/llvm/bin/llc");
+    assert missing.code == "E0621";
+    assert expect_contains_str(missing.message, "llc").ok;
+    assert expect_contains_str(missing.message, "/opt/llvm").ok;
+
+    let skew = llvm_version_skew_diagnostic("opt", "/opt/llvm/bin/opt", 17, 18);
+    assert skew.code == "E0622";
+    assert expect_contains_str(skew.message, "17").ok;
+    assert expect_contains_str(skew.message, "18").ok;
+
+    let unsupported = llvm_target_unsupported_diagnostic("x86_64-w64-mingw32", "");
+    assert unsupported.code == "E0623";
+    assert expect_contains_str(unsupported.message, "x86_64-w64-mingw32").ok;
+}
+
+test "llvm-toolchain-resolver: an ungoverned triple fails closed with E0623" ![io] {
+    let family = resolve_llvm_toolchain("x86_64-w64-mingw32");
+    assert expect_eq_bool(family.ok, false).ok;
+    if family.diagnostic != null {
+        let diag = family.diagnostic;
+        assert diag.code == "E0623";
+    } else {
+        // Never reached: !ok must always carry a diagnostic.
+        assert false;
+    }
+}
+
+// Also the assertion that holds on the `SAILFIN_HOST_OS=Windows` leg: `.exe`
+// names resolve nothing on a Linux runner, so resolution must fail closed
+// with a named member rather than return "" the way `_which`/
+// `_linker_on_path` do today.
+test "llvm-toolchain-resolver: a governed triple resolves structurally, never silently" ![io] {
+    let family = resolve_llvm_toolchain("x86_64-unknown-linux-gnu");
+    if family.ok {
+        assert family.fingerprint.length == 64;
+        assert family.tools.length == 4;
+        assert expect_eq_bool(family.target_supported, true).ok;
+    } else {
+        assert family.fingerprint.length == 0;
+        if family.diagnostic != null {
+            let diag = family.diagnostic;
+            let known_code = diag.code == "E0621" || diag.code == "E0622"
+                || diag.code == "E0623";
+            assert expect_eq_bool(known_code, true).ok;
+        } else { assert false; }
+    }
+}
+
+// The regression for the review defect: EVERY member of a Linux and a
+// Windows family must parse to the supported major from its real `--version`
+// text. Driving the loop off `llvm_family_roles` means adding a role to the
+// family without teaching the parser its banner fails here rather than
+// surfacing as a spurious "could not be resolved" at build time.
+test "llvm-toolchain-resolver: every family role's real --version parses to the supported major" {
+    let oses: string[] = ["Linux", "Windows", "Darwin"];
+    let mut o: int = 0;
+    loop {
+        if o >= oses.length { break; }
+        let roles = llvm_family_roles(oses[o]);
+        assert roles.length > 0;
+        let mut i: int = 0;
+        loop {
+            if i >= roles.length { break; }
+            let fixture = _role_version_fixture(roles[i]);
+            assert fixture.length > 0;
+            assert parse_llvm_major(fixture) == llvm_supported_major();
+            i += 1;
+        }
+        o += 1;
+    }
+}
+
+// The LLD banner specifically, pinned as literals so a refactor of
+// `parse_llvm_major` cannot drop the second marker unnoticed.
+test "llvm-toolchain-resolver: the LLD banner parses even though it omits \"LLVM version\"" {
+    assert parse_llvm_major("Ubuntu LLD 18.1.3 (compatible with GNU linkers)") == 18;
+    assert parse_llvm_major("Ubuntu LLD 18.1.3") == 18;
+    assert parse_llvm_major("LLD 18.1.8 (compatible with GNU linkers)") == 18;
+    assert parse_llvm_major("Ubuntu LLD version") == -1;
+}
+
+// Windows executable conventions, driven in-process. On a Linux runner the
+// `.exe` spellings resolve nothing, so the assertion is the fail-CLOSED one:
+// a named member and a real diagnostic, never the silent "" that
+// `_which`/`_linker_on_path` return on Windows today because `_shell_read_cmd`
+// self-disables there. Reaching a diagnostic at all also proves discovery ran
+// without a shell — a shelled probe could not have produced one.
+test "llvm-toolchain-resolver: a Windows host uses .exe conventions and fails closed" ![io] {
+    let family = resolve_llvm_toolchain_for_host("x86_64-pc-windows-msvc", "Windows");
+    assert expect_eq_bool(family.ok, false).ok;
+    assert family.fingerprint.length == 0;
+    if family.diagnostic != null {
+        let diag = family.diagnostic;
+        assert diag.code == "E0621";
+        assert expect_contains_str(diag.message, ".exe").ok;
+    } else { assert false; }
+}
+
+// The same seam proves the Linux leg is not accidentally host-independent:
+// the identical triple under a Linux host searches unsuffixed/`-18` names
+// with no `.exe` anywhere in the failure text.
+test "llvm-toolchain-resolver: a Linux host never searches .exe spellings" ![io] {
+    let family = resolve_llvm_toolchain_for_host("arm64-apple-darwin", "Linux");
+    if !family.ok {
+        if family.diagnostic != null {
+            let diag = family.diagnostic;
+            assert expect_eq_bool(expect_contains_str(diag.message, ".exe").ok, false).ok;
+        } else { assert false; }
+    }
+}

@@ -1,0 +1,555 @@
+// compiler/src/build/llvm_toolchain_resolver.sfn
+//
+// Resolves the LLVM tool family (`llvm-as`, `opt`, `llc`, and the target's
+// linker role) the native pipeline needs, as ONE complete, version-matched
+// unit rather than tool by tool (SFN-948 / SFEP-0066 §3.4). A mixed family —
+// an `opt-18` picked up beside a stray `llc-17` — is exactly the failure
+// mode this guards against: every member must report the same major, or the
+// whole family is rejected together.
+//
+// `SAILFIN_LLVM_ROOT`, when set, is authoritative (§3.4 rule 1): resolution
+// never falls through to PATH once a root is given, so a pinned toolchain
+// can never silently pick up an ambient system LLVM. Within either origin,
+// the unsuffixed spelling (`opt`) is tried before the major-suffixed one
+// (`opt-18`), since a version-suffixed binary is the distro convention for
+// coexisting with a system default, not the preferred spelling.
+//
+// This module resolves and validates the family and derives its cache
+// identity (§3.8); it does not spawn `clang`/`llvm-link`/the final linker
+// and is not wired into any consumer yet (SFN-951/SFN-952/SFN-956).
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { int_to_string } from "sfn/strings";
+
+import { _get_env_cmd } from "../build_flags";
+import {
+    char_code_at_text,
+    contains_string,
+    index_of,
+    substring
+} from "../string_utils";
+import { sha256_hex_of_string } from "./hash";
+import { _path_join } from "./paths";
+import { build_host_os } from "./target";
+
+let LLVM_SUPPORTED_MAJOR: int = 18;
+let LLVM_PIPELINE_SCHEMA: string = "llvm-family-v1";
+
+struct LlvmTool {
+    role: string;  // "llvm-as" | "opt" | "llc" | "ld.lld" | "lld-link"
+    path: string;  // spelling actually spawned (root-absolute, or bare name for PATH)
+    version_output: string;  // complete --version stdout
+    major: int;
+}
+
+struct LlvmFamily {
+    ok: boolean;
+    origin: string;  // "root" | "path" | "" when unresolved
+    root: string;  // SAILFIN_LLVM_ROOT value when origin == "root", else ""
+    suffixed: boolean;  // true when the accepted family used -<major> names
+    major: int;  // 0 when unresolved
+    tools: LlvmTool[];
+    target_triple: string;
+    object_format: string;  // "elf" | "macho" | "coff"
+    target_supported: boolean;
+    fingerprint: string;  // "" when !ok
+    diagnostic: Diagnostic?;  // null when ok
+}
+
+// Internal result of evaluating ONE complete candidate family.
+struct _FamilyAttempt {
+    ok: boolean;
+    tools: LlvmTool[];
+    missing_role: string;  // "" unless a member did not resolve
+    searched: string;  // the spelling tried for missing_role
+    skew_role: string;  // "" unless a member reported the wrong major
+    skew_major: int;
+    skew_path: string;
+}
+
+fn llvm_supported_major() -> int { return LLVM_SUPPORTED_MAJOR; }
+
+// SFEP-0066 §3.2's four native pairs — NOT `target.sfn::triple_is_supported`'s
+// six-entry closed set. `x86_64-apple-darwin` and `x86_64-w64-mingw32` are
+// accepted by that broader set but are outside this contract and must be
+// rejected by `llvm_triple_is_governed` below.
+fn llvm_governed_triples() -> string[] {
+    return ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "arm64-apple-darwin", "x86_64-pc-windows-msvc"];
+}
+
+fn llvm_triple_is_governed(triple: string) -> boolean {
+    return contains_string(llvm_governed_triples(), triple);
+}
+
+fn llvm_object_format(triple: string) -> string {
+    if triple == "x86_64-unknown-linux-gnu" { return "elf"; }
+    if triple == "aarch64-unknown-linux-gnu" { return "elf"; }
+    if triple == "arm64-apple-darwin" { return "macho"; }
+    if triple == "x86_64-pc-windows-msvc" { return "coff"; }
+    return "";
+}
+
+// Matches `build_host_os()`'s vocabulary ("Linux" | "Darwin" | "Windows"),
+// restricted to the governed set above; "" for anything else.
+fn llvm_target_os(triple: string) -> string {
+    if triple == "x86_64-unknown-linux-gnu" { return "Linux"; }
+    if triple == "aarch64-unknown-linux-gnu" { return "Linux"; }
+    if triple == "arm64-apple-darwin" { return "Darwin"; }
+    if triple == "x86_64-pc-windows-msvc" { return "Windows"; }
+    return "";
+}
+
+// The LLVM family members required for `target_os`. Darwin omits a linker
+// role because Apple `ld` is a platform tool identified separately from the
+// LLVM family, per SFEP-0066 §3.4.
+fn llvm_family_roles(target_os: string) -> string[] {
+    if target_os == "Linux" {
+        return ["llvm-as", "opt", "llc", "ld.lld"];
+    }
+    if target_os == "Windows" {
+        return ["llvm-as", "opt", "llc", "lld-link"];
+    }
+    if target_os == "Darwin" { return ["llvm-as", "opt", "llc"]; }
+    return [];
+}
+
+// Use whatever int->string spelling the codebase already uses
+// (`sfn/strings::int_to_string`, per neighbouring `build/*.sfn` modules).
+fn llvm_tool_file_name(role: string, major: int, suffixed: boolean, host_os: string) -> string {
+    let mut base = role;
+    if suffixed { base = role + "-" + int_to_string(major); }
+    if host_os == "Windows" { return base + ".exe"; }
+    return base;
+}
+
+// Read the decimal run immediately following `marker`. Returns -1 when the
+// marker is absent or no digits follow it.
+fn _major_after(version_output: string, marker: string) -> int {
+    let start = index_of(version_output, marker);
+    if start < 0 { return -1; }
+    let len = version_output.length;
+    let mut i: int = start + marker.length;
+    let mut value: int = 0;
+    let mut digit_count: int = 0;
+    let mut guard: int = 0;
+    loop {
+        if guard > len { break; }
+        guard += 1;
+        if i >= len { break; }
+        let code = char_code_at_text(version_output, i);
+        if code < 48 || code > 57 { break; }
+        value = value * 10 + (code - 48);
+        digit_count += 1;
+        i += 1;
+    }
+    if digit_count == 0 { return -1; }
+    return value;
+}
+
+// The family's major, from any member's `--version` text. Two markers are
+// needed because the LLD roles do not print the "LLVM version" banner the
+// `llvm-as`/`opt`/`llc` trio does:
+//   llvm-as/opt/llc  "Ubuntu LLVM version 18.1.3\n  Optimized build."
+//   ld.lld           "Ubuntu LLD 18.1.3 (compatible with GNU linkers)"
+//   lld-link         "Ubuntu LLD 18.1.3"
+// Keying only on "LLVM version " made every linker member parse as -1, so a
+// complete and correct family was rejected as though `ld.lld` were missing
+// (SFN-948 review) — resolution could never succeed on Linux or Windows,
+// only on Darwin, whose role list carries no linker.
+fn parse_llvm_major(version_output: string) -> int {
+    let llvm_major = _major_after(version_output, "LLVM version ");
+    if llvm_major >= 0 { return llvm_major; }
+    return _major_after(version_output, "LLD ");
+}
+
+// Parse the `llc --version` "  Registered Targets:" block: for each line
+// following the marker, take the first whitespace-delimited token; stop at
+// the first line that is empty or has no leading whitespace. Returns []
+// when the marker is absent.
+fn llc_registered_targets(version_output: string) -> string[] {
+    let marker = "  Registered Targets:";
+    let marker_pos = index_of(version_output, marker);
+    let mut result: string[] = [];
+    if marker_pos < 0 { return result; }
+    let len = version_output.length;
+    let after_marker = marker_pos + marker.length;
+    let first_nl = index_of(substring(version_output, after_marker, len), "\n");
+    if first_nl < 0 { return result; }
+    let mut pos: int = after_marker + first_nl + 1;
+    let mut guard: int = 0;
+    loop {
+        if guard > len { break; }
+        guard += 1;
+        if pos > len { break; }
+        let rest = substring(version_output, pos, len);
+        let nl = index_of(rest, "\n");
+        let mut line: string = "";
+        let mut advance: int = 0;
+        if nl < 0 {
+            line = rest;
+            advance = len - pos;
+        } else {
+            line = substring(rest, 0, nl);
+            advance = nl + 1;
+        }
+        if line.length == 0 { break; }
+        let first_char = substring(line, 0, 1);
+        if first_char != " " && first_char != "\t" { break; }
+        let mut token_start: int = 0;
+        loop {
+            if token_start >= line.length { break; }
+            let ch = substring(line, token_start, token_start + 1);
+            if ch != " " && ch != "\t" { break; }
+            token_start += 1;
+        }
+        let mut token_end: int = token_start;
+        loop {
+            if token_end >= line.length { break; }
+            let ch = substring(line, token_end, token_end + 1);
+            if ch == " " || ch == "\t" { break; }
+            token_end += 1;
+        }
+        if token_end > token_start {
+            result.push(substring(line, token_start, token_end));
+        }
+        if nl < 0 { break; }
+        pos = pos + advance;
+    }
+    return result;
+}
+
+// Acceptable registered-target tokens for a governed triple. `arm64-apple-darwin`
+// accepts both spellings because LLVM registers both under those names.
+fn llc_target_tokens(triple: string) -> string[] {
+    if triple == "x86_64-unknown-linux-gnu" { return ["x86-64"]; }
+    if triple == "x86_64-pc-windows-msvc" { return ["x86-64"]; }
+    if triple == "aarch64-unknown-linux-gnu" { return ["aarch64"]; }
+    if triple == "arm64-apple-darwin" { return ["arm64", "aarch64"]; }
+    return [];
+}
+
+fn llc_supports_triple(version_output: string, triple: string) -> boolean {
+    let registered = llc_registered_targets(version_output);
+    let tokens = llc_target_tokens(triple);
+    if registered.length == 0 || tokens.length == 0 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= tokens.length { break; }
+        if contains_string(registered, tokens[i]) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// The hint text shared by every "unsupported triple" diagnostic, derived
+// from `llvm_governed_triples()` rather than hand-written a second time.
+fn _llvm_governed_triples_hint() -> string {
+    let triples = llvm_governed_triples();
+    let mut hint = "(SFEP-0066 §3.2 governed triples: ";
+    let mut i: int = 0;
+    loop {
+        if i >= triples.length { break; }
+        if i > 0 { hint = hint + ", "; }
+        hint = hint + triples[i];
+        i += 1;
+    }
+    return hint + ")";
+}
+
+fn llvm_tool_missing_diagnostic(role: string, origin: string, root: string, searched: string) -> Diagnostic {
+    let mut message = "LLVM " + role + " could not be resolved (searched \""
+        + searched
+        + "\")";
+    if origin == "root" {
+        message = message + "; SAILFIN_LLVM_ROOT=\"" + root
+            + "\" is set, and resolution does not fall through to PATH when it is set";
+    } else {
+        message = message + "; both the unsuffixed and -" + int_to_string(LLVM_SUPPORTED_MAJOR)
+            + " spellings were tried on PATH";
+    }
+    return Diagnostic {
+        code: "E0621",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn llvm_version_skew_diagnostic(role: string, path: string, found_major: int, expected_major: int) -> Diagnostic {
+    return Diagnostic {
+        code: "E0622",
+        severity: "error",
+        message: "LLVM " + role + " at \"" + path + "\" reports version "
+            + int_to_string(found_major)
+            + ", but this build requires LLVM "
+            + int_to_string(expected_major),
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn llvm_target_unsupported_diagnostic(triple: string, llc_path: string) -> Diagnostic {
+    let mut message = "target \"" + triple
+        + "\" is not supported by the LLVM toolchain";
+    if llc_path.length > 0 {
+        message = message + " (llc at \"" + llc_path
+            + "\" has no registered target for it)";
+    }
+    message = message + " " + _llvm_governed_triples_hint();
+    return Diagnostic {
+        code: "E0623",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+// Build the canonical fingerprint text, then hash it. Executable content
+// digests are NOT an ingredient: hashing multi-hundred-megabyte LLVM
+// binaries on every command is not affordable, and the complete `--version`
+// output already carries the LLVM build revision, so a rebuilt binary at
+// the same path still moves the fingerprint. `LLVM_PIPELINE_SCHEMA` is the
+// lever that invalidates every cache if a digest ingredient is ever added
+// (SFEP-0066 §3.8).
+fn llvm_family_fingerprint(tools: LlvmTool[], major: int, triple: string, object_format: string, target_supported: boolean) -> string {
+    let mut text = LLVM_PIPELINE_SCHEMA + "\n" + int_to_string(major) + "\n"
+        + triple
+        + "\n"
+        + object_format
+        + "\n";
+    if target_supported { text = text + "target-ok\n"; } else {
+        text = text + "target-unsupported\n";
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= tools.length { break; }
+        let t = tools[i];
+        text = text + t.role + "\t" + t.path + "\t" + t.version_output + "\n";
+        i += 1;
+    }
+    return sha256_hex_of_string(text);
+}
+
+// Spawn `path --version` with no shell involved. `posix_spawnp` performs
+// PATH resolution itself, so a bare name is a valid `path`. Both
+// `capture_take_*` calls are made even though the stderr is discarded, per
+// every existing call site (`compiler/src/llvm_validation.sfn`,
+// `capsules/sfn/test/src/tool_probe.sfn`).
+fn _probe_version(path: string) -> string ![io] {
+    let exit = process.run_capture([path, "--version"], process.environ());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return out;
+}
+
+// Resolve one family member. Under an explicit root the candidate must
+// exist, be executable, and NOT be a directory before it is probed — the
+// `!fs.is_directory` pairing is required because `fs.is_executable`
+// degrades to `access(path, 0)` on Windows and cannot itself distinguish a
+// file from a directory (`./paths.sfn:208-209`). Any failure of that guard
+// returns `major: -1` (unresolved) rather than probing a non-executable
+// path.
+fn _resolve_role(role: string, major: int, suffixed: boolean, host_os: string, root: string) -> LlvmTool ![io] {
+    let file_name = llvm_tool_file_name(role, major, suffixed, host_os);
+    let mut candidate = file_name;
+    if root.length > 0 {
+        candidate = _path_join(_path_join(root, "bin"), file_name);
+        let usable = fs.exists(candidate) && fs.is_executable(candidate) && !fs.is_directory(candidate);
+        if !usable {
+            return LlvmTool {
+                role: role,
+                path: candidate,
+                version_output: "",
+                major: -1
+            };
+        }
+    }
+    let version_output = _probe_version(candidate);
+    if version_output.length == 0 {
+        return LlvmTool {
+            role: role,
+            path: candidate,
+            version_output: version_output,
+            major: -1
+        };
+    }
+    return LlvmTool {
+        role: role,
+        path: candidate,
+        version_output: version_output,
+        major: parse_llvm_major(version_output)
+    };
+}
+
+// Resolve every role as ONE complete family (SFEP-0066 §3.4), never tool by
+// tool: the first member that fails to resolve, or the first that resolves
+// to the wrong major, stops the attempt immediately.
+fn _attempt_family(roles: string[], major: int, suffixed: boolean, host_os: string, root: string) -> _FamilyAttempt ![io] {
+    let mut tools: LlvmTool[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= roles.length { break; }
+        let role = roles[i];
+        let tool = _resolve_role(role, major, suffixed, host_os, root);
+        if tool.major < 0 {
+            return _FamilyAttempt {
+                ok: false,
+                tools: tools,
+                missing_role: role,
+                searched: tool.path,
+                skew_role: "",
+                skew_major: 0,
+                skew_path: ""
+            };
+        }
+        if tool.major != LLVM_SUPPORTED_MAJOR {
+            return _FamilyAttempt {
+                ok: false,
+                tools: tools,
+                missing_role: "",
+                searched: "",
+                skew_role: role,
+                skew_major: tool.major,
+                skew_path: tool.path
+            };
+        }
+        tools.push(tool);
+        i += 1;
+    }
+    return _FamilyAttempt {
+        ok: true,
+        tools: tools,
+        missing_role: "",
+        searched: "",
+        skew_role: "",
+        skew_major: 0,
+        skew_path: ""
+    };
+}
+
+// A failed `LlvmFamily`, at any resolution stage. `origin`/`root`/`major`
+// collapse to their "unresolved" values regardless of how far resolution
+// got, matching the field-level contract documented on `LlvmFamily` above.
+fn _llvm_unresolved_family(triple: string, object_format: string, diagnostic: Diagnostic) -> LlvmFamily {
+    return LlvmFamily {
+        ok: false,
+        origin: "",
+        root: "",
+        suffixed: false,
+        major: 0,
+        tools: [],
+        target_triple: triple,
+        object_format: object_format,
+        target_supported: false,
+        fingerprint: "",
+        diagnostic: diagnostic
+    };
+}
+
+// The target probe (step g/h): a complete, version-matched family is not
+// enough — its `llc` must also register the requested triple's backend.
+fn _llvm_finish_family(tools: LlvmTool[], origin: string, root: string, suffixed: boolean, triple: string, object_format: string) -> LlvmFamily {
+    let mut llc = LlvmTool {
+        role: "",
+        path: "",
+        version_output: "",
+        major: -1
+    };
+    let mut i: int = 0;
+    loop {
+        if i >= tools.length { break; }
+        if tools[i].role == "llc" {
+            llc = tools[i];
+            break;
+        }
+        i += 1;
+    }
+    if !llc_supports_triple(llc.version_output, triple) {
+        return _llvm_unresolved_family(triple, object_format, llvm_target_unsupported_diagnostic(triple, llc.path));
+    }
+    return LlvmFamily {
+        ok: true,
+        origin: origin,
+        root: root,
+        suffixed: suffixed,
+        major: LLVM_SUPPORTED_MAJOR,
+        tools: tools,
+        target_triple: triple,
+        object_format: object_format,
+        target_supported: true,
+        fingerprint: llvm_family_fingerprint(tools, LLVM_SUPPORTED_MAJOR, triple, object_format, true),
+        diagnostic: null
+    };
+}
+
+// Resolve for an EXPLICIT host OS. Split out from `resolve_llvm_toolchain`
+// so the Windows executable conventions (`.exe` suffixing) can be driven
+// in-process on a Linux runner. The `SAILFIN_HOST_OS=Windows` override is
+// not usable for that here: `build_host_os()` is compiler-global, so it
+// also redirects the test harness's OWN binary link and the run dies at
+// `clang: linker command failed` before any test body executes (SFN-948).
+// Passing the host in keeps the Windows path covered by an ordinary unit
+// test instead of an environment the runner cannot provide.
+fn resolve_llvm_toolchain_for_host(triple: string, host_os: string) -> LlvmFamily ![io] {
+    if !llvm_triple_is_governed(triple) {
+        return _llvm_unresolved_family(triple, llvm_object_format(triple), llvm_target_unsupported_diagnostic(triple, ""));
+    }
+    let target_os = llvm_target_os(triple);
+    let roles = llvm_family_roles(target_os);
+    let object_format = llvm_object_format(triple);
+    let root = _get_env_cmd("SAILFIN_LLVM_ROOT");
+    let mut origin = "path";
+    if root.length > 0 { origin = "root"; }
+    // Both attempts below are confined to the SAME origin: when
+    // `origin == "root"` this never inspects PATH (SFEP-0066 §3.4 rule 1 —
+    // an explicit root is authoritative and must not fall through), because
+    // `root` is passed unchanged into every `_resolve_role` call either way.
+    let unsuffixed = _attempt_family(roles, LLVM_SUPPORTED_MAJOR, false, host_os, root);
+    if unsuffixed.ok {
+        return _llvm_finish_family(unsuffixed.tools, origin, root, false, triple, object_format);
+    }
+    let suffixed = _attempt_family(roles, LLVM_SUPPORTED_MAJOR, true, host_os, root);
+    if suffixed.ok {
+        return _llvm_finish_family(suffixed.tools, origin, root, true, triple, object_format);
+    }
+    // Both attempts failed: report the SUFFIXED attempt's reason, since it
+    // was tried last.
+    if suffixed.skew_role.length > 0 {
+        return _llvm_unresolved_family(triple, object_format, llvm_version_skew_diagnostic(suffixed.skew_role, suffixed.skew_path, suffixed.skew_major, LLVM_SUPPORTED_MAJOR));
+    }
+    return _llvm_unresolved_family(triple, object_format, llvm_tool_missing_diagnostic(suffixed.missing_role, origin, root, suffixed.searched));
+}
+
+// The entry point: resolve the complete, version-matched LLVM family for
+// `triple` against the real host, or a failed `LlvmFamily` carrying the
+// diagnostic that explains why.
+fn resolve_llvm_toolchain(triple: string) -> LlvmFamily ![io] {
+    return resolve_llvm_toolchain_for_host(triple, build_host_os());
+}
+
+export {
+    LlvmFamily,
+    LlvmTool,
+    llc_registered_targets,
+    llc_supports_triple,
+    llc_target_tokens,
+    llvm_family_fingerprint,
+    llvm_family_roles,
+    llvm_governed_triples,
+    llvm_object_format,
+    llvm_supported_major,
+    llvm_target_os,
+    llvm_target_unsupported_diagnostic,
+    llvm_tool_file_name,
+    llvm_tool_missing_diagnostic,
+    llvm_triple_is_governed,
+    llvm_version_skew_diagnostic,
+    parse_llvm_major,
+    resolve_llvm_toolchain,
+    resolve_llvm_toolchain_for_host
+};
