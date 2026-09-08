@@ -261,27 +261,38 @@ jobs:
           test -x "${GLOBAL_BIN_DIR}/sfn"
           file -L "${GLOBAL_BIN_DIR}/sfn" | grep -E '${{ matrix.file_pattern }}'
           test "$("${GLOBAL_BIN_DIR}/sfn" --version)" = "sfn ${SEED_VERSION}"
-          # A post-SFN-937 archive (the one that ships workspace.toml) mirrors
-          # no payload into the version-shared bin dir, whether the global
-          # command is a symlink or a copy: the install-root pointer is the
-          # discovery anchor for both the driver and the analyzer's
-          # prelude-global loader. Asserted as absence so a regression back to
-          # the unconditional mirror fails loudly (SFN-1241). The `sfn run`
-          # from an empty cwd below is the other half of that contract -- it is
-          # what proves the pointer actually carries discovery.
+          # The pinned release is >= install.sh's SAILFIN_INSTALL_ROOT_FLOOR by
+          # construction (the seed pin only moves forward), so it mirrors no
+          # payload into the version-shared bin dir, whether the global command
+          # is a symlink or a copy: the install-root pointer is the discovery
+          # anchor for both the driver and the analyzer's prelude-global loader
+          # (SFN-1241).
+          #
+          # The archive-shape precondition is asserted, NOT used as a
+          # condition. Gating the absence checks on it would let them all
+          # vanish silently if a future archive stopped shipping
+          # workspace.toml -- the same silent-skip shape this workflow fails
+          # closed against elsewhere.
           target_dir="${INSTALL_BASE}/${expected_host}/${SEED_VERSION}"
-          if [ -f "${target_dir}/workspace.toml" ]; then
-            for mirrored in runtime capsules workspace.toml; do
-              if [ -e "${GLOBAL_BIN_DIR}/${mirrored}" ]; then
-                echo "::error::post-SFN-937 install mirrored ${mirrored} into ${GLOBAL_BIN_DIR}"
-                exit 1
-              fi
-            done
-            if [ ! -L "${GLOBAL_BIN_DIR}/sfn" ] \
-              && [ ! -f "${GLOBAL_BIN_DIR}/sailfin-install-root" ]; then
-              echo "::error::copied global command has no install-root pointer"
+          test -f "${target_dir}/workspace.toml" \
+            || { echo "::error::pinned release ${SEED_VERSION} staged no workspace.toml; the assertions below would be vacuous"; exit 1; }
+          for mirrored in runtime capsules workspace.toml; do
+            # -L as well as -e: -e is false for a dangling symlink, and this
+            # assertion's whole job is to be un-fool-able.
+            if [ -e "${GLOBAL_BIN_DIR}/${mirrored}" ] || [ -L "${GLOBAL_BIN_DIR}/${mirrored}" ]; then
+              echo "::error::install mirrored ${mirrored} into ${GLOBAL_BIN_DIR}"
               exit 1
             fi
+          done
+          # Only the copy fallback writes the pointer; a symlinked global
+          # command resolves through the link. Note that every runner in this
+          # matrix creates symlinks successfully, so the block above is a
+          # forward tripwire here rather than coverage of the copy fallback --
+          # the Windows leg is what genuinely exercises it.
+          if [ ! -L "${GLOBAL_BIN_DIR}/sfn" ] \
+            && [ ! -f "${GLOBAL_BIN_DIR}/sailfin-install-root" ]; then
+            echo "::error::copied global command has no install-root pointer"
+            exit 1
           fi
           empty_dir="${RUNNER_TEMP}/sailfin-empty-cwd"
           mkdir -p "$empty_dir"
@@ -451,25 +462,28 @@ jobs:
           if (-not (Test-Path $sfn) -or -not (Test-Path $sailfin)) {
             throw "Expected sfn.exe and sailfin.exe in $env:GLOBAL_BIN_DIR"
           }
-          # Every Windows global command is a copy, never a symlink, so this
-          # leg always exercises the copy fallback. On a post-SFN-937 archive
-          # (the one that ships workspace.toml) that fallback mirrors no
-          # payload beside the copy: the install-root pointer is the discovery
-          # anchor for both the driver and the analyzer's prelude-global
-          # loader. Asserted as absence so a regression back to the
-          # unconditional mirror fails loudly (SFN-1241). The `sfn run` from an
-          # empty cwd below is the other half of that contract -- it is what
-          # proves the pointer actually carries discovery.
+          # Every Windows global command is a copy, never a symlink, so this leg
+          # is the one that genuinely exercises the copy fallback -- the unix
+          # legs all symlink and never enter it. The pinned release is >=
+          # install.ps1's $InstallRootFloor by construction (the seed pin only
+          # moves forward), so that fallback mirrors no payload beside the
+          # copy: the install-root pointer is the discovery anchor for both the
+          # driver and the analyzer's prelude-global loader (SFN-1241).
+          #
+          # The archive-shape precondition is asserted, NOT used as a
+          # condition -- gating on it would let every check below vanish
+          # silently if a future archive stopped shipping workspace.toml.
           $targetDir = Join-Path $env:INSTALL_BASE "$expectedHost\$env:SEED_VERSION"
-          if (Test-Path (Join-Path $targetDir "workspace.toml")) {
-            foreach ($mirrored in @("runtime", "capsules", "workspace.toml")) {
-              if (Test-Path (Join-Path $env:GLOBAL_BIN_DIR $mirrored)) {
-                throw "post-SFN-937 install mirrored $mirrored into $env:GLOBAL_BIN_DIR"
-              }
+          if (-not (Test-Path (Join-Path $targetDir "workspace.toml"))) {
+            throw "Pinned release $env:SEED_VERSION staged no workspace.toml; the assertions below would be vacuous"
+          }
+          foreach ($mirrored in @("runtime", "capsules", "workspace.toml")) {
+            if (Test-Path (Join-Path $env:GLOBAL_BIN_DIR $mirrored)) {
+              throw "Install mirrored $mirrored into $env:GLOBAL_BIN_DIR"
             }
-            if (-not (Test-Path (Join-Path $env:GLOBAL_BIN_DIR "sailfin-install-root"))) {
-              throw "Copied global command has no install-root pointer in $env:GLOBAL_BIN_DIR"
-            }
+          }
+          if (-not (Test-Path (Join-Path $env:GLOBAL_BIN_DIR "sailfin-install-root"))) {
+            throw "Copied global command has no install-root pointer in $env:GLOBAL_BIN_DIR"
           }
           & $sfn --version
           $emptyDir = Join-Path $env:RUNNER_TEMP "sailfin-empty-cwd"

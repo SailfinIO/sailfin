@@ -500,10 +500,27 @@ if ($LocalArchive) {
 # (SFN-1034, SFEP-0073 section 3.7).
 $SigningFloor = "0.8.0"
 
-# Naive MAJOR.MINOR.PATCH compare, prerelease deliberately ignored: this feeds
-# wording, not policy, so prerelease ordering would be precision without
-# purpose.
-function Test-BelowSigningFloor([string]$Candidate, [string]$Floor) {
+# The release that first routed BOTH runtime-root resolvers through the
+# install-root pointer (SFN-1124): the CLI driver and, critically, the
+# analyzer's prelude-global loader. A copied global command from any earlier
+# release re-derives the runtime root from its own directory and finds nothing,
+# contributing no prelude names -- so it still needs the adjacent mirror, even
+# from a post-SFN-937 archive that carries `workspace.toml`.
+$InstallRootFloor = "0.11.0"
+
+# Naive MAJOR.MINOR.PATCH compare, prerelease deliberately ignored. Two callers
+# with deliberately different stakes:
+#
+#   - $SigningFloor feeds wording, not policy: enforcement is version-
+#     independent, because deciding it from the version would hand an attacker
+#     the downgrade.
+#   - $InstallRootFloor does decide behavior, but only ever adds a redundant
+#     copy of the payload this installer just wrote -- getting it wrong costs
+#     disk, never verification.
+#
+# Ignoring prerelease ordering is sound for both: no `0.11.0-*` prerelease was
+# ever tagged, and every prerelease that does exist is 0.8.x or older.
+function Test-VersionBelow([string]$Candidate, [string]$Floor) {
     $c = ($Candidate -split '-')[0] -split '\.'
     $f = $Floor -split '\.'
     for ($i = 0; $i -lt 3; $i++) {
@@ -570,7 +587,7 @@ function Get-VerifiedManifest {
     if ($manifestStatus -ne "ok" -or $signatureStatus -ne "ok") {
         $missing = if ($manifestStatus -ne "ok") { "SHA256SUMS" } else { "SHA256SUMS.sig" }
         if (-not $AllowUnverified) {
-            if (Test-BelowSigningFloor $Version $SigningFloor) {
+            if (Test-VersionBelow $Version $SigningFloor) {
                 Die @"
 release '$ReleaseTag' publishes no $missing.
 
@@ -896,28 +913,39 @@ foreach ($Alias in ($Aliases | Select-Object -Unique)) {
     Log "Installed: $LinkPath"
 }
 
-foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
-    $LegacyPath = Join-Path $GlobalBinDir $LegacyName
-    if ((Test-Path $LegacyPath) -and -not $GlobalPayloadOwned) {
-        throw "Refusing to replace unowned $LegacyPath for the adjacent payload mirror."
+# An archive from $InstallRootFloor onward gets no adjacent mirror at all: the
+# pointer written below is the discovery anchor for both the CLI driver and the
+# analyzer's prelude-global loader, so a version-shared bin directory stays
+# decoupled from any one version's payload (SFN-937).
+#
+# Two disjoint reasons an older release still needs the mirror, and both are
+# required -- the archive shape and the compiler capability moved in different
+# releases. A pre-SFN-937 archive carries no workspace.toml and its compiler
+# predates the pointer entirely; a post-SFN-937 archive below the floor (0.10.6
+# is the worked example) carries workspace.toml but its analyzer still
+# re-derives the runtime root from the executable's own directory, which here
+# always resolves nowhere -- every Windows global command is a copy, never a
+# symlink. Gating on archive shape alone would leave that second class
+# installing green and failing E0420 on the first bare prelude call (SFN-1124).
+if ((-not (Test-Path $WorkspaceSrc)) -or (Test-VersionBelow $Version $InstallRootFloor)) {
+    # Scoped to the branch that writes: Copy-Item -Recurse nests as
+    # bin\runtime\runtime when the destination already exists, so an unowned
+    # tree here is a real hazard. Outside this branch nothing is written, and
+    # throwing would strand a copied global command with neither a mirror nor
+    # the pointer below -- the one shape that cannot resolve a runtime at all.
+    foreach ($LegacyName in @("runtime", "capsules", "workspace.toml")) {
+        $LegacyPath = Join-Path $GlobalBinDir $LegacyName
+        if ((Test-Path $LegacyPath) -and -not $GlobalPayloadOwned) {
+            throw "Refusing to replace unowned $LegacyPath for the adjacent payload mirror."
+        }
     }
-}
-
-# A post-SFN-937 archive gets no adjacent mirror at all: the pointer is the
-# discovery anchor for both the CLI driver and the analyzer's prelude-global
-# loader, so a version-shared bin directory stays decoupled from any one
-# version's payload. Pre-SFN-937 compilers do not read the pointer and
-# re-derive both roots from the executable's own directory, which on Windows --
-# where every global command is a copy, never a symlink -- resolves nowhere. So
-# those archives still get the legacy mirror beside the copy.
-if (-not (Test-Path $WorkspaceSrc)) {
     if (Test-Path $RuntimeDest) {
         Copy-Item -Path $RuntimeDest -Destination (Join-Path $GlobalBinDir "runtime") -Recurse
     }
     if (Test-Path $CapsulesDest) {
         Copy-Item -Path $CapsulesDest -Destination (Join-Path $GlobalBinDir "capsules") -Recurse
     }
-    Log "Installed adjacent payload mirror for pre-SFN-937 compiler compatibility."
+    Log "Installed adjacent payload mirror for pre-$InstallRootFloor compiler compatibility."
 }
 
 # Copied executables report GLOBAL_BIN_DIR as their own directory. Publish the

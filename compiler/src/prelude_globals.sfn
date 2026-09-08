@@ -176,12 +176,14 @@ fn _pg_find_runtime_dir() -> string ![io] {
     }
     // A copied (non-symlinked) installed `sfn` has no `runtime/` anywhere
     // near its own directory; the installer's pointer names the version
-    // directory that owns it. Ahead of the exe-relative walk because the
-    // installer may also leave an adjacent `runtime/` mirror beside the copy
-    // (SFN-1125), and the pointer is the one the driver anchors on; ahead of
-    // the cwd-relative probes so an installed compiler run from an empty cwd
-    // still sees the full prelude rather than degrading to `helper_names`
-    // (SFN-1124).
+    // directory that owns it. Ahead of the exe-relative walk because a bin
+    // directory may still hold an adjacent `runtime/` mirror -- installers
+    // write one beside a copy for releases below their install-root floor,
+    // and an upgrade inherits whatever the previous install left -- while the
+    // pointer is the one the driver anchors on, so the two must not disagree.
+    // Ahead of the cwd-relative probes so an installed compiler run from an
+    // empty cwd still sees the full prelude rather than degrading to
+    // `helper_names` (SFN-1124).
     let exe_raw: *u8 = exe_path();
     let payload = installed_payload_dir_for_exe(exe_raw as string);
     if payload.length > 0 {
