@@ -69,16 +69,30 @@ fn _substring1(text: string, at: int) -> string {
     return text.substring(at, at + 1);
 }
 
-// Extracts the single `[trace-link] ...` line from stderr (see
-// `_llvm_text_trace_link`, `compiler/src/backend.sfn:347-357`) so token
-// counts measure the link argv only, not surrounding diagnostic text such as
-// the E0627 message.
-fn _trace_link_line(text: string) -> string {
-    let start = find(text, "[trace-link]", 0);
-    if start < 0 { return ""; }
-    let end = find(text, "\n", start);
+// Extracts the `[trace-link] ...` line for the final program link from
+// stderr (see `_llvm_text_trace_link`, `compiler/src/backend.sfn:347-357`),
+// identified as the line containing `bin_path` (the output binary) — a build
+// can emit more than one `[trace-link]` line (e.g. intermediate artifacts),
+// and taking the first unconditionally risks measuring the wrong link. Falls
+// back to the last `[trace-link]` line if none mentions `bin_path`, so token
+// counts still measure some link argv rather than silently the wrong text.
+fn _trace_link_line(text: string, bin_path: string) -> string {
+    let mut search_from: int = 0;
+    let mut last_start: int = -1;
+    loop {
+        let start = find(text, "[trace-link]", search_from);
+        if start < 0 { break; }
+        last_start = start;
+        let mut end = find(text, "\n", start);
+        if end < 0 { end = text.length; }
+        let line = text.substring(start, end);
+        if find(line, bin_path, 0) >= 0 { return line; }
+        search_from = end;
+    }
+    if last_start < 0 { return ""; }
+    let mut end = find(text, "\n", last_start);
     if end < 0 { end = text.length; }
-    return text.substring(start, end);
+    return text.substring(last_start, end);
 }
 
 // Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
@@ -88,8 +102,11 @@ fn _bin_path(tag: string) -> string ![io] {
     return base + "/sfn-root-link-libs-" + tag + "-prog";
 }
 
-test "root capsule link-libs: reach the final link argv exactly once" ![io] {
-    let root = _scratch_dir() + "/root-app";
+// Writes a root-app fixture at `root` whose `[build] link-libs` is
+// `extra_libs` (each entry already quoted/escaped) followed by `-L<root>`,
+// then builds it via a nested `sfn build` and returns the extracted
+// `[trace-link]` line for the final program link.
+fn _build_and_trace(root: string, extra_libs: string, bin: string, label: string) -> string ![io] {
     fs.createDirectory(root, true);
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
         + "name = \"sfn/root-link-libs-e2e-app\"\n"
@@ -101,26 +118,57 @@ test "root capsule link-libs: reach the final link argv exactly once" ![io] {
         + "[build]\n"
         + "kind = \"binary\"\n"
         + "entry = \"main.sfn\"\n"
-        + "link-libs = [\"-lm\", \"-L"
+        + "link-libs = ["
+        + extra_libs
+        + "\"-L"
         + root
         + "\"]\n");
     fs.writeFile(root + "/main.sfn", "fn main() ![io] {\n    print(\"root-link-libs-ok\");\n}\n");
 
-    let bin = _bin_path("root");
-    let exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "-o", bin], _child_env("root-link-libs"));
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "-o", bin], _child_env(label));
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit == 0;
     assert contains(err, "[trace-link]");
-    let trace_link = _trace_link_line(err);
-    // Dedup acceptance criterion: the runtime already contributes `-lm`
-    // (runtime/capsule.toml), so a root-declared `-lm` must not double it.
-    assert _count_token_occurrences(trace_link, "-lm") == 1;
+    return _trace_link_line(err, bin);
+}
+
+test "root capsule link-libs: reach the final link argv without duplicating the runtime's own" ![io] {
+    // The runtime (runtime/capsule.toml) already contributes `-lm` via every
+    // runtime capsule's own `link_libs`, appended verbatim with no dedup
+    // across capsules (`assemble_runtime_capsule_link_inputs`,
+    // compiler/src/build/runtime_objs.sfn:381-386). How many `-lm` that
+    // baseline carries is host-dependent, not something this test controls —
+    // so instead of asserting an absolute count, build the same fixture with
+    // and without a root-declared `-lm` and assert the root declaration adds
+    // no additional occurrence beyond the baseline.
+    let baseline_root = _scratch_dir() + "/root-app-baseline";
+    let baseline_bin = _bin_path("root-baseline");
+    let trace_baseline = _build_and_trace(baseline_root, "", baseline_bin, "root-link-libs-baseline");
+
+    let withlm_root = _scratch_dir() + "/root-app-withlm";
+    let withlm_bin = _bin_path("root-withlm");
+    let trace_withlm = _build_and_trace(withlm_root, "\"-lm\", ", withlm_bin, "root-link-libs-withlm");
+
+    print.err("[test:link-libs] baseline trace: " + trace_baseline);
+    print.err("[test:link-libs] withlm trace: " + trace_withlm);
+
+    let baseline_lm = _count_token_occurrences(trace_baseline, "-lm");
+    let withlm_lm = _count_token_occurrences(trace_withlm, "-lm");
+    // Guard against a vacuous pass: if the baseline itself has no `-lm`, the
+    // equality below would compare two zeros and this stops measuring
+    // anything about dedup at all.
+    assert baseline_lm >= 1;
+    // Dedup acceptance criterion: a root-declared `-lm` must not add an
+    // occurrence beyond whatever the runtime already contributed.
+    assert withlm_lm == baseline_lm;
     // Non-`-l` flags (here `-L<dir>`, never supplied by the runtime) reach
-    // the link argv unchanged — this is what makes the assertion above
-    // actually exercise the root `link-libs` path rather than passing
-    // vacuously off the runtime's own `-lm`.
-    assert _count_token_occurrences(trace_link, "-L" + root) == 1;
+    // the link argv unchanged on both builds — this is what makes the
+    // assertions above actually exercise the root `link-libs` path rather
+    // than passing vacuously off the runtime's own `-lm`, and it is the
+    // assertion that must fail if root `link-libs` were disabled entirely.
+    assert _count_token_occurrences(trace_baseline, "-L" + baseline_root) == 1;
+    assert _count_token_occurrences(trace_withlm, "-L" + withlm_root) == 1;
 }
 
 // Own nested workspace (like `capsule_reachability_filter_test.sfn`):
@@ -176,7 +224,7 @@ test "dependency capsule link-libs: ignored at link and reported via E0627" ![io
     // because the filtered-out flag never made it to clang/ld.
     assert exit == 0;
     assert contains(err, "[trace-link]");
-    assert _count_token_occurrences(_trace_link_line(err), "-lsfn1269absent") == 0;
+    assert _count_token_occurrences(_trace_link_line(err, bin), "-lsfn1269absent") == 0;
     assert contains(err, "E0627");
     assert contains(err, "demo/root-link-libs-e2e-dep");
 }
