@@ -31,6 +31,8 @@ The reference section is the authoritative source for how Sailfin works.
   and APIs.
 - **[CLI Reference](/docs/reference/cli)** — `sailfin` command-line flags and
   subcommands.
+- **[On-Disk Layout](/docs/reference/on-disk-layout)** — Where Sailfin reads
+  and writes on your machine, and the variables that relocate each root.
 - **[Runtime ABI](/docs/reference/runtime-abi)** — Low-level interface between
   compiled Sailfin code and the runtime.
 
