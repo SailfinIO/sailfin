@@ -243,7 +243,6 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     spec.entry_relative = entry_rel;
     spec.capsule_name = toml_get_name(manifest_text);
     spec.version = toml_get_version(manifest_text);
-    spec.link_libs = toml_get_link_libs(manifest_text);
     let declared_kind = toml_get_build_kind(manifest_text);
     if declared_kind.length > 0 {
         // Validate against the supported set so a typo in capsule.toml
@@ -262,6 +261,7 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
         }
         spec.kind = declared_kind;
     }
+    spec.link_libs = toml_get_link_libs(manifest_text);
     return spec;
 }
 

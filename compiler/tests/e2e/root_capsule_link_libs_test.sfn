@@ -69,6 +69,18 @@ fn _substring1(text: string, at: int) -> string {
     return text.substring(at, at + 1);
 }
 
+// Extracts the single `[trace-link] ...` line from stderr (see
+// `_llvm_text_trace_link`, `compiler/src/backend.sfn:347-357`) so token
+// counts measure the link argv only, not surrounding diagnostic text such as
+// the E0627 message.
+fn _trace_link_line(text: string) -> string {
+    let start = find(text, "[trace-link]", 0);
+    if start < 0 { return ""; }
+    let end = find(text, "\n", start);
+    if end < 0 { end = text.length; }
+    return text.substring(start, end);
+}
+
 // Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
 fn _bin_path(tag: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -89,7 +101,9 @@ test "root capsule link-libs: reach the final link argv exactly once" ![io] {
         + "[build]\n"
         + "kind = \"binary\"\n"
         + "entry = \"main.sfn\"\n"
-        + "link-libs = [\"-lm\"]\n");
+        + "link-libs = [\"-lm\", \"-L"
+        + root
+        + "\"]\n");
     fs.writeFile(root + "/main.sfn", "fn main() ![io] {\n    print(\"root-link-libs-ok\");\n}\n");
 
     let bin = _bin_path("root");
@@ -98,9 +112,15 @@ test "root capsule link-libs: reach the final link argv exactly once" ![io] {
     let err = process.capture_take_stderr();
     assert exit == 0;
     assert contains(err, "[trace-link]");
+    let trace_link = _trace_link_line(err);
     // Dedup acceptance criterion: the runtime already contributes `-lm`
     // (runtime/capsule.toml), so a root-declared `-lm` must not double it.
-    assert _count_token_occurrences(err, "-lm") == 1;
+    assert _count_token_occurrences(trace_link, "-lm") == 1;
+    // Non-`-l` flags (here `-L<dir>`, never supplied by the runtime) reach
+    // the link argv unchanged — this is what makes the assertion above
+    // actually exercise the root `link-libs` path rather than passing
+    // vacuously off the runtime's own `-lm`.
+    assert _count_token_occurrences(trace_link, "-L" + root) == 1;
 }
 
 // Own nested workspace (like `capsule_reachability_filter_test.sfn`):
@@ -156,7 +176,7 @@ test "dependency capsule link-libs: ignored at link and reported via E0627" ![io
     // because the filtered-out flag never made it to clang/ld.
     assert exit == 0;
     assert contains(err, "[trace-link]");
-    assert _count_token_occurrences(err, "-lsfn1269absent") == 0;
+    assert _count_token_occurrences(_trace_link_line(err), "-lsfn1269absent") == 0;
     assert contains(err, "E0627");
     assert contains(err, "demo/root-link-libs-e2e-dep");
 }

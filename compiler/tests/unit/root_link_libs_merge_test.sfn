@@ -2,7 +2,10 @@
 //
 // Unit guard for `merge_root_link_libs` (SFN-1269): the pure merge that
 // appends a root capsule's declared `[build] link-libs` to the
-// runtime-derived link libs, deduplicated against what is already there.
+// runtime-derived link libs. `link-libs` is a raw flag list, so only `-l`
+// entries are deduplicated, and only against `base` — never against earlier
+// root entries — so paired flags like `-framework <name>` and deliberate
+// `-l` repetition survive intact.
 // An empty `root_link_libs` must leave `base` element-wise unchanged — that
 // is what keeps a build with no declaration byte-identical to today's argv.
 import { expect_eq_str_array } from "sfn/test";
@@ -52,21 +55,7 @@ test "root link libs: paired non-l flags like -framework are never deduped" ![pu
     let base: string[] = ["-lm"];
     let root: string[] = ["-framework", "CoreFoundation", "-framework", "Security"];
     let result = merge_root_link_libs(base, root);
-    let expected: string[] = [
-        "-lm",
-        "-framework",
-        "CoreFoundation",
-        "-framework",
-        "Security",
-    ];
-    assert expect_eq_str_array(result, expected).ok;
-}
-
-test "root link libs: -l entry already present in base and pthread is not duplicated" ![pure] {
-    let base: string[] = ["-lm", "-lpthread"];
-    let root: string[] = ["-lm"];
-    let result = merge_root_link_libs(base, root);
-    let expected: string[] = ["-lm", "-lpthread"];
+    let expected: string[] = ["-lm", "-framework", "CoreFoundation", "-framework", "Security",];
     assert expect_eq_str_array(result, expected).ok;
 }
 

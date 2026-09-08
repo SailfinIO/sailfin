@@ -97,12 +97,12 @@ fn _cr_parse_deps(deps: string) -> _CrDepEntry[] {
     return out;
 }
 
-fn _cr_join_link_libs_csv(libs: string[]) -> string {
+fn _cr_join_link_libs_space(libs: string[]) -> string {
     let mut out: string = "";
     let mut i: int = 0;
     loop {
         if i >= libs.length { break; }
-        if i > 0 { out = out + ", "; }
+        if i > 0 { out = out + " "; }
         out = out + libs[i];
         i += 1;
     }
@@ -118,9 +118,8 @@ fn _dependency_link_libs_ignored_diagnostic(spec: string, libs: string[]) -> Dia
         code: "E0627",
         severity: "warning",
         message: "[build] link-libs declared by dependency \"" + spec
-            + "\" are ignored ("
-            + _cr_join_link_libs_csv(libs)
-            + "): link-libs are honored only for the capsule being built, so a dependency cannot add linker inputs to your binary",
+            + "\" are ignored: link-libs are honored only for the capsule being built — "
+            + _cr_join_link_libs_space(libs),
         file_path: "",
         primary: null,
         suggestion: null
@@ -640,7 +639,12 @@ fn enumerate_capsule_sources(project_root: string, runtime_root: string, additio
             // through this loop body, so this fires at most once per
             // dependency spec — never for the root, which this worklist
             // never enqueues (it walks [dependencies] only).
-            if has_dep_manifest {
+            // Gated on `runtime_root`, same as above: this is a link-path-only
+            // diagnostic (a claim about linker inputs), and `sfn check` never
+            // reaches the link, so it has nothing actionable to say here —
+            // the offending manifest belongs to a dependency the caller can't
+            // fix from `sfn check` output anyway.
+            if runtime_root.length > 0 && has_dep_manifest {
                 let dep_link_libs = toml_get_link_libs(dep_text);
                 if dep_link_libs.length > 0 {
                     let empty_lines: string[] = [];
