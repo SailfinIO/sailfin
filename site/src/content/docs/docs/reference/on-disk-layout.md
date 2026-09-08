@@ -26,14 +26,15 @@ matrix](#the-relocation-matrix) below for the exact boundaries.
 ## Root 1 — the config root
 
 Defaults to `~/.sfn/`, overridden in full by `SAILFIN_CONFIG_DIR`. It holds
-four things:
+your persisted settings, your registry token, this host's default toolchain,
+and the capsule cache:
 
 | Path | Written by | Contents |
 | --- | --- | --- |
 | the directory itself (mode `0700`) | `sfn config set`, `sfn login` | container |
 | `config.toml` (mode `0600`) | `sfn config set`/`unset` | persisted user settings |
 | `credentials` (mode `0600`) | `sfn login` | registry bearer token, **plain text** |
-| `toolchain-default` | `sfn toolchain default <version>` | per-host-triple default toolchain |
+| `toolchain-default` | `sfn toolchain default`, `sfn toolchain update` | per-host-triple default toolchain and tracked channel |
 | `cache/capsules/<scope>/<name>/<version>/` | `sfn add` | fetched capsule `.sfnpkg` archives, extracted |
 
 **`config.toml` is created lazily.** A user who has never run `sfn config set`
@@ -139,9 +140,11 @@ cache and why.
 ### Toolchain subcommands
 
 All nine `sfn toolchain` subcommands are shipped: `install`, `entry-version`,
-`run`, `list`, `active`, `verify`, `default`, `update`, and `remove`. See the
-[CLI Reference](/docs/reference/cli#toolchain-pinning-flags) for what each one
-does; this page only covers where they read and write.
+`run`, `list`, `active`, `verify`, `default`, `update`, and `remove`. This page
+only covers where they read and write; for what each one does, see
+[Installing a toolchain](/docs/reference/cli#installing-a-toolchain),
+[Default toolchain and removal](/docs/reference/cli#default-toolchain-and-removal),
+and [Updating a toolchain](/docs/reference/cli#updating-a-toolchain).
 
 ## Root 3 — the build cache
 

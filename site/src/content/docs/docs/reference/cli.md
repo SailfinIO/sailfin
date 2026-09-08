@@ -935,7 +935,12 @@ inherited `SAILFIN_BUILD_JOBS` still wins, and the serial path is unaffected.
 
 ## Environment Variables
 
-These environment variables influence the behavior of `sfn`.
+These environment variables influence the behavior of `sfn`. Several of them
+relocate one of the three on-disk roots Sailfin writes to (`~/.sfn`, the
+toolchain store, or the build cache) — see [On-Disk
+Layout](/docs/reference/on-disk-layout) for which variable moves which
+directory and, just as importantly, which directories a given variable does
+**not** move.
 
 | Variable | Scope | Description |
 |---|---|---|
