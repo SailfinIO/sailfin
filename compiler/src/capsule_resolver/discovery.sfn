@@ -9,6 +9,7 @@
 // `int_to_string` comes from the `sfn/strings` standard-library capsule rather
 // than via `../main`: routing it through `main` would pull the whole compiler
 // into every consumer of this module's import closure.
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { int_to_string } from "sfn/strings";
 
 import { _collect_sfn_files_cmd } from "../build/fs";
@@ -24,7 +25,13 @@ import {
     semver_parse
 } from "../semver";
 import { contains_string, substring } from "../string_utils";
-import { toml_get_dependencies, toml_get_dev_dependencies, toml_get_name } from "../toml_parser";
+import { render_terminal_diagnostic } from "../terminal_output";
+import {
+    toml_get_dependencies,
+    toml_get_dev_dependencies,
+    toml_get_link_libs,
+    toml_get_name
+} from "../toml_parser";
 import { workspace_member_for_spec } from "./capability";
 import { locate_capsule_src, locate_runtime_dep_capsule_src } from "./locate";
 import {
@@ -88,6 +95,36 @@ fn _cr_parse_deps(deps: string) -> _CrDepEntry[] {
         start = end + 1;
     }
     return out;
+}
+
+fn _cr_join_link_libs_csv(libs: string[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= libs.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + libs[i];
+        i += 1;
+    }
+    return out;
+}
+
+// E0627: a dependency capsule declared `[build] link-libs`. The key is
+// honored only for the capsule being built (SFN-1269) — a dependency
+// declaring it is a legitimate manifest that would matter if that capsule
+// were itself the root, so this is a warning, not a hard error.
+fn _dependency_link_libs_ignored_diagnostic(spec: string, libs: string[]) -> Diagnostic {
+    return Diagnostic {
+        code: "E0627",
+        severity: "warning",
+        message: "[build] link-libs declared by dependency \"" + spec
+            + "\" are ignored ("
+            + _cr_join_link_libs_csv(libs)
+            + "): link-libs are honored only for the capsule being built, so a dependency cannot add linker inputs to your binary",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
 }
 
 // Look up a capsule's locked version from the pre-parsed lockfile
@@ -598,6 +635,17 @@ fn enumerate_capsule_sources(project_root: string, runtime_root: string, additio
             if has_dep_manifest { dep_text = fs.readFile(dep_manifest); }
             if capsule_provenance_rejects(spec, dep_manifest, dep_text, origin) {
                 continue;
+            }
+            // SFN-1269: `visited` above already guards this spec to one pass
+            // through this loop body, so this fires at most once per
+            // dependency spec — never for the root, which this worklist
+            // never enqueues (it walks [dependencies] only).
+            if has_dep_manifest {
+                let dep_link_libs = toml_get_link_libs(dep_text);
+                if dep_link_libs.length > 0 {
+                    let empty_lines: string[] = [];
+                    print.err(render_terminal_diagnostic(diagnostic_to_diag(_dependency_link_libs_ignored_diagnostic(spec, dep_link_libs), "build"), empty_lines, "build"));
+                }
             }
             let found = _cr_collect_capsule_sources(src_dir, spec, origin);
             let mut fi: int = 0;

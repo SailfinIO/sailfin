@@ -1,0 +1,49 @@
+// compiler/tests/unit/root_link_libs_merge_test.sfn
+//
+// Unit guard for `merge_root_link_libs` (SFN-1269): the pure merge that
+// appends a root capsule's declared `[build] link-libs` to the
+// runtime-derived link libs, deduplicated against what is already there.
+// An empty `root_link_libs` must leave `base` element-wise unchanged — that
+// is what keeps a build with no declaration byte-identical to today's argv.
+import { expect_eq_str_array } from "sfn/test";
+
+import { merge_root_link_libs } from "../../src/build/link_contract";
+
+test "root link libs: empty root leaves base element-wise unchanged" ![pure] {
+    let base: string[] = ["-lm", "-lpthread"];
+    let root: string[] = [];
+    let result = merge_root_link_libs(base, root);
+    assert expect_eq_str_array(result, base).ok;
+}
+
+test "root link libs: root entry already in base is not duplicated" ![pure] {
+    let base: string[] = ["-lm", "-lpthread"];
+    let root: string[] = ["-lm"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lm", "-lpthread"];
+    assert expect_eq_str_array(result, expected).ok;
+}
+
+test "root link libs: new root entry is appended after base, order preserved" ![pure] {
+    let base: string[] = ["-lm", "-lpthread"];
+    let root: string[] = ["-lSDL2"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lm", "-lpthread", "-lSDL2"];
+    assert expect_eq_str_array(result, expected).ok;
+}
+
+test "root link libs: an internal duplicate in root is appended once" ![pure] {
+    let base: string[] = ["-lm", "-lpthread"];
+    let root: string[] = ["-lSDL2", "-lSDL2"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lm", "-lpthread", "-lSDL2"];
+    assert expect_eq_str_array(result, expected).ok;
+}
+
+test "root link libs: empty base yields root in order" ![pure] {
+    let base: string[] = [];
+    let root: string[] = ["-lSDL2", "-lm"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lSDL2", "-lm"];
+    assert expect_eq_str_array(result, expected).ok;
+}

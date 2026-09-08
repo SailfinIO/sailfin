@@ -1,0 +1,162 @@
+// compiler/tests/e2e/root_capsule_link_libs_test.sfn
+//
+// End-to-end guard for SFN-1269: a root capsule's own `[build] link-libs`
+// reach the final link argv (deduplicated against the runtime's own libs),
+// while a DEPENDENCY capsule's `link-libs` are ignored with a warning
+// (E0627) rather than reaching the link at all.
+//
+// Both cases spawn nested `sfn build` children, so per
+// `.claude/rules/no-bash-e2e.md` this threads `SAILFIN_TEST_SCRATCH` (via
+// `nested_runner_scratch`) so concurrent builds under the parallel pool do
+// not clobber each other's `program.ll`, and uses `clean_runner_env` (never
+// raw `process.environ()`) so the nested build does not inherit the parent
+// pool's private orchestration keys.
+import { contains, find } from "sfn/strings";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-root-link-libs-e2e";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// `SAILFIN_TRACE_LINK` is not a pool-managed key, so `clean_runner_env`
+// passes any ambient value through — strip it explicitly so `true` (always
+// wanted here) is the sole source of the child's value, mirroring
+// `sailfin_trace_link_test.sfn`.
+fn _child_env(label: string) -> string[] ![io] {
+    let base = clean_runner_env(nested_runner_scratch(label));
+    let mut e: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        if find(base[i], "SAILFIN_TRACE_LINK=", 0) != 0 {
+            e.push(base[i]);
+        }
+        i += 1;
+    }
+    e.push("SAILFIN_TRACE_LINK=1");
+    return e;
+}
+
+// Count non-overlapping occurrences of `needle` as a whole space-delimited
+// token in `text` — a plain substring count would also match `needle` as a
+// fragment of some other flag, so this checks the surrounding boundary is a
+// space (or the string edge) on both sides.
+fn _count_token_occurrences(text: string, needle: string) -> int {
+    let mut count: int = 0;
+    let mut search_from: int = 0;
+    loop {
+        let idx = find(text, needle, search_from);
+        if idx < 0 { break; }
+        let before_ok = idx == 0 || _substring1(text, idx - 1) == " ";
+        let after_pos = idx + needle.length;
+        let after_ok = after_pos >= text.length || _substring1(text, after_pos) == " ";
+        if before_ok && after_ok { count += 1; }
+        search_from = idx + 1;
+    }
+    return count;
+}
+
+fn _substring1(text: string, at: int) -> string {
+    return text.substring(at, at + 1);
+}
+
+// Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
+fn _bin_path(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = default_scratch_dir(); }
+    return base + "/sfn-root-link-libs-" + tag + "-prog";
+}
+
+test "root capsule link-libs: reach the final link argv exactly once" ![io] {
+    let root = _scratch_dir() + "/root-app";
+    fs.createDirectory(root, true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/root-link-libs-e2e-app\"\n"
+        + "version = \"0.1.0\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"main.sfn\"\n"
+        + "link-libs = [\"-lm\"]\n");
+    fs.writeFile(root + "/main.sfn", "fn main() ![io] {\n    print(\"root-link-libs-ok\");\n}\n");
+
+    let bin = _bin_path("root");
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", root, "-o", bin], _child_env("root-link-libs"));
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(err, "[trace-link]");
+    // Dedup acceptance criterion: the runtime already contributes `-lm`
+    // (runtime/capsule.toml), so a root-declared `-lm` must not double it.
+    assert _count_token_occurrences(err, "-lm") == 1;
+}
+
+// Own nested workspace (like `capsule_reachability_filter_test.sfn`):
+// `discover_workspace_root` walking up from `consumer/` stops at THIS
+// `workspace.toml`, so the fixture registers exactly its two members
+// without touching the repo's own workspace.toml.
+fn _ensure_dep_fixture(root: string) ![io] {
+    fs.createDirectory(root + "/dep-lib/src", true);
+    fs.createDirectory(root + "/consumer/src", true);
+
+    fs.writeFile(root + "/workspace.toml", "[workspace]\n" + "members = [\n"
+        + "    \"dep-lib\",\n"
+        + "    \"consumer\",\n"
+        + "]\n");
+
+    fs.writeFile(root + "/dep-lib/capsule.toml", "[capsule]\n"
+        + "name = \"demo/root-link-libs-e2e-dep\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"SFN-1269 fixture: dependency declaring link-libs\"\n\n"
+        + "[dependencies]\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "entry = \"src/mod.sfn\"\n"
+        + "kind = \"library\"\n"
+        + "link-libs = [\"-lsfn1269absent\"]\n");
+    fs.writeFile(root + "/dep-lib/src/mod.sfn", "export { dep_marker };\n\nfn dep_marker() -> string { return \"dep-ok\"; }\n");
+
+    fs.writeFile(root + "/consumer/capsule.toml", "[capsule]\n"
+        + "name = \"demo/root-link-libs-e2e-consumer\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"SFN-1269 fixture: consumer of a link-libs-declaring dep\"\n\n"
+        + "[dependencies]\n"
+        + "\"demo/root-link-libs-e2e-dep\" = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"binary\"\n");
+    fs.writeFile(root + "/consumer/src/main.sfn", "import { dep_marker } from \"demo/root-link-libs-e2e-dep\";\n\nfn main() ![io] {\n    print(dep_marker());\n}\n");
+}
+
+test "dependency capsule link-libs: ignored at link and reported via E0627" ![io] {
+    let root = _scratch_dir() + "/dep-fixture";
+    _ensure_dep_fixture(root);
+
+    let bin = _bin_path("dep");
+    let exit = process.run_capture([sfn_bin_path(), "build", "-p", root
+        + "/consumer", "-o", bin], _child_env("dep-link-libs"));
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // -lsfn1269absent must never reach a real link — the build succeeds
+    // because the filtered-out flag never made it to clang/ld.
+    assert exit == 0;
+    assert contains(err, "[trace-link]");
+    assert _count_token_occurrences(err, "-lsfn1269absent") == 0;
+    assert contains(err, "E0627");
+    assert contains(err, "demo/root-link-libs-e2e-dep");
+}

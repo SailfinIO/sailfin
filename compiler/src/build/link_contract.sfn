@@ -112,9 +112,7 @@ fn merge_root_link_libs(base: string[], root_link_libs: string[]) -> string[] {
     loop {
         if j >= root_link_libs.length { break; }
         let lib = root_link_libs[j];
-        if !contains_string(result, lib) {
-            result.push(lib);
-        }
+        if !contains_string(result, lib) { result.push(lib); }
         j += 1;
     }
     return result;

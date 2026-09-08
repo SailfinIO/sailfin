@@ -16,7 +16,11 @@ import { user_config_linker, user_config_linker_origin } from "../user_config";
 import { assemble_link_inputs } from "./clang_argv";
 import { resolve_direct_ld_lld } from "./direct_link";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
-import { merge_root_link_libs, missing_runtime_dep_specs, runtime_dep_link_failure_message } from "./link_contract";
+import {
+    merge_root_link_libs,
+    missing_runtime_dep_specs,
+    runtime_dep_link_failure_message
+} from "./link_contract";
 import { _ensure_dir, _find_substring_from } from "./paths";
 import { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs } from "./runtime_objs";
 import { runtime_demanded_dep_specs } from "./runtime_selection";

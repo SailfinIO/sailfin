@@ -1,0 +1,52 @@
+// compiler/tests/unit/capsule_build_spec_link_libs_test.sfn
+//
+// Regression for SFN-1269: `_resolve_capsule_build_spec` must surface the
+// declared `[build] link-libs` on `_CapsuleBuildSpec.link_libs` so the
+// build/run link routes can carry the root capsule's own libs into the
+// final link argv. A `kind = "binary"` capsule with no declaration gets
+// `[]` — the byte-identical-argv guarantee.
+import { remove_all } from "sfn/fs";
+import { expect_eq_str_array } from "sfn/test";
+
+import { _resolve_capsule_build_spec } from "../../src/build/cache";
+
+test "capsule build spec: kind=binary with link-libs surfaces them" ![io] {
+    let scratch = "build/sailfin/.capsule-build-spec-link-libs-test-1";
+    remove_all(scratch);
+    fs.createDirectory(scratch, true);
+    let manifest = "[capsule]\n" + "name = \"sfn/link-libs-fixture\"\n"
+        + "version = \"0.1.0\"\n"
+        + "\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"main.sfn\"\n"
+        + "link-libs = [\"-lm\", \"-lSDL2\"]\n";
+    fs.writeFile(scratch + "/capsule.toml", manifest);
+    fs.writeFile(scratch + "/main.sfn", "fn main() -> int { return 0; }\n");
+
+    let spec = _resolve_capsule_build_spec(scratch);
+    assert spec.entry_path.length > 0;
+    let expected: string[] = ["-lm", "-lSDL2"];
+    assert expect_eq_str_array(spec.link_libs, expected).ok;
+    remove_all(scratch);
+}
+
+test "capsule build spec: kind=binary with no link-libs is empty" ![io] {
+    let scratch = "build/sailfin/.capsule-build-spec-link-libs-test-2";
+    remove_all(scratch);
+    fs.createDirectory(scratch, true);
+    let manifest = "[capsule]\n" + "name = \"sfn/no-link-libs-fixture\"\n"
+        + "version = \"0.1.0\"\n"
+        + "\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"main.sfn\"\n";
+    fs.writeFile(scratch + "/capsule.toml", manifest);
+    fs.writeFile(scratch + "/main.sfn", "fn main() -> int { return 0; }\n");
+
+    let spec = _resolve_capsule_build_spec(scratch);
+    assert spec.entry_path.length > 0;
+    let expected: string[] = [];
+    assert expect_eq_str_array(spec.link_libs, expected).ok;
+    remove_all(scratch);
+}

@@ -1,7 +1,11 @@
 import { LinkPlan, LlvmTextBackend } from "../../../backend";
 import { assemble_link_inputs } from "../../../build/clang_argv";
 import { _ensure_dir_cmd } from "../../../build/fs";
-import { merge_root_link_libs, missing_runtime_dep_specs, runtime_dep_link_failure_message } from "../../../build/link_contract";
+import {
+    merge_root_link_libs,
+    missing_runtime_dep_specs,
+    runtime_dep_link_failure_message
+} from "../../../build/link_contract";
 import { assemble_runtime_capsule_link_inputs } from "../../../build/runtime_objs";
 import { runtime_demanded_dep_specs, select_runtime_sfn_sources } from "../../../build/runtime_selection";
 import { _get_env_cmd } from "../../../build_flags";
