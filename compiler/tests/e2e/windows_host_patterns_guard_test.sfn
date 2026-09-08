@@ -29,6 +29,7 @@
 // literals, so no line of this file is itself a match — that is what lets
 // the guard scan its own source along with every other test.
 import {
+    concat_all,
     contains,
     int_to_string,
     split,
@@ -127,8 +128,20 @@ fn _has_echo_dollar(line: string) -> boolean {
 // the whole file and requiring the tokens to stay adjacent closes that
 // without widening the match: adjacency means an unrelated mention
 // elsewhere in the same file cannot combine into a false positive.
+//
+// Pieces are collected and merged once with `concat_all` rather than
+// accumulated into `out = out + ch`. The runtime is zero-GC (SFEP-0043:
+// `sfn_mem_free` is a no-op), so sequential accumulation abandons the
+// previous buffer every iteration and costs O(n^2) *permanent* bytes to
+// build an n-byte result. This normalizes whole files, and the callers
+// below run it over every test file carrying the trigger literal, so that
+// total is measured against the 8 GiB `RLIMIT_AS` this binary inherits
+// from the parent `sfn test` (`.claude/rules/compiler-safety.md`) — and
+// was exceeding it, so the guard aborted with no offender to report. On
+// Linux only: Darwin ignores `RLIMIT_AS`. `concat_all` does the same total
+// copy in O(n log n) bytes (SFN-976, `stdlib/strings/src/mod.sfn`).
 fn _collapse_whitespace(text: string) -> string {
-    let mut out = "";
+    let mut pieces: string[] = [];
     let mut i = 0;
     let mut in_space = false;
     loop {
@@ -136,14 +149,14 @@ fn _collapse_whitespace(text: string) -> string {
         let ch = text[i];
         i = i + 1;
         if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
-            if !in_space { out = out + " "; }
+            if !in_space { pieces.push(" "); }
             in_space = true;
             continue;
         }
         in_space = false;
-        out = out + ch;
+        pieces.push(ch);
     }
-    return out;
+    return concat_all(pieces);
 }
 
 test "windows host: no hardcoded compiler path in a spawn argv" ![io] {

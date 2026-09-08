@@ -8,7 +8,13 @@
 // (`./target.sfn`) could silently diverge — the exact drift sharing a
 // diagnostic is meant to prevent. One source of truth; both commands now
 // render byte-identical text for the identical mistake.
+//
+// Also holds the `sfn build --static` (SFN-1268) diagnostics: E0625 for the
+// closed triple set static linking supports, E0626 for a resolvable target
+// whose static prerequisites are missing on the host.
 import { Diagnostic } from "sfn/analyzer/typecheck_types";
+
+import { index_of } from "../string_utils";
 
 // The closed-set hint text shared by every "unsupported triple" message,
 // regardless of the value's provenance (`--target` flag vs. an ambient
@@ -33,4 +39,56 @@ fn unsupported_target_diagnostic(triple: string) -> Diagnostic {
     };
 }
 
-export { supported_targets_hint, unsupported_target_diagnostic };
+// --static supports a narrower closed set than --target (Linux glibc only,
+// SFN-1268) — deliberately not `supported_targets_hint()`, whose wider
+// --target set includes triples --static rejects.
+fn static_unsupported_target_diagnostic(triple: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0625",
+        severity: "error",
+        message: "--static is not supported for target triple: \"" + triple
+            + "\" (supported: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu)",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+// `resolve_direct_ld_lld`'s `reason` for a linker override (`SAILFIN_LINKER`
+// or a user-config pin) other than lld/ld.lld reads "<origin>=<value> defers
+// to clang" — a host-configuration choice, not a missing static artifact.
+// Sending that case the glibc-install hint would tell a developer with a
+// fully-provisioned host to install packages they already have, so the hint
+// branches on the reason class instead (SFN-1268).
+fn _static_prerequisite_hint(reason: string) -> string {
+    if index_of(reason, "defers to clang") >= 0 {
+        return " (hint: --static requires the direct ld.lld path; unset SAILFIN_LINKER or remove the [linker] pin from your user config)";
+    }
+    return " (hint: install your distribution's static glibc and libgcc packages, e.g. glibc-static / libc6-dev + libgcc-*-dev)";
+}
+
+// Fail-closed refusal: for the embedded targets --static serves, a dynamic
+// binary is a worse outcome than a build error, so a missing static
+// prerequisite on the host is an error rather than a silent fallback to a
+// dynamic link.
+fn static_prerequisites_diagnostic(triple: string, reason: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0626",
+        severity: "error",
+        message: "--static could not resolve its static link prerequisites for "
+            + triple
+            + ": "
+            + reason
+            + _static_prerequisite_hint(reason),
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+export {
+    static_prerequisites_diagnostic,
+    static_unsupported_target_diagnostic,
+    supported_targets_hint,
+    unsupported_target_diagnostic
+};

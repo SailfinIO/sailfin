@@ -11,6 +11,7 @@
 import { expect_eq_str_array } from "sfn/test";
 
 import { _determinism_pass2_argv } from "../../src/build/determinism";
+import { clear_static_link, set_static_link } from "../../src/build/target_state";
 
 // --------------------------------------------------------------
 // _determinism_pass2_argv — the pass-2 build command line
@@ -54,5 +55,21 @@ test "determinism_pass2_argv: threads the cache-trace flag ahead of the target" 
 // Non-JSON mode is the inherited-output path; the argv is identical
 // apart from the absent `--json`, so both branches spawn the same shape.
 test "determinism_pass2_argv: omits the json flag in inherited-output mode" {
+    assert expect_eq_str_array(_determinism_pass2_argv("drv", "", "in.sfn", "wd-pass2", false, false), ["drv", "build", "--skip-toolchain-check", "--work-dir", "wd-pass2", "in.sfn"]).ok;
+}
+
+// SFN-1268: `--static` lives in the process-local cell, so without this
+// forwarding a `--check-determinism` run would compare a static pass 1
+// against a dynamic pass 2 — two different builds, not two passes of one.
+// The cell is cleared at the end so it does not leak into sibling tests
+// in this file.
+test "determinism_pass2_argv: forwards --static when the cell is set" ![io] {
+    set_static_link(true);
+    assert expect_eq_str_array(_determinism_pass2_argv("drv", "", "in.sfn", "wd-pass2", false, false), ["drv", "build", "--skip-toolchain-check", "--work-dir", "wd-pass2", "--static", "in.sfn"]).ok;
+    clear_static_link();
+}
+
+test "determinism_pass2_argv: omits --static when the cell is clear" ![io] {
+    clear_static_link();
     assert expect_eq_str_array(_determinism_pass2_argv("drv", "", "in.sfn", "wd-pass2", false, false), ["drv", "build", "--skip-toolchain-check", "--work-dir", "wd-pass2", "in.sfn"]).ok;
 }

@@ -72,6 +72,10 @@ import {
     target_linker_driver,
     target_linker_driver_flags
 } from "./build/target";
+// The `sfn build --static` (SFN-1268) process cell: `resolve_direct_ld_lld`
+// is reached ambiently here, so the flag has to travel via this cell rather
+// than a parameter.
+import { active_static_link } from "./build/target_state";
 // `_env_flag` gives `SAILFIN_TRACE_LINK` the same toggle semantics ("",
 // "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs;
 // `_get_env_cmd` reads a single env var (the macOS SDK probe below).
@@ -435,7 +439,8 @@ struct LlvmTextBackend {
         // `link_flags`, so the same builder serves both). Any non-Linux
         // target or missing prerequisite falls back to the clang driver
         // below with a trace-visible reason — never a silent ABI change.
-        let direct = resolve_direct_ld_lld(target_os);
+        let static_link = active_static_link();
+        let direct = resolve_direct_ld_lld(target_os, static_link);
         if direct.ok {
             let direct_argv = direct_ld_lld_argv(direct, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
             // The trace keeps receiving the ORIGINAL argv so
@@ -446,6 +451,14 @@ struct LlvmTextBackend {
             _llvm_text_trace_link(direct_argv);
             return process.run(direct_spawn);
         }
+        // Structural half of "`--static` never silently degrades" (SFN-1268):
+        // `build/link.sfn` refuses first with a rendered E0626, and
+        // `cli/commands/build.sfn` preflights the same contract before any
+        // compile, so this path is unreachable in practice. It exists so
+        // that no future edit can make the static leg fall through to the
+        // clang driver below. It stays silent because the reachable
+        // refusals own the user-facing diagnostic.
+        if static_link { return 2; }
         trace_direct_link_fallback(direct.reason);
         if eff_plan.test_mode {
             let test_argv = _llvm_text_link_test_argv_with_driver(eff_plan, driver_flags, link_driver);
