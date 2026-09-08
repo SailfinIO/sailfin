@@ -348,7 +348,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             }
 
             if trace_runner { print.err("test runner: link start"); }
-            let link_res = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir, groups[group_idx].runtime_demand, rt_shared_cache_root);
+            let link_res = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir, groups[group_idx].runtime_demand, rt_shared_cache_root, groups[group_idx].root_link_libs);
             let link_rc = link_res.rc;
             if link_rc != 0 {
                 // Only a genuine backend failure earns the SFN-34 ICE banner;

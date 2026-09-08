@@ -4,7 +4,7 @@ title: The Capability-Sealed Runtime — Claim Ladder and Link-Time Admission
 status: Accepted
 type: runtime
 created: 2026-06-07
-updated: 2026-08-05
+updated: 2026-09-08
 author: "agent:compiler-architect; project owner (repositioning 2026-06-26, admission rule 2026-07-26); agent:Sailbot (2026-08-05 rewrite)"
 tracking:
 supersedes:
@@ -301,14 +301,21 @@ may honestly be claimed** rather than merely naming a task.
    can spawn a shell has no seal — and the toolchain that must *produce* sealed
    binaries currently relies on the path it must forbid
    (`compiler/src/build/fs.sfn`, `compiler/src/cli_selfhost.sfn`).
-3. **OpenSSL is linked native code with its own syscall paths.**
-   `runtime/capsule.toml:88` carries `link-libs = ["-lm", "-lpthread", "-lssl",
-   "-lcrypto"]` into **every** Sailfin binary, including the compiler. This makes
-   the link-time rule and the OpenSSL removal **the same decision**: a byte-level
-   "no raw syscall opcode" rule rejects OpenSSL, and any rule permissive enough to
-   admit OpenSSL admits everything. SFEP-0048 removes the exception; until then
-   the runtime manifest must digest-declare the resolved OpenSSL libraries and
-   their full transitive closure, and such a binary is provenance-sealed.
+3. **Foreign-linked native code has its own syscall paths outside the gate.**
+   SFN-341 retired the last OpenSSL link dependency — TLS is now pure Sailfin
+   (`runtime/sfn/platform/tls.sfn:6-7`, `runtime/sfn/adapters/websocket.sfn:116-117`)
+   — and `runtime/capsule.toml:110` now carries `link-libs = ["-lm",
+   "-lpthread"]`. A default build's foreign link inputs today are libc, libm,
+   libpthread, libgcc, and the CRT objects: all host-provided, none
+   user-controlled, and none the size of a TLS stack. That would let the
+   link-time rule stay deferred, except **SFN-1269 introduces the first
+   user-controlled foreign link input**: `[build] link-libs` is now honored on
+   the root capsule. A user-declared entry declares a **build input, not
+   provenance** — linking `-lSDL2` records that the build asked for it, not
+   that the compiler vouches for what the host resolved it to
+   (`docs/proposals/design-notes/sfn-1269-link-libs-build-input-not-provenance.md`).
+   The rule must be specified now because a user can widen this surface, not
+   because an exception is already linked into every binary.
 4. **The digest mechanism currently depends on hole 2.** §3.5 makes sha256 the
    authority for `vetted-link-inputs`, and the compiler computes sha256 by
    spawning a shell (`compiler/src/build/fs.sfn`,
@@ -319,8 +326,8 @@ may honestly be claimed** rather than merely naming a task.
 
 Holes 1, 2, and 4 are removable by owning the corresponding surface. Hole 3 is
 the one that forces the link-time rule to be *specified* rather than deferred,
-since no rule can be written while an exception the size of a TLS stack is linked
-into every binary.
+since SFN-1269 makes `[build] link-libs` the first user-controlled foreign link
+input, and no rule can stay deferred once a user can widen that surface.
 
 ### 4.3 The reachable claim today, and the one not to make
 

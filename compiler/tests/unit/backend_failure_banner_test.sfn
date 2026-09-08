@@ -36,7 +36,8 @@ test "backend banner gate: a missing-runtime-bundle preflight does not signal a 
     // `ran_backend == false` so the CLI link sites suppress the ICE banner —
     // a config/environment error is not a compiler bug.
     let no_caps: RuntimeCapsuleArtifacts[] = [];
-    let result = _clang_link_multi(["unused.ll"], "unused.bin", "no-such-runtime-root", no_caps, "", "build/sailfin", "");
+    let empty_link_libs: string[] = [];
+    let result = _clang_link_multi(["unused.ll"], "unused.bin", "no-such-runtime-root", no_caps, "", "build/sailfin", "", empty_link_libs);
     assert result.rc == 1;
     assert result.ran_backend == false;
 }

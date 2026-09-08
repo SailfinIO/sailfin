@@ -336,6 +336,10 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     let mut cap_capsule_name: string = "";
     let mut cap_version: string = "";
     let mut cap_entry_relative: string = "";
+    // SFN-1269: the root capsule's declared `[build] link-libs`, empty for
+    // a positional (non-capsule) build — `_resolve_capsule_build_spec` never
+    // runs in that case, so there is no manifest to read them from.
+    let mut cap_link_libs: string[] = [];
     if capsule_path.length > 0 {
         if input_path.length > 0 {
             print.err("sfn build: -p and positional source are mutually exclusive");
@@ -348,6 +352,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         cap_capsule_name = cap_spec.capsule_name;
         cap_version = cap_spec.version;
         cap_entry_relative = cap_spec.entry_relative;
+        cap_link_libs = cap_spec.link_libs;
     }
 
     // Bootstrap mode (SFEP-0047): `sfn build -p compiler` in a compiler
@@ -685,7 +690,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         build_shared_cache_root = "";
         clean_runtime_object_cache(build_runtime_caps, sailfin_cache_dir, "-O2");
     }
-    let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir, build_shared_cache_root);
+    let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir, build_shared_cache_root, cap_link_libs);
     let rc = link_result.rc;
     if rc != 0 {
         // The SFN-34 backend-failure ICE banner only applies when the

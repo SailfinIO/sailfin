@@ -105,8 +105,12 @@ include-dirs = []
 # dependency: TLS is now pure Sailfin (`sfn/platform/tls.sfn` +
 # `sfn/platform/tls_record.sfn` over the `sfn/crypto` capsule), so no
 # `-lssl`/`-lcrypto` reaches the link and build hosts need no OpenSSL
-# development package. The runtime capsule is still the only `kind`
-# whose `link-libs` reaches the link (SFEP-0036 3.2).
+# development package. The runtime capsule's `link-libs` reach every
+# link as the base set; a root capsule's own `link-libs` are appended
+# after them and deduplicated against them (SFN-1269), so these two
+# entries keep their position and a root declaring `-lm` does not
+# produce it twice. A dependency capsule's `link-libs` are still
+# ignored (E0627).
 link-libs = ["-lm", "-lpthread"]
 
 # The prelude (`runtime/prelude.sfn`) is emitted from source on the same

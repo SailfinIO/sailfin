@@ -1,0 +1,68 @@
+// compiler/tests/unit/root_link_libs_merge_test.sfn
+//
+// Unit guard for `merge_root_link_libs` (SFN-1269): the pure merge that
+// appends a root capsule's declared `[build] link-libs` to the
+// runtime-derived link libs. `link-libs` is a raw flag list, so only `-l`
+// entries are deduplicated, and only against `base` — never against earlier
+// root entries — so paired flags like `-framework <name>` and deliberate
+// `-l` repetition survive intact.
+// An empty `root_link_libs` must leave `base` element-wise unchanged — that
+// is what keeps a build with no declaration byte-identical to today's argv.
+import { expect_eq_str_array } from "sfn/test";
+
+import { merge_root_link_libs } from "../../src/build/link_contract";
+
+test "root link libs: empty root leaves base element-wise unchanged" ![pure] {
+    let base: string[] = ["-lm", "-lpthread"];
+    let root: string[] = [];
+    let result = merge_root_link_libs(base, root);
+    assert expect_eq_str_array(result, base).ok;
+}
+
+test "root link libs: root entry already in base is not duplicated" ![pure] {
+    let base: string[] = ["-lm", "-lpthread"];
+    let root: string[] = ["-lm"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lm", "-lpthread"];
+    assert expect_eq_str_array(result, expected).ok;
+}
+
+test "root link libs: new root entry is appended after base, order preserved" ![pure] {
+    let base: string[] = ["-lm", "-lpthread"];
+    let root: string[] = ["-lSDL2"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lm", "-lpthread", "-lSDL2"];
+    assert expect_eq_str_array(result, expected).ok;
+}
+
+test "root link libs: an internal duplicate in root is preserved" ![pure] {
+    let base: string[] = ["-lm", "-lpthread"];
+    let root: string[] = ["-lSDL2", "-lSDL2"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lm", "-lpthread", "-lSDL2", "-lSDL2"];
+    assert expect_eq_str_array(result, expected).ok;
+}
+
+test "root link libs: empty base yields root in order" ![pure] {
+    let base: string[] = [];
+    let root: string[] = ["-lSDL2", "-lm"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lSDL2", "-lm"];
+    assert expect_eq_str_array(result, expected).ok;
+}
+
+test "root link libs: paired non-l flags like -framework are never deduped" ![pure] {
+    let base: string[] = ["-lm"];
+    let root: string[] = ["-framework", "CoreFoundation", "-framework", "Security"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-lm", "-framework", "CoreFoundation", "-framework", "Security",];
+    assert expect_eq_str_array(result, expected).ok;
+}
+
+test "root link libs: non-l token equal to a base entry is appended, not deduped" ![pure] {
+    let base: string[] = ["-pthread"];
+    let root: string[] = ["-pthread"];
+    let result = merge_root_link_libs(base, root);
+    let expected: string[] = ["-pthread", "-pthread"];
+    assert expect_eq_str_array(result, expected).ok;
+}

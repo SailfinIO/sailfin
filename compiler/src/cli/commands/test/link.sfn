@@ -1,7 +1,11 @@
 import { LinkPlan, LlvmTextBackend } from "../../../backend";
 import { assemble_link_inputs } from "../../../build/clang_argv";
 import { _ensure_dir_cmd } from "../../../build/fs";
-import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "../../../build/link_contract";
+import {
+    merge_root_link_libs,
+    missing_runtime_dep_specs,
+    runtime_dep_link_failure_message
+} from "../../../build/link_contract";
 import { assemble_runtime_capsule_link_inputs } from "../../../build/runtime_objs";
 import { runtime_demanded_dep_specs, select_runtime_sfn_sources } from "../../../build/runtime_selection";
 import { _get_env_cmd } from "../../../build_flags";
@@ -47,7 +51,7 @@ struct TestLinkResult {
     ran_backend: boolean;
 }
 
-fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string, runtime_demand: string[], shared_cache_root: string) -> TestLinkResult ![io] {
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string, runtime_demand: string[], shared_cache_root: string, root_link_libs: string[]) -> TestLinkResult ![io] {
     // `-Wno-override-module`: every emitted `.ll` carries its own `target
     // triple`, which clang's link overrides — matching the suppression on
     // every other clang invocation in cli_main.sfn so the test path is not
@@ -226,7 +230,7 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         out_path: out_path,
         opt_flag: "-O0",
         link_flags: no_link_flags,
-        libs: libs,
+        libs: merge_root_link_libs(libs, root_link_libs),
         test_mode: true
     };
     let link_rc = backend.link(plan);
