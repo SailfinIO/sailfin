@@ -52,6 +52,7 @@ import {
     check_array_element_assignment,
     check_array_element_type
 } from "./array_element_rules";
+import { array_hof_diagnostics } from "./array_hof_rules";
 import { walk_block_expressions } from "./block_walk";
 import {
     call_arity_diagnostics,
@@ -167,6 +168,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // `hs.push(spawn ...)` on an inferred-empty `[]`-tagged receiver ->
         // E0823 (SFN-386). See `push_spawn_handle_diagnostics`.
         diagnostics = diagnostics.concat(push_spawn_handle_diagnostics(expression, bindings));
+        diagnostics = diagnostics.concat(array_hof_diagnostics(expression, bindings));
         // `field.to_uppercase()` on a proven primitive receiver whose method
         // resolves to neither a primitive method descriptor nor a free callable
         // -> E0012 (SFN-385). Silent unless the receiver's primitive kind is

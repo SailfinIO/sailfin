@@ -1,0 +1,192 @@
+// Unit tests for the array higher-order-builtin argument-shape checks
+// E0844/E0845 (SFN-691).
+//
+// `xs.reduce(0, "not a closure")` parsed, typechecked with no argument
+// checking at all, lowered, and segfaulted at runtime. The check is
+// proof-based: it fires only when the receiver is a proven array binding and
+// the offending argument's own AST shape is provably wrong (a bare literal
+// in a closure slot, or a wrong argument count) — anything an inferencer
+// would be needed to classify (an identifier, a call, another lambda in the
+// right slot) stays silent, so these tests pin the silent cases as carefully
+// as the rejecting ones.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { find } from "sfn/strings";
+import { parse_program } from "sfn/syntax";
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _first_message(diagnostics: Diagnostic[], code: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) {
+            return diagnostics[i].message;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _diagnostics_for(source: string) -> Diagnostic[] ![io] {
+    let program = parse_program(source);
+    return typecheck_diagnostics(program);
+}
+
+// -------------------------------------------------------------------
+// Rejecting cases.
+// -------------------------------------------------------------------
+test "array hof argcheck: reduce with a string literal closure argument is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    let r = xs.reduce(0, \"not a closure\");\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    assert _count_code(diagnostics, "E0844") == 0;
+}
+
+test "array hof argcheck: map with a string literal argument is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.map(\"nope\");\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    assert _count_code(diagnostics, "E0844") == 0;
+}
+
+test "array hof argcheck: filter with a string literal argument is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.filter(\"nope\");\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    assert _count_code(diagnostics, "E0844") == 0;
+}
+
+test "array hof argcheck: transposed reduce arguments are rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    let r = xs.reduce(fn (acc: int, x: int) -> int { return acc + x; }, 0);\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    assert _count_code(diagnostics, "E0844") == 0;
+    let message = _first_message(diagnostics, "E0845");
+    assert find(message, "transposed", 0) >= 0;
+}
+
+test "array hof argcheck: reduce with a null closure argument is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    let r = xs.reduce(0, null);\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    assert _count_code(diagnostics, "E0844") == 0;
+}
+
+test "array hof argcheck: map with an array literal argument is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.map([1, 2]);\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    assert _count_code(diagnostics, "E0844") == 0;
+}
+
+test "array hof argcheck: the map diagnostic names the expected closure type" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.map(\"nope\");\n"
+        + "}\n";
+    let message = _first_message(_diagnostics_for(source), "E0845");
+    assert find(message, "fn(int) -> U", 0) >= 0;
+    assert find(message, "argument 1", 0) >= 0;
+}
+
+test "array hof argcheck: an inferred array receiver is still checked" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs = [1, 2, 3];\n"
+        + "    xs.map(\"nope\");\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    // No annotation to read an element type from, so the hint degrades to
+    // the `T` placeholder rather than guessing.
+    let message = _first_message(diagnostics, "E0845");
+    assert find(message, "fn(T) -> U", 0) >= 0;
+}
+
+test "array hof argcheck: map with zero arguments is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.map();\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0844") == 1;
+    assert _count_code(diagnostics, "E0845") == 0;
+}
+
+test "array hof argcheck: reduce with one argument is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    let r = xs.reduce(0);\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0844") == 1;
+    assert _count_code(diagnostics, "E0845") == 0;
+}
+
+// -------------------------------------------------------------------
+// Silent cases — a false rejection here breaks every build.
+// -------------------------------------------------------------------
+test "array hof argcheck: map with a closure literal is accepted" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.map(fn (x: int) -> int { return x * 2; });\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0844") == 0;
+    assert _count_code(diagnostics, "E0845") == 0;
+}
+
+test "array hof argcheck: filter with a closure literal is accepted" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.filter(fn (x: int) -> boolean { return x > 1; });\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0844") == 0;
+    assert _count_code(diagnostics, "E0845") == 0;
+}
+
+test "array hof argcheck: reduce with a closure literal is accepted" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    let r = xs.reduce(0, fn (acc: int, x: int) -> int { return acc + x; });\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0844") == 0;
+    assert _count_code(diagnostics, "E0845") == 0;
+}
+
+test "array hof argcheck: a named function value in the closure slot stays silent" ![io] {
+    let source = "fn double(x: int) -> int { return x * 2; }\n"
+        + "fn main() -> void {\n"
+        + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.map(double);\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0844") == 0;
+    assert _count_code(diagnostics, "E0845") == 0;
+}
+
+test "array hof argcheck: a non-array receiver with a map member stays silent" ![io] {
+    let source = "struct S { a: int; }\n" + "fn main() -> void {\n"
+        + "    let s = S { a: 1 };\n"
+        + "    s.map(\"nope\");\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0844") == 0;
+    assert _count_code(diagnostics, "E0845") == 0;
+}
