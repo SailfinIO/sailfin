@@ -45,7 +45,7 @@ import { _llvm_text_assemble_argv } from "./build/clang_argv";
 // non-Linux target or missing prerequisite.
 import {
     direct_ld_lld_argv,
-    resolve_direct_ld_lld,
+    resolve_link_contract,
     trace_direct_link_fallback
 } from "./build/direct_link";
 // `_shell_read_cmd` runs a command and trims its stdout — used by the
@@ -72,7 +72,7 @@ import {
     target_linker_driver,
     target_linker_driver_flags
 } from "./build/target";
-// The `sfn build --static` (SFN-1268) process cell: `resolve_direct_ld_lld`
+// The `sfn build --static` (SFN-1268) process cell: `resolve_link_contract`
 // is reached ambiently here, so the flag has to travel via this cell rather
 // than a parameter.
 import { active_static_link } from "./build/target_state";
@@ -422,7 +422,7 @@ struct LlvmTextBackend {
         // axis by SFN-774): prefix the `-target` triple ahead of the
         // macOS SDK flags and filter POSIX libs. Host-native Linux/macOS
         // stays byte-identical; cross targets carry their triple.
-        // `resolve_direct_ld_lld`
+        // `resolve_link_contract`
         // below stays OS-keyed (Linux-only path selection), so both
         // resolutions are threaded independently.
         let target_os = build_target_os();
@@ -440,7 +440,7 @@ struct LlvmTextBackend {
         // target or missing prerequisite falls back to the clang driver
         // below with a trace-visible reason — never a silent ABI change.
         let static_link = active_static_link();
-        let direct = resolve_direct_ld_lld(target_os, static_link);
+        let direct = resolve_link_contract(target_os, static_link);
         if direct.ok {
             let direct_argv = direct_ld_lld_argv(direct, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
             // The trace keeps receiving the ORIGINAL argv so

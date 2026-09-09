@@ -16,7 +16,7 @@ import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { render_terminal_diagnostic } from "../terminal_output";
 import { user_config_linker, user_config_linker_origin } from "../user_config";
 import { assemble_link_inputs } from "./clang_argv";
-import { resolve_direct_ld_lld } from "./direct_link";
+import { resolve_link_contract } from "./direct_link";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
 import {
     merge_root_link_libs,
@@ -24,7 +24,7 @@ import {
     runtime_dep_link_failure_message
 } from "./link_contract";
 import { _ensure_dir, _find_substring_from } from "./paths";
-import { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs } from "./runtime_objs";
+import { assemble_runtime_capsule_link_inputs } from "./runtime_objs";
 import { runtime_demanded_dep_specs } from "./runtime_selection";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A); promoted to the triple
 // axis by SFN-774 / SFEP-0068 §3.1): the msvc ABI forces `-fuse-ld=lld`
@@ -294,7 +294,18 @@ fn _runtime_retain_root_flags(runtime_objs: string[]) -> string[] ![io] {
 }
 
 fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
-    let mut contract_lls: string[] = request.primary_lls;
+    // Copy into a fresh array rather than aliasing `request.primary_lls`.
+    // Arrays are reference-typed (SFEP-0075 3.7), so pushing the deps onto
+    // the request's own array would grow the caller's list and make the
+    // primary-IR assembly below compile the deps a second time — putting
+    // every dep object on the link line twice.
+    let mut contract_lls: string[] = [];
+    let mut pli: int = 0;
+    loop {
+        if pli >= request.primary_lls.length { break; }
+        contract_lls.push(request.primary_lls[pli]);
+        pli += 1;
+    }
     let mut cli: int = 0;
     loop {
         if cli >= request.dep_lls.length { break; }
@@ -477,7 +488,7 @@ fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
 
     if request.layout.preflights_static && active_static_link() {
         let static_triple = build_target_triple();
-        let static_contract = resolve_direct_ld_lld(build_target_os(), true);
+        let static_contract = resolve_link_contract(build_target_os(), true);
         if !static_contract.ok {
             let empty_lines: string[] = [];
             print.err(render_terminal_diagnostic(diagnostic_to_diag(static_prerequisites_diagnostic(static_triple, static_contract.reason), "build"), empty_lines, "build"));
