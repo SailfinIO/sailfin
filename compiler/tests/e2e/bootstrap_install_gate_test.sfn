@@ -944,3 +944,46 @@ test "bootstrap: refuses to install when the seed's build did not produce the ex
 
     assert remove_all(repo);
 }
+
+test "bootstrap: refuses to forward an output flag to the seed" ![io] {
+    // SFN-1270: the install, the smoke check and the freshness record all
+    // read `built_program_path()`, so honouring a caller's `-o` would leave
+    // the seed writing one path while the driver published another — the
+    // same substitution the scenario above refuses, and the recorded digest
+    // would then wedge later bootstraps into "up to date" against it.
+    // Refusing before the seed runs is what the marker's absence proves.
+    let repo = _scratch_repo("bootstrap-forwarded-output-flag-repo");
+    assert remove_all(repo);
+    fs.createDirectory(repo, true);
+    _create_fingerprint_roots(repo);
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+
+    let marker = repo + "/seed-invocations.marker";
+    _write_bootstrap_toml(repo);
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env(nested_runner_scratch("bootstrap_forwarded_output_flag"));
+    let fixtures = _fixtures_dir(repo);
+    let ok_bin = _build_ok_program(sfn, child_env, fixtures);
+    assert ok_bin.length > 0;
+    child_env.push("SFN172_MARKER=" + marker);
+    child_env.push("SFN172_OK_BIN=" + ok_bin);
+    // A seed that would have succeeded: the refusal must be attributable to
+    // the forwarded flag, not to the stub failing.
+    assert _seed_stub(repo, sfn, child_env) == 0;
+
+    let target = repo + "/elsewhere/compiler";
+    let run_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--", "-o", target], child_env, repo);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    _report_child_always("bootstrap-forwarded-output-flag build", run_exit, run_out, run_err);
+    _report_marker(marker);
+    assert run_exit != 0;
+    assert find(run_err, "cannot forward an output flag", 0) >= 0;
+
+    // The seed never ran, so nothing was built anywhere.
+    assert ! fs.exists(marker);
+    assert ! fs.exists(target);
+    assert ! fs.exists(_installed_bin_path(repo));
+
+    assert remove_all(repo);
+}

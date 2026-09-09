@@ -14,7 +14,7 @@ import {
 } from "sfn/cli";
 import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
 
-import { _bootstrap_compiler_build_argv, _build_args_set_output, command_def } from "../../src/cli/commands/dev";
+import { _bootstrap_compiler_build_argv, _build_args_have_output, command_def } from "../../src/cli/commands/dev";
 
 test "dev-bootstrap: build tail reaches the seed argv verbatim" {
     let parsed = parse(command_def(), ["dev", "bootstrap", "build", "--", "--no-cache", "--cache-trace"]);
@@ -88,8 +88,9 @@ test "dev-bootstrap: a pinned output path precedes the forwarded tail" {
 }
 
 // `get_or` returns the first occurrence, so an injected `-o` would beat a
-// caller's own. `_dev_bootstrap_build` suppresses the pin instead, leaving
-// the caller's override authoritative.
+// caller's own. Rather than yield the pin, `_dev_bootstrap_build` refuses
+// the invocation: it installs from `built_program_path()` regardless, so
+// deferring would republish an artifact the seed did not write there.
 test "dev-bootstrap: an output flag in the forwarded tail is detected" {
     let dash_o: string[] = ["-o", "mine"];
     let long_o: string[] = ["--o", "mine"];
@@ -97,10 +98,10 @@ test "dev-bootstrap: an output flag in the forwarded tail is detected" {
     let long_joined: string[] = ["--o=mine"];
     let unrelated: string[] = ["--no-cache", "--cache-trace"];
     let empty: string[] = [];
-    assert expect_eq_bool(_build_args_set_output(dash_o), true).ok;
-    assert expect_eq_bool(_build_args_set_output(long_o), true).ok;
-    assert expect_eq_bool(_build_args_set_output(joined), true).ok;
-    assert expect_eq_bool(_build_args_set_output(long_joined), true).ok;
-    assert expect_eq_bool(_build_args_set_output(unrelated), false).ok;
-    assert expect_eq_bool(_build_args_set_output(empty), false).ok;
+    assert expect_eq_bool(_build_args_have_output(dash_o), true).ok;
+    assert expect_eq_bool(_build_args_have_output(long_o), true).ok;
+    assert expect_eq_bool(_build_args_have_output(joined), true).ok;
+    assert expect_eq_bool(_build_args_have_output(long_joined), true).ok;
+    assert expect_eq_bool(_build_args_have_output(unrelated), false).ok;
+    assert expect_eq_bool(_build_args_have_output(empty), false).ok;
 }
