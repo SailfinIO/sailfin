@@ -14,19 +14,19 @@ import {
 } from "sfn/cli";
 import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
 
-import { _bootstrap_compiler_build_argv, command_def } from "../../src/cli/commands/dev";
+import { _bootstrap_compiler_build_argv, _build_args_have_output, command_def } from "../../src/cli/commands/dev";
 
 test "dev-bootstrap: build tail reaches the seed argv verbatim" {
     let parsed = parse(command_def(), ["dev", "bootstrap", "build", "--", "--no-cache", "--cache-trace"]);
     assert expect_eq_bool(parse_is_ok(parsed), true).ok;
 
-    let argv = _bootstrap_compiler_build_argv("/seed/sfn", positionals(parse_matches(parsed), "build-arg"));
+    let argv = _bootstrap_compiler_build_argv("/seed/sfn", "", positionals(parse_matches(parsed), "build-arg"));
     assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check", "--no-cache", "--cache-trace"]).ok;
 }
 
 test "dev-bootstrap: bare build argv is unchanged" {
     let no_build_args: string[] = [];
-    let argv = _bootstrap_compiler_build_argv("/seed/sfn", no_build_args);
+    let argv = _bootstrap_compiler_build_argv("/seed/sfn", "", no_build_args);
     assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check"]).ok;
 }
 
@@ -44,7 +44,7 @@ test "dev-bootstrap: --clean-tree never reaches the seed argv" {
     assert expect_eq_bool(parse_is_ok(parsed), true).ok;
 
     let m = parse_matches(parsed);
-    let argv = _bootstrap_compiler_build_argv("/seed/sfn", positionals(m, "build-arg"));
+    let argv = _bootstrap_compiler_build_argv("/seed/sfn", "", positionals(m, "build-arg"));
     assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check", "--no-cache"]).ok;
 }
 
@@ -66,4 +66,42 @@ test "dev-bootstrap: --clean-tree adds no element to the descent path" {
     // test does not construct — pinning the shape here would pin the wrong
     // root. The invariant that carries over is the equality below.
     assert expect_eq_str_array(subcommand_path(parse_matches(parsed)), subcommand_path(parse_matches(bare))).ok;
+}
+
+// SFN-1270: the driver dictates the seed build's output path rather than
+// predicting it, so `built_program_path()` and `build.sfn`'s canonical
+// per-capsule default cannot drift apart on a future rename.
+test "dev-bootstrap: a pinned output path lands in the fixed prefix" {
+    let no_build_args: string[] = [];
+    let argv = _bootstrap_compiler_build_argv("/seed/sfn", "build/capsules/sfn/compiler/bin/compiler", no_build_args);
+    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check", "-o", "build/capsules/sfn/compiler/bin/compiler"]).ok;
+}
+
+// The pin goes in the prefix, never after the tail: SFN-1076 requires the
+// caller's arguments to reach the seed last and byte-for-byte.
+test "dev-bootstrap: a pinned output path precedes the forwarded tail" {
+    let parsed = parse(command_def(), ["dev", "bootstrap", "build", "--", "--no-cache"]);
+    assert expect_eq_bool(parse_is_ok(parsed), true).ok;
+
+    let argv = _bootstrap_compiler_build_argv("/seed/sfn", "out/bin", positionals(parse_matches(parsed), "build-arg"));
+    assert expect_eq_str_array(argv, ["/seed/sfn", "build", "-p", "compiler", "--skip-toolchain-check", "-o", "out/bin", "--no-cache"]).ok;
+}
+
+// `get_or` returns the first occurrence, so an injected `-o` would beat a
+// caller's own. Rather than yield the pin, `_dev_bootstrap_build` refuses
+// the invocation: it installs from `built_program_path()` regardless, so
+// deferring would republish an artifact the seed did not write there.
+test "dev-bootstrap: an output flag in the forwarded tail is detected" {
+    let dash_o: string[] = ["-o", "mine"];
+    let long_o: string[] = ["--o", "mine"];
+    let joined: string[] = ["-o=mine"];
+    let long_joined: string[] = ["--o=mine"];
+    let unrelated: string[] = ["--no-cache", "--cache-trace"];
+    let empty: string[] = [];
+    assert expect_eq_bool(_build_args_have_output(dash_o), true).ok;
+    assert expect_eq_bool(_build_args_have_output(long_o), true).ok;
+    assert expect_eq_bool(_build_args_have_output(joined), true).ok;
+    assert expect_eq_bool(_build_args_have_output(long_joined), true).ok;
+    assert expect_eq_bool(_build_args_have_output(unrelated), false).ok;
+    assert expect_eq_bool(_build_args_have_output(empty), false).ok;
 }

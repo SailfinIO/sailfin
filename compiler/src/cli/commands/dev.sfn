@@ -1028,12 +1028,39 @@ fn _dev_bootstrap_fetch() -> int ![clock, io, net] {
     return 0;
 }
 
+// True when the caller's forwarded tail already names an output path.
+// `sfn build` declares `-o` via `flag_value_short("o", "o", ...)`
+// (`compiler/src/cli/commands/build.sfn:112`), so both `-o` and `--o`
+// spellings reach the same `get_or(matches, "o", ...)` slot — and that
+// getter returns the FIRST occurrence
+// (`capsules/sfn/cli/src/matches.sfn:29`), not the last. A driver-injected
+// `-o` would therefore sit ahead of the caller's and silently win.
+//
+// SFN-1270: the driver refuses such an invocation outright rather than
+// yielding the pin. Deferring to the caller would leave the seed writing
+// one path while the driver still smoke-checks, installs, and records a
+// freshness digest for another — which is the very substitution this fix
+// exists to stop, and the recorded digest would then wedge every later
+// bootstrap into "up to date" against those bits.
+fn _build_args_have_output(build_args: string[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= build_args.length { break; }
+        let a = build_args[i];
+        if a == "-o" || a == "--o" { return true; }
+        if a.length > 3 && substring(a, 0, 3) == "-o=" { return true; }
+        if a.length > 4 && substring(a, 0, 4) == "--o=" { return true; }
+        i += 1;
+    }
+    return false;
+}
+
 // Run the pinned seed's `sfn build -p compiler` as a subprocess (not a
 // process-image replacement) so the command can report a result. The seed
 // binary is the exact stage0; the `SAILFIN_BOOTSTRAP_DISPATCHED` guard is not
 // needed because the invoked binary IS the seed (its core version satisfies
 // the pin, so its own gate is a no-op).
-fn _bootstrap_compiler_build_argv(seed_bin: string, build_args: string[]) -> string[] {
+fn _bootstrap_compiler_build_argv(seed_bin: string, out_path: string, build_args: string[]) -> string[] {
     // `--skip-toolchain-check` belongs to the fixed prefix, not after the
     // forwarded tail: the driver has already resolved the exact seed binary to
     // run and must not let that child re-select a different toolchain (a
@@ -1043,6 +1070,29 @@ fn _bootstrap_compiler_build_argv(seed_bin: string, build_args: string[]) -> str
     // last and byte-for-byte. Appending it after them would satisfy the first
     // and quietly break the second.
     let mut argv: string[] = [seed_bin, "build", "-p", "compiler", "--skip-toolchain-check"];
+    // SFN-1270: dictate the output path instead of predicting it. Without
+    // `-o`, the seed derives its own default from `capsule.toml`'s
+    // scope/name (`build.sfn:483-498`) while the driver independently
+    // reconstructs the same literal in `built_program_path()`
+    // (`compiler/src/build/source_fingerprint.sfn:90`); the two agreed only
+    // by convention, and a rename broke that silently. `sfn selfhost`
+    // already closes the loop this way (`cli_selfhost.sfn:322`).
+    //
+    // The path is resolved from the driver's own `build_target_os()`, which
+    // reads the host and the `SAILFIN_TARGET_*` environment the child
+    // inherits — not a `--target` sitting in the forwarded tail, which the
+    // driver never parses (`build/target.sfn:308`; `active_build_target()`
+    // is written only by `build.sfn:run`). A tail `--target` therefore
+    // pins a path named for the wrong target; the build's own smoke check
+    // rejects the foreign binary, so it fails closed. `_dev_bootstrap_build`
+    // is a stage0 self-host and has no cross gate of its own (SFN-1108
+    // gates dispatch, `bootstrap_gate_or_dispatch` above).
+    //
+    // Left empty by callers that have no path to pin.
+    if out_path.length > 0 {
+        argv.push("-o");
+        argv.push(out_path);
+    }
     let mut i: int = 0;
     loop {
         if i >= build_args.length { break; }
@@ -1052,9 +1102,9 @@ fn _bootstrap_compiler_build_argv(seed_bin: string, build_args: string[]) -> str
     return argv;
 }
 
-fn _bootstrap_run_compiler_build(m: BootstrapManifest, build_args: string[]) -> int ![io] {
+fn _bootstrap_run_compiler_build(m: BootstrapManifest, out_path: string, build_args: string[]) -> int ![io] {
     let seed_bin = _bootstrap_seed_bin(m.install_base, m.version);
-    return process.run(_bootstrap_compiler_build_argv(seed_bin, build_args));
+    return process.run(_bootstrap_compiler_build_argv(seed_bin, out_path, build_args));
 }
 
 // A `local-path` seed has no release to fetch; the seed must already be in
@@ -1147,6 +1197,19 @@ fn _dev_bootstrap_build(clean: boolean, force: boolean, build_args: string[]) ->
         }
     }
 
+    // SFN-1270: the driver publishes what the build produced, so it has to
+    // know where that is. A caller-supplied `-o` moves the seed's output
+    // somewhere the driver cannot attribute — and it cannot simply defer,
+    // because the install, the smoke check, and the freshness record below
+    // all read `built_program_path()` regardless. Refuse rather than
+    // publish an artifact this build did not make.
+    if _build_args_have_output(build_args) {
+        print.err("error: sfn dev bootstrap build cannot forward an output flag (`-o`) to the seed");
+        print.err("  the bootstrap installs the binary the seed just built, so it must own the build's output path");
+        print.err("  to build the compiler to a path of your choosing, invoke the seed directly: <seed> build -p compiler -o <path>");
+        return 1;
+    }
+
     write_fingerprint(pending_fingerprint_path(), pre);
 
     let ensured = _bootstrap_ensure_seed(m);
@@ -1154,8 +1217,38 @@ fn _dev_bootstrap_build(clean: boolean, force: boolean, build_args: string[]) ->
         fs.deleteFile(pending_fingerprint_path());
         return ensured;
     }
+    // SFN-1270: prove the artifact about to be installed came from THIS
+    // build, rather than trusting that something is sitting at the path the
+    // driver predicted. Two halves, and both are needed:
+    //
+    //   1. Pin the seed's output path (`-o built`) so producer and consumer
+    //      cannot drift. Skipped when the caller supplied its own `-o`,
+    //      which makes the artifact's location the caller's business.
+    //   2. Delete any pre-existing file there first, so a leftover binary
+    //      from an earlier build — or from a pre-rename layout — cannot be
+    //      mistaken for output. Presence after the build then *means*
+    //      "written by this build".
+    //
+    // The smoke check below cannot substitute for this: it proves the
+    // candidate runs, and a months-old compiler runs fine. That is exactly
+    // how a stale binary got republished over `build/bin/sfn` repeatedly,
+    // each republish reinstalling the same stale driver so the substitution
+    // repeated. Version output cannot substitute either —
+    // `resolve_compiler_version()` reads `compiler/capsule.toml` from the
+    // workspace at runtime, so a stale binary reports the current version.
+    let built = built_program_path();
+    if fs.exists(built) && !fs.deleteFile(built) {
+        fs.deleteFile(pending_fingerprint_path());
+        print.err("error: stale-or-missing build artifact: could not remove the previous artifact at "
+            + built);
+        print.err("  the bootstrap clears that path so a file surviving the build proves the build wrote it; without the clear it cannot");
+        if host_is_windows() {
+            print.err("  a running copy of that binary cannot be replaced on Windows; close it and retry");
+        }
+        return 1;
+    }
     print("sfn dev bootstrap: building compiler with seed " + m.version);
-    let rc = _bootstrap_run_compiler_build(m, build_args);
+    let rc = _bootstrap_run_compiler_build(m, built, build_args);
     if rc != 0 {
         fs.deleteFile(pending_fingerprint_path());
         print.err("error: compiler build failed (seed " + m.version + ", exit "
@@ -1171,6 +1264,20 @@ fn _dev_bootstrap_build(clean: boolean, force: boolean, build_args: string[]) ->
         return 1;
     }
 
+    // SFN-1270: fail closed. The seed reported success, so if nothing is at
+    // the path it was told to write, the driver cannot prove what it is
+    // holding and must not publish. Worded as a provenance refusal, not a
+    // build error: the build succeeded, and the developer's next move is to
+    // check the layout the seed emits, not to debug a compile.
+    if !fs.exists(built) {
+        fs.deleteFile(pending_fingerprint_path());
+        print.err("error: stale-or-missing build artifact: the seed reported a successful build but wrote no compiler to "
+            + built);
+        print.err("  this is a provenance refusal, not a compile failure: the driver cannot prove the binary it would install came from this build");
+        print.err("  " + out + " was left unchanged");
+        return 1;
+    }
+
     // Smoke-verify the built artifact BEFORE it replaces anything (SFN-679).
     // Publishing first and checking after would swap a working `build/bin/sfn`
     // for a broken one on every bad build, leaving the developer with no
@@ -1180,10 +1287,10 @@ fn _dev_bootstrap_build(clean: boolean, force: boolean, build_args: string[]) ->
     // purely additive: the previously installed compiler is untouched.
     // SFN-1068 / SFEP-0073 §3.3: prove the freshly built binary runs, not
     // that its per-user default toolchain resolves.
-    let smoke_rc = process.run([built_program_path(), "version", "--skip-toolchain-check"]);
+    let smoke_rc = process.run([built, "version", "--skip-toolchain-check"]);
     if smoke_rc != 0 {
         fs.deleteFile(pending_fingerprint_path());
-        print.err("error: the compiler built at " + built_program_path()
+        print.err("error: the compiler built at " + built
             + " failed its smoke check (exit "
             + int_to_string(smoke_rc)
             + "); "
@@ -1192,7 +1299,7 @@ fn _dev_bootstrap_build(clean: boolean, force: boolean, build_args: string[]) ->
         return 1;
     }
 
-    if !install_built_compiler(built_program_path(), out) {
+    if !install_built_compiler(built, out) {
         fs.deleteFile(pending_fingerprint_path());
         print.err("error: could not install the built compiler to " + out);
         return 1;
@@ -1502,16 +1609,26 @@ fn _dev_bootstrap_check() -> int ![clock, io, net] {
     if ensured != 0 { return ensured; }
     print("sfn dev bootstrap: building compiler with seed " + m.version);
     let no_build_args: string[] = [];
-    let build_rc = _bootstrap_run_compiler_build(m, no_build_args);
+    // SFN-1270: same pin as `_dev_bootstrap_build`. `check` takes no
+    // forwarded build arguments, so the output path is always the driver's
+    // to dictate; clearing it first is what turns the `fs.exists` guard
+    // below from "something is there" into "this build wrote it".
+    let built = built_program_path();
+    if fs.exists(built) && !fs.deleteFile(built) {
+        print.err("error: stale-or-missing build artifact: could not remove the previous artifact at "
+            + built);
+        return 1;
+    }
+    let build_rc = _bootstrap_run_compiler_build(m, built, no_build_args);
     if build_rc != 0 {
         print.err("error: compiler build failed (seed " + m.version + ", exit "
             + int_to_string(build_rc)
             + ")");
         return build_rc;
     }
-    let built = built_program_path();
     if !fs.exists(built) {
-        print.err("error: build did not produce " + built);
+        print.err("error: stale-or-missing build artifact: the seed reported a successful build but wrote no compiler to "
+            + built);
         return 1;
     }
     // SFN-1068 / SFEP-0073 §3.3: prove the freshly built binary runs, not
@@ -1675,5 +1792,6 @@ export {
     _bootstrap_commit_dev_payload,
     _bootstrap_prefixed_install_path,
     _bootstrap_restore_after_entry_claim,
-    _bootstrap_target_is_cross
+    _bootstrap_target_is_cross,
+    _build_args_have_output
 };

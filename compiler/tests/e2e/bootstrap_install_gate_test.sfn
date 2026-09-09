@@ -277,6 +277,24 @@ fn _seed_unrunnable_src(compiler_dest: string) -> string {
         + "}\n";
 }
 
+// A seed that exits 0 and produces a genuinely runnable artifact — but at
+// the PRE-RENAME path `build/sailfin/program` instead of the scoped path
+// `built_program_path()` (`compiler/src/build/source_fingerprint.sfn`)
+// resolves to. This is the SFN-1270 drift itself: the seed's real output
+// location disagrees with where the driver predicts it landed. The
+// executable bit is set and the content is real (unlike
+// `_seed_unrunnable_src`) so a refusal here proves the fix checks
+// PROVENANCE, not runnability.
+fn _seed_wrong_output_path_src() -> string {
+    return "import { copy } from \"sfn/fs\";\n\n" + "fn main() -> int ![io] {\n"
+        + "    fs.appendFile(env.get(\"SFN172_MARKER\"), \"invoked\\n\");\n"
+        + "    fs.createDirectory(\"build/sailfin\", true);\n"
+        + "    let _ok = copy(env.get(\"SFN172_OK_BIN\"), \"build/sailfin/program\");\n"
+        + "    fs.set_perms(\"build/sailfin/program\", 493);\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
 // Compile `src_text` to the store's seed binary path and mark the store
 // entry ready (`.sha256`, written last so a partial write never reads as
 // complete). Returns the seed FIXTURE's own build exit code (whether it
@@ -303,6 +321,10 @@ fn _seed_stub_failing_build(repo: string, sfn: string, child_env: string[]) -> i
 
 fn _seed_stub_unrunnable_program(repo: string, sfn: string, child_env: string[]) -> int ![io] {
     return _install_seed(repo, sfn, child_env, _seed_unrunnable_src(_compiler_dest_rel()), "seed-unrunnable");
+}
+
+fn _seed_stub_wrong_output_path(repo: string, sfn: string, child_env: string[]) -> int ![io] {
+    return _install_seed(repo, sfn, child_env, _seed_wrong_output_path_src(), "seed-wrong-output-path");
 }
 
 // ---------------------------------------------------------------------
@@ -840,6 +862,128 @@ test "bootstrap: install.sh lands the seed where the native dispatch probes" ![i
     _report_marker(marker);
     assert build_exit == 0;
     assert _marker_count(marker) == 1;
+
+    assert remove_all(repo);
+}
+
+test "bootstrap: refuses to install when the seed's build did not produce the expected artifact" ![io] {
+    // SFN-1270: the driver predicts the seed's build output via
+    // `built_program_path()` rather than observing it. A seed that exits 0
+    // and genuinely builds a runnable compiler, but writes it to the
+    // pre-rename path `build/sailfin/program` instead of the scoped path
+    // the driver expects, must not be treated as success: a stale binary
+    // already sitting at the predicted path would otherwise pass the smoke
+    // check and get republished untouched.
+    let repo = _scratch_repo("bootstrap-wrong-output-path-repo");
+    assert remove_all(repo);
+    fs.createDirectory(repo, true);
+    _create_fingerprint_roots(repo);
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+    fs.writeFile(repo + "/runtime/sfn/b.sfn", "fn b_value() -> int { return 2; }\n");
+
+    let marker = repo + "/seed-invocations.marker";
+    let installed = _installed_bin_path(repo);
+    _write_bootstrap_toml(repo);
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env(nested_runner_scratch("bootstrap_wrong_output_path"));
+    let fixtures = _fixtures_dir(repo);
+    let ok_bin = _build_ok_program(sfn, child_env, fixtures);
+    assert ok_bin.length > 0;
+    child_env.push("SFN172_MARKER=" + marker);
+    child_env.push("SFN172_OK_BIN=" + ok_bin);
+    let seed_rc = _seed_stub_wrong_output_path(repo, sfn, child_env);
+    assert seed_rc == 0;
+
+    // A pre-existing binary at the scoped compiler path: what the buggy
+    // driver would smoke-check and install without ever asking whether the
+    // seed's build actually produced it. It must be genuinely runnable so a
+    // refusal here is attributable to PROVENANCE, not to the content being
+    // unrunnable (that case is `_seed_unrunnable_src` above).
+    let compiler_dest = repo + "/" + _compiler_dest_rel();
+    fs.createDirectory(repo + "/build/capsules/sfn/compiler/bin", true);
+    assert copy(ok_bin, compiler_dest);
+    fs.set_perms(compiler_dest, 493);
+
+    // A distinguishable placeholder at `build/bin/sfn`, built from its own
+    // source so its bytes differ from `ok_bin` — a hash comparison after the
+    // run cannot be fooled by the buggy path republishing `ok_bin`'s content
+    // under a different name.
+    let placeholder_src = fixtures + "/wrong-output-path-placeholder.sfn";
+    fs.writeFile(placeholder_src, "fn main() -> int ![io] {\n    print(\"wrong-output-path-placeholder\");\n    return 0;\n}\n");
+    let placeholder_base = fixtures + "/wrong-output-path-placeholder";
+    let placeholder_rc = _build_fixture(sfn, child_env, placeholder_src, placeholder_base, "bootstrap-install-gate wrong-output-path placeholder");
+    assert placeholder_rc == 0;
+    let placeholder_bin = _built_path(placeholder_base);
+    fs.createDirectory(repo + "/build/bin", true);
+    assert copy(placeholder_bin, installed);
+    fs.set_perms(installed, 493);
+
+    let before_bytes = read_bytes(installed);
+    assert before_bytes.status == 0;
+    let before_hash = sha256_hex_of_bytes(before_bytes.addr, before_bytes.length);
+    free_bytes(before_bytes);
+
+    let run_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    _report_child_always("bootstrap-wrong-output-path build", run_exit, run_out, run_err);
+    _report_binary_state("build/bin/sfn (after wrong-output-path build)", installed);
+    _report_marker(marker);
+    assert run_exit != 0;
+    assert find(run_err, "stale-or-missing build artifact", 0) >= 0;
+
+    let after_bytes = read_bytes(installed);
+    assert after_bytes.status == 0;
+    assert sha256_hex_of_bytes(after_bytes.addr, after_bytes.length) == before_hash;
+    free_bytes(after_bytes);
+
+    // The driver deletes the stale scoped-artifact candidate before invoking
+    // the seed (fix 1) and the seed never rewrites it (it wrote to
+    // `build/sailfin/program` instead), so it must stay gone.
+    assert ! fs.exists(compiler_dest);
+
+    assert remove_all(repo);
+}
+
+test "bootstrap: refuses to forward an output flag to the seed" ![io] {
+    // SFN-1270: the install, the smoke check and the freshness record all
+    // read `built_program_path()`, so honouring a caller's `-o` would leave
+    // the seed writing one path while the driver published another — the
+    // same substitution the scenario above refuses, and the recorded digest
+    // would then wedge later bootstraps into "up to date" against it.
+    // Refusing before the seed runs is what the marker's absence proves.
+    let repo = _scratch_repo("bootstrap-forwarded-output-flag-repo");
+    assert remove_all(repo);
+    fs.createDirectory(repo, true);
+    _create_fingerprint_roots(repo);
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+
+    let marker = repo + "/seed-invocations.marker";
+    _write_bootstrap_toml(repo);
+    let sfn = sfn_bin_abs_path();
+    let mut child_env = clean_runner_env(nested_runner_scratch("bootstrap_forwarded_output_flag"));
+    let fixtures = _fixtures_dir(repo);
+    let ok_bin = _build_ok_program(sfn, child_env, fixtures);
+    assert ok_bin.length > 0;
+    child_env.push("SFN172_MARKER=" + marker);
+    child_env.push("SFN172_OK_BIN=" + ok_bin);
+    // A seed that would have succeeded: the refusal must be attributable to
+    // the forwarded flag, not to the stub failing.
+    assert _seed_stub(repo, sfn, child_env) == 0;
+
+    let target = repo + "/elsewhere/compiler";
+    let run_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--", "-o", target], child_env, repo);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    _report_child_always("bootstrap-forwarded-output-flag build", run_exit, run_out, run_err);
+    _report_marker(marker);
+    assert run_exit != 0;
+    assert find(run_err, "cannot forward an output flag", 0) >= 0;
+
+    // The seed never ran, so nothing was built anywhere.
+    assert ! fs.exists(marker);
+    assert ! fs.exists(target);
+    assert ! fs.exists(_installed_bin_path(repo));
 
     assert remove_all(repo);
 }
