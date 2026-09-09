@@ -34,7 +34,7 @@
 // is module-private — by checking which directory the nested run's
 // `fs.mkdtemp("<base>/sfn-test-")` actually populated.
 import { remove_all } from "sfn/fs";
-import { starts_with } from "sfn/strings";
+import { find, starts_with } from "sfn/strings";
 import {
     clean_runner_env,
     nested_runner_scratch,
@@ -106,12 +106,25 @@ fn _nested_run_mints_under(base: string, var_name: string, tag: string) -> boole
     // inspect afterward — keep it.
     env = _without_key(env, "SAILFIN_TEST_KEEP_SCRATCH");
     env.push("SAILFIN_TEST_KEEP_SCRATCH=1");
+    // SFN-1249: a simulated Windows host must still restore executable
+    // permissions on POSIX. An isolated cold/warm pair exercises that
+    // path regardless of the surrounding runner's cache state.
+    env = _without_key(env, "SAILFIN_BUILD_CACHE_DIR");
+    env.push("SAILFIN_BUILD_CACHE_DIR=" + base + "/cache");
 
-    let exit = process.run_capture([sfn_bin_path(), "test", _fixture()], env);
+    let exit = process.run_capture([sfn_bin_path(), "test", _fixture(), "--json"], env);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure(tag, exit, out, err);
     assert exit == 0;
+
+    let warm_exit = process.run_capture([sfn_bin_path(), "test", _fixture(), "--json"], env);
+    let warm_out = process.capture_take_stdout();
+    let warm_err = process.capture_take_stderr();
+    report_child_failure(tag + "-warm", warm_exit, warm_out, warm_err);
+    assert warm_exit == 0;
+    assert find(warm_out, "\"test_bin_hits\":1", 0) >= 0;
+    assert find(warm_out, "\"test_bin_misses\":0", 0) >= 0;
 
     let entries = fs.listDirectory(base);
     let mut i: int = 0;
