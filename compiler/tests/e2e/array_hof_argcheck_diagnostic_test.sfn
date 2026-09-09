@@ -2,18 +2,17 @@
 //
 // SFN-691: a transposed `reduce(closure, initial)` call must fail in the
 // frontend with an E0845 diagnostic, in both `check` and `build`, rather
-// than lowering, linking, and segfaulting at runtime. Literal AST nodes
-// carry no span (`ast.sfn:62,66`), so unlike the sibling
-// `array_element_mismatch_diagnostic_test.sfn` this does NOT assert on a
-// `file:line:column` location — only on the E-code and the absence of the
-// lowering/ICE markers that would indicate the diagnostic failed to stop the
-// pipeline.
+// than lowering, linking, and segfaulting at runtime (the pre-fix binary
+// exited 139). Literal AST nodes carry no span (`ast.sfn:62,66`), so the
+// diagnostic anchors on the enclosing `Call` — which does carry one
+// (`ast.sfn:83`) — and names the offending argument by index in its message.
+// The location is therefore still assertable, and this pins it exactly as
+// the sibling `array_element_mismatch_diagnostic_test.sfn` does.
 import { find } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
 
 fn _source() -> string {
-    return "fn main() -> void ![io.console] {\n"
-        + "    let xs: int[] = [1, 2, 3];\n"
+    return "fn main() -> void ![io] {\n" + "    let xs: int[] = [1, 2, 3];\n"
         + "    let r = xs.reduce(fn (acc: int, x: int) -> int { return acc + x; }, 0);\n"
         + "    print(\"r=\" + r);\n"
         + "}\n";
@@ -44,19 +43,21 @@ fn _run(command: string) -> string ![io] {
     return result;
 }
 
-fn _assert_frontend_rejection(output: string) {
+fn _assert_frontend_rejection(output: string, location: string) {
     assert find(output, "unexpected zero exit", 0) < 0;
     assert find(output, "unexpected binary", 0) < 0;
     assert find(output, "error[E0845]:", 0) >= 0;
+    assert find(output, "the arguments are transposed", 0) >= 0;
+    assert find(output, location, 0) >= 0;
     assert find(output, "llvm lowering [fatal]", 0) < 0;
     assert find(output, "invalid operand type for instruction", 0) < 0;
     assert find(output, "internal compiler error", 0) < 0;
 }
 
 test "array hof argcheck: check rejects a transposed reduce" ![io] {
-    _assert_frontend_rejection(_run("check"));
+    _assert_frontend_rejection(_run("check"), "array-hof-argcheck.sfn:3:16");
 }
 
 test "array hof argcheck: build agrees with check before lowering" ![io] {
-    _assert_frontend_rejection(_run("build"));
+    _assert_frontend_rejection(_run("build"), "array-hof-argcheck:3:16");
 }

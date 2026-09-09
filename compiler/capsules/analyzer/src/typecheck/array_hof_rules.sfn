@@ -21,7 +21,12 @@ import { token_from_name, trim_text, typecheck_int_to_string } from "../typechec
 
 // Declared argument count for a supported array higher-order builtin, or -1
 // for anything else (including plain array methods with no closure
-// argument, like `.push`/`.length`).
+// argument, like `.push`/`.length`). These counts mirror the runtime
+// helpers the lowerer routes to — `sfn_array_sfn_filter(arr, predicate)`
+// and `sfn_array_sfn_reduce(arr, initial, reducer)` in
+// `runtime/sfn/array.sfn`, dispatched at `method_target.sfn:393-456`,
+// which injects the receiver itself and so consumes no argument slot.
+// Keep the two in step if a helper signature changes.
 fn _array_hof_arity(member: string) -> int {
     if strings_equal(member, "map") { return 1; }
     if strings_equal(member, "filter") { return 1; }
@@ -42,19 +47,29 @@ fn _array_hof_signature_text(member: string) -> string {
     return "";
 }
 
-// True only for a literal AST node that can never be a closure value —
-// `StringLiteral`/`NumberLiteral`/`BooleanLiteral`. Every other variant,
-// including `Identifier` (may name a function value we cannot resolve here)
-// and `null`, is NOT provably wrong and returns false.
+// True only for an AST node whose own shape is a closed value form that
+// can never denote a closure — the three scalar literals plus `null` and
+// the three aggregate literals. Classifying these needs no type inference
+// at all, so admitting them costs nothing against the fail-open posture,
+// and each otherwise lowers to a `{i8*, i8*}` pair the runtime helper then
+// calls through (`xs.reduce(0, null)` exits 139 without this).
+//
+// Every other variant returns false. `Identifier` in particular may name a
+// function value this pass cannot resolve, and `Call`/`Member`/`Index`
+// would need the expression-type inferencer the analyzer does not have.
 fn _is_proven_non_closure(value: Expression?) -> boolean {
     if value == null { return false; }
     if strings_equal(value.variant, "StringLiteral") { return true; }
     if strings_equal(value.variant, "NumberLiteral") { return true; }
     if strings_equal(value.variant, "BooleanLiteral") { return true; }
+    if strings_equal(value.variant, "NullLiteral") { return true; }
+    if strings_equal(value.variant, "Array") { return true; }
+    if strings_equal(value.variant, "Object") { return true; }
+    if strings_equal(value.variant, "Struct") { return true; }
     return false;
 }
 
-fn _literal_kind_text(value: Expression) -> string {
+fn _non_closure_text(value: Expression) -> string {
     if strings_equal(value.variant, "StringLiteral") {
         return "a string literal";
     }
@@ -64,6 +79,10 @@ fn _literal_kind_text(value: Expression) -> string {
     if strings_equal(value.variant, "BooleanLiteral") {
         return "a boolean literal";
     }
+    if strings_equal(value.variant, "NullLiteral") { return "`null`"; }
+    if strings_equal(value.variant, "Array") { return "an array literal"; }
+    if strings_equal(value.variant, "Object") { return "an object literal"; }
+    if strings_equal(value.variant, "Struct") { return "a struct literal"; }
     return "not a closure";
 }
 
@@ -81,6 +100,11 @@ fn _array_element_text(entry: SymbolEntry) -> string {
     return "T";
 }
 
+// The `reduce` hint spells the accumulator as the element type. That is
+// exact for the only shipped lowering — the runtime helper is scalar-i64
+// throughout (`method_target.sfn:448-455`) — but it is narrower than the
+// language will eventually allow (a `string` accumulator over `int[]` is
+// `fn(string, int) -> string`). Widen this text when the helper does.
 fn _expected_closure_text(member: string, elem: string) -> string {
     if strings_equal(member, "map") { return "fn(" + elem + ") -> U"; }
     if strings_equal(member, "filter") { return "fn(" + elem + ") -> boolean"; }
@@ -167,10 +191,10 @@ fn array_hof_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Dia
         let first = expression.arguments[0];
         if first != null {
             if strings_equal(first.variant, "Lambda") {
-                return [_make_array_hof_argument_diagnostic(callee.member, 1, "", _literal_kind_text(slot), true, span)];
+                return [_make_array_hof_argument_diagnostic(callee.member, 1, "", _non_closure_text(slot), true, span)];
             }
         }
     }
     let expected_closure = _expected_closure_text(callee.member, _array_element_text(entry));
-    return [_make_array_hof_argument_diagnostic(callee.member, closure_index + 1, expected_closure, _literal_kind_text(slot), false, span)];
+    return [_make_array_hof_argument_diagnostic(callee.member, closure_index + 1, expected_closure, _non_closure_text(slot), false, span)];
 }

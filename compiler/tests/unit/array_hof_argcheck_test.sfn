@@ -83,6 +83,45 @@ test "array hof argcheck: transposed reduce arguments are rejected" ![io] {
     assert find(message, "transposed", 0) >= 0;
 }
 
+test "array hof argcheck: reduce with a null closure argument is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    let r = xs.reduce(0, null);\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    assert _count_code(diagnostics, "E0844") == 0;
+}
+
+test "array hof argcheck: map with an array literal argument is rejected" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.map([1, 2]);\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    assert _count_code(diagnostics, "E0844") == 0;
+}
+
+test "array hof argcheck: the map diagnostic names the expected closure type" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
+        + "    xs.map(\"nope\");\n"
+        + "}\n";
+    let message = _first_message(_diagnostics_for(source), "E0845");
+    assert find(message, "fn(int) -> U", 0) >= 0;
+    assert find(message, "argument 1", 0) >= 0;
+}
+
+test "array hof argcheck: an inferred array receiver is still checked" ![io] {
+    let source = "fn main() -> void {\n" + "    let xs = [1, 2, 3];\n"
+        + "    xs.map(\"nope\");\n"
+        + "}\n";
+    let diagnostics = _diagnostics_for(source);
+    assert _count_code(diagnostics, "E0845") == 1;
+    // No annotation to read an element type from, so the hint degrades to
+    // the `T` placeholder rather than guessing.
+    let message = _first_message(diagnostics, "E0845");
+    assert find(message, "fn(T) -> U", 0) >= 0;
+}
+
 test "array hof argcheck: map with zero arguments is rejected" ![io] {
     let source = "fn main() -> void {\n" + "    let xs: int[] = [1, 2, 3];\n"
         + "    xs.map();\n"
