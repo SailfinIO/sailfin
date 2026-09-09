@@ -5,7 +5,12 @@ import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
 import { _sanitize_filename_cmd, _write_text_cmd } from "../../../build/fs";
-import { build_target_os, build_target_triple, target_exe_name } from "../../../build/target";
+import {
+    build_target_os,
+    build_target_triple,
+    host_is_windows,
+    target_exe_name
+} from "../../../build/target";
 import {
     CacheKey,
     cache_copy_artifact_to,
@@ -287,17 +292,17 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
                 + path), tb_target_triple);
             if cache_lookup_artifact(tb_cache_root, tb_key, "test-bin") {
                 if cache_copy_artifact_to(tb_cache_root, tb_key, "test-bin", exe_path) {
-                    // The shared atomic-copy helper publishes through an
-                    // `mktemp` temp (mode 0600), so the restored binary
-                    // loses the executable bit clang gave the original —
-                    // harmless for the `.ll`/`.o` artifacts the module
-                    // cache restores, fatal for a binary we then `exec`
-                    // (`Permission denied`, rc 126). Re-assert +x; only
-                    // count the hit when chmod succeeds, otherwise leave
-                    // `cache_hit` false so the run falls through to a cold
-                    // lower+link (counted as a miss) rather than exec'ing a
-                    // non-executable file.
-                    if process.run(["chmod", "+x", exe_path]) == 0 {
+                    // Atomic copy publishes a mode-0600 temp on POSIX.
+                    // Restore +x before counting a hit; permission failure
+                    // must fall through to a cold lower+link. Windows has
+                    // no POSIX executable bit or native chmod command, so
+                    // only POSIX hosts need this step. The host owns file
+                    // permissions regardless of the target (SFN-1249).
+                    let mut executable_ready = host_is_windows();
+                    if !executable_ready {
+                        executable_ready = process.run(["chmod", "+x", exe_path]) == 0;
+                    }
+                    if executable_ready {
                         cache_hit = true;
                         test_bin_hits += 1;
                         if trace_runner {
