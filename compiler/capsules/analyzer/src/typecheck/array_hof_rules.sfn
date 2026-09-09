@@ -1,0 +1,176 @@
+// compiler/capsules/analyzer/src/typecheck/array_hof_rules.sfn
+//
+// Argument-shape rule for array higher-order builtins (`.map`/`.filter`/
+// `.reduce`) — SFN-691. Passing a non-closure argument to one of these
+// (`xs.reduce(0, "not a closure")`) parses, typechecks today with no
+// argument checking at all, lowers, links, and segfaults at runtime. The
+// analyzer has no expression-type inferencer (#829), so this rule mirrors
+// the proof-based posture documented at `call_signature.sfn:9-14`: it fires
+// only when the mismatch is *provable* from the argument's own AST shape
+// (a bare literal in a closure slot) and stays silent for everything an
+// inferencer would be needed to classify — an identifier, a call, a member
+// access, another lambda in the wrong slot, and so on. A missed rejection
+// is acceptable; a false rejection is not.
+import { ends_with, substring } from "sfn/strings";
+import { Expression, SourceSpan } from "sfn/syntax";
+
+import { Diagnostic } from "../typecheck_types";
+import { element_kind_marks_array } from "../typecheck_types/annotation_shape_checks";
+import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { token_from_name, trim_text, typecheck_int_to_string } from "../typecheck_types/text_utils";
+
+// Declared argument count for a supported array higher-order builtin, or -1
+// for anything else (including plain array methods with no closure
+// argument, like `.push`/`.length`).
+fn _array_hof_arity(member: string) -> int {
+    if strings_equal(member, "map") { return 1; }
+    if strings_equal(member, "filter") { return 1; }
+    if strings_equal(member, "reduce") { return 2; }
+    return -1;
+}
+
+// The zero-based argument index that must hold the closure.
+fn _array_hof_closure_index(member: string) -> int {
+    if strings_equal(member, "reduce") { return 1; }
+    return 0;
+}
+
+fn _array_hof_signature_text(member: string) -> string {
+    if strings_equal(member, "map") { return "map(closure)"; }
+    if strings_equal(member, "filter") { return "filter(closure)"; }
+    if strings_equal(member, "reduce") { return "reduce(initial, closure)"; }
+    return "";
+}
+
+// True only for a literal AST node that can never be a closure value —
+// `StringLiteral`/`NumberLiteral`/`BooleanLiteral`. Every other variant,
+// including `Identifier` (may name a function value we cannot resolve here)
+// and `null`, is NOT provably wrong and returns false.
+fn _is_proven_non_closure(value: Expression?) -> boolean {
+    if value == null { return false; }
+    if strings_equal(value.variant, "StringLiteral") { return true; }
+    if strings_equal(value.variant, "NumberLiteral") { return true; }
+    if strings_equal(value.variant, "BooleanLiteral") { return true; }
+    return false;
+}
+
+fn _literal_kind_text(value: Expression) -> string {
+    if strings_equal(value.variant, "StringLiteral") {
+        return "a string literal";
+    }
+    if strings_equal(value.variant, "NumberLiteral") {
+        return "a number literal";
+    }
+    if strings_equal(value.variant, "BooleanLiteral") {
+        return "a boolean literal";
+    }
+    return "not a closure";
+}
+
+// The array element type text for the diagnostic's expected-closure hint:
+// `int` for `let xs: int[]`, or the generic placeholder `"T"` when the
+// receiver carries no explicit array annotation (an inferred `let xs =
+// [1, 2, 3]`).
+fn _array_element_text(entry: SymbolEntry) -> string {
+    let trimmed = trim_text(entry.declared_type);
+    if trimmed.length > 2 {
+        if ends_with(trimmed, "[]") {
+            return substring(trimmed, 0, trimmed.length - 2);
+        }
+    }
+    return "T";
+}
+
+fn _expected_closure_text(member: string, elem: string) -> string {
+    if strings_equal(member, "map") { return "fn(" + elem + ") -> U"; }
+    if strings_equal(member, "filter") { return "fn(" + elem + ") -> boolean"; }
+    if strings_equal(member, "reduce") {
+        return "fn(" + elem + ", " + elem + ") -> " + elem;
+    }
+    return "";
+}
+
+fn _make_array_hof_arity_diagnostic(member: string, expected: int, supplied: int, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0844",
+        severity: "error",
+        message: "`" + member + "` on an array takes " + typecheck_int_to_string(expected)
+            + " argument(s) — the signature is `"
+            + _array_hof_signature_text(member)
+            + "`, but "
+            + typecheck_int_to_string(supplied)
+            + " were supplied",
+        file_path: "",
+        primary: token_from_name(member, span),
+        suggestion: null
+    };
+}
+
+fn _make_array_hof_argument_diagnostic(member: string, argument_index_1based: int, expected_closure: string, actual_text: string, transposed: boolean, span: SourceSpan?) -> Diagnostic {
+    if transposed {
+        return Diagnostic {
+            code: "E0845",
+            severity: "error",
+            message: "`reduce` takes `reduce(initial, closure)` — argument 1 is a closure and argument 2 is "
+                + actual_text
+                + "; the arguments are transposed. Pass the initial value first: `reduce(initial, closure)`",
+            file_path: "",
+            primary: token_from_name(member, span),
+            suggestion: null
+        };
+    }
+    return Diagnostic {
+        code: "E0845",
+        severity: "error",
+        message: "argument " + typecheck_int_to_string(argument_index_1based)
+            + " of `"
+            + member
+            + "` must be a closure `"
+            + expected_closure
+            + "`, but is "
+            + actual_text,
+        file_path: "",
+        primary: token_from_name(member, span),
+        suggestion: null
+    };
+}
+
+// Array higher-order-builtin argument-shape check (E0844/E0845, SFN-691).
+// Fires only when the receiver is a plain identifier proven to be an array
+// binding (`element_kind_marks_array`) and the callee is one of
+// `map`/`filter`/`reduce`. Silent otherwise — a user struct with a `.map`
+// method, a non-identifier receiver, or an unresolved binding are all left
+// alone.
+fn array_hof_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee == null { return []; }
+    if !strings_equal(callee.variant, "Member") { return []; }
+    let expected = _array_hof_arity(callee.member);
+    if expected < 0 { return []; }
+    let receiver = callee.object;
+    if receiver == null { return []; }
+    if !strings_equal(receiver.variant, "Identifier") { return []; }
+    let entry = find_symbol(bindings, receiver.name);
+    if entry == null { return []; }
+    if !element_kind_marks_array(entry.element_kind) { return []; }
+    let mut span = expression.span;
+    if span == null { span = callee.span; }
+    if span == null { span = receiver.span; }
+    let supplied = expression.arguments.length;
+    if supplied != expected {
+        return [_make_array_hof_arity_diagnostic(callee.member, expected, supplied, span)];
+    }
+    let closure_index = _array_hof_closure_index(callee.member);
+    let slot = expression.arguments[closure_index];
+    if !_is_proven_non_closure(slot) { return []; }
+    if strings_equal(callee.member, "reduce") {
+        let first = expression.arguments[0];
+        if first != null {
+            if strings_equal(first.variant, "Lambda") {
+                return [_make_array_hof_argument_diagnostic(callee.member, 1, "", _literal_kind_text(slot), true, span)];
+            }
+        }
+    }
+    let expected_closure = _expected_closure_text(callee.member, _array_element_text(entry));
+    return [_make_array_hof_argument_diagnostic(callee.member, closure_index + 1, expected_closure, _literal_kind_text(slot), false, span)];
+}
