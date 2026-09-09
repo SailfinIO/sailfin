@@ -137,10 +137,21 @@ fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
 
 // Sort the specifiers inside a single import { A, C, B } alphabetically.
 // A specifier may be an alias (`A as B`); it is treated as ONE unit keyed
-// on the imported name `A`, with the `as B` alias riding along, so sorting
-// never breaks the `imported as local` pairing (the value tokens are
-// re-slotted positionally by `_push_span_sorted`, so a flat name list that
-// straddles `as` would otherwise swap the two sides).
+// on the imported name `A`, with the `as B` alias riding along, so a flat
+// name list cannot swap the two sides of one `A as B` (the value tokens are
+// re-slotted positionally by `_push_span_sorted`).
+//
+// That holds only while every unit has the same arity. `_push_span_sorted`
+// re-slots values into the *source's* skeleton of `as`/`,` tokens, so a brace
+// mixing a bare specifier with an aliased one still permutes across the `as`
+// boundary and rewrites the bindings — SFN-1271, pre-existing and not guarded
+// here. Every mixed-arity import in the tree is already in sorted order, so
+// the permutation is currently the identity.
+//
+// Returns *ordinals into the in-brace value-token sequence*, not lexemes, so
+// `_push_span_sorted` can carry each name's own comments to its new slot
+// (SFN-1255). Ordinal `n` is the n-th `value`-role token between the braces,
+// which is exactly the indexing `_push_span_sorted`'s `value_positions` uses.
 //
 // Implemented with flat `string[]` / `int[]` arrays and an index-order sort
 // rather than an array of `{ key, names: string[] }` structs: copying a
@@ -149,7 +160,7 @@ fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
 // aliased imports, which the self-host never exercises). All values live in
 // one flat array; units are tracked by (start, len) offsets and reordered
 // by sorting an index array, so nothing copies an array-bearing struct.
-fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: int, end: int) -> string[] {
+fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: int, end: int) -> int[] {
     // Find the { and } within this import span
     let mut brace_open = -1;
     let mut brace_close = -1;
@@ -253,7 +264,7 @@ fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: int, end: int) -> stri
     // Flatten in sorted unit order, preserving each unit's internal order
     // (imported first, then alias) so `_push_span_sorted` re-slots the value
     // positions without breaking `A as B`.
-    let mut names: string[] = [];
+    let mut ordinals: int[] = [];
     let mut x = 0;
     loop {
         if x >= order.length { break; }
@@ -263,20 +274,45 @@ fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: int, end: int) -> stri
         let mut y = 0;
         loop {
             if y >= n { break; }
-            names.push(all_values[s + y]);
+            ordinals.push(s + y);
             y += 1;
         }
         x += 1;
     }
 
-    return names;
+    return ordinals;
+}
+
+// The trailing comment belonging to the specifier unit whose last value sits
+// at `ord`. `alpha,  // c` attaches the comment to the *comma*, while an
+// unpunctuated last specifier `alpha  // c` attaches it to the value token, so
+// a unit's comment can live in either place and both must travel with it.
+fn _unit_trailing_comment(fmt_tokens: FmtToken[], value_positions: int[], comma_after: int[], ord: int) -> Token[] {
+    let mut out: Token[] = [];
+    let vt = fmt_tokens[value_positions[ord]];
+    let mut i = 0;
+    loop {
+        if i >= vt.trailing_comment.length { break; }
+        out.push(vt.trailing_comment[i]);
+        i += 1;
+    }
+    if comma_after[ord] >= 0 {
+        let ct = fmt_tokens[comma_after[ord]];
+        let mut j = 0;
+        loop {
+            if j >= ct.trailing_comment.length { break; }
+            out.push(ct.trailing_comment[j]);
+            j += 1;
+        }
+    }
+    return out;
 }
 
 // Push tokens from span.start+1 to span.end into result, sorting specifier
 // names inside { ... } alphabetically.
 fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: int, span_end: int) -> FmtToken[] {
-    let sorted_names = _sort_import_specifiers(fmt_tokens, span_start, span_end);
-    if sorted_names.length == 0 {
+    let sorted_ordinals = _sort_import_specifiers(fmt_tokens, span_start, span_end);
+    if sorted_ordinals.length == 0 {
         // No braces or no specifiers — copy as-is
         let mut j = span_start + 1;
         loop {
@@ -312,11 +348,48 @@ fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: int
         k += 1;
     }
 
+    // For each value ordinal, the comma closing its specifier unit, or -1 when
+    // the unit is last and unpunctuated. Comment attribution is keyed on this:
+    // the comment in `alpha,  // c` rides the comma, so leaving the comma in
+    // place while the name moves re-points the comment at whichever name the
+    // sort dropped into this slot (SFN-1255).
+    let mut comma_after: int[] = [];
+    let mut vi = 0;
+    loop {
+        if vi >= value_positions.length { break; }
+        let mut found = -1;
+        let mut cj = value_positions[vi] + 1;
+        loop {
+            if cj >= brace_close { break; }
+            if strings_equal(fmt_tokens[cj].role, "value") { break; }
+            if strings_equal(fmt_tokens[cj].token.lexeme, ",") {
+                found = cj;
+                break;
+            }
+            cj += 1;
+        }
+        comma_after.push(found);
+        vi += 1;
+    }
+
     // Copy tokens, replacing value tokens with sorted names
     let mut name_idx = 0;
+    let mut pending_comma_pos = -1;
+    let mut pending_comma_comment: Token[] = [];
     let mut ti = span_start + 1;
     loop {
         if ti > span_end { break; }
+        // A comma that closes a re-slotted unit carries that unit's comment.
+        if ti == pending_comma_pos {
+            let ctok = fmt_tokens[ti];
+            result.push(FmtToken {
+                token: ctok.token, leading_comments: ctok.leading_comments, trailing_comment: pending_comma_comment, blank_lines_before: ctok.blank_lines_before, role: ctok.role
+            });
+            pending_comma_pos = -1;
+            pending_comma_comment = [];
+            ti += 1;
+            continue;
+        }
         // Check if this is a value token inside the braces that needs reordering
         let mut is_specifier = false;
         if ti > brace_open {
@@ -327,16 +400,29 @@ fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: int
             }
         }
         if is_specifier {
-            if name_idx < sorted_names.length {
+            if name_idx < sorted_ordinals.length {
                 let orig = fmt_tokens[ti];
+                // `src` is the token the sorted name came from; its comments
+                // travel with it. Line/column stay with the slot so the emitter
+                // keeps the layout it computed. `name_idx` doubles as the
+                // destination ordinal, so `comma_after[name_idx]` says whether
+                // this slot has a comma to hang the unit's comment on.
+                let src_ord = sorted_ordinals[name_idx];
+                let src = fmt_tokens[value_positions[src_ord]];
+                let unit_comment = _unit_trailing_comment(fmt_tokens, value_positions, comma_after, src_ord);
                 let new_token = Token {
-                    kind: orig.token.kind,
-                    lexeme: sorted_names[name_idx],
+                    kind: src.token.kind,
+                    lexeme: src.token.lexeme,
                     line: orig.token.line,
                     column: orig.token.column
                 };
+                let mut own_trailing: Token[] = [];
+                if comma_after[name_idx] >= 0 {
+                    pending_comma_pos = comma_after[name_idx];
+                    pending_comma_comment = unit_comment;
+                } else { own_trailing = unit_comment; }
                 result.push(FmtToken {
-                    token: new_token, leading_comments: orig.leading_comments, trailing_comment: orig.trailing_comment, blank_lines_before: orig.blank_lines_before, role: orig.role
+                    token: new_token, leading_comments: src.leading_comments, trailing_comment: own_trailing, blank_lines_before: orig.blank_lines_before, role: orig.role
                 });
                 name_idx += 1;
             }
@@ -385,8 +471,9 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
         let span = sorted_spans[si];
 
         // Determine leading_comments for this import's first token:
-        // - If this is the first emitted import (si == 0), use the saved header
-        //   comments so they stay at the top.
+        // - If this is the first emitted import (si == 0), the saved header
+        //   comments stay at the top, followed by this import's own comments.
+        //   Overwriting rather than appending deleted them outright (SFN-1255).
         // - If this import was originally first but got sorted elsewhere, strip
         //   its leading_comments (they were transferred above).
         // - Otherwise, preserve the import's own leading_comments.
@@ -395,8 +482,23 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
         let mut use_blanks = first_ft.blank_lines_before;
 
         if si == 0 {
-            use_comments = header_comments;
             use_blanks = header_blanks;
+            if span.start == orig_first_start { use_comments = header_comments; } else {
+                let mut merged: Token[] = [];
+                let mut hi = 0;
+                loop {
+                    if hi >= header_comments.length { break; }
+                    merged.push(header_comments[hi]);
+                    hi += 1;
+                }
+                let mut oi = 0;
+                loop {
+                    if oi >= first_ft.leading_comments.length { break; }
+                    merged.push(first_ft.leading_comments[oi]);
+                    oi += 1;
+                }
+                use_comments = merged;
+            }
         } else if span.start == orig_first_start { use_comments = []; }
 
         // Insert blank line between import groups
