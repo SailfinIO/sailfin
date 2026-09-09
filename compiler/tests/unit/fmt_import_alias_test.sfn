@@ -77,3 +77,77 @@ test "fmt import-alias: aliased import sort is idempotent" ![io] {
     let twice = format_source(once);
     assert once == twice;
 }
+
+// ── SFN-1255: the sorter moved content but left comments on positions ────
+//
+// Two shapes of the same defect. A leading comment on a promoted import was
+// overwritten by the saved header comments and deleted outright; a specifier
+// comment stayed in its slot and re-described whichever name the sort put
+// there. The mangled output is a stable fixed point, so `fmt --check` passes
+// on it immediately afterwards and the loss reaches a commit unsignalled.
+test "fmt import: a promoted import keeps its own leading comment" ![io] {
+    let src = "// header\nimport { b } from \"./z\";\n// why we need a\nimport { a } from \"./a\";\n";
+    let out = format_source(src);
+    let i_header = index_of(out, "// header");
+    let i_why = index_of(out, "// why we need a");
+    let i_a = index_of(out, "from \"./a\"");
+    let i_z = index_of(out, "from \"./z\"");
+    assert i_header >= 0;
+    assert i_why >= 0;  // deleted outright before the fix
+    assert i_a < i_z;  // `./a` is still promoted over `./z`
+    assert i_header < i_why;  // the header stays pinned to the top ...
+    assert i_why < i_a;  // ... and the comment still introduces its own import
+}
+
+test "fmt import: re-homed leading comments survive a second pass" ![io] {
+    let src = "// header\nimport { b } from \"./z\";\n// why we need a\nimport { a } from \"./a\";\n";
+    let once = format_source(src);
+    let twice = format_source(once);
+    assert once == twice;  // appending must not duplicate on re-format
+}
+
+test "fmt import: a specifier comment on a comma stays with its name" ![io] {
+    // `alpha,  // pick me` attaches the comment to the comma, not to `alpha`.
+    let src = "import { zeta } from \"b\";\nimport {\n    beta,\n    alpha,  // pick me\n} from \"a\";\n";
+    let out = format_source(src);
+    let i_alpha = index_of(out, "alpha");
+    let i_beta = index_of(out, "beta");
+    let i_note = index_of(out, "// pick me");
+    assert i_note >= 0;
+    assert i_alpha < i_beta;  // `alpha` sorts first ...
+    assert i_note < i_beta;  // ... and takes its comment with it
+}
+
+test "fmt import: a specifier comment on the last name stays with it" ![io] {
+    // No trailing comma, so the comment attaches to the `alpha` token itself.
+    let src = "import { zeta } from \"b\";\nimport {\n    beta,\n    alpha  // pick me\n} from \"a\";\n";
+    let out = format_source(src);
+    let i_alpha = index_of(out, "alpha");
+    let i_beta = index_of(out, "beta");
+    let i_note = index_of(out, "// pick me");
+    assert i_note >= 0;
+    assert i_alpha < i_beta;
+    assert i_note < i_beta;
+}
+
+test "fmt import: a comment follows its specifier down the sort" ![io] {
+    let src = "import { zeta } from \"b\";\nimport {\n    beta,  // second note\n    alpha\n} from \"a\";\n";
+    let out = format_source(src);
+    let i_alpha = index_of(out, "alpha");
+    let i_beta = index_of(out, "beta");
+    let i_note = index_of(out, "// second note");
+    assert i_note >= 0;
+    assert i_alpha < i_beta;  // `beta` is demoted ...
+    assert i_note > i_beta;  // ... and its comment is demoted with it
+}
+
+test "fmt import: a specifier's leading comment stays with its name" ![io] {
+    let src = "import { zeta } from \"b\";\nimport {\n    beta,\n    // leading note\n    alpha\n} from \"a\";\n";
+    let out = format_source(src);
+    let i_alpha = index_of(out, "alpha");
+    let i_beta = index_of(out, "beta");
+    let i_note = index_of(out, "// leading note");
+    assert i_note >= 0;
+    assert i_alpha < i_beta;
+    assert i_note < i_alpha;  // it introduces `alpha`, not `beta`
+}
