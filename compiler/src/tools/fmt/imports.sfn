@@ -137,10 +137,16 @@ fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
 
 // Sort the specifiers inside a single import { A, C, B } alphabetically.
 // A specifier may be an alias (`A as B`); it is treated as ONE unit keyed
-// on the imported name `A`, with the `as B` alias riding along, so sorting
-// never breaks the `imported as local` pairing (the value tokens are
-// re-slotted positionally by `_push_span_sorted`, so a flat name list that
-// straddles `as` would otherwise swap the two sides).
+// on the imported name `A`, with the `as B` alias riding along, so a flat
+// name list cannot swap the two sides of one `A as B` (the value tokens are
+// re-slotted positionally by `_push_span_sorted`).
+//
+// That holds only while every unit has the same arity. `_push_span_sorted`
+// re-slots values into the *source's* skeleton of `as`/`,` tokens, so a brace
+// mixing a bare specifier with an aliased one still permutes across the `as`
+// boundary and rewrites the bindings — SFN-1271, pre-existing and not guarded
+// here. Every mixed-arity import in the tree is already in sorted order, so
+// the permutation is currently the identity.
 //
 // Returns *ordinals into the in-brace value-token sequence*, not lexemes, so
 // `_push_span_sorted` can carry each name's own comments to its new slot
@@ -403,7 +409,7 @@ fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: int
                 // this slot has a comma to hang the unit's comment on.
                 let src_ord = sorted_ordinals[name_idx];
                 let src = fmt_tokens[value_positions[src_ord]];
-                let eff = _unit_trailing_comment(fmt_tokens, value_positions, comma_after, src_ord);
+                let unit_comment = _unit_trailing_comment(fmt_tokens, value_positions, comma_after, src_ord);
                 let new_token = Token {
                     kind: src.token.kind,
                     lexeme: src.token.lexeme,
@@ -413,8 +419,8 @@ fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: int
                 let mut own_trailing: Token[] = [];
                 if comma_after[name_idx] >= 0 {
                     pending_comma_pos = comma_after[name_idx];
-                    pending_comma_comment = eff;
-                } else { own_trailing = eff; }
+                    pending_comma_comment = unit_comment;
+                } else { own_trailing = unit_comment; }
                 result.push(FmtToken {
                     token: new_token, leading_comments: src.leading_comments, trailing_comment: own_trailing, blank_lines_before: orig.blank_lines_before, role: orig.role
                 });

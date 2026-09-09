@@ -1,5 +1,5 @@
 // Regression coverage for `sfn fmt` aliased import-specifier handling
-// (`compiler/src/tools/fmt.sfn`).
+// (`compiler/src/tools/fmt/imports.sfn`).
 //
 // History: `_sort_import_specifiers` collected every identifier inside the
 // `{ … }` independently and re-slotted them positionally, so for
@@ -150,4 +150,38 @@ test "fmt import: a specifier's leading comment stays with its name" ![io] {
     assert i_note >= 0;
     assert i_alpha < i_beta;
     assert i_note < i_alpha;  // it introduces `alpha`, not `beta`
+}
+
+test "fmt import: a comment on an aliased unit stays with that unit" ![io] {
+    // Both units are `X as Y`, so `_unit_trailing_comment` resolves the
+    // comment through the alias's *second* value — the branch a bare
+    // specifier never reaches.
+    let src = "import { zeta } from \"b\";\nimport {\n    gamma as g,\n    alpha as a,  // pick me\n} from \"a\";\n";
+    let out = format_source(src);
+    let i_alpha = index_of(out, "alpha as a");
+    let i_gamma = index_of(out, "gamma as g");
+    let i_note = index_of(out, "// pick me");
+    assert i_alpha >= 0;  // the pairing survives ...
+    assert i_gamma >= 0;
+    assert i_note >= 0;
+    assert i_alpha < i_gamma;  // ... `alpha` sorts first ...
+    assert i_note < i_gamma;  // ... and keeps its comment
+}
+
+test "fmt import: migrated specifier comments survive a second pass" ![io] {
+    // The demotion case migrates the comment from a comma to a value token,
+    // the placement most able to oscillate. A mangled `fmt` result being a
+    // stable fixed point is what let SFN-1255 reach a commit unsignalled, so
+    // pin the fixed point rather than only the first pass.
+    let demote = "import { zeta } from \"b\";\nimport {\n    beta,  // second note\n    alpha\n} from \"a\";\n";
+    let demote_once = format_source(demote);
+    assert demote_once == format_source(demote_once);
+
+    let promote = "import { zeta } from \"b\";\nimport {\n    beta,\n    alpha,  // pick me\n} from \"a\";\n";
+    let promote_once = format_source(promote);
+    assert promote_once == format_source(promote_once);
+
+    let leading = "import { zeta } from \"b\";\nimport {\n    beta,\n    // leading note\n    alpha\n} from \"a\";\n";
+    let leading_once = format_source(leading);
+    assert leading_once == format_source(leading_once);
 }
