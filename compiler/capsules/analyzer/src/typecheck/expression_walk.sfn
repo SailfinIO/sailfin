@@ -168,9 +168,6 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // `hs.push(spawn ...)` on an inferred-empty `[]`-tagged receiver ->
         // E0823 (SFN-386). See `push_spawn_handle_diagnostics`.
         diagnostics = diagnostics.concat(push_spawn_handle_diagnostics(expression, bindings));
-        // `xs.map(...)`/`xs.filter(...)`/`xs.reduce(...)` on a proven array
-        // receiver with a provably-wrong argument (arity or literal in a
-        // closure slot) -> E0844/E0845 (SFN-691).
         diagnostics = diagnostics.concat(array_hof_diagnostics(expression, bindings));
         // `field.to_uppercase()` on a proven primitive receiver whose method
         // resolves to neither a primitive method descriptor nor a free callable
