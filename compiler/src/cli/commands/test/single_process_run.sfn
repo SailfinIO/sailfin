@@ -5,12 +5,7 @@ import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
 import { _sanitize_filename_cmd, _write_text_cmd } from "../../../build/fs";
-import {
-    build_target_os,
-    build_target_triple,
-    host_is_windows,
-    target_exe_name
-} from "../../../build/target";
+import { build_target_os, build_target_triple, target_exe_name } from "../../../build/target";
 import {
     CacheKey,
     cache_copy_artifact_to,
@@ -294,11 +289,11 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
                 if cache_copy_artifact_to(tb_cache_root, tb_key, "test-bin", exe_path) {
                     // Atomic copy publishes a mode-0600 temp on POSIX.
                     // Restore +x before counting a hit; permission failure
-                    // must fall through to a cold lower+link. Windows has
-                    // no POSIX executable bit or native chmod command, so
-                    // only POSIX hosts need this step. The host owns file
-                    // permissions regardless of the target (SFN-1249).
-                    let mut executable_ready = host_is_windows();
+                    // must fall through to a cold lower+link. The native
+                    // filesystem check uses existence on Windows, which has
+                    // no executable bit. Unlike SAILFIN_HOST_OS, it cannot
+                    // be overridden by host-simulation tests (SFN-1249).
+                    let mut executable_ready = fs.is_executable(exe_path);
                     if !executable_ready {
                         executable_ready = process.run(["chmod", "+x", exe_path]) == 0;
                     }
