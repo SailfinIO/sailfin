@@ -255,7 +255,8 @@ runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity)   // bu
 
 Match that against the emit's actual inputs — the child argv at `:922`
 (`emit --module-name <slug> --import-context <ctx_root> -o … llvm <src>`) plus
-the subsequent `llvm_assemble_argv(ll, obj, opt_flag, [])`:
+the subsequent LLVM-artifact compile (`llvm_artifact_argv` over an
+`LlvmArtifactRequest`, SFN-950):
 
 | Emit/compile input | Folded by |
 |---|---|

@@ -67,7 +67,6 @@ import {
     build_target_os,
     build_target_triple,
     host_target_triple,
-    target_clang_flags,
     target_extra_link_libs,
     target_filter_link_libs,
     target_linker_driver,
@@ -393,6 +392,15 @@ fn _concat_driver_flags(a: string[], b: string[]) -> string[] {
 // argv stays byte-identical (#1112). A free function so the LinkPlan
 // literal is not constructed inside a struct-method body (file-header
 // self-host note).
+// A free function so the `LlvmArtifactRequest` literal is not constructed
+// inside a struct-method body (file-header self-host note), matching
+// `_target_conditioned_plan` below.
+fn _assemble_llvm_artifact(src: string, out: string, opt_flag: string) -> int ![io] {
+    return run_llvm_artifact(LlvmArtifactRequest {
+        ir_path: src, object_path: out, opt_flag: opt_flag
+    });
+}
+
 fn _target_conditioned_plan(plan: LinkPlan, triple: string) -> LinkPlan {
     let mut libs = target_filter_link_libs(plan.libs, triple);
     let extra = target_extra_link_libs(triple);
@@ -417,9 +425,7 @@ fn _target_conditioned_plan(plan: LinkPlan, triple: string) -> LinkPlan {
 // free functions above (see the self-host note in the file header).
 struct LlvmTextBackend {
     fn assemble(self, src: string, out: string, opt_flag: string) -> int ![io] {
-        return run_llvm_artifact(LlvmArtifactRequest {
-            ir_path: src, object_path: out, opt_flag: opt_flag
-        });
+        return _assemble_llvm_artifact(src, out, opt_flag);
     }
 
     fn link(self, plan: LinkPlan) -> int ![io] {

@@ -306,7 +306,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             }
             if _runtime_obj_cache_hit(obj, key) {
                 stats.hits = stats.hits + 1;
-            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base, "foreign-c-obj") {
+            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base, _runtime_obj_cache_kind("c")) {
                 stats.hits = stats.hits + 1;
             } else {
                 stats.misses = stats.misses + 1;
@@ -355,7 +355,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             }
             if _runtime_obj_cache_hit(obj, key) {
                 stats.hits = stats.hits + 1;
-            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base, "runtime-obj") {
+            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base, _runtime_obj_cache_kind("ll")) {
                 stats.hits = stats.hits + 1;
             } else {
                 stats.misses = stats.misses + 1;
@@ -568,12 +568,10 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
             let slug = _runtime_module_slug(cap, src);
             let obj_base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag)
                 + ".o";
-            // SFN-870: the slug fold sits inside the target fold, exactly
-            // as `_prepare_runtime_sfn_object` composes it. The stamped
-            // fast path compares against this hash, so any divergence
-            // between the two compositions silently demotes every stamped
-            // lookup to a full derivation.
-            let obj_key = _runtime_obj_key_for_build(_runtime_obj_key_with_slug(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), slug), target_triple);
+            // Shared with `_prepare_runtime_sfn_object` by construction:
+            // the stamped fast path compares against this hash, so the two
+            // derivations must not be composed independently (SFN-870).
+            let obj_key = _runtime_sfn_object_key(src, opt_flag, compiler_identity, ctx_root, slug, target_triple);
             if obj_key.length > 0 {
                 text = text + "obj/" + obj_base + "=" + sha256_hex_of_string(obj_key)
                     + "\n";
@@ -750,6 +748,29 @@ fn _runtime_obj_cache_kind(source_kind: string) -> string {
     return "runtime-obj";
 }
 
+// The complete cache key for a runtime `.sfn`-source object. Both the
+// consumer (`_prepare_runtime_sfn_object`) and the stamp writer
+// (`write_runtime_identity_stamp`) derive it here, because the stamped fast
+// path compares a hash of this key against the `.key` sidecar: any
+// divergence between two hand-composed foldings silently demotes every
+// stamped lookup to a full ~34-source derivation (SFN-870, SFN-950).
+// Composing it once is what keeps that class of drift impossible rather
+// than merely documented.
+//
+// Fold order is load-bearing. The artifact-kind namespace is innermost so
+// the raw, potentially unvalidated target triple stays last with nothing
+// after it (SFN-677); the slug fold sits between the sibling-dep fold and
+// the target fold (SFN-617, SFN-870). An unhashable base propagates ""
+// through every fold, preserving the always-recompile fallback.
+fn _runtime_sfn_object_key(src: string, opt_flag: string, compiler_identity: string, ctx_root: string, slug: string, target_triple: string) -> string ![io] {
+    let identity_key = runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity);
+    // SFN-950: the object is lowered from an emitted `.ll`, so it lives in
+    // the LLVM-artifact namespace, disjoint from any foreign-C object.
+    let namespaced = llvm_artifact_cache_key(identity_key);
+    let with_deps = _runtime_obj_key_with_sibling_deps(namespaced, ctx_root, slug);
+    return _runtime_obj_key_for_build(_runtime_obj_key_with_slug(with_deps, slug), target_triple);
+}
+
 fn _runtime_obj_key_for_build(base_key: string, target_triple: string) -> string ![io] {
     return _runtime_obj_key_with_target(_runtime_obj_key_with_host(base_key, host_target_triple()), target_triple);
 }
@@ -889,15 +910,10 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     }
     // #1197: fold the emitting compiler's identity into the key so a
     // codegen change in `compiler/src` busts the cached runtime object
-    // even when the runtime source bytes are unchanged. See
-    // `runtime_object_cache_key_with_identity`.
-    // SFN-617: the target fold wraps OUTSIDE the sibling-deps fold, same
-    // ordering `write_runtime_identity_stamp` uses for its stamped entry.
-    // SFN-870: the slug fold sits between them, in that same shared
-    // ordering — the stamp writer must compose these identically.
-    // SFN-950: the emitted `.ll` is an LLVM text artifact, so the key sits
-    // in the LLVM namespace — disjoint from any foreign-C object.
-    let key = _runtime_obj_key_for_build(_runtime_obj_key_with_slug(_runtime_obj_key_with_sibling_deps(llvm_artifact_cache_key(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity)), ctx_root, slug), slug), target_triple);
+    // even when the runtime source bytes are unchanged. The full fold
+    // order lives in `_runtime_sfn_object_key`, shared with the stamp
+    // writer (SFN-617, SFN-870, SFN-950).
+    let key = _runtime_sfn_object_key(src, opt_flag, compiler_identity, ctx_root, slug, target_triple);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
     let shared_suffix = stem;
     if _runtime_obj_cache_hit(obj_path, key) {
