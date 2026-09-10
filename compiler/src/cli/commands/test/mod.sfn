@@ -52,8 +52,6 @@ import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
 import { AssertFailure, _empty_assert_failure } from "../../../assert_failure";
-import { LinkPlan, LlvmTextBackend } from "../../../backend";
-import { assemble_link_inputs } from "../../../build/clang_argv";
 import {
     _dirname_cmd,
     _ends_with_cmd,

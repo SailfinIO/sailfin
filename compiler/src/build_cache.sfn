@@ -854,6 +854,13 @@ fn _filename_for_kind(kind: string) -> string {
     // ever aliasing in a shared cache entry, even though their content
     // keys are already disjoint.
     if kind == "runtime-obj" { return "runtime.o"; }
+    // Foreign C objects (SFN-950, SFEP-0066 §3.8). A `.c` and a `.ll`
+    // with identical bytes hash their content the same way, so the
+    // artifact-kind namespace fold in `build/artifact_compile.sfn`
+    // already separates their keys; a distinct filename here means the
+    // two cannot alias within one entry directory even if a future key
+    // change reintroduced a collision.
+    if kind == "foreign-c-obj" { return "foreign-c.o"; }
     // Per-test linked binary cache (#1230, Lever 2 of
     // `docs/proposals/0011-ci-test-speed.md`). A distinct filename keeps
     // the test-binary layer from ever aliasing the per-module `.o`

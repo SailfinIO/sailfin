@@ -34,11 +34,12 @@
 // for call to `args.push`"), even though `sfn check` accepts it — a
 // build-only failure of the #1389 class. The methods are thin delegators
 // to the free functions, which is the proven self-hosting shape.
-// The clang `assemble` argv builder lives in the struct-free
-// `build/clang_argv` leaf so build-driver modules can assemble without
-// importing this module (and emitting the `LlvmTextBackend` vtable). See
-// that file's header for the seed-lowering reason (#1730).
-import { _llvm_text_assemble_argv } from "./build/clang_argv";
+// The LLVM-artifact argv builder lives in the struct-free
+// `build/artifact_compile` leaf so build-driver modules can lower `.ll` to
+// `.o` without importing this module (and emitting the `LlvmTextBackend`
+// vtable). See `build/clang_argv.sfn`'s header for the seed-lowering
+// reason (#1730).
+import { LlvmArtifactRequest, run_llvm_artifact } from "./build/artifact_compile";
 // Sailfin owns the Link role on Linux x86-64 (SFEP-0066 §3.1 role table,
 // `direct_link.sfn`): a direct `ld.lld` invocation instead of clang.
 // Resolves `ok=false` (a controlled fallback to the clang path) on any
@@ -116,8 +117,11 @@ struct LinkPlan {
 }
 
 interface Backend {
-    // Compile a single IR/C source to an object file (`clang -c`).
-    fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io];
+    // Lower a single LLVM text artifact to a native object. Foreign C
+    // sources do NOT come through here — they have their own request and
+    // provider in `build/artifact_compile.sfn` (SFN-950, SFEP-0066 §3.3),
+    // which is why this method carries no include-root parameter.
+    fn assemble(self, src: string, out: string, opt_flag: string) -> int ![io];
     // Link pre-compiled objects + IR inputs into a binary.
     fn link(self, plan: LinkPlan) -> int ![io];
 }
@@ -412,9 +416,10 @@ fn _target_conditioned_plan(plan: LinkPlan, triple: string) -> LinkPlan {
 // assembly and linking. The methods delegate argv construction to the
 // free functions above (see the self-host note in the file header).
 struct LlvmTextBackend {
-    fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
-        let target_flags = target_clang_flags(build_target_triple(), host_target_triple());
-        return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags));
+    fn assemble(self, src: string, out: string, opt_flag: string) -> int ![io] {
+        return run_llvm_artifact(LlvmArtifactRequest {
+            ir_path: src, object_path: out, opt_flag: opt_flag
+        });
     }
 
     fn link(self, plan: LinkPlan) -> int ![io] {
