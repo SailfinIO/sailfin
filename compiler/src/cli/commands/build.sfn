@@ -49,7 +49,7 @@ import {
 } from "../../build/cache";
 import { _do_determinism_check } from "../../build/determinism";
 // SFN-1268: preflight `--static`'s link prerequisites before compiling.
-import { resolve_direct_ld_lld } from "../../build/direct_link";
+import { resolve_link_contract } from "../../build/direct_link";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { clean_runtime_object_cache } from "../../build/runtime_objs";
@@ -192,7 +192,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let target_flag: string = get_or(matches, "target", "");
     set_build_target(target_flag);
     // Seeded alongside the target cell so the two cannot drift (SFN-1268):
-    // `--static` reads `build_target_triple()` through `resolve_direct_ld_lld`,
+    // `--static` reads `build_target_triple()` through `resolve_link_contract`,
     // so both must be in effect together for the whole invocation.
     let static_flag: boolean = has_flag(matches, "static");
     set_static_link(static_flag);
@@ -239,7 +239,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             clear_static_link();
             return 2;
         }
-        let static_contract = resolve_direct_ld_lld(build_target_os(), true);
+        let static_contract = resolve_link_contract(build_target_os(), true);
         if !static_contract.ok {
             let empty_lines: string[] = [];
             print.err(render_terminal_diagnostic(diagnostic_to_diag(static_prerequisites_diagnostic(static_triple, static_contract.reason), "build"), empty_lines, "build"));

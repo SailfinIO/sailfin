@@ -1,0 +1,533 @@
+// compiler/src/build/link_dispatch.sfn
+//
+// SFN-803 (SFEP-0066 §3.6): the single, target-profile-driven final-link
+// dispatcher. `build/link.sfn` (program/run) and `cli/commands/test/link.sfn`
+// (test) previously duplicated the same ten link stages; this module is the
+// one place they now share, with the two callers differing only through
+// `LinkLayout` DATA rather than separate selection logic. This is the only
+// module under `compiler/src` that calls `backend.link(` — a census test
+// (`compiler/tests/unit/link_dispatch_census_test.sfn`) enforces that.
+import { diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
+
+import { LinkPlan, LlvmTextBackend } from "../backend";
+import { CacheStats, empty_cache_stats } from "../build_cache";
+import { _env_flag, _get_env_cmd } from "../build_flags";
+import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
+import { render_terminal_diagnostic } from "../terminal_output";
+import { user_config_linker, user_config_linker_origin } from "../user_config";
+import { assemble_link_inputs } from "./clang_argv";
+import { resolve_link_contract } from "./direct_link";
+import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
+import {
+    merge_root_link_libs,
+    missing_runtime_dep_specs,
+    runtime_dep_link_failure_message
+} from "./link_contract";
+import { _ensure_dir, _find_substring_from } from "./paths";
+import { assemble_runtime_capsule_link_inputs } from "./runtime_objs";
+import { runtime_demanded_dep_specs } from "./runtime_selection";
+// Target conditioning (SFN-52, SFEP-0021 §4.2(A); promoted to the triple
+// axis by SFN-774 / SFEP-0068 §3.1): the msvc ABI forces `-fuse-ld=lld`
+// and skips the GNU-only dead-strip / retain-root flags `lld-link`
+// rejects. All no-ops off Windows.
+import {
+    build_target_os,
+    build_target_triple,
+    target_forced_linker_flag,
+    target_linker_driver,
+    target_reproducible_link_flag,
+    target_uses_gnu_link_gc,
+    triple_target_os
+} from "./target";
+import { static_prerequisites_diagnostic } from "./target_diagnostics";
+import { active_static_link } from "./target_state";
+
+// Layout policy. Program and test links differ through DATA on this
+// struct, never through separate selection logic (SFEP-0066 section 3.6).
+struct LinkLayout {
+    name: string;  // "program" | "test", for trace/diagnostics
+    primary_objects_first: boolean;  // test links its own object first; program links the runtime surface first
+    computes_driver_flags: boolean;  // program computes the clang-driver flag interleave; test links with none
+    preflights_static: boolean;  // program refuses `--static` with E0626; test does not (SFN-803 preserves this exactly)
+    backfills_posix_libs: boolean;  // test re-adds -lm/-pthread when the runtime capsule did not supply them
+    test_mode: boolean;  // LinkPlan.test_mode
+}
+
+fn program_link_layout() -> LinkLayout {
+    return LinkLayout {
+        name: "program",
+        primary_objects_first: false,
+        computes_driver_flags: true,
+        preflights_static: true,
+        backfills_posix_libs: false,
+        test_mode: false
+    };
+}
+
+fn test_link_layout() -> LinkLayout {
+    return LinkLayout {
+        name: "test",
+        primary_objects_first: true,
+        computes_driver_flags: false,
+        preflights_static: false,
+        backfills_posix_libs: true,
+        test_mode: true
+    };
+}
+
+// One structured prerequisite/dispatch failure (SFEP-0066 section 3.7):
+// names the failed stage and the concrete reason, so trace and
+// fail-closed diagnostics render from one shape.
+struct LinkFailure {
+    stage: string;
+    reason: string;
+}
+
+// `stage` is "" when the dispatch reached the backend.
+struct LinkOutcome {
+    rc: int;
+    ran_backend: boolean;
+    failure: LinkFailure;
+    runtime_stats: CacheStats;
+}
+
+struct LinkRequest {
+    layout: LinkLayout;
+    primary_lls: string[];  // program/capsule IR (program) | the test module's own .ll (test)
+    dep_lls: string[];  // resolver-produced dep IR (test); ALWAYS EMPTY on the program layout, whose deps already arrive inside primary_lls
+    runtime_capsules: RuntimeCapsuleArtifacts[];
+    out_path: string;
+    opt_flag: string;
+    runtime_cache_dir: string;  // where runtime objects are assembled/cached
+    link_obj_dir: string;  // where primary/dep IR is assembled
+    binary_dir: string;
+    shared_cache_root: string;
+    root_link_libs: string[];
+}
+
+// True when `name` resolves to an executable on PATH. `command -v` is
+// POSIX and emits the resolved path (non-empty) on success, nothing on
+// failure — so a non-empty capture means the tool is present. `name` is
+// shell-quoted: current callers pass constants, but quoting matches the
+// surrounding `_shell_single_quote_arg` convention and forecloses a
+// shell-composition footgun if a caller ever threads through user input.
+fn _linker_on_path(name: string) -> boolean ![io] {
+    let found = _shell_read_cmd("command -v " + _shell_single_quote_arg(name)
+        + " 2>/dev/null");
+    return found.length > 0;
+}
+
+// Resolve the `-fuse-ld=` flag for the final clang link (#343).
+//
+// Opportunistic linker selection: probe PATH for a faster linker and
+// pass `-fuse-ld=<linker>` to clang when one is found, otherwise fall
+// back to the platform default. lld is ~2-5x faster than ld.bfd/ld.gold
+// on cold links of large object sets; mold is faster again. The empty
+// string means "use the system default" (no flag added).
+//
+// Self-contained on purpose: #1112 (the `Backend` interface) intends to
+// absorb the final-link call site, so this stays a single helper with no
+// driver-level state to untangle later.
+//
+// Override contract: `SAILFIN_LINKER` wins over auto-detection.
+//   - "ld" / "system" / "default" force the platform linker (no flag).
+//   - any other value selects that linker by name (e.g.
+//     `SAILFIN_LINKER=mold` -> `-fuse-ld=mold`).
+//
+// Auto-detect order: mold, then lld (`ld.lld` or `lld`), else default.
+// Auto-detect is gated to Linux only — every non-Linux host (macOS, the
+// BSDs) keeps the system default unless the user opts in via
+// `SAILFIN_LINKER`. lld's Mach-O backend has historically lagged ld64 on
+// edge cases and the path is not smoke-tested off Linux, so the safe
+// default is to do nothing rather than auto-flip an untested linker
+// (#343 risk note). The chosen linker is surfaced only when
+// `SAILFIN_TRACE_LINK` is enabled, sharing the trace path used by the
+// resolved clang argv.
+fn _trace_linker_choice(message: string) ![io] {
+    if _env_flag("SAILFIN_TRACE_LINK") {
+        print.err("[link] linker: " + message);
+    }
+}
+
+fn _resolve_linker() -> string ![io] {
+    // SFEP-0076 section 3.3: rung 2 (environment) above rung 4 (user config).
+    // `origin` carries which rung supplied the value into the existing traces,
+    // so a persisted default is distinguishable from a one-shot override.
+    let mut linker_override = _get_env_cmd("SAILFIN_LINKER");
+    let mut linker_origin: string = "SAILFIN_LINKER";
+    if linker_override.length == 0 {
+        let config_triple = build_target_triple();
+        linker_override = user_config_linker(config_triple);
+        linker_origin = user_config_linker_origin(config_triple);
+    }
+    if linker_override.length > 0 {
+        if linker_override == "ld" || linker_override == "system"
+            || linker_override == "default" {
+            _trace_linker_choice("system default (" + linker_origin + "="
+                + linker_override
+                + ")");
+            return "";
+        }
+        _trace_linker_choice(linker_override + " (" + linker_origin
+            + " override)");
+        return "-fuse-ld=" + linker_override;
+    }
+
+    // De-shelled host/target probe (SFN-52): `build_target_os()` honors the
+    // `SAILFIN_TARGET_OS` override and needs no `uname` subprocess (native
+    // Windows has none). On a Linux/macOS host with no override it returns
+    // exactly what `uname -s` did, so the auto-detect below is unchanged.
+    let os = build_target_os();
+    // The msvc ABI links with `lld-link`, forced ahead of the Linux-only
+    // auto-detect (`SAILFIN_LINKER` still wins, handled above). Resolved
+    // from the triple (SFN-774), independently of the OS-only `os` above.
+    let forced = target_forced_linker_flag(build_target_triple());
+    if forced.length > 0 {
+        _trace_linker_choice("lld (MSVC target default)");
+        return forced;
+    }
+    // A non-clang target driver owns its linker selection. Host mold/lld
+    // discovery would otherwise leak a Linux linker choice into a MinGW
+    // cross link (SFN-775).
+    if target_linker_driver(build_target_triple()) != "clang" {
+        _trace_linker_choice("target driver default");
+        return "";
+    }
+    if os != "Linux" {
+        _trace_linker_choice("system default (auto-detect is Linux-only; "
+            + "set SAILFIN_LINKER=lld to opt in on "
+            + os
+            + ")");
+        return "";
+    }
+
+    if _linker_on_path("mold") {
+        _trace_linker_choice("mold (auto-detected)");
+        return "-fuse-ld=mold";
+    }
+    if _linker_on_path("ld.lld") || _linker_on_path("lld") {
+        _trace_linker_choice("lld (auto-detected)");
+        return "-fuse-ld=lld";
+    }
+    _trace_linker_choice("system default (mold/lld not found on PATH)");
+    return "";
+}
+
+// Dead-code-strip linker flag for the final link (#1047). With every
+// `clang -c` (and the inline `.ll` compile in the link below) emitting
+// `-ffunction-sections -fdata-sections`, the linker's section garbage
+// collector drops any function/datum unreferenced from the entry point —
+// so importing one symbol from a multi-function capsule no longer drags
+// the whole `src/` closure into the binary. The GC flag is platform-
+// specific: GNU ld / lld use `--gc-sections`, the Darwin linker uses
+// `-dead_strip`. Derived from the **target**, not a host probe (SFN-52) —
+// a Linux host cross-linking a Darwin target must still emit
+// `-dead_strip`.
+//
+// Takes the caller's already-resolved `triple` rather than re-deriving the
+// target itself. Both matter and they disagree: the gate in
+// `_clang_link_multi_with_opt` resolves via `build_target_triple()`, which
+// reads `SAILFIN_TARGET_TRIPLE` before `SAILFIN_TARGET_OS`, while
+// `build_target_os()` reads them the other way round. Re-deriving here
+// would let a contradictory pair (a mingw triple plus
+// `SAILFIN_TARGET_OS=Darwin`) pass the gnu-ABI gate and then emit the
+// Mach-O `-dead_strip` to a mingw linker. One resolution, threaded
+// through, cannot disagree with itself.
+//
+// The msvc ABI never reaches here: the sole call site is gated on
+// `target_uses_gnu_link_gc()` in `_clang_link_multi_with_opt`, which is
+// false for that ABI. windows-gnu/mingw does reach here and correctly
+// takes the GNU branch, since its mingw linker accepts `--gc-sections`.
+fn _dead_strip_link_flag(triple: string) -> string {
+    if strings_equal(triple_target_os(triple), "Darwin") {
+        return "-Wl,-dead_strip";
+    }
+    return "-Wl,--gc-sections";
+}
+
+// Force-retain the runtime provider surface as link-GC roots (#1047).
+// `--gc-sections` would otherwise strip every runtime helper the *current*
+// program never statically references — including the compiler's own
+// self-hosted binary, which exercises only a slice of the runtime. But the
+// runtime is a provider surface: downstream programs link these helpers
+// fresh, and the C→Sailfin migration tests assert the compiler binary
+// keeps the full `sfn_*` family defined. Rooting the migrated provider
+// symbols keeps that surface intact while user / capsule `.ll` code that
+// nothing references is still collected (the actual #1046 win).
+//
+// We restrict rooting to defined globals whose name contains `sfn` — the
+// migrated runtime helper family (`sfn_*`, `sfn_str_sfn_*`, the Mach-O
+// `_sfn_*` form). Rooting *every* runtime global is wrong: it drags back C
+// startup/internal sections gc-sections is meant to drop. With
+// `-ffunction-sections` each function is its own section, so rooting an
+// `sfn_*` symbol pulls in only that function, not its object's startup
+// neighbours. Runtime objects are few, so a single `nm` over all of them
+// is cheap; its BSD output is `<value> <type> <name>`, and we keep global
+// defined types (uppercase, excluding `U` undefined — which also have only
+// two fields, so `NF >= 3` drops them).
+fn _runtime_retain_root_flags(runtime_objs: string[]) -> string[] ![io] {
+    if runtime_objs.length == 0 { return []; }
+    let mut nm_cmd = "nm";
+    let mut oi: int = 0;
+    loop {
+        if oi >= runtime_objs.length { break; }
+        nm_cmd = nm_cmd + " " + _shell_single_quote_arg(runtime_objs[oi]);
+        oi += 1;
+    }
+    nm_cmd = nm_cmd
+        + " 2>/dev/null | awk 'NF >= 3 && $2 ~ /^[A-TV-Z]$/ && $3 ~ /sfn/ {print $3}' | sort -u";
+    let out = _shell_read_cmd(nm_cmd);
+    if out.length == 0 { return []; }
+    let mut flags: string[] = [];
+    let mut start: int = 0;
+    loop {
+        if start >= out.length { break; }
+        let nl = _find_substring_from(out, "\n", start);
+        let mut end = nl;
+        if end < 0 { end = out.length; }
+        let name = substring(out, start, end);
+        if name.length > 0 { flags.push("-Wl,-u," + name); }
+        if nl < 0 { break; }
+        start = nl + 1;
+    }
+    return flags;
+}
+
+fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
+    // Copy into a fresh array rather than aliasing `request.primary_lls`.
+    // Arrays are reference-typed (SFEP-0075 3.7), so pushing the deps onto
+    // the request's own array would grow the caller's list and make the
+    // primary-IR assembly below compile the deps a second time — putting
+    // every dep object on the link line twice.
+    let mut contract_lls: string[] = [];
+    let mut pli: int = 0;
+    loop {
+        if pli >= request.primary_lls.length { break; }
+        contract_lls.push(request.primary_lls[pli]);
+        pli += 1;
+    }
+    let mut cli: int = 0;
+    loop {
+        if cli >= request.dep_lls.length { break; }
+        contract_lls.push(request.dep_lls[cli]);
+        cli += 1;
+    }
+    let missing_deps = missing_runtime_dep_specs(request.runtime_capsules, contract_lls, runtime_demanded_dep_specs(request.runtime_capsules));
+    if missing_deps.length > 0 {
+        let message = runtime_dep_link_failure_message(missing_deps);
+        print.err(message);
+        return LinkOutcome {
+            rc: 1,
+            ran_backend: false,
+            failure: LinkFailure {
+                stage: "runtime-dep-contract",
+                reason: message
+            },
+            runtime_stats: empty_cache_stats()
+        };
+    }
+
+    _ensure_dir(request.runtime_cache_dir);
+
+    let inputs = assemble_runtime_capsule_link_inputs(request.runtime_capsules, request.runtime_cache_dir, request.opt_flag, request.binary_dir, request.shared_cache_root);
+    if !inputs.success {
+        return LinkOutcome {
+            rc: 1,
+            ran_backend: false,
+            failure: LinkFailure {
+                stage: "runtime-object-assembly",
+                reason: ""
+            },
+            runtime_stats: inputs.stats
+        };
+    }
+    let runtime_objs = inputs.object_paths;
+    let runtime_link_libs = inputs.link_libs;
+
+    let primary_result = assemble_link_inputs(request.primary_lls, request.link_obj_dir, request.opt_flag);
+    if !primary_result.success {
+        return LinkOutcome {
+            rc: 1,
+            ran_backend: true,
+            failure: LinkFailure { stage: "object-assembly", reason: "" },
+            runtime_stats: inputs.stats
+        };
+    }
+    let dep_result = assemble_link_inputs(request.dep_lls, request.link_obj_dir, request.opt_flag);
+    if !dep_result.success {
+        return LinkOutcome {
+            rc: 1,
+            ran_backend: true,
+            failure: LinkFailure { stage: "object-assembly", reason: "" },
+            runtime_stats: inputs.stats
+        };
+    }
+
+    // Driver computes the clang-driver flag interleave; `LlvmTextBackend`
+    // owns the final argv + `process.run`. Flag order is load-bearing for
+    // byte-identical output (#1112 zero-behaviour gate).
+    let mut link_flags: string[] = [];
+    if request.layout.computes_driver_flags {
+        // Opportunistic faster-linker selection (#343): prefer mold/lld when
+        // present, honour the `SAILFIN_LINKER` override, else fall back to the
+        // platform default. Empty string = no `-fuse-ld=` flag (system linker).
+        let linker_flag = _resolve_linker();
+        if linker_flag.length > 0 { link_flags.push(linker_flag); }
+        // Every input is now pre-assembled with section splitting. Keep the
+        // historical driver flags for zero-diff linker behavior while the
+        // direct-link successor (SFN-455) takes ownership of the raw linker argv.
+        link_flags.push("-ffunction-sections");
+        link_flags.push("-fdata-sections");
+        // `lld-link` writes a live wall-clock `TimeDateStamp` unless `/Brepro`
+        // is passed; msvc-only, no-op everywhere else (SFN-920).
+        let repro_flag = target_reproducible_link_flag(build_target_triple());
+        if repro_flag.length > 0 { link_flags.push(repro_flag); }
+        // Root the runtime provider surface, then GC unreferenced sections
+        // (#1047). The order matters for correctness: if symbol enumeration
+        // yields nothing while runtime objects are present (`nm`/`awk`
+        // unavailable, or the pipeline failed), enabling the strip anyway
+        // would drop the runtime surface the compiler binary must export.
+        // In that case we skip the GC flag — keeping the (slightly larger)
+        // un-stripped binary is strictly safer than a silently broken one —
+        // and emit a diagnostic so the lost optimization isn't invisible.
+        // With runtime objects present the enumeration always finds the
+        // `sfn_*` family, so the happy path is unaffected.
+        // The dead-strip + retain-root flags are GNU/Mach-O linker inputs
+        // (`-Wl,--gc-sections` / `-Wl,-dead_strip` / `-Wl,-u,<sym>`); the msvc
+        // ABI links with `lld-link`, which rejects them (it uses `/OPT:REF` /
+        // `/INCLUDE:`). Skip them for an msvc target — a clean lld-link
+        // invocation, at the cost of an unstripped binary until the
+        // MSVC-native GC flags are tuned against a real link (SFEP-0021 M7).
+        // Every other target (incl. windows-gnu, whose mingw linker accepts
+        // the GNU flags) runs this block exactly as before (SFN-52 / SFN-774).
+        let gc_triple = build_target_triple();
+        if target_uses_gnu_link_gc(gc_triple) {
+            let retain_flags = _runtime_retain_root_flags(runtime_objs);
+            let strip_safe = runtime_objs.length == 0 || retain_flags.length > 0;
+            if strip_safe {
+                link_flags.push(_dead_strip_link_flag(gc_triple));
+            } else {
+                print("sfn: dead-code strip disabled — could not enumerate runtime");
+                print("     provider symbols (is `nm` on PATH?); linking unstripped");
+            }
+            let mut rfi: int = 0;
+            loop {
+                if rfi >= retain_flags.length { break; }
+                link_flags.push(retain_flags[rfi]);
+                rfi += 1;
+            }
+        }
+    }
+
+    // Retention roots above must be derived from the runtime provider
+    // objects only. Capsule symbols contain the `sfn` mangling marker too;
+    // including program/capsule objects in `_runtime_retain_root_flags`
+    // would force-retain their entire closure and defeat dead stripping.
+    let mut link_objects: string[] = [];
+    if request.layout.primary_objects_first {
+        let mut pi: int = 0;
+        loop {
+            if pi >= primary_result.object_paths.length { break; }
+            link_objects.push(primary_result.object_paths[pi]);
+            pi += 1;
+        }
+        let mut roi: int = 0;
+        loop {
+            if roi >= runtime_objs.length { break; }
+            link_objects.push(runtime_objs[roi]);
+            roi += 1;
+        }
+    } else {
+        let mut roi: int = 0;
+        loop {
+            if roi >= runtime_objs.length { break; }
+            link_objects.push(runtime_objs[roi]);
+            roi += 1;
+        }
+        let mut pi: int = 0;
+        loop {
+            if pi >= primary_result.object_paths.length { break; }
+            link_objects.push(primary_result.object_paths[pi]);
+            pi += 1;
+        }
+    }
+    let mut doi: int = 0;
+    loop {
+        if doi >= dep_result.object_paths.length { break; }
+        link_objects.push(dep_result.object_paths[doi]);
+        doi += 1;
+    }
+
+    let mut libs: string[] = runtime_link_libs;
+    if request.layout.backfills_posix_libs {
+        // The runtime capsule's `link-libs` (runtime/capsule.toml) already
+        // carries `-lm` / `-lpthread`. Track which math/thread libs flow
+        // through so the defensive push below does not re-add a lib the
+        // capsule supplied — a duplicate `-lm` makes the macOS linker emit
+        // `ld: warning: ignoring duplicate libraries: '-lm'`.
+        let mut backfilled: string[] = [];
+        let mut has_lm: boolean = false;
+        let mut has_pthread: boolean = false;
+        let mut lli: int = 0;
+        loop {
+            if lli >= libs.length { break; }
+            let lib = libs[lli];
+            if strings_equal(lib, "-lm") { has_lm = true; }
+            if strings_equal(lib, "-lpthread") { has_pthread = true; }
+            if strings_equal(lib, "-pthread") { has_pthread = true; }
+            backfilled.push(lib);
+            lli += 1;
+        }
+        // Fallback for configurations where the runtime capsule did not supply
+        // them (keeps the link complete without double-adding).
+        if !has_lm { backfilled.push("-lm"); }
+        if !has_pthread { backfilled.push("-pthread"); }
+        libs = backfilled;
+    }
+    libs = merge_root_link_libs(libs, request.root_link_libs);
+
+    if request.layout.preflights_static && active_static_link() {
+        let static_triple = build_target_triple();
+        let static_contract = resolve_link_contract(build_target_os(), true);
+        if !static_contract.ok {
+            let empty_lines: string[] = [];
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(static_prerequisites_diagnostic(static_triple, static_contract.reason), "build"), empty_lines, "build"));
+            return LinkOutcome {
+                rc: 2,
+                ran_backend: false,
+                failure: LinkFailure {
+                    stage: "static-prerequisites",
+                    reason: static_contract.reason
+                },
+                runtime_stats: inputs.stats
+            };
+        }
+    }
+
+    let backend = LlvmTextBackend { };
+    let plan = LinkPlan {
+        objects: link_objects,
+        out_path: request.out_path,
+        opt_flag: request.opt_flag,
+        link_flags: link_flags,
+        libs: libs,
+        test_mode: request.layout.test_mode
+    };
+    let rc = backend.link(plan);
+    return LinkOutcome {
+        rc: rc,
+        ran_backend: true,
+        failure: LinkFailure { stage: "", reason: "" },
+        runtime_stats: inputs.stats
+    };
+}
+
+export {
+    LinkLayout,
+    program_link_layout,
+    test_link_layout,
+    LinkFailure,
+    LinkOutcome,
+    LinkRequest,
+    dispatch_link
+};

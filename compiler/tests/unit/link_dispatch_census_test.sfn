@@ -1,20 +1,22 @@
-// Census guard for the runtime-dep link contract (SFN-341).
+// Census guard for the runtime-dep link contract (SFN-341, SFN-803).
 //
 // `compiler/src/build/link_contract.sfn` centralizes the check that a link
 // plan carries the LLVM IR modules a runtime capsule dependency needs
-// (`missing_runtime_dep_specs`). Two call sites consult it today —
-// `build/link.sfn` and `cli/commands/test/link.sfn` — after the tensor-harness
-// defect where a link *caller* built a plan that skipped the resolver and
-// silently dropped a runtime dependency.
+// (`missing_runtime_dep_specs`). SFN-803 collapsed the two dispatchers that
+// used to duplicate this wiring — `build/link.sfn` and
+// `cli/commands/test/link.sfn` — onto a single target-profile-driven
+// implementation, `build/link_dispatch.sfn`, after the tensor-harness defect
+// where a link *caller* built a plan that skipped the resolver and silently
+// dropped a runtime dependency.
 //
 // This file is a strictly different guard from the contract itself, and the
 // two are not substitutes for each other:
 //
 //   - The contract (enforced inside `missing_runtime_dep_specs`, called from
-//     each dispatcher) catches a link *caller* that assembles an incomplete
+//     the dispatcher) catches a link *caller* that assembles an incomplete
 //     plan — the tensor-harness failure mode. It fires at link time, for any
-//     caller of an already-wired dispatcher.
-//   - This census catches a *new link implementation* — a third place that
+//     caller of the already-wired dispatcher.
+//   - This census catches a *new link implementation* — a second place that
 //     calls `backend.link(` directly — that never wires the contract in at
 //     all. It fires at test time, by enumerating `compiler/src` rather than
 //     trusting a hardcoded list, so an unknown future dispatcher cannot slip
@@ -91,9 +93,9 @@ fn _sorted(values: string[]) -> string[] {
     return out;
 }
 
-test "link census: the dispatcher set is exactly the two known linkers" ![io] {
+test "link census: the dispatcher set is exactly the one unified linker" ![io] {
     let discovered = _sorted(_find_link_dispatchers());
-    let expected = _sorted(["build/link", "cli/commands/test/link"]);
+    let expected = _sorted(["build/link_dispatch"]);
     assert expect_eq_str_array(discovered, expected).ok;
 }
 

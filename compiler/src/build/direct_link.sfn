@@ -144,6 +144,33 @@ fn _which(name: string) -> string ![io] {
     return _shell_read_cmd("command -v " + name + " 2>/dev/null");
 }
 
+// Target-profile selection for the Link role (SFEP-0066 section 3.6): one
+// entry point picks the platform's direct linker. Darwin and Windows
+// MSVC/COFF resolve to a structured not-yet-owned reason until SFN-954 and
+// SFN-955 implement their argv; both defer to the migration clang oracle
+// rather than failing the build.
+fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
+    if target_os == "Linux" {
+        return resolve_direct_ld_lld(target_os, static_link);
+    }
+    // Every arm echoes `target_os` verbatim in a `(<os>)` group. That is
+    // load-bearing, not cosmetic: `build_target_os()` returns an
+    // unrecognized `SAILFIN_TARGET_OS` override unvalidated (`./target.sfn`
+    // 68-84), and the trace echoing it back is what lets a caller see which
+    // value was actually resolved. `target_flag_cache_key_test.sfn` pins the
+    // recognized/unrecognized contrast on exactly that echo.
+    if target_os == "Darwin" {
+        return _direct_fail("target os (" + target_os
+            + ") has no owned direct linker yet (SFN-954)");
+    }
+    if target_os == "Windows" {
+        return _direct_fail("target os (" + target_os
+            + ") has no owned direct linker yet (SFN-955)");
+    }
+    return _direct_fail("target os (" + target_os
+        + ") has no direct-link target profile");
+}
+
 // Resolve the direct glibc Linux `ld.lld` link contract, or a
 // fallback (`ok=false`) with a reason. Gates, in order: target OS is
 // Linux; host arch is x86_64 or aarch64; `SAILFIN_LINKER` is unset or
@@ -496,6 +523,7 @@ fn trace_direct_link_fallback(reason: string) ![io] {
 export {
     DirectLinkContract,
     resolve_direct_ld_lld,
+    resolve_link_contract,
     direct_ld_lld_argv,
     trace_direct_link_fallback
 };
