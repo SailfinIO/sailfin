@@ -48,19 +48,32 @@ fn _assert_inventory_unique(inventory: WorkspaceInventory) {
 test "workspace inventory: current checkout preserves local automation scopes" ![io] {
     let inventory = load_workspace_inventory(".");
     assert inventory.ok;
-    assert inventory.members.length == 30;
+    assert inventory.members.length == 31;
+    // These two do NOT move with member count, and that is the property, not
+    // an accident. `compiler`/`maintainer` classification keys on capsule role
+    // and build kind (`workspace_inventory.sfn:232-234`), so a `tools/*` Tier 2
+    // member (SFEP-0074 §3) is invisible to both — which is what keeps repo
+    // tooling out of the compiler build fingerprint. A `tools/` capsule that
+    // bumped either of these would have crossed the ownership boundary the
+    // root exists to draw.
     assert inventory.compiler_source_inputs.length == 6;
     assert inventory.maintainer_source_inputs.length == 8;
-    assert inventory.all_source_inputs.length == 30;
-    assert inventory.member_test_roots.length == 20;
-    assert inventory.test_roots.length == 23;
-    assert inventory.manifest_inputs.length == 30;
+    assert inventory.all_source_inputs.length == 31;
+    assert inventory.member_test_roots.length == 21;
+    assert inventory.test_roots.length == 24;
+    assert inventory.manifest_inputs.length == 31;
     // The runtime member's `ir/` holds exactly one `.ll`: the Win32 BOOLEAN
     // ABI bridge behind the link providers (SFN-1143). Every runtime IR file
     // lands in `explicit_inputs` too, so the two counts move together.
     assert inventory.runtime_ir_inputs.length == 1;
-    assert inventory.explicit_inputs.length == 33;
+    assert inventory.explicit_inputs.length == 34;
     assert _contains(inventory.compiler_source_inputs, "compiler/src");
+    // The repo-tooling member is discoverable for tests and manifests but
+    // reaches neither compiler-facing scope (SFEP-0074 §3 Tier 2).
+    assert _contains(inventory.all_source_inputs, "tools/repo-tooling/src");
+    assert _contains(inventory.member_test_roots, "tools/repo-tooling/tests");
+    assert ! _contains(inventory.compiler_source_inputs, "tools/repo-tooling/src");
+    assert ! _contains(inventory.maintainer_source_inputs, "tools/repo-tooling/src");
     assert _contains(inventory.maintainer_source_inputs, "runtime/prelude.sfn");
     assert _contains(inventory.maintainer_source_inputs, "runtime/sfn");
     assert _contains(inventory.all_source_inputs, "stdlib/strings/src");
