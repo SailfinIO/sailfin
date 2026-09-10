@@ -44,11 +44,9 @@
 // `.claude/rules/no-bash-e2e.md`. Shape follows `runtime_identity_stamp_test.sfn`.
 // env-safe (SFN-1114): derived by subtraction from the real environment
 // rather than a hand-rolled allowlist.
-import { clean_runner_env, clean_runner_env_without, sfn_bin_path } from "sfn/test";
+import { clean_runner_env_without, sfn_bin_path } from "sfn/test";
 
-fn _child_env(scratch: string) -> string[] ![io] {
-    return clean_runner_env(scratch);
-}
+import { copy_tree } from "../../src/build/fs_tree";
 
 fn _contains_text(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
@@ -73,25 +71,13 @@ fn _contains_text(haystack: string, needle: string) -> boolean {
 fn _stage_runtime_fixture(scratch: string, dep_spec: string, probe_rel: string, probe_source: string) -> string ![io] {
     // Private runtime tree. The name has no `runtime/` segment on purpose.
     let runtime_copy = scratch + "/runtime-copy";
-    let cp_rt = process.run_capture(["cp", "-R", "runtime", runtime_copy], _child_env(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_rt == 0;
-
-    let cp_caps = process.run_capture(["cp", "-R", "capsules", scratch
-        + "/capsules"], _child_env(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_caps == 0;
+    assert copy_tree("runtime", runtime_copy);
+    assert copy_tree("capsules", scratch + "/capsules");
 
     // Mirror the installer's stable projection for the one foundation
     // capsule this fixture consumes. Copying it explicitly keeps this test's
     // out-of-tree shape independent from the source-workspace layout.
-    let cp_strings = process.run_capture(["cp", "-R", "stdlib/strings", scratch
-        + "/capsules/sfn/strings"], _child_env(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_strings == 0;
+    assert copy_tree("stdlib/strings", scratch + "/capsules/sfn/strings");
 
     // Declare the dependency and add a probe module that actually calls into
     // it. Both edits are required: the manifest entry drives staging, and the
@@ -116,23 +102,11 @@ fn _stage_runtime_fixture(scratch: string, dep_spec: string, probe_rel: string, 
 // consulted canonical workspace identity rather than deriving a path.
 fn _stage_workspace_runtime_fixture(scratch: string, dep_spec: string, probe_rel: string, probe_source: string) -> string ![io] {
     let runtime_copy = scratch + "/runtime-copy";
-    let cp_rt = process.run_capture(["cp", "-R", "runtime", runtime_copy], _child_env(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_rt == 0;
+    assert copy_tree("runtime", runtime_copy);
 
     fs.createDirectory(scratch + "/stdlib", true);
-    let cp_crypto = process.run_capture(["cp", "-R", "capsules/sfn/crypto", scratch
-        + "/stdlib/crypto"], _child_env(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_crypto == 0;
-
-    let cp_strings = process.run_capture(["cp", "-R", "stdlib/strings", scratch
-        + "/stdlib/strings"], _child_env(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_strings == 0;
+    assert copy_tree("capsules/sfn/crypto", scratch + "/stdlib/crypto");
+    assert copy_tree("stdlib/strings", scratch + "/stdlib/strings");
 
     fs.writeFile(scratch + "/workspace.toml", "[workspace]\n"
         + "members = [\"runtime-copy\", \"stdlib/*\"]\n");
@@ -211,11 +185,7 @@ test "runtime capsule dep: missing workspace member rejects stale installed mirr
     fs.writeFile(scratch + "/workspace.toml", "[workspace]\n"
         + "members = [\"runtime-copy\"]\n");
     fs.createDirectory(scratch + "/capsules/sfn", true);
-    let cp_stale = process.run_capture(["cp", "-R", "capsules/sfn/crypto", scratch
-        + "/capsules/sfn/crypto"], _child_env(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_stale == 0;
+    assert copy_tree("capsules/sfn/crypto", scratch + "/capsules/sfn/crypto");
 
     let prog = scratch + "/prog.sfn";
     fs.writeFile(prog, "fn main() -> int { return 0; }\n");

@@ -133,6 +133,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         enabled: false,
         trace: false,
         clean: false,
+        preserve_shared_on_clean: false,
         capsule_name: ""
     };
     let staged = stage_capsule_imports(resolved.sources, disabled_cache, sailfin_exe, work_dir);

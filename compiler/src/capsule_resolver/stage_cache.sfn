@@ -88,6 +88,9 @@ fn _cr_disabled_stage_cache_ctx() -> _StageCacheContext {
 // `docs/runbooks/build-cache-stale-ir.md` §3.
 fn _cr_resolve_stage_cache_ctx(config: BuildCacheConfig, sailfin_exe: string) -> _StageCacheContext ![io] {
     if !config.enabled { return _cr_disabled_stage_cache_ctx(); }
+    if config.clean && config.preserve_shared_on_clean {
+        return _cr_disabled_stage_cache_ctx();
+    }
     if sailfin_exe.length == 0 { return _cr_disabled_stage_cache_ctx(); }
     // SFN-861: `empty_build_cache_config()` (the `sfn test` leg's config)
     // hardcodes `enabled: true` and never consults these env vars the way

@@ -381,9 +381,8 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     let effective_exe = _cr_effective_isolation_exe(sailfin_exe, self_exe, binary_dir, resolved.sources.length);
 
     // SFN-872: `--clean` must also reach the LOCAL staged import-context
-    // tree. `compile_capsule_modules` wipes `cache_root(...)` — which covers
-    // the SFN-861 shared staging tier — but the tree `stage_capsule_imports`
-    // reads is work-dir rooted and survives that wipe. Its local gate is the
+    // tree. Shared-cache cleanup or bypass cannot invalidate the work-dir
+    // tree read by `stage_capsule_imports`. Its local gate is the
     // `.srchash` sidecar, a hash of the SOURCE alone (no compiler identity,
     // no target), so an artifact emitted by a DIFFERENT compiler is served
     // straight back — exactly the staleness `--clean` exists to break.
@@ -577,6 +576,7 @@ fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_
         enabled: false,
         trace: false,
         clean: false,
+        preserve_shared_on_clean: false,
         capsule_name: ""
     };
     return stage_capsule_imports(resolved.sources, disabled_cache, sailfin_exe, work_dir);

@@ -52,7 +52,7 @@ import { _do_determinism_check } from "../../build/determinism";
 import { resolve_link_contract } from "../../build/direct_link";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
-import { clean_runtime_object_cache } from "../../build/runtime_objs";
+import { clean_runtime_object_cache, condition_runtime_capsules_for_target } from "../../build/runtime_objs";
 import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import {
     build_target_os,
@@ -323,6 +323,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     // paths so the default invocation is byte-for-byte identical.
     let sailfin_cache_dir = _resolve_sailfin_cache_dir_for_work(work_dir);
     let mut cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
+    cache_config.preserve_shared_on_clean = true;
 
     // -p resolves the entry path + build kind from the capsule's
     // manifest. The build then proceeds as for a positional source
@@ -675,7 +676,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         build_shared_cache_root = cache_root(cache_config.capsule_name);
     }
     // SFN-14: force runtime objects to recompile from scratch on `--clean`.
-    // `cache_clean` (`build_cache.sfn`) wipes only the module cache root;
+    // Project cleanup bypasses shared reads without deleting the shared root;
     // the runtime object cache has two tiers that both survive it — the
     // work-dir-local `.o`/`.key`/`.ll` under `sailfin_cache_dir`, and (since
     // #1096) the shared content-addressed tier under
@@ -688,7 +689,17 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     // the opt level `_clang_link_multi` compiles the runtime objects with.
     if clean_flag {
         build_shared_cache_root = "";
-        clean_runtime_object_cache(build_runtime_caps, sailfin_cache_dir, "-O2");
+        // The linker conditions the manifest before compiling, replacing
+        // generic providers and appending target-specific ones. Clean that
+        // exact source set too; using the unconditioned set left native
+        // Windows objects in place to hit locally on the clean invocation.
+        let clean_runtime_caps = condition_runtime_capsules_for_target(build_runtime_caps, build_target_os(), build_target_triple());
+        if clean_runtime_caps.length != build_runtime_caps.length { return 1; }
+        if !clean_runtime_object_cache(clean_runtime_caps, sailfin_cache_dir, "-O2") {
+            print.err("[cache] --clean: failed to remove runtime object cache artifacts from "
+                + sailfin_cache_dir);
+            return 1;
+        }
     }
     let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir, build_shared_cache_root, cap_link_libs);
     let rc = link_result.rc;

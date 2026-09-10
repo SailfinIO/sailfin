@@ -330,6 +330,9 @@ struct BuildCacheConfig {
     enabled: boolean;
     trace: boolean;
     clean: boolean;
+    // SFN-1251: build bypasses shared reads instead of deleting other entries.
+    // Default false preserves the separate run --clean schema-wipe contract.
+    preserve_shared_on_clean: boolean;
     // The current build's `[capsule].name`, threaded here so it
     // reaches every `cache_root()` call site (this config already
     // flows to all of them). Used only to pin the content-addressed
@@ -345,6 +348,7 @@ fn empty_build_cache_config() -> BuildCacheConfig {
         enabled: true,
         trace: false,
         clean: false,
+        preserve_shared_on_clean: false,
         capsule_name: ""
     };
 }
@@ -358,6 +362,7 @@ fn resolve_build_cache_config(no_cache_flag: boolean, trace_flag: boolean, clean
         enabled: !env_disabled && !no_cache_flag,
         trace: env_trace || trace_flag,
         clean: clean_flag,
+        preserve_shared_on_clean: false,
         capsule_name: ""
     };
 }

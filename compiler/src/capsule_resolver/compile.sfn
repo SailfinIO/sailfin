@@ -97,7 +97,8 @@ fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: strin
     if config.enabled {
         lookup_attempted = true;
         cache_key = cache_key_for(src.source_path, dep_slugs, dep_manifests, compiler_version, flags_canonical, src.slug, target_triple);
-        if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
+        if !(config.clean && config.preserve_shared_on_clean)
+            && cache_lookup_artifact(cache_root_path, cache_key, "ll") {
             if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
                 if config.trace { print.err("[cache hit] " + src.slug); }
                 return ModuleCacheEvent {
@@ -205,9 +206,8 @@ fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: strin
 // `CompileCapsuleResult` for the build (paths + stats + success).
 // `config` carries the CLI flag overrides; pass
 // `empty_build_cache_config()` for callers that want the default
-// env-driven behaviour. Honours `config.clean` by wiping the cache
-// root before any per-module work — done once per build, not per
-// module, so a single `--clean` run can't double-wipe.
+// env-driven behaviour. Build clean bypasses lookups while refreshing only
+// this invocation's keys; other callers retain the schema-wipe behavior.
 fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string, work_dir: string, implicit_provider_slugs: string[]) -> CompileCapsuleResult ![io] {
     let scratch_root = _cr_scratch_root();
     _cr_ensure_dir(scratch_root);
@@ -281,8 +281,9 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     _cr_stage_import_deps(sources, slug_universe, work_dir);
     _cr_stage_implicit_deps(sources, implicit_provider_slugs, work_dir);
     let cache_root_path = cache_root(config.capsule_name);
-    if config.clean {
-        // `--clean` is a destructive opt-in. If the wipe fails
+    if config.clean && !config.preserve_shared_on_clean {
+        // The legacy run --clean contract wipes the shared root. Build uses
+        // invocation-scoped lookup bypass instead (SFN-1251). If the wipe fails
         // (read-only fs, perms, etc.), surface a warning so the
         // user knows the cache may still be partially populated
         // — falling through silently would be surprising and
@@ -396,7 +397,8 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
             if config.enabled {
                 lookup_attempted = true;
                 cache_key = cache_key_for(src.source_path, per_source_dep_slugs[pi], per_source_dep_manifests[pi], compiler_version, flags_canonical, src.slug, target_triple);
-                if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
+                if !(config.clean && config.preserve_shared_on_clean)
+                    && cache_lookup_artifact(cache_root_path, cache_key, "ll") {
                     if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
                         if config.trace {
                             print.err("[cache hit] " + src.slug);

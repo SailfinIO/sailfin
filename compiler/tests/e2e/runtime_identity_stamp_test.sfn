@@ -36,18 +36,12 @@
 import { find } from "sfn/strings";
 import { clean_runner_env, clean_runner_env_without, sfn_bin_path } from "sfn/test";
 
+import { copy_tree } from "../../src/build/fs_tree";
+
 // Derived by subtraction from the real environment rather than a
 // hand-rolled allowlist (SFN-1114).
 fn _child_env_with_scratch(scratch: string) -> string[] ![io] {
     return clean_runner_env(scratch);
-}
-
-// HOME is named to `clean_runner_env_without` so an inherited entry cannot
-// shadow this forced override (SFN-1114).
-fn _child_env_with_scratch_and_home(scratch: string, home: string) -> string[] ![io] {
-    let mut e = clean_runner_env_without(scratch, ["HOME"]);
-    e.push("HOME=" + home);
-    return e;
 }
 
 // Materialize two minimal fixture dirs (A and B) under `base`. Each dir
@@ -236,14 +230,11 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     // segment, so it exercises the fixed runtime-relative slug derivation
     // (pre-fix this dir name is exactly what broke the warm).
     let runtime_copy = scratch + "/runtime-copy";
-    let cp_exit = process.run_capture(["cp", "-R", "runtime", runtime_copy], _child_env_with_scratch(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_exit == 0;
+    assert copy_tree("runtime", runtime_copy);
 
     // The installed capsule projection has to come along. Since
     // `runtime/capsule.toml` gained a
-    // `[dependencies]` entry (SFN-341), a bare `cp -R runtime` no longer yields
+    // `[dependencies]` entry (SFN-341), a runtime-only copy no longer yields
     // a COMPLETE runtime: the runtime's `sfn-sources` call into `sfn/crypto`,
     // which in turn declares `sfn/strings`, and none of it is inside
     // `runtime/`. `locate_runtime_dep_capsule_src` resolves a runtime dep at
@@ -256,15 +247,8 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     // `capsules/sfn/*` layout. Copying whole roots rather than naming
     // `crypto` + `strings` keeps the fixture correct when that closure changes.
     let caps_copy = scratch + "/capsules";
-    let cp_caps_exit = process.run_capture(["cp", "-R", "capsules", caps_copy], _child_env_with_scratch(scratch));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_caps_exit == 0;
-    let cp_stdlib_exit = process.run_capture(["cp", "-R", "stdlib/.", caps_copy
-        + "/sfn"], _child_env_with_scratch_and_home(scratch, isolated_home));
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    assert cp_stdlib_exit == 0;
+    assert copy_tree("capsules", caps_copy);
+    assert copy_tree("stdlib", caps_copy + "/sfn");
 
     // First warm against the private copy. Pre-#2005 this failed at link
     // (`invalid redefinition of function sfn_type_register__<path-slug>`)

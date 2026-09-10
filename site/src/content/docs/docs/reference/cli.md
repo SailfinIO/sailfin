@@ -49,7 +49,7 @@ sfn run [<file.sfn>]
 
 | Flag | Description |
 |---|---|
-| `--clean` | Clear the content-addressed build cache (and the runtime object cache) before running. Clears the cache, not the `build/` tree — see [`--clean-tree` vs `--clean`](#--clean-tree-vs---clean) |
+| `--clean` | Clear the content-addressed build cache and local project staging before running. See [`--clean-tree` vs `--clean`](#--clean-tree-vs---clean). |
 | `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 
 **Examples:**
@@ -327,7 +327,7 @@ sfn build [<file.sfn> | -p <capsule-path>] [-o <output>]
 |---|---|
 | `-o <output>` | Write the compiled binary to `output` instead of the default path |
 | `-p <capsule-path>` | Build the capsule at this directory or manifest path, using its `[build]` configuration |
-| `--clean` | Clear the content-addressed build cache (and the runtime object cache) before building. Clears the cache, not the `build/` tree — see [`--clean-tree` vs `--clean`](#--clean-tree-vs---clean) |
+| `--clean` | Clear local project staging and runtime objects, and bypass shared cache reads for this build. Rebuilt project modules can refresh their own shared entries; unrelated entries remain intact. See [`--clean-tree` vs `--clean`](#--clean-tree-vs---clean). |
 | `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 | `--static` | Link with no `libc.so` in `DT_NEEDED` and no ELF interpreter — see the caveats below. Linux `x86_64-unknown-linux-gnu` / `aarch64-unknown-linux-gnu` only; any other resolved triple fails with `E0625`. Never degrades: if the static CRT objects or `libc.a` cannot be resolved the build fails with `E0626` rather than emitting a dynamic binary. |
 
@@ -438,7 +438,8 @@ These two flags sound alike and clear different things — never conflate them.
 
 | Command | Clears |
 |---|---|
-| `sfn build --clean` / `sfn run --clean` | The content-addressed build cache and the runtime object cache. That cache root lives outside the repo unless neither `XDG_CACHE_HOME` nor `HOME` is set, or `~/.sfn/config.toml`'s `[build] cache-dir` is set. |
+| `sfn build --clean` | Local project staging and runtime objects. Shared cache reads are bypassed for this invocation; unrelated shared entries are preserved. |
+| `sfn run --clean` | The content-addressed cache root and local project staging. Work-dir runtime-object cleanup for `run` is a separate contract. |
 | `sfn dev bootstrap build --clean-tree` | `build/*` except the fetched seed toolchain store, then self-hosts. Never touches the cache. |
 | `sfn dev clean build` | The same removal as `--clean-tree`, standalone (no rebuild), with `--include-seed` / `--dry-run` available. |
 

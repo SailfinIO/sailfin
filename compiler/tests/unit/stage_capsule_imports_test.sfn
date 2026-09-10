@@ -52,6 +52,7 @@ fn _sct_no_cache() -> BuildCacheConfig {
         enabled: false,
         trace: false,
         clean: false,
+        preserve_shared_on_clean: false,
         capsule_name: ""
     };
 }
