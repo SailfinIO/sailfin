@@ -13,13 +13,6 @@
 # path and no override knob here, in the one place `bootstrap.toml`'s
 # `[verify] required = true` is unambiguous.
 #
-# `install.ps1` and `install.sh` used to warn-and-continue when OpenSSL was
-# missing or the manifest fetch failed; SFN-1034 closed that, so all three now
-# fail closed. They are NOT identical: the installers accept a loudly named
-# `SAILFIN_ALLOW_UNVERIFIED=1` opt-in for genuinely unsigned artifacts, which
-# this script must never grow. `install.ps1` also carries an embedded Ed25519
-# verifier and needs no OpenSSL at all; SFN-1093 converges this script onto it
-# so CI and users exercise identical arithmetic, and deletes this paragraph.
 
 [CmdletBinding()]
 param(
@@ -42,6 +35,180 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# SFN-1093: keep this arithmetic and both RFC 8032 self-test assertions in
+# sync with install.ps1. D-12 in the SFN-1034 design note requires duplication:
+# the installer is delivered as a single file and cannot import a repo helper.
+$script:_Ed25519P = [System.Numerics.BigInteger]::Pow(2, 255) - 19
+$script:_Ed25519L = [System.Numerics.BigInteger]::Pow(2, 252) + [System.Numerics.BigInteger]::Parse("27742317777372353535851937790883648493")
+
+function _Ed25519Mod([System.Numerics.BigInteger]$a) {
+    $r = $a % $script:_Ed25519P
+    if ($r.Sign -lt 0) { $r += $script:_Ed25519P }
+    return $r
+}
+
+function _Ed25519Inv([System.Numerics.BigInteger]$a) {
+    return [System.Numerics.BigInteger]::ModPow((_Ed25519Mod $a), $script:_Ed25519P - 2, $script:_Ed25519P)
+}
+
+$script:_Ed25519D = _Ed25519Mod ((_Ed25519Mod ([System.Numerics.BigInteger]-121665)) * (_Ed25519Inv ([System.Numerics.BigInteger]121666)))
+$script:_Ed25519I = [System.Numerics.BigInteger]::ModPow([System.Numerics.BigInteger]2, ($script:_Ed25519P - 1) / 4, $script:_Ed25519P)
+
+# Points are extended twisted-Edwards coordinates (X, Y, Z, T) with a = -1.
+function _Ed25519PointAdd($p1, $p2) {
+    $a = _Ed25519Mod (($p1[1] - $p1[0]) * ($p2[1] - $p2[0]))
+    $b = _Ed25519Mod (($p1[1] + $p1[0]) * ($p2[1] + $p2[0]))
+    $c = _Ed25519Mod ($p1[3] * 2 * $script:_Ed25519D * $p2[3])
+    $d = _Ed25519Mod ($p1[2] * 2 * $p2[2])
+    $e = $b - $a; $f = $d - $c; $g = $d + $c; $h = $b + $a
+    return @((_Ed25519Mod ($e * $f)), (_Ed25519Mod ($g * $h)), (_Ed25519Mod ($f * $g)), (_Ed25519Mod ($e * $h)))
+}
+
+function _Ed25519PointDouble($p1) {
+    $a = _Ed25519Mod ($p1[0] * $p1[0])
+    $b = _Ed25519Mod ($p1[1] * $p1[1])
+    $c = _Ed25519Mod (2 * $p1[2] * $p1[2])
+    $d = _Ed25519Mod (-$a)
+    $e = _Ed25519Mod ((_Ed25519Mod (($p1[0] + $p1[1]) * ($p1[0] + $p1[1]))) - $a - $b)
+    $g = $d + $b; $f = $g - $c; $h = $d - $b
+    return @((_Ed25519Mod ($e * $f)), (_Ed25519Mod ($g * $h)), (_Ed25519Mod ($f * $g)), (_Ed25519Mod ($e * $h)))
+}
+
+function _Ed25519PointMul($pt, [System.Numerics.BigInteger]$n) {
+    $q = @([System.Numerics.BigInteger]0, [System.Numerics.BigInteger]1, [System.Numerics.BigInteger]1, [System.Numerics.BigInteger]0)
+    $bits = New-Object System.Collections.ArrayList
+    $t = $n
+    while ($t -gt 0) { [void]$bits.Add([int]($t % 2)); $t = $t / 2 }
+    for ($i = $bits.Count - 1; $i -ge 0; $i--) {
+        $q = _Ed25519PointDouble $q
+        if ($bits[$i] -eq 1) { $q = _Ed25519PointAdd $q $pt }
+    }
+    return $q
+}
+
+# Recover x from y on the curve, or $null when y encodes no curve point.
+function _Ed25519XRecover([System.Numerics.BigInteger]$y) {
+    $yy = _Ed25519Mod ($y * $y)
+    $u = _Ed25519Mod ($yy - 1)
+    $v = _Ed25519Mod ($script:_Ed25519D * $yy + 1)
+    $uv = _Ed25519Mod ($u * (_Ed25519Inv $v))
+    $x = [System.Numerics.BigInteger]::ModPow($uv, ($script:_Ed25519P + 3) / 8, $script:_Ed25519P)
+    if ((_Ed25519Mod ($x * $x - $uv)) -ne 0) { $x = _Ed25519Mod ($x * $script:_Ed25519I) }
+    if ((_Ed25519Mod ($x * $x * $v - $u)) -ne 0) { return $null }
+    return $x
+}
+
+function _Ed25519HexToBytes([string]$h) {
+    $n = $h.Length / 2
+    $r = New-Object byte[] $n
+    for ($i = 0; $i -lt $n; $i++) { $r[$i] = [Convert]::ToByte($h.Substring($i * 2, 2), 16) }
+    return ,$r
+}
+
+# Little-endian byte string to BigInteger. The extra zero byte forces a
+# non-negative interpretation regardless of the top bit.
+function _Ed25519LeToBig([byte[]]$b) {
+    $e = New-Object byte[] ($b.Length + 1)
+    [Array]::Copy($b, $e, $b.Length)
+    return [System.Numerics.BigInteger]::new($e)
+}
+
+function _Ed25519DecodePoint([byte[]]$b) {
+    if ($b.Length -ne 32) { return $null }
+    $c = New-Object byte[] 32
+    [Array]::Copy($b, $c, 32)
+    $sign = ($c[31] -shr 7) -band 1
+    $c[31] = $c[31] -band 0x7f
+    $y = _Ed25519LeToBig $c
+    if ($y -ge $script:_Ed25519P) { return $null }
+    $x = _Ed25519XRecover $y
+    if ($null -eq $x) { return $null }
+    # RFC 8032 section 5.1.3 step 4: x = 0 with the sign bit set is a
+    # non-canonical encoding and decoding MUST fail. Negating zero would
+    # otherwise silently accept a second byte encoding of the identity and the
+    # order-2 point. Not a forgery route here -- the public key is a pinned
+    # constant and is always canonical -- but accepting an alternate encoding
+    # of R is signature malleability, and a verifier should not deviate from
+    # the spec on inputs an attacker chooses.
+    if ($x -eq 0 -and $sign -eq 1) { return $null }
+    if (($x % 2) -ne $sign) { $x = _Ed25519Mod (-$x) }
+    return @($x, $y, [System.Numerics.BigInteger]1, (_Ed25519Mod ($x * $y)))
+}
+
+# Returns $true only when `sig` is a valid Ed25519 signature by `pub` over
+# `msg`. Every malformed input returns $false; nothing here throws on bad data,
+# so a caller cannot mistake a parse failure for a verification pass.
+function Test-Ed25519Signature([byte[]]$pub, [byte[]]$sig, [byte[]]$msg) {
+    if ($null -eq $pub -or $pub.Length -ne 32) { return $false }
+    if ($null -eq $sig -or $sig.Length -ne 64) { return $false }
+    # A null message would otherwise verify over the EMPTY message rather than
+    # returning false, quietly breaking this function's stated contract that
+    # every malformed input is rejected.
+    if ($null -eq $msg) { return $false }
+
+    $a = _Ed25519DecodePoint $pub
+    if ($null -eq $a) { return $false }
+
+    $rBytes = New-Object byte[] 32
+    $sBytes = New-Object byte[] 32
+    [Array]::Copy($sig, 0, $rBytes, 0, 32)
+    [Array]::Copy($sig, 32, $sBytes, 0, 32)
+
+    $r = _Ed25519DecodePoint $rBytes
+    if ($null -eq $r) { return $false }
+
+    # Reject a non-canonical scalar rather than reducing it: s >= L would admit
+    # a second valid encoding of the same signature.
+    $s = _Ed25519LeToBig $sBytes
+    if ($s -ge $script:_Ed25519L) { return $false }
+
+    $sha = [System.Security.Cryptography.SHA512]::Create()
+    try {
+        $buf = New-Object byte[] (64 + $msg.Length)
+        [Array]::Copy($rBytes, 0, $buf, 0, 32)
+        [Array]::Copy($pub, 0, $buf, 32, 32)
+        if ($msg.Length -gt 0) { [Array]::Copy($msg, 0, $buf, 64, $msg.Length) }
+        $hashBytes = $sha.ComputeHash($buf)
+    } finally {
+        $sha.Dispose()
+    }
+    $h = (_Ed25519LeToBig $hashBytes) % $script:_Ed25519L
+
+    $basePoint = _Ed25519DecodePoint (_Ed25519HexToBytes "5866666666666666666666666666666666666666666666666666666666666666")
+    $lhs = _Ed25519PointMul $basePoint $s
+    $rhs = _Ed25519PointAdd $r (_Ed25519PointMul $a $h)
+
+    # Compare projectively: X1*Z2 == X2*Z1 and Y1*Z2 == Y2*Z1.
+    $okX = (_Ed25519Mod ($lhs[0] * $rhs[2])) -eq (_Ed25519Mod ($rhs[0] * $lhs[2]))
+    $okY = (_Ed25519Mod ($lhs[1] * $rhs[2])) -eq (_Ed25519Mod ($rhs[1] * $lhs[2]))
+    return ($okX -and $okY)
+}
+
+# Known-answer self-test, RFC 8032 section 7.1 TEST 2, run before the verifier
+# is trusted with a release signature.
+#
+# BOTH assertions are mandatory. Without the negative case a verifier that
+# always returns true would pass this probe -- which is precisely the failure
+# mode SFN-1034 exists to close.
+function Assert-Ed25519VerifierUsable {
+    $katKey = _Ed25519HexToBytes "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+    $katSig = _Ed25519HexToBytes "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+    $genuine = _Ed25519HexToBytes "72"
+    $tampered = _Ed25519HexToBytes "73"
+
+    $accepts = $false
+    $rejects = $false
+    try {
+        $accepts = (Test-Ed25519Signature $katKey $katSig $genuine)
+        $rejects = -not (Test-Ed25519Signature $katKey $katSig $tampered)
+    } catch {
+        throw "the embedded Ed25519 verifier failed its RFC 8032 self-test with an error ($($_.Exception.Message)). Refusing to bootstrap: a verifier that cannot check a known vector cannot be trusted to reject a forged one."
+    }
+    if (-not $accepts -or -not $rejects) {
+        throw "the embedded Ed25519 verifier failed its RFC 8032 self-test (accepts-genuine=$accepts, rejects-tampered=$rejects). Refusing to bootstrap."
+    }
+}
+
 $ver = $Version
 # Asset naming and the release-asset layout are hardcoded here, as they
 # already are in `compiler/src/cli/commands/toolchain.sfn`, `install.sh`
@@ -60,7 +227,6 @@ New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 $archive  = Join-Path $WorkDir $asset
 $manifest = Join-Path $WorkDir "SHA256SUMS"
 $sigHex   = Join-Path $WorkDir "SHA256SUMS.sig"
-$sigRaw   = Join-Path $WorkDir "SHA256SUMS.sig.raw"
 $pubKey   = $PublicKeyPath
 
 foreach ($f in @(@{u="$base/$asset"; o=$archive},
@@ -102,38 +268,28 @@ foreach ($f in @(@{u="$base/$asset"; o=$archive},
 
 if (-not (Test-Path $pubKey)) { throw "SFN-994: release signing key missing at $pubKey" }
 
-# OpenSSL 3.0+, NOT the `1.1.1|[2-9]` pattern `install.sh` and `install.ps1`
-# use. `pkeyutl -rawin` arrived in 3.0; on 1.1.1 it is an unknown option, so
-# that pattern admits a toolchain which then fails at the verify call and
-# reports a SIGNATURE failure for what is really a missing flag. Rejecting it
-# up front costs nothing here -- the pinned `windows-2025` image carries
-# OpenSSL 3.6.3 -- and keeps the diagnosis honest.
-$ossl = Get-Command openssl -ErrorAction SilentlyContinue
-$osslVersion = if ($ossl) { (& openssl version 2>$null) } else { "" }
-if (-not $ossl -or $osslVersion -notmatch '^OpenSSL ([3-9]|[1-9][0-9]+)\.') {
-  throw "SFN-994: OpenSSL 3.0+ is required to verify the release seed (pkeyutl -rawin), and was not found (got '$osslVersion'). Failing closed -- bootstrap.toml [verify].required = true. If the runner image dropped OpenSSL, that is the bug; do not relax this check."
+# RFC 8410 Ed25519 SubjectPublicKeyInfo: fixed algorithm identifier, absent
+# parameters, and a 32-byte BIT STRING with no unused bits. Validate the whole
+# envelope before extracting the raw key; do not accept another key algorithm.
+$pem = (Get-Content -Raw -LiteralPath $pubKey).Trim()
+if ($pem -notmatch '\A-----BEGIN PUBLIC KEY-----\s+([A-Za-z0-9+/=\s]+)\s+-----END PUBLIC KEY-----\z') {
+  throw "SFN-1093: malformed Ed25519 public key PEM at $pubKey"
 }
+$keyDer = [Convert]::FromBase64String(($Matches[1] -replace '\s', ''))
+$prefix = '302A300506032B6570032100'
+if ($keyDer.Length -ne 44 -or ([BitConverter]::ToString($keyDer, 0, 12) -replace '-', '') -cne $prefix) {
+  throw "SFN-1093: expected an Ed25519 SubjectPublicKeyInfo key at $pubKey"
+}
+$keyBytes = New-Object byte[] 32
+[Array]::Copy($keyDer, 12, $keyBytes, 0, 32)
+
+Assert-Ed25519VerifierUsable
 
 $hex = ((Get-Content -Raw $sigHex) -replace '\s', '')
 if ($hex -notmatch '^[0-9a-fA-F]{128}$') { throw "SFN-994: SHA256SUMS.sig is malformed" }
-$sigBytes = New-Object byte[] 64
-for ($i = 0; $i -lt 64; $i++) { $sigBytes[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
-[IO.File]::WriteAllBytes((Join-Path (Resolve-Path -LiteralPath $WorkDir) 'SHA256SUMS.sig.raw'), $sigBytes)
-
-# try/catch, not a bare `$LASTEXITCODE` check. PowerShell 7.4 defaults
-# `$PSNativeCommandUseErrorActionPreference` to true, so with
-# `$ErrorActionPreference = 'Stop'` a non-zero native exit raises a terminating
-# error AT the call, before the next line runs. Either way the step goes red,
-# but without this the log shows PowerShell's generic native-command error
-# instead of saying which check failed -- and "the step died somewhere in
-# verification" is the ambiguity this whole file exists to avoid.
-$sigOk = $false
-try {
-  & openssl pkeyutl -verify -pubin -inkey $pubKey -rawin -in $manifest -sigfile $sigRaw 2>$null | Out-Null
-  $sigOk = ($LASTEXITCODE -eq 0)
-} catch {
-  $sigOk = $false
-}
+$sigBytes = _Ed25519HexToBytes $hex
+$manifestBytes = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $manifest))
+$sigOk = Test-Ed25519Signature $keyBytes $sigBytes $manifestBytes
 if (-not $sigOk) { throw "SFN-994: SHA256SUMS ed25519 signature verification FAILED for v$ver against $pubKey; refusing to bootstrap from it." }
 
 $digests = @()
@@ -152,9 +308,6 @@ if ($actual -ne $digests[0].ToLowerInvariant()) {
   throw "SFN-994: SHA-256 digest mismatch for '$asset'; refusing to bootstrap from it."
 }
 
-# Say what was verified. `install.ps1`'s equivalent is silent on
-# success, which is why establishing whether it had verified anything
-# took log forensics rather than reading a line (SFN-1034).
+# Say what was verified, matching install.ps1's success evidence (SFN-1034).
 Write-Host "verified: SHA256SUMS ed25519 signature (key $pubKey)"
 Write-Host "verified: $asset sha256 $actual"
-

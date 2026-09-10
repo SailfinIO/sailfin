@@ -337,6 +337,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Exercise the verifier called by seed_source: release on real signed
+      # assets, then prove each trust failure with isolated fixtures (SFN-1093).
+      - name: Verify release seed and fail-closed fixtures without OpenSSL
+        shell: pwsh
+        env:
+          SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          $savedPath = $env:PATH
+          try {
+            $env:PATH = ''
+            if (Get-Command openssl -ErrorAction SilentlyContinue) {
+              throw 'OpenSSL is still available'
+            }
+            & ./.github/actions/sailfin-build-windows/verify-release-seed.ps1 `
+              -Version $env:SEED_VERSION -WorkDir scratch/release-seed
+          } finally { $env:PATH = $savedPath }
+          & ./.github/installer-fixtures/verify-release-seed-tests.ps1 `
+            -Version $env:SEED_VERSION -FixtureDir scratch/release-seed
+
+      - name: Verify release seed fixtures on Windows PowerShell 5.1
+        shell: powershell
+        env:
+          SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          & ./.github/installer-fixtures/verify-release-seed-tests.ps1 `
+            -Version $env:SEED_VERSION -FixtureDir scratch/release-seed
+
       - name: Check PowerShell syntax and release asset
         id: check
         shell: pwsh

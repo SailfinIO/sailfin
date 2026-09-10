@@ -80,12 +80,9 @@ runs:
     # URL and MUST verify it before executing it — this is CI about to run a
     # downloaded executable that will then compile the compiler.
     #
-    # Verification here FAILS CLOSED at every step. `install.ps1` and
-    # `install.sh` warn-and-continue when OpenSSL is missing or the manifest
-    # fetch fails (SFN-1034); copying that shape would let Windows CI bootstrap
-    # from an unverified binary, in the one place `bootstrap.toml`'s
-    # `[verify] required = true` is unambiguous. There is deliberately no
-    # downgrade path and no override knob.
+    # Verification here FAILS CLOSED at every step, enforcing bootstrap.toml's
+    # `[verify] required = true`. SFN-1093 uses install.ps1's embedded verifier,
+    # with no downgrade path or override knob in CI.
     - name: Resolve the pinned seed version (release)
       if: ${{ inputs.seed_source == 'release' }}
       id: seed_pin
@@ -106,18 +103,8 @@ runs:
         echo "version=$pin" >> "$GITHUB_OUTPUT"
         echo "pinned seed: $pin"
 
-    # `shell: pwsh` and not bash, deliberately — this is the only non-bash step
-    # in the action. OpenSSL's presence is EVIDENCED for pwsh on this image
-    # (installer-smoke.yml's windows job runs install.ps1's openssl-gated
-    # verification and does not emit its "OpenSSL unavailable" warning; the
-    # runner reports `Image: windows-2025-vs2026`, whose manifest lists OpenSSL
-    # 3.6.3). No equivalent evidence exists for Git Bash's PATH, and a
-    # verification step is the wrong place to infer a dependency.
-    #
-    # That evidence is a snapshot, not a guarantee: `windows-latest` will move
-    # to a newer image and the `windows-2025` pin will not follow it. Failing
-    # closed is what turns that drift into a loud failure instead of a silent
-    # unverified bootstrap.
+    # PowerShell supplies BigInteger and SHA512 for the embedded Ed25519
+    # verifier, so verification does not depend on the runner's OpenSSL.
     - name: Fetch and verify the native release seed
       if: ${{ inputs.seed_source == 'release' }}
       shell: pwsh
