@@ -33,7 +33,12 @@
 // The "uses cwd" case (test 5) is therefore covered by passing the workdir
 // as the path arg; the cwd-discovery nuance is exercised equivalently.
 import { Env, env_from_current, env_set } from "sfn/os";
-import { contains, find, split } from "sfn/strings";
+import {
+    contains,
+    find,
+    int_to_string,
+    split
+} from "sfn/strings";
 import {
     Background,
     clean_runner_env,
@@ -140,13 +145,29 @@ fn _first_line(text: string) -> string {
 // A generated `sfn/http` capsule, built once and run as a background
 // subprocess on loopback. `handle` records every request's path and body
 // under `SFN_FIXTURE_DIR` (set per-test), and can be told to answer with a
-// 400 (marker file `status400`). Port is fixed: this is the sole publish
-// e2e file binding it, so it does not collide under `--jobs N`.
-fn _fixture_port() -> string { return "18920"; }
+// 400 (marker file `status400`). The complete Windows inventory can overlap
+// nested or repeated copies of this file, so derive both the build root and
+// port from the runner-owned scratch instead of sharing process-global
+// resources (SFN-1237).
+fn _fixture_port() -> string ![io] {
+    let key = _scratch_dir();
+    let mut hash = 0;
+    let mut i = 0;
+    loop {
+        if i >= key.length { break; }
+        hash = (hash * 131 + char_code(substring(key, i, i + 1))) % 10000;
+        i += 1;
+    }
+    // Stay below Windows' default dynamic-port range (49152+) while
+    // spreading concurrent test workers over ten thousand candidates.
+    return int_to_string(20000 + hash);
+}
 
-fn _fixture_app_root() -> string { return "build/publish-e2e-fixture-server"; }
+fn _fixture_app_root() -> string ![io] {
+    return _scratch_dir() + "/publish-e2e-fixture-server";
+}
 
-fn _fixture_bin_path() -> string {
+fn _fixture_bin_path() -> string ![io] {
     return _fixture_app_root() + "/server-bin";
 }
 
@@ -225,10 +246,11 @@ fn _fixture_env(fixture_dir: string) -> Env ![io] {
     return env_set(env_from_current(), "SFN_FIXTURE_DIR", fixture_dir);
 }
 
-// Poll `GET /probe` until the prebuilt fixture server answers.
+// Poll `GET /probe` until this fixture server answers. Equality matters:
+// a non-empty response from an unrelated listener must not look ready.
 fn _await_fixture_ready() -> boolean ![clock, io, net] {
     return wait_until(fn () -> boolean {
-        return http.get_body("http://127.0.0.1:" + _fixture_port() + "/probe").length > 0;
+        return http.get_body("http://127.0.0.1:" + _fixture_port() + "/probe") == "ready";
     }, 45000, 500);
 }
 
