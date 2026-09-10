@@ -13,6 +13,7 @@ import {
     repeated,
     subcommand
 } from "sfn/cli";
+import { contains } from "sfn/strings";
 
 import { TOOL_NAME, TOOL_VERSION, root_command } from "../src/commands";
 
@@ -20,6 +21,18 @@ test "repo-tooling cli: the root command carries a version for --version" {
     assert root_command().name == TOOL_NAME;
     assert root_command().version == TOOL_VERSION;
     assert TOOL_VERSION.length > 0;
+}
+
+test "repo-tooling cli: the reported version matches the manifest" ![io] {
+    // `TOOL_VERSION` is hand-synced to `[capsule] version` — there is no
+    // manifest-version intrinsic a non-compiler capsule can read — so this is
+    // what detects the drift. `sfn test` runs with the workspace root as cwd
+    // (the same assumption `compiler/tests/unit/repository_topology_test.sfn`
+    // makes when it reads `docs/conventions/...`), so the relative path
+    // resolves.
+    let manifest = fs.readFile("tools/repo-tooling/capsule.toml");
+    assert manifest.length > 0;
+    assert contains(manifest, "version = \"" + TOOL_VERSION + "\"");
 }
 
 test "repo-tooling cli: every registered leaf is reachable from the one tree" {

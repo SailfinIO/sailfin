@@ -41,17 +41,26 @@ fn report_field(current: Report, key: string, value: string) -> Report {
 }
 
 // Byte-order comparison. `a < b` on strings is not assumed here; the
-// comparison walks code units so the ordering is the same on every host.
+// comparison walks bytes (`char_code` is byte-valued —
+// runtime/prelude.sfn:753), so the ordering is a total order that is the same
+// on every host and under every locale.
+//
+// Both lengths are hoisted because `.length` lowers to a `strnlen` call, so
+// re-reading them per iteration makes a single comparison O(len^2).
+// `stdlib/strings/src/mod.sfn:79-83` hoists the same two in the same
+// algorithm for the same reason.
 fn _line_less(a: string, b: string) -> boolean {
+    let a_len = a.length;
+    let b_len = b.length;
     let mut i: int = 0;
     loop {
-        if i >= a.length || i >= b.length { break; }
+        if i >= a_len || i >= b_len { break; }
         let ca = char_code(a[i]);
         let cb = char_code(b[i]);
         if ca != cb { return ca < cb; }
         i += 1;
     }
-    return a.length < b.length;
+    return a_len < b_len;
 }
 
 // Insertion sort, stable by construction: an element only moves past a

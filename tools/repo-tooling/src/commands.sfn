@@ -13,10 +13,13 @@
 //
 // The reassignment form (`let mut root = ...; root = with_subcommand(root, x);`)
 // is not style. The pinned seed miscompiles nested `with_subcommand(...)`
-// chains (#1773, recorded at compiler/src/cli/main.sfn:280), and this capsule
-// is built by the seed already on the CI runner (SFEP-0074 §4), so a nested
-// chain here would miscompile in exactly the environment the capsule is meant
-// to run in. Keep the reassignment form until the pin clears #1773.
+// chains past a certain depth (#1773, recorded at
+// compiler/src/cli/main.sfn:631 and compiler/src/cli/commands/test/mod.sfn:219),
+// and this capsule is built by the seed already on the CI runner (SFEP-0074
+// §4), so a nested chain here would miscompile in exactly the environment the
+// capsule is meant to run in. The tree is far shallower than the depth that
+// tipped the compiler's own registration over, so this is prophylaxis rather
+// than a live workaround — but it costs nothing and the tree only grows.
 import {
     Command,
     Matches,

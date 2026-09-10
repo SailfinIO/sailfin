@@ -43,7 +43,13 @@ Three independent mechanisms, none of them redundant:
 |---|---|
 | `[capsule] publish = false` → `sfn publish` exits `E0612` before credential discovery | `compiler/src/cli/commands/publish.sfn:108` |
 | `[build] kind = "binary"` fails the `kind == "library"` half of the public-member predicate | `scripts/module_layout_fingerprint.sh:244` |
-| the release workflow's path filter watches `capsules/**` and `stdlib/**`, never `tools/**` | `.github/workflows/capsule-release.yml:6` |
+| the release workflow's path filter never watches `tools/**` | `.github/workflows/capsule-release.yml:6` |
+
+The third row narrows the trigger rather than removing it: the filter also
+lists `workspace.toml`, so a PR registering a `tools/*` member does fire the
+workflow. The first two rows are what decide publication, and
+`compiler/tests/unit/repository_topology_test.sfn` enforces both for every
+`tools/` member rather than trusting this table.
 
 The capsule name is deliberately outside the `sfn/` scope. Placing it in
 `capsules/sfn/*` would name repo-internal automation `sfn/<something>` and read
@@ -62,7 +68,7 @@ structural rather than a convention.
 | Filesystem | `src/repo_fs.sfn` | `RepoFs { root }` scopes every access; `repo_relative_is_safe` is a pure containment gate that rejects absolute paths, `..`, backslashes, and globs. |
 | Fixture | `src/fixture.sfn` | Declare a tree as data, get a `RepoFs` over a `mkdtemp` root — the same type production takes, so a test drives the real code path. |
 | Deterministic output | `src/deterministic.sfn` | Byte-ordered, LF-only, no clock or PID reachable. `render_report` is file-shaped (trailing LF); `report_lines` is stream-shaped. |
-| Credential injection | `src/credentials.sfn` | `credentials_from_env` is the only `![io]` function; everything downstream takes a `Credentials` value. `redact` is pure, so "this secret cannot survive this rendering" is provable without holding one. |
+| Credential injection | `src/credentials.sfn` | `credentials_from_env` is the only `![io]` function; everything downstream takes a `Credentials` value. `redact` is pure, and removes every **verbatim** occurrence — redact before encoding, not after. |
 
 `[capabilities] required = ["io"]` is deliberately narrower than where the
 leaves end up. A leaf that needs `net` widens it when it lands; declaring it

@@ -1,6 +1,8 @@
 // Filesystem seam. The containment half is pure, so the traversal cases —
 // the ones with the bugs in them — are asserted with no temp directory at
 // all; only the read/write round trip needs `![io]`.
+import { starts_with } from "sfn/strings";
+
 import { fixture_file, materialize } from "../src/fixture";
 import {
     RepoFs,
@@ -51,11 +53,20 @@ fn _bool_of(result: Result<boolean, string>) -> boolean {
     }
 }
 
+// A failed `materialize` must never hand back a usable root. `repo_fs("")`
+// normalizes to `.`, and `.` is the checkout during `sfn test` — a
+// containment test that fell back to it would write into the repository and
+// still report green, which is the worst available outcome for this module.
+// `_assert_fixture_root` below is the guard; every test calls it.
 fn _repo_of(result: Result<RepoFs, string>) -> RepoFs {
     match result {
         Result.Ok { value } => { return value; },
         Result.Err { error } => { return repo_fs(""); }
     }
+}
+
+fn _assert_fixture_root(repo: RepoFs) -> boolean {
+    return repo.root.length > 0 && repo.root != "." && starts_with(repo.root, "/");
 }
 
 test "repo-tooling fs: an ordinary relative path is safe" {
@@ -85,6 +96,22 @@ test "repo-tooling fs: a backslash is refused so containment stays one rule" {
     assert ! repo_relative_is_safe("..\\outside");
 }
 
+test "repo-tooling fs: a Windows drive path is refused" {
+    // Neither form carries a leading slash, a backslash, or a dot segment, so
+    // every other rule admits them. Joined against the default `.` root they
+    // come out absolute (`C:/...`) and drive-relative (`C:foo`) respectively,
+    // the latter resolving against a per-drive working directory that need
+    // not be under the checkout.
+    assert ! repo_relative_is_safe("C:/Windows/System32/x");
+    assert ! repo_relative_is_safe("C:foo");
+    assert ! repo_relative_is_safe("dist/C:foo");
+}
+
+test "repo-tooling fs: a leading tilde is refused before a shell can expand it" {
+    assert ! repo_relative_is_safe("~");
+    assert ! repo_relative_is_safe("~/.ssh/id_ed25519");
+}
+
 test "repo-tooling fs: an empty segment or empty path is refused" {
     assert ! repo_relative_is_safe("");
     assert ! repo_relative_is_safe("dist//SHA256SUMS");
@@ -103,6 +130,9 @@ test "repo-tooling fs: joining under a root prefixes exactly once" {
 test "repo-tooling fs: the default root joins to a bare relative path" {
     assert _string_of(repo_path(repo_fs("."), "dist/SHA256SUMS")) == "dist/SHA256SUMS";
     assert _string_of(repo_path(repo_fs(""), "dist/SHA256SUMS")) == "dist/SHA256SUMS";
+    // A directly-constructed handle skips `repo_fs`, so `repo_path` has to
+    // normalize the empty root itself or this joins to an absolute path.
+    assert _string_of(repo_path(RepoFs { root: "" }, "dist/X")) == "dist/X";
 }
 
 test "repo-tooling fs: an escaping path fails closed instead of joining" {
@@ -118,7 +148,7 @@ test "repo-tooling fs: parent derivation stops at the first segment" {
 
 test "repo-tooling fs: a written file reads back through the same handle" ![io] {
     let repo = _repo_of(materialize([fixture_file("seed.txt", "seed\n")], "fs-roundtrip"));
-    assert repo.root.length > 0;
+    assert _assert_fixture_root(repo);
     assert _int_of(repo_write(repo, "dist/nested/OUT", "written\n")) == 8;
     assert _string_of(repo_read(repo, "dist/nested/OUT")) == "written\n";
     assert _bool_of(repo_exists(repo, "dist/nested/OUT"));
@@ -127,12 +157,14 @@ test "repo-tooling fs: a written file reads back through the same handle" ![io] 
 
 test "repo-tooling fs: reading an absent file is an error, not an empty string" ![io] {
     let repo = _repo_of(materialize([fixture_file("present.txt", "x")], "fs-absent"));
+    assert _assert_fixture_root(repo);
     let error = _error_of(repo_read(repo, "absent.txt"));
     assert error == "repo-tooling: no such repository file \"absent.txt\"";
 }
 
 test "repo-tooling fs: an escaping write never reaches the filesystem" ![io] {
     let repo = _repo_of(materialize([fixture_file("present.txt", "x")], "fs-escape"));
+    assert _assert_fixture_root(repo);
     let error = _int_error_of(repo_write(repo, "../escaped", "nope"));
     assert error == "repo-tooling: unsafe repository path \"../escaped\"";
 }

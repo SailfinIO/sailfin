@@ -43,11 +43,28 @@ fn repo_fs(root: string) -> RepoFs {
 // tree), backslashes (repository manifests are forward-slash on every host,
 // and accepting both makes containment two rules instead of one), empty and
 // `.`/`..` segments, and any `*` (a glob is a caller concern, never a path).
+//
+// A colon anywhere is rejected too, and that one is load-bearing rather than
+// tidiness. `C:/Windows/x` and `C:foo` carry no leading slash, no backslash,
+// and no dot segment, so every other rule here passes them — and joined
+// against the default `.` root they come out as a drive-absolute and a
+// drive-*relative* Windows path respectively, the latter resolving against
+// the process's per-drive working directory, which need not be under the
+// checkout at all. This capsule's acceptance bar names Windows-capable
+// workspace paths, so the one remaining lexical absolute-path form cannot be
+// the gap. A colon is not a legal Windows filename byte in any case, and no
+// repository-relative path needs one.
+//
+// A leading `~` is rejected for the adjacent reason: inert to the filesystem
+// but expanded by a shell, and `paths` exists precisely so a Tier 3 caller
+// can borrow this gate.
 fn repo_relative_is_safe(relative: string) -> boolean {
     if relative.length == 0 { return false; }
     if starts_with(relative, "/") { return false; }
+    if starts_with(relative, "~") { return false; }
     if contains(relative, "\\") { return false; }
     if contains(relative, "*") { return false; }
+    if contains(relative, ":") { return false; }
     let parts = split(relative, "/");
     let mut i: int = 0;
     loop {
@@ -69,7 +86,10 @@ fn repo_path(repo: RepoFs, relative: string) -> Result<string, string> {
             error: "repo-tooling: unsafe repository path \"" + relative + "\""
         };
     }
-    if repo.root == "." {
+    // `RepoFs.root` is a public field, so a leaf can build one without going
+    // through `repo_fs`. An empty root is treated as `.` here as well, or
+    // `"" + "/" + relative` would silently produce an absolute path.
+    if repo.root.length == 0 || repo.root == "." {
         return Result.Ok { value: relative };
     }
     return Result.Ok { value: repo.root + "/" + relative };
