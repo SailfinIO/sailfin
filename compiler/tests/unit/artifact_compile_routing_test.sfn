@@ -1,0 +1,148 @@
+// Routing contract for the split source-to-object providers (SFN-950,
+// SFEP-0066 §3.3).
+//
+// `compiler/src/build/artifact_compile.sfn` replaced one shared `clang -c`
+// argv — which took `.ll` and `.c` through the same `include_flags`
+// parameter and the same cache-key formula — with two request kinds. These
+// tests pin the four properties that split is supposed to buy:
+//
+//   1. Each path still emits the legacy clang argv byte-for-byte, so the
+//      refactor cannot change what any current caller compiles.
+//   2. An LLVM request carries no C include roots and no C language mode.
+//   3. A misrouted source (a `c-sources` entry handed to the LLVM builder,
+//      or a `.ll` handed to the foreign-C builder) fails closed with an
+//      empty argv rather than compiling through the wrong provider.
+//   4. The two cache namespaces are disjoint for identical base keys — the
+//      case where a `.c` and a `.ll` share a basename and content hash.
+//
+// The companion guard against a *new, unclassified* object-compile call
+// site lives in `link_dispatch_census_test.sfn`; neither substitutes for
+// the other.
+import { starts_with } from "sfn/strings";
+import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
+
+import {
+    ForeignCRequest,
+    LlvmArtifactRequest,
+    classify_object_source,
+    foreign_c_argv_with_target,
+    foreign_c_cache_key,
+    llvm_artifact_argv_with_target,
+    llvm_artifact_cache_key
+} from "../../src/build/artifact_compile";
+
+fn _no_flags() -> string[] ![pure] { return []; }
+
+fn _windows_target() -> string[] ![pure] {
+    return ["-target", "x86_64-pc-windows-msvc"];
+}
+
+// ---- Classification ----
+test "artifact routing: sources classify by artifact kind" ![pure] {
+    assert expect_eq_str(classify_object_source("runtime/sfn/string.ll"), "llvm").ok;
+    assert expect_eq_str(classify_object_source("runtime/c/shim.c"), "foreign-c").ok;
+    // Neither provider owns these; the empty result is the fail-closed
+    // signal every caller must reject.
+    assert expect_eq_str(classify_object_source("mod.o"), "").ok;
+    assert expect_eq_str(classify_object_source("mod.bc"), "").ok;
+    assert expect_eq_str(classify_object_source("mod"), "").ok;
+}
+
+// ---- Legacy argv byte-identity ----
+test "artifact routing: llvm argv is byte-identical to the legacy no-include form" ![pure] {
+    let argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
+        ir_path: "in.ll", object_path: "out.o", opt_flag: "-O2"
+    }, _no_flags());
+    let expected: string[] = ["clang", "-O2", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", "in.ll", "-o", "out.o"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+test "artifact routing: llvm argv splices -target after the opt flag" ![pure] {
+    let argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
+        ir_path: "in.ll", object_path: "out.o", opt_flag: "-O2"
+    }, _windows_target());
+    let expected: string[] = ["clang", "-O2", "-target", "x86_64-pc-windows-msvc", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", "in.ll", "-o", "out.o"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+test "artifact routing: foreign-c argv is byte-identical to the legacy include form" ![pure] {
+    // The pre-split call site hand-built `-Iinc` and passed it through the
+    // shared `include_flags` parameter; the request now owns the `-I`
+    // spelling and must land the flags in the same argv position.
+    let argv = foreign_c_argv_with_target(ForeignCRequest {
+        include_roots: ["inc"], object_path: "out.o", opt_flag: "-O2", source_path: "in.c"
+    }, _windows_target());
+    let expected: string[] = ["clang", "-O2", "-target", "x86_64-pc-windows-msvc", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-Iinc", "-c", "in.c", "-o", "out.o"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+test "artifact routing: foreign-c argv carries every declared include root in order" ![pure] {
+    let argv = foreign_c_argv_with_target(ForeignCRequest {
+        include_roots: ["a", "b/c"], object_path: "out.o", opt_flag: "-O0", source_path: "in.c"
+    }, _no_flags());
+    let expected: string[] = ["clang", "-O0", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-Ia", "-Ib/c", "-c", "in.c", "-o", "out.o"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+// ---- An LLVM request cannot carry C include flags or a C language mode ----
+test "artifact routing: no llvm argv carries an include root or a language mode" ![pure] {
+    let argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
+        ir_path: "in.ll", object_path: "out.o", opt_flag: "-O2"
+    }, _windows_target());
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        assert expect_eq_bool(starts_with(argv[i], "-I"), false).ok;
+        assert expect_eq_bool(starts_with(argv[i], "-std="), false).ok;
+        assert expect_eq_bool(argv[i] == "-x", false).ok;
+        i += 1;
+    }
+}
+
+// ---- Fail-closed on a misrouted source ----
+test "artifact routing: a c-source cannot reach the llvm provider" ![pure] {
+    let argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
+        ir_path: "runtime/c/shim.c", object_path: "out.o", opt_flag: "-O2"
+    }, _no_flags());
+    assert expect_eq_str_array(argv, []).ok;
+}
+
+test "artifact routing: an llvm artifact cannot reach the foreign-c provider" ![pure] {
+    let argv = foreign_c_argv_with_target(ForeignCRequest {
+        include_roots: ["inc"], object_path: "out.o", opt_flag: "-O2", source_path: "runtime/sfn/string.ll"
+    }, _no_flags());
+    assert expect_eq_str_array(argv, []).ok;
+}
+
+test "artifact routing: an unclassifiable source reaches neither provider" ![pure] {
+    let llvm_argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
+        ir_path: "mod.bc", object_path: "out.o", opt_flag: "-O2"
+    }, _no_flags());
+    assert expect_eq_str_array(llvm_argv, []).ok;
+    let c_argv = foreign_c_argv_with_target(ForeignCRequest {
+        include_roots: [], object_path: "out.o", opt_flag: "-O2", source_path: "mod.bc"
+    }, _no_flags());
+    assert expect_eq_str_array(c_argv, []).ok;
+}
+
+// ---- Disjoint cache namespaces ----
+test "artifact routing: llvm and foreign-c keys cannot alias on an identical base" ![pure] {
+    // The base key is the source content hash + opt flag + ABI tag
+    // (`runtime_object_cache_key`), so a `.c` and a `.ll` with coinciding
+    // basenames and contents reach this fold with the SAME base. The
+    // namespace fold is the only thing separating them.
+    let base = "deadbeef\n-O2\nsecsplit1-strabi1";
+    let llvm_key = llvm_artifact_cache_key(base);
+    let c_key = foreign_c_cache_key(base);
+    assert expect_eq_bool(llvm_key == c_key, false).ok;
+    assert expect_eq_bool(llvm_key == base, false).ok;
+    assert expect_eq_bool(c_key == base, false).ok;
+}
+
+test "artifact routing: both namespaces propagate an unhashable base key" ![pure] {
+    // An empty base key is the always-recompile fallback
+    // (`runtime_object_cache_key` returns "" when the source cannot be
+    // hashed); neither fold may turn it into a cacheable key.
+    assert expect_eq_str(llvm_artifact_cache_key(""), "").ok;
+    assert expect_eq_str(foreign_c_cache_key(""), "").ok;
+}

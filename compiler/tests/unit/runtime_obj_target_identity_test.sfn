@@ -246,11 +246,12 @@ test "runtime-obj identity: slug fold composition is stable across calls" ![pure
 }
 
 test "runtime-obj identity: the slug fold nests inside the target fold, leaving the triple last" ![pure] {
-    // Both `.sfn`-source call sites — `_prepare_runtime_sfn_object` and
-    // `write_runtime_identity_stamp`'s stamped entry — compose the two
-    // folds in this order. The triple stays last with nothing after it,
-    // preserving the SFN-677 absorption guarantee that the target fold's
-    // own comment documents.
+    // `_runtime_sfn_object_key` composes the two folds in this order for
+    // both `.sfn`-source consumers — `_prepare_runtime_sfn_object` and
+    // `write_runtime_identity_stamp`'s stamped entry, which SFN-950 moved
+    // onto that one shared derivation. The triple stays last with nothing
+    // after it, preserving the SFN-677 absorption guarantee that the
+    // target fold's own comment documents.
     let composed = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("BASE", "runtime/sfn/string"), "Linux");
     assert expect_eq_str(composed, "BASE\nobj1:runtime/sfn/string\ntgt3:Linux").ok;
 }

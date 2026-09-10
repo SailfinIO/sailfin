@@ -1,7 +1,10 @@
 // compiler/src/build/clang_argv.sfn
 //
-// Leaf: clang assemble-argv construction plus a struct-free `assemble`
-// entry, extracted from `backend.sfn` (SFEP-0027 §3.1, issue #1730).
+// Leaf: batched LLVM-artifact assembly ahead of the final link
+// (SFEP-0027 §3.1, issue #1730). The argv shapes themselves moved to
+// `./artifact_compile` when SFN-950 split LLVM-artifact lowering from
+// foreign-C compilation; this module now owns only the cached, pooled
+// batch that turns a link plan's `.ll` inputs into objects.
 //
 // Why this leaf exists. Build-driver modules under `compiler/src/build/`
 // (e.g. `build/runtime_objs.sfn`) need to assemble `.ll` → `.o`, but they
@@ -13,24 +16,24 @@
 // that assembles but never links (`build/runtime_objs`) thus leaves the
 // `link` method symbol undefined and produces invalid LLVM IR
 // (`use of undefined value @LlvmTextBackendlink`), failing the cold
-// self-host build. Routing the assemble path through this struct-free leaf
+// self-host build. Routing the assemble path through struct-free leaves
 // keeps `LlvmTextBackend` out of the consumer's type universe, so no vtable
 // is emitted there. (The underlying seed vtable-lowering bug is tracked
 // separately; this leaf is the source-level avoidance.)
-//
-// `backend.sfn`'s `LlvmTextBackend.assemble` delegates here too, so the argv
-// shape stays defined in exactly one place.
 //
 // The Assemble role deliberately keeps a bare `clang` resolved through PATH.
 // On macOS, Homebrew LLVM is placed there so `llvm-link`, `llvm-as`, and clang
 // come from one compatible toolchain; compiling LLVM IR to a Mach-O object does
 // not ask clang to own the Darwin SDK/linker contract. The final Link role is
 // separate and resolves Apple's driver in `backend.sfn` (SFN-1077).
-//
-// Importing `./target` (a struct-free leaf over `build_flags`/`paths`) does
-// not reintroduce the `LlvmTextBackend` vtable hazard the module note above
-// warns about — `target.sfn` declares no interface-implementing struct.
 import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
+import {
+    LlvmArtifactRequest,
+    classify_object_source,
+    llvm_artifact_argv,
+    llvm_artifact_cache_key,
+    run_llvm_artifact
+} from "./artifact_compile";
 import {
     _atomic_rename_into_place,
     _ensure_dir_cmd,
@@ -40,58 +43,6 @@ import {
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
 import { build_target_triple, host_target_triple, target_clang_flags } from "./target";
-
-// `target_flags` (SFN-52, SFEP-0021 §4.2(A)) carries the `-target <triple>`
-// pair for a cross/Windows target, or [] for the host default. It is
-// spliced right after `opt_flag` — an empty slice leaves the argv
-// byte-identical to the pre-target-conditioning form on Linux/macOS
-// (#1112). The flags are resolved by the `![io]` caller (`llvm_assemble` /
-// `LlvmTextBackend.assemble`) so this argv builder stays pure.
-fn _llvm_text_assemble_argv(src: string, out: string, opt_flag: string, include_flags: string[], target_flags: string[]) -> string[] {
-    let mut args: string[] = ["clang", opt_flag];
-    let mut ti: int = 0;
-    loop {
-        if ti >= target_flags.length { break; }
-        args.push(target_flags[ti]);
-        ti += 1;
-    }
-    args.push("-Wno-override-module");
-    args.push("-ffunction-sections");
-    args.push("-fdata-sections");
-    let mut i: int = 0;
-    loop {
-        if i >= include_flags.length { break; }
-        args.push(include_flags[i]);
-        i += 1;
-    }
-    args.push("-c");
-    args.push(src);
-    args.push("-o");
-    args.push(out);
-    return args;
-}
-
-// Free-function assemble entry, byte-identical to
-// `LlvmTextBackend{}.assemble(...)` (both delegate to
-// `_llvm_text_assemble_argv` + `process.run`). Build-driver callers use this
-// so they need not import `backend.sfn` — see the module note above.
-//
-// The `-target` triple is resolved here from the build target
-// (`build_target_triple()`, SFN-52, promoted to the triple axis by
-// SFN-774) so every `.ll`/`.c` → `.o` assemble the driver runs — runtime
-// c/ll-sources, emitted runtime sfn-sources, and the per-test dependency
-// objects — compiles for the same target as the final link, with no
-// change at the call sites. Empty when the resolved target is host-native.
-fn llvm_assemble(src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
-    return process.run(llvm_assemble_argv(src, out, opt_flag, include_flags));
-}
-
-// Build the target-conditioned clang argv used by both direct assembly and
-// the bounded subprocess pool.
-fn llvm_assemble_argv(src: string, out: string, opt_flag: string, include_flags: string[]) -> string[] ![io] {
-    let target_flags = target_clang_flags(build_target_triple(), host_target_triple());
-    return _llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags);
-}
 
 // Result of separating LLVM assembly from the final link. `object_paths`
 // preserves the input order exactly; callers splice the returned objects
@@ -111,15 +62,38 @@ struct PendingLinkObjectAssembly {
     task: ParallelProcessTask;
 }
 
+fn _link_input_task(ll_path: string, out_path: string, opt_flag: string) -> ParallelProcessTask ![io] {
+    return ParallelProcessTask {
+        argv: llvm_artifact_argv(LlvmArtifactRequest {
+            ir_path: ll_path, object_path: out_path, opt_flag: opt_flag
+        })
+    };
+}
+
 // Assemble a list of textual LLVM modules before the final link (SFN-453).
 //
 // The content-addressed key covers every input that changes clang's object
 // output: IR bytes, optimization level, target flags, clang identity, and the
-// section-splitting flag scheme owned by `_llvm_text_assemble_argv`. Objects
-// live under the caller's work/shared cache. If that cache is unwritable, use
-// an ephemeral object beside the `.ll` input instead of falling back to feeding
-// raw IR into the final link; the object-only backend boundary is invariant.
+// section-splitting flag scheme owned by `_clang_object_argv`. The
+// LLVM-artifact namespace fold (SFN-950) keeps these objects out of the
+// foreign-C key space. Objects live under the caller's work/shared cache. If
+// that cache is unwritable, use an ephemeral object beside the `.ll` input
+// instead of falling back to feeding raw IR into the final link; the
+// object-only backend boundary is invariant.
 fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string) -> LinkObjectAssembly ![io] {
+    // Fail closed on a misrouted artifact before any cache or spawn work
+    // (SFN-950, SFEP-0066 §3.3): this provider owns LLVM text only, so a
+    // `c-sources` entry that reached a link plan is rejected here rather
+    // than compiled through the LLVM path.
+    let mut ci: int = 0;
+    loop {
+        if ci >= ll_paths.length { break; }
+        if classify_object_source(ll_paths[ci]) != "llvm" {
+            print("sfn build: link input is not an LLVM artifact: " + ll_paths[ci]);
+            return LinkObjectAssembly { success: false, object_paths: [] };
+        }
+        ci += 1;
+    }
     _ensure_dir_cmd(object_dir);
     let triple = build_target_triple();
     let target_flags = target_clang_flags(triple, host_target_triple());
@@ -131,8 +105,8 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
         target_key = target_key + "\n" + target_flags[ti];
         ti += 1;
     }
-    let toolchain_key = clang_line + "\n" + target_key
-        + "\nlink-obj-v1-secsplit1";
+    let toolchain_key = llvm_artifact_cache_key(clang_line + "\n" + target_key
+        + "\nlink-obj-v1-secsplit1");
     let mut objects: string[] = [];
     let mut pending: PendingLinkObjectAssembly[] = [];
     let mut can_parallel: boolean = true;
@@ -146,13 +120,10 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
                 + "\n"
                 + toolchain_key);
             let fallback = ll_path + ".link-" + fallback_key + ".o";
-            let no_includes: string[] = [];
             objects.push(fallback);
             can_parallel = false;
             pending.push(PendingLinkObjectAssembly {
-                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: "", staged_path: "", task: ParallelProcessTask {
-                    argv: llvm_assemble_argv(ll_path, fallback, opt_flag, no_includes)
-                }
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: "", staged_path: "", task: _link_input_task(ll_path, fallback, opt_flag)
             });
             i += 1;
             continue;
@@ -166,15 +137,12 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
             continue;
         }
 
-        let no_includes: string[] = [];
         let tmp = _mktemp_sibling_cmd(obj_path);
         let fallback = ll_path + ".link-" + key_hash + ".o";
         if tmp.length > 0 {
             objects.push(obj_path);
             pending.push(PendingLinkObjectAssembly {
-                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: tmp, task: ParallelProcessTask {
-                    argv: llvm_assemble_argv(ll_path, tmp, opt_flag, no_includes)
-                }
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: tmp, task: _link_input_task(ll_path, tmp, opt_flag)
             });
         } else {
             // Cache publication cannot be staged without a sibling temp. The
@@ -183,9 +151,7 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
             objects.push(fallback);
             can_parallel = false;
             pending.push(PendingLinkObjectAssembly {
-                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: "", task: ParallelProcessTask {
-                    argv: llvm_assemble_argv(ll_path, fallback, opt_flag, no_includes)
-                }
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: "", task: _link_input_task(ll_path, fallback, opt_flag)
             });
         }
         i += 1;
@@ -211,8 +177,9 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
             if _atomic_rename_into_place(item.staged_path, item.object_path) {
                 objects[item.object_index] = item.object_path;
             } else {
-                let no_includes: string[] = [];
-                if llvm_assemble(item.ll_path, item.fallback_path, opt_flag, no_includes) != 0 {
+                if run_llvm_artifact(LlvmArtifactRequest {
+                    ir_path: item.ll_path, object_path: item.fallback_path, opt_flag: opt_flag
+                }) != 0 {
                     _delete_link_object_staging(pending);
                     return LinkObjectAssembly {
                         success: false,
@@ -249,10 +216,4 @@ fn _link_object_tasks(pending: PendingLinkObjectAssembly[]) -> ParallelProcessTa
     return tasks;
 }
 
-export {
-    LinkObjectAssembly,
-    _llvm_text_assemble_argv,
-    assemble_link_inputs,
-    llvm_assemble,
-    llvm_assemble_argv
-};
+export { LinkObjectAssembly, assemble_link_inputs };

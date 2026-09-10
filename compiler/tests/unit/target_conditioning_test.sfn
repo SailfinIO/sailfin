@@ -36,7 +36,6 @@ import {
     _llvm_text_link_program_argv_with_driver,
     _llvm_text_link_test_argv
 } from "../../src/backend";
-import { _llvm_text_assemble_argv } from "../../src/build/clang_argv";
 import { emit_child_argv } from "../../src/build/emit_child_argv";
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { condition_runtime_capsules_for_target } from "../../src/build/runtime_objs";
@@ -501,24 +500,10 @@ test "target: host targets keep the POSIX X_OK fs_exec_mode module" ![io] {
 }
 
 // ---- Assemble argv splicing ----
-test "target: assemble argv is byte-identical with no target flags" ![pure] {
-    // The host path passes [] and must reproduce the pre-conditioning argv
-    // exactly (#1112).
-    let no_target: string[] = [];
-    let no_includes: string[] = [];
-    let argv = _llvm_text_assemble_argv("in.ll", "out.o", "-O2", no_includes, no_target);
-    let expected: string[] = ["clang", "-O2", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", "in.ll", "-o", "out.o"];
-    assert expect_eq_str_array(argv, expected).ok;
-}
-
-test "target: assemble argv splices -target after the opt flag" ![pure] {
-    let target: string[] = ["-target", "x86_64-pc-windows-msvc"];
-    let includes: string[] = ["-Iinc"];
-    let argv = _llvm_text_assemble_argv("in.ll", "out.o", "-O2", includes, target);
-    let expected: string[] = ["clang", "-O2", "-target", "x86_64-pc-windows-msvc", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-Iinc", "-c", "in.ll", "-o", "out.o"];
-    assert expect_eq_str_array(argv, expected).ok;
-}
-
+// The `-target` splice for the object-compile argv is asserted per provider
+// in `artifact_compile_routing_test.sfn` (SFN-950), which is where the
+// LLVM-artifact and foreign-C argv shapes now live. The link-driver splice
+// stays here.
 // ---- Link argv carries the -target driver flag ----
 fn _driver_plan(test_mode: boolean) -> LinkPlan ![pure] {
     return LinkPlan {

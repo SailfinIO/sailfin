@@ -1,0 +1,183 @@
+// compiler/src/build/artifact_compile.sfn
+//
+// Provider-neutral source-to-object request contracts (SFN-950,
+// SFEP-0066 §3.3).
+//
+// Before this leaf, one argv builder in `./clang_argv` served both LLVM
+// text artifacts (`.ll`) and foreign C sources (`.c`). The same
+// `include_flags` parameter that carried `-I` roots for a manifest
+// `c-sources` entry was handed `[]` by every LLVM caller, and both paths
+// shared one cache-key formula. Nothing in the types recorded which
+// provider a call belonged to, so a `c-sources` entry reaching the LLVM
+// path — or an LLVM object aliasing a foreign-C object in the shared
+// content-addressed cache — was one naming accident away.
+//
+// The seam here is the artifact kind:
+//
+//   - `LlvmArtifactRequest` carries an `.ll` path and nothing else. It has
+//     no include-root field, so an LLVM request CANNOT carry C include
+//     flags or select a C language mode. The guarantee is the absent
+//     field, not a runtime check.
+//   - `ForeignCRequest` carries a `.c` path plus its include roots. It has
+//     no LLVM IR field.
+//
+// Both builders additionally fail closed on a misrouted extension
+// (`classify_object_source`): a `.c` handed to the LLVM builder yields an
+// empty argv the caller must reject, rather than a silently-compiling
+// clang line. An empty argv is never spawnable, so a caller that forgets
+// the check fails loudly at the pool rather than producing a wrong object.
+//
+// The two paths carry distinct cache namespaces (`llvm_artifact_cache_key`
+// / `foreign_c_cache_key`) folded into every key, so an LLVM object and a
+// foreign-C object cannot alias even when their source basenames and
+// contents coincide.
+//
+// This leaf preserves the legacy clang argv byte-for-byte on both paths.
+// The dedicated `llvm-as`/`opt`/`llc` provider is resolved but unwired
+// (`./llvm_toolchain_resolver`, SFN-948) and is wired by SFN-952; the full
+// LLVM-family fingerprint SFEP-0066 §3.8 requires becomes part of these
+// namespaces then. Today a namespace records only which provider owns the
+// object, which is what the non-aliasing contract needs.
+//
+// Like `./clang_argv`, this module must NOT import `../backend` — see that
+// file's header for the seed vtable-lowering hazard that constrains every
+// build-driver leaf.
+import { ends_with } from "sfn/strings";
+
+import { build_target_triple, host_target_triple, target_clang_flags } from "./target";
+
+// Cache-namespace tags. Folded into every object cache key so the two
+// providers occupy disjoint key spaces. The `-v1` suffix is the schema
+// version: SFN-952 bumps it when the LLVM family fingerprint joins the
+// namespace.
+let _LLVM_ARTIFACT_NAMESPACE: string = "artifact-kind:llvm-v1";
+let _FOREIGN_C_NAMESPACE: string = "artifact-kind:foreign-c-v1";
+
+// An LLVM text artifact lowered to a native object. Deliberately has no
+// include-root or language-mode field.
+struct LlvmArtifactRequest {
+    ir_path: string;
+    object_path: string;
+    opt_flag: string;
+}
+
+// A foreign C source compiled by the configured external C compiler
+// (SFEP-0066 §3.9). `include_roots` are bare directories; this module owns
+// the `-I` spelling so no caller hand-builds a C flag.
+struct ForeignCRequest {
+    include_roots: string[];
+    object_path: string;
+    opt_flag: string;
+    source_path: string;
+}
+
+// Classify a source path by artifact kind: `"llvm"`, `"foreign-c"`, or
+// `""` for a path neither provider owns. The empty result is the
+// fail-closed signal — callers must reject it rather than guess.
+fn classify_object_source(path: string) -> string {
+    if ends_with(path, ".ll") { return "llvm"; }
+    if ends_with(path, ".c") { return "foreign-c"; }
+    return "";
+}
+
+// The legacy shared clang `-c` argv shape, now private to this leaf. Both
+// public builders route through it so the emitted command stays
+// byte-identical to the pre-split form on each path (#1112, SFN-52).
+// `target_flags` carries the `-target <triple>` pair for a cross/Windows
+// target, or [] for the host default; it is spliced right after
+// `opt_flag`. `include_flags` is non-empty only on the foreign-C path.
+fn _clang_object_argv(src: string, out: string, opt_flag: string, include_flags: string[], target_flags: string[]) -> string[] {
+    let mut args: string[] = ["clang", opt_flag];
+    let mut ti: int = 0;
+    loop {
+        if ti >= target_flags.length { break; }
+        args.push(target_flags[ti]);
+        ti += 1;
+    }
+    args.push("-Wno-override-module");
+    args.push("-ffunction-sections");
+    args.push("-fdata-sections");
+    let mut i: int = 0;
+    loop {
+        if i >= include_flags.length { break; }
+        args.push(include_flags[i]);
+        i += 1;
+    }
+    args.push("-c");
+    args.push(src);
+    args.push("-o");
+    args.push(out);
+    return args;
+}
+
+// Pure LLVM-artifact argv over explicit target flags. Returns [] when the
+// request's input is not an LLVM text artifact.
+fn llvm_artifact_argv_with_target(request: LlvmArtifactRequest, target_flags: string[]) -> string[] {
+    if classify_object_source(request.ir_path) != "llvm" { return []; }
+    let no_includes: string[] = [];
+    return _clang_object_argv(request.ir_path, request.object_path, request.opt_flag, no_includes, target_flags);
+}
+
+// Pure foreign-C argv over explicit target flags. Returns [] when the
+// request's input is not a C source, so no `c-sources` entry can be
+// compiled through the LLVM path and no `.ll` through this one.
+fn foreign_c_argv_with_target(request: ForeignCRequest, target_flags: string[]) -> string[] {
+    if classify_object_source(request.source_path) != "foreign-c" { return []; }
+    let mut include_flags: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= request.include_roots.length { break; }
+        include_flags.push("-I" + request.include_roots[i]);
+        i += 1;
+    }
+    return _clang_object_argv(request.source_path, request.object_path, request.opt_flag, include_flags, target_flags);
+}
+
+// Resolve the build target once, then build the LLVM-artifact argv. Every
+// `.ll` -> `.o` in the driver compiles for the same target as the final
+// link (SFN-52, SFN-774).
+fn llvm_artifact_argv(request: LlvmArtifactRequest) -> string[] ![io] {
+    return llvm_artifact_argv_with_target(request, target_clang_flags(build_target_triple(), host_target_triple()));
+}
+
+fn foreign_c_argv(request: ForeignCRequest) -> string[] ![io] {
+    return foreign_c_argv_with_target(request, target_clang_flags(build_target_triple(), host_target_triple()));
+}
+
+// Spawn an LLVM-artifact compile directly (unpooled). Returns a non-zero
+// exit for a misrouted request rather than spawning anything.
+fn run_llvm_artifact(request: LlvmArtifactRequest) -> int ![io] {
+    let argv = llvm_artifact_argv(request);
+    if argv.length == 0 { return 1; }
+    return process.run(argv);
+}
+
+// Fold the LLVM-artifact namespace into an object cache key. Propagates an
+// empty base key unchanged so the caller's always-recompile fallback keeps
+// working.
+fn llvm_artifact_cache_key(base_key: string) -> string {
+    if base_key.length == 0 { return ""; }
+    return base_key + "\n" + _LLVM_ARTIFACT_NAMESPACE;
+}
+
+// Fold the foreign-C namespace into an object cache key. Disjoint from
+// `llvm_artifact_cache_key` for every input, which is what keeps a `.c`
+// and a `.ll` of identical content and basename from sharing a shared-cache
+// entry (SFEP-0066 §3.8).
+fn foreign_c_cache_key(base_key: string) -> string {
+    if base_key.length == 0 { return ""; }
+    return base_key + "\n" + _FOREIGN_C_NAMESPACE;
+}
+
+export {
+    ForeignCRequest,
+    LlvmArtifactRequest,
+    classify_object_source,
+    foreign_c_argv,
+    foreign_c_argv_with_target,
+    foreign_c_cache_key,
+    llvm_artifact_argv,
+    llvm_artifact_argv_with_target,
+    llvm_artifact_cache_key,
+    run_llvm_artifact
+};

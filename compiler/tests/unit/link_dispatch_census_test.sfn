@@ -58,7 +58,7 @@ fn _relative_module_path(full: string) -> string {
     return substring(without_prefix, 0, without_prefix.length - 4);
 }
 
-fn _find_link_dispatchers() -> string[] ![io] {
+fn _find_modules_containing(needle: string) -> string[] ![io] {
     let files = _collect_sfn_files("compiler/src", []);
     let mut out: string[] = [];
     let mut i: int = 0;
@@ -67,7 +67,31 @@ fn _find_link_dispatchers() -> string[] ![io] {
         let full = files[i];
         i += 1;
         let source = fs.readFile(full);
-        if contains(source, "backend.link(") {
+        if contains(source, needle) {
+            out.push(_relative_module_path(full));
+        }
+    }
+    return out;
+}
+
+fn _find_link_dispatchers() -> string[] ![io] {
+    return _find_modules_containing("backend.link(");
+}
+
+// Every module that invokes one of the two classified source-to-object
+// providers (SFN-950). A module appears here if it builds or spawns an
+// LLVM-artifact or foreign-C compile.
+fn _find_object_compile_sites() -> string[] ![io] {
+    let files = _collect_sfn_files("compiler/src", []);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= files.length { break; }
+        let full = files[i];
+        i += 1;
+        let source = fs.readFile(full);
+        if contains(source, "llvm_artifact_argv(") || contains(source, "foreign_c_argv(")
+            || contains(source, "run_llvm_artifact(") {
             out.push(_relative_module_path(full));
         }
     }
@@ -122,4 +146,48 @@ test "link census: the resolver-free link entry points stay deleted" ![io] {
     let source = fs.readFile("compiler/src/build/link.sfn");
     assert expect_eq_bool(contains(source, "fn _clang_link("), false).ok;
     assert expect_eq_bool(contains(source, "fn _clang_link_with_opt("), false).ok;
+}
+
+// ---- Source-to-object census (SFN-950, SFEP-0066 §3.3) ----
+//
+// The link census above guards the Link role; these guard the Assemble
+// role, which SFN-950 split into an LLVM-artifact provider and a foreign-C
+// provider. The failure mode is the same shape: a new call site that turns
+// a source into an object without declaring which artifact kind it is, and
+// so without a classification check or a namespaced cache key. Enumerating
+// `compiler/src` rather than trusting a list is what makes an unknown
+// future call site fail loudly instead of silently.
+test "object census: the clang -c argv is built in exactly one module" ![io] {
+    // `_clang_object_argv` is the single legacy `clang -c` shape both
+    // providers delegate to. A second module building its own object argv
+    // is an unclassified source-to-object path by construction.
+    let discovered = _sorted(_find_modules_containing("_clang_object_argv("));
+    let expected = _sorted(["build/artifact_compile"]);
+    assert expect_eq_str_array(discovered, expected).ok;
+}
+
+test "object census: every source-to-object call site is classified" ![io] {
+    // `build/artifact_compile` defines the providers; the other three are
+    // the only consumers. `cli/commands/build` reaches the LLVM provider
+    // indirectly through `backend.assemble`, which is itself in this set.
+    //
+    // NOT in this set, deliberately: `llvm_validation.sfn`'s
+    // `_validator_argv` runs `clang -c -emit-llvm` to produce a discarded
+    // `.bc` sink. That is IR validation (SFEP-0066 §3.5), not object
+    // emission, so it is outside this boundary.
+    let discovered = _sorted(_find_object_compile_sites());
+    let expected = _sorted(["backend", "build/artifact_compile", "build/clang_argv", "build/runtime_objs"]);
+    assert expect_eq_str_array(discovered, expected).ok;
+}
+
+test "object census: the shared assemble entry points stay deleted" ![io] {
+    // The pre-SFN-950 surface took `.ll` and `.c` through one argv with a
+    // shared `include_flags` parameter. Reintroducing any of these names
+    // reintroduces the unclassified path.
+    let sites = _find_modules_containing("_llvm_text_assemble_argv(");
+    assert expect_eq_str_array(_sorted(sites), []).ok;
+    let assemble_argv = _find_modules_containing("llvm_assemble_argv(");
+    assert expect_eq_str_array(_sorted(assemble_argv), []).ok;
+    let assemble = _find_modules_containing("llvm_assemble(");
+    assert expect_eq_str_array(_sorted(assemble), []).ok;
 }

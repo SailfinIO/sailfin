@@ -611,8 +611,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     // the in-process driver.
     if no_link {
         let backend = LlvmTextBackend { };
-        let no_includes: string[] = [];
-        let rc_obj = backend.assemble(ll_path, out_path, "-O2", no_includes);
+        let rc_obj = backend.assemble(ll_path, out_path, "-O2");
         if rc_obj != 0 {
             if !json_flag {
                 print.err(format_backend_failure_banner(binary_dir, "clang -c", ll_path, rc_obj));
