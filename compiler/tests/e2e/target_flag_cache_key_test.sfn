@@ -149,7 +149,7 @@ test "target flag: an unrecognized SAILFIN_TARGET_OS diverges from the triple re
         let _exit_r = process.run_capture_cwd([sfn, "build", "main.sfn"], env_recognized, dir);
         let _out_r = process.capture_take_stdout();
         let err_r = process.capture_take_stderr();
-        assert contains(err_r, "target is not Linux (Windows)");
+        assert contains(err_r, "target os (Windows)");
         assert contains(err_r, "-target x86_64-pc-windows-msvc");
 
         // Unrecognized: the OS resolver echoes the typo verbatim, but the
@@ -161,7 +161,7 @@ test "target flag: an unrecognized SAILFIN_TARGET_OS diverges from the triple re
         let _exit_t = process.run_capture_cwd([sfn, "build", "main.sfn"], env_typo, dir);
         let _out_t = process.capture_take_stdout();
         let err_t = process.capture_take_stderr();
-        assert contains(err_t, "target is not Linux (Plan9)");
+        assert contains(err_t, "target os (Plan9)");
         assert ! contains(err_t, "-target x86_64-pc-windows-msvc");
 
         return 0;
