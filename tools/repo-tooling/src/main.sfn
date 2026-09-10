@@ -1,0 +1,19 @@
+// tools/repo-tooling/src/main.sfn
+//
+// Entry point for the `tools/repo-tooling` binary (SFEP-0074 Tier 2). The
+// LLVM lowering detects `fn main` and synthesizes the
+// `@main(i32 %argc, i8** %argv)` wrapper that converts argv into a Sailfin
+// `string[]` (compiler/capsules/codegen-llvm/src/lowering/emission.sfn:334);
+// the compiler's own entry point takes the same shape at
+// compiler/src/cli/entry.sfn:151.
+//
+// This file holds no logic on purpose. Everything a leaf touches lives in
+// `commands.sfn` and the seam modules beside it, so adding a Tier 2 verb
+// never edits the entry point.
+import { run } from "sfn/cli";
+
+import { dispatch, root_command } from "./commands";
+
+fn main(argv: string[]) -> int ![io] {
+    return dispatch(run(root_command(), argv));
+}

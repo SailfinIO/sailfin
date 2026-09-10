@@ -1,0 +1,65 @@
+// tools/repo-tooling/src/fixture.sfn
+//
+// Fixture seam (SFEP-0074 §3 Tier 2). The property SFEP-0074 §4 is buying by
+// building Tier 2 from source rather than pulling a published binary is that
+// "repo tooling is testable in the PR that changes it". That only holds if
+// standing up a realistic tree is cheap — a leaf whose test needs fifteen
+// lines of `fs.createDirectory` before it can assert anything gets tested
+// once and then not again.
+//
+// So: declare the tree as data, materialize it under `fs.mkdtemp`, get a
+// `RepoFs` pointed at it. The returned handle is the same type the
+// production path takes, which is the whole point — a leaf under test runs
+// its real code against a fake tree, not a parallel test-only code path.
+//
+// Temp directories are intentionally not cleaned up. `fs.mkdtemp` roots live
+// under the host temp dir, the pooled test runner already isolates them per
+// child, and a surviving tree is what makes a failing assertion diagnosable.
+import {
+    RepoFs,
+    repo_fs,
+    repo_parent_dir,
+    repo_relative_is_safe
+} from "./repo_fs";
+
+struct FixtureFile {
+    path: string;
+    contents: string;
+}
+
+fn fixture_file(path: string, contents: string) -> FixtureFile {
+    return FixtureFile { path: path, contents: contents };
+}
+
+// Materialize under a fresh temp root. Paths run through the same
+// `repo_relative_is_safe` gate the production reader uses, so a fixture
+// cannot set up a tree the real code would refuse to traverse — a fixture
+// that could would let a leaf's test pass against a shape that cannot occur.
+fn materialize(files: FixtureFile[], label: string) -> Result<RepoFs, string> ![io] {
+    let root = fs.mkdtemp("sfn-repo-tooling-" + label + "-");
+    if root.length == 0 {
+        return Result.Err {
+            error: "repo-tooling: could not create a fixture root"
+        };
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= files.length { break; }
+        let file = files[i];
+        i += 1;
+        if !repo_relative_is_safe(file.path) {
+            return Result.Err {
+                error: "repo-tooling: unsafe fixture path \"" + file.path + "\""
+            };
+        }
+        let full = root + "/" + file.path;
+        let parent = repo_parent_dir(full);
+        if parent.length > 0 && !fs.exists(parent) {
+            fs.createDirectory(parent, true);
+        }
+        fs.writeFile(full, file.contents);
+    }
+    return Result.Ok { value: repo_fs(root) };
+}
+
+export { FixtureFile, fixture_file, materialize };

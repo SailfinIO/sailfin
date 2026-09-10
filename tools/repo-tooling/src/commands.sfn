@@ -1,0 +1,137 @@
+// tools/repo-tooling/src/commands.sfn
+//
+// Argument seam (SFEP-0074 §3 Tier 2, §2.2). SFEP-0074's root-cause finding
+// is a friction gradient, not an adherence problem: registering an
+// `sfn dev <verb>` costs edits in five places, adding a bash script costs one
+// file, and no convention survives that ratio. This capsule exists to absorb
+// Tier 2 work, so it would defeat its own purpose to reproduce the gradient.
+//
+// Adding a leaf here is ONE edit to ONE file: append a `with_subcommand` line
+// in `root_command` and a branch in `dispatch`, both below, adjacent. There
+// is no separate registration module, no hand-maintained usage string
+// (`sfn/cli` renders help from the command tree), and no third file.
+//
+// The reassignment form (`let mut root = ...; root = with_subcommand(root, x);`)
+// is not style. The pinned seed miscompiles nested `with_subcommand(...)`
+// chains past a certain depth (#1773, recorded at
+// compiler/src/cli/main.sfn:631 and compiler/src/cli/commands/test/mod.sfn:219),
+// and this capsule is built by the seed already on the CI runner (SFEP-0074
+// §4), so a nested chain here would miscompile in exactly the environment the
+// capsule is meant to run in. The tree is far shallower than the depth that
+// tipped the compiler's own registration over, so this is prophylaxis rather
+// than a live workaround — but it costs nothing and the tree only grows.
+import {
+    Command,
+    Matches,
+    arg,
+    command,
+    flag_repeat,
+    flag_value,
+    get,
+    repeated,
+    subcommand,
+    with_arg,
+    with_flag,
+    with_subcommand,
+    with_version
+} from "sfn/cli";
+
+import { credentials_from_env, credentials_missing } from "./credentials";
+import { report, report_field, report_lines } from "./deterministic";
+import { repo_fs, repo_path } from "./repo_fs";
+
+let TOOL_NAME: string = "repo-tooling";
+
+// Kept in step with `[capsule] version` in tools/repo-tooling/capsule.toml by
+// hand. There is no manifest-version intrinsic a non-compiler capsule can
+// read, and the compiler's own resolver
+// (compiler/src/version.sfn:resolve_compiler_version) is compiler-specific.
+let TOOL_VERSION: string = "0.1.0";
+
+fn _env_check_command() -> Command {
+    let mut cmd = command("env-check", "Report which required credentials are present");
+    cmd = with_flag(cmd, flag_repeat("require", "Credential environment variable that must be set"));
+    return cmd;
+}
+
+fn _paths_command() -> Command {
+    let mut cmd = command("paths", "Resolve a repository-relative path under a root, refusing escapes");
+    cmd = with_arg(cmd, arg("relative", "Repository-relative path"));
+    cmd = with_flag(cmd, flag_value("root", "Repository root (default: .)"));
+    return cmd;
+}
+
+fn root_command() -> Command {
+    let mut root = command(TOOL_NAME, "Repo-internal Sailfin tooling (SFEP-0074 Tier 2)");
+    root = with_version(root, TOOL_VERSION);
+    root = with_subcommand(root, _env_check_command());
+    root = with_subcommand(root, _paths_command());
+    return root;
+}
+
+// Reports presence, never a value. A leaf's CI step runs this before it opens
+// a socket so a missing token fails in one line instead of as an opaque 401,
+// and the output is safe to paste into a public build log by construction:
+// the only thing that ever leaves this function is a name and a boolean.
+fn _run_env_check(matches: Matches) -> int ![io] {
+    let names = repeated(matches, "require");
+    if names.length == 0 {
+        print.err(TOOL_NAME
+            + " env-check: at least one --require <NAME> is required");
+        return 2;
+    }
+    let credentials = credentials_from_env(names);
+    let mut out = report();
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        let name = names[i];
+        i += 1;
+        let mut state = "missing";
+        if credentials_missing(credentials, [name]).length == 0 {
+            state = "present";
+        }
+        out = report_field(out, name, state);
+    }
+    let lines = report_lines(out);
+    let mut j: int = 0;
+    loop {
+        if j >= lines.length { break; }
+        print(lines[j]);
+        j += 1;
+    }
+    if credentials_missing(credentials, names).length > 0 { return 1; }
+    return 0;
+}
+
+fn _run_paths(matches: Matches) -> int ![io] {
+    let relative = get(matches, "relative");
+    let mut root = get(matches, "root");
+    if root.length == 0 { root = "."; }
+    let resolved = repo_path(repo_fs(root), relative);
+    match resolved {
+        Result.Ok { value } => {
+            print(value);
+            return 0;
+        },
+        Result.Err { error } => {
+            print.err(error);
+            return 2;
+        }
+    }
+}
+
+fn dispatch(matches: Matches) -> int ![io] {
+    let verb = subcommand(matches);
+    if verb == "env-check" { return _run_env_check(matches); }
+    if verb == "paths" { return _run_paths(matches); }
+    print.err(TOOL_NAME + ": no subcommand given; try --help");
+    return 2;
+}
+
+export {
+    TOOL_NAME,
+    TOOL_VERSION,
+    dispatch,
+    root_command
+};

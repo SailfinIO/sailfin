@@ -15,8 +15,10 @@ import {
 import { _cr_sort_strings } from "../../src/capsule_resolver/paths";
 import { _cr_expand_member_globs, parse_workspace_member_paths } from "../../src/capsule_resolver/workspace";
 import {
+    toml_get_build_kind,
     toml_get_entry,
     toml_get_name,
+    toml_get_publish,
     toml_get_workspace_exclude,
     toml_get_workspace_members
 } from "../../src/toml_parser";
@@ -173,18 +175,71 @@ fn _is_contained(root: string, path: string) -> boolean {
 }
 
 // These are the only member placements committed by SFEP-0072: today's
-// roots, the dual-root transition, and the three-root target. Logical capsule
-// names are intentionally absent from this physical policy.
+// roots, the dual-root transition, and the three-root target — plus the
+// repo-tooling root committed by SFEP-0074 §8.3. Logical capsule names are
+// intentionally absent from this physical policy.
+//
+// `tools/<name>` is a shipped-surface exclusion, not an extra shipped root.
+// Admitting the root is what lets the workspace resolve a Tier 2 capsule at
+// all; `_tools_member_exclusion_error` below is what keeps the root from
+// becoming a second way to publish. The two are deliberately separate: this
+// predicate answers "may a member sit here?", that one answers "on what
+// terms?".
 fn _is_allowed_member_path(path: string) -> boolean {
     if path == "compiler" || path == "runtime" { return true; }
     let parts = split(path, "/");
     if parts.length == 2 {
-        if parts[0] == "stdlib" { return true; }
+        if parts[0] == "stdlib" || parts[0] == "tools" { return true; }
         return parts[0] == "compiler" && parts[1] != "capsules";
     }
     if parts.length != 3 { return false; }
     if parts[0] == "compiler" && parts[1] == "capsules" { return true; }
     return parts[0] == "capsules" && parts[1] == "sfn";
+}
+
+// The terms a `tools/` member sits on (SFEP-0074 §8.3). Both fields are what
+// keep such a member out of the publishable set, so both are checked here
+// rather than asserted in a comment:
+//
+//   - `publish = false` makes `sfn publish` refuse with `E0612` before
+//     credential discovery (compiler/src/cli/commands/publish.sfn:123-141);
+//   - `kind = "binary"` fails the `kind == "library"` half of the
+//     `--public-members` predicate at
+//     scripts/module_layout_fingerprint.sh:244, which is the classifier
+//     `.github/workflows/capsule-release.yml:126` iterates.
+//
+// Without this, a later Tier 2 leaf could land `tools/<name>` as a `library`
+// with no `publish` key — the classifier defaults publish to `true`
+// (module_layout_fingerprint.sh:229) — and enter the publishable set with
+// nothing objecting. The `tools/*` glob makes that a one-file drop, which is
+// exactly the friction gradient SFEP-0074 §2.2 is about.
+//
+// Returns "" when the member is acceptable.
+fn _tools_member_exclusion_error(member_path: string, manifest_text: string) -> string {
+    if !starts_with(member_path, "tools/") { return ""; }
+    let policy = toml_get_publish(manifest_text);
+    if policy.error.length > 0 {
+        return "repository topology: member \"" + member_path + "\" " + policy.error;
+    }
+    // Fail closed on a policy that did not resolve, mirroring the same
+    // decision at the distribution boundary in `publish.sfn`.
+    if policy.publish == null || !policy.has_declaration {
+        return "repository topology: member \"" + member_path
+            + "\" must declare [capsule] publish = false";
+    }
+    let publish_allowed: boolean = policy.publish;
+    if publish_allowed {
+        return "repository topology: member \"" + member_path
+            + "\" must declare [capsule] publish = false";
+    }
+    let kind = toml_get_build_kind(manifest_text);
+    if kind != "binary" {
+        return "repository topology: member \"" + member_path
+            + "\" must declare [build] kind = \"binary\", not \""
+            + kind
+            + "\"";
+    }
+    return "";
 }
 
 fn _is_safe_member_declaration(path: string) -> boolean {
@@ -206,7 +261,8 @@ fn _is_safe_member_declaration(path: string) -> boolean {
 
 fn _is_allowed_member_declaration(path: string) -> boolean {
     if path == "compiler/*" || path == "compiler/capsules/*" || path == "capsules/sfn/*"
-        || path == "stdlib/*" { return true; }
+        || path == "stdlib/*"
+        || path == "tools/*" { return true; }
     if contains(path, "*") { return false; }
     return _is_allowed_member_path(path);
 }
@@ -364,6 +420,9 @@ fn _validate_repository_topology(workspace_root: string) -> TopologyResult ![io]
         names.push(name);
         name_paths.push(member_path);
 
+        let tools_error = _tools_member_exclusion_error(member_path, manifest_text);
+        if tools_error.length > 0 { return _topology_error(tools_error); }
+
         let entry = toml_get_entry(manifest_text);
         if entry.length == 0 { continue; }
         if contains(entry, "\\") {
@@ -450,6 +509,63 @@ test "repository topology: unsafe member declarations fail before expansion" ![i
     assert ! result.ok;
     assert result.diagnostic == "repository topology: workspace member declaration"
         + " \"compiler/.\" is unsafe";
+}
+
+fn _write_tools_workspace(root: string, publish_line: string, kind: string) ![io] {
+    fs.createDirectory(root + "/tools/repo-tooling/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"tools/*\"]\n");
+    fs.writeFile(root + "/tools/repo-tooling/capsule.toml", "[capsule]\n"
+        + "name = \"tools/repo-tooling\"\nversion = \"0.0.0\"\n"
+        + publish_line
+        + "\n[build]\nkind = \""
+        + kind
+        + "\"\nentry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/tools/repo-tooling/src/main.sfn", "fn main() -> int { return 0; }\n");
+}
+
+// SFEP-0074 §8.3. The repo-tooling root is admitted only on the terms that
+// keep it out of the publishable set, so the three tests below cover the
+// accepting case and both refusals. The live checkout carries the same
+// property through `test "repository topology: current checkout satisfies the
+// contract"`, which validates `tools/repo-tooling/capsule.toml` as it
+// actually stands rather than one this test wrote.
+test "repository topology: an unpublished binary tools member is admitted" ![io] {
+    let root = fs.mkdtemp("sfn-topology-tools-root-");
+    _write_tools_workspace(root, "publish = false\n", "binary");
+    assert _assert_valid(root) == 1;
+}
+
+test "repository topology: a publishable tools member is refused" ![io] {
+    // The dangerous shape: a Tier 2 leaf dropped in as a library with no
+    // `publish` key. `module_layout_fingerprint.sh:229` defaults publish to
+    // true, so without this refusal the member enters the publishable set.
+    let root = fs.mkdtemp("sfn-topology-tools-publishable-");
+    _write_tools_workspace(root, "", "library");
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"tools/repo-tooling\""
+        + " must declare [capsule] publish = false";
+}
+
+test "repository topology: an unpublished library tools member is refused" ![io] {
+    let root = fs.mkdtemp("sfn-topology-tools-library-");
+    _write_tools_workspace(root, "publish = false\n", "library");
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"tools/repo-tooling\""
+        + " must declare [build] kind = \"binary\", not \"library\"";
+}
+
+test "repository topology: a nested tools member is still outside the root" ![io] {
+    // `tools/<name>` is two segments. A three-segment `tools/a/b` would be a
+    // second, unreviewed placement shape, so it stays refused.
+    let root = fs.mkdtemp("sfn-topology-tools-nested-");
+    fs.writeFile(root + "/workspace.toml", "[workspace]\n"
+        + "members = [\"tools/nested/inner\"]\n");
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: workspace member declaration"
+        + " \"tools/nested/inner\" is outside the allowed current, transitional, and target roots";
 }
 
 test "repository topology: dormant unapproved roots fail before expansion" ![io] {

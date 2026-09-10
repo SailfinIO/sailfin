@@ -1,0 +1,65 @@
+// Fixture seam. A leaf's test stands up a tree as data and gets back the same
+// `RepoFs` the production path takes, so the code under test is the real code.
+import { starts_with } from "sfn/strings";
+
+import { FixtureFile, fixture_file, materialize } from "../src/fixture";
+import { RepoFs, repo_fs, repo_read } from "../src/repo_fs";
+
+// A failed `materialize` must never hand back a usable root. `repo_fs("")`
+// normalizes to `.`, and `.` is the checkout during `sfn test` — a
+// containment test that fell back to it would write into the repository and
+// still report green, which is the worst available outcome for this module.
+// `_assert_fixture_root` below is the guard; every test calls it.
+fn _repo_of(result: Result<RepoFs, string>) -> RepoFs {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return repo_fs(""); }
+    }
+}
+
+fn _assert_fixture_root(repo: RepoFs) -> boolean {
+    return repo.root.length > 0 && repo.root != "." && starts_with(repo.root, "/");
+}
+
+fn _error_of(result: Result<RepoFs, string>) -> string {
+    match result {
+        Result.Ok { value } => { return ""; },
+        Result.Err { error } => { return error; }
+    }
+}
+
+fn _string_of(result: Result<string, string>) -> string {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return ""; }
+    }
+}
+
+test "repo-tooling fixture: a declared tree materializes with nested parents" ![io] {
+    let files = [fixture_file("SHA256SUMS", "abc  sailfin\n"), fixture_file("dist/nested/deep/file.txt", "deep\n")];
+    let repo = _repo_of(materialize(files, "fixture-nested"));
+    assert _assert_fixture_root(repo);
+    assert _string_of(repo_read(repo, "SHA256SUMS")) == "abc  sailfin\n";
+    assert _string_of(repo_read(repo, "dist/nested/deep/file.txt")) == "deep\n";
+}
+
+test "repo-tooling fixture: an empty tree still yields a usable root" ![io] {
+    let files: FixtureFile[] = [];
+    let repo = _repo_of(materialize(files, "fixture-empty"));
+    assert _assert_fixture_root(repo);
+}
+
+test "repo-tooling fixture: two roots do not collide" ![io] {
+    let first = _repo_of(materialize([fixture_file("a", "a")], "fixture-unique-one"));
+    let second = _repo_of(materialize([fixture_file("a", "a")], "fixture-unique-two"));
+    assert _assert_fixture_root(first);
+    assert _assert_fixture_root(second);
+    assert first.root != second.root;
+}
+
+test "repo-tooling fixture: a fixture cannot declare a shape the reader refuses" ![io] {
+    // A fixture that could write outside its root would let a leaf's test
+    // pass against a tree the production reader can never traverse.
+    let error = _error_of(materialize([fixture_file("../escaped", "nope")], "fixture-escape"));
+    assert error == "repo-tooling: unsafe fixture path \"../escaped\"";
+}

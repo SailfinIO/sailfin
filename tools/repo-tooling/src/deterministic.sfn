@@ -1,0 +1,120 @@
+// tools/repo-tooling/src/deterministic.sfn
+//
+// Deterministic-output seam (SFEP-0074 §3 Tier 2). Every Tier 2 leaf emits
+// something a reviewer or a later run compares byte-for-byte: a label
+// reconciliation plan, a signed manifest listing, a toolchain-index diff. If
+// two runs over the same inputs can differ, that comparison stops being
+// evidence, so the ordering and the line terminator are decided here once
+// instead of per leaf.
+//
+// Three properties this module guarantees, all pure and therefore testable
+// with no `![io]` at all:
+//
+//   - byte ordering, not locale ordering — `_sort_lines` compares UTF-8 code
+//     units, so a report does not reorder when the host locale changes;
+//   - LF only, with exactly one trailing LF — no CRLF drift between the
+//     Windows-capable workspace paths the acceptance bar names;
+//   - no clock, no PID, no absolute path — nothing in this module can read
+//     any of them, which is the point of it being pure.
+import { join } from "sfn/strings";
+
+struct Report {
+    lines: string[];
+}
+
+fn report() -> Report {
+    return Report { lines: [] };
+}
+
+fn report_line(current: Report, text: string) -> Report {
+    let mut out = current;
+    out.lines.push(text);
+    return out;
+}
+
+// `key=value` is the whole record grammar. It is deliberately poorer than
+// TOML or JSON: a leaf that needs structure should emit several flat keys
+// rather than teach this module a nesting rule, because a flat sorted line
+// set diffs cleanly and a nested one does not.
+fn report_field(current: Report, key: string, value: string) -> Report {
+    return report_line(current, key + "=" + value);
+}
+
+// Byte-order comparison. `a < b` on strings is not assumed here; the
+// comparison walks bytes (`char_code` is byte-valued —
+// runtime/prelude.sfn:753), so the ordering is a total order that is the same
+// on every host and under every locale.
+//
+// Both lengths are hoisted because `.length` lowers to a `strnlen` call, so
+// re-reading them per iteration makes a single comparison O(len^2).
+// `stdlib/strings/src/mod.sfn:79-83` hoists the same two in the same
+// algorithm for the same reason.
+fn _line_less(a: string, b: string) -> boolean {
+    let a_len = a.length;
+    let b_len = b.length;
+    let mut i: int = 0;
+    loop {
+        if i >= a_len || i >= b_len { break; }
+        let ca = char_code(a[i]);
+        let cb = char_code(b[i]);
+        if ca != cb { return ca < cb; }
+        i += 1;
+    }
+    return a_len < b_len;
+}
+
+// Insertion sort, stable by construction: an element only moves past a
+// strictly-greater neighbour, so equal lines keep their insertion order.
+// Reports are tens of lines, not thousands; an O(n^2) sort whose stability
+// is obvious beats a faster one whose stability has to be argued.
+fn _sort_lines(lines: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let value = lines[i];
+        i += 1;
+        let mut inserted: string[] = [];
+        let mut placed = false;
+        let mut j: int = 0;
+        loop {
+            if j >= out.length { break; }
+            if !placed && _line_less(value, out[j]) {
+                inserted.push(value);
+                placed = true;
+            }
+            inserted.push(out[j]);
+            j += 1;
+        }
+        if !placed { inserted.push(value); }
+        out = inserted;
+    }
+    return out;
+}
+
+// The two rendering funnels, sharing one sort. Sorting here rather than at
+// push time is what lets a leaf emit records in whatever order its traversal
+// produces them and still get a stable artifact.
+//
+// `render_report` is file-shaped: LF-separated with a trailing LF, so writing
+// it through `repo_write` produces a POSIX-clean artifact. `report_lines` is
+// stream-shaped, for a caller emitting through `print` (which supplies its
+// own newline) — printing `render_report`'s output would emit a trailing
+// blank line, and a blank line is a byte a diff sees.
+fn render_report(current: Report) -> string {
+    if current.lines.length == 0 { return ""; }
+    return join(_sort_lines(current.lines), "\n") + "\n";
+}
+
+fn report_lines(current: Report) -> string[] {
+    return _sort_lines(current.lines);
+}
+
+export {
+    Report,
+    render_report,
+    report,
+    report_field,
+    report_line,
+    report_lines
+};
