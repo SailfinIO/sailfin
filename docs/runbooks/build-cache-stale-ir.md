@@ -24,7 +24,7 @@ The distinction that actually decides whether you have cleared anything is
 
 | Tier | Holds | Keyed on | Cleared by |
 |---|---|---|---|
-| **Shared** (`cache_root`) | `.ll`, `.o`, `runtime.o`, and staged `.sfn-asm` / `layout.manifest` | source + **compiler identity** + target¹ | `--clean`, or re-rooted by `SAILFIN_BUILD_CACHE_DIR` |
+| **Shared** (`cache_root`) | `.ll`, `.o`, `runtime.o`, and staged `.sfn-asm` / `layout.manifest` | source + **compiler identity** + target¹ | Bypassed by `sfn build --clean`; wiped by `sfn run --clean`; re-rooted by `SAILFIN_BUILD_CACHE_DIR` |
 | **Local** (`build/compiler/import-context/`) | staged `.sfn-asm`, `.layout-manifest` | **source hash alone** — no compiler identity, no target | `--clean`, or re-rooted by `--work-dir` |
 
 ¹ The one exception is harmless: clang-compiled C/LL `runtime.o` keys on source
@@ -299,7 +299,7 @@ whole cache.
 ```bash
 sfn dev bootstrap build -- --no-cache --cache-trace  # diagnose the pinned-seed self-host
 sfn build -p <capsule> --no-cache     # bypass lookup + store for this build
-sfn build -p <capsule> --clean        # wipe the schema-versioned cache subtree first
+sfn build -p <capsule> --clean        # bypass shared reads and rebuild local artifacts
 SAILFIN_BUILD_CACHE_DIR=$(mktemp -d) sfn build -p <capsule>   # fresh, isolated cache
 ```
 
@@ -315,23 +315,16 @@ test residual in §3 the lever is a fresh cache root:
 SAILFIN_BUILD_CACHE_DIR=$(mktemp -d) sfn test <dir-or-_test.sfn>   # cold module cache
 ```
 
-**Staging cache (`.sfn-asm` / `.layout-manifest`):** `--clean` is the lever for
-both tiers, but note **`--no-cache` is not** — it leaves the local tree fully
-live (§4.3). One ordering wrinkle is worth knowing, because it decides what a
-single `--clean` run actually achieves:
+**Project staging (`.sfn-asm` / `.layout-manifest`):** `sfn build --clean`
+clears the local tree before staging and disables the shared staging cache
+for the invocation (SFN-1251). Project-module IR lookups are also bypassed;
+freshly compiled modules may refresh their own shared entries. Unrelated
+shared entries remain intact. `--no-cache` alone still leaves local staging
+live (§4.3).
 
-| Tier | Wiped where | Relative to staging | Effect on *this* build |
-|---|---|---|---|
-| Local | `capsule_resolver/mod.sfn:401-407` | **before** | cold — staging re-emits |
-| Shared | `capsule_resolver/compile.sfn:266-281` | **after** | not cold; staging already probed and stored, and the wipe then removes what it just published |
-
-So `--clean` cold-starts the *local* staging tier immediately, but the *shared*
-staging tier only from the **next** invocation. To cold-start the shared tier
-for the run in front of you, redirect the root instead:
-
-```bash
-SAILFIN_BUILD_CACHE_DIR=$(mktemp -d) sfn build -p <capsule> --clean   # both tiers cold, this run
-```
+`sfn run --clean` retains its separate behavior: local staging is cleared
+before staging, but its shared-root wipe happens afterward. A fresh
+`SAILFIN_BUILD_CACHE_DIR` also isolates shared staging for that command.
 
 To clear the local tree by hand (no build, or to inspect what was there):
 
@@ -361,7 +354,7 @@ nothing about whether staging ran.
   `stage_cache_key_from_digest`), `cache_compiler_identity`, `cache_root_from`.
 - `compiler/src/build_stamp.sfn` — the four-case stamp truth table (incl. `.dirty`).
 - `compiler/src/capsule_resolver/compile.sfn` — the `.ll` module-cache call site
-  and the shared-root `--clean` wipe.
+  and the build-only clean lookup bypass (the shared-root wipe remains for `run`).
 - `compiler/src/capsule_resolver/mod.sfn` — `_cr_effective_isolation_exe`, and
   the local import-context `--clean` wipe (SFN-872) with the rationale for why
   the `.srchash` gate needs it.
@@ -381,7 +374,8 @@ nothing about whether staging ran.
 > none of §5's levers clear. Its **shared** tier, though, publishes `sfn-asm`
 > artifacts into the same `cache_root` as §4.1 (fetch `runtime_objs.sfn:1164`,
 > publish `:1224`), separated only by the `asm1:` / `stage1:` key domains — so
-> `SAILFIN_BUILD_CACHE_DIR` and `--clean`'s shared wipe do reach it. Its local
+> `SAILFIN_BUILD_CACHE_DIR` re-roots it. `sfn build --clean` preserves these
+> shared entries and bypasses them for the invocation (SFN-1251). Its local
 > tier is deliberately left alone by `--clean` (`capsule_resolver/mod.sfn:390-394`)
 > because its `.key` sidecar *does* fold compiler identity, so it has no
 > equivalent stale-serve hole.

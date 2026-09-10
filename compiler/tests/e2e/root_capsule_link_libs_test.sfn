@@ -134,41 +134,40 @@ fn _build_and_trace(root: string, extra_libs: string, bin: string, label: string
 }
 
 test "root capsule link-libs: reach the final link argv without duplicating the runtime's own" ![io] {
-    // The runtime (runtime/capsule.toml) already contributes `-lm` via every
-    // runtime capsule's own `link_libs`, appended verbatim with no dedup
-    // across capsules (`assemble_runtime_capsule_link_inputs`,
-    // compiler/src/build/runtime_objs.sfn:381-386). How many `-lm` that
-    // baseline carries is host-dependent, not something this test controls —
-    // so instead of asserting an absolute count, build the same fixture with
-    // and without a root-declared `-lm` and assert the root declaration adds
-    // no additional occurrence beyond the baseline.
+    // Compare the runtime baseline with a duplicate root declaration: the
+    // root must add no extra occurrence of an already-linked library.
     let baseline_root = _scratch_dir() + "/root-app-baseline";
     let baseline_bin = _bin_path("root-baseline");
     let trace_baseline = _build_and_trace(baseline_root, "", baseline_bin, "root-link-libs-baseline");
 
-    let withlm_root = _scratch_dir() + "/root-app-withlm";
-    let withlm_bin = _bin_path("root-withlm");
-    let trace_withlm = _build_and_trace(withlm_root, "\"-lm\", ", withlm_bin, "root-link-libs-withlm");
+    // Windows resolves math through the CRT and filters -lm; exercise dedup
+    // with a library its runtime actually links (SFN-1269).
+    let mut runtime_lib = "-lm";
+    if contains(trace_baseline, "windows-msvc") { runtime_lib = "-ladvapi32"; }
+    let with_lib_root = _scratch_dir() + "/root-app-with_lib";
+    let with_lib_bin = _bin_path("root-with_lib");
+    let trace_with_lib = _build_and_trace(with_lib_root, "\"" + runtime_lib
+        + "\", ", with_lib_bin, "root-link-libs-with_lib");
 
     print.err("[test:link-libs] baseline trace: " + trace_baseline);
-    print.err("[test:link-libs] withlm trace: " + trace_withlm);
+    print.err("[test:link-libs] with_lib trace: " + trace_with_lib);
 
-    let baseline_lm = _count_token_occurrences(trace_baseline, "-lm");
-    let withlm_lm = _count_token_occurrences(trace_withlm, "-lm");
-    // Guard against a vacuous pass: if the baseline itself has no `-lm`, the
+    let baseline_count = _count_token_occurrences(trace_baseline, runtime_lib);
+    let with_lib_count = _count_token_occurrences(trace_with_lib, runtime_lib);
+    // Guard against a vacuous pass: if the baseline itself has no selected library, the
     // equality below would compare two zeros and this stops measuring
     // anything about dedup at all.
-    assert baseline_lm >= 1;
-    // Dedup acceptance criterion: a root-declared `-lm` must not add an
+    assert baseline_count >= 1;
+    // Dedup acceptance criterion: a root-declared library must not add an
     // occurrence beyond whatever the runtime already contributed.
-    assert withlm_lm == baseline_lm;
+    assert with_lib_count == baseline_count;
     // Non-`-l` flags (here `-L<dir>`, never supplied by the runtime) reach
     // the link argv unchanged on both builds — this is what makes the
     // assertions above actually exercise the root `link-libs` path rather
-    // than passing vacuously off the runtime's own `-lm`, and it is the
+    // than passing vacuously off the runtime's own library, and it is the
     // assertion that must fail if root `link-libs` were disabled entirely.
     assert _count_token_occurrences(trace_baseline, "-L" + baseline_root) == 1;
-    assert _count_token_occurrences(trace_withlm, "-L" + withlm_root) == 1;
+    assert _count_token_occurrences(trace_with_lib, "-L" + with_lib_root) == 1;
 }
 
 // Own nested workspace (like `capsule_reachability_filter_test.sfn`):

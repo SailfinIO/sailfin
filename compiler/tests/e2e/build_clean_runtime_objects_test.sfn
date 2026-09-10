@@ -1,8 +1,7 @@
-// End-to-end test for SFN-14: `sfn build --clean` must also wipe the
-// per-work-dir runtime object cache.
+// End-to-end test for SFN-14/SFN-1251: `sfn build --clean` must bypass
+// both runtime-object cache tiers on every native host.
 //
-// `cache_clean` (`build_cache.sfn`) removes only the content-addressed
-// cache root (`cache_root()` -> `build/cache/<schema>`). The runtime
+// Project cleanup bypasses the content-addressed shared cache. The runtime
 // object `.o` + content-key `.key` sidecars live in a DIFFERENT location —
 // the build work-dir (`<work-dir>/sailfin/`) — so before the fix a
 // `--clean` build still served every runtime object from the surviving
@@ -15,11 +14,13 @@
 //   A. cold build   -> compiles + caches the runtime objects locally.
 //   B. warm rebuild -> local cache hits: the `[cache]` summary reports
 //                      misses=0 (confirms the local cache is warm).
-//   C. `--clean`    -> SFN-14 wipes the local `.o`/`.key` (and `cache_clean`
-//      rebuild         wipes the shared root), so the runtime objects
+//   C. `--clean`    -> SFN-14 wipes the local `.o`/`.key` and bypasses the
+//      rebuild         still-populated shared tier, so the runtime objects
 //                      recompile: the summary must NOT report misses=0.
-// Without the fix, step C's local sidecars survive and it reports
-// misses=0, so this test fails.
+// On native Windows the old cleanup shelled out to `rm`, so step C's local
+// sidecars survived and it reported misses=0. The shared entries must remain
+// stored but unserved: `--clean` bypasses that tier for this invocation
+// instead of globally deleting unrelated cache content.
 //
 // Assert on the captured `[cache]` summary with `sfn/strings` predicates —
 // the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
@@ -41,12 +42,35 @@ fn _build_env(cache_dir: string) -> string[] ![io] {
 // root every run keeps each build's shared cache genuinely cold.
 fn _root() -> string ![io] { return fs.mkdtemp("sfn-clean-rtobj-"); }
 
-// The one-line program has no `.ll` module-cache deps of its own, so the
-// `[cache]` summary reflects only the runtime objects.
-fn _write_hello(root: string) -> string ![io] {
-    let src = root + "/hello.sfn";
-    fs.writeFile(src, "fn main() -> int {\n    return 0;\n}\n");
-    return src;
+// Keep the fixture under the repository's `build/` tree so workspace
+// discovery resolves `sfn/math`. The dependency is load-bearing: it drives
+// the project-module `--clean` path that historically wiped the entire shared
+// schema root, including unrelated runtime-object entries.
+fn _write_hello() -> string ![io] {
+    let fixture = "build/sfn-clean-rtobj-test/cap";
+    fs.createDirectory(fixture + "/src", true);
+    fs.writeFile(fixture + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/clean-rtobj-test\"\n"
+        + "version = \"0.0.1\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/math\" = \"*\"\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"binary\"\n");
+    let src = fixture + "/src/main.sfn";
+    fs.writeFile(src, "import { abs } from \"sfn/math\";\n\n"
+        + "fn main() -> int {\n    return abs(0);\n}\n");
+    return fixture;
+}
+
+// Cache tracing also prints a separate staging summary. Compare only the
+// build summary so staging counters cannot satisfy runtime assertions.
+fn _build_summary(log: string) -> string {
+    let start = find(log, "[cache] hits=", 0);
+    if start < 0 { return ""; }
+    let end = find(log, "\n", start);
+    if end < 0 { return substring(log, start, log.length); }
+    return substring(log, start, end);
 }
 
 // Count runtime-object key sidecars directly under `<work-dir>/sailfin/`.
@@ -66,16 +90,37 @@ fn _count_runtime_keys(objdir: string) -> int ![io] {
     return n;
 }
 
-test "build --clean recompiles the work-dir runtime object cache (SFN-14)" ![io] {
+// Count shared-cache runtime objects recursively. Keeping these entries
+// across step C proves `--clean` bypasses the shared tier for this invocation
+// rather than deleting the persistent cache tree.
+fn _count_shared_runtime_objects(dir: string) -> int ![io] {
+    if !fs.exists(dir) { return 0; }
+    let entries = fs.listDirectory(dir);
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        let full = dir + "/" + name;
+        let children = fs.listDirectory(full);
+        if children.length > 0 {
+            n = n + _count_shared_runtime_objects(full);
+        } else if name == "runtime.o" { n = n + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
+test "build --clean bypasses local and shared runtime object caches (SFN-1251)" ![io] {
     let root = _root();
     let cache = root + "/cache";
     let work = root + "/wd";
     let out = root + "/hello";
-    let src = _write_hello(root);
+    let src = _write_hello();
     let objdir = work + "/sailfin";
 
     // A: cold build populates the work-dir-local runtime object cache.
-    let exit_a = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--work-dir", work], _build_env(cache));
+    let exit_a = process.run_capture([sfn_bin_path(), "build", "-p", src, "-o", out, "--work-dir", work], _build_env(cache));
     let _out_a = process.capture_take_stdout();
     let _err_a = process.capture_take_stderr();
     assert exit_a == 0;
@@ -84,22 +129,53 @@ test "build --clean recompiles the work-dir runtime object cache (SFN-14)" ![io]
 
     // B: warm rebuild, SAME work-dir, no `--clean` -> local cache hits,
     // so the runtime objects are NOT recompiled: misses=0.
-    let exit_b = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--work-dir", work], _build_env(cache));
+    let exit_b = process.run_capture([sfn_bin_path(), "build", "-p", src, "-o", out, "--work-dir", work], _build_env(cache));
     let out_b = process.capture_take_stdout();
     let err_b = process.capture_take_stderr();
     assert exit_b == 0;
-    let log_b = out_b + err_b;
+    let log_b = _build_summary(out_b + err_b);
     assert find(log_b, "[cache]", 0) >= 0;
+    assert find(log_b, "hits=0", 0) < 0;
     assert find(log_b, "misses=0", 0) >= 0;
+    let shared_runtime_objects = _count_shared_runtime_objects(cache);
+    assert shared_runtime_objects >= 1;
+
+    // Unrelated module, runtime-staging, runtime-object and future artifact
+    // kinds all share the schema root. None belongs to this invocation.
+    let unrelated = cache
+        + "/v2/ff/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+    let runtime_stage = cache
+        + "/v2/ee/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    fs.createDirectory(unrelated, true);
+    fs.createDirectory(runtime_stage, true);
+    fs.writeFile(unrelated + "/ir.sfn-asm", "other module assembly");
+    fs.writeFile(unrelated + "/layout.manifest", "other module layout");
+    fs.writeFile(unrelated + "/mod.ll", "other module IR");
+    fs.writeFile(unrelated + "/mod.o", "other module object");
+    fs.writeFile(unrelated + "/test.bin", "other test binary");
+    fs.writeFile(unrelated + "/future", "future artifact");
+    fs.writeFile(runtime_stage + "/ir.sfn-asm", "other runtime assembly");
 
     // C: `--clean` rebuild, SAME work-dir -> SFN-14 wipes the local
     // `.o`/`.key`, so the runtime objects recompile from scratch. The
     // build must still succeed AND the summary must NOT report misses=0.
-    let exit_c = process.run_capture([sfn_bin_path(), "build", src, "-o", out, "--work-dir", work, "--clean"], _build_env(cache));
+    let exit_c = process.run_capture([sfn_bin_path(), "build", "-p", src, "-o", out, "--work-dir", work, "--clean", "--cache-trace"], _build_env(cache));
     let out_c = process.capture_take_stdout();
     let err_c = process.capture_take_stderr();
     assert exit_c == 0;
-    let log_c = out_c + err_c;
+    let log_c = _build_summary(out_c + err_c);
     assert find(log_c, "[cache]", 0) >= 0;
+    // The module and runtime cache layers both participate in this fixture,
+    // so zero hits proves neither tier served an entry during `--clean`.
+    assert find(log_c, "hits=0", 0) >= 0;
     assert find(log_c, "misses=0", 0) < 0;
+    assert _count_shared_runtime_objects(cache) == shared_runtime_objects;
+    assert fs.readFile(unrelated + "/ir.sfn-asm") == "other module assembly";
+    assert fs.readFile(unrelated + "/layout.manifest") == "other module layout";
+    assert fs.readFile(unrelated + "/mod.ll") == "other module IR";
+    assert fs.readFile(unrelated + "/mod.o") == "other module object";
+    assert fs.readFile(unrelated + "/test.bin") == "other test binary";
+    assert fs.readFile(unrelated + "/future") == "future artifact";
+    assert fs.readFile(runtime_stage + "/ir.sfn-asm") == "other runtime assembly";
+    assert find(out_c + err_c, "[stage cache hit]", 0) < 0;
 }

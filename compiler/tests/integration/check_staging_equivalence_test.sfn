@@ -29,7 +29,7 @@
 //
 // Each run uses its own work directory (staging writes to
 // `<cwd>/build/compiler/import-context`), so the two staged trees can
-// be `diff -r`'d whole: same file set, same bytes. Spawning the real
+// be compared whole: same file set, same bytes. Spawning the real
 // binary (rather than importing resolver entry points) matches
 // production exactly and avoids dragging the whole driver into the
 // test link — the same rationale as `emit_retry_test.sfn`.
@@ -242,11 +242,12 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
 
     // The headline equivalence: identical file set, identical bytes
     // (`.sfn-asm`, `.layout-manifest`, and `.srchash` sidecars all
-    // participate in the recursive diff).
-    let rc_diff = process.run(["diff", "-r", work_a
-        + "/build/compiler/import-context", work_b
-        + "/build/compiler/import-context"]);
-    assert rc_diff == 0;
+    // participate). Keep this comparison Sailfin-native: native Windows
+    // does not provide the POSIX `diff` executable.
+    let ctx_a = work_a + "/build/compiler/import-context";
+    let ctx_b = work_b + "/build/compiler/import-context";
+    assert _join_lines(staged_a) == _join_lines(staged_b);
+    assert _staged_snapshot(ctx_a, staged_a) == _staged_snapshot(ctx_b, staged_b);
 
     assert remove_all(root);
 }

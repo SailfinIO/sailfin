@@ -1952,26 +1952,19 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     };
 }
 
-// SFN-617/SFN-641: append `path` to the removal argv only when it exists.
-// Sweeping the closed target tag set multiplies the candidate list by the
-// number of targets, and measured against the real 29-source runtime
-// manifest that is 9,202 bytes of argv per tag — 36,808 across four, past
-// the 32,767-byte Windows `CreateProcess` lpCommandLine cap SFN-641
-// tracks. `rm -f` tolerates a missing path, so the unfiltered form was
-// correct but oversized; a tree only ever holds artifacts for the targets
-// it actually built, so filtering restores the single-target argv to its
-// pre-sweep size instead of 4x while still sweeping every target really
-// present. Arrays are reference-semantic here (same in-place growth idiom
-// as `_stage_imported_platform_externs`), so this mutates the caller's
-// argv directly rather than returning a copy.
-fn _push_if_present(argv: string[], path: string) ![io] {
-    if !fs.exists(path) { return; }
-    argv.push(path);
+// Delete one runtime artifact without relying on a host shell utility.
+// `fs.deleteFile` maps to the platform-native unlink operation, so this
+// works on native Windows as well as POSIX hosts. The post-condition catches
+// a failed deletion instead of allowing the subsequent cache lookup to serve
+// the artifact that `--clean` promised to bypass.
+fn _delete_runtime_artifact(path: string) -> boolean ![io] {
+    if !fs.exists(path) { return true; }
+    fs.deleteFile(path);
+    return !fs.exists(path);
 }
 
 // SFN-14: force a from-scratch runtime-object rebuild for `sfn build
-// --clean`. `cache_clean` (`build_cache.sfn`) wipes only the
-// content-addressed cache root (`cache_root()` → `build/cache/<schema>`);
+// --clean`. Project cleanup bypasses reads from the shared cache root;
 // the per-work-dir runtime object cache lives under `out_dir`
 // (`build/sailfin/`, or `<work-dir>/sailfin/`), outside that root, so a
 // `--clean` build otherwise reused cached runtime `.o`s. This removes
@@ -1990,21 +1983,20 @@ fn _push_if_present(argv: string[], path: string) ![io] {
 // "other"]` literal silently stopped matching once `target_artifact_tag`
 // grew per-arch/per-ABI tags, resurrecting SFN-14).
 //
-// The sweep is complete on the TARGET axis only. It resolves stems from
-// the capsule set as handed in, which the `--clean` call site
-// (`cli/commands/build.sfn`) passes unconditioned, so a Windows target's
-// swapped-in and appended `platform/*_windows` modules are not named here
-// and survive `--clean`; it is likewise `-O2`-only, so the `sfn test`
-// link path's `-O0` objects are missed. Both gaps predate the tag sweep
-// and are tracked in SFN-678 — do not read this function as a total
-// clean until that lands. Scope is otherwise the current runtime source
-// set: a source removed since the last build leaves an orphaned `.o`,
+// The sweep is complete on the TARGET axis only. The `sfn build --clean`
+// call site passes the target-conditioned capsule set, so replaced and
+// appended platform providers are included on native Windows as well as
+// POSIX hosts. It is still `-O2`-only, so the `sfn test` link path's `-O0`
+// objects are outside this build-command contract. Scope is otherwise the
+// current runtime source set: a source removed since the last build leaves an orphaned `.o`,
 // which is inert (never linked, never reused — the link consumes the
 // freshly-computed object paths and every reuse is content-key gated).
-// `rm -f` is idempotent, so an unpopulated cache is a clean no-op.
-fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) ![io] {
+// Missing artifacts are an idempotent no-op. Returns false if any artifact
+// remains after its deletion attempt, so the caller can stop rather than
+// silently reuse a runtime object during a clean build.
+fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) -> boolean ![io] {
     let tags = triple_artifact_tags();
-    let mut argv: string[] = ["rm", "-f"];
+    let mut ok: boolean = true;
     let mut i: int = 0;
     loop {
         if i >= runtime_capsules.length { break; }
@@ -2020,8 +2012,8 @@ fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_d
                 if ci >= cap.c_sources.length { break; }
                 let obj = _path_join(out_dir, _runtime_obj_stem(cap_prefix, cap.c_sources[ci], opt_flag, tag)
                     + ".o");
-                _push_if_present(argv, obj);
-                _push_if_present(argv, obj + ".key");
+                if !_delete_runtime_artifact(obj) { ok = false; }
+                if !_delete_runtime_artifact(obj + ".key") { ok = false; }
                 ci += 1;
             }
             let mut li: int = 0;
@@ -2029,8 +2021,8 @@ fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_d
                 if li >= cap.ll_sources.length { break; }
                 let obj = _path_join(out_dir, _runtime_obj_stem(cap_prefix, cap.ll_sources[li], opt_flag, tag)
                     + ".o");
-                _push_if_present(argv, obj);
-                _push_if_present(argv, obj + ".key");
+                if !_delete_runtime_artifact(obj) { ok = false; }
+                if !_delete_runtime_artifact(obj + ".key") { ok = false; }
                 li += 1;
             }
             // sfn-sources: `.o` + `.key` + the emitted `.ll` intermediate.
@@ -2038,25 +2030,35 @@ fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_d
             loop {
                 if si >= cap.sfn_sources.length { break; }
                 let base = _runtime_obj_stem(cap_prefix, cap.sfn_sources[si], opt_flag, tag);
-                _push_if_present(argv, _path_join(out_dir, base + ".o"));
-                _push_if_present(argv, _path_join(out_dir, base + ".o.key"));
-                _push_if_present(argv, _path_join(out_dir, base + ".ll"));
+                if !_delete_runtime_artifact(_path_join(out_dir, base + ".o")) {
+                    ok = false;
+                }
+                if !_delete_runtime_artifact(_path_join(out_dir, base + ".o.key")) {
+                    ok = false;
+                }
+                if !_delete_runtime_artifact(_path_join(out_dir, base + ".ll")) {
+                    ok = false;
+                }
                 si += 1;
             }
             // prelude-entry rides the same sfn emit path (`.o`/`.key`/`.ll`).
             if cap.prelude_entry.length > 0 {
                 let base = _runtime_obj_stem(cap_prefix, cap.prelude_entry, opt_flag, tag);
-                _push_if_present(argv, _path_join(out_dir, base + ".o"));
-                _push_if_present(argv, _path_join(out_dir, base + ".o.key"));
-                _push_if_present(argv, _path_join(out_dir, base + ".ll"));
+                if !_delete_runtime_artifact(_path_join(out_dir, base + ".o")) {
+                    ok = false;
+                }
+                if !_delete_runtime_artifact(_path_join(out_dir, base + ".o.key")) {
+                    ok = false;
+                }
+                if !_delete_runtime_artifact(_path_join(out_dir, base + ".ll")) {
+                    ok = false;
+                }
             }
             ti += 1;
         }
         i += 1;
     }
-    // No runtime sources resolved → nothing to remove.
-    if argv.length <= 2 { return; }
-    process.run(argv);
+    return ok;
 }
 
 export {
