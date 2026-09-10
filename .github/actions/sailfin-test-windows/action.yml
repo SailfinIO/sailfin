@@ -1,0 +1,132 @@
+name: "Sailfin Windows shard test"
+description: >-
+  Downloads one native MSVC compiler artifact, restores the self-validating
+  per-shard test-binary cache, and runs one canonical Sailfin test shard.
+inputs:
+  compiler_artifact:
+    description: "Artifact containing build/bin/sfn.exe."
+    required: true
+  shard:
+    description: "Canonical logical shard name."
+    required: true
+  timing_artifact_prefix:
+    description: "Prefix for the retained JSONL timing artifact."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download shared native compiler
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.compiler_artifact }}
+        path: build/bin
+
+    - name: Set up MSVC developer environment
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Verify native compiler and LLVM tools
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        if (-not (Test-Path -LiteralPath build/bin/sfn.exe -PathType Leaf)) {
+          throw "shared artifact did not contain build/bin/sfn.exe"
+        }
+        & build/bin/sfn.exe --version
+        clang --version | Select-Object -First 1
+        lld-link --version
+
+    # The entry itself folds test source, dependency closure, compiler, and
+    # runtime identities. A stale archive is therefore only a source of misses,
+    # never a source of stale executable reuse (SFN-1233).
+    - name: Restore per-shard test-binary cache
+      id: test_bin_cache
+      uses: actions/cache@v6
+      with:
+        path: build/cache/test-bin
+        key: test-bin-${{ runner.os }}-${{ inputs.shard }}-${{ github.sha }}
+        restore-keys: |
+          test-bin-${{ runner.os }}-${{ inputs.shard }}-
+
+    - name: Run native Windows shard
+      id: shard_run
+      shell: pwsh
+      env:
+        SAILFIN_BOOTSTRAP: "off"
+        SAILFIN_RUNTIME_ROOT: ${{ github.workspace }}/runtime
+        SHARD: ${{ inputs.shard }}
+      run: |
+        $ErrorActionPreference = "Continue"
+        New-Item -ItemType Directory -Force build/test-results | Out-Null
+        $resultPath = "build/test-results/windows-$env:SHARD.jsonl"
+        $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        & build/bin/sfn.exe dev shard run $env:SHARD --json 2>&1 |
+          Tee-Object -FilePath $resultPath
+        $rc = $LASTEXITCODE
+        $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+        "exit_code=$rc" >> $env:GITHUB_OUTPUT
+        "wall_ms=$elapsed" >> $env:GITHUB_OUTPUT
+        # Keep this step green long enough to publish diagnostics. The final
+        # step restores the native exit code as the job result.
+        exit 0
+
+    - name: Summarize Windows shard metrics
+      if: ${{ always() }}
+      shell: pwsh
+      env:
+        ACTIONS_CACHE_HIT: ${{ steps.test_bin_cache.outputs.cache-hit }}
+        EXIT_CODE: ${{ steps.shard_run.outputs.exit_code }}
+        SHARD: ${{ inputs.shard }}
+        WALL_MS: ${{ steps.shard_run.outputs.wall_ms }}
+      run: |
+        $resultPath = "build/test-results/windows-$env:SHARD.jsonl"
+        $summary = $null
+        if (Test-Path -LiteralPath $resultPath) {
+          $summary = Get-Content -LiteralPath $resultPath |
+            ForEach-Object {
+              try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+            } |
+            Where-Object { $_.event -eq "summary" } |
+            Select-Object -Last 1
+        }
+        $hitRate = if ($summary -and $null -ne $summary.cache.test_bin_hit_rate) {
+          $summary.cache.test_bin_hit_rate
+        } else {
+          "unavailable"
+        }
+        $wallMs = if ($env:WALL_MS) { [int64]$env:WALL_MS } else { 0 }
+        $wall = [TimeSpan]::FromMilliseconds($wallMs).ToString("hh\:mm\:ss")
+        Write-Host "[ci-metrics] target=windows-x86_64 phase=test shard=$env:SHARD test_ms=$wallMs test_bin_hit_rate=$hitRate actions_cache_hit=$env:ACTIONS_CACHE_HIT"
+        @"
+        ### Windows test shard metrics — $env:SHARD
+
+        | metric | value |
+        | --- | --- |
+        | physical runner legs | 8 |
+        | shard | $env:SHARD |
+        | wall time | $wall |
+        | test-bin hit rate | $hitRate |
+        | Actions cache exact hit | $env:ACTIONS_CACHE_HIT |
+        | exit code | $env:EXIT_CODE |
+        "@ >> $env:GITHUB_STEP_SUMMARY
+
+    - name: Upload per-shard test timing
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.timing_artifact_prefix }}-${{ inputs.shard }}
+        path: build/test-results/windows-${{ inputs.shard }}.jsonl
+        if-no-files-found: ignore
+        retention-days: 90
+
+    - name: Fail when the native shard failed
+      if: ${{ steps.shard_run.outputs.exit_code != '0' }}
+      shell: pwsh
+      env:
+        EXIT_CODE: ${{ steps.shard_run.outputs.exit_code }}
+        SHARD: ${{ inputs.shard }}
+      run: |
+        Write-Error "native Windows shard '$env:SHARD' failed (exit=$env:EXIT_CODE)"
+        exit 1

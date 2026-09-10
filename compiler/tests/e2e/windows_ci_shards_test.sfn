@@ -1,0 +1,43 @@
+// SFN-1014 guards for the required native-Windows source-PR shard topology.
+// These assertions pin the cross-workflow contract: source scope selects the
+// native build, one published-seed compiler artifact feeds all eight canonical
+// shards, the aggregate gate consumes their result, and the main seeder writes
+// keys compatible with the PR restore prefix.
+import { contains } from "sfn/strings";
+
+fn _assert_canonical_shards(source: string) -> void {
+    assert contains(source, "unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d");
+}
+
+test "Windows CI: every source PR builds once and gates all shards" ![io] {
+    let workflow = fs.readFile(".github/workflows/ci.yml");
+    let source_scope = "$" + "{{ needs.ci-scope.outputs.source == 'true' }}";
+    let windows_result = "$" + "{{ needs.build-windows.result }}";
+    _assert_canonical_shards(workflow);
+    assert contains(workflow, "build-compiler-windows:\n    name: Build compiler [windows-x86_64]\n    needs: ci-scope\n    if: "
+        + source_scope);
+    assert contains(workflow, "seed_source: release");
+    assert contains(workflow, "compiler_artifact: ci-build-windows-x86_64");
+    assert contains(workflow, "BUILD_WINDOWS: " + windows_result);
+    assert contains(workflow, "check \"Build + Test [windows-x86_64]\" \"$BUILD_WINDOWS\"");
+    assert ! contains(workflow, "needs.ci-scope.outputs.windows == 'true'");
+}
+
+test "Windows CI: PR and main seeder share the cache and shard action" ![io] {
+    let action = fs.readFile(".github/actions/sailfin-test-windows/action.yml");
+    let runner_os = "$" + "{{ runner.os }}";
+    let shard = "$" + "{{ inputs.shard }}";
+    let sha = "$" + "{{ github.sha }}";
+    assert contains(action, "key: test-bin-" + runner_os + "-" + shard + "-"
+        + sha);
+    assert contains(action, "test-bin-" + runner_os + "-" + shard + "-");
+    assert contains(action, "dev shard run $env:SHARD --json");
+    assert contains(action, "test_bin_hit_rate=$hitRate");
+
+    let seeder = fs.readFile(".github/workflows/seed-test-bin.yml");
+    _assert_canonical_shards(seeder);
+    assert contains(seeder, "build-compiler-windows:");
+    assert contains(seeder, "seed_source: release");
+    assert contains(seeder, "compiler_artifact: seed-build-windows-x86_64");
+    assert contains(seeder, "uses: ./.github/actions/sailfin-test-windows");
+}
