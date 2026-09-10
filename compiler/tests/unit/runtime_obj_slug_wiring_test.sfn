@@ -12,31 +12,29 @@
 //
 // Mechanism: two byte-identical sources (`alpha.sfn`, `beta.sfn`) share a
 // base cache key, since that key hashes source CONTENT only. A shared-cache
-// entry is pre-stored under the key this test composes for `alpha` (module
-// slug `runtime/alpha`). Calling `_prepare_runtime_sfn_object` for `alpha`
-// with an unusable `self_path` must still succeed (a shared-cache HIT,
-// proven by the emit subprocess being unable to run) — this is the
-// non-vacuity leg, asserted FIRST, and it fails loudly if this test's own
-// key composition ever drifts from the function's. Calling it for `beta`
-// (slug `runtime/beta`), same unusable `self_path`, must MISS: if the slug
-// fold were removed from `_prepare_runtime_sfn_object`, `beta`'s key would
-// collapse onto `alpha`'s stored entry and this leg would wrongly hit
-// instead.
+// entry is pre-stored under `_runtime_sfn_object_key`'s key for `alpha`
+// (module slug `runtime/alpha`). Calling `_prepare_runtime_sfn_object` for
+// `alpha` with an unusable `self_path` must still succeed (a shared-cache
+// HIT, proven by the emit subprocess being unable to run) — the non-vacuity
+// leg, asserted FIRST, so a stored entry that is simply unreachable cannot
+// let the second leg pass for the wrong reason. Calling it for `beta` (slug
+// `runtime/beta`), same unusable `self_path`, must MISS.
+//
+// The slug fold is guarded by that second leg alone, and deliberately so.
+// Dropping the fold from `_runtime_sfn_object_key` collapses `beta`'s key
+// onto `alpha`'s stored entry, so `beta` would wrongly HIT — caught, even
+// though both legs derive their key from the same shared function. Deriving
+// the expected key here instead of re-folding it by hand is what keeps this
+// file from becoming another copy that drifts (SFN-950).
 import { remove_all } from "sfn/fs";
 import { default_scratch_dir } from "sfn/test";
 
 import {
     RuntimeSfnObjectPlan,
     _prepare_runtime_sfn_object,
-    _runtime_obj_key_for_build,
-    _runtime_obj_key_with_slug
+    _runtime_sfn_object_key
 } from "../../src/build/runtime_objs";
-import {
-    CacheKey,
-    cache_store_artifact,
-    runtime_object_cache_key_with_identity,
-    runtime_object_entry_key_from_str
-} from "../../src/build_cache";
+import { CacheKey, cache_store_artifact, runtime_object_entry_key_from_str } from "../../src/build_cache";
 import { RuntimeCapsuleArtifacts, RuntimeTargetArtifacts } from "../../src/runtime_capsule_resolver";
 
 // A self_path that cannot resolve to a runnable binary. Used to prove a
@@ -100,15 +98,17 @@ test "runtime-obj slug wiring: a shared entry stored under one slug is never ser
         target_artifacts: empty_targets
     };
 
-    // Compose the expected key for `alpha.sfn` at module slug
-    // `runtime/alpha`, matching `_runtime_module_slug(manifest_dir, alpha_src)`.
-    // No `.import-deps` sidecar exists under `ctx_root`, so the
-    // sibling-deps fold (not exported here) returns its input unchanged —
-    // it is omitted from this composition, per its own documented
-    // behaviour in `runtime_objs.sfn`.
+    // The expected key for `alpha.sfn` at module slug `runtime/alpha`,
+    // matching `_runtime_module_slug(manifest_dir, alpha_src)`. Derived
+    // through the same `_runtime_sfn_object_key` the production call sites
+    // use rather than re-composed here: a test that hand-folds this key is
+    // a fourth composition to keep in sync, and SFN-950 is where that bill
+    // came due (the artifact-kind namespace fold reached the call sites and
+    // not the hand-composed copies). The discrimination leg below is what
+    // actually guards the slug fold, and it does not need a hand-rolled key
+    // to do it — see this file's header.
     let alpha_slug = "runtime/alpha";
-    let base_key = runtime_object_cache_key_with_identity(alpha_src, opt_flag, compiler_identity);
-    let alpha_key = _runtime_obj_key_for_build(_runtime_obj_key_with_slug(base_key, alpha_slug), target_triple);
+    let alpha_key = _runtime_sfn_object_key(alpha_src, opt_flag, compiler_identity, ctx_root, alpha_slug, target_triple);
 
     // Store a sentinel object under that exact key.
     let sentinel_path = out_dir_store + "/sentinel.o";

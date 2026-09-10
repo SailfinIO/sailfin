@@ -2102,6 +2102,7 @@ export {
     _runtime_obj_key_with_host,
     _runtime_obj_key_with_target,
     _runtime_obj_key_with_slug,
+    _runtime_sfn_object_key,
     _prepare_runtime_sfn_object,
     _stage_one_runtime_sfn_import_context,
     runtime_asm_cache_key
