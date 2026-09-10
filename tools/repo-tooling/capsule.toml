@@ -1,0 +1,40 @@
+[capsule]
+name = "tools/repo-tooling"
+version = "0.1.0"
+description = "Repo-internal Sailfin tooling for release publication and repository API automation"
+
+# SFEP-0074 §8.3. Three independent mechanisms keep this capsule out of the
+# public surface, and all three are load-bearing rather than redundant:
+#
+#   1. `publish = false` — `sfn publish` refuses with `E0612` before it
+#      discovers credentials or opens a socket
+#      (compiler/src/cli/commands/publish.sfn:108).
+#   2. `kind = "binary"` below — fails the `kind == "library"` half of the
+#      `--public-members` predicate at
+#      scripts/module_layout_fingerprint.sh:244, so the capsule never enters
+#      the publishable set the release workflow iterates.
+#   3. `.github/workflows/capsule-release.yml:6` watches `capsules/**` and
+#      `stdlib/**`, never `tools/**`.
+#
+# The name is deliberately outside the `sfn/` scope: `capsules/sfn/*` would
+# name repo-internal automation `sfn/<something>` and read as a shipped
+# capsule. `tools/` already means "not the compiler" (`bluesky`, `mcp-server`).
+publish = false
+
+[dependencies]
+"sfn/cli" = "*"
+"sfn/strings" = "*"
+
+[capabilities]
+# `io` only, deliberately narrower than where the Tier 2 leaves end up.
+# SFN-1185 (GitHub/Linear sync) and SFN-1188 (toolchain-index validation)
+# widen this to include `net` when they land; declaring it now would make
+# the ceiling wider than the shipped surface, which stdlib/archive's
+# `capsule.toml` records as a cost to avoid. The acceptance bar for this
+# capsule is that its own tests run with no network and no credentials, so
+# `net` here would be a claim the tests cannot back.
+required = ["io"]
+
+[build]
+entry = "src/main.sfn"
+kind = "binary"

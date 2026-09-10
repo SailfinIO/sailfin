@@ -19,6 +19,26 @@
 # new capsule under either transitional standard-library root is picked up by
 # its glob with no edit here.
 
+# `tools/*` is repo-internal tooling and is never published (SFEP-0074 §3
+# Tier 2, §8.3). `tools/` already means "not the compiler" (`bluesky`,
+# `mcp-server`), so a Tier 2 capsule lands there rather than in
+# `capsules/sfn/*`, where its name would read as a shipped `sfn/<something>`.
+# Neither pre-existing subdirectory carries a `capsule.toml`, so the glob
+# expands to the Sailfin members only. Membership buys workspace resolution
+# and `sfn test` discovery, not publication: `workspace_inventory.sfn:232-234`
+# keys `compiler`/`maintainer` classification on capsule role and build kind,
+# so a `tools/*` member's sources stay out of `compiler-sources` and
+# `maintainer-sources` and cannot dirty the compiler build fingerprint.
+#
+# Keep every comment OUT of the `members` array itself, including this one.
+# The array has two readers and they disagree: the native ones
+# (`capsule_resolver/workspace.sfn`, and the pinned seed's own copy) skip
+# comments, but `scripts/module_layout_fingerprint.sh:114-131` extracts every
+# double-quoted substring on every line from `members =` to the closing `]`
+# with no comment handling, so a `#` line carrying quoted prose is read as
+# member paths and the run dies on a missing manifest. That script is the one
+# `.github/workflows/capsule-release.yml:126` invokes, so the failure lands in
+# release automation rather than in a local build.
 [workspace]
 members = [
     "compiler",
@@ -26,6 +46,7 @@ members = [
     "runtime",
     "capsules/sfn/*",
     "stdlib/*",
+    "tools/*",
 ]
 
 # Workspace-wide toolchain floor (SFEP-0051 Phase 2, SFN-414 / SFEP-0046

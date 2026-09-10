@@ -1,0 +1,74 @@
+// Argument seam. Asserted through the pure `parse` rather than `run`, which
+// exits the process on `--help` and on a parse error and so cannot be
+// wrapped by a test (capsules/sfn/cli/src/parser.sfn:291).
+//
+// These assertions are the standing check that the registration shape
+// SFEP-0074 §2.2 asks for still holds: the tree comes from one function, and
+// a new leaf is visible here the moment it is added.
+import {
+    get,
+    parse,
+    parse_is_ok,
+    parse_matches,
+    repeated,
+    subcommand
+} from "sfn/cli";
+
+import { TOOL_NAME, TOOL_VERSION, root_command } from "../src/commands";
+
+test "repo-tooling cli: the root command carries a version for --version" {
+    assert root_command().name == TOOL_NAME;
+    assert root_command().version == TOOL_VERSION;
+    assert TOOL_VERSION.length > 0;
+}
+
+test "repo-tooling cli: every registered leaf is reachable from the one tree" {
+    let subs = root_command().subcmds;
+    assert subs.length == 2;
+    assert subs[0].name == "env-check";
+    assert subs[1].name == "paths";
+}
+
+test "repo-tooling cli: env-check collects repeated --require values in order" {
+    let argv: string[] = [TOOL_NAME, "env-check", "--require", "GITHUB_TOKEN", "--require", "LINEAR_API_KEY"];
+    let result = parse(root_command(), argv);
+    assert parse_is_ok(result);
+    let matches = parse_matches(result);
+    assert subcommand(matches) == "env-check";
+    let names = repeated(matches, "require");
+    assert names.length == 2;
+    assert names[0] == "GITHUB_TOKEN";
+    assert names[1] == "LINEAR_API_KEY";
+}
+
+test "repo-tooling cli: env-check with no --require parses and defers the error" {
+    // The arity rule is the command's, not the parser's: `--require` is
+    // optional to `sfn/cli` and `_run_env_check` rejects an empty set, so a
+    // missing flag produces the tool's own message rather than a parse error.
+    let argv: string[] = [TOOL_NAME, "env-check"];
+    let result = parse(root_command(), argv);
+    assert parse_is_ok(result);
+    assert repeated(parse_matches(result), "require").length == 0;
+}
+
+test "repo-tooling cli: paths takes a positional and an optional root" {
+    let argv: string[] = [TOOL_NAME, "paths", "--root", "/tmp/root", "dist/SHA256SUMS"];
+    let result = parse(root_command(), argv);
+    assert parse_is_ok(result);
+    let matches = parse_matches(result);
+    assert subcommand(matches) == "paths";
+    assert get(matches, "relative") == "dist/SHA256SUMS";
+    assert get(matches, "root") == "/tmp/root";
+}
+
+test "repo-tooling cli: paths defaults its root when the flag is absent" {
+    let argv: string[] = [TOOL_NAME, "paths", "dist/SHA256SUMS"];
+    let result = parse(root_command(), argv);
+    assert parse_is_ok(result);
+    assert get(parse_matches(result), "root") == "";
+}
+
+test "repo-tooling cli: an unregistered verb is a parse error, not a silent no-op" {
+    let argv: string[] = [TOOL_NAME, "not-a-verb"];
+    assert ! parse_is_ok(parse(root_command(), argv));
+}

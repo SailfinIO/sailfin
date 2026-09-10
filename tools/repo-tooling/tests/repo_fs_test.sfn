@@ -1,0 +1,138 @@
+// Filesystem seam. The containment half is pure, so the traversal cases —
+// the ones with the bugs in them — are asserted with no temp directory at
+// all; only the read/write round trip needs `![io]`.
+import { fixture_file, materialize } from "../src/fixture";
+import {
+    RepoFs,
+    repo_exists,
+    repo_fs,
+    repo_parent_dir,
+    repo_path,
+    repo_read,
+    repo_relative_is_safe,
+    repo_write
+} from "../src/repo_fs";
+
+// Unwrap helpers keep every assertion flat. Nesting one `match` inside
+// another would rebind `value` in an inner scope, and the readable ordering
+// of a Result test is "get the value, then assert on it".
+fn _string_of(result: Result<string, string>) -> string {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return ""; }
+    }
+}
+
+fn _error_of(result: Result<string, string>) -> string {
+    match result {
+        Result.Ok { value } => { return ""; },
+        Result.Err { error } => { return error; }
+    }
+}
+
+fn _int_error_of(result: Result<int, string>) -> string {
+    match result {
+        Result.Ok { value } => { return ""; },
+        Result.Err { error } => { return error; }
+    }
+}
+
+fn _int_of(result: Result<int, string>) -> int {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return -1; }
+    }
+}
+
+fn _bool_of(result: Result<boolean, string>) -> boolean {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return false; }
+    }
+}
+
+fn _repo_of(result: Result<RepoFs, string>) -> RepoFs {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return repo_fs(""); }
+    }
+}
+
+test "repo-tooling fs: an ordinary relative path is safe" {
+    assert repo_relative_is_safe("dist/SHA256SUMS");
+    assert repo_relative_is_safe("a");
+}
+
+test "repo-tooling fs: an absolute path is refused" {
+    assert ! repo_relative_is_safe("/etc/passwd");
+}
+
+test "repo-tooling fs: a dot-dot segment is refused anywhere in the path" {
+    assert ! repo_relative_is_safe("..");
+    assert ! repo_relative_is_safe("../outside");
+    assert ! repo_relative_is_safe("dist/../../outside");
+    assert ! repo_relative_is_safe("dist/..");
+}
+
+test "repo-tooling fs: a bare dot segment is refused" {
+    assert ! repo_relative_is_safe(".");
+    assert ! repo_relative_is_safe("./dist");
+    assert ! repo_relative_is_safe("dist/./SHA256SUMS");
+}
+
+test "repo-tooling fs: a backslash is refused so containment stays one rule" {
+    assert ! repo_relative_is_safe("dist\\SHA256SUMS");
+    assert ! repo_relative_is_safe("..\\outside");
+}
+
+test "repo-tooling fs: an empty segment or empty path is refused" {
+    assert ! repo_relative_is_safe("");
+    assert ! repo_relative_is_safe("dist//SHA256SUMS");
+    assert ! repo_relative_is_safe("dist/");
+}
+
+test "repo-tooling fs: a glob is refused because it is not a path" {
+    assert ! repo_relative_is_safe("dist/*");
+}
+
+test "repo-tooling fs: joining under a root prefixes exactly once" {
+    let joined = _string_of(repo_path(repo_fs("/tmp/root"), "dist/SHA256SUMS"));
+    assert joined == "/tmp/root/dist/SHA256SUMS";
+}
+
+test "repo-tooling fs: the default root joins to a bare relative path" {
+    assert _string_of(repo_path(repo_fs("."), "dist/SHA256SUMS")) == "dist/SHA256SUMS";
+    assert _string_of(repo_path(repo_fs(""), "dist/SHA256SUMS")) == "dist/SHA256SUMS";
+}
+
+test "repo-tooling fs: an escaping path fails closed instead of joining" {
+    let error = _error_of(repo_path(repo_fs("/tmp/root"), "../outside"));
+    assert error == "repo-tooling: unsafe repository path \"../outside\"";
+}
+
+test "repo-tooling fs: parent derivation stops at the first segment" {
+    assert repo_parent_dir("/tmp/root/dist/SHA256SUMS") == "/tmp/root/dist";
+    assert repo_parent_dir("bare") == "";
+    assert repo_parent_dir("/bare") == "";
+}
+
+test "repo-tooling fs: a written file reads back through the same handle" ![io] {
+    let repo = _repo_of(materialize([fixture_file("seed.txt", "seed\n")], "fs-roundtrip"));
+    assert repo.root.length > 0;
+    assert _int_of(repo_write(repo, "dist/nested/OUT", "written\n")) == 8;
+    assert _string_of(repo_read(repo, "dist/nested/OUT")) == "written\n";
+    assert _bool_of(repo_exists(repo, "dist/nested/OUT"));
+    assert ! _bool_of(repo_exists(repo, "dist/nested/ABSENT"));
+}
+
+test "repo-tooling fs: reading an absent file is an error, not an empty string" ![io] {
+    let repo = _repo_of(materialize([fixture_file("present.txt", "x")], "fs-absent"));
+    let error = _error_of(repo_read(repo, "absent.txt"));
+    assert error == "repo-tooling: no such repository file \"absent.txt\"";
+}
+
+test "repo-tooling fs: an escaping write never reaches the filesystem" ![io] {
+    let repo = _repo_of(materialize([fixture_file("present.txt", "x")], "fs-escape"));
+    let error = _int_error_of(repo_write(repo, "../escaped", "nope"));
+    assert error == "repo-tooling: unsafe repository path \"../escaped\"";
+}

@@ -1,0 +1,129 @@
+// tools/repo-tooling/src/repo_fs.sfn
+//
+// Filesystem seam (SFEP-0074 §3 Tier 2). Tier 2 leaves read and write real
+// repository files — `SHA256SUMS` and its detached signature (SFN-1186), a
+// label manifest (SFN-1185), a toolchain index (SFN-1188). Two things have to
+// be true of every one of those accesses, and neither is true of raw `fs.*`
+// calls scattered through the leaves:
+//
+//   - a test can point the whole leaf at a temporary tree instead of the
+//     checkout, which is what `RepoFs { root }` buys;
+//   - a relative path taken from a manifest, an API response, or argv cannot
+//     escape that tree.
+//
+// The containment rule lives in `repo_relative_is_safe`, which is pure. That
+// split matters: the interesting half of this module — the half with the
+// traversal bugs in it — is testable with no `![io]` and no temp directory.
+// `compiler/tests/unit/repository_topology_test.sfn` enforces the same
+// property for workspace members; this is the runtime equivalent for the
+// paths a leaf handles.
+import { contains, split, starts_with } from "sfn/strings";
+
+struct RepoFs {
+    root: string;
+}
+
+fn repo_fs(root: string) -> RepoFs {
+    if root.length == 0 {
+        return RepoFs { root: "." };
+    }
+    return RepoFs { root: root };
+}
+
+// Lexical containment only, and deliberately so: this rejects a path before
+// it reaches the filesystem, so it holds on a host where symlinks do not
+// exist and on one where the target has not been created yet. It is not a
+// substitute for link resolution — a leaf that must survive a hostile
+// symlink inside the tree needs the `fs.read_link` walk that
+// `repository_topology_test.sfn:_resolve_links` performs. No Tier 2 leaf
+// reads an attacker-controlled checkout today, so that walk is not paid for
+// here; the moment one does, this comment is the pointer to what it needs.
+//
+// Rejected: absolute paths (a manifest entry must not reach outside the
+// tree), backslashes (repository manifests are forward-slash on every host,
+// and accepting both makes containment two rules instead of one), empty and
+// `.`/`..` segments, and any `*` (a glob is a caller concern, never a path).
+fn repo_relative_is_safe(relative: string) -> boolean {
+    if relative.length == 0 { return false; }
+    if starts_with(relative, "/") { return false; }
+    if contains(relative, "\\") { return false; }
+    if contains(relative, "*") { return false; }
+    let parts = split(relative, "/");
+    let mut i: int = 0;
+    loop {
+        if i >= parts.length { break; }
+        let part = parts[i];
+        i += 1;
+        if part.length == 0 { return false; }
+        if part == "." || part == ".." { return false; }
+    }
+    return true;
+}
+
+// Join under the root, failing closed rather than returning a path the
+// caller has to remember to validate. Every `![io]` helper below goes
+// through this, so there is exactly one place containment can be forgotten.
+fn repo_path(repo: RepoFs, relative: string) -> Result<string, string> {
+    if !repo_relative_is_safe(relative) {
+        return Result.Err {
+            error: "repo-tooling: unsafe repository path \"" + relative + "\""
+        };
+    }
+    if repo.root == "." {
+        return Result.Ok { value: relative };
+    }
+    return Result.Ok { value: repo.root + "/" + relative };
+}
+
+fn repo_exists(repo: RepoFs, relative: string) -> Result<boolean, string> ![io] {
+    let path = repo_path(repo, relative)?;
+    return Result.Ok { value: fs.exists(path) };
+}
+
+fn repo_read(repo: RepoFs, relative: string) -> Result<string, string> ![io] {
+    let path = repo_path(repo, relative)?;
+    if !fs.exists(path) {
+        return Result.Err {
+            error: "repo-tooling: no such repository file \"" + relative + "\""
+        };
+    }
+    return Result.Ok { value: fs.readFile(path) };
+}
+
+// Creates the parent chain so a leaf writing `dist/manifests/SHA256SUMS`
+// does not need its own mkdir dance. The parent is derived from the
+// already-validated joined path, so it cannot escape the root either.
+fn repo_write(repo: RepoFs, relative: string, contents: string) -> Result<int, string> ![io] {
+    let path = repo_path(repo, relative)?;
+    let parent = repo_parent_dir(path);
+    if parent.length > 0 && !fs.exists(parent) {
+        fs.createDirectory(parent, true);
+    }
+    fs.writeFile(path, contents);
+    return Result.Ok { value: contents.length };
+}
+
+// Exported rather than module-private: `fixture.sfn` writes through the same
+// join shape and duplicating this walk there would let the two drift.
+fn repo_parent_dir(path: string) -> string {
+    let mut last: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" { last = i; }
+        i += 1;
+    }
+    if last <= 0 { return ""; }
+    return substring(path, 0, last);
+}
+
+export {
+    RepoFs,
+    repo_exists,
+    repo_fs,
+    repo_parent_dir,
+    repo_path,
+    repo_read,
+    repo_relative_is_safe,
+    repo_write
+};

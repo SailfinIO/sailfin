@@ -1,0 +1,82 @@
+// Deterministic-output seam. Every assertion here is on a pure function, so
+// the byte-stability the Tier 2 leaves depend on is proved without a
+// filesystem, a clock, or a subprocess.
+import {
+    render_report,
+    report,
+    report_field,
+    report_line,
+    report_lines
+} from "../src/deterministic";
+
+test "repo-tooling deterministic: an empty report renders to nothing" {
+    assert render_report(report()) == "";
+    assert report_lines(report()).length == 0;
+}
+
+test "repo-tooling deterministic: insertion order does not reach the output" {
+    let mut forward = report();
+    forward = report_field(forward, "alpha", "1");
+    forward = report_field(forward, "beta", "2");
+    forward = report_field(forward, "gamma", "3");
+
+    let mut backward = report();
+    backward = report_field(backward, "gamma", "3");
+    backward = report_field(backward, "beta", "2");
+    backward = report_field(backward, "alpha", "1");
+
+    assert render_report(forward) == render_report(backward);
+    assert render_report(forward) == "alpha=1\nbeta=2\ngamma=3\n";
+}
+
+test "repo-tooling deterministic: ordering is by byte, not by case folding" {
+    // "Z" (0x5A) sorts before "a" (0x61). A locale-aware or case-folded
+    // comparison would put "a" first, which is the drift this pins.
+    let mut r = report();
+    r = report_line(r, "a");
+    r = report_line(r, "Z");
+    assert render_report(r) == "Z\na\n";
+}
+
+test "repo-tooling deterministic: a prefix sorts before its extension" {
+    let mut r = report();
+    r = report_line(r, "keyed");
+    r = report_line(r, "key");
+    assert render_report(r) == "key\nkeyed\n";
+}
+
+test "repo-tooling deterministic: equal lines keep insertion order" {
+    let mut r = report();
+    r = report_field(r, "dup", "first");
+    r = report_field(r, "dup", "second");
+    let lines = report_lines(r);
+    assert lines.length == 2;
+    assert lines[0] == "dup=first";
+    assert lines[1] == "dup=second";
+}
+
+test "repo-tooling deterministic: file rendering is LF with one trailing LF" {
+    let mut r = report();
+    r = report_line(r, "only");
+    let rendered = render_report(r);
+    assert rendered == "only\n";
+    // No CR anywhere, on any host.
+    let mut i: int = 0;
+    let mut carriage_returns: int = 0;
+    loop {
+        if i >= rendered.length { break; }
+        if char_code(rendered[i]) == 13 { carriage_returns += 1; }
+        i += 1;
+    }
+    assert carriage_returns == 0;
+}
+
+test "repo-tooling deterministic: stream rendering carries no trailing blank" {
+    let mut r = report();
+    r = report_line(r, "one");
+    r = report_line(r, "two");
+    let lines = report_lines(r);
+    assert lines.length == 2;
+    assert lines[0] == "one";
+    assert lines[1] == "two";
+}

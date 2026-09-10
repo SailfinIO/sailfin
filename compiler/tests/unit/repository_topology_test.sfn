@@ -173,13 +173,22 @@ fn _is_contained(root: string, path: string) -> boolean {
 }
 
 // These are the only member placements committed by SFEP-0072: today's
-// roots, the dual-root transition, and the three-root target. Logical capsule
-// names are intentionally absent from this physical policy.
+// roots, the dual-root transition, and the three-root target — plus the
+// repo-tooling root committed by SFEP-0074 §8.3. Logical capsule names are
+// intentionally absent from this physical policy.
+//
+// `tools/<name>` is a shipped-surface exclusion, not an extra shipped root:
+// a member there is `publish = false` and `kind = "binary"`, so it fails both
+// halves of the `--public-members` predicate at
+// scripts/module_layout_fingerprint.sh:244 and never enters
+// `.github/workflows/capsule-release.yml`'s publishable set. It is listed
+// here because the policy is about *physical placement*, and admitting the
+// root is what lets the workspace resolve a Tier 2 capsule at all.
 fn _is_allowed_member_path(path: string) -> boolean {
     if path == "compiler" || path == "runtime" { return true; }
     let parts = split(path, "/");
     if parts.length == 2 {
-        if parts[0] == "stdlib" { return true; }
+        if parts[0] == "stdlib" || parts[0] == "tools" { return true; }
         return parts[0] == "compiler" && parts[1] != "capsules";
     }
     if parts.length != 3 { return false; }
@@ -206,7 +215,8 @@ fn _is_safe_member_declaration(path: string) -> boolean {
 
 fn _is_allowed_member_declaration(path: string) -> boolean {
     if path == "compiler/*" || path == "compiler/capsules/*" || path == "capsules/sfn/*"
-        || path == "stdlib/*" { return true; }
+        || path == "stdlib/*"
+        || path == "tools/*" { return true; }
     if contains(path, "*") { return false; }
     return _is_allowed_member_path(path);
 }
@@ -450,6 +460,38 @@ test "repository topology: unsafe member declarations fail before expansion" ![i
     assert ! result.ok;
     assert result.diagnostic == "repository topology: workspace member declaration"
         + " \"compiler/.\" is unsafe";
+}
+
+// SFEP-0074 §8.3. Pins the repo-tooling root against two ways it could be
+// lost: silently dropped from the allowlist, or widened into a second public
+// capsule root. `publish = false` and `kind = "binary"` are asserted through
+// the manifest the fixture writes, since it is those two fields — not
+// membership — that keep the member out of `--public-members`.
+test "repository topology: the repo-tooling root is admitted unpublished" ![io] {
+    let root = fs.mkdtemp("sfn-topology-tools-root-");
+    fs.createDirectory(root + "/tools/repo-tooling/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"tools/*\"]\n");
+    fs.writeFile(root + "/tools/repo-tooling/capsule.toml", "[capsule]\n"
+        + "name = \"tools/repo-tooling\"\nversion = \"0.0.0\"\npublish = false\n\n"
+        + "[build]\nkind = \"binary\"\nentry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/tools/repo-tooling/src/main.sfn", "fn main() -> int { return 0; }\n");
+    assert _assert_valid(root) == 1;
+
+    let manifest = fs.readFile(root + "/tools/repo-tooling/capsule.toml");
+    assert contains(manifest, "publish = false");
+    assert contains(manifest, "kind = \"binary\"");
+}
+
+test "repository topology: a nested tools member is still outside the root" ![io] {
+    // `tools/<name>` is two segments. A three-segment `tools/a/b` would be a
+    // second, unreviewed placement shape, so it stays refused.
+    let root = fs.mkdtemp("sfn-topology-tools-nested-");
+    fs.writeFile(root + "/workspace.toml", "[workspace]\n"
+        + "members = [\"tools/nested/inner\"]\n");
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: workspace member declaration"
+        + " \"tools/nested/inner\" is outside the allowed current, transitional, and target roots";
 }
 
 test "repository topology: dormant unapproved roots fail before expansion" ![io] {
