@@ -120,15 +120,17 @@ fn _is_safe_segment(seg: string) -> boolean {
 }
 
 // `_relative_under_root(url_path)` — the decoded, guarded, slash-joined
-// relative path a URL names, or `""` when the URL may not name one.
+// relative path a URL names, or `null` when the URL may not name one.
 //
-// An empty result means *refuse*, and the caller answers `403`. Note that a
-// request for a bare directory (`/docs`, `/`) returns the directory's own
-// relative path; choosing `index.html` inside it is `static_file`'s job,
-// because that decision needs the filesystem and this function is pure.
-fn _relative_under_root(url_path: string) -> string {
+// `null` and `""` are different answers and the difference matters: `null`
+// is a refusal the caller reports as `403`, while `""` means the URL named
+// the root itself. A single sentinel conflated them, which made `//` — a
+// path of separators and nothing else — a refusal while `/` was served.
+// Choosing `index.html` inside a directory is `static_file`'s job, because
+// that decision needs the filesystem and this function is pure.
+fn _relative_under_root(url_path: string) -> string? {
     let decoded = _percent_decode(url_path);
-    if decoded.length == 0 { return ""; }
+    if decoded.length == 0 && url_path.length > 0 { return null; }
 
     let mut out = "";
     let mut seg = "";
@@ -144,7 +146,7 @@ fn _relative_under_root(url_path: string) -> string {
 
         if strings_equal(ch, "/") {
             if seg.length > 0 {
-                if !_is_safe_segment(seg) { return ""; }
+                if !_is_safe_segment(seg) { return null; }
                 if out.length > 0 { out = out + "/"; }
                 out = out + seg;
                 seg = "";
@@ -172,10 +174,15 @@ fn _canonical(path: string) -> string ![io] {
         free(buf);
         return "";
     }
-    // Copy out of the libc buffer before freeing it: the `string` coercion
-    // reads the bytes, and a `string` aliasing freed memory is a use-after-free
-    // the moment anything else allocates.
-    let resolved = "" + (buf as string);
+    // `buf as string` ADOPTS the foreign buffer rather than copying it
+    // (`sfn_str_sfn_from_cstr`: "No copy: the foreign buffer is adopted in
+    // place"), so the result would dangle the moment `free` ran below —
+    // `runtime/sfn/platform/exec.sfn` sidesteps this by never freeing its
+    // `realpath` buffer at all, which leaks, and a leak per request is not
+    // available to a server. `substring` over the whole span materialises a
+    // real arena-backed buffer, which is what makes the free safe.
+    let adopted = buf as string;
+    let resolved = substring(adopted, 0, adopted.length);
     free(buf);
     return resolved;
 }
@@ -229,12 +236,10 @@ fn static_file(root: string, url_path: string, index: string = "index.html") -> 
     }
 
     let rel = _relative_under_root(url_path);
-    if rel.length == 0 && url_path.length > 0 && !strings_equal(url_path, "/") {
-        return response_with_status(403, "Forbidden");
-    }
+    if rel == null { return response_with_status(403, "Forbidden"); }
 
     let mut candidate = root_real;
-    if rel.length > 0 { candidate = root_real + "/" + rel; }
+    if rel != null && rel.length > 0 { candidate = root_real + "/" + rel; }
 
     let mut resolved = _canonical(candidate);
     if resolved.length == 0 { return not_found(); }

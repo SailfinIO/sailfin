@@ -96,6 +96,20 @@ test "static_file: a directory with no index is a 404, never a listing" ![io] {
     remove_all(dir);
 }
 
+test "static_file: a path of bare separators names the root, not a refusal" ![io] {
+    // `//` decodes to no segments at all, which is the same thing `/` names.
+    // Reporting a refusal for one and serving the other would make the two
+    // spellings of the root disagree.
+    let dir = mkdtemp("sfnhttp");
+    write(dir + "/index.html", "<p>root</p>");
+
+    let rsp = static_file(dir, "//");
+    assert rsp.status == 200;
+    _release(rsp);
+
+    remove_all(dir);
+}
+
 test "static_file: a missing file is a 404" ![io] {
     let dir = mkdtemp("sfnhttp");
     let rsp = static_file(dir, "/nope.txt");
