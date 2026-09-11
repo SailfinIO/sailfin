@@ -113,6 +113,7 @@ selfhost_next="$tmp_dir/selfhost-next"
 source_closure_members="$tmp_dir/source-closure-members"
 source_closure_next="$tmp_dir/source-closure-next"
 source_closure_roots="$tmp_dir/source-closure-roots"
+test_relative_imports="$tmp_dir/test-relative-imports"
 member_glob_parents="$tmp_dir/member-glob-parents"
 
 # Manifests outside `[workspace].members` that still bind a capsule into the
@@ -424,6 +425,20 @@ awk -F '\t' '
     $1 ~ /^sfn\/(compiler|syntax|analyzer|ir|codegen|codegen-llvm)$/ || $3 == "runtime" { print $1 }
 ' "$member_records" > "$source_closure_members"
 printf 'sfn/test\n' >> "$source_closure_members"
+if [ ! -d "$test_manifest_root" ]; then
+    canonical_compiler_roles=$(awk -F '\t' '
+        $1 ~ /^sfn\/(compiler|syntax|analyzer|ir|codegen|codegen-llvm)$/ { print $1 }
+    ' "$member_records" | LC_ALL=C sort -u | awk 'END { print NR }')
+    if [ "$canonical_compiler_roles" -eq 6 ]; then
+        # Silently skipping the seed here would not empty the closure, it would
+        # narrow it — dropping sfn/http and sfn/tensor, whose only path in is
+        # this directory. A narrowed-but-plausible closure passes both guards
+        # SFEP-0077 section 3.3 gives ci.yml (non-empty, strict subset), so the
+        # failure has to be raised here or not at all.
+        echo "module_layout_fingerprint: workspace has the six canonical compiler-role capsules but no $test_manifest_root" >&2
+        exit 2
+    fi
+fi
 if [ -d "$test_manifest_root" ]; then
     LC_ALL=C find "$test_manifest_root" -type f -name capsule.toml -print \
         | while IFS= read -r fixture_manifest; do
@@ -438,6 +453,50 @@ if [ -d "$test_manifest_root" ]; then
         ' "$fixture_manifest" >> "$source_closure_members"
     done
 fi
+# Relative cross-member imports. A compiler test may reach another member's
+# source by path rather than by capsule name — `tensor_import_signatures_test.sfn`
+# imports `../../../stdlib/tensor/src/mod` (SFN-436). That edge appears in no
+# `[dependencies]` table, so a manifest-only seed would let a `stdlib/tensor`
+# change take the narrow lane and skip the very test that compiles it.
+: > "$test_relative_imports"
+if [ -d "$test_manifest_root" ]; then
+    LC_ALL=C find "$test_manifest_root" -type f -name '*.sfn' -print \
+        | while IFS= read -r test_source; do
+        awk -v dir="${test_source%/*}" '
+            match($0, /from[[:space:]]*"\.\.[^"]*"/) {
+                spec = substr($0, RSTART, RLENGTH)
+                sub(/^from[[:space:]]*"/, "", spec)
+                sub(/"$/, "", spec)
+                print dir "/" spec
+            }
+        ' "$test_source" >> "$test_relative_imports"
+    done
+fi
+# Normalize each `..` path, then attribute it to the longest member root that
+# prefixes it. A path under no member root (the compiler's own `src/`, say)
+# drops out.
+awk -F '\t' '
+    NR == FNR { owner[$2] = $1; next }
+    {
+        segments = split($0, part, "/")
+        top = 0
+        for (i = 1; i <= segments; i++) {
+            if (part[i] == "." || part[i] == "") { continue }
+            if (part[i] == "..") { if (top > 0) { top -= 1 } continue }
+            top += 1
+            stack[top] = part[i]
+        }
+        path = ""
+        for (i = 1; i <= top; i++) { path = (i == 1 ? stack[i] : path "/" stack[i]) }
+        best = ""
+        for (root in owner) {
+            if (path == root || index(path, root "/") == 1) {
+                if (length(root) > length(best)) { best = root }
+            }
+        }
+        if (best != "") { print owner[best] }
+    }
+' "$member_records" "$test_relative_imports" >> "$source_closure_members"
 closure_fixed_point "$source_closure_members" "$source_closure_next" "$member_dependencies"
 # Names that are not workspace members (a fixture may declare one that is not
 # in this workspace) drop out here: the join keeps only rows `member_records`
