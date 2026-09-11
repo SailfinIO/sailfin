@@ -187,8 +187,9 @@ independently of this design.
 The union is **16 of 31 members**. Every capsule reached from under
 `compiler/tests/` — by bare name
 (`sfn/{test,strings,syntax,fs,ir,os,crypto,codegen,cli,archive,http,analyzer}`)
-or by relative path (`sfn/tensor`) — is inside it. §8.1 makes that a standing
-assertion over **both** import forms rather than a snapshot over one.
+or by relative path (`sfn/tensor`) — is inside it. §8.1 makes that a standing assertion over the
+bare-name form, with the relative form as a consistency check between two
+implementations of the same normalization.
 
 ### 3.3 The classification is three-valued, and fail-closed at every edge
 
@@ -513,7 +514,7 @@ The load-bearing file. Drives `scripts/module_layout_fingerprint.sh` via
 `process.run_capture_cwd`, modelled on
 `compiler/tests/e2e/module_layout_fingerprint_test.sfn:94-113`.
 
-- *"ci source closure: the closure is a strict non-empty subset of member
+- *"ci source closure: the closure is a non-empty subset of member
   roots"* — the fail-closed shape the workflow guard depends on.
 - *"ci source closure: every capsule imported under compiler/tests is in the
   closure"* — scan `compiler/tests/**/*.sfn` for `from "sfn/<name>"`, map to
@@ -522,8 +523,10 @@ The load-bearing file. Drives `scripts/module_layout_fingerprint.sh` via
 
   **Bare-name imports are the soundness assertion.** The walk never seeds from
   them, so a compiler test importing an out-of-closure capsule by name fails
-  this test. Verified by falsification: a scratch test importing `sfn/tensor`
-  by name fails the assertion, and removing it restores green. This is the
+  this test. Verified by falsification: a scratch test importing `sfn/nn`
+  by name fails the assertion, and removing it restores green. `sfn/nn` and
+  not `sfn/tensor` — the fourth seed term pulls `stdlib/tensor` into the
+  closure, so a bare-name import of *that* now passes. This is the
   half that makes a member-lane green honest, and it covers the dominant form
   — 1431 of the import sites under `compiler/tests/` today.
 

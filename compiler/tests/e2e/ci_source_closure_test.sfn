@@ -345,8 +345,12 @@ test "ci source closure: the closure is a non-empty subset of the member roots" 
 // assertion. The script seeds the closure from manifests and from relative
 // imports, never from bare-name imports, so a compiler test importing an
 // out-of-closure capsule by name fails here. Verified by falsification, not
-// by inspection: a scratch test importing `sfn/tensor` by name fails this
+// by inspection: a scratch test importing `sfn/nn` by name fails this
 // assertion, and removing it restores green.
+//
+// `sfn/nn` and not `sfn/tensor`: the relative seed below pulls `stdlib/tensor`
+// into the closure, so a bare-name import of it now passes. Any falsification
+// probe has to name a capsule outside the closure by *every* seed term.
 //
 // Relative cross-member imports (`from "../..."`) cannot fail that way,
 // because the script seeds the closure from exactly these edges — add one
