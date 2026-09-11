@@ -47,7 +47,7 @@ fi
 mode=layout
 member_name=""
 case "${1:-}" in
-    --freshness|--ci-freshness|--layout-inputs|--freshness-inputs|--ci-freshness-inputs|--compiler-sources|--maintainer-sources|--member-roots|--member-records|--compiler-manifests|--public-members)
+    --freshness|--ci-freshness|--layout-inputs|--freshness-inputs|--ci-freshness-inputs|--compiler-sources|--maintainer-sources|--member-roots|--member-records|--compiler-manifests|--public-members|--source-closure-roots|--member-glob-parents)
         mode=${1#--}
         shift
         ;;
@@ -110,6 +110,42 @@ member_source_inputs="$tmp_dir/member-source-inputs"
 member_dependencies="$tmp_dir/member-dependencies"
 selfhost_members="$tmp_dir/selfhost-members"
 selfhost_next="$tmp_dir/selfhost-next"
+source_closure_members="$tmp_dir/source-closure-members"
+source_closure_next="$tmp_dir/source-closure-next"
+source_closure_roots="$tmp_dir/source-closure-roots"
+member_glob_parents="$tmp_dir/member-glob-parents"
+
+# Manifests outside `[workspace].members` that still bind a capsule into the
+# compiler's own test surface. Seeds the SFEP-0077 source closure below;
+# guarded on existence so a fixture workspace without one still resolves.
+test_manifest_root="compiler/tests"
+
+# Close `members_file` transitively over the `owner<TAB>dependency` edge list
+# in `edges_file`, using `next_file` as scratch. Monotone over a finite name
+# set, so it always terminates.
+#
+# Extracted verbatim from the `--ci-freshness` walk (SFEP-0077 Phase 1) so the
+# source-scope closure can reuse it. The ci-freshness caller below computes
+# exactly what it computed before the extraction; `--ci-freshness` is pinned
+# byte-for-byte by `compiler/tests/e2e/module_layout_fingerprint_test.sfn`.
+closure_fixed_point() {
+    local members_file="$1"
+    local next_file="$2"
+    local edges_file="$3"
+    local before_count after_count
+    while :; do
+        LC_ALL=C sort -u "$members_file" > "$next_file"
+        before_count=$(awk 'END { print NR }' "$next_file")
+        : > "$members_file"
+        awk -F '\t' '
+            NR == FNR { selected[$1] = 1; next }
+            selected[$1] { print $2 }
+        ' "$next_file" "$edges_file" >> "$members_file"
+        LC_ALL=C sort -u "$next_file" "$members_file" -o "$members_file"
+        after_count=$(awk 'END { print NR }' "$members_file")
+        if [ "$after_count" -eq "$before_count" ]; then break; fi
+    done
+}
 
 extract_workspace_array() {
     local key="$1"
@@ -155,6 +191,18 @@ while IFS= read -r spec; do
         *) printf '%s\n' "$spec" ;;
     esac
 done < "$members_raw" | LC_ALL=C sort -u > "$members"
+
+# The `/*` prefixes from `[workspace].members`, pre-expansion. A changed path
+# under one of these that resolves to no member root is an add, a rename or a
+# removal, which SFEP-0077 rule 4 scores as full scope rather than attributing
+# it to a member. Emitted as a query so the classifier need not re-parse the
+# manifest. The loop above has already failed closed on a missing glob root.
+: > "$member_glob_parents"
+while IFS= read -r spec; do
+    case "$spec" in
+        */\*) printf '%s\n' "${spec%/\*}" >> "$member_glob_parents" ;;
+    esac
+done < "$members_raw"
 
 : > "$paths"
 : > "$freshness_paths"
@@ -346,18 +394,7 @@ cp "$freshness_paths" "$ci_freshness_paths"
 awk -F '\t' '
     $1 ~ /^sfn\/(compiler|syntax|analyzer|ir|codegen|codegen-llvm)$/ || $3 == "runtime" { print $1 }
 ' "$member_records" > "$selfhost_members"
-while :; do
-    LC_ALL=C sort -u "$selfhost_members" > "$selfhost_next"
-    before_count=$(awk 'END { print NR }' "$selfhost_next")
-    : > "$selfhost_members"
-    awk -F '\t' '
-        NR == FNR { selected[$1] = 1; next }
-        selected[$1] { print $2 }
-    ' "$selfhost_next" "$member_dependencies" >> "$selfhost_members"
-    LC_ALL=C sort -u "$selfhost_next" "$selfhost_members" -o "$selfhost_members"
-    after_count=$(awk 'END { print NR }' "$selfhost_members")
-    if [ "$after_count" -eq "$before_count" ]; then break; fi
-done
+closure_fixed_point "$selfhost_members" "$selfhost_next" "$member_dependencies"
 awk -F '\t' '
     NR == FNR { selected[$1] = 1; next }
     selected[$1] { print $2 "\t" $3 }
@@ -369,6 +406,47 @@ awk -F '\t' '
     fi
 done
 
+# SFEP-0077: the CI *source scope* closure — the members a changed path can
+# reach the compiler, the runtime, or the compiler test surface through.
+# Deliberately a separate member file from `selfhost_members` above so nothing
+# here can perturb the `--ci-freshness` digest.
+#
+# Seeded wider than the ci-freshness walk by two terms:
+#   - `sfn/test`, which every compiler test binary links, so a change to it or
+#     to anything it depends on reaches all of them.
+#   - every `[dependencies]` key declared by a manifest under
+#     `$test_manifest_root`. `sfn/http` is deliberately NOT a compiler
+#     dependency (SFN-496, bare-name collision with `sfn/cli`'s `get`), but
+#     `compiler/tests/e2e/fixtures/stateful_http_users_server` declares it, so
+#     a closure seeded only from the compiler and runtime manifests would let
+#     an `sfn/http` change skip the e2e test that compiles that fixture.
+awk -F '\t' '
+    $1 ~ /^sfn\/(compiler|syntax|analyzer|ir|codegen|codegen-llvm)$/ || $3 == "runtime" { print $1 }
+' "$member_records" > "$source_closure_members"
+printf 'sfn/test\n' >> "$source_closure_members"
+if [ -d "$test_manifest_root" ]; then
+    LC_ALL=C find "$test_manifest_root" -type f -name capsule.toml -print \
+        | while IFS= read -r fixture_manifest; do
+        awk '
+            /^[[:space:]]*\[/ { in_dependencies = ($0 ~ /^[[:space:]]*\[dependencies\][[:space:]]*$/) }
+            in_dependencies && match($0, /^[[:space:]]*"[^"]+"[[:space:]]*=/) {
+                dependency = substr($0, RSTART, RLENGTH)
+                sub(/^[[:space:]]*"/, "", dependency)
+                sub(/"[[:space:]]*=$/, "", dependency)
+                print dependency
+            }
+        ' "$fixture_manifest" >> "$source_closure_members"
+    done
+fi
+closure_fixed_point "$source_closure_members" "$source_closure_next" "$member_dependencies"
+# Names that are not workspace members (a fixture may declare one that is not
+# in this workspace) drop out here: the join keeps only rows `member_records`
+# knows, so the output is always a subset of `--member-roots`.
+awk -F '\t' '
+    NR == FNR { selected[$1] = 1; next }
+    selected[$1] { print $2 }
+' "$source_closure_members" "$member_records" > "$source_closure_roots"
+
 case "$mode" in
     layout-inputs) LC_ALL=C sort -u "$paths"; exit 0 ;;
     freshness-inputs) LC_ALL=C sort -u "$freshness_paths"; exit 0 ;;
@@ -376,6 +454,8 @@ case "$mode" in
     compiler-sources) LC_ALL=C sort -u "$compiler_source_inputs"; exit 0 ;;
     maintainer-sources) LC_ALL=C sort -u "$maintainer_source_inputs"; exit 0 ;;
     member-roots) LC_ALL=C sort -u "$member_roots"; exit 0 ;;
+    source-closure-roots) LC_ALL=C sort -u "$source_closure_roots"; exit 0 ;;
+    member-glob-parents) LC_ALL=C sort -u "$member_glob_parents"; exit 0 ;;
     member-records) LC_ALL=C sort -u "$member_records"; exit 0 ;;
     compiler-manifests)
         compiler_count=$(LC_ALL=C sort -u "$compiler_manifests" | awk 'END { print NR }')
