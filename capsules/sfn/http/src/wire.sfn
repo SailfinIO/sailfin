@@ -233,7 +233,13 @@ fn parse_request(raw: string) -> Request {
 fn parse_response(raw: string) -> Response {
     let total = raw.length;
     if total == 0 {
-        return Response { status: 0, headers: [], body: "" };
+        return Response {
+            status: 0,
+            headers: [],
+            body: "",
+            body_addr: 0,
+            body_len: 0
+        };
     }
 
     // Status line: up to the first '\n'.
@@ -274,7 +280,13 @@ fn parse_response(raw: string) -> Response {
         cursor = next;
     }
 
-    return Response { status: status, headers: headers, body: body };
+    return Response {
+        status: status,
+        headers: headers,
+        body: body,
+        body_addr: 0,
+        body_len: 0
+    };
 }
 
 // ── response serialization ────────────────────────────────────────
@@ -454,23 +466,43 @@ fn keep_alive_requested(req: Request) -> boolean {
 // Convenience constructors for the common responses. Moved here from
 // `mod.sfn` so the typed `Response` surface lives beside its serializer.
 fn response(body: string) -> Response {
-    return Response { status: 200, headers: [], body: body };
+    return Response {
+        status: 200,
+        headers: [],
+        body: body,
+        body_addr: 0,
+        body_len: 0
+    };
 }
 
 fn response_with_status(status: int, body: string) -> Response {
-    return Response { status: status, headers: [], body: body };
+    return Response {
+        status: status,
+        headers: [],
+        body: body,
+        body_addr: 0,
+        body_len: 0
+    };
 }
 
 fn json_response(body: string) -> Response {
     return Response {
         status: 200,
         headers: ["Content-Type: application/json"],
-        body: body
+        body: body,
+        body_addr: 0,
+        body_len: 0
     };
 }
 
 fn not_found(body: string = "Not Found") -> Response {
-    return Response { status: 404, headers: [], body: body };
+    return Response {
+        status: 404,
+        headers: [],
+        body: body,
+        body_addr: 0,
+        body_len: 0
+    };
 }
 
 // `text_response(body)` — an explicit `text/plain` response.
@@ -482,7 +514,9 @@ fn text_response(body: string) -> Response {
     return Response {
         status: 200,
         headers: ["Content-Type: text/plain; charset=utf-8"],
-        body: body
+        body: body,
+        body_addr: 0,
+        body_len: 0
     };
 }
 
@@ -496,7 +530,9 @@ fn html_response(body: string) -> Response {
     return Response {
         status: 200,
         headers: ["Content-Type: text/html; charset=utf-8"],
-        body: body
+        body: body,
+        body_addr: 0,
+        body_len: 0
     };
 }
 
@@ -506,7 +542,9 @@ fn html_response_with_status(status: int, body: string) -> Response {
     return Response {
         status: status,
         headers: ["Content-Type: text/html; charset=utf-8"],
-        body: body
+        body: body,
+        body_addr: 0,
+        body_len: 0
     };
 }
 
@@ -537,12 +575,20 @@ fn bytes_response(status: int, content_type: string, addr: int, length: int) -> 
 // returns a `500` the handler's author will notice.
 fn redirect(location: string, status: int = 302) -> Response {
     if _has_crlf(location) {
-        return Response { status: 500, headers: [], body: "" };
+        return Response {
+            status: 500,
+            headers: [],
+            body: "",
+            body_addr: 0,
+            body_len: 0
+        };
     }
     return Response {
         status: status,
         headers: ["Location: " + location],
-        body: ""
+        body: "",
+        body_addr: 0,
+        body_len: 0
     };
 }
 

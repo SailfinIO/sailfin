@@ -33,9 +33,13 @@ struct Response {
     // and the server trampoline copies exactly that many bytes after the
     // header block rather than concatenating onto a string.
     //
-    // Both default to 0, so every existing `Response { status, headers,
-    // body }` literal keeps its text behaviour untouched — omitted struct
-    // fields are zero-filled.
+    // **Every `Response` literal must state all five fields.** A partial
+    // literal typechecks and then fails at LLVM lowering with `E1002`
+    // ("refusing to fabricate a default"), so these two fields are a
+    // breaking change to every hand-written literal — set both to 0 for a
+    // text response. The builders (`response`, `html_response`,
+    // `json_response`, `not_found`, …) already do, which is what keeps the
+    // break off most call sites.
     //
     // **Ownership transfers to the server.** `serve`'s trampoline copies
     // these bytes into the outgoing buffer and then frees `body_addr`, so a

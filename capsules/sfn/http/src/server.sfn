@@ -165,7 +165,7 @@ let mut _sfn_http_handler_addr: i64 = 0;
 fn _sfn_http_trampoline(req: OwnedBuf) -> OwnedBuf {
     if _sfn_http_handler_addr == 0 {
         return _http_owned_from_str(serialize_response(Response {
-            status: 500, headers: [], body: ""
+            status: 500, headers: [], body: "", body_addr: 0, body_len: 0
         }));
     }
     let entry: *fn (Request) -> Response = _sfn_http_handler_addr as *fn (Request) -> Response;

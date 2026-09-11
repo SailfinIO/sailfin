@@ -110,7 +110,13 @@ fn fetch(method: string, url: string, headers: string[], body: string) -> Respon
     if raw_ptr as i64 == 0 {
         // Socket/connect failure — surface a status-0 Response rather
         // than dereferencing a null buffer as a string.
-        return Response { status: 0, headers: [], body: "" };
+        return Response {
+            status: 0,
+            headers: [],
+            body: "",
+            body_addr: 0,
+            body_len: 0
+        };
     }
     return parse_response(raw_ptr as string);
 }

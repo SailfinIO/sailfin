@@ -121,7 +121,7 @@ test "static_file: a missing file is a 404" ![io] {
 test "static_file: a dot-segment traversal is refused" ![io] {
     let base = mkdtemp("sfnhttp");
     let root = base + "/public";
-    fs.mkdir(root);
+    mkdir(root);
     write(base + "/secret.txt", "classified");
     write(root + "/ok.txt", "public");
 
@@ -143,7 +143,7 @@ test "static_file: a percent-encoded traversal is refused" ![io] {
     // the case that fails when the segment check runs before the decode.
     let base = mkdtemp("sfnhttp");
     let root = base + "/public";
-    fs.mkdir(root);
+    mkdir(root);
     write(base + "/secret.txt", "classified");
 
     let a = static_file(root, "/%2e%2e/secret.txt");
@@ -182,7 +182,7 @@ test "static_file: a symlink pointing outside the root is refused" ![io] {
     // is innocent, and only canonicalizing the result catches it.
     let base = mkdtemp("sfnhttp");
     let root = base + "/public";
-    fs.mkdir(root);
+    mkdir(root);
     write(base + "/secret.txt", "classified");
     symlink(base, root + "/out");
 
@@ -198,8 +198,8 @@ test "static_file: a sibling root sharing a name prefix is not served" ![io] {
     // tree: containment is a path test, not a string-prefix test.
     let base = mkdtemp("sfnhttp");
     let root = base + "/public";
-    fs.mkdir(root);
-    fs.mkdir(base + "/public-old");
+    mkdir(root);
+    mkdir(base + "/public-old");
     write(base + "/public-old/secret.txt", "classified");
     symlink(base + "/public-old", root + "/sib");
 

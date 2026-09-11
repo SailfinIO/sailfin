@@ -1015,7 +1015,9 @@ struct Response {
 
 An outgoing HTTP response. `headers` are raw `"Name: value"` lines; framing headers (`Content-Length`, `Connection`, `Transfer-Encoding`) and any header containing CR/LF are added or dropped automatically by `serialize_response`.
 
-`body_addr` / `body_len` carry a **binary** body — bytes a `string` cannot hold, because a Sailfin `string` recovers its length by a NUL scan and so ends at its first zero byte. When `body_addr` is non-zero it is authoritative and `body` is ignored. Both default to `0`, and omitted struct fields are zero-filled, so an existing `Response { status, headers, body }` literal is unaffected.
+`body_addr` / `body_len` carry a **binary** body — bytes a `string` cannot hold, because a Sailfin `string` recovers its length by a NUL scan and so ends at its first zero byte. When `body_addr` is non-zero it is authoritative and `body` is ignored.
+
+> **Breaking change.** A `Response` literal must state **all five** fields. A partial literal typechecks and then fails at LLVM lowering with `E1002` ("refusing to fabricate a default"), so an existing `Response { status, headers, body }` needs `body_addr: 0, body_len: 0` added. Code that builds responses through `response`, `html_response`, `json_response`, `not_found`, `redirect` and friends needs no change — the builders set both.
 
 **Ownership of `body_addr` transfers to the server**: `serve` copies the bytes onto the wire and then frees the buffer, so a handler that read a file hands it over and frees nothing. The pointer must therefore be a `malloc`'d buffer the handler is finished with — never a literal, a stack address, or a buffer reused across requests. Use `bytes_response` to build one, or `static_file`, which does it for you.
 

@@ -85,7 +85,9 @@ test "serialize_response: status line, custom header, framing (exact bytes)" {
     let rsp = Response {
         status: 404,
         headers: ["X-Custom: yes"],
-        body: "nope"
+        body: "nope",
+        body_addr: 0,
+        body_len: 0
     };
     let out = serialize_response(rsp);
     let expected = "HTTP/1.1 404 Not Found\r\nX-Custom: yes\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnope";
@@ -96,7 +98,9 @@ test "serialize_response: drops headers carrying CR or LF (injection guard)" {
     let rsp = Response {
         status: 200,
         headers: ["Evil: a\r\nInjected: b"],
-        body: "hi"
+        body: "hi",
+        body_addr: 0,
+        body_len: 0
     };
     let out = serialize_response(rsp);
     let expected = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi";
@@ -110,7 +114,9 @@ test "serialize_response: drops user-supplied framing headers (smuggling guard)"
     let rsp = Response {
         status: 200,
         headers: ["content-length: 999", "Connection: keep-alive", "Transfer-Encoding: chunked", "X-Keep: yes"],
-        body: "abc"
+        body: "abc",
+        body_addr: 0,
+        body_len: 0
     };
     let out = serialize_response(rsp);
     let expected = "HTTP/1.1 200 OK\r\nX-Keep: yes\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc";
@@ -123,7 +129,9 @@ test "serialize_response: keep_alive=true emits Connection: keep-alive (#1711)" 
     let rsp = Response {
         status: 200,
         headers: ["X-Custom: yes"],
-        body: "ok"
+        body: "ok",
+        body_addr: 0,
+        body_len: 0
     };
     let out = serialize_response(rsp, true);
     let expected = "HTTP/1.1 200 OK\r\nX-Custom: yes\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
@@ -133,7 +141,13 @@ test "serialize_response: keep_alive=true emits Connection: keep-alive (#1711)" 
 test "serialize_response: keep_alive=false matches the default close framing (#1711)" {
     // Passing false explicitly is byte-identical to the zero-arg default — the
     // close-path regression stays intact.
-    let rsp = Response { status: 200, headers: [], body: "x" };
+    let rsp = Response {
+        status: 200,
+        headers: [],
+        body: "x",
+        body_addr: 0,
+        body_len: 0
+    };
     assert strings_equal(serialize_response(rsp, false), serialize_response(rsp));
     assert strings_equal(serialize_response(rsp, false), "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx");
 }
@@ -196,7 +210,9 @@ test "serialize_response: a caller's own Content-Type is not doubled" {
     let rsp = Response {
         status: 200,
         headers: ["Content-Type: application/json"],
-        body: "{}"
+        body: "{}",
+        body_addr: 0,
+        body_len: 0
     };
     let out = serialize_response(rsp);
     let expected = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
@@ -209,7 +225,9 @@ test "serialize_response: a caller's lowercase Content-Type also suppresses the 
     let rsp = Response {
         status: 200,
         headers: ["content-type: text/csv"],
-        body: "a,b"
+        body: "a,b",
+        body_addr: 0,
+        body_len: 0
     };
     let out = serialize_response(rsp);
     assert strings_equal(out, "HTTP/1.1 200 OK\r\ncontent-type: text/csv\r\nContent-Length: 3\r\nConnection: close\r\n\r\na,b");
@@ -217,7 +235,13 @@ test "serialize_response: a caller's lowercase Content-Type also suppresses the 
 
 test "serialize_response: a bodiless response carries no Content-Type" {
     // A type on an empty body is a claim about bytes that were never sent.
-    let rsp = Response { status: 204, headers: [], body: "" };
+    let rsp = Response {
+        status: 204,
+        headers: [],
+        body: "",
+        body_addr: 0,
+        body_len: 0
+    };
     let out = serialize_response(rsp);
     assert strings_equal(out, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
