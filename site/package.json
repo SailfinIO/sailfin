@@ -16,7 +16,7 @@
   "dependencies": {
     "@astrojs/mdx": "^8.0.0",
     "@astrojs/sitemap": "^3.7.4",
-    "@astrojs/starlight": "^0.41.10",
+    "@astrojs/starlight": "^0.42.0",
     "astro": "^7.2.10",
     "sharp": "^0.35.3"
   }
