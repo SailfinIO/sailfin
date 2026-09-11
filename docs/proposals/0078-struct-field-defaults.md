@@ -1,12 +1,12 @@
 ---
 sfep: 78
 title: Struct Field Default Values
-status: Draft
+status: Accepted
 type: language
 created: 2026-09-11
 updated: 2026-09-11
 author: "agent:compiler-architect (drafted); project owner (direction + decisions)"
-tracking:
+tracking: SFN-392 (Phase 1), SFN-1281 (Phase 2)
 supersedes:
 superseded-by:
 graduates-to: reference/spec/03-declarations.md
@@ -813,33 +813,72 @@ sfn dev verify                                           # Phase 2 ship gate onl
   initializers; Swift default property values; Kotlin/Python/TypeScript default
   parameters and property initializers — all spelled `= expr`.
 
-## 10. Open questions for the design gate
+## 10. Design gate — decisions
 
-1. **The enum-variant parse message (§3.7).** Phase 1 leaves
-   `parse_enum_variant_field` unchanged, so a default written on a variant
-   payload field fails through the generic variant-field parse failure with a
-   message that does not say why. Is a third E-code
-   ("field defaults are not supported on enum-variant payload fields —
-   SFN-913") worth allocating for a diagnostic that Phase 5 will delete, or is
-   the poor message acceptable for the interval? The alternative — parse it and
-   reject it in typecheck — costs the same code and reads better, but puts a
-   temporary rejection in the frontend.
-2. **`null` as a default (§3.3).** Included on the argument that an added `T?`
-   field is the most common additive change. It is also the one accepted form
-   whose materialized value is identical to what `default_return_literal` would
-   have fabricated — so for that one case, the author's intent and the
-   compiler's guess coincide. This is harmless (provenance still differs, and
-   `E1002` still fires when no default is declared), but a reviewer who wants
-   the provenance distinction to be *observable* in every case may prefer to
-   exclude `null` in Phase 1.
-3. **Generic structs (§3.4).** `E0311` should not need the existing
-   `is_generic_struct` guard, since field presence is independent of type
-   substitution — but the implementer must confirm the declared field list for a
-   generic struct is complete rather than erased in `ctx.declarations` and
-   `ctx.imported_structs` before relying on it. If it is erased for imported
-   generics, `E0311` suppresses there and `E1002` remains the backstop.
-4. **Is Phase 1 worth landing independently of Phase 2?** The recommendation
-   here is yes — it fixes the `check`/build divergence, which is a defect on its
-   own terms — but it does briefly make the additive-field problem *louder*
-   (a friendlier error, still an error) before Phase 2 makes it go away. A
-   reviewer may prefer to land both in one cycle.
+The gate was passed 2026-09-11. The four questions this section carried as open
+were each settled in favour of the recommendation the proposal already made;
+they are recorded here as decisions so an implementer reads a resolved document,
+not an open one.
+
+1. **Enum-variant payload field defaults are out of scope**, and the parse
+   message stays as it is for the interval. Phase 1 leaves
+   `parse_enum_variant_field`
+   (`compiler/capsules/syntax/src/parser/declarations/enums.sfn:235`) unchanged,
+   so a default written on a variant payload field dies in the generic
+   variant-field parse failure with a message that does not say why. That is
+   accepted rather than spending a third E-code on a diagnostic Phase 5 would
+   delete. Enum-variant defaults are gated on SFN-913: omission on that path
+   currently emits *no store* and reads stack residue, and layering an opt-in
+   "omission is legal" feature onto it would make the unsound case
+   indistinguishable from the intended one. Fix the unsoundness first, then
+   extend.
+
+2. **`null` is an accepted default form in Phase 1.** An added `T?` field is the
+   most common additive change after a scalar, and excluding it would leave the
+   most-wanted case unserved to preserve a distinction that is already
+   structural. It is the one accepted form whose materialized value coincides
+   with what `default_return_literal` would have fabricated — harmless, because
+   provenance still differs (the author wrote it, in the declaration, where a
+   reader can see it) and `E1002` still fires when no default is declared.
+
+3. **Generic structs: `E0311` does not take the `is_generic_struct` guard**,
+   since field presence is independent of type substitution. This is an
+   implementer verification rather than a design fork: confirm the declared
+   field list is complete rather than erased for imported generics in
+   `ctx.declarations` and `ctx.imported_structs` before relying on it, and
+   record the finding on the Phase 1 issue. If it is erased there, `E0311`
+   suppresses for imported generics and `E1002` remains the backstop — a
+   narrower check, not a wrong one.
+
+4. **Phase 1 lands independently of Phase 2.** It fixes the `check`-green /
+   build-red divergence on its own terms, depends on nothing below it, and moves
+   a build-only failure to rung 1 of the validation ladder. The cost is
+   acknowledged: between the two phases the additive-field problem is *louder* —
+   a friendlier error, still an error — which is a better position than a
+   backend E-code and a strictly temporary one.
+
+Two constraints that are **not** open questions and must survive implementation
+unchanged, restated here because they are the two places where a reasonable
+shortcut would reintroduce the hole this proposal is careful not to reopen:
+
+- The `E1002` gate at
+  `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_literals_lowering.sfn:838-856`
+  keeps its wording and its severity. It gains one branch *before* it. It is not
+  softened, not downgraded to a warning, and not deleted once `E0311` exists —
+  it is the backstop for a literal the frontend could not adjudicate.
+- Defaults lower with empty `bindings` and `locals`. The constant restriction of
+  §3.3 is enforced by construction rather than by a check that could be relaxed
+  later without anyone noticing what it was protecting.
+
+## 11. Implementation tracking
+
+| Phase | Issue | Scope |
+|---|---|---|
+| 1 | SFN-392 | `E0311` in typecheck. No syntax change. Reopened from `Duplicate`; the lowering-side fix it was closed against covered only half its scope. |
+| 2 | SFN-1281 | The capability — parse, AST, `E0312`, `.sfn-asm` emit and re-parse, cross-module carry, the lowering branch — bundled with the `sfn/http` `Response` consumer and the two doc retractions. |
+
+Phases 3–5 (compiler self-adoption after a seed advance, non-scalar constant
+defaults, enum-variant payload defaults) are follow-ons per §5.3 and §5.4 and
+are deliberately unfiled: none clears the bar in
+`.claude/rules/follow-up-filing.md` today, and each wants the evidence the phase
+before it produces.

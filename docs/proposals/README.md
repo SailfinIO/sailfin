@@ -100,7 +100,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0075](./0075-struct-value-semantics.md) | Struct Value Semantics and the Mutability Floor | Draft | language |
 | [0076](./0076-user-build-defaults.md) | User-Level Build Defaults | Accepted | tooling |
 | [0077](./0077-ci-dependency-closure-scope.md) | CI Source Scope by Dependency Closure, and the Member Lane | Accepted | tooling |
-| [0078](./0078-struct-field-defaults.md) | Struct Field Default Values | Draft | language |
+| [0078](./0078-struct-field-defaults.md) | Struct Field Default Values | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
