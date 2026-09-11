@@ -33,12 +33,18 @@
 // The "uses cwd" case (test 5) is therefore covered by passing the workdir
 // as the path arg; the cwd-discovery nuance is exercised equivalently.
 import { Env, env_from_current, env_set } from "sfn/os";
-import { contains, find, split } from "sfn/strings";
+import {
+    contains,
+    find,
+    replace,
+    split
+} from "sfn/strings";
 import {
     Background,
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    host_is_windows,
     sfn_bin_abs_path,
     sfn_bin_path,
     wait_until,
@@ -104,27 +110,43 @@ fn _write_credentials(home: string) -> void ![io] {
 }
 
 // Build a child env with HOME and the canonical user-config override forced
-// to `home`, plus any extra `KEY=value` entries (only SFN_REGISTRY here).
+// to `home`, plus any extra `KEY=value` entries.
 // Native Windows home discovery can fall through HOME to USERPROFILE or
 // HOMEDRIVE+HOMEPATH, while publish's credentials and registry config have a
 // stronger, platform-independent SAILFIN_CONFIG_DIR seam. Bind that seam to
 // the fixture-owned `.sfn` directory so a clean runner and a developer
 // machine resolve the same files (SFN-1237). Every pushed key is first named
 // to `clean_runner_env_without`, preventing inherited duplicates from
-// shadowing the fixture value (SFN-1114). `SFN_TOKEN` is stripped and never
-// re-pushed: an inherited developer credential would defeat the no-token
-// tests' premise and would otherwise be transmitted to whatever registry the
-// child resolves (SFN-1245).
+// shadowing the fixture value (SFN-1114). An inherited `SFN_TOKEN` is always
+// stripped: a developer credential would defeat the no-token tests' premise
+// and could otherwise be transmitted to whatever registry the child resolves
+// (SFN-1245). Authenticated fixture cases may explicitly add their own fake
+// token after this cleanup.
 fn _env_for(home: string, extra: string[]) -> string[] ![io] {
-    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["HOME", "SAILFIN_CONFIG_DIR", "SFN_REGISTRY", "SFN_TOKEN"]);
-    e.push("HOME=" + home);
-    e.push("SAILFIN_CONFIG_DIR=" + home + "/.sfn");
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["HOME", "HOMEDRIVE", "HOMEPATH", "SAILFIN_CONFIG_DIR", "SFN_REGISTRY", "SFN_TOKEN", "USERPROFILE"]);
+    let mut child_home = home;
+    if host_is_windows() { child_home = replace(child_home, "/", "\\"); }
+    e.push("HOME=" + child_home);
+    e.push("USERPROFILE=" + child_home);
+    e.push("SAILFIN_CONFIG_DIR=" + child_home + "/.sfn");
     let mut i = 0;
     loop {
         if i >= extra.length { break; }
         e.push(extra[i]);
         i += 1;
     }
+    return e;
+}
+
+// Fixture-backed publish cases authenticate through the explicit token seam.
+// Credential-file discovery has its own command coverage; making these HTTP
+// protocol tests depend on Windows home/config discovery caused the complete
+// native inventory to exit before POST even though the loopback fixture was
+// ready. `_env_for` strips any inherited token first, so this is the only
+// credential the child can observe (SFN-1237).
+fn _authenticated_env_for(home: string, extra: string[]) -> string[] ![io] {
+    let mut e = _env_for(home, extra);
+    e.push("SFN_TOKEN=fake-token");
     return e;
 }
 
@@ -326,14 +348,14 @@ test "publish: path arg finds capsule" ![clock, io, net] {
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
     _make_capsule(workdir + "/my/capsule", "test/pkg", "1.0.0");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
             + "/my/capsule"], e);
         let out = process.capture_take_stdout();
@@ -354,14 +376,14 @@ test "publish: trailing-slash path works" ![clock, io, net] {
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
     _make_capsule(workdir + "/cap", "test/pkg", "1.0.0");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
             + "/cap/"], e);
         let out = process.capture_take_stdout();
@@ -384,14 +406,14 @@ test "publish: discovers capsule (cwd semantics)" ![clock, io, net] {
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
     _make_capsule(workdir, "my/cap", "2.0.0");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
@@ -429,14 +451,14 @@ test "publish: digest has sha256: prefix" ![clock, io, net] {
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
     _make_capsule(workdir, "test/pkg", "1.0.0");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let _o = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
@@ -480,14 +502,14 @@ test "publish: payload carries content_b64 with relative packaging" ![clock, io,
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
     _make_capsule(workdir + "/nested/cap", "test/pkg", "1.0.0");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir
             + "/nested/cap"], e);
         let out = process.capture_take_stdout();
@@ -513,14 +535,14 @@ test "publish: surfaces HTTP error details" ![clock, io, net] {
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
     fs.writeFile(fixture_dir + "/status400", "1");
-    _write_credentials(home);
     _make_capsule(workdir, "test/pkg", "1.0.0");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
@@ -564,6 +586,9 @@ test "publish: config-file registry URL" ![clock, io, net] {
         fs.writeFile(home + "/.sfn/config.toml", "[registry]\nurl = \"http://127.0.0.1:"
             + _fixture_port(fixture_dir)
             + "\"\n");
+        // This one positive case deliberately exercises both records from
+        // the test-owned config directory: `credentials` authenticates and
+        // `config.toml` selects the loopback registry on native Windows.
         let e = _env_for(home, []);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let _o = process.capture_take_stdout();
@@ -582,7 +607,7 @@ test "publish: SFN_REGISTRY env overrides config" ![clock, io, net] {
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
+    fs.createDirectory(home + "/.sfn", true);
     fs.writeFile(home + "/.sfn/config.toml", "[registry]\nurl = \"http://127.0.0.1:9\"\n");
     _make_capsule(workdir, "test/pkg", "1.0.0");
     let bin = _ensure_fixture_bin();
@@ -590,7 +615,8 @@ test "publish: SFN_REGISTRY env overrides config" ![clock, io, net] {
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let _o = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
@@ -610,14 +636,14 @@ test "publish: SFN_REGISTRY strips trailing slash" ![clock, io, net] {
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
     _make_capsule(workdir, "test/pkg", "1.0.0");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)
             + "/"]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let _o = process.capture_take_stdout();
@@ -749,14 +775,14 @@ test "publish: explicit publish = true preserves publishing" ![clock, io, net] {
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
     _make_capsule_with_publish(workdir, "test/pkg", "1.0.0", "publish = true");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
@@ -776,14 +802,14 @@ test "publish: omitted publish preserves publishing" ![clock, io, net] {
     let workdir = root + "/work";
     let fixture_dir = root + "/fixture";
     fs.createDirectory(fixture_dir, true);
-    _write_credentials(home);
     _make_capsule(workdir, "test/pkg", "1.0.0");
     let bin = _ensure_fixture_bin();
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
         assert _await_fixture_ready(fixture_dir);
-        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
+        let e = _authenticated_env_for(home, ["SFN_REGISTRY=http://127.0.0.1:"
+            + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
