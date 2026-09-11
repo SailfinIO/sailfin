@@ -485,6 +485,17 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
         // not been audited against it; narrowing here is a perf question to
         // answer on its own evidence, not a corollary of that move.
         //
+        // The opt-out is also load-bearing for CACHE correctness, not only
+        // for the link error above (SFN-1087). Pooled children share the
+        // parent's `sub_root`, hence one `rt-import-context` tree; a
+        // narrower child would stage a narrower set into it and
+        // `_prune_runtime_sfn_ctx_root` (`build/runtime_objs.sfn`) would
+        // then delete the siblings the wider parent is still emitting
+        // against. Forcing the full set keeps every participant on one
+        // staged set, which is the precondition that prune assumes. A
+        // future narrowing attempt has to answer this reason as well as the
+        // link one.
+        //
         // Forcing `"*"` here rather than only at the link site keeps C1 and the
         // link consuming ONE demand set. Narrowing the closure here while the
         // link stayed wide is the divergence that makes the contract preflight

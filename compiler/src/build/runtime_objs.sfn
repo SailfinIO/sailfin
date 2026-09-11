@@ -49,9 +49,11 @@ import {
     _mktemp_sibling_cmd,
     _sha256_of_file
 } from "./fs";
+import { remove_empty_dirs_under, walk_dirs } from "./fs_tree";
 import { sha256_hex_of_string } from "./hash";
 import {
     _dirname,
+    _ends_with,
     _ensure_dir,
     _find_substring_from,
     _path_basename,
@@ -1414,6 +1416,92 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
     }
 }
 
+// SFN-1087: constrain `ctx_root` to exactly `staged_slugs`, so the runtime
+// `.o` cache key and the emit's actual import inputs cannot diverge.
+//
+// The key folds the `.import-deps` sidecar
+// (`_runtime_obj_key_with_sibling_deps`, above). The emit does not: the
+// child's LLVM import resolution goes through
+// `load_imported_module_context_with_implicit` (`import_context.sfn`,
+// reached from `main.sfn`), which ignores that sidecar and re-resolves the
+// module's own `.import` entries against the ON-DISK CONTENTS of
+// `ctx_root` — a depth-bounded transitive walk over whatever `.sfn-asm`,
+// `.layout-manifest`, and `.slugalias` files are present, populating
+// `module_aliases` that reach symbol mangling
+// (`lowering_helpers_mangling.sfn`). The object is therefore a function of
+// a directory's contents while the key is a function of a sidecar list;
+// the two coincide only when the directory holds exactly the staged set.
+//
+// Staging only ever adds, so before this a reused `out_dir` whose staged
+// set SHRANK between invocations — a runtime source deleted, a gate
+// flipped, an `sfn-sources` entry dropped — emitted against the old, wider
+// context and published under the new, shorter key. A later fresh-tree
+// invocation computed that same shorter key and fetched the contaminated
+// object.
+//
+// Surgical rather than `remove_tree(ctx_root)`: the per-slug `.key` sidecar
+// warm path in `_stage_one_runtime_sfn_import_context` has to keep hitting
+// for the slugs that survive, or every invocation re-pays the staging emits
+// the shared cache exists to avoid.
+//
+// Deleting is safe against a concurrent reader because sharing one
+// `out_dir` already implies sharing one demand set. Pooled test children
+// force `runtime_demand_all()` (`cli/commands/test/discovery.sfn`,
+// SFN-882), so their staged sets are identical and this prune is a no-op
+// among them; a nested build gets its own scratch through
+// `nested_runner_scratch` / `clean_runner_env` (SFN-401). Two different
+// demand sets sharing one `out_dir` concurrently is the configuration this
+// prune exists to make impossible, not one it has to tolerate.
+//
+// A file whose name carries none of the artifact suffixes this staging path
+// writes is left alone. `ctx_root` is ours, but guessing at an unrecognised
+// name is how a prune becomes data loss.
+fn _prune_runtime_sfn_ctx_root(ctx_root: string, staged_slugs: string[]) -> boolean ![io] {
+    if ctx_root.length == 0 { return true; }
+    if !fs.exists(ctx_root) { return true; }
+    // Longest-first: `.sfn-asm.key` has to win over `.sfn-asm`, or the
+    // derived slug keeps a trailing `.key`, matches nothing in
+    // `staged_slugs`, and the prune deletes a live sidecar.
+    let suffixes: string[] = [".sfn-asm.key", ".sfn-asm", ".import-deps", ".implicit-deps", ".layout-manifest", ".slugalias"];
+    let prefix = ctx_root + "/";
+    let dirs = walk_dirs(ctx_root, 0, 16);
+    let mut di: int = 0;
+    loop {
+        if di >= dirs.length { break; }
+        let dir = dirs[di];
+        di += 1;
+        let entries = fs.listDirectory(dir);
+        let mut ei: int = 0;
+        loop {
+            if ei >= entries.length { break; }
+            let full = dir + "/" + entries[ei];
+            ei += 1;
+            if fs.is_directory(full) { continue; }
+            if full.length <= prefix.length { continue; }
+            if substring(full, 0, prefix.length) != prefix { continue; }
+            let rel = substring(full, prefix.length, full.length);
+            let mut si: int = 0;
+            let mut slug: string = "";
+            let mut recognised: boolean = false;
+            loop {
+                if si >= suffixes.length { break; }
+                let suffix = suffixes[si];
+                si += 1;
+                if !_ends_with(rel, suffix) { continue; }
+                slug = substring(rel, 0, rel.length - suffix.length);
+                recognised = true;
+                break;
+            }
+            if !recognised { continue; }
+            if slug.length == 0 { continue; }
+            if _slug_already_staged(staged_slugs, slug) { continue; }
+            if !fs.deleteFile(full) { return false; }
+        }
+    }
+    let _pruned_dirs = remove_empty_dirs_under(ctx_root);
+    return true;
+}
+
 // Stage import-context artifacts + `.import-deps` sidecars for EVERY
 // sfn-source across the runtime capsules before any of them is
 // emitted to LLVM. Runs inside `_compile_runtime_sfn_sources` (and
@@ -1539,6 +1627,11 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
         _write_runtime_sfn_import_deps(staged_asm_paths[di], staged_slugs[di], ctx_root, staged_slugs);
         di += 1;
     }
+    // SFN-1087: last, once `staged_slugs` is final — the platform-extern
+    // pass above grows it in place — drop every artifact for a slug this
+    // invocation did not stage, so the emit cannot resolve anything the
+    // cache key does not fold.
+    if !_prune_runtime_sfn_ctx_root(ctx_root, staged_slugs) { return false; }
     return true;
 }
 
