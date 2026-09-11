@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0077
 title: CI Source Scope by Dependency Closure, and the Member Lane
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-09-11
 updated: 2026-09-11
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to: docs/conventions/ci-test-topology.md
 ---
 
-# SFEP-XXXX — CI Source Scope by Dependency Closure, and the Member Lane
+# SFEP-0077 — CI Source Scope by Dependency Closure, and the Member Lane
 
 ## 1. Summary
 
