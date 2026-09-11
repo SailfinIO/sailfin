@@ -102,7 +102,7 @@ fn _write_server(dir: string, cert: string, key: string) -> string ![io] {
         + "\n"
         + "fn handle(req: Request) -> Response {\n"
         + "    if strings_equal(req.path, \"/\") {\n"
-        + "        return Response { status: 201, headers: [\"X-TLS-Typed: yes\"], body: \"TLS-TYPED-OK-9f3a\" };\n"
+        + "        return Response { status: 201, headers: [\"X-TLS-Typed: yes\"], body: \"TLS-TYPED-OK-9f3a\", body_addr: 0, body_len: 0 };\n"
         + "    }\n"
         + "    return not_found();\n"
         + "}\n"

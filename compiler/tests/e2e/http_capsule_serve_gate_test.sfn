@@ -71,7 +71,7 @@ fn _write_consumer() -> string ![io] {
         + "\n"
         + "fn handle(req: Request) -> Response {\n"
         + "    if strings_equal(req.path, \"/secret\") {\n"
-        + "        return Response { status: 403, headers: [\"X-Reason: nope\"], body: \"denied\" };\n"
+        + "        return Response { status: 403, headers: [\"X-Reason: nope\"], body: \"denied\", body_addr: 0, body_len: 0 };\n"
         + "    }\n"
         + "    return not_found();\n"
         + "}\n"

@@ -7,6 +7,11 @@ description = "HTTP client and server for Sailfin"
 # `sfn/strings::int_to_string` replaces the capsule's private `_int_to_string`
 # base-10 formatter used for status codes and Content-Length (SFN-35).
 "sfn/strings" = "*"
+# `static_files.sfn` reads assets through `sfn/fs`'s `read_bytes`, which
+# returns the `FileBytes` aggregate (address + true length). The prelude's
+# `fs.read_bytes` adapter reports length through an out-parameter and cannot
+# express a body whose bytes include an interior NUL.
+"sfn/fs" = "*"
 
 [capabilities]
 required = ["io", "net"]

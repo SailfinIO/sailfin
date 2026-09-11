@@ -1,0 +1,251 @@
+// Tests for sfn/http static asset serving.
+//
+// Each test mints a hermetic scratch tree with `mkdtemp` and tears it down
+// with `remove_all`, the pattern `stdlib/fs/tests/bytes_test.sfn` uses. The
+// traversal cases are the reason this file exists: they assert a *refusal*,
+// and a refusal is the one behaviour that silently stops working when a
+// guard is refactored, because nothing else on the frame changes.
+import {
+    mkdtemp,
+    remove_all,
+    symlink,
+    write
+} from "sfn/fs";
+
+import { Response, static_file } from "../src/mod";
+
+extern fn fopen(path: *u8, mode: *u8) -> *File;
+
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn fclose(f: *File) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+// Write `bytes` to `path` one byte at a time, so a fixture can carry the
+// interior NUL a Sailfin `string` cannot hold. Mirrors
+// `_write_byte_fixture` in `stdlib/fs/tests/bytes_test.sfn`.
+fn _write_byte_fixture(path: string, bytes: int[]) -> void ![io] {
+    let mode: string = "wb";
+    let f: *File = fopen(path as *u8, mode as *u8);
+    assert(f as i64) != 0;
+    let buf: *u8 = malloc(1 as usize);
+    assert(buf as i64) != 0;
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        memset(buf, bytes[i] as i32, 1 as usize);
+        fwrite(buf, 1 as usize, 1 as usize, f);
+        i = i + 1;
+    }
+    free(buf);
+    fclose(f);
+}
+
+// Release a served binary body. In production `serve`'s trampoline does
+// this after the send (`types.sfn`); a test never reaches the trampoline,
+// so it stands in as the owner.
+fn _release(rsp: Response) -> void {
+    if rsp.body_addr != 0 { free(rsp.body_addr as *u8); }
+}
+
+// One header line, or "" — the serializer's own `Content-Type` handling is
+// covered in `wire_test.sfn`; here we only need to read back what
+// `static_file` attached.
+fn _first_header(rsp: Response) -> string {
+    if rsp.headers.length == 0 { return ""; }
+    return rsp.headers[0];
+}
+
+test "static_file: serves a file with the media type its extension names" ![io] {
+    let dir = mkdtemp("sfnhttp");
+    write(dir + "/page.html", "<h1>hi</h1>");
+
+    let rsp = static_file(dir, "/page.html");
+    assert rsp.status == 200;
+    assert strings_equal(_first_header(rsp), "Content-Type: text/html; charset=utf-8");
+    assert rsp.body_len == 11;
+    _release(rsp);
+
+    remove_all(dir);
+}
+
+test "static_file: a directory request serves its index file" ![io] {
+    let dir = mkdtemp("sfnhttp");
+    write(dir + "/index.html", "<p>root</p>");
+
+    let rsp = static_file(dir, "/");
+    assert rsp.status == 200;
+    assert strings_equal(_first_header(rsp), "Content-Type: text/html; charset=utf-8");
+    _release(rsp);
+
+    remove_all(dir);
+}
+
+test "static_file: a directory with no index is a 404, never a listing" ![io] {
+    // A listing would have to be opted out of on every deploy that did not
+    // want one, so the default discloses nothing.
+    let dir = mkdtemp("sfnhttp");
+    let rsp = static_file(dir, "/");
+    assert rsp.status == 404;
+    _release(rsp);
+    remove_all(dir);
+}
+
+test "static_file: a path of bare separators names the root, not a refusal" ![io] {
+    // `//` decodes to no segments at all, which is the same thing `/` names.
+    // Reporting a refusal for one and serving the other would make the two
+    // spellings of the root disagree.
+    let dir = mkdtemp("sfnhttp");
+    write(dir + "/index.html", "<p>root</p>");
+
+    let rsp = static_file(dir, "//");
+    assert rsp.status == 200;
+    _release(rsp);
+
+    remove_all(dir);
+}
+
+test "static_file: a missing file is a 404" ![io] {
+    let dir = mkdtemp("sfnhttp");
+    let rsp = static_file(dir, "/nope.txt");
+    assert rsp.status == 404;
+    _release(rsp);
+    remove_all(dir);
+}
+
+// A nested fixture directory is minted with `mkdtemp` rather than `mkdir`,
+// and that is not a style preference. `sfn/fs`'s `mkdir` lowers to
+// `declare void @mkdir({i8*, i64})` and links against libc's
+// `mkdir(path, mode)`, so the Sailfin string's LENGTH word arrives in the
+// mode register: a 32-byte path yields mode 0o040, a 25-byte one 0o031.
+// The directory is created unwritable, every write into it fails, and the
+// whole thing is invisible to anyone running the suite as root because root
+// bypasses the permission check — which is why this passed locally and
+// failed on CI. `mkdtemp` goes through `mkdtemp(3)` and takes no mode.
+// Revert to `mkdir` once SFN-1277 lands.
+test "static_file: a dot-segment traversal is refused" ![io] {
+    let base = mkdtemp("sfnhttp");
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
+    write(base + "/secret.txt", "classified");
+    write(root + "/ok.txt", "public");
+
+    // The file is genuinely there and genuinely readable — only its
+    // position outside the root makes this a refusal.
+    let escaped = static_file(root, "/../secret.txt");
+    assert escaped.status == 403;
+    _release(escaped);
+
+    let inside = static_file(root, "/ok.txt");
+    assert inside.status == 200;
+    _release(inside);
+
+    remove_all(base);
+}
+
+test "static_file: a percent-encoded traversal is refused" ![io] {
+    // `%2e%2e%2f` carries no `..` segment until it is decoded, so this is
+    // the case that fails when the segment check runs before the decode.
+    let base = mkdtemp("sfnhttp");
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
+    write(base + "/secret.txt", "classified");
+
+    let a = static_file(root, "/%2e%2e/secret.txt");
+    assert a.status == 403;
+    _release(a);
+
+    let b = static_file(root, "/..%2fsecret.txt");
+    assert b.status == 403;
+    _release(b);
+
+    remove_all(base);
+}
+
+test "static_file: an encoded NUL is refused" ![io] {
+    // `/x%00.txt` would name `/x` while reading as a `.txt` request — the
+    // extension the media-type table would answer for is not the file the
+    // filesystem would open.
+    let dir = mkdtemp("sfnhttp");
+    write(dir + "/x", "shadowed");
+    let rsp = static_file(dir, "/x%00.txt");
+    assert rsp.status == 403;
+    _release(rsp);
+    remove_all(dir);
+}
+
+test "static_file: a malformed percent escape is refused" ![io] {
+    let dir = mkdtemp("sfnhttp");
+    let rsp = static_file(dir, "/a%zz.txt");
+    assert rsp.status == 403;
+    _release(rsp);
+    remove_all(dir);
+}
+
+test "static_file: a symlink pointing outside the root is refused" ![io] {
+    // The guard no segment check can make: every segment of `/out/secret.txt`
+    // is innocent, and only canonicalizing the result catches it.
+    let base = mkdtemp("sfnhttp");
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
+    write(base + "/secret.txt", "classified");
+    symlink(base, root + "/out");
+
+    let rsp = static_file(root, "/out/secret.txt");
+    assert rsp.status == 403;
+    _release(rsp);
+
+    remove_all(base);
+}
+
+test "static_file: a sibling root sharing a name prefix is not served" ![io] {
+    // `<root>-old<suffix>` starts with `<root>` and is a different tree:
+    // containment is a path test, not a string-prefix test.
+    let base = mkdtemp("sfnhttp");
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
+    // `mkdtemp` appends its own suffix, so this sibling's path begins with
+    // the whole of `root` and then diverges — exactly the string-prefix
+    // relationship the containment test must not be fooled by.
+    let sibling = mkdtemp(root + "-old");
+    assert sibling.length > 0;
+    write(sibling + "/secret.txt", "classified");
+    symlink(sibling, root + "/sib");
+
+    let rsp = static_file(root, "/sib/secret.txt");
+    assert rsp.status == 403;
+    _release(rsp);
+
+    remove_all(base);
+}
+
+test "static_file: a binary body keeps its bytes past the first NUL" ![io] {
+    // The whole point of the byte path. A `string` body would report a
+    // length of 3 here; the served asset is 6 bytes and the middle one is
+    // the NUL that used to end it.
+    let dir = mkdtemp("sfnhttp");
+    let bytes: int[] = [137, 80, 78, 0, 71, 13];
+    _write_byte_fixture(dir + "/logo.png", bytes);
+
+    let rsp = static_file(dir, "/logo.png");
+    assert rsp.status == 200;
+    assert strings_equal(_first_header(rsp), "Content-Type: image/png");
+    assert rsp.body_len == 6;
+    assert rsp.body_addr != 0;
+    _release(rsp);
+
+    remove_all(dir);
+}
+
+test "static_file: a nonexistent root is a 500, not a 404" ![io] {
+    // A misconfigured server and a missing page are different facts, and a
+    // 404 for the first would send the operator hunting for the page.
+    let rsp = static_file("/no/such/root/at/all", "/index.html");
+    assert rsp.status == 500;
+    _release(rsp);
+}

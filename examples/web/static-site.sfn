@@ -1,0 +1,88 @@
+// examples/web/static-site.sfn
+//
+// Serving a web page and its assets from native Sailfin: a rendered HTML
+// page at `/`, and everything under `/static/` read off disk with the media
+// type its extension names.
+//
+// This file is illustrative. To build and run it, place it as the entry of
+// a consumer capsule (copy it to `mysite/src/main.sfn`) whose
+// `mysite/capsule.toml` declares the dependency:
+//
+//     [build]
+//     entry = "src/main.sfn"
+//     [dependencies]
+//     "sfn/http" = "*"
+//
+// then, from the capsule root:  build/bin/sfn run src/main.sfn
+//
+// As in `http-server.sfn`, the handler is a TOP-LEVEL function passed
+// address-taken — closures are not supported as handlers in v0 — and the
+// server blocks, one per process, requiring `![io, net]`.
+import {
+    Request,
+    Response,
+    html_escape,
+    html_response,
+    not_found,
+    query_param,
+    redirect,
+    serve,
+    static_file
+} from "sfn/http";
+
+// Where the assets live. A handler cannot capture a variable (no closures),
+// so configuration is a top-level function rather than a parameter.
+fn _asset_root() -> string { return "./public"; }
+
+// Build the page.
+//
+// There is no template engine here, so a page is string concatenation — and
+// anything that came from the request goes through `html_escape` on the way
+// in. `?name=<script>alert(1)</script>` is the reason: interpolated raw, it
+// is script running on this origin; escaped, it is text that reads as the
+// tags the visitor typed.
+fn _home_page(name: string) -> string {
+    return "<!doctype html>\n" + "<html lang=\"en\">\n" + "<head>\n"
+        + "  <meta charset=\"utf-8\">\n"
+        + "  <title>Sailfin</title>\n"
+        + "  <link rel=\"stylesheet\" href=\"/static/site.css\">\n"
+        + "</head>\n"
+        + "<body>\n"
+        + "  <h1>Hello, "
+        + html_escape(name)
+        + "</h1>\n"
+        + "  <img src=\"/static/logo.png\" alt=\"\">\n"
+        + "</body>\n"
+        + "</html>\n";
+}
+
+// The handler declares `![io]` because `static_file` reads the disk, even
+// though `serve` takes a bare `*fn (Request) -> Response` with no effect in
+// the type. The address-taken cast erases the annotation; reach is not lost
+// with it, because `serve` itself is `![io, net]` and every caller up to
+// `main` must declare the same, so the capsule's capability manifest still
+// names both.
+fn handle(req: Request) -> Response ![io] {
+    if strings_equal(req.path, "/") {
+        let mut name = "world";
+        let supplied = query_param(req, "name");
+        if supplied != null { name = supplied; }
+        return html_response(_home_page(name));
+    }
+
+    // `/static/...` is served from disk. `static_file` takes the request path
+    // as-is: it does its own decoding and its own containment check against
+    // the root, so trimming or rewriting the prefix here is not a security
+    // step and should not be treated as one.
+    if req.path.length >= 8 && strings_equal(substring(req.path, 0, 8), "/static/") {
+        return static_file(_asset_root(), substring(req.path, 7, req.path.length));
+    }
+
+    // A trailing-slash redirect, so `/about/` and `/about` do not become two
+    // URLs for one page.
+    if strings_equal(req.path, "/home") { return redirect("/"); }
+
+    return not_found();
+}
+
+fn main() ![io, net] { serve(handle as *fn (Request) -> Response, 8080); }
