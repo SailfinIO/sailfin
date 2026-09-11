@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/codegen-llvm"
-version = "0.11.0"
+version = "0.12.0"
 description = "Sailfin LLVM lowering provider (toolchain-internal)"
 publish = false
 
