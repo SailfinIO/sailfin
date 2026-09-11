@@ -108,11 +108,14 @@ fn _sfn_asm_files(leaves: string[]) -> string[] {
     return out;
 }
 
-// The staged `.sfn-asm` files inside a `rt-import-context` tree — the exact
-// set the child emit's import resolver walks. Distinct from
-// `_sfn_asm_files`, which spans every tree under the scratch including the
-// content-addressed cache (SFN-1087).
-fn _rt_context_asm(leaves: string[]) -> string[] {
+// Every leaf inside a `rt-import-context` tree — the exact directory the
+// child emit's import resolver walks. Deliberately NOT filtered to
+// `.sfn-asm`: the risk surface of the SFN-1087 prune is the completeness of
+// its suffix list, so an assertion that only sees `.sfn-asm` would stay
+// green if `.sfn-asm.key` or `.import-deps` were dropped from it. Distinct
+// from `_sfn_asm_files`, which spans every tree under the scratch including
+// the content-addressed cache.
+fn _rt_context_leaves(leaves: string[]) -> string[] {
     let mut out: string[] = [];
     let mut i: int = 0;
     loop {
@@ -120,7 +123,6 @@ fn _rt_context_asm(leaves: string[]) -> string[] {
         let path = leaves[i];
         i += 1;
         if !contains(path, "/rt-import-context/") { continue; }
-        if !ends_with(path, ".sfn-asm") { continue; }
         out.push(path);
     }
     return out;
@@ -437,7 +439,7 @@ test "runtime gates: a reused scratch prunes a shrinking staged set (SFN-1087)" 
     assert wide_exit == 0;
 
     // Sanity: the wide set really is wider, or the test proves nothing.
-    let wide_ctx = _rt_context_asm(_collect_leaves(scratch, [], 0));
+    let wide_ctx = _rt_context_leaves(_collect_leaves(scratch, [], 0));
     assert _any_contains(wide_ctx, "sfn/crypto");
 
     // Pass 2 — narrow: a `print`-only program into the SAME scratch.
@@ -446,7 +448,7 @@ test "runtime gates: a reused scratch prunes a shrinking staged set (SFN-1087)" 
     let narrow_exit = _build_in_dir("runtime-gates-shrink-narrow", scratch, narrow_src, []);
     assert narrow_exit == 0;
 
-    let narrow_ctx = _rt_context_asm(_collect_leaves(scratch, [], 0));
+    let narrow_ctx = _rt_context_leaves(_collect_leaves(scratch, [], 0));
     // Name the leftovers before asserting: "one module survived" and "the
     // prune never ran" have unrelated causes.
     if _any_contains(narrow_ctx, "sfn/crypto") {

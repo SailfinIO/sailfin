@@ -1453,9 +1453,34 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
 // demand sets sharing one `out_dir` concurrently is the configuration this
 // prune exists to make impossible, not one it has to tolerate.
 //
-// A file whose name carries none of the artifact suffixes this staging path
-// writes is left alone. `ctx_root` is ours, but guessing at an unrecognised
-// name is how a prune becomes data loss.
+// `walk_dirs` truncates silently on hitting `FS_TREE_MAX_DEPTH` (16) or
+// `FS_TREE_MAX_NODES` (200000), and unlike its other callers — which merely
+// under-report or under-prune — a short walk here leaves stale artifacts and
+// fails this prune OPEN. That is safe only by margin, so the margin is
+// stated: the deepest runtime slug is three components
+// (`sfn/platform/tls`), i.e. two directory levels under `ctx_root` against a
+// bound of 16, and the tree holds a few dozen directories against a bound of
+// 200000. Deeply nested staging would have to cross both before this
+// argument stops holding.
+//
+// The suffix list is keyed on what the RESOLVER CAN PROBE, not on what
+// staging writes — staging writes only `.sfn-asm`, its `.sfn-asm.key`
+// sidecar, and `.import-deps`, but `_resolve_artifact_slug`
+// (`import_context.sfn`) additionally probes `.layout-manifest` and
+// `.slugalias`, and `_read_implicit_deps` (`build/paths.sfn`) probes
+// `.implicit-deps`. A suffix the resolver can reach but the prune does not
+// list is a hole straight back into the divergence above, so add one here
+// whenever the resolver learns to probe it, not whenever staging learns to
+// write it.
+//
+// `.sfn-asm.key` earns its place twice over. Beyond slug derivation, the
+// stamped fast path (`_runtime_stamp_cache_hit`) requires both the artifact
+// and its `.key` sidecar to exist, so a prune that removed only `.sfn-asm`
+// would report a stamped hit on a missing artifact.
+//
+// A file whose name carries none of those suffixes is left alone.
+// `ctx_root` is ours, but guessing at an unrecognised name is how a prune
+// becomes data loss.
 fn _prune_runtime_sfn_ctx_root(ctx_root: string, staged_slugs: string[]) -> boolean ![io] {
     if ctx_root.length == 0 { return true; }
     if !fs.exists(ctx_root) { return true; }
@@ -1464,6 +1489,7 @@ fn _prune_runtime_sfn_ctx_root(ctx_root: string, staged_slugs: string[]) -> bool
     // `staged_slugs`, and the prune deletes a live sidecar.
     let suffixes: string[] = [".sfn-asm.key", ".sfn-asm", ".import-deps", ".implicit-deps", ".layout-manifest", ".slugalias"];
     let prefix = ctx_root + "/";
+    let mut undeletable: string[] = [];
     let dirs = walk_dirs(ctx_root, 0, 16);
     let mut di: int = 0;
     loop {
@@ -1495,10 +1521,20 @@ fn _prune_runtime_sfn_ctx_root(ctx_root: string, staged_slugs: string[]) -> bool
             if !recognised { continue; }
             if slug.length == 0 { continue; }
             if _slug_already_staged(staged_slugs, slug) { continue; }
-            if !fs.deleteFile(full) { return false; }
+            if !fs.deleteFile(full) { undeletable.push(full); }
         }
     }
-    let _pruned_dirs = remove_empty_dirs_under(ctx_root);
+    if undeletable.length > 0 {
+        let mut ui: int = 0;
+        loop {
+            if ui >= undeletable.length { break; }
+            print.err("sfn build: failed to prune stale runtime import-context artifact "
+                + undeletable[ui]);
+            ui += 1;
+        }
+        return false;
+    }
+    let _ = remove_empty_dirs_under(ctx_root);
     return true;
 }
 
@@ -2044,9 +2080,16 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
             if cap.prelude_entry.length > 0 {
                 let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
                 // #1288: the prelude is never staged, so it has no
-                // `.import-deps` sidecar — the threaded context root
-                // is inert here and the prelude keeps its legacy
-                // descriptor-based emit byte-for-byte (#940 Risk R2).
+                // `.import-deps` sidecar and its key folds no import
+                // context at all. The threaded context root is NOT
+                // inert: `--import-context` is passed unconditionally
+                // and the child's LLVM emit resolves the prelude's own
+                // imports against that directory's contents. So the
+                // prelude object is a function of the staged set while
+                // its key is not — the SFN-1087 divergence, one module
+                // over, which the `ctx_root` prune bounds but does not
+                // close. Tracked as SFN-1275. The legacy
+                // descriptor-based emit is unchanged (#940 Risk R2).
                 let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap, target_triple);
                 if prelude_plan.obj_path.length == 0 {
                     _delete_runtime_sfn_object_staging(prelude_plans);
@@ -2199,6 +2242,7 @@ export {
     _runtime_obj_key_with_slug,
     _runtime_sfn_object_key,
     _prepare_runtime_sfn_object,
+    _prune_runtime_sfn_ctx_root,
     _stage_one_runtime_sfn_import_context,
     runtime_asm_cache_key
 };
