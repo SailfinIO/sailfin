@@ -25,7 +25,12 @@
 // client adapter). The extern carries no effect annotation (externs may
 // not); enforcement rides on `serve`'s own `![net, io]`.
 import { Request, Response } from "./types";
-import { keep_alive_requested, parse_request, serialize_response } from "./wire";
+import {
+    keep_alive_requested,
+    parse_request,
+    serialize_head,
+    serialize_response
+} from "./wire";
 
 extern fn sfn_serve_framed(handler: *u8, port: i32) -> void;
 
@@ -41,6 +46,8 @@ extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 extern fn strlen(s: *u8) -> usize;
+
+extern fn free(ptr: *u8) -> void;
 
 // `OwnedBuf` — the runtime owned-buffer aggregate, inlined byte-identically
 // (four `i64` fields, 32 bytes, `arena_addr == 0` = libc-backed). The
@@ -83,6 +90,53 @@ fn _http_owned_from_str(s: string) -> OwnedBuf {
     };
 }
 
+// `_http_owned_from_parts(head, body_addr, body_len)` — one owned buffer
+// holding a text header block followed by `body_len` raw bytes.
+//
+// The binary twin of `_http_owned_from_str`. It exists because the two
+// halves of a binary response cannot be joined as strings: `head` is text
+// and measurable with `strlen`, while the body is arbitrary bytes whose
+// first NUL would end any `string` built from it. Joining them here — with
+// the body's length passed in rather than derived — is what lets the
+// `OwnedBuf.len` handed back to the runtime be the true total.
+//
+// Still NUL-terminated, for the same reason the text path is: the trailing
+// byte costs one allocation byte and keeps the buffer safe to hand to
+// anything that still scans. Nothing depends on it for the length any more.
+fn _http_owned_from_parts(head: string, body_addr: i64, body_len: i64) -> OwnedBuf {
+    // Clamp before it reaches the arithmetic. A negative length makes
+    // `total` SMALLER than the head, so the allocation below would be
+    // under-sized and the head's own `memcpy` would run off the end of it —
+    // a heap overflow reachable from any handler that miscomputed a length,
+    // which is exactly the class of mistake a byte-range API invites.
+    let mut n: i64 = body_len;
+    if n < 0 { n = 0; }
+
+    let head_src: *u8 = head as *u8;
+    let head_n: i64 = strlen(head_src) as i64;
+    let total: i64 = head_n + n;
+    let copy: *u8 = malloc((total + 1) as usize);
+    if copy as i64 == 0 {
+        return OwnedBuf {
+            ptr_addr: 0,
+            len: 0,
+            cap: 0,
+            arena_addr: 0
+        };
+    }
+    memcpy(copy, head_src, head_n as usize);
+    if n > 0 {
+        memcpy(((copy as i64) + head_n) as *u8, body_addr as *u8, n as usize);
+    }
+    memset(((copy as i64) + total) as *u8, 0, 1 as usize);
+    return OwnedBuf {
+        ptr_addr: copy as i64,
+        len: total,
+        cap: total + 1,
+        arena_addr: 0
+    };
+}
+
 // Handler code pointer, set by `serve` before the accept loop starts and
 // read by `_sfn_http_trampoline` on pool-worker threads. Written once
 // before any worker runs, so no synchronization is needed (single server
@@ -111,7 +165,7 @@ let mut _sfn_http_handler_addr: i64 = 0;
 fn _sfn_http_trampoline(req: OwnedBuf) -> OwnedBuf {
     if _sfn_http_handler_addr == 0 {
         return _http_owned_from_str(serialize_response(Response {
-            status: 500, headers: [], body: ""
+            status: 500, headers: [], body: "", body_addr: 0, body_len: 0
         }));
     }
     let entry: *fn (Request) -> Response = _sfn_http_handler_addr as *fn (Request) -> Response;
@@ -123,6 +177,18 @@ fn _sfn_http_trampoline(req: OwnedBuf) -> OwnedBuf {
     // control never disagree.
     let keep_alive: boolean = keep_alive_requested(parsed);
     let resp: Response = entry(parsed);
+
+    // A binary body takes the length-explicit path. Ownership of
+    // `body_addr` transfers here (`types.sfn`): the bytes are copied into
+    // the outgoing buffer and the handler's allocation is released
+    // immediately, so a static-asset handler needs no free of its own and a
+    // served file cannot leak per request.
+    if resp.body_addr != 0 {
+        let head: string = serialize_head(resp, keep_alive);
+        let out: OwnedBuf = _http_owned_from_parts(head, resp.body_addr as i64, resp.body_len as i64);
+        free(resp.body_addr as *u8);
+        return out;
+    }
     return _http_owned_from_str(serialize_response(resp, keep_alive));
 }
 

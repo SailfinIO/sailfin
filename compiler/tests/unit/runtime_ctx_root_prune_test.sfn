@@ -1,0 +1,115 @@
+// Unit coverage for `_prune_runtime_sfn_ctx_root`
+// (`compiler/src/build/runtime_objs.sfn`, SFN-1087): constrains a runtime
+// import-context root to exactly its staged slugs so the emit's on-disk
+// inputs and the object cache key cannot diverge.
+//
+// Each test uses its own scratch namespace so parallel runs don't collide,
+// and cleans up on exit.
+import { remove_all } from "sfn/fs";
+import { default_scratch_dir } from "sfn/test";
+
+import { _prune_runtime_sfn_ctx_root } from "../../src/build/runtime_objs";
+
+fn _crp_tmp_root(label: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = default_scratch_dir(); }
+    let dir = base + "/sfn_runtime_ctx_root_prune_test_" + label;
+    assert remove_all(dir);
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _crp_cleanup(path: string) ![io] { assert remove_all(path); }
+
+test "ctx root prune: every artifact suffix of an unstaged slug is removed" ![io] {
+    let ctx = _crp_tmp_root("t1_ctx");
+    let crypto_dir = ctx + "/sfn/crypto";
+    fs.createDirectory(crypto_dir, true);
+    let base = crypto_dir + "/sha384";
+    fs.writeFile(base + ".sfn-asm", "asm\n");
+    fs.writeFile(base + ".sfn-asm.key", "key\n");
+    fs.writeFile(base + ".import-deps", "deps\n");
+    fs.writeFile(base + ".implicit-deps", "implicit\n");
+    fs.writeFile(base + ".layout-manifest", "layout\n");
+    fs.writeFile(base + ".slugalias", "alias\n");
+
+    let ok = _prune_runtime_sfn_ctx_root(ctx, ["sfn/strings"]);
+    assert ok;
+    assert ! fs.exists(base + ".sfn-asm");
+    assert ! fs.exists(base + ".sfn-asm.key");
+    assert ! fs.exists(base + ".import-deps");
+    assert ! fs.exists(base + ".implicit-deps");
+    assert ! fs.exists(base + ".layout-manifest");
+    assert ! fs.exists(base + ".slugalias");
+
+    _crp_cleanup(ctx);
+}
+
+test "ctx root prune: a staged slug keeps every artifact, including the .key sidecar" ![io] {
+    let ctx = _crp_tmp_root("t2_ctx");
+    let crypto_dir = ctx + "/sfn/crypto";
+    fs.createDirectory(crypto_dir, true);
+    let base = crypto_dir + "/sha384";
+    fs.writeFile(base + ".sfn-asm", "asm\n");
+    fs.writeFile(base + ".sfn-asm.key", "key\n");
+    fs.writeFile(base + ".import-deps", "deps\n");
+    fs.writeFile(base + ".implicit-deps", "implicit\n");
+    fs.writeFile(base + ".layout-manifest", "layout\n");
+    fs.writeFile(base + ".slugalias", "alias\n");
+
+    let ok = _prune_runtime_sfn_ctx_root(ctx, ["sfn/crypto/sha384"]);
+    assert ok;
+    assert fs.exists(base + ".sfn-asm");
+    assert fs.exists(base + ".sfn-asm.key");
+    assert fs.exists(base + ".import-deps");
+    assert fs.exists(base + ".implicit-deps");
+    assert fs.exists(base + ".layout-manifest");
+    assert fs.exists(base + ".slugalias");
+
+    _crp_cleanup(ctx);
+}
+
+test "ctx root prune: a nested staged slug is unaffected by an unstaged sibling" ![io] {
+    let ctx = _crp_tmp_root("t3_ctx");
+    let crypto_dir = ctx + "/sfn/crypto";
+    fs.createDirectory(crypto_dir, true);
+    let sha_path = crypto_dir + "/sha384.sfn-asm";
+    let aes_path = crypto_dir + "/aes.sfn-asm";
+    fs.writeFile(sha_path, "sha\n");
+    fs.writeFile(aes_path, "aes\n");
+
+    let ok = _prune_runtime_sfn_ctx_root(ctx, ["sfn/crypto/aes"]);
+    assert ok;
+    assert fs.exists(aes_path);
+    assert ! fs.exists(sha_path);
+
+    _crp_cleanup(ctx);
+}
+
+test "ctx root prune: an unrecognised file name is left alone" ![io] {
+    let ctx = _crp_tmp_root("t4_ctx");
+    let crypto_dir = ctx + "/sfn/crypto";
+    fs.createDirectory(crypto_dir, true);
+    let notes_path = ctx + "/notes.txt";
+    let temp_path = crypto_dir + "/sha384.sfn_stage.abc123";
+    fs.writeFile(notes_path, "notes\n");
+    fs.writeFile(temp_path, "temp\n");
+
+    let ok = _prune_runtime_sfn_ctx_root(ctx, []);
+    assert ok;
+    assert fs.exists(notes_path);
+    assert fs.exists(temp_path);
+
+    _crp_cleanup(ctx);
+}
+
+test "ctx root prune: a missing context root succeeds without work" ![io] {
+    let ctx = _crp_tmp_root("t5_ctx");
+    let missing = ctx + "/does-not-exist";
+    let ok = _prune_runtime_sfn_ctx_root(missing, []);
+    assert ok;
+    let ok_empty = _prune_runtime_sfn_ctx_root("", []);
+    assert ok_empty;
+
+    _crp_cleanup(ctx);
+}
