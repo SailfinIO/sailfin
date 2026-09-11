@@ -1,0 +1,481 @@
+// Regression coverage for SFEP-0077 Phase 1's `--source-closure-roots` and
+// `--member-glob-parents` modes of `scripts/module_layout_fingerprint.sh`
+// (`docs/proposals/0077-ci-dependency-closure-scope.md` §8.1).
+//
+// `--source-closure-roots` is a fixed-point walk over `[dependencies]` edges,
+// seeded from the compiler-role members (`sfn/compiler`, `sfn/syntax`,
+// `sfn/analyzer`, `sfn/ir`, `sfn/codegen`, `sfn/codegen-llvm`),
+// `kind = "runtime"` members, `sfn/test`, and every `[dependencies]` key
+// declared by a manifest under `compiler/tests`. It is the set the Phase 3
+// workflow guard will use to decide whether a changed path can reach the
+// compiler, the runtime, or the compiler test surface at all — so the test
+// that matters most here is the one that would fail the day a compiler test
+// starts importing a capsule the closure does not know about.
+import { remove_all } from "sfn/fs";
+import {
+    ends_with,
+    find,
+    split,
+    starts_with,
+    trim
+} from "sfn/strings";
+import {
+    bash_path,
+    clean_runner_env_without,
+    default_scratch_dir,
+    git_bash_path,
+    report_child_failure
+} from "sfn/test";
+
+import { _collect_sfn_files_cmd } from "../../src/build/fs";
+import { walk_dirs } from "../../src/build/fs_tree";
+
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    let resolved: *u8 = realpath("." as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    let pwd = env.get("PWD");
+    if pwd.length > 0 { return pwd; }
+    return ".";
+}
+
+// `run_capture`'s env is empty, not inherited — the script needs
+// `sha256sum`/`shasum`, `find`, and `sort` on `PATH`.
+fn _script_env() -> string[] ![io] {
+    let temp = default_scratch_dir() + "/sfn-ci-source-closure bash temp";
+    fs.createDirectory(temp, true);
+    let mut child_env = clean_runner_env_without("", ["TMPDIR"]);
+    child_env.push("TMPDIR=" + bash_path(temp));
+    return child_env;
+}
+
+fn _view(root: string, flag: string) -> string ![io] {
+    let script = bash_path(_repo_root()
+        + "/scripts/module_layout_fingerprint.sh");
+    let exit = process.run_capture_cwd([git_bash_path(), script, flag], _script_env(), root);
+    let output = process.capture_take_stdout();
+    let error = process.capture_take_stderr();
+    report_child_failure("module-layout-fingerprint " + flag, exit, output, error);
+    return output;
+}
+
+fn _read_repo_file(path: string) -> string ![io] {
+    return fs.readFile(_repo_root() + "/" + path);
+}
+
+// Split on `\n` and drop the trailing empty entry a `\n`-terminated tool
+// output leaves behind, so array length matches the visible line count.
+fn _lines(text: string) -> string[] {
+    let mut raw = split(text, "\n");
+    if raw.length > 0 && raw[raw.length - 1].length == 0 {
+        let mut trimmed: string[] = [];
+        let mut i: int = 0;
+        loop {
+            if i >= raw.length - 1 { break; }
+            trimmed.push(raw[i]);
+            i += 1;
+        }
+        return trimmed;
+    }
+    return raw;
+}
+
+fn _contains_line(lines: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if lines[i] == target { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Every double-quoted substring in `text`, in order of appearance.
+fn _quoted_strings(text: string) -> string[] {
+    let mut results: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if substring(text, i, i + 1) == "\"" {
+            let mut j = i + 1;
+            loop {
+                if j >= text.length { break; }
+                if substring(text, j, j + 1) == "\"" { break; }
+                j += 1;
+            }
+            results.push(substring(text, i + 1, j));
+            i = j + 1;
+        } else { i += 1; }
+    }
+    return results;
+}
+
+// Every `from "sfn/..."` import source in `text`, verbatim (deep-import
+// paths like `sfn/analyzer/effect_imports` included).
+fn _sfn_import_sources(text: string) -> string[] {
+    let mut results: string[] = [];
+    let marker = "from \"sfn/";
+    let mut i: int = 0;
+    loop {
+        if i + marker.length > text.length { break; }
+        if substring(text, i, i + marker.length) == marker {
+            let start = i + 6;  // position of "sfn/..." right after the opening quote
+            let mut j = start;
+            loop {
+                if j >= text.length { break; }
+                if substring(text, j, j + 1) == "\"" { break; }
+                j += 1;
+            }
+            results.push(substring(text, start, j));
+            i = j + 1;
+        } else { i += 1; }
+    }
+    return results;
+}
+
+// Canonical capsule names are always `sfn/<segment>` with no further slash
+// (verified against `--member-records` — see the surface probe in "every
+// capsule imported under compiler/tests is in the closure" below), so a deep
+// import's owning capsule is everything up to (but not including) a second
+// `/`.
+fn _capsule_name_from_import_source(source: string) -> string {
+    let mut i: int = 4;  // skip past "sfn/"
+    loop {
+        if i >= source.length { break; }
+        if substring(source, i, i + 1) == "/" { break; }
+        i += 1;
+    }
+    return substring(source, 0, i);
+}
+
+// `--member-records` is `name\tmember\tkind\tpublish` per line. Returns the
+// member root for `name`, or `""` if `name` has no record (deliberately not
+// a failure — a fixture-only or otherwise non-canonical name is out of
+// scope, mirroring the shell walk's own join-drops-unknowns behavior for
+// `--source-closure-roots`).
+fn _member_root_for_name(records: string, name: string) -> string {
+    let lines = _lines(records);
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let cols = split(lines[i], "\t");
+        if cols.length >= 2 && cols[0] == name { return cols[1]; }
+        i += 1;
+    }
+    return "";
+}
+
+// Every `[dependencies]` key in a `capsule.toml` at `manifest_path`, as the
+// bare quoted capsule name (no value, no comment tail).
+fn _manifest_dependency_names(manifest_path: string) -> string[] ![io] {
+    let text = fs.readFile(manifest_path);
+    let lines = _lines(text);
+    let mut results: string[] = [];
+    let mut in_dependencies: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let trimmed = trim(line);
+        if starts_with(trimmed, "[") && ends_with(trimmed, "]") {
+            in_dependencies = trimmed == "[dependencies]";
+            i += 1;
+            continue;
+        }
+        if in_dependencies && starts_with(trimmed, "\"") {
+            let quoted = _quoted_strings(trimmed);
+            if quoted.length > 0 { results.push(quoted[0]); }
+        }
+        i += 1;
+    }
+    return results;
+}
+
+// --------------------------------------------------------------
+// Shape of the closure itself
+// --------------------------------------------------------------
+test "ci source closure: the closure is a non-empty strict subset of the member roots" ![io] {
+    let root = _repo_root();
+    let closure = _lines(_view(root, "--source-closure-roots"));
+    let members = _lines(_view(root, "--member-roots"));
+
+    assert closure.length > 0;
+    assert closure.length < members.length;
+    let mut i: int = 0;
+    loop {
+        if i >= closure.length { break; }
+        assert _contains_line(members, closure[i]);
+        i += 1;
+    }
+}
+
+// --------------------------------------------------------------
+// The load-bearing guard: nothing a compiler test can reach for is outside
+// the closure the Phase 3 workflow gate will consult.
+// --------------------------------------------------------------
+test "ci source closure: every capsule imported under compiler/tests is in the closure" ![io] {
+    let root = _repo_root();
+    let closure = _lines(_view(root, "--source-closure-roots"));
+    let records = _view(root, "--member-records");
+
+    let files = _collect_sfn_files_cmd(root + "/compiler/tests", 20);
+    assert files.length > 0;
+
+    let mut checked: int = 0;
+    let mut fi: int = 0;
+    loop {
+        if fi >= files.length { break; }
+        let text = fs.readFile(files[fi]);
+        let sources = _sfn_import_sources(text);
+        let mut si: int = 0;
+        loop {
+            if si >= sources.length { break; }
+            let capsule_name = _capsule_name_from_import_source(sources[si]);
+            let member_root = _member_root_for_name(records, capsule_name);
+            // A name with no matching member record is skipped, not a
+            // failure — this loop only asserts about names the workspace
+            // actually recognizes.
+            if member_root.length > 0 {
+                checked += 1;
+                assert _contains_line(closure, member_root);
+            }
+            si += 1;
+        }
+        fi += 1;
+    }
+    // Sanity check that the scan actually exercised the mapping path
+    // (otherwise a broken extractor would pass this test vacuously).
+    assert checked > 0;
+}
+
+// --------------------------------------------------------------
+// The `sfn/http` case: a capsule reachable only through a compiler/tests
+// fixture manifest, not through any import statement or the compiler's own
+// dependency graph.
+// --------------------------------------------------------------
+test "ci source closure: every capsule declared by a compiler/tests fixture manifest is in the closure" ![io] {
+    let root = _repo_root();
+    let closure = _lines(_view(root, "--source-closure-roots"));
+    let records = _view(root, "--member-records");
+
+    let dirs = walk_dirs(root + "/compiler/tests", 0, 16);
+    let mut manifests: string[] = [];
+    let mut di: int = 0;
+    loop {
+        if di >= dirs.length { break; }
+        let candidate = dirs[di] + "/capsule.toml";
+        if fs.exists(candidate) { manifests.push(candidate); }
+        di += 1;
+    }
+    assert manifests.length > 0;
+
+    let mut saw_http: boolean = false;
+    let mut mi: int = 0;
+    loop {
+        if mi >= manifests.length { break; }
+        let deps = _manifest_dependency_names(manifests[mi]);
+        let mut depi: int = 0;
+        loop {
+            if depi >= deps.length { break; }
+            let member_root = _member_root_for_name(records, deps[depi]);
+            if member_root.length > 0 {
+                assert _contains_line(closure, member_root);
+                if member_root == "capsules/sfn/http" { saw_http = true; }
+            }
+            depi += 1;
+        }
+        mi += 1;
+    }
+    // `compiler/tests/e2e/fixtures/stateful_http_users_server/capsule.toml`
+    // declares `sfn/http`, and `sfn/http` is deliberately NOT a compiler
+    // dependency (SFN-496 — its bare-name `get` collides with `sfn/cli`'s).
+    // Without the compiler/tests manifest seed the closure would have no
+    // other path to `capsules/sfn/http`, so this assertion is the one that
+    // would catch that seed term regressing.
+    assert saw_http;
+}
+
+// --------------------------------------------------------------
+// Guards the walk itself: the compiler's and runtime's own declared
+// dependencies must land inside the closure they seed.
+// --------------------------------------------------------------
+test "ci source closure: compiler and runtime manifest dependencies are all in the closure" ![io] {
+    let root = _repo_root();
+    let closure = _lines(_view(root, "--source-closure-roots"));
+    let records = _view(root, "--member-records");
+
+    let mut deps = _manifest_dependency_names(root + "/compiler/capsule.toml");
+    let runtime_deps = _manifest_dependency_names(root + "/runtime/capsule.toml");
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_deps.length { break; }
+        deps.push(runtime_deps[i]);
+        i += 1;
+    }
+    assert deps.length > 0;
+
+    let mut di: int = 0;
+    loop {
+        if di >= deps.length { break; }
+        let member_root = _member_root_for_name(records, deps[di]);
+        if member_root.length > 0 {
+            assert _contains_line(closure, member_root);
+        }
+        di += 1;
+    }
+}
+
+// --------------------------------------------------------------
+// The ci-freshness walk and the source-scope closure walk share the same
+// fixed-point machinery but different seeds, so this direction is the only
+// one that must hold between them.
+// --------------------------------------------------------------
+test "ci source closure: the ci-freshness source closure is a subset of the source closure" ![io] {
+    let root = _repo_root();
+    let closure = _lines(_view(root, "--source-closure-roots"));
+    let member_roots = _lines(_view(root, "--member-roots"));
+    let freshness_inputs = _lines(_view(root, "--ci-freshness-inputs"));
+
+    // Guards a regression in the walk's own reach: a member whose sources
+    // key the CI build cache but which is not reachable in the source
+    // closure would let a narrow-lane PR (one that only touches that
+    // member's path prefix) invalidate the cache without anything
+    // attributing the resulting cold build to a full-CI-triggering change.
+    let mut qualifying: int = 0;
+    let mut mi: int = 0;
+    loop {
+        if mi >= member_roots.length { break; }
+        let member_root = member_roots[mi];
+        let prefix = member_root + "/";
+        let mut has_sfn_under_member: boolean = false;
+        let mut fi: int = 0;
+        loop {
+            if fi >= freshness_inputs.length { break; }
+            let input = freshness_inputs[fi];
+            if ends_with(input, ".sfn") && find(input, prefix, 0) == 0 {
+                has_sfn_under_member = true;
+                break;
+            }
+            fi += 1;
+        }
+        if has_sfn_under_member {
+            qualifying += 1;
+            assert _contains_line(closure, member_root);
+        }
+        mi += 1;
+    }
+    assert qualifying > 0;
+
+    // The converse deliberately does NOT hold: `capsules/sfn/http` sits in
+    // the source closure (seeded by the compiler/tests fixture manifest)
+    // but contributes zero `.sfn` to `--ci-freshness-inputs`, because that
+    // walk is seeded only from compiler-role/runtime members and never
+    // reaches `sfn/http` at all.
+    assert _contains_line(closure, "capsules/sfn/http");
+    // Every member's `capsule.toml` lands in `--ci-freshness-inputs`
+    // unconditionally (it always keys the manifest-parse step), so the
+    // "zero .sfn" claim must be checked against `.sfn` inputs specifically
+    // rather than any line under the member's prefix.
+    let mut http_sfn_in_freshness: boolean = false;
+    let mut fi2: int = 0;
+    loop {
+        if fi2 >= freshness_inputs.length { break; }
+        let input = freshness_inputs[fi2];
+        if ends_with(input, ".sfn") && find(input, "capsules/sfn/http/", 0) == 0 {
+            http_sfn_in_freshness = true;
+            break;
+        }
+        fi2 += 1;
+    }
+    assert ! http_sfn_in_freshness;
+}
+
+// --------------------------------------------------------------
+// `--member-glob-parents` against the manifest it reads from.
+// --------------------------------------------------------------
+test "ci source closure: member glob parents match the workspace manifest" ![io] {
+    let root = _repo_root();
+    let glob_parents = _lines(_view(root, "--member-glob-parents"));
+
+    let workspace_text = _read_repo_file("workspace.toml");
+    let start = find(workspace_text, "members = [", 0);
+    assert start >= 0;
+    let close = find(workspace_text, "]", start);
+    assert close > start;
+    let block = substring(workspace_text, start, close);
+    let entries = _quoted_strings(block);
+
+    let mut expected: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if ends_with(entries[i], "/*") {
+            expected.push(substring(entries[i], 0, entries[i].length - 2));
+        }
+        i += 1;
+    }
+    assert expected.length > 0;
+    assert expected.length == glob_parents.length;
+    let mut ei: int = 0;
+    loop {
+        if ei >= expected.length { break; }
+        assert _contains_line(glob_parents, expected[ei]);
+        ei += 1;
+    }
+}
+
+// --------------------------------------------------------------
+// Transitivity: the walk must follow more than one hop, in both directions.
+// --------------------------------------------------------------
+fn _write_library(root: string, dir: string, name: string, dependency: string) ![io] {
+    fs.createDirectory(root + "/" + dir + "/src", true);
+    let mut manifest = "[capsule]\nname = \"" + name
+        + "\"\nversion = \"0.0.0\"\n\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\n";
+    if dependency.length > 0 {
+        manifest = manifest + "\n[dependencies]\n\"" + dependency
+            + "\" = \"*\"\n";
+    }
+    fs.writeFile(root + "/" + dir + "/capsule.toml", manifest);
+    fs.writeFile(root + "/" + dir + "/src/mod.sfn", "fn value() -> int { return 1; }\n");
+}
+
+// A tiny standalone workspace: `sfn/compiler` -> `sfn/mid` -> `sfn/leaf`
+// (two hops from the compiler), plus an unrelated `sfn/outside` that
+// nothing depends on and that depends on nothing.
+fn _build_transitivity_fixture(root: string) ![io] {
+    assert remove_all(root);
+    fs.createDirectory(root + "/compiler/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"compiler\", \"stdlib/*\"]\n");
+    fs.writeFile(root + "/compiler/capsule.toml", "[capsule]\nname = \"sfn/compiler\"\nversion = \"0.0.0\"\n\n[build]\nkind = \"binary\"\nentry = \"src/main.sfn\"\n\n[dependencies]\n\"sfn/mid\" = \"*\"\n");
+    fs.writeFile(root + "/compiler/src/main.sfn", "fn main() -> int { return 0; }\n");
+    _write_library(root, "stdlib/mid", "sfn/mid", "sfn/leaf");
+    _write_library(root, "stdlib/leaf", "sfn/leaf", "");
+    _write_library(root, "stdlib/outside", "sfn/outside", "");
+}
+
+test "ci source closure: a leaf member outside the closure stays outside" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/ci-source-closure-transitivity-outside";
+    _build_transitivity_fixture(scratch);
+    let closure = _lines(_view(scratch, "--source-closure-roots"));
+    assert ! _contains_line(closure, "stdlib/outside");
+    assert remove_all(scratch);
+}
+
+test "ci source closure: a member the compiler depends on is inside" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/ci-source-closure-transitivity-inside";
+    _build_transitivity_fixture(scratch);
+    let closure = _lines(_view(scratch, "--source-closure-roots"));
+    // `stdlib/mid` is a direct compiler dependency (one hop); `stdlib/leaf`
+    // is reachable only THROUGH `stdlib/mid` (two hops). Asserting on
+    // `stdlib/leaf` is what proves the walk is transitive rather than a
+    // single-hop lookup — a one-hop implementation would include
+    // `stdlib/mid` but miss `stdlib/leaf`.
+    assert _contains_line(closure, "stdlib/mid");
+    assert _contains_line(closure, "stdlib/leaf");
+    assert remove_all(scratch);
+}
