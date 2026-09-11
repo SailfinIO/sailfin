@@ -240,7 +240,15 @@ the failure is invisible to `ci.yml` by construction and has to be raised
 where the seed is read. `module_layout_fingerprint.sh` therefore `exit 2`s
 when a workspace carries all six canonical compiler-role capsules but no
 `compiler/tests`, which leaves fixture workspaces (none of which carry all
-six) exempt. The script's own guards
+six) exempt.
+
+**That failure is scoped to `--source-closure-roots` alone.** The closure is
+computed before the mode dispatch, so raising it where it is detected would
+fail *every* mode — including `--ci-freshness`, which keys the CI build cache,
+and `--public-members`, which `capsule-release.yml:126` depends on. Only the
+source closure is unsound without the seed, so the condition is recorded during
+computation and raised in that one dispatch arm. Phase 1's guarantee that no
+pre-existing mode changes behaviour holds in this edge case too. The script's own guards
 (`module_layout_fingerprint.sh:135-138` empty members, `:183-199` missing or
 unnamed manifest, `:196-199` duplicate name) already `exit 2`, and `set -euo
 pipefail` in the step propagates that. Every failure mode widens or errors;

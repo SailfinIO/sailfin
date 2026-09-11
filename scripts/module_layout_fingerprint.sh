@@ -114,6 +114,7 @@ source_closure_members="$tmp_dir/source-closure-members"
 source_closure_next="$tmp_dir/source-closure-next"
 source_closure_roots="$tmp_dir/source-closure-roots"
 test_relative_imports="$tmp_dir/test-relative-imports"
+source_closure_incomplete=0
 member_glob_parents="$tmp_dir/member-glob-parents"
 
 # Manifests outside `[workspace].members` that still bind a capsule into the
@@ -430,13 +431,19 @@ if [ ! -d "$test_manifest_root" ]; then
         $1 ~ /^sfn\/(compiler|syntax|analyzer|ir|codegen|codegen-llvm)$/ { print $1 }
     ' "$member_records" | LC_ALL=C sort -u | awk 'END { print NR }')
     if [ "$canonical_compiler_roles" -eq 6 ]; then
-        # Silently skipping the seed here would not empty the closure, it would
-        # narrow it — dropping sfn/http and sfn/tensor, whose only path in is
-        # this directory. A narrowed-but-plausible closure passes both guards
-        # SFEP-0077 section 3.3 gives ci.yml (non-empty, strict subset), so the
-        # failure has to be raised here or not at all.
-        echo "module_layout_fingerprint: workspace has the six canonical compiler-role capsules but no $test_manifest_root" >&2
-        exit 2
+        # Silently skipping the seed here would not empty the closure, it
+        # would narrow it — dropping sfn/http and sfn/tensor, whose only path
+        # in is this directory. A narrowed-but-plausible closure is non-empty
+        # and contains only member roots, so it passes both guards SFEP-0077
+        # section 3.3 gives ci.yml; the failure has to be raised here.
+        #
+        # Recorded rather than raised on the spot: this block runs before the
+        # mode dispatch, so an `exit 2` here would fail EVERY mode, including
+        # --ci-freshness (the build-cache key), --member-roots, and
+        # --public-members, which capsule-release.yml:126 depends on. Only
+        # the source closure is unsound without this seed, so only the mode
+        # that serves it fails.
+        source_closure_incomplete=1
     fi
 fi
 if [ -d "$test_manifest_root" ]; then
@@ -513,7 +520,14 @@ case "$mode" in
     compiler-sources) LC_ALL=C sort -u "$compiler_source_inputs"; exit 0 ;;
     maintainer-sources) LC_ALL=C sort -u "$maintainer_source_inputs"; exit 0 ;;
     member-roots) LC_ALL=C sort -u "$member_roots"; exit 0 ;;
-    source-closure-roots) LC_ALL=C sort -u "$source_closure_roots"; exit 0 ;;
+    source-closure-roots)
+        if [ "$source_closure_incomplete" -ne 0 ]; then
+            echo "module_layout_fingerprint: workspace has the six canonical compiler-role capsules but no $test_manifest_root" >&2
+            exit 2
+        fi
+        LC_ALL=C sort -u "$source_closure_roots"
+        exit 0
+        ;;
     member-glob-parents) LC_ALL=C sort -u "$member_glob_parents"; exit 0 ;;
     member-records) LC_ALL=C sort -u "$member_records"; exit 0 ;;
     compiler-manifests)
