@@ -306,7 +306,14 @@ fn serialize_response(rsp: Response, keep_alive: boolean = false) -> string {
 // `body` empty and a length read off the empty string would truncate the
 // asset to nothing.
 fn response_body_length(rsp: Response) -> int {
-    if rsp.body_addr != 0 { return rsp.body_len; }
+    if rsp.body_addr != 0 {
+        // Never negative. A `Content-Length: -1` is a malformed response, and
+        // the same number reaches the marshaller that sizes the outgoing
+        // buffer — so clamping here keeps the header honest and the
+        // allocation sound from one place.
+        if rsp.body_len < 0 { return 0; }
+        return rsp.body_len;
+    }
     return rsp.body.length;
 }
 

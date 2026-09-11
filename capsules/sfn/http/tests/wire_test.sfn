@@ -292,6 +292,14 @@ test "response_body_length: the byte range wins over the string body" {
     assert response_body_length(text) == 5;
 }
 
+test "response_body_length: a negative byte count clamps to zero" {
+    // The same number sizes the outgoing buffer, where a negative length
+    // would under-allocate and overflow on the header copy.
+    let rsp = bytes_response(200, "image/png", 4096, -1);
+    assert response_body_length(rsp) == 0;
+    assert strings_equal(serialize_head(rsp), "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+}
+
 test "serialize_head: states the binary length and appends no body" {
     // The head is text and ends at the blank line; the bytes are copied
     // after it by the server trampoline, which is why this must not try to

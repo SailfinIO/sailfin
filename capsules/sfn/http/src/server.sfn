@@ -104,9 +104,17 @@ fn _http_owned_from_str(s: string) -> OwnedBuf {
 // byte costs one allocation byte and keeps the buffer safe to hand to
 // anything that still scans. Nothing depends on it for the length any more.
 fn _http_owned_from_parts(head: string, body_addr: i64, body_len: i64) -> OwnedBuf {
+    // Clamp before it reaches the arithmetic. A negative length makes
+    // `total` SMALLER than the head, so the allocation below would be
+    // under-sized and the head's own `memcpy` would run off the end of it —
+    // a heap overflow reachable from any handler that miscomputed a length,
+    // which is exactly the class of mistake a byte-range API invites.
+    let mut n: i64 = body_len;
+    if n < 0 { n = 0; }
+
     let head_src: *u8 = head as *u8;
     let head_n: i64 = strlen(head_src) as i64;
-    let total: i64 = head_n + body_len;
+    let total: i64 = head_n + n;
     let copy: *u8 = malloc((total + 1) as usize);
     if copy as i64 == 0 {
         return OwnedBuf {
@@ -117,8 +125,8 @@ fn _http_owned_from_parts(head: string, body_addr: i64, body_len: i64) -> OwnedB
         };
     }
     memcpy(copy, head_src, head_n as usize);
-    if body_len > 0 {
-        memcpy(((copy as i64) + head_n) as *u8, body_addr as *u8, body_len as usize);
+    if n > 0 {
+        memcpy(((copy as i64) + head_n) as *u8, body_addr as *u8, n as usize);
     }
     memset(((copy as i64) + total) as *u8, 0, 1 as usize);
     return OwnedBuf {
