@@ -103,17 +103,22 @@ fn _write_credentials(home: string) -> void ![io] {
     fs.writeFile(home + "/.sfn/credentials", "fake-token\n");
 }
 
-// Build a child env with HOME forced to `home` and any extra `KEY=value`
-// entries appended (this file only ever passes SFN_REGISTRY). `HOME` and
-// `SFN_REGISTRY` are named to `clean_runner_env_without` because this helper
-// goes on to push its own, so an inherited entry earlier in the array cannot
-// shadow the caller's push (SFN-1114). `SFN_TOKEN` is stripped and never
+// Build a child env with HOME and the canonical user-config override forced
+// to `home`, plus any extra `KEY=value` entries (only SFN_REGISTRY here).
+// Native Windows home discovery can fall through HOME to USERPROFILE or
+// HOMEDRIVE+HOMEPATH, while publish's credentials and registry config have a
+// stronger, platform-independent SAILFIN_CONFIG_DIR seam. Bind that seam to
+// the fixture-owned `.sfn` directory so a clean runner and a developer
+// machine resolve the same files (SFN-1237). Every pushed key is first named
+// to `clean_runner_env_without`, preventing inherited duplicates from
+// shadowing the fixture value (SFN-1114). `SFN_TOKEN` is stripped and never
 // re-pushed: an inherited developer credential would defeat the no-token
 // tests' premise and would otherwise be transmitted to whatever registry the
 // child resolves (SFN-1245).
 fn _env_for(home: string, extra: string[]) -> string[] ![io] {
-    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["HOME", "SFN_REGISTRY", "SFN_TOKEN"]);
+    let mut e = clean_runner_env_without(env.get("SAILFIN_TEST_SCRATCH"), ["HOME", "SAILFIN_CONFIG_DIR", "SFN_REGISTRY", "SFN_TOKEN"]);
     e.push("HOME=" + home);
+    e.push("SAILFIN_CONFIG_DIR=" + home + "/.sfn");
     let mut i = 0;
     loop {
         if i >= extra.length { break; }
@@ -437,6 +442,9 @@ test "publish: digest has sha256: prefix" ![clock, io, net] {
         let _err = process.capture_take_stderr();
         return 0;
     });
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
     let captured = fixture_dir + "/last_body";
     assert fs.exists(captured);
     let body = fs.readFile(captured);
@@ -488,6 +496,9 @@ test "publish: payload carries content_b64 with relative packaging" ![clock, io,
         assert contains(out + err, "packaging test/pkg@1.0.0");
         return 0;
     });
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
     let captured = fixture_dir + "/last_body";
     assert fs.exists(captured);
     let body = fs.readFile(captured);
@@ -752,6 +763,9 @@ test "publish: explicit publish = true preserves publishing" ![clock, io, net] {
         assert contains(out + err, "packaging test/pkg@1.0.0");
         return 0;
     });
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
     assert fs.exists(fixture_dir + "/last_body");
 }
 
@@ -776,6 +790,9 @@ test "publish: omitted publish preserves publishing" ![clock, io, net] {
         assert contains(out + err, "packaging test/pkg@1.0.0");
         return 0;
     });
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
     assert fs.exists(fixture_dir + "/last_body");
 }
 
