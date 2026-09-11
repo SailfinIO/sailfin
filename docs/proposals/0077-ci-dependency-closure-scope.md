@@ -1,10 +1,10 @@
 ---
-sfep: TBD
+sfep: 0077
 title: CI Source Scope by Dependency Closure, and the Member Lane
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-09-11
-updated: 2026-09-11
+updated: 2026-09-11  # Phase 1 review: relative-import seed, subset guard
 author: "agent:compiler-architect; human review"
 tracking: "SFN-1278"   # SFN-1279 is the opposite-direction examples gap
 supersedes:
@@ -12,13 +12,13 @@ superseded-by:
 graduates-to: docs/conventions/ci-test-topology.md
 ---
 
-# SFEP-XXXX — CI Source Scope by Dependency Closure, and the Member Lane
+# SFEP-0077 — CI Source Scope by Dependency Closure, and the Member Lane
 
 ## 1. Summary
 
 `ci.yml`'s `ci-scope` job answers "does this PR need the compiler matrix?" with
 "did any of the 31 workspace members change?". That predicate is wrong in one
-direction: 16 of the 31 members are not in the compiler's transitive dependency
+direction: 15 of the 31 members are not in the compiler's transitive dependency
 closure, and changing one cannot affect the compiler binary, the runtime, or
 any test outside its own capsule. Today a one-line edit to `stdlib/tensor`
 spends `check-fast`, three compiler builds, eight Linux shards, five packed
@@ -50,7 +50,8 @@ The closure, computed from every member's `capsule.toml [dependencies]`:
 | Compiler closure | `sfn/compiler`, `sfn/syntax`, `sfn/ir`, `sfn/analyzer`, `sfn/codegen`, `sfn/codegen-llvm`, `sfn/runtime-native`, `sfn/cli`, `sfn/strings`, `sfn/crypto`, `sfn/archive` | 11 |
 | Added by `sfn/test` | `sfn/test`, `sfn/fs`, `sfn/os` | 3 |
 | Added by fixture manifests | `sfn/http` | 1 |
-| **Outside (the member lane)** | `sfn/bench`, `sfn/device`, `sfn/json`, `sfn/layers`, `sfn/log`, `sfn/losses`, `sfn/math`, `sfn/net`, `sfn/nn`, `sfn/path`, `sfn/prelude`, `sfn/sync`, `sfn/tensor`, `sfn/time`, `sfn/toml`, `tools/repo-tooling` | 16 |
+| Added by relative cross-member imports | `sfn/tensor` | 1 |
+| **Outside (the member lane)** | `sfn/bench`, `sfn/device`, `sfn/json`, `sfn/layers`, `sfn/log`, `sfn/losses`, `sfn/math`, `sfn/net`, `sfn/nn`, `sfn/path`, `sfn/prelude`, `sfn/sync`, `sfn/time`, `sfn/toml`, `tools/repo-tooling` | 15 |
 
 Roots: `compiler/capsule.toml` declares ten capsule dependencies;
 `runtime/capsule.toml:132` declares `sfn/crypto`; `sfn/cli`, `sfn/crypto` and
@@ -59,7 +60,7 @@ compiler dependency (`compiler/capsule.toml:63-68`, SFN-496 bare-name
 collision between `sfn/http`'s `get(url)` and `sfn/cli`'s `get(m, name)`);
 it enters only through a test fixture, see §3.3.
 
-Three of the 16 are entirely inert in-tree: `sfn/prelude` and `sfn/toml` have
+Three of the 15 are entirely inert in-tree: `sfn/prelude` and `sfn/toml` have
 zero in-tree importers (the compiler carries its own
 `compiler/src/toml_parser.sfn`), and nothing depends on `tools/repo-tooling`.
 
@@ -157,9 +158,38 @@ Plus one augmentation that is not a `[workspace].members` manifest:
    is a manifest-only operation reusing the same awk at `:235-243` — not an
    import scan, not a resolver.
 
-The union is **15 of 31 members**. Every capsule imported anywhere under
-`compiler/tests/` — `sfn/{test,strings,syntax,fs,ir,os,crypto,codegen,cli,archive,http,analyzer}`
-— is inside it. §8.1 makes that a standing assertion rather than a snapshot.
+**A fourth seed term: relative cross-member imports.** A compiler test may
+reach another member's source by path rather than by capsule name.
+`compiler/tests/unit/tensor_import_signatures_test.sfn:11` imports
+`"../../../stdlib/tensor/src/mod"` (SFN-436), an edge that appears in no
+`[dependencies]` table and that no manifest scan can see. Seeded only from
+manifests, a `stdlib/tensor` change would take the member lane and skip the
+very test that compiles it — rule 2's always-full `compiler/tests/*` glob does
+not help, because it fires on edits *to* a test, not to what a test imports.
+So the walk also scans `.sfn` sources under `compiler/tests/` for `..`-relative
+import specs, normalizes each against the importing file's directory, and
+attributes it to the longest member root that prefixes it. This is the one
+term that reads source text rather than manifests; it is confined to
+`compiler/tests/` and can only ever widen the closure.
+
+**The cost of that seed is that it makes the corresponding test tautological.**
+A seed term and an assertion over the same edges cannot both be load-bearing:
+once the walk consumes relative imports, the closure carries them by
+construction. That is the right trade for *soundness* — the alternative is a
+lane that skips `tensor_import_signatures_test.sfn` — but it means §8.1's
+relative-import coverage is a consistency check, not a guard, and it is stated
+that way there. The deeper issue is that a compiler test reaching another
+member's source by path bypasses the capsule dependency system entirely, and
+the closure is compensating for it; reconciling that (a declared edge, or a
+bare-name import) would restore the assertion's force and is worth doing
+independently of this design.
+
+The union is **16 of 31 members**. Every capsule reached from under
+`compiler/tests/` — by bare name
+(`sfn/{test,strings,syntax,fs,ir,os,crypto,codegen,cli,archive,http,analyzer}`)
+or by relative path (`sfn/tensor`) — is inside it. §8.1 makes that a standing assertion over the
+bare-name form, with the relative form as a consistency check between two
+implementations of the same normalization.
 
 ### 3.3 The classification is three-valued, and fail-closed at every edge
 
@@ -193,8 +223,33 @@ never `member` and never `none`.
 **The existing empty-inventory guard (`ci.yml:124-127`) keeps its shape and
 gains a sibling.** Today: empty `workspace_roots` or `workspace_inputs` →
 `::error::Workspace inventory is empty; refusing to narrow CI scope` and exit 1.
-Add: an empty closure, or a closure that is not a strict subset of the member
-roots, is the same error. The script's own guards
+Add: an empty closure, or a closure containing a path that is not a member
+root, is the same error. Note **subset, not *strict* subset**: nothing
+guarantees strictness, and a workspace where every member is reachable from
+the compiler is one with no member lane available, not a fault. Guarding on
+strictness would fail CI with "refusing to narrow CI scope" for a change that
+is in fact safe.
+
+**One guard belongs in the script, not in `ci.yml`.** The `compiler/tests/`
+seed terms are guarded on that directory existing, so a fixture workspace
+without one still resolves. But if the directory were ever renamed in the
+*real* workspace, the seed would silently skip and the closure would narrow
+from 16 to 14 — losing exactly `sfn/http` and `sfn/tensor`, the two members
+whose only path in is that directory. A narrowed-but-plausible closure is
+non-empty and contains only member roots, so it passes **both** guards above:
+the failure is invisible to `ci.yml` by construction and has to be raised
+where the seed is read. `module_layout_fingerprint.sh` therefore `exit 2`s
+when a workspace carries all six canonical compiler-role capsules but no
+`compiler/tests`, which leaves fixture workspaces (none of which carry all
+six) exempt.
+
+**That failure is scoped to `--source-closure-roots` alone.** The closure is
+computed before the mode dispatch, so raising it where it is detected would
+fail *every* mode — including `--ci-freshness`, which keys the CI build cache,
+and `--public-members`, which `capsule-release.yml:126` depends on. Only the
+source closure is unsound without the seed, so the condition is recorded during
+computation and raised in that one dispatch arm. Phase 1's guarantee that no
+pre-existing mode changes behaviour holds in this edge case too. The script's own guards
 (`module_layout_fingerprint.sh:135-138` empty members, `:183-199` missing or
 unnamed manifest, `:196-199` duplicate name) already `exit 2`, and `set -euo
 pipefail` in the step propagates that. Every failure mode widens or errors;
@@ -459,13 +514,28 @@ The load-bearing file. Drives `scripts/module_layout_fingerprint.sh` via
 `process.run_capture_cwd`, modelled on
 `compiler/tests/e2e/module_layout_fingerprint_test.sfn:94-113`.
 
-- *"ci source closure: the closure is a strict non-empty subset of member
+- *"ci source closure: the closure is a non-empty subset of member
   roots"* — the fail-closed shape the workflow guard depends on.
 - *"ci source closure: every capsule imported under compiler/tests is in the
   closure"* — scan `compiler/tests/**/*.sfn` for `from "sfn/<name>"`, map to
   member roots via `--member-records`, assert each is in `--source-closure-roots`.
-  **This is the test that makes a member-lane green honest**, and it fails the
-  day someone imports `sfn/tensor` from a compiler test.
+  Covers **both** import forms, which carry different weight.
+
+  **Bare-name imports are the soundness assertion.** The walk never seeds from
+  them, so a compiler test importing an out-of-closure capsule by name fails
+  this test. Verified by falsification: a scratch test importing `sfn/nn`
+  by name fails the assertion, and removing it restores green. `sfn/nn` and
+  not `sfn/tensor` — the fourth seed term pulls `stdlib/tensor` into the
+  closure, so a bare-name import of *that* now passes. This is the
+  half that makes a member-lane green honest, and it covers the dominant form
+  — 1431 of the import sites under `compiler/tests/` today.
+
+  **The relative half cannot fail that way, and the SFEP should not claim it
+  can.** §3.2's fourth seed term means the closure is widened by exactly these
+  edges, so adding one widens the closure to match. What the relative half
+  checks is that the test's normalization and the script's awk normalization
+  agree on `..` resolution and longest-member-root attribution — a differential
+  check between two implementations, not a guard against a missing member.
 - *"ci source closure: every capsule declared by a compiler/tests fixture
   manifest is in the closure"* — the `sfn/http` case, asserted from the
   manifests rather than from the import text.
@@ -550,7 +620,7 @@ the new closure from compiler-role ∪ runtime ∪ `sfn/test` ∪ every
 `compiler/tests/**/capsule.toml` `[dependencies]` entry. Leave `--ci-freshness`
 seeded exactly as today.
 
-**Acceptance:** §8.1 and §8.3 pass; `--source-closure-roots` emits 15 roots on
+**Acceptance:** §8.1 and §8.3 pass; `--source-closure-roots` emits 16 roots on
 this checkout; `--ci-freshness` digest is byte-identical to `main`'s.
 **Nothing in CI consumes the new mode yet**, so this phase cannot change any
 run's scope.
