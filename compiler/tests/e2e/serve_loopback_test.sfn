@@ -40,7 +40,7 @@
 // text with `sfn/strings::contains` instead.
 import { remove_all } from "sfn/fs";
 import { Env, env_from_current } from "sfn/os";
-import { contains } from "sfn/strings";
+import { contains, find, int_to_string } from "sfn/strings";
 import {
     Background,
     report_child_failure,
@@ -231,6 +231,38 @@ fn _lb_request(port: i64, request: string) -> string ![net] {
     return resp;
 }
 
+// `_lb_request_len(port, request)` — the byte COUNT of the response, not
+// its text.
+//
+// `_lb_recv_all` returns `buf as string`, and a `string` ends at its first
+// NUL — so a binary body is exactly what that helper cannot report on. The
+// truncation this guards against would shorten the response, so counting
+// the bytes off the socket is the assertion that can see it. Returns -1 on
+// a connect/send failure.
+fn _lb_request_len(port: i64, request: string) -> i64 ![net] {
+    let fd: i32 = _lb_connect(port);
+    if fd < 0 { return 0 - 1; }
+    if !_lb_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
+        sfn_socket_close(fd);
+        return 0 - 1;
+    }
+    let chunk: i64 = 8192;
+    let buf: *u8 = malloc((chunk + 1) as usize);
+    if buf as i64 == 0 {
+        sfn_socket_close(fd);
+        return 0 - 1;
+    }
+    let mut total: i64 = 0;
+    loop {
+        let n: i64 = recv(fd, buf, chunk, 0);
+        if n <= 0 { break; }
+        total = total + n;
+    }
+    free(buf);
+    sfn_socket_close(fd);
+    return total;
+}
+
 // `_lb_fire_and_close(port, request)` — connect, send `request` (which may
 // be empty), then close WITHOUT reading the response. The fire-and-forget
 // shape for driving the server's error paths (empty / truncated
@@ -294,9 +326,28 @@ fn _write_server(port_str: string) -> string ![io] {
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
-    fs.writeFile(root + "/src/main.sfn", "import { serve, Request, Response, not_found } from \"sfn/http\";\n"
+    fs.writeFile(root + "/src/main.sfn", "import { bytes_response, serve, Request, Response, not_found } from \"sfn/http\";\n"
+        + "\n"
+        + "extern fn malloc(size: usize) -> *u8;\n"
+        + "\n"
+        + "extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;\n"
+        + "\n"
+        + "// A body whose 4th byte is NUL. The framed send path measured the\n"
+        + "// response with `strlen` until it was taught to carry the handler's\n"
+        + "// own `OwnedBuf.len`, which truncated this to 3 bytes on the wire\n"
+        + "// under a Content-Length that honestly said 8.\n"
+        + "fn _bin_body() -> int {\n"
+        + "    let p: *u8 = malloc(8 as usize);\n"
+        + "    if p as i64 == 0 { return 0; }\n"
+        + "    memset(p, 65, 8 as usize);\n"
+        + "    memset(((p as i64) + 3) as *u8, 0, 1 as usize);\n"
+        + "    return p as i64;\n"
+        + "}\n"
         + "\n"
         + "fn handle(req: Request) -> Response {\n"
+        + "    if strings_equal(req.path, \"/binary\") {\n"
+        + "        return bytes_response(200, \"application/octet-stream\", _bin_body(), 8);\n"
+        + "    }\n"
         + "    if strings_equal(req.path, \"/\") {\n"
         + "        return Response { status: 200, headers: [\"X-Root: 1\"], body: \"ROOT-OK\", body_addr: 0, body_len: 0 };\n"
         + "    }\n"
@@ -476,6 +527,27 @@ test "serve loopback: macOS request delivery + framed behavioral round-trips" ![
         assert contains(echo_resp, "HTTP/1.1 200");
         assert contains(echo_resp, "X-Echo: 1");
         assert contains(echo_resp, body);
+
+        // A binary body survives past its first NUL (the framed send path
+        // now takes the length from the handler's `OwnedBuf.len` rather
+        // than re-deriving it with `strlen`). The head is NUL-free so it
+        // reads back as text; the body is counted off the socket instead,
+        // because a `string` could not hold it.
+        let bin_head = _lb_request(port, "GET /binary HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        print.info("[serve-loopback] binary head: " + bin_head);
+        assert contains(bin_head, "HTTP/1.1 200");
+        assert contains(bin_head, "Content-Type: application/octet-stream");
+        assert contains(bin_head, "Content-Length: 8");
+        // The head ends at the blank line; `find` locates it so the expected
+        // total is derived rather than hard-coded against header text that
+        // may grow.
+        let sep = find(bin_head, "\r\n\r\n", 0);
+        assert sep > 0;
+        let head_len = sep + 4;
+        let bin_total = _lb_request_len(port, "GET /binary HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        print.info("[serve-loopback] binary total bytes: " + int_to_string(bin_total as int));
+        // Truncation at the NUL would land this at head_len + 3.
+        assert bin_total == (head_len as i64) + 8;
 
         // Custom status + header reach the wire via the framed path.
         let secret_resp = _lb_request(port, "GET /secret HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
