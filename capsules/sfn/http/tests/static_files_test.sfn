@@ -118,10 +118,20 @@ test "static_file: a missing file is a 404" ![io] {
     remove_all(dir);
 }
 
+// A nested fixture directory is minted with `mkdtemp` rather than `mkdir`,
+// and that is not a style preference. `sfn/fs`'s `mkdir` lowers to
+// `declare void @mkdir({i8*, i64})` and links against libc's
+// `mkdir(path, mode)`, so the Sailfin string's LENGTH word arrives in the
+// mode register: a 32-byte path yields mode 0o040, a 25-byte one 0o031.
+// The directory is created unwritable, every write into it fails, and the
+// whole thing is invisible to anyone running the suite as root because root
+// bypasses the permission check — which is why this passed locally and
+// failed on CI. `mkdtemp` goes through `mkdtemp(3)` and takes no mode.
+// Revert to `mkdir` once SFN-1277 lands.
 test "static_file: a dot-segment traversal is refused" ![io] {
     let base = mkdtemp("sfnhttp");
-    let root = base + "/public";
-    mkdir(root);
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
     write(base + "/secret.txt", "classified");
     write(root + "/ok.txt", "public");
 
@@ -142,8 +152,8 @@ test "static_file: a percent-encoded traversal is refused" ![io] {
     // `%2e%2e%2f` carries no `..` segment until it is decoded, so this is
     // the case that fails when the segment check runs before the decode.
     let base = mkdtemp("sfnhttp");
-    let root = base + "/public";
-    mkdir(root);
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
     write(base + "/secret.txt", "classified");
 
     let a = static_file(root, "/%2e%2e/secret.txt");
@@ -181,8 +191,8 @@ test "static_file: a symlink pointing outside the root is refused" ![io] {
     // The guard no segment check can make: every segment of `/out/secret.txt`
     // is innocent, and only canonicalizing the result catches it.
     let base = mkdtemp("sfnhttp");
-    let root = base + "/public";
-    mkdir(root);
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
     write(base + "/secret.txt", "classified");
     symlink(base, root + "/out");
 
@@ -194,14 +204,18 @@ test "static_file: a symlink pointing outside the root is refused" ![io] {
 }
 
 test "static_file: a sibling root sharing a name prefix is not served" ![io] {
-    // `/tmp/x/public-old` starts with `/tmp/x/public` and is a different
-    // tree: containment is a path test, not a string-prefix test.
+    // `<root>-old<suffix>` starts with `<root>` and is a different tree:
+    // containment is a path test, not a string-prefix test.
     let base = mkdtemp("sfnhttp");
-    let root = base + "/public";
-    mkdir(root);
-    mkdir(base + "/public-old");
-    write(base + "/public-old/secret.txt", "classified");
-    symlink(base + "/public-old", root + "/sib");
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
+    // `mkdtemp` appends its own suffix, so this sibling's path begins with
+    // the whole of `root` and then diverges — exactly the string-prefix
+    // relationship the containment test must not be fooled by.
+    let sibling = mkdtemp(root + "-old");
+    assert sibling.length > 0;
+    write(sibling + "/secret.txt", "classified");
+    symlink(sibling, root + "/sib");
 
     let rsp = static_file(root, "/sib/secret.txt");
     assert rsp.status == 403;
