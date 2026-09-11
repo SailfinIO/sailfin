@@ -1008,10 +1008,18 @@ struct Response {
     status: int;
     headers: string[];
     body: string;
+    body_addr: int;
+    body_len: int;
 }
 ```
 
 An outgoing HTTP response. `headers` are raw `"Name: value"` lines; framing headers (`Content-Length`, `Connection`, `Transfer-Encoding`) and any header containing CR/LF are added or dropped automatically by `serialize_response`.
+
+`body_addr` / `body_len` carry a **binary** body — bytes a `string` cannot hold, because a Sailfin `string` recovers its length by a NUL scan and so ends at its first zero byte. When `body_addr` is non-zero it is authoritative and `body` is ignored.
+
+> **Breaking change.** A `Response` literal must state **all five** fields. A partial literal typechecks and then fails at LLVM lowering with `E1002` ("refusing to fabricate a default"), so an existing `Response { status, headers, body }` needs `body_addr: 0, body_len: 0` added. Code that builds responses through `response`, `html_response`, `json_response`, `not_found`, `redirect` and friends needs no change — the builders set both.
+
+**Ownership of `body_addr` transfers to the server**: `serve` copies the bytes onto the wire and then frees the buffer, so a handler that read a file hands it over and frees nothing. The pointer must therefore be a `malloc`'d buffer the handler is finished with — never a literal, a stack address, or a buffer reused across requests. Use `bytes_response` to build one, or `static_file`, which does it for you.
 
 ---
 
@@ -1035,6 +1043,8 @@ Carried for forward compatibility. **`host` is not enforced in v0** — the runt
 Start a blocking HTTP/1.1 server on `port`. Dispatches each accepted connection to `handler` and does not return. Only one server per process is supported in v0.
 
 The handler **must be a top-level named function passed address-taken**. Closures are not supported as handlers in v0; the type system enforces this.
+
+A handler **may declare effects** — `fn handle(req: Request) -> Response ![io]` is accepted, which is what lets one call `static_file`. The address-taken cast erases the annotation from the type, but reach is not lost with it: `serve` is itself `![io, net]` and every caller up to `main` must declare the same, so the capsule's capability manifest still names both.
 
 ```sfn
 import { serve, Request, Response, response, not_found } from "sfn/http";
@@ -1121,6 +1131,53 @@ fn handle(req: Request) -> Response {
 
 ---
 
+#### `text_response(body: string) -> Response`
+
+Build a 200 OK response with `Content-Type: text/plain; charset=utf-8`. Byte-identical on the wire to bare `response()`, which defaults to the same type — it exists so a handler can say it meant plain text.
+
+---
+
+#### `html_response(body: string) -> Response`
+
+Build a 200 OK response with `Content-Type: text/html; charset=utf-8`.
+
+```sfn
+fn handle(req: Request) -> Response {
+    return html_response("<h1>Hello</h1>");
+}
+```
+
+Declaring the charset matters: an HTML response that does not leaves the browser to pick an encoding from its own locale.
+
+---
+
+#### `html_response_with_status(status: int, body: string) -> Response`
+
+The same, under an explicit status — a styled `404` or `500` page.
+
+---
+
+#### `bytes_response(status: int, content_type: string, addr: int, length: int) -> Response`
+
+Build a response whose body is a raw byte range rather than a `string`, for content a `string` cannot carry. `addr` must be a `malloc`'d buffer whose ownership passes to the server (see `Response` above).
+
+---
+
+#### `redirect(location: string, status: int = 302) -> Response`
+
+Build a bodiless redirect carrying a `Location` header.
+
+```sfn
+fn handle(req: Request) -> Response {
+    if strings_equal(req.path, "/old") { return redirect("/new"); }
+    return not_found();
+}
+```
+
+`302` is the default because a `301` is cached by browsers indefinitely and is close to irreversible once served; ask for `301` explicitly when you mean it. A `location` containing CR or LF returns a `500` rather than a redirect with the header stripped — a redirect that silently goes nowhere is worse than a reported fault.
+
+---
+
 #### `not_found(body: string = "Not Found") -> Response`
 
 Build a 404 Not Found response.
@@ -1159,11 +1216,42 @@ let rsp = parse_response("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
 
 #### `serialize_response(rsp: Response, keep_alive: boolean = false) -> string`
 
-Serialize a `Response` to a raw HTTP/1.1 response string. Emits the status line (using an internal reason-phrase table), the user-supplied headers, `Content-Length`, and a `Connection` header: `Connection: keep-alive` when `keep_alive` is `true`, otherwise `Connection: close` (the default). Any user header containing CR or LF is silently dropped (injection guard). Headers that name `Content-Length`, `Connection`, or `Transfer-Encoding` are also dropped to prevent response smuggling.
+Serialize a `Response` to a raw HTTP/1.1 response string. Emits the status line (using an internal reason-phrase table), the user-supplied headers, a defaulted `Content-Type` (below), `Content-Length`, and a `Connection` header: `Connection: keep-alive` when `keep_alive` is `true`, otherwise `Connection: close` (the default). Any user header containing CR or LF is silently dropped (injection guard). Headers that name `Content-Length`, `Connection`, or `Transfer-Encoding` are also dropped to prevent response smuggling.
 
 ```sfn
 let raw = serialize_response(Response { status: 200, headers: [], body: "OK" });
 ```
+
+**`Content-Type` defaulting.** A response with a body and no `Content-Type` of its own gets `text/plain; charset=utf-8`. An untyped response leaves the browser to sniff a type from the content, which is the mechanism behind content-type-confusion XSS; `text/plain` renders anything inertly. An explicit `Content-Type` always wins — the check is case-insensitive on the header name, so `content-type:` suppresses the default too — and a **bodiless** response (a `204`, a `304`, a redirect) gets no `Content-Type` at all.
+
+---
+
+#### `serialize_head(rsp: Response, keep_alive: boolean = false) -> string`
+
+Everything up to and including the blank line that ends the header block, with no body appended. `serialize_response` is this plus `rsp.body`.
+
+Split out because a binary body cannot be concatenated onto a `string`: the server's trampoline serializes the head as text and copies `body_len` bytes after it. Handlers rarely need this directly.
+
+---
+
+#### `response_body_length(rsp: Response) -> int`
+
+The byte count `Content-Length` will state: `body_len` when `body_addr` is set, otherwise `body.length`.
+
+---
+
+#### `html_escape(value: string) -> string`
+
+Escape the five markup-significant characters — `&`, `<`, `>`, `"`, `'` — so untrusted text is safe to concatenate into a page.
+
+```sfn
+let name = query_param(req, "name");
+if name != null {
+    return html_response("<h1>Hello, " + html_escape(name) + "</h1>");
+}
+```
+
+This capsule ships **no template engine**, so pages are built by joining strings — which is exactly the shape that grows an XSS hole the first time a query parameter is interpolated into one. `'` is escaped as `&#39;` rather than `&apos;` (the latter is XHTML and undefined in HTML4), and both quote characters are covered, so the result is safe in an attribute value as well as in element text.
 
 ---
 
@@ -1286,13 +1374,60 @@ v0 limit: the response to each `_send` call must carry a `Content-Length` header
 
 ---
 
+### Static files
+
+#### `static_file(root: string, url_path: string, index: string = "index.html") -> Response ![io]`
+
+Serve a file under `root`, answering with its bytes and a `Content-Type` from the media-type table. `url_path` is `Request.path` — already split from the query string by `parse_request`.
+
+```sfn
+fn handle(req: Request) -> Response {
+    return static_file("./public", req.path);
+}
+```
+
+Answers `200` with the file, `403` when the URL's *shape* is a refusal, `404` when the shape is fine and the file is not there, and `500` when `root` itself does not resolve (a server misconfiguration rather than anything the request did). A directory request serves `index` inside it; passing `""` for `index` makes a directory a `404`.
+
+**Directory listing is deliberately not offered.** A listing is a feature that has to be opted out of on every deploy that does not want one.
+
+**Path traversal is refused by three independent guards**, because the attack has three distinct shapes:
+
+1. **Percent-encoding** is decoded *before* the segment check, never after — `/..%2f..%2fetc/passwd` carries no `..` segment until it is decoded. An escape that decodes to NUL, and a malformed escape, are both refused outright rather than passed through.
+2. **Dot segments** are rejected per path segment after the split on `/`, not by searching the joined string for `".."` — a substring search also rejects the legitimate file `my..notes.txt`.
+3. **Symlinks** are caught by canonicalizing the result with `realpath` and requiring it to sit under the canonicalized root. A segment check cannot see these: every segment of `/assets/link` is innocent when `link` points at `/etc`. Containment is a path test rather than a string-prefix test, so a sibling root such as `/srv/www-old` is not served from `/srv/www`.
+
+Guard 3 subsumes the other two on POSIX; they remain because `realpath` answers only for paths that exist, so without them a traversal to a nonexistent path would be indistinguishable from a typo.
+
+The response body is a heap buffer whose ownership passes to `serve`, which frees it after the send — a static-asset handler frees nothing itself.
+
+---
+
+#### `content_type_for_path(path: string) -> string`
+
+The full `Content-Type` header value for `path`'s extension — markup, styles, scripts, data, images, fonts, media and archives — matched case-insensitively.
+
+Unknown extensions fall back to `application/octet-stream`, never `text/plain`: an unknown type served as text invites sniffing, and octet-stream is the type that means "bytes, do not interpret". A dot inside a directory name is not read as the file's extension, and a dotfile (`.gitignore`) has no extension.
+
+---
+
+#### `is_text_media_type(value: string) -> boolean`
+
+True when `value`'s media type is one the table labels UTF-8 text (`text/*`, `application/json`, `application/xml`, `application/manifest+json`, `image/svg+xml`).
+
+---
+
 ### v0 limitations
 
 - **HTTP/1.1 only, blocking accept.** The typed capsule provides plaintext `serve` and TLS `serve_tls`; inbound TLS termination is enforced end-to-end (SFEP-0036) and fails closed on cert/key load errors. Keep-alive IS honored: the server reuses a connection for back-to-back requests unless the client sends `Connection: close` (#1711). HTTP pipelining (multiple in-flight requests on one connection) remains out of scope.
 - **`Content-Length` bodies only** — POST/PUT request bodies are drained via `Content-Length` (capped at 1 MiB; over-cap requests get a `500`), so `Request.body` is reliable. Chunked transfer-encoding is not decoded (post-1.0).
 - **`host` binding not enforced** — the server always binds `INADDR_ANY` regardless of `ServerConfig.host`.
-- **Per-request allocations are not freed** — a known leak; acceptable for short-lived or v0 servers but not production long-running processes.
+- **Per-request allocations are not freed** — a known leak; acceptable for short-lived or v0 servers but not production long-running processes. A binary body (`body_addr`) is the exception: the server frees it after the send, so serving static assets does not leak a file per request.
 - **One server per process** — multiple concurrent `serve` calls in one process are not supported in v0.
+- **No template engine, and none planned as a language feature** — pages are built by concatenating strings, with `html_escape` for anything that came from the request. Templating is a library concern.
+- **No `ETag`, `Last-Modified` or conditional requests** — `static_file` always sends the whole file, and does not consult `If-None-Match` / `If-Modified-Since`. Every asset is re-sent on every load.
+- **No `Range` requests** — a partial-content request is answered with the whole file and a `200`, so seeking within a large media file is not supported.
+- **No compression** — no `Content-Encoding: gzip`, and `Accept-Encoding` is ignored.
+- **`static_file` reads the whole file into memory** before sending, so peak memory tracks the largest asset served rather than a fixed buffer.
 
 ---
 

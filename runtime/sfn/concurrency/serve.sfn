@@ -624,20 +624,29 @@ fn _serve_send_response(fd: i32, ssl: *u8, body: *u8, keep_alive: bool) -> bool 
     return ok;
 }
 
-// `_serve_send_raw(fd, ssl, resp)` — write a pre-framed HTTP response
+// `_serve_send_raw(fd, ssl, resp, len)` — write a pre-framed HTTP response
 // verbatim. This is the framed-handler contract used by `sfn_serve_framed`:
 // the handler returns the FULL response (status line + headers + body),
 // so the runtime adds no framing of its own. A null `resp` becomes a
-// `500 Internal Server Error`. Returns false on a send failure. v0 is
-// text responses (NUL-terminated); embedded-NUL binary bodies are out of
-// scope (the `strlen` length stops at the first NUL). `ssl` selects the
-// transport (null → raw `send`, non-null → TLS).
-fn _serve_send_raw(fd: i32, ssl: *u8, resp: *u8) -> bool {
+// `500 Internal Server Error`. Returns false on a send failure. `ssl`
+// selects the transport (null → raw `send`, non-null → TLS).
+//
+// `len` is the response's own byte count, taken from the handler's
+// `OwnedBuf.len` rather than re-measured with `strlen` here. The buffer
+// already carried its exact length across the handler boundary, and
+// re-deriving it by a NUL scan discarded that: it capped every response at
+// its first zero byte, which is what confined the server to text bodies.
+// An image, a font or a compressed asset is indistinguishable from text
+// until its first NUL, so the failure was a body silently truncated
+// mid-asset under a `Content-Length` the handler had computed honestly —
+// which no client can recover from and nothing on the server logs.
+fn _serve_send_raw(fd: i32, ssl: *u8, resp: *u8, len: i64) -> bool {
     if resp as i64 == 0 {
         let err: string = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         return _serve_send_all(fd, ssl, err as *u8, strlen(err as *u8) as i64);
     }
-    return _serve_send_all(fd, ssl, resp, strlen(resp) as i64);
+    if len <= 0 { return true; }
+    return _serve_send_all(fd, ssl, resp, len);
 }
 
 // `OwnedBuf` — the runtime owned-buffer aggregate (`runtime/sfn/memory/
@@ -830,14 +839,16 @@ fn _serve_conn_worker_framed(ctx: *u8) -> *u8 {
     loop {
         let request: *u8 = _serve_recv_request(client_fd as i32, null);
         if request as i64 == 0 {
-            if first { _serve_send_raw(client_fd as i32, null, null); }
+            if first {
+                _serve_send_raw(client_fd as i32, null, null, 0);
+            }
             break;
         }
         first = false;
         let keep_alive: bool = _serve_keep_alive(request);
         let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
         let response: OwnedBuf = sfn_serve_handler_dispatch(handler as *u8, req_box);
-        let sent_ok: bool = _serve_send_raw(client_fd as i32, null, response.ptr_addr as *u8);
+        let sent_ok: bool = _serve_send_raw(client_fd as i32, null, response.ptr_addr as *u8, response.len);
         _serve_free_owned(response);
         if !keep_alive { break; }
         if !sent_ok { break; }
@@ -943,14 +954,16 @@ fn _serve_conn_worker_framed_tls(ctx: *u8) -> *u8 {
     loop {
         let request: *u8 = _serve_recv_request(client_fd as i32, ssl);
         if request as i64 == 0 {
-            if first { _serve_send_raw(client_fd as i32, ssl, null); }
+            if first {
+                _serve_send_raw(client_fd as i32, ssl, null, 0);
+            }
             break;
         }
         first = false;
         let keep_alive: bool = _serve_keep_alive(request);
         let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
         let response: OwnedBuf = sfn_serve_handler_dispatch(handler as *u8, req_box);
-        let sent_ok: bool = _serve_send_raw(client_fd as i32, ssl, response.ptr_addr as *u8);
+        let sent_ok: bool = _serve_send_raw(client_fd as i32, ssl, response.ptr_addr as *u8, response.len);
         _serve_free_owned(response);
         if !keep_alive { break; }
         if !sent_ok { break; }

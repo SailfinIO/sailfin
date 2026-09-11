@@ -1,0 +1,58 @@
+// Tests for the sfn/http media-type table.
+//
+// Pure lookup coverage — no filesystem, no socket. The traversal-guard and
+// file-reading half lives in `static_files_test.sfn`.
+import { content_type_for_path, is_text_media_type } from "../src/mod";
+
+test "mime: markup and style extensions carry a charset" {
+    assert strings_equal(content_type_for_path("/index.html"), "text/html; charset=utf-8");
+    assert strings_equal(content_type_for_path("/a/b/page.htm"), "text/html; charset=utf-8");
+    assert strings_equal(content_type_for_path("/site.css"), "text/css; charset=utf-8");
+    assert strings_equal(content_type_for_path("/app.js"), "text/javascript; charset=utf-8");
+    assert strings_equal(content_type_for_path("/mod.mjs"), "text/javascript; charset=utf-8");
+}
+
+test "mime: binary assets carry no charset" {
+    assert strings_equal(content_type_for_path("/logo.png"), "image/png");
+    assert strings_equal(content_type_for_path("/photo.JPG"), "image/jpeg");
+    assert strings_equal(content_type_for_path("/f.woff2"), "font/woff2");
+    assert strings_equal(content_type_for_path("/doc.pdf"), "application/pdf");
+}
+
+test "mime: extension matching is case-insensitive" {
+    // A capitalised extension is the same file type — a server that served
+    // `/LOGO.PNG` as octet-stream would make the same asset behave
+    // differently depending on how it was named.
+    assert strings_equal(content_type_for_path("/LOGO.PNG"), "image/png");
+    assert strings_equal(content_type_for_path("/Index.HtMl"), "text/html; charset=utf-8");
+}
+
+test "mime: an unknown extension falls back to octet-stream" {
+    // Never text/plain: an unknown type served as text invites sniffing,
+    // and octet-stream is the type that means "do not interpret".
+    assert strings_equal(content_type_for_path("/archive.xyz"), "application/octet-stream");
+    assert strings_equal(content_type_for_path("/LICENSE"), "application/octet-stream");
+}
+
+test "mime: a dot in a directory does not become the file's extension" {
+    // `/assets/v1.2/README` has no extension — reading `.2/README` off the
+    // directory would label an extensionless file by its parent's version.
+    assert strings_equal(content_type_for_path("/assets/v1.2/README"), "application/octet-stream");
+    assert strings_equal(content_type_for_path("/assets/v1.2/app.css"), "text/css; charset=utf-8");
+}
+
+test "mime: a dotfile's name is not an extension" {
+    // `.gitignore` is a name beginning with a dot, not a `gitignore` type.
+    assert strings_equal(content_type_for_path("/.gitignore"), "application/octet-stream");
+    assert strings_equal(content_type_for_path("/dir/.env"), "application/octet-stream");
+}
+
+test "mime: is_text_media_type recognises the utf-8 families" {
+    assert is_text_media_type("text/html; charset=utf-8");
+    assert is_text_media_type("text/plain");
+    assert is_text_media_type("application/json; charset=utf-8");
+    assert is_text_media_type("image/svg+xml; charset=utf-8");
+    assert ! is_text_media_type("image/png");
+    assert ! is_text_media_type("application/octet-stream");
+    assert ! is_text_media_type("font/woff2");
+}

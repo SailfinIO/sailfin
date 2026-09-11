@@ -43,7 +43,9 @@ fn handle(req: Request) -> Response {
         return Response {
             status: 200,
             headers: ["Content-Type: application/json"],
-            body: json_users()
+            body: json_users(),
+            body_addr: 0,
+            body_len: 0
         };
     }
 
@@ -54,7 +56,9 @@ fn handle(req: Request) -> Response {
             return Response {
                 status: 200,
                 headers: ["Content-Type: application/json"],
-                body: json_user(user as User)
+                body: json_user(user as User),
+                body_addr: 0,
+                body_len: 0
             };
         }
         return not_found();
@@ -69,7 +73,9 @@ fn handle(req: Request) -> Response {
         return Response {
             status: 201,
             headers: ["Content-Type: application/json"],
-            body: json_user(user)
+            body: json_user(user),
+            body_addr: 0,
+            body_len: 0
         };
     }
 

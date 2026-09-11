@@ -45,6 +45,7 @@ SKIP_RUN=(
     "examples/basics/tests.sfn"
     "examples/web/http-server.sfn"
     "examples/web/rest-api.sfn"
+    "examples/web/static-site.sfn"
     "examples/web/websocket-chat.sfn"
     "examples/advanced/web-server-with-concurrency.sfn"
 )

@@ -43,7 +43,7 @@ test "capsule resolver: transitive dep of a declared capsule links and runs" ![i
     fs.writeFile(root + "/src/main.sfn", "import { serialize_response, Response } from \"sfn/http\";\n"
         + "\n"
         + "fn main() -> int ![net, io] {\n"
-        + "    let rsp = Response { status: 200, headers: [], body: \"hi\" };\n"
+        + "    let rsp = Response { status: 200, headers: [], body: \"hi\", body_addr: 0, body_len: 0 };\n"
         + "    print.info(serialize_response(rsp, false));\n"
         + "    return 0;\n"
         + "}\n");
