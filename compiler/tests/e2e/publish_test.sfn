@@ -6,7 +6,7 @@
 // SFN-496 replaced that with an in-process HTTP call, so the
 // network-dependent cases below no longer intercept anything via a
 // PATH-injected fake HTTP client. They instead run
-// a small generated `sfn/http` server (`_write_fixture_server`, built once
+// a small generated `sfn/net` server (`_write_fixture_server`, built once
 // via `_ensure_fixture_bin`) as a background subprocess on loopback, point
 // `SFN_REGISTRY` at it, and inspect what the fixture records under
 // `SFN_FIXTURE_DIR` (`last_path` / `last_body`) after the CLI run
@@ -79,6 +79,15 @@ fn _child_env() -> string[] ![io] {
 fn _test_root(tag: string) -> string ![io] {
     let root = _scratch_dir() + "/publish-" + tag;
     fs.createDirectory(root, true);
+    // The same scratch root may survive a cached or repeated invocation. A
+    // stale port is not a valid readiness signal for the next server process,
+    // and stale recordings can make an upload look successful (SFN-1237).
+    let fixture = root + "/fixture";
+    let markers = ["port", "last_path", "last_body", "status400", "index.json"];
+    for marker in markers {
+        let path = fixture + "/" + marker;
+        if fs.exists(path) { fs.deleteFile(path); }
+    }
     return root;
 }
 
@@ -151,8 +160,8 @@ fn _first_line(text: string) -> string {
 
 // ── Fixture registry server (SFN-496) ──────────────────────────────
 //
-// A generated `sfn/http` capsule, built once and run as a background
-// subprocess on loopback. `handle` records every request's path and body
+// A generated `sfn/net` capsule, built once and run as a background
+// subprocess on loopback. Its one-shot handler records the request path and body
 // under `SFN_FIXTURE_DIR` (set per-test), and can be told to answer with a
 // 400 (marker file `status400`). The complete Windows inventory can overlap
 // nested or repeated copies of this file. Keep the build root under the
@@ -176,7 +185,6 @@ fn _write_fixture_server() -> string ![io] {
         + "description = \"sfn publish e2e fixture registry\"\n"
         + "\n"
         + "[dependencies]\n"
-        + "\"sfn/http\" = \"*\"\n"
         + "\"sfn/net\" = \"*\"\n"
         + "\n"
         + "[capabilities]\n"
@@ -185,26 +193,29 @@ fn _write_fixture_server() -> string ![io] {
         + "[build]\n"
         + "entry = \"src/main.sfn\"\n"
         + "kind = \"library\"\n");
-    fs.writeFile(root + "/src/main.sfn", "import { parse_request, serialize_response, Request, Response } from \"sfn/http\";\n"
-        + "import { accept, close, is_open, listen, read_bytes, write_all } from \"sfn/net\";\n"
+    fs.writeFile(root + "/src/main.sfn", "import { accept, close, close_listener, is_open, listen, read_bytes, write_all } from \"sfn/net\";\n"
         + "import { find, int_to_string } from \"sfn/strings\";\n"
         + "\n"
-        + "fn handle(req: Request) -> Response ![io] {\n"
-        + "    if strings_equal(req.path, \"/probe\") {\n"
-        + "        return Response { status: 200, headers: [], body: \"ready\", body_addr: 0, body_len: 0 };\n"
-        + "    }\n"
-        + "    let dir = env.get(\"SFN_FIXTURE_DIR\");\n"
-        + "    if dir.length > 0 {\n"
-        + "        fs.writeFile(dir + \"/last_path\", req.path);\n"
-        + "        fs.writeFile(dir + \"/last_body\", req.body);\n"
-        + "        if fs.exists(dir + \"/status400\") {\n"
-        + "            return Response { status: 400, headers: [], body: \"{\\\"error\\\":\\\"Digest mismatch: expected sha256:abc, got sha256:def\\\"}\", body_addr: 0, body_len: 0 };\n"
-        + "        }\n"
-        + "        if fs.exists(dir + \"/index.json\") {\n"
-        + "            return Response { status: 200, headers: [], body: fs.readFile(dir + \"/index.json\"), body_addr: 0, body_len: 0 };\n"
-        + "        }\n"
-        + "    }\n"
-        + "    return Response { status: 200, headers: [], body: \"{\\\"ok\\\":true}\", body_addr: 0, body_len: 0 };\n"
+        + "fn request_path(raw: string) -> string {\n"
+        + "    let start = find(raw, \" \", 0);\n"
+        + "    if start < 0 { return \"\"; }\n"
+        + "    let finish = find(raw, \" \", start + 1);\n"
+        + "    if finish < 0 { return \"\"; }\n"
+        + "    return substring(raw, start + 1, finish);\n"
+        + "}\n"
+        + "\n"
+        + "fn request_body(raw: string) -> string {\n"
+        + "    let header_end = find(raw, \"\\r\\n\\r\\n\", 0);\n"
+        + "    if header_end < 0 { return \"\"; }\n"
+        + "    return substring(raw, header_end + 4, raw.length);\n"
+        + "}\n"
+        + "\n"
+        + "fn response(status: int, body: string) -> string {\n"
+        + "    let mut reason = \"OK\";\n"
+        + "    if status == 400 { reason = \"Bad Request\"; }\n"
+        + "    return \"HTTP/1.1 \" + int_to_string(status) + \" \" + reason\n"
+        + "        + \"\\r\\nContent-Length: \" + int_to_string(body.length)\n"
+        + "        + \"\\r\\nConnection: close\\r\\n\\r\\n\" + body;\n"
         + "}\n"
         + "\n"
         + "fn request_complete(raw: string) -> boolean {\n"
@@ -234,22 +245,32 @@ fn _write_fixture_server() -> string ![io] {
         + "    let fixture_dir = env.get(\"SFN_FIXTURE_DIR\");\n"
         + "    if fixture_dir.length == 0 { return 3; }\n"
         + "    fs.writeFile(fixture_dir + \"/port\", int_to_string(listener.port));\n"
+        + "    let conn = accept(listener);\n"
+        + "    if !is_open(conn) { close_listener(listener); return 4; }\n"
+        + "    let mut raw = \"\";\n"
+        + "    let mut reads = 0;\n"
         + "    loop {\n"
-        + "        let conn = accept(listener);\n"
-        + "        if !is_open(conn) { continue; }\n"
-        + "        let mut raw = \"\";\n"
-        + "        let mut reads = 0;\n"
-        + "        loop {\n"
-        + "            if request_complete(raw) || reads >= 32 { break; }\n"
-        + "            let chunk = read_bytes(conn, 1048576);\n"
-        + "            if chunk.length == 0 { break; }\n"
-        + "            raw = raw + chunk;\n"
-        + "            reads += 1;\n"
-        + "        }\n"
-        + "        let response = handle(parse_request(raw));\n"
-        + "        write_all(conn, serialize_response(response));\n"
-        + "        close(conn);\n"
+        + "        if request_complete(raw) || reads >= 32 { break; }\n"
+        + "        let chunk = read_bytes(conn, 1048576);\n"
+        + "        if chunk.length == 0 { break; }\n"
+        + "        raw = raw + chunk;\n"
+        + "        reads += 1;\n"
         + "    }\n"
+        + "    let path = request_path(raw);\n"
+        + "    let mut status = 200;\n"
+        + "    let mut body = \"{\\\"ok\\\":true}\";\n"
+        + "    fs.writeFile(fixture_dir + \"/last_path\", path);\n"
+        + "    fs.writeFile(fixture_dir + \"/last_body\", request_body(raw));\n"
+        + "    if fs.exists(fixture_dir + \"/status400\") {\n"
+        + "        status = 400;\n"
+        + "        body = \"{\\\"error\\\":\\\"Digest mismatch: expected sha256:abc, got sha256:def\\\"}\";\n"
+        + "    } else if fs.exists(fixture_dir + \"/index.json\") {\n"
+        + "        body = fs.readFile(fixture_dir + \"/index.json\");\n"
+        + "    }\n"
+        + "    write_all(conn, response(status, body));\n"
+        + "    close(conn);\n"
+        + "    close_listener(listener);\n"
+        + "    return 0;\n"
         + "}\n");
     return root + "/src/main.sfn";
 }
@@ -296,15 +317,6 @@ fn _await_fixture_ready(fixture_dir: string) -> boolean ![clock, io] {
     return wait_until(fn () -> boolean {
         return fs.exists(fixture_dir + "/port") && _fixture_port(fixture_dir).length > 0;
     }, 45000, 100);
-}
-
-// Negative network tests need stronger evidence than port publication because
-// their success condition is the absence of a recorded POST. Prove that their
-// fixture accepts a connection before exercising the early-rejection path.
-fn _await_fixture_accepting(fixture_dir: string) -> boolean ![clock, io, net] {
-    if !_await_fixture_ready(fixture_dir) { return false; }
-    return http.get_body("http://127.0.0.1:" + _fixture_port(fixture_dir)
-        + "/probe") == "ready";
 }
 
 // ---- Test 1: publish with too many args shows usage ----
@@ -696,7 +708,7 @@ test "publish: private capsule makes no network call" ![clock, io, net] {
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
-        assert _await_fixture_accepting(fixture_dir);
+        assert _await_fixture_ready(fixture_dir);
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
@@ -726,7 +738,7 @@ test "publish: registry override cannot bypass the private gate" ![clock, io, ne
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
-        assert _await_fixture_accepting(fixture_dir);
+        assert _await_fixture_ready(fixture_dir);
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
@@ -832,7 +844,7 @@ test "publish: invalid publish value is a manifest error" ![clock, io, net] {
     assert bin.length > 0;
     let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
         assert server.handle.handle_id != 0;
-        assert _await_fixture_accepting(fixture_dir);
+        assert _await_fixture_ready(fixture_dir);
         let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port(fixture_dir)]);
         let _exit = process.run_capture([sfn_bin_path(), "publish", workdir], e);
         let out = process.capture_take_stdout();
