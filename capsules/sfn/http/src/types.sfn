@@ -22,6 +22,37 @@ struct Response {
     status: int;
     headers: string[];
     body: string;
+    // Binary body, as a raw heap address plus an explicit byte count.
+    //
+    // `body` cannot carry arbitrary bytes: a Sailfin `string` recovers its
+    // length by a NUL scan at the coercion boundary, so a PNG, a woff2 or a
+    // gzip stream ends at its first zero byte (`stdlib/fs/src/bytes.sfn`
+    // documents the same limit, and `FileBytes` is the shape that escapes
+    // it). When `body_addr` is non-zero it is authoritative and `body` is
+    // ignored: `serialize_head` states `body_len` as the `Content-Length`,
+    // and the server trampoline copies exactly that many bytes after the
+    // header block rather than concatenating onto a string.
+    //
+    // Both default to 0, so every existing `Response { status, headers,
+    // body }` literal keeps its text behaviour untouched — omitted struct
+    // fields are zero-filled.
+    //
+    // **Ownership transfers to the server.** `serve`'s trampoline copies
+    // these bytes into the outgoing buffer and then frees `body_addr`, so a
+    // handler that read a file hands the buffer over and frees nothing.
+    //
+    // The alternative — borrowing — cannot work here: the handler returns
+    // before the response reaches the socket, so a handler freeing its own
+    // buffer would free it while it was still being written, and one that
+    // did not would leak a whole file on every request. Transfer is the
+    // only rule under which a correct handler is also the simple one.
+    //
+    // The consequence is that `body_addr` must be a `malloc`'d buffer the
+    // handler is done with. Pointing it at a string literal, a stack
+    // address, or a buffer reused across requests is a free of memory the
+    // allocator does not own.
+    body_addr: int;
+    body_len: int;
 }
 
 // Server bind configuration. v0 honors `port` only — the runtime binds

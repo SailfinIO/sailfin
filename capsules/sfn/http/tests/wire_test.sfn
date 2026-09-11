@@ -7,13 +7,22 @@
 import {
     Request,
     Response,
+    bytes_response,
     header,
+    html_escape,
+    html_response,
+    html_response_with_status,
     not_found,
     parse_request,
     parse_response,
     query_param,
     reason_phrase,
-    serialize_response
+    redirect,
+    response,
+    response_body_length,
+    serialize_head,
+    serialize_response,
+    text_response
 } from "../src/mod";
 // `keep_alive_requested` is an internal wire helper (not part of the public
 // barrel); imported directly for unit coverage, like `server.sfn` does.
@@ -79,7 +88,7 @@ test "serialize_response: status line, custom header, framing (exact bytes)" {
         body: "nope"
     };
     let out = serialize_response(rsp);
-    let expected = "HTTP/1.1 404 Not Found\r\nX-Custom: yes\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnope";
+    let expected = "HTTP/1.1 404 Not Found\r\nX-Custom: yes\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnope";
     assert strings_equal(out, expected);
 }
 
@@ -90,7 +99,7 @@ test "serialize_response: drops headers carrying CR or LF (injection guard)" {
         body: "hi"
     };
     let out = serialize_response(rsp);
-    let expected = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi";
+    let expected = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi";
     assert strings_equal(out, expected);
 }
 
@@ -104,7 +113,7 @@ test "serialize_response: drops user-supplied framing headers (smuggling guard)"
         body: "abc"
     };
     let out = serialize_response(rsp);
-    let expected = "HTTP/1.1 200 OK\r\nX-Keep: yes\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc";
+    let expected = "HTTP/1.1 200 OK\r\nX-Keep: yes\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc";
     assert strings_equal(out, expected);
 }
 
@@ -117,7 +126,7 @@ test "serialize_response: keep_alive=true emits Connection: keep-alive (#1711)" 
         body: "ok"
     };
     let out = serialize_response(rsp, true);
-    let expected = "HTTP/1.1 200 OK\r\nX-Custom: yes\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
+    let expected = "HTTP/1.1 200 OK\r\nX-Custom: yes\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
     assert strings_equal(out, expected);
 }
 
@@ -126,7 +135,7 @@ test "serialize_response: keep_alive=false matches the default close framing (#1
     // close-path regression stays intact.
     let rsp = Response { status: 200, headers: [], body: "x" };
     assert strings_equal(serialize_response(rsp, false), serialize_response(rsp));
-    assert strings_equal(serialize_response(rsp, false), "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx");
+    assert strings_equal(serialize_response(rsp, false), "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx");
 }
 
 test "keep_alive_requested: HTTP/1.1 default is keep-alive, Connection: close opts out (#1711)" {
@@ -178,4 +187,122 @@ test "not_found: default body and 404 status" {
     let rsp = not_found();
     assert rsp.status == 404;
     assert strings_equal(rsp.body, "Not Found");
+}
+
+// ── content-type defaulting ───────────────────────────────────────
+test "serialize_response: a caller's own Content-Type is not doubled" {
+    // The default must yield to an explicit type, or every JSON response
+    // would carry two conflicting Content-Type headers.
+    let rsp = Response {
+        status: 200,
+        headers: ["Content-Type: application/json"],
+        body: "{}"
+    };
+    let out = serialize_response(rsp);
+    let expected = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+    assert strings_equal(out, expected);
+}
+
+test "serialize_response: a caller's lowercase Content-Type also suppresses the default" {
+    // Header names are case-insensitive on the wire, so `content-type:` is
+    // the same header and must not produce a second one.
+    let rsp = Response {
+        status: 200,
+        headers: ["content-type: text/csv"],
+        body: "a,b"
+    };
+    let out = serialize_response(rsp);
+    assert strings_equal(out, "HTTP/1.1 200 OK\r\ncontent-type: text/csv\r\nContent-Length: 3\r\nConnection: close\r\n\r\na,b");
+}
+
+test "serialize_response: a bodiless response carries no Content-Type" {
+    // A type on an empty body is a claim about bytes that were never sent.
+    let rsp = Response { status: 204, headers: [], body: "" };
+    let out = serialize_response(rsp);
+    assert strings_equal(out, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+}
+
+// ── response builders ─────────────────────────────────────────────
+test "html_response: declares markup and a charset" {
+    let out = serialize_response(html_response("<h1>hi</h1>"));
+    let expected = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: 11\r\nConnection: close\r\n\r\n<h1>hi</h1>";
+    assert strings_equal(out, expected);
+}
+
+test "html_response_with_status: carries markup under a chosen status" {
+    let rsp = html_response_with_status(404, "<p>gone</p>");
+    assert rsp.status == 404;
+    assert strings_equal(rsp.headers[0], "Content-Type: text/html; charset=utf-8");
+}
+
+test "text_response: is plain text, and matches the bare default on the wire" {
+    // `response()` defaults to the same type, so the two agree byte for
+    // byte — `text_response` exists to say so at the call site.
+    assert strings_equal(serialize_response(text_response("hi")), serialize_response(response("hi")));
+}
+
+test "redirect: is a bodiless 302 with a Location" {
+    let out = serialize_response(redirect("/login"));
+    assert strings_equal(out, "HTTP/1.1 302 Found\r\nLocation: /login\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+}
+
+test "redirect: a permanent redirect is opt-in" {
+    let rsp = redirect("/new", 301);
+    assert rsp.status == 301;
+}
+
+test "redirect: a CRLF in the location is refused outright" {
+    // The header would be dropped by the injection guard, leaving a 302
+    // with nowhere to go — a redirect that silently does nothing is worse
+    // than one that reports a fault.
+    let rsp = redirect("/a\r\nX-Evil: 1");
+    assert rsp.status == 500;
+    assert rsp.headers.length == 0;
+}
+
+// ── escaping ──────────────────────────────────────────────────────
+test "html_escape: escapes the five markup-significant characters" {
+    assert strings_equal(html_escape("<script>"), "&lt;script&gt;");
+    assert strings_equal(html_escape("a\"b"), "a&quot;b");
+    assert strings_equal(html_escape("a'b"), "a&#39;b");
+    assert strings_equal(html_escape("plain"), "plain");
+}
+
+test "html_escape: the ampersand is escaped once, not twice" {
+    // Escaping `&` last would re-enter the entities the other four just
+    // produced and render `<` as `&amp;lt;`.
+    assert strings_equal(html_escape("&"), "&amp;");
+    assert strings_equal(html_escape("a&<b"), "a&amp;&lt;b");
+    assert strings_equal(html_escape("&amp;"), "&amp;amp;");
+}
+
+test "html_escape: neutralises an attribute breakout" {
+    let escaped = html_escape("\" onerror=\"alert(1)");
+    assert strings_equal(escaped, "&quot; onerror=&quot;alert(1)");
+}
+
+// ── binary bodies ─────────────────────────────────────────────────
+test "response_body_length: the byte range wins over the string body" {
+    // A caller setting `body_addr` leaves `body` empty; reading the string's
+    // length would state a Content-Length of 0 for a real asset.
+    let rsp = bytes_response(200, "image/png", 4096, 1234);
+    assert response_body_length(rsp) == 1234;
+
+    let text = response("hello");
+    assert response_body_length(text) == 5;
+}
+
+test "serialize_head: states the binary length and appends no body" {
+    // The head is text and ends at the blank line; the bytes are copied
+    // after it by the server trampoline, which is why this must not try to
+    // concatenate them.
+    let rsp = bytes_response(200, "image/png", 4096, 1234);
+    let head = serialize_head(rsp);
+    let expected = "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 1234\r\nConnection: close\r\n\r\n";
+    assert strings_equal(head, expected);
+}
+
+test "serialize_head: a text response's head is its serialization minus the body" {
+    let rsp = response("hello");
+    assert strings_equal(serialize_head(rsp) + "hello", serialize_response(rsp));
 }

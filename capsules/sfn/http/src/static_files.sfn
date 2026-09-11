@@ -1,0 +1,269 @@
+// sfn/http — serving files off disk.
+//
+// The piece that turns `serve` into something a static site can sit on:
+// take a request path, find the file it names under a root directory, and
+// answer with the bytes and the right media type — without ever answering
+// with a file the root does not contain.
+//
+// That last clause is the whole difficulty. Path traversal is the oldest bug
+// in static file serving, and it has three distinct shapes, so there are
+// three distinct guards here and each one catches something the others do
+// not:
+//
+//   1. **Percent-encoding.** `/..%2f..%2fetc/passwd` contains no `..` segment
+//      until it is decoded, so decoding must happen BEFORE the segment check,
+//      never after. Checking first and decoding second is the classic
+//      bypass — it is the same ordering mistake as escaping `&` last in
+//      `html_escape`.
+//   2. **Dot segments.** Rejected per *segment* after the split on `/`,
+//      not by searching the joined string for `".."`. A substring search
+//      also rejects the legitimate file `my..notes.txt`, and — worse —
+//      misses nothing it needs to but teaches the reader the wrong rule.
+//   3. **Symlinks.** A segment check cannot see them: every segment of
+//      `/assets/link` is innocent even when `link` points at `/etc`. So the
+//      resolved path is canonicalized with `realpath` and required to sit
+//      under the canonicalized root. This is the guard that holds when the
+//      attacker controls the *tree* rather than the URL.
+//
+// Guard 3 subsumes guards 1 and 2 on POSIX, and they are still here on
+// purpose: `realpath` answers only for paths that exist, so without them a
+// traversal to a nonexistent path would be reported as a plain 404 — the
+// same answer a typo gets — and a probe for which files exist outside the
+// root would read as ordinary traffic. Rejecting the shape independently of
+// the filesystem is what makes a traversal attempt distinguishable from a
+// miss.
+import { is_directory, read_bytes } from "sfn/fs";
+
+import { content_type_for_path } from "./mime";
+import { Response } from "./types";
+import { bytes_response, not_found, response_with_status } from "./wire";
+
+// Externs redeclared per-module (the #306 cross-module-extern limit),
+// spelling matched to `runtime/sfn/platform/exec.sfn` and
+// `stdlib/fs/src/bytes.sfn`.
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+// `PATH_MAX` on Linux and the documented `realpath` output bound. The
+// buffer is one byte over so a path of exactly `PATH_MAX - 1` bytes plus
+// its NUL cannot touch the edge.
+fn _path_max() -> int { return 4096; }
+
+// `_hex_value(ch)` — 0-15 for a hex digit, -1 otherwise. Both cases are
+// accepted: `%2F` and `%2f` are the same byte, and a decoder that took only
+// one of them would leave the other spelling to reach the segment check
+// still encoded.
+fn _hex_value(ch: string) -> int {
+    let code = char_code(ch);
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 87; }
+    if code >= 65 && code <= 70 { return code - 55; }
+    return -1;
+}
+
+// `_percent_decode(path)` — decode `%XX` escapes, or `""` if the input is
+// not decodable to a servable name.
+//
+// Two refusals rather than a best-effort decode. A `%00` would end the
+// `string` early at the coercion boundary, so `/x%00.txt` could name `/x`
+// while reading as a `.txt` request — the NUL-byte extension trick. And a
+// malformed escape (`%zz`, or a `%` in the last two bytes) is left to no
+// interpretation at all: passing it through literally means the decoded and
+// undecoded spellings of one path differ, which is precisely the ambiguity
+// guard 1 exists to remove.
+//
+// `+` is NOT treated as a space: that is `application/x-www-form-urlencoded`,
+// a form-body encoding, and applying it to a path would make the real file
+// `a+b.txt` unreachable.
+fn _percent_decode(path: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    let n = path.length;
+    loop {
+        if i >= n { break; }
+        let ch = grapheme_at(path, i);
+        if !strings_equal(ch, "%") {
+            out = out + ch;
+            i = i + 1;
+        } else {
+            if i + 2 >= n { return ""; }
+            let hi = _hex_value(grapheme_at(path, i + 1));
+            let lo = _hex_value(grapheme_at(path, i + 2));
+            if hi < 0 || lo < 0 { return ""; }
+            let code = hi * 16 + lo;
+            if code == 0 { return ""; }
+            out = out + char_from_code(code);
+            i = i + 3;
+        }
+    }
+    return out;
+}
+
+// `_is_safe_segment(seg)` — true if `seg` may become one path component.
+//
+// Rejects the two dot segments and a segment carrying a separator of either
+// flavour. The backslash is rejected on every platform, not only Windows:
+// serving the same tree from a Linux host and a Windows host must not
+// disagree about which requests are legal, or a rule tested on one is not
+// the rule enforced on the other.
+fn _is_safe_segment(seg: string) -> boolean {
+    if strings_equal(seg, ".") { return false; }
+    if strings_equal(seg, "..") { return false; }
+    if find_char(seg, "\\", 0) >= 0 { return false; }
+    if find_char(seg, "/", 0) >= 0 { return false; }
+    return true;
+}
+
+// `_relative_under_root(url_path)` — the decoded, guarded, slash-joined
+// relative path a URL names, or `""` when the URL may not name one.
+//
+// An empty result means *refuse*, and the caller answers `403`. Note that a
+// request for a bare directory (`/docs`, `/`) returns the directory's own
+// relative path; choosing `index.html` inside it is `static_file`'s job,
+// because that decision needs the filesystem and this function is pure.
+fn _relative_under_root(url_path: string) -> string {
+    let decoded = _percent_decode(url_path);
+    if decoded.length == 0 { return ""; }
+
+    let mut out = "";
+    let mut seg = "";
+    let mut i = 0;
+    let n = decoded.length;
+    loop {
+        if i > n { break; }
+        // One past the end flushes the final segment without duplicating
+        // the append below.
+        let at_end = i == n;
+        let mut ch = "/";
+        if !at_end { ch = grapheme_at(decoded, i); }
+
+        if strings_equal(ch, "/") {
+            if seg.length > 0 {
+                if !_is_safe_segment(seg) { return ""; }
+                if out.length > 0 { out = out + "/"; }
+                out = out + seg;
+                seg = "";
+            }
+        } else { seg = seg + ch; }
+        i = i + 1;
+    }
+    return out;
+}
+
+// `_canonical(path)` — `realpath(path)`, or `""` when it does not resolve.
+//
+// A `""` is not distinguishable here between "no such file" and "a component
+// is not a directory" and "permission denied on a parent"; every one of those
+// is a path this server will not serve, and `static_file` answers `404` to
+// all of them rather than leaking which it was. Reporting `403` for an
+// unreadable-but-present file and `404` for an absent one is a directory
+// oracle: it tells an attacker what exists.
+fn _canonical(path: string) -> string ![io] {
+    let buf: *u8 = malloc((_path_max() + 1) as usize);
+    if buf as i64 == 0 { return ""; }
+    memset(buf, 0, (_path_max() + 1) as usize);
+    let got: *u8 = realpath(path as *u8, buf);
+    if got as i64 == 0 {
+        free(buf);
+        return "";
+    }
+    // Copy out of the libc buffer before freeing it: the `string` coercion
+    // reads the bytes, and a `string` aliasing freed memory is a use-after-free
+    // the moment anything else allocates.
+    let resolved = "" + (buf as string);
+    free(buf);
+    return resolved;
+}
+
+// `_within(root, candidate)` — true if `candidate` is `root` itself or sits
+// beneath it. Both are expected to be canonical already.
+//
+// The separator test is what stops the prefix check from being a prefix
+// *string* check: `/srv/www-old` starts with `/srv/www` and is a different
+// tree, so a bare `starts_with` would serve it. Requiring the next byte to
+// be `/` is what makes "beneath" mean beneath.
+fn _within(root: string, candidate: string) -> boolean {
+    if root.length == 0 || candidate.length == 0 { return false; }
+    if strings_equal(root, candidate) { return true; }
+    if candidate.length <= root.length { return false; }
+    if !strings_equal(substring(candidate, 0, root.length), root) {
+        return false;
+    }
+    // A root of `/` already ends in the separator; anything under it is
+    // beneath it by construction.
+    if strings_equal(root, "/") { return true; }
+    return strings_equal(substring(candidate, root.length, root.length + 1), "/");
+}
+
+// `static_file(root, url_path, index)` — answer a request for a file under
+// `root`.
+//
+// `url_path` is `Request.path` — already split from the query string by
+// `parse_request`, so no `?` handling is needed here. `index` is the file
+// served for a directory request; passing `""` disables that and makes a
+// directory a `404`.
+//
+// Answers:
+//   - `200` with the file's bytes and a `Content-Type` from `mime.sfn`
+//   - `403` when the URL's *shape* is a refusal (traversal, bad encoding)
+//   - `404` when the shape is fine and the file is not there
+//   - `500` when the root itself does not resolve, which is a server
+//     misconfiguration rather than anything the request did
+//
+// Directory listing is deliberately not offered. A listing is a feature that
+// has to be opted out of on every deploy that does not want it, and the
+// default a static server should have is the one that discloses nothing.
+//
+// The response body is a heap buffer whose ownership passes to the caller;
+// `serve`'s trampoline frees it after writing it to the socket (see
+// `Response.body_addr` in `types.sfn`).
+fn static_file(root: string, url_path: string, index: string = "index.html") -> Response ![io] {
+    let root_real = _canonical(root);
+    if root_real.length == 0 {
+        return response_with_status(500, "Static root unavailable");
+    }
+
+    let rel = _relative_under_root(url_path);
+    if rel.length == 0 && url_path.length > 0 && !strings_equal(url_path, "/") {
+        return response_with_status(403, "Forbidden");
+    }
+
+    let mut candidate = root_real;
+    if rel.length > 0 { candidate = root_real + "/" + rel; }
+
+    let mut resolved = _canonical(candidate);
+    if resolved.length == 0 { return not_found(); }
+    if !_within(root_real, resolved) {
+        return response_with_status(403, "Forbidden");
+    }
+
+    // A directory request becomes its index file, re-resolved and re-checked
+    // — the index name is fixed rather than attacker-supplied, but re-running
+    // the containment test costs nothing and means no path reaches the read
+    // without having passed it.
+    if is_directory(resolved) {
+        if index.length == 0 { return not_found(); }
+        let indexed = _canonical(resolved + "/" + index);
+        if indexed.length == 0 { return not_found(); }
+        if !_within(root_real, indexed) {
+            return response_with_status(403, "Forbidden");
+        }
+        if is_directory(indexed) { return not_found(); }
+        resolved = indexed;
+    }
+
+    // `sfn/fs`'s `read_bytes` rather than the prelude `fs.read_bytes`
+    // adapter: the adapter is the raw two-argument adapter that reports its
+    // length through an out-parameter, while this returns the `FileBytes`
+    // aggregate whose `length` is the true byte count including interior
+    // NULs — the whole reason a binary body can be served at all.
+    let data = read_bytes(resolved);
+    if data.status != 0 { return not_found(); }
+
+    return bytes_response(200, content_type_for_path(resolved), data.addr, data.length);
+}

@@ -294,6 +294,69 @@ fn parse_response(raw: string) -> Response {
 // connection alive for an HTTP/1.1 client that did not send `Connection:
 // close` (see `server.sfn::_sfn_http_trampoline`). v0 is text bodies only.
 fn serialize_response(rsp: Response, keep_alive: boolean = false) -> string {
+    return serialize_head(rsp, keep_alive) + rsp.body;
+}
+
+// `response_body_length(rsp)` — the byte count `Content-Length` must state.
+//
+// A `Response` carries its body one of two ways: as a `string` (`body`), or —
+// when `body_addr` is non-zero — as a raw byte range the `string` type cannot
+// hold (SFN binary static assets; see `types.sfn`). The binary range is
+// authoritative when present, because a caller setting `body_addr` leaves
+// `body` empty and a length read off the empty string would truncate the
+// asset to nothing.
+fn response_body_length(rsp: Response) -> int {
+    if rsp.body_addr != 0 { return rsp.body_len; }
+    return rsp.body.length;
+}
+
+// `_has_content_type(headers)` — true if the caller already declared one.
+//
+// Asked before the default below is applied, so a hand-set `Content-Type`
+// always wins. Matching is case-insensitive on the header *name* only: HTTP
+// header names are case-insensitive, and a caller writing `content-type:`
+// must not end up with two of them on the wire.
+fn _has_content_type(headers: string[]) -> boolean {
+    let mut i = 0;
+    loop {
+        if i >= headers.length { break; }
+        let h = headers[i];
+        let colon = find_char(h, ":", 0);
+        if colon >= 0 {
+            let name = _ascii_lower(_trim(substring(h, 0, colon)));
+            if strings_equal(name, "content-type") { return true; }
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `serialize_head(rsp, keep_alive)` — everything up to and including the
+// blank line that ends the header block, with no body appended.
+//
+// Split out of `serialize_response` because a binary body cannot be
+// concatenated onto a `string`: a Sailfin `string` recovers its length by a
+// NUL scan at the coercion boundary, so a PNG's first zero byte would end it
+// (`stdlib/fs/src/bytes.sfn` documents the same limit for file reads). The
+// server's trampoline therefore serializes the head as text and copies the
+// body's bytes after it with an explicit length.
+//
+// `Content-Length` and `Connection` are always the serializer's own — a
+// caller-supplied copy is dropped by `_is_reserved_header` — and a
+// `Content-Type` is defaulted only when the caller set none AND there is a
+// body to describe.
+//
+// **The default is `text/plain; charset=utf-8`, not HTML.** An untyped
+// response leaves the browser to sniff, and a sniffed body is chosen by
+// content rather than by the server's intent — the mechanism behind
+// content-type-confusion XSS. `text/plain` is the type that renders anything
+// inertly. A handler returning markup says so with `html_response`.
+//
+// A bodiless response (a `204`, a `304`, a redirect) gets no `Content-Type`
+// at all: there is nothing to describe, and a type on an empty body is a
+// claim about bytes that were never sent.
+fn serialize_head(rsp: Response, keep_alive: boolean = false) -> string {
+    let body_len = response_body_length(rsp);
     let mut out = "HTTP/1.1 " + int_to_string(rsp.status) + " " + reason_phrase(rsp.status)
         + "\r\n";
     let mut i = 0;
@@ -303,12 +366,14 @@ fn serialize_response(rsp: Response, keep_alive: boolean = false) -> string {
         if !_has_crlf(h) && !_is_reserved_header(h) { out = out + h + "\r\n"; }
         i = i + 1;
     }
-    out = out + "Content-Length: " + int_to_string(rsp.body.length) + "\r\n";
+    if body_len > 0 && !_has_content_type(rsp.headers) {
+        out = out + "Content-Type: text/plain; charset=utf-8\r\n";
+    }
+    out = out + "Content-Length: " + int_to_string(body_len) + "\r\n";
     if keep_alive { out = out + "Connection: keep-alive\r\n"; } else {
         out = out + "Connection: close\r\n";
     }
     out = out + "\r\n";
-    out = out + rsp.body;
     return out;
 }
 
@@ -399,4 +464,112 @@ fn json_response(body: string) -> Response {
 
 fn not_found(body: string = "Not Found") -> Response {
     return Response { status: 404, headers: [], body: body };
+}
+
+// `text_response(body)` — an explicit `text/plain` response.
+//
+// Identical on the wire to bare `response()`, which defaults to the same
+// type. It exists so a handler can *say* it meant plain text, rather than
+// relying on a default that a later reader has to go and look up.
+fn text_response(body: string) -> Response {
+    return Response {
+        status: 200,
+        headers: ["Content-Type: text/plain; charset=utf-8"],
+        body: body
+    };
+}
+
+// `html_response(body)` — a `200` carrying markup.
+//
+// The missing builder that made serving a page awkward: `json_response`
+// existed, so returning JSON was one call and returning HTML was a hand-written
+// header array. Charset is declared for the reason `mime.sfn` gives — an
+// undeclared charset lets the browser pick one from its locale.
+fn html_response(body: string) -> Response {
+    return Response {
+        status: 200,
+        headers: ["Content-Type: text/html; charset=utf-8"],
+        body: body
+    };
+}
+
+// `html_response_with_status(status, body)` — markup under a chosen status,
+// for the error pages a site actually wants (a styled `404`, a `500`).
+fn html_response_with_status(status: int, body: string) -> Response {
+    return Response {
+        status: status,
+        headers: ["Content-Type: text/html; charset=utf-8"],
+        body: body
+    };
+}
+
+// `bytes_response(status, content_type, addr, length)` — a response whose
+// body is a raw byte range rather than a `string`.
+//
+// The constructor for everything `string` cannot hold; see `Response`'s
+// `body_addr` note in `types.sfn` for why that class exists and who owns
+// the memory.
+fn bytes_response(status: int, content_type: string, addr: int, length: int) -> Response {
+    return Response {
+        status: status,
+        headers: ["Content-Type: " + content_type],
+        body: "",
+        body_addr: addr,
+        body_len: length
+    };
+}
+
+// `redirect(location, status)` — a bodiless redirect.
+//
+// `302` by default: a permanent `301` is cached by browsers indefinitely and
+// is close to irreversible once served, so the temporary code is the safe
+// default and a caller wanting permanence asks for it. The `Location` value
+// is rejected outright if it carries a CR or LF — `serialize_head` would drop
+// the header anyway (the injection guard), but a redirect silently serving a
+// `200`-shaped body with no `Location` is worse than a refusal, so this
+// returns a `500` the handler's author will notice.
+fn redirect(location: string, status: int = 302) -> Response {
+    if _has_crlf(location) {
+        return Response { status: 500, headers: [], body: "" };
+    }
+    return Response {
+        status: status,
+        headers: ["Location: " + location],
+        body: ""
+    };
+}
+
+// `html_escape(value)` — the five-character escape that makes untrusted text
+// safe to concatenate into markup.
+//
+// This capsule ships no template engine, so a page is built by joining
+// strings — which is exactly the shape that grows an XSS hole the first time
+// a query parameter is interpolated into it. Escaping the ampersand FIRST is
+// load-bearing: done last it would re-escape the `&` of the entities the
+// other four just produced, and `<` would render as `&amp;lt;`.
+//
+// `'` is escaped as `&#39;` rather than `&apos;` because the latter is XHTML
+// and is not defined in HTML4 — old parsers render it literally, which turns
+// an escape into the character it was escaping. Both quotes are covered so
+// the result is safe in an attribute value, not only in element text.
+fn html_escape(value: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= value.length { break; }
+        let ch = grapheme_at(value, i);
+        if strings_equal(ch, "&") { out = out + "&amp;"; } else {
+            if strings_equal(ch, "<") { out = out + "&lt;"; } else {
+                if strings_equal(ch, ">") { out = out + "&gt;"; } else {
+                    if strings_equal(ch, "\"") { out = out + "&quot;"; } else {
+                        if strings_equal(ch, "'") { out = out + "&#39;"; } else {
+                            out = out + ch;
+                        }
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return out;
 }

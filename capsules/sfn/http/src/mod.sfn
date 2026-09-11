@@ -21,15 +21,28 @@ export { Request, Response, ServerConfig } from "./types";
 export {
     parse_request,
     parse_response,
+    serialize_head,
     serialize_response,
+    response_body_length,
     header,
     query_param,
     reason_phrase,
     response,
     response_with_status,
+    text_response,
+    html_response,
+    html_response_with_status,
     json_response,
+    bytes_response,
+    redirect,
+    html_escape,
     not_found
 } from "./wire";
+
+// ---- Media types + static assets ----
+export { content_type_for_path, is_text_media_type } from "./mime";
+
+export { static_file } from "./static_files";
 
 // ---- Server ----
 export { serve, serve_tls } from "./server";
