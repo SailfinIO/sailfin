@@ -172,6 +172,18 @@ attributes it to the longest member root that prefixes it. This is the one
 term that reads source text rather than manifests; it is confined to
 `compiler/tests/` and can only ever widen the closure.
 
+**The cost of that seed is that it makes the corresponding test tautological.**
+A seed term and an assertion over the same edges cannot both be load-bearing:
+once the walk consumes relative imports, the closure carries them by
+construction. That is the right trade for *soundness* — the alternative is a
+lane that skips `tensor_import_signatures_test.sfn` — but it means §8.1's
+relative-import coverage is a consistency check, not a guard, and it is stated
+that way there. The deeper issue is that a compiler test reaching another
+member's source by path bypasses the capsule dependency system entirely, and
+the closure is compensating for it; reconciling that (a declared edge, or a
+bare-name import) would restore the assertion's force and is worth doing
+independently of this design.
+
 The union is **16 of 31 members**. Every capsule reached from under
 `compiler/tests/` — by bare name
 (`sfn/{test,strings,syntax,fs,ir,os,crypto,codegen,cli,archive,http,analyzer}`)
@@ -498,11 +510,21 @@ The load-bearing file. Drives `scripts/module_layout_fingerprint.sh` via
 - *"ci source closure: every capsule imported under compiler/tests is in the
   closure"* — scan `compiler/tests/**/*.sfn` for `from "sfn/<name>"`, map to
   member roots via `--member-records`, assert each is in `--source-closure-roots`.
-  Covers **both** import forms: bare-name `from "sfn/<name>"` and `..`-relative
-  specs resolved against the importing file's directory.
-  **This is the test that makes a member-lane green honest**, and it fails the
-  day a compiler test reaches a member the closure does not carry — verified by
-  falsification, not by inspection.
+  Covers **both** import forms, which carry different weight.
+
+  **Bare-name imports are the soundness assertion.** The walk never seeds from
+  them, so a compiler test importing an out-of-closure capsule by name fails
+  this test. Verified by falsification: a scratch test importing `sfn/tensor`
+  by name fails the assertion, and removing it restores green. This is the
+  half that makes a member-lane green honest, and it covers the dominant form
+  — 1431 of the import sites under `compiler/tests/` today.
+
+  **The relative half cannot fail that way, and the SFEP should not claim it
+  can.** §3.2's fourth seed term means the closure is widened by exactly these
+  edges, so adding one widens the closure to match. What the relative half
+  checks is that the test's normalization and the script's awk normalization
+  agree on `..` resolution and longest-member-root attribution — a differential
+  check between two implementations, not a guard against a missing member.
 - *"ci source closure: every capsule declared by a compiler/tests fixture
   manifest is in the closure"* — the `sfn/http` case, asserted from the
   manifests rather than from the import text.
