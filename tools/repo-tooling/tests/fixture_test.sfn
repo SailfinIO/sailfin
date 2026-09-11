@@ -18,7 +18,15 @@ fn _repo_of(result: Result<RepoFs, string>) -> RepoFs {
 }
 
 fn _assert_fixture_root(repo: RepoFs) -> boolean {
-    return repo.root.length > 0 && repo.root != "." && starts_with(repo.root, "/");
+    if starts_with(repo.root, "/") || starts_with(repo.root, "\\\\") {
+        return true;
+    }
+    if repo.root.length < 3 { return false; }
+    let drive = char_code(substring(repo.root, 0, 1));
+    let drive_letter = (drive >= 65 && drive <= 90) || (drive >= 97 && drive <= 122);
+    let separator = substring(repo.root, 2, 3);
+    return drive_letter && substring(repo.root, 1, 2) == ":" && (separator == "/"
+        || separator == "\\");
 }
 
 fn _error_of(result: Result<RepoFs, string>) -> string {
