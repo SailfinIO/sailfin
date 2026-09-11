@@ -124,6 +124,7 @@ Index row. One slate is in review.
 |---|---|---|
 | [`draft-nested-build-object-cache-sharing`](./draft-nested-build-object-cache-sharing.md) | Shared runtime/dep object cache for nested builds in the e2e suite | tooling |
 | [`draft-test-path-shared-runtime-object-cache`](./draft-test-path-shared-runtime-object-cache.md) | Cross-invocation runtime-object persistence for the `sfn test` link path | tooling |
+| [`draft-ci-dependency-closure-scope`](./draft-ci-dependency-closure-scope.md) | CI Source Scope by Dependency Closure, and the Member Lane | tooling |
 
 The **native-Windows toolchain critical path** design graduated out of this
 slate on 2026-08-15 and now holds an Index row: SFEP-0071 (in-process
