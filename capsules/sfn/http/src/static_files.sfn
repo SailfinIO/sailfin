@@ -41,18 +41,9 @@ import { bytes_response, not_found, response_with_status } from "./wire";
 // Externs redeclared per-module (the #306 cross-module-extern limit),
 // spelling matched to `runtime/sfn/platform/exec.sfn` and
 // `stdlib/fs/src/bytes.sfn`.
-extern fn malloc(size: usize) -> *u8;
-
 extern fn free(ptr: *u8) -> void;
 
-extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
-
 extern fn realpath(path: *u8, resolved: *u8) -> *u8;
-
-// `PATH_MAX` on Linux and the documented `realpath` output bound. The
-// buffer is one byte over so a path of exactly `PATH_MAX - 1` bytes plus
-// its NUL cannot touch the edge.
-fn _path_max() -> int { return 4096; }
 
 // `_hex_value(ch)` — 0-15 for a hex digit, -1 otherwise. Both cases are
 // accepted: `%2F` and `%2f` are the same byte, and a decoder that took only
@@ -166,25 +157,37 @@ fn _relative_under_root(url_path: string) -> string? {
 // unreadable-but-present file and `404` for an absent one is a directory
 // oracle: it tells an attacker what exists.
 fn _canonical(path: string) -> string ![io] {
-    let buf: *u8 = malloc((_path_max() + 1) as usize);
-    if buf as i64 == 0 { return ""; }
-    memset(buf, 0, (_path_max() + 1) as usize);
-    let got: *u8 = realpath(path as *u8, buf);
-    if got as i64 == 0 {
-        free(buf);
-        return "";
+    // A null result buffer asks POSIX `realpath` and Sailfin's Windows
+    // compatibility implementation for an allocated, physically resolved
+    // path. On Windows this is load-bearing: the legacy caller-buffer leg is
+    // `_fullpath`, which succeeds for nonexistent paths and does not resolve
+    // symlinks or junctions (SFN-1237).
+    let got: *u8 = realpath(path as *u8, null);
+    if got as i64 == 0 { return ""; }
+    // `got as string` ADOPTS the foreign buffer rather than copying it.
+    // Materialise the result byte-by-byte before freeing: `substring` may
+    // retain the adopted allocation on native Windows, leaving a dangling
+    // canonical path after `free` (SFN-1237).
+    let adopted = got as string;
+    let mut resolved = "";
+    let mut i = 0;
+    loop {
+        if i >= adopted.length { break; }
+        resolved = resolved + grapheme_at(adopted, i);
+        i += 1;
     }
-    // `buf as string` ADOPTS the foreign buffer rather than copying it
-    // (`sfn_str_sfn_from_cstr`: "No copy: the foreign buffer is adopted in
-    // place"), so the result would dangle the moment `free` ran below —
-    // `runtime/sfn/platform/exec.sfn` sidesteps this by never freeing its
-    // `realpath` buffer at all, which leaks, and a leak per request is not
-    // available to a server. `substring` over the whole span materialises a
-    // real arena-backed buffer, which is what makes the free safe.
-    let adopted = buf as string;
-    let resolved = substring(adopted, 0, adopted.length);
-    free(buf);
+    free(got);
     return resolved;
+}
+
+fn _is_path_separator(root: string, ch: string) -> boolean {
+    // A physical POSIX path always begins with `/`, where `\\` is a legal
+    // filename byte. Windows drive and UNC paths do not have that shape and
+    // accept both separator spellings.
+    if strings_equal(substring(root, 0, 1), "/") {
+        return strings_equal(ch, "/");
+    }
+    return strings_equal(ch, "/") || strings_equal(ch, "\\");
 }
 
 // `_within(root, candidate)` — true if `candidate` is `root` itself or sits
@@ -193,7 +196,7 @@ fn _canonical(path: string) -> string ![io] {
 // The separator test is what stops the prefix check from being a prefix
 // *string* check: `/srv/www-old` starts with `/srv/www` and is a different
 // tree, so a bare `starts_with` would serve it. Requiring the next byte to
-// be `/` is what makes "beneath" mean beneath.
+// be a native path separator is what makes "beneath" mean beneath.
 fn _within(root: string, candidate: string) -> boolean {
     if root.length == 0 || candidate.length == 0 { return false; }
     if strings_equal(root, candidate) { return true; }
@@ -201,10 +204,12 @@ fn _within(root: string, candidate: string) -> boolean {
     if !strings_equal(substring(candidate, 0, root.length), root) {
         return false;
     }
-    // A root of `/` already ends in the separator; anything under it is
-    // beneath it by construction.
-    if strings_equal(root, "/") { return true; }
-    return strings_equal(substring(candidate, root.length, root.length + 1), "/");
+    // POSIX `/` and Windows drive/UNC roots already end in a separator.
+    if _is_path_separator(root, substring(root, root.length - 1, root.length)) {
+        return true;
+    }
+    return _is_path_separator(root, substring(candidate, root.length, root.length
+        + 1));
 }
 
 // `static_file(root, url_path, index)` — answer a request for a file under
