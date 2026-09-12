@@ -11,7 +11,7 @@
 // `cache_store_artifact` (compiler/src/build_cache.sfn): a `.ll` store
 // fires only on a cache miss→emit, so a digest appearing twice in the
 // ledger is exactly a stampede. Two compiler unit tests that both pull
-// in the heavy parser/typecheck/effect_checker closure and resolve
+// in the parser/effect-checker closure and resolve
 // under the same group are run together with `--jobs 4` on a fresh
 // cache; the ledger must contain no duplicate digest.
 //
@@ -28,11 +28,18 @@ import { clean_runner_env_without, sfn_bin_path, with_tmp_dir } from "sfn/test";
 // capsule_resolver.sfn): below it a single-file child derives
 // `effective_exe = ""` and a different module cache key than the parent's
 // warm, so it would silently miss the warm and its stampede would not
-// surface as a duplicate. Measured solo closures: atomic_fence ~131,
-// check_tool ~50 — both comfortably clear 16.
-fn _fixture_a() -> string { return "compiler/tests/unit/atomic_fence_test.sfn"; }
+// surface as a duplicate. These two effect-checker tests both comfortably
+// clear 16 without pulling in the analyzer facade or LLVM backend. Keeping
+// this cache-concurrency regression on the smallest qualifying closure avoids
+// a memory and runtime spike when it overlaps the complete Windows cold
+// inventory (SFN-1237).
+fn _fixture_a() -> string {
+    return "compiler/tests/unit/concurrency_effect_test.sfn";
+}
 
-fn _fixture_b() -> string { return "compiler/tests/unit/check_tool_test.sfn"; }
+fn _fixture_b() -> string {
+    return "compiler/tests/unit/effect_assignment_test.sfn";
+}
 
 // Child environment for the spawned `sfn test` run, derived by subtraction
 // via `clean_runner_env_without` (SFN-1114): the base env drops the pool's

@@ -25,9 +25,7 @@
   <a href="https://github.com/SailfinIO/sailfin/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/SailfinIO/sailfin?style=flat"></a>
 </p>
 
-> **Status:** The current release is
-> [`v0.10.4`](https://github.com/SailfinIO/sailfin/releases/tag/v0.10.4).
-> Sailfin is pre-1.0 and under active development. The native
+> **Status:** Sailfin is pre-1.0 and under active development. The native
 > compiler is self-hosted and the runtime is written in Sailfin. The current
 > backend still lowers through LLVM and links with the platform toolchain;
 > LLVM/clang independence is a project goal, not the current shipping state. For

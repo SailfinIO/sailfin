@@ -224,6 +224,30 @@ test "static_file: a sibling root sharing a name prefix is not served" ![io] {
     remove_all(base);
 }
 
+test "static_file: a POSIX backslash sibling is not served" ![io] {
+    let base = mkdtemp("sfnhttp");
+    let root = mkdtemp(base + "/pub");
+    assert root.length > 0;
+    // A canonical POSIX path begins with `/`; on Windows `\\` is a native
+    // separator, so this filename relationship cannot be constructed.
+    if !strings_equal(substring(root, 0, 1), "/") {
+        remove_all(base);
+        return;
+    }
+    // POSIX permits `\\` in a filename. This sibling therefore starts with
+    // the complete root string followed by `\\`, but is not beneath root.
+    let sibling = mkdtemp(root + "\\escape");
+    assert sibling.length > 0;
+    write(sibling + "/secret.txt", "classified");
+    symlink(sibling, root + "/sib");
+
+    let rsp = static_file(root, "/sib/secret.txt");
+    assert rsp.status == 403;
+    _release(rsp);
+
+    remove_all(base);
+}
+
 test "static_file: a binary body keeps its bytes past the first NUL" ![io] {
     // The whole point of the byte path. A `string` body would report a
     // length of 3 here; the served asset is 6 bytes and the middle one is

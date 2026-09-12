@@ -99,6 +99,8 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0074](./0074-repo-tooling-ownership.md) | Repo Tooling Ownership — Retiring `scripts/` into Native Verbs | Accepted | tooling |
 | [0075](./0075-struct-value-semantics.md) | Struct Value Semantics and the Mutability Floor | Draft | language |
 | [0076](./0076-user-build-defaults.md) | User-Level Build Defaults | Accepted | tooling |
+| [0077](./0077-ci-dependency-closure-scope.md) | CI Source Scope by Dependency Closure, and the Member Lane | Accepted | tooling |
+| [0078](./0078-struct-field-defaults.md) | Struct Field Default Values | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -124,7 +126,6 @@ Index row. One slate is in review.
 |---|---|---|
 | [`draft-nested-build-object-cache-sharing`](./draft-nested-build-object-cache-sharing.md) | Shared runtime/dep object cache for nested builds in the e2e suite | tooling |
 | [`draft-test-path-shared-runtime-object-cache`](./draft-test-path-shared-runtime-object-cache.md) | Cross-invocation runtime-object persistence for the `sfn test` link path | tooling |
-| [`draft-ci-dependency-closure-scope`](./draft-ci-dependency-closure-scope.md) | CI Source Scope by Dependency Closure, and the Member Lane | tooling |
 
 The **native-Windows toolchain critical path** design graduated out of this
 slate on 2026-08-15 and now holds an Index row: SFEP-0071 (in-process
@@ -173,6 +174,14 @@ ownership/affine `E09xx` range — `E0919` assignment to an immutable binding,
 `E0920` write through an immutable place, `W0921` deprecated field-level `mut`.
 Mutability is the ownership floor's first rung, so the codes compose with
 `E0901`–`E0907` rather than opening a new range. Drafts must skip them.
+
+SFEP-0078 (struct field defaults) allocates `E0311` and `E0312` in the
+type-conflict `E03xx` range — `E0311` a struct literal omitting a field that
+has no default, `E0312` a struct field default that is not a constant
+expression. A literal whose field set does not match its declaration is a
+type-shape conflict, sibling to `E0310` (array element type mismatch), so the
+codes extend `E03xx` rather than opening a range; `E0301`–`E0310` were the only
+`E03xx` codes in use when they were claimed. Drafts must skip them.
 
 ## Subdirectories
 

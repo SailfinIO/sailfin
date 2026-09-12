@@ -47,7 +47,7 @@ fi
 mode=layout
 member_name=""
 case "${1:-}" in
-    --freshness|--ci-freshness|--layout-inputs|--freshness-inputs|--ci-freshness-inputs|--compiler-sources|--maintainer-sources|--member-roots|--member-records|--compiler-manifests|--public-members)
+    --freshness|--ci-freshness|--layout-inputs|--freshness-inputs|--ci-freshness-inputs|--compiler-sources|--maintainer-sources|--member-roots|--member-records|--compiler-manifests|--public-members|--source-closure-roots|--member-glob-parents)
         mode=${1#--}
         shift
         ;;
@@ -110,6 +110,43 @@ member_source_inputs="$tmp_dir/member-source-inputs"
 member_dependencies="$tmp_dir/member-dependencies"
 selfhost_members="$tmp_dir/selfhost-members"
 selfhost_next="$tmp_dir/selfhost-next"
+source_closure_members="$tmp_dir/source-closure-members"
+source_closure_next="$tmp_dir/source-closure-next"
+source_closure_roots="$tmp_dir/source-closure-roots"
+test_relative_imports="$tmp_dir/test-relative-imports"
+member_glob_parents="$tmp_dir/member-glob-parents"
+
+# Manifests outside `[workspace].members` that still bind a capsule into the
+# compiler's own test surface. Seeds the SFEP-0077 source closure below;
+# guarded on existence so a fixture workspace without one still resolves.
+test_manifest_root="compiler/tests"
+
+# Close `members_file` transitively over the `owner<TAB>dependency` edge list
+# in `edges_file`, using `next_file` as scratch. Monotone over a finite name
+# set, so it always terminates.
+#
+# Extracted verbatim from the `--ci-freshness` walk (SFEP-0077 Phase 1) so the
+# source-scope closure can reuse it. The ci-freshness caller below computes
+# exactly what it computed before the extraction; `--ci-freshness` is pinned
+# byte-for-byte by `compiler/tests/e2e/module_layout_fingerprint_test.sfn`.
+closure_fixed_point() {
+    local members_file="$1"
+    local next_file="$2"
+    local edges_file="$3"
+    local before_count after_count
+    while :; do
+        LC_ALL=C sort -u "$members_file" > "$next_file"
+        before_count=$(awk 'END { print NR }' "$next_file")
+        : > "$members_file"
+        awk -F '\t' '
+            NR == FNR { selected[$1] = 1; next }
+            selected[$1] { print $2 }
+        ' "$next_file" "$edges_file" >> "$members_file"
+        LC_ALL=C sort -u "$next_file" "$members_file" -o "$members_file"
+        after_count=$(awk 'END { print NR }' "$members_file")
+        if [ "$after_count" -eq "$before_count" ]; then break; fi
+    done
+}
 
 extract_workspace_array() {
     local key="$1"
@@ -155,6 +192,18 @@ while IFS= read -r spec; do
         *) printf '%s\n' "$spec" ;;
     esac
 done < "$members_raw" | LC_ALL=C sort -u > "$members"
+
+# The `/*` prefixes from `[workspace].members`, pre-expansion. A changed path
+# under one of these that resolves to no member root is an add, a rename or a
+# removal, which SFEP-0077 rule 4 scores as full scope rather than attributing
+# it to a member. Emitted as a query so the classifier need not re-parse the
+# manifest. The loop above has already failed closed on a missing glob root.
+: > "$member_glob_parents"
+while IFS= read -r spec; do
+    case "$spec" in
+        */\*) printf '%s\n' "${spec%/\*}" >> "$member_glob_parents" ;;
+    esac
+done < "$members_raw"
 
 : > "$paths"
 : > "$freshness_paths"
@@ -346,18 +395,7 @@ cp "$freshness_paths" "$ci_freshness_paths"
 awk -F '\t' '
     $1 ~ /^sfn\/(compiler|syntax|analyzer|ir|codegen|codegen-llvm)$/ || $3 == "runtime" { print $1 }
 ' "$member_records" > "$selfhost_members"
-while :; do
-    LC_ALL=C sort -u "$selfhost_members" > "$selfhost_next"
-    before_count=$(awk 'END { print NR }' "$selfhost_next")
-    : > "$selfhost_members"
-    awk -F '\t' '
-        NR == FNR { selected[$1] = 1; next }
-        selected[$1] { print $2 }
-    ' "$selfhost_next" "$member_dependencies" >> "$selfhost_members"
-    LC_ALL=C sort -u "$selfhost_next" "$selfhost_members" -o "$selfhost_members"
-    after_count=$(awk 'END { print NR }' "$selfhost_members")
-    if [ "$after_count" -eq "$before_count" ]; then break; fi
-done
+closure_fixed_point "$selfhost_members" "$selfhost_next" "$member_dependencies"
 awk -F '\t' '
     NR == FNR { selected[$1] = 1; next }
     selected[$1] { print $2 "\t" $3 }
@@ -369,6 +407,130 @@ awk -F '\t' '
     fi
 done
 
+# SFEP-0077: the CI *source scope* closure — the members a changed path can
+# reach the compiler, the runtime, or the compiler test surface through.
+#
+# Gated on the mode. The seed walks every `.sfn` under `compiler/tests`, which
+# is ~1,000 files; doing that in the unconditional prologue would charge the
+# cost to `--member-roots`, `--layout-inputs`, `--member-manifest` and
+# `--member-records` (four back-to-back calls in `ci.yml`), to `--ci-freshness`
+# in every `sailfin-build` job, and to `--public-members` in
+# `capsule-release.yml`. It would also give every one of those modes a
+# `compiler/tests` precondition none of them reads. Only this mode needs any
+# of it.
+if [ "$mode" = "source-closure-roots" ]; then
+    awk -F '\t' '
+        $1 ~ /^sfn\/(compiler|syntax|analyzer|ir|codegen|codegen-llvm)$/ || $3 == "runtime" { print $1 }
+    ' "$member_records" > "$source_closure_members"
+    # Every compiler test binary links `sfn/test`.
+    printf 'sfn/test\n' >> "$source_closure_members"
+
+    if [ ! -d "$test_manifest_root" ]; then
+        canonical_compiler_roles=$(awk -F '\t' '
+            $1 ~ /^sfn\/(compiler|syntax|analyzer|ir|codegen|codegen-llvm)$/ { print $1 }
+        ' "$member_records" | LC_ALL=C sort -u | awk 'END { print NR }')
+        if [ "$canonical_compiler_roles" -eq 6 ]; then
+            # Skipping the seed would not empty the closure, it would narrow
+            # it — dropping sfn/http and sfn/tensor, whose only path in is this
+            # directory. A narrowed-but-plausible closure is non-empty and
+            # contains only member roots, so it passes both guards SFEP-0077
+            # section 3.3 gives ci.yml. The failure has to be raised here.
+            #
+            # The predicate fails open if one of the six is ever renamed: the
+            # count drops to 5 and this stops firing. `--compiler-manifests`
+            # carries the standing `-ne 6` assertion that catches a rename,
+            # but only the release workflows invoke it.
+            echo "module_layout_fingerprint: workspace has the six canonical compiler-role capsules but no $test_manifest_root" >&2
+            exit 2
+        fi
+    fi
+
+    : > "$test_relative_imports"
+    if [ -d "$test_manifest_root" ]; then
+        # Fixture manifests. `sfn/http` is not a compiler dependency (SFN-496,
+        # bare-name collision with `sfn/cli`'s `get`) but
+        # `compiler/tests/e2e/fixtures/stateful_http_users_server` declares it.
+        LC_ALL=C find "$test_manifest_root" -type f -name capsule.toml \
+            -exec awk '
+                FNR == 1 { in_dependencies = 0 }
+                /^[[:space:]]*\[/ { in_dependencies = ($0 ~ /^[[:space:]]*\[dependencies\][[:space:]]*$/) }
+                in_dependencies && match($0, /^[[:space:]]*"[^"]+"[[:space:]]*=/) {
+                    dependency = substr($0, RSTART, RLENGTH)
+                    sub(/^[[:space:]]*"/, "", dependency)
+                    sub(/"[[:space:]]*=$/, "", dependency)
+                    print dependency
+                }
+            ' {} + >> "$source_closure_members"
+
+        # Relative cross-member imports. A compiler test may reach another
+        # member's source by path rather than by capsule name —
+        # `tensor_import_signatures_test.sfn` imports
+        # `../../../stdlib/tensor/src/mod` (SFN-436). That edge appears in no
+        # `[dependencies]` table, so a manifest-only seed would let a
+        # `stdlib/tensor` change take the narrow lane and skip the very test
+        # that compiles it.
+        #
+        # One awk over every file rather than one per file: `FILENAME` gives
+        # the importing file's directory, so no per-file shell spawn is needed.
+        # The inner `while` consumes each match and rescans the remainder, so a
+        # line carrying two imports seeds both — a single `match()` would drop
+        # the second, and that is the one failure direction section 3.3 forbids
+        # (narrowing rather than widening).
+        LC_ALL=C find "$test_manifest_root" -type f -name '*.sfn' \
+            -exec awk '
+                FNR == 1 { dir = FILENAME; sub(/\/[^\/]*$/, "", dir) }
+                {
+                    rest = $0
+                    while (match(rest, /from[[:space:]]*"\.\.[^"]*"/)) {
+                        spec = substr(rest, RSTART, RLENGTH)
+                        rest = substr(rest, RSTART + RLENGTH)
+                        sub(/^from[[:space:]]*"/, "", spec)
+                        sub(/"$/, "", spec)
+                        print dir "/" spec
+                    }
+                }
+            ' {} + >> "$test_relative_imports"
+    fi
+
+    # Normalize each `..` path, then attribute it to the longest member root
+    # that prefixes it. A path under no member root drops out. More `..` than
+    # there are segments clamps at the repo root rather than dropping: that
+    # over-attributes, which widens, and such an import would not compile
+    # anyway. Assumes `$test_manifest_root` is relative — an absolute one would
+    # have its leading empty segment dropped here and mis-attribute.
+    awk -F '\t' '
+        NR == FNR { owner[$2] = $1; next }
+        {
+            delete stack
+            segments = split($0, part, "/")
+            top = 0
+            for (i = 1; i <= segments; i++) {
+                if (part[i] == "." || part[i] == "") { continue }
+                if (part[i] == "..") { if (top > 0) { top -= 1 } continue }
+                top += 1
+                stack[top] = part[i]
+            }
+            path = ""
+            for (i = 1; i <= top; i++) { path = (i == 1 ? stack[i] : path "/" stack[i]) }
+            best = ""
+            for (root in owner) {
+                if (path == root || index(path, root "/") == 1) {
+                    if (length(root) > length(best)) { best = root }
+                }
+            }
+            if (best != "") { print owner[best] }
+        }
+    ' "$member_records" "$test_relative_imports" >> "$source_closure_members"
+
+    closure_fixed_point "$source_closure_members" "$source_closure_next" "$member_dependencies"
+    # Names that are not workspace members drop out here, so the output is
+    # always a subset of `--member-roots`.
+    awk -F '\t' '
+        NR == FNR { selected[$1] = 1; next }
+        selected[$1] { print $2 }
+    ' "$source_closure_members" "$member_records" > "$source_closure_roots"
+fi
+
 case "$mode" in
     layout-inputs) LC_ALL=C sort -u "$paths"; exit 0 ;;
     freshness-inputs) LC_ALL=C sort -u "$freshness_paths"; exit 0 ;;
@@ -376,6 +538,8 @@ case "$mode" in
     compiler-sources) LC_ALL=C sort -u "$compiler_source_inputs"; exit 0 ;;
     maintainer-sources) LC_ALL=C sort -u "$maintainer_source_inputs"; exit 0 ;;
     member-roots) LC_ALL=C sort -u "$member_roots"; exit 0 ;;
+    source-closure-roots) LC_ALL=C sort -u "$source_closure_roots"; exit 0 ;;
+    member-glob-parents) LC_ALL=C sort -u "$member_glob_parents"; exit 0 ;;
     member-records) LC_ALL=C sort -u "$member_records"; exit 0 ;;
     compiler-manifests)
         compiler_count=$(LC_ALL=C sort -u "$compiler_manifests" | awk 'END { print NR }')
