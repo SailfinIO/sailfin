@@ -126,7 +126,11 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         out_path: out_path,
         opt_flag: "-O0",
         runtime_cache_dir: rt_cache_dir,
-        link_obj_dir: rt_cache_dir + "/link-obj",
+        // Runtime objects are safe to share read-only across pooled children;
+        // the primary test object is not. Keep its staging directory under
+        // the per-child cache root so two nested `--jobs` links cannot delete
+        // or replace each other's object on Windows (LNK1104).
+        link_obj_dir: cache_dir + "/link-obj",
         binary_dir: binary_dir,
         shared_cache_root: shared_cache_root,
         root_link_libs: root_link_libs

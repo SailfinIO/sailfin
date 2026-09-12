@@ -70,6 +70,20 @@ fn command_def() -> Command {
     return with_usage(with_arg(command("publish", "Publish a capsule to the registry"), arg_optional("path", "Capsule directory to publish (defaults to .)", "")), "packages", "sfn publish [path]", "publish a capsule");
 }
 
+// Directory for the transient package payload. `/tmp` is not a portable
+// Windows path: the UCRT resolves it on the current drive, where the parent
+// directory normally does not exist on a clean runner. Prefer the test-owned
+// scratch when present, then the host's conventional temp variables.
+fn _publish_work_root() -> string ![io] {
+    let scratch = _get_env_cmd("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let mut temp = _get_env_cmd("TMPDIR");
+    if temp.length == 0 { temp = _get_env_cmd("TEMP"); }
+    if temp.length == 0 { temp = _get_env_cmd("TMP"); }
+    if temp.length > 0 { return temp; }
+    return "/tmp";
+}
+
 // Package the capsule at `[path]` (or the current directory) and upload it
 // to the registry, authenticating with the token from `SFN_TOKEN` or the
 // `credentials` file resolved by `user_config_credentials_path()`. Identical
@@ -181,7 +195,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
         fi += 1;
     }
 
-    let payload_tmp = _mktemp_from_template_cmd("/tmp/.sfn_pub_XXXXXX");
+    let payload_tmp = _mktemp_from_template_cmd(_publish_work_root()
+        + "/.sfn_pub_XXXXXX");
     if payload_tmp.length == 0 {
         print.err("failed to create temp file");
         return 1;
