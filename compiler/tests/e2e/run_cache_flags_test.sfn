@@ -9,7 +9,7 @@
 //   3. Warm `--cache-trace` run prints a summary with hits>=1, misses=0.
 //   4. `--no-cache` suppresses the `[cache]` summary line entirely.
 //   5. `--cache-trace` emits per-module `[cache hit]` lines.
-//   6. `--clean` wipes `<cache_root>/v2/...` before building.
+//   6. `--clean` wipes `<cache_root>/v3/...` before building.
 //   7. `--clean` also wipes the staged import-context tree, not just the
 //      shared cache root (SFN-872).
 //
@@ -285,8 +285,8 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
     let _ = _run_with_cwd(fixture_dir, test_scratch, cache_dir, []);
     let _ = _run_with_cwd(fixture_dir, test_scratch, cache_dir, []);
 
-    // Sanity: v2 cache dir must exist.
-    assert fs.exists(cache_dir + "/v2");
+    // Sanity: the active cache schema dir must exist.
+    assert fs.exists(cache_dir + "/v3");
 
     // Run with --clean and telemetry: wipes the .ll module cache and forces
     // a re-miss.

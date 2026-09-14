@@ -131,7 +131,7 @@
 // is unresolvable, and is pinned in-tree for the compiler self-host
 // build so `make compile` / `make check` stay hermetic. See
 // `cache_root_from`. The trailing suffix is
-// `build_cache_schema_version()` (currently `v2`) — bump it when a
+// `build_cache_schema_version()` (currently `v3`) — bump it when a
 // key-shape or layout change could make an old entry ALIAS a new one,
 // and let the old `v<N>` tree age out so stale entries can never
 // poison new compilers.
@@ -156,16 +156,17 @@
 // production-side wrapper that resolves the root ladder from the
 // environment; the pure `cache_root_from` underneath it takes every
 // input explicitly so the precedence order is unit-testable.
+import { int_to_string } from "sfn/strings";
+
 import {
     _atomic_rename_into_place,
     _copy_file,
+    _copy_file_counted,
     _dirname_cmd,
     _ensure_dir_recursive_cmd,
     _mktemp_sibling_cmd,
     _sanitize_filename_cmd,
     _sha256_of_file,
-    _shell_read_cmd,
-    _shell_single_quote_arg,
     _write_text_cmd
 } from "./build/fs";
 import {
@@ -175,33 +176,9 @@ import {
     walk_dirs
 } from "./build/fs_tree";
 import { sha256_hex_of_string } from "./build/hash";
-import { host_is_windows } from "./build/target";
 import { _get_env_cmd } from "./build_flags";
 import { char_code_at_text, find_last_index_of_char, substring } from "./string_utils";
 import { user_config_build_cache_dir } from "./user_config";
-
-// The Windows-only native probes backing the cache GC helpers below
-// (SFN-754). Declared module-locally per the SFN-720 convention
-// `build/fs.sfn` documents for `sfn_rename_replace`/`sfn_create_exclusive`
-// — an extern over a runtime symbol resolves against the pinned seed and
-// needs no seed cut, unlike importing the defining module.
-//
-// `sfn_fs_stat_size`/`sfn_fs_stat_mtime_epoch` are defined by
-// `runtime/sfn/platform/file_stat.sfn` (POSIX stub, always `-1`) and
-// swapped for `file_stat_windows.sfn` (real `GetFileAttributesExA` read)
-// by the matching Windows table in `runtime/capsule.toml`. Both
-// return `-1` to mean "not available, fall back to the shell reading" —
-// the POSIX leg always does, since `struct stat` field offsets are not
-// portable across glibc/Darwin (`runtime/sfn/platform/sizes_linux.sfn`).
-extern fn sfn_fs_stat_size(path: *u8) -> i64;
-
-extern fn sfn_fs_stat_mtime_epoch(path: *u8) -> i64;
-
-// The write-side counterpart of the two probes above, backing
-// `cache_touch_entry` below. Same `-1`-means-"not available" contract:
-// the POSIX stub always returns it, so `cache_touch_entry` unconditionally
-// falls back to the pre-existing `process.run(["touch", dir])` there.
-extern fn sfn_fs_touch_now(path: *u8) -> i32;
 
 // The existing runtime realtime clock (`runtime/sfn/clock.sfn`), real on
 // every target — POSIX and Windows both resolve the `clock_gettime` it
@@ -220,7 +197,7 @@ extern fn sfn_clock_unix_millis(out_millis: *i64) -> i32;
 // incompatible with the current compiler. Old `v<N>/` trees are
 // left in place; they age out via the user's normal cache-cleanup
 // or `--clean` flow once that ships in PR1b.
-fn build_cache_schema_version() -> string { return "v2"; }
+fn build_cache_schema_version() -> string { return "v3"; }
 
 // ----------------------------------------------------------------
 // Public types
@@ -380,40 +357,23 @@ fn resolve_build_cache_config(no_cache_flag: boolean, trace_flag: boolean, clean
 fn cache_clean(root: string) -> boolean ![io] { return remove_tree(root); }
 
 // ----------------------------------------------------------------
-// Cache GC: mtime-on-hit, info, prune, stale-schema sweep
+// Cache GC: last-use sidecars, info, prune, stale-schema sweep
 // ----------------------------------------------------------------
 // SFEP-0040 §3.2–3.4. All operate on a resolved schema root
-// (`<base>/v<N>`) and never touch the cache *key*, entry *layout*, or
-// the atomic-publish protocol — only when entries are removed and the
-// recency signal `cache_prune` reads. Every removal path is `![io]`, the
+// (`<base>/v<N>`) and leave cache key derivation unchanged. Schema v3
+// adds accounting sidecars beside artifacts. Every removal path is `![io]`, the
 // same effect class the cache already carries. Enumeration and removal
-// are shell-free; the remaining shell-quoted reads below (`stat`, `du`,
-// `date`) are what SFN-754 replaces.
-// A cache HIT copies artifacts OUT of the entry directory into the
-// build tree; it never writes into the entry itself, so the entry's
-// mtime would otherwise stay pinned at creation time and `cache_prune`
-// would evict a hot entry as though it were cold. Touch the entry
-// directory on every hit so mtime is a true LRU recency signal
-// (SFEP-0040 §3.4). Metadata-only; a failure is non-fatal (best-effort
-// recency — the build has already succeeded).
+// are shell-free. A cache hit copies artifacts out of the entry, then
+// refreshes `lastused` so prune sees true LRU recency (SFEP-0040 §3.4).
+// A failed refresh is non-fatal because the build already succeeded.
 fn cache_touch_entry(root: string, key: CacheKey) -> boolean ![io] {
     if !_is_valid_digest(key.digest) { return false; }
     let dir = _cache_entry_dir(root, key);
     if !fs.exists(dir) { return false; }
-    // The age axis is live on Windows now (`_now_epoch`/`_entry_mtime_epoch`
-    // both have a real native path there, SFN-754), so a hit here has to
-    // genuinely refresh recency or `cache_prune --max-age` sweeps entries
-    // that were just served. `sfn_fs_touch_now` (native `SetFileTime`) is
-    // what keeps that true on Windows; POSIX still shells `touch`
-    // unconditionally, since the native probe there is an always-`-1`
-    // stub, matching `_entry_mtime_epoch`/`_dir_size_bytes` above.
-    if sfn_fs_touch_now(dir as *u8) == 0 { return true; }
-    return process.run(["touch", dir]) == 0;
+    return _write_cache_number(dir + "/lastused", _now_epoch());
 }
 
-// Parse a leading run of decimal digits as a non-negative int. Returns
-// 0 when `text` has no leading digit (shell helpers below already trim
-// their output, so a well-formed number is the whole string).
+// Parse a leading run of decimal digits as a non-negative int.
 fn _parse_nonneg_int(text: string) -> int {
     let mut val: int = 0;
     let mut i: int = 0;
@@ -427,6 +387,38 @@ fn _parse_nonneg_int(text: string) -> int {
     return val;
 }
 
+// Strict sidecar parser. A torn, missing, or corrupt value is unknown,
+// never a believable zero. Prune evicts unknown entries to avoid hiding
+// their age or size; info reports their count and a known-byte subtotal.
+fn _read_cache_number(path: string) -> int ![io] {
+    if !fs.exists(path) { return -1; }
+    let value = fs.readFile(path);
+    if value.length == 0 { return -1; }
+    let mut parsed: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let code = char_code_at_text(value, i);
+        if code < 48 || code > 57 { return -1; }
+        let digit = code - 48;
+        if parsed > 922337203685477580 { return -1; }
+        if parsed == 922337203685477580 && digit > 7 { return -1; }
+        parsed = parsed * 10 + digit;
+        i += 1;
+    }
+    return parsed;
+}
+
+fn _write_cache_number(path: string, value: int) -> boolean ![io] {
+    if value < 0 { return false; }
+    let tmp = _mktemp_sibling_cmd(path);
+    if tmp.length == 0 { return false; }
+    fs.deleteFile(tmp);
+    fs.writeFile(tmp, int_to_string(value));
+    if !fs.exists(tmp) { return false; }
+    return _atomic_rename_into_place(tmp, path);
+}
+
 fn _basename_cmd(path: string) -> string {
     let idx = find_last_index_of_char(path, "/");
     if idx < 0 { return path; }
@@ -436,24 +428,17 @@ fn _basename_cmd(path: string) -> string {
 // The LIVE `<prefix>/<key>` entry directories under `root` (layout depth
 // 2) — those still holding at least one artifact.
 //
-// The emptiness filter is deliberate and is this helper's own policy:
+// The artifact filter is deliberate and is this helper's own policy:
 // `cache_info` should not count an entry holding nothing, and
 // `cache_prune` should not carry one through the LRU machinery to
-// reclaim what `_prune_empty_shards` reaps at the end of the same prune
-// anyway. Note the directory is not weightless — `_dir_size_bytes` is
-// `du -sk`, so an empty one measures a block (~4 KiB), the same cruft
-// `cache_sweep_stale_schemas` reclaims below. The reap is the reason to
-// filter here, not a zero size.
+// reclaim what `_prune_empty_shards` reaps at the end of the same prune.
 //
 // Until SFN-756 the filter was implicit: `walk_dirs` classified a child
 // as a directory by whether listing it yielded entries, so an
 // artifact-less entry directory was invisible to the walk itself. That
 // walk now uses `fs.is_directory` and answers correctly, so the policy
-// has to be stated here or it silently inverts. The filter reuses the
-// same `fs.listDirectory` the old heuristic spent — and inherits its
-// failure mode, since an unreadable directory collapses to zero entries
-// and is filtered out either way — but per entry the walk now pays a
-// `stat` on top of that `opendir` rather than the `opendir` alone.
+// has to be stated here or it silently inverts. Sidecar-only directories
+// also need filtering because they contain no recoverable artifact.
 //
 // The policy does NOT extend to `cache_sweep_stale_schemas`, where the
 // same invisibility was a latent bug rather than an intent; see the note
@@ -464,103 +449,61 @@ fn _cache_entry_dirs(root: string) -> string[] ![io] {
     let mut i: int = 0;
     loop {
         if i >= dirs.length { break; }
-        if fs.listDirectory(dirs[i]).length > 0 { live.push(dirs[i]); }
+        if _has_cache_artifact(dirs[i]) { live.push(dirs[i]); }
         i += 1;
     }
     return live;
 }
 
-// Directory mtime in epoch seconds. Tries the native Windows probe first
-// (`sfn_fs_stat_mtime_epoch`, real only on a Windows target — see the
-// extern's header note); its `-1` "not available" sentinel is always what
-// the POSIX stub returns, so POSIX unconditionally falls through to the
-// pre-existing shell reading below, byte-identical to before SFN-754.
-// That fallback tries GNU `stat -c %Y` then BSD `stat -f %m` so the LRU
-// signal is portable across Linux and macOS.
+fn _has_cache_artifact(dir: string) -> boolean ![io] {
+    return fs.exists(dir + "/ir.sfn-asm") || fs.exists(dir + "/layout.manifest")
+        || fs.exists(dir
+        + "/mod.ll")
+        || fs.exists(dir
+        + "/mod.o")
+        || fs.exists(dir
+        + "/runtime.o")
+        || fs.exists(dir
+        + "/foreign-c.o")
+        || fs.exists(dir
+        + "/test.bin");
+}
+
+// Last successful publish or hit, read directly from the entry sidecar.
 fn _entry_mtime_epoch(dir: string) -> int ![io] {
-    let native = sfn_fs_stat_mtime_epoch(dir as *u8);
-    if native >= 0 { return native as int; }
-    let q = _shell_single_quote_arg(dir);
-    let out = _shell_read_cmd("stat -c %Y " + q + " 2>/dev/null || stat -f %m "
-        + q
-        + " 2>/dev/null");
-    return _parse_nonneg_int(out);
+    return _read_cache_number(dir + "/lastused");
 }
 
-// On-disk size of `dir` in bytes. Tries the native Windows per-file walk
-// first (`_dir_size_bytes_native`); its `-1` sentinel is always what a
-// POSIX host produces (the underlying probe is the same always-`-1` stub
-// `_entry_mtime_epoch` falls back from), so POSIX unconditionally falls
-// through to the pre-existing shell reading below, byte-identical to
-// before SFN-754. `du -sk` (1024-byte blocks) is portable across GNU and
-// BSD; block-rounding is the correct notion of "on-disk size" and is
-// precise enough for both `info` and LRU compares.
+// Sum of apparent artifact bytes, recorded during counted publication.
 fn _dir_size_bytes(dir: string) -> int ![io] {
-    let native = _dir_size_bytes_native(dir);
-    if native >= 0 { return native; }
-    let q = _shell_single_quote_arg(dir);
-    let out = _shell_read_cmd("du -sk " + q + " 2>/dev/null | awk '{print $1}'");
-    return _parse_nonneg_int(out) * 1024;
-}
-
-// `dir`'s total size in bytes via `sfn_fs_stat_size`, summed over every
-// regular file the tree contains. Walks with `walk_dirs`
-// (`build/fs_tree.sfn`), which already bounds the traversal
-// (`FS_TREE_MAX_DEPTH`/`FS_TREE_MAX_NODES`) rather than reimplementing a
-// guarded BFS here. A single native read failing anywhere — including
-// every read on POSIX, where the probe is an always-`-1` stub — abandons
-// the walk immediately and returns `-1`, so a partial sum can never be
-// reported as the total; `-1` is also returned for a file-less tree (no
-// probe ever ran), so an empty directory falls back to the shell `du`
-// reading exactly as it always has, rather than reporting a native `0`
-// that disagrees with `du`'s minimum block accounting.
-fn _dir_size_bytes_native(dir: string) -> int ![io] {
-    let dirs = walk_dirs(dir, 0, 16);
-    let mut total: i64 = 0;
-    let mut saw_file: boolean = false;
-    let mut d: int = 0;
+    let recorded = _read_cache_number(dir + "/bytes");
+    if recorded < 0 { return -1; }
+    let names = ["ir.sfn-asm", "layout.manifest", "mod.ll", "mod.o", "runtime.o", "foreign-c.o", "test.bin"];
+    let mut total: int = 0;
+    let mut i: int = 0;
     loop {
-        if d >= dirs.length { break; }
-        let entries = fs.listDirectory(dirs[d]);
-        let mut e: int = 0;
-        loop {
-            if e >= entries.length { break; }
-            let full = dirs[d] + "/" + entries[e];
-            if !fs.is_directory(full) {
-                let sz = sfn_fs_stat_size(full as *u8);
-                if sz < 0 { return -1; }
-                saw_file = true;
-                total += sz;
-            }
-            e += 1;
+        if i >= names.length { break; }
+        if fs.exists(dir + "/" + names[i]) {
+            let part = _read_cache_number(dir + "/" + names[i] + ".bytes");
+            if part < 0 || total > 9223372036854775807 - part { return -1; }
+            total += part;
         }
-        d += 1;
+        i += 1;
     }
-    if !saw_file { return -1; }
-    return total as int;
+    // Two publishers may race to replace the aggregate. Per-kind files
+    // are the stable source; reconcile a stale total before reporting it.
+    if total != recorded {
+        let _ = _write_cache_number(dir + "/bytes", total);
+    }
+    return total;
 }
 
-// Current time in epoch seconds. Tries the native runtime clock first
-// (`sfn_clock_unix_millis`, real on every target) on a Windows host only
-// — POSIX stays on the pre-existing shell reading unconditionally, so its
-// behaviour is byte-identical to before SFN-754, matching
-// `_entry_mtime_epoch`/`_dir_size_bytes` above.
-//
-// All three moved together, for the reason this comment used to warn
-// about: de-shelling the mtime/size reads alone while `now` stayed
-// shell-bound (returning 0 on Windows) would have switched
-// `cache_prune`'s `now > 0` age-eviction guard off — now that `now` is
-// real too, that guard is live, so a real mtime is exactly what it needs.
-// POSIX shells all three exactly as before, so the invariant holds there
-// too: the age axis and the mtime/size reads move in lockstep on every
-// host, never independently.
+// Current time in epoch seconds from the runtime clock on every host.
 fn _now_epoch() -> int ![io] {
-    if host_is_windows() {
-        let mut millis: i64 = 0;
-        let status = sfn_clock_unix_millis(& millis);
-        if status != 0 && millis > 0 { return (millis / 1000) as int; }
-    }
-    return _parse_nonneg_int(_shell_read_cmd("date +%s"));
+    let mut millis: i64 = 0;
+    let status = sfn_clock_unix_millis(& millis);
+    if status != 0 && millis > 0 { return (millis / 1000) as int; }
+    return 0;
 }
 
 // Recursive delete guarded against the empty path and `/` (mirrors
@@ -570,6 +513,15 @@ fn _rm_rf_dir(dir: string) -> boolean ![io] { return remove_tree(dir); }
 // Best-effort removal of now-empty prefix shards (and any empty entry
 // dirs) so `cache info` entry counts stay honest after a prune.
 fn _prune_empty_shards(root: string) ![io] {
+    // An entry with only accounting sidecars is no longer literally empty.
+    // Remove that orphan before the ordinary empty-shard pass.
+    let dirs = walk_dirs(root, 2, 2);
+    let mut i: int = 0;
+    loop {
+        if i >= dirs.length { break; }
+        if !_has_cache_artifact(dirs[i]) { let _ = remove_tree(dirs[i]); }
+        i += 1;
+    }
     let _ = remove_empty_dirs_under(root);
 }
 
@@ -609,6 +561,7 @@ struct CacheInfo {
     root: string;
     entry_count: int;
     total_bytes: int;
+    incomplete_entries: int;
 }
 
 // Resolved root, live entry count, and total on-disk size (bytes). A
@@ -617,16 +570,19 @@ struct CacheInfo {
 fn cache_info(root: string) -> CacheInfo ![io] {
     let dirs = _cache_entry_dirs(root);
     let mut total: int = 0;
-    if fs.exists(root) {
-        let q = _shell_single_quote_arg(root);
-        let out = _shell_read_cmd("du -sk " + q
-            + " 2>/dev/null | awk '{print $1}'");
-        total = _parse_nonneg_int(out) * 1024;
+    let mut incomplete: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= dirs.length { break; }
+        let size = _dir_size_bytes(dirs[i]);
+        if size < 0 { incomplete += 1; } else { total += size; }
+        i += 1;
     }
     return CacheInfo {
         root: root,
         entry_count: dirs.length,
-        total_bytes: total
+        total_bytes: total,
+        incomplete_entries: incomplete
     };
 }
 
@@ -636,20 +592,25 @@ fn cache_info(root: string) -> CacheInfo ![io] {
 struct PruneResult {
     removed_entries: int;
     removed_bytes: int;
+    truncated: boolean;
 }
 
-// LRU eviction. `max_age_days >= 0` removes any entry whose mtime is
+// LRU eviction. `max_age_days >= 0` removes any entry whose last use is
 // older than that many days; `max_size_bytes >= 0` then deletes
 // oldest-first until the total falls to or below the cap (so
 // `--max-size 0` empties the cache). A negative bound disables that
 // axis. Age is applied before size so an aged-out entry never counts
-// toward the size total. mtime is a true recency signal because a hit
-// touches the entry (`cache_touch_entry`).
+// toward the size total. A hit refreshes `lastused` (`cache_touch_entry`).
 fn cache_prune(root: string, max_size_bytes: int, max_age_days: int) -> PruneResult ![io] {
     let mut removed_entries: int = 0;
     let mut removed_bytes: int = 0;
+    let mut truncated: boolean = false;
     if !fs.exists(root) {
-        return PruneResult { removed_entries: 0, removed_bytes: 0 };
+        return PruneResult {
+            removed_entries: 0,
+            removed_bytes: 0,
+            truncated: false
+        };
     }
     let dirs = _cache_entry_dirs(root);
     let now = _now_epoch();
@@ -670,12 +631,14 @@ fn cache_prune(root: string, max_size_bytes: int, max_age_days: int) -> PruneRes
         let d = dirs[i];
         let mt = _entry_mtime_epoch(d);
         let sz = _dir_size_bytes(d);
-        let aged_out = age_active && now > 0 && (now - mt) > max_age_days * 86400;
+        // Unknown metadata is eviction-favored on both axes. It must not
+        // become a zero-byte entry that evades a size cap indefinitely.
+        let aged_out = mt < 0 || sz < 0 || (age_active && now > 0 && (now - mt) > max_age_days * 86400);
         if aged_out {
             if _rm_rf_dir(d) {
                 removed_entries += 1;
-                removed_bytes += sz;
-            }
+                if sz > 0 { removed_bytes += sz; }
+            } else { truncated = true; }
         } else {
             kept_dirs.push(d);
             kept_mtimes.push(mt);
@@ -703,7 +666,7 @@ fn cache_prune(root: string, max_size_bytes: int, max_age_days: int) -> PruneRes
                     removed_entries += 1;
                     removed_bytes += kept_sizes[idx];
                     total -= kept_sizes[idx];
-                }
+                } else { truncated = true; }
                 o += 1;
             }
         }
@@ -712,7 +675,8 @@ fn cache_prune(root: string, max_size_bytes: int, max_age_days: int) -> PruneRes
     _prune_empty_shards(root);
     return PruneResult {
         removed_entries: removed_entries,
-        removed_bytes: removed_bytes
+        removed_bytes: removed_bytes,
+        truncated: truncated
     };
 }
 
@@ -978,16 +942,44 @@ fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
 // be minted the helper degrades to a direct in-place copy: atomicity
 // is lost but the build still produces the artifact.
 fn _cache_atomic_copy(src: string, dst: string) -> boolean ![io] {
+    return _cache_atomic_copy_counted(src, dst) >= 0;
+}
+
+fn _cache_atomic_copy_counted(src: string, dst: string) -> int ![io] {
     let tmp = _mktemp_sibling_cmd(dst);
     if tmp.length == 0 {
-        // No temp available — degrade to a non-atomic direct copy.
-        return _copy_file(src, dst);
+        let direct = _copy_file_counted(src, dst);
+        if direct.ok { return direct.bytes; }
+        return -1;
     }
-    if !_copy_file(src, tmp) {
+    let staged = _copy_file_counted(src, tmp);
+    if !staged.ok {
         fs.deleteFile(tmp);
-        return false;
+        return -1;
     }
-    return _atomic_rename_into_place(tmp, dst);
+    if !_atomic_rename_into_place(tmp, dst) { return -1; }
+    return staged.bytes;
+}
+
+// One counted publish per artifact. The per-kind values let a later
+// overwrite replace its old contribution without rereading the artifact.
+fn _record_artifact_bytes(dir: string, kind: string, size: int) -> boolean ![io] {
+    let name = _filename_for_kind(kind);
+    if name.length == 0 { return false; }
+    if !_write_cache_number(dir + "/" + name + ".bytes", size) { return false; }
+    let names = ["ir.sfn-asm", "layout.manifest", "mod.ll", "mod.o", "runtime.o", "foreign-c.o", "test.bin"];
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if fs.exists(dir + "/" + names[i]) {
+            let part = _read_cache_number(dir + "/" + names[i] + ".bytes");
+            if part < 0 || total > 9223372036854775807 - part { return false; }
+            total += part;
+        }
+        i += 1;
+    }
+    return _write_cache_number(dir + "/bytes", total);
 }
 
 // ----------------------------------------------------------------
@@ -1004,13 +996,30 @@ fn cache_store(root: string, key: CacheKey, sfn_asm_src: string, layout_manifest
     let entry_dir = _cache_entry_dir(root, key);
     _ensure_dir_recursive_cmd(entry_dir);
     let paths = cache_paths_for(root, key);
-    if !_cache_atomic_copy(sfn_asm_src, paths.sfn_asm) { return false; }
-    if !_cache_atomic_copy(layout_manifest_src, paths.layout_manifest) {
+    let asm_size = _cache_atomic_copy_counted(sfn_asm_src, paths.sfn_asm);
+    if asm_size < 0 { return false; }
+    let layout_size = _cache_atomic_copy_counted(layout_manifest_src, paths.layout_manifest);
+    if layout_size < 0 { return false; }
+    let ll_size = _cache_atomic_copy_counted(ll_src, paths.ll);
+    if ll_size < 0 { return false; }
+    let obj_size = _cache_atomic_copy_counted(obj_src, paths.obj);
+    if obj_size < 0 { return false; }
+    if !_write_cache_number(entry_dir + "/ir.sfn-asm.bytes", asm_size) {
         return false;
     }
-    if !_cache_atomic_copy(ll_src, paths.ll) { return false; }
-    if !_cache_atomic_copy(obj_src, paths.obj) { return false; }
-    return true;
+    if !_write_cache_number(entry_dir + "/layout.manifest.bytes", layout_size) {
+        return false;
+    }
+    if !_write_cache_number(entry_dir + "/mod.ll.bytes", ll_size) {
+        return false;
+    }
+    if !_write_cache_number(entry_dir + "/mod.o.bytes", obj_size) {
+        return false;
+    }
+    if !_write_cache_number(entry_dir + "/bytes", asm_size + layout_size
+        + ll_size
+        + obj_size) { return false; }
+    return cache_touch_entry(root, key);
 }
 
 // ----------------------------------------------------------------
@@ -1053,17 +1062,17 @@ fn cache_lookup_artifact(root: string, key: CacheKey, kind: string) -> boolean !
 // cache hit into a recompile.
 fn cache_copy_artifact_to(root: string, key: CacheKey, kind: string, dst_path: string) -> boolean ![io] {
     let ok = _cache_copy_artifact_to_impl(root, key, kind, dst_path);
-    // Cache hit: bump the entry's mtime so `cache_prune` sees true
+    // Cache hit: refresh `lastused` so `cache_prune` sees true
     // recency (SFEP-0040 §3.4). Best-effort — never fails the restore.
     if ok { let _ = cache_touch_entry(root, key); }
     return ok;
 }
 
-// Same restore as `cache_copy_artifact_to`, but skips the recency-bumping
-// `touch`. For a caller restoring MULTIPLE artifacts out of the SAME entry
+// Same restore as `cache_copy_artifact_to`, but skips the recency refresh.
+// For a caller restoring MULTIPLE artifacts out of the SAME entry
 // directory in one operation (the staging cache's `.sfn-asm` +
 // `.layout-manifest` pair, e.g.) — one entry needs one recency bump, not
-// one per artifact, and `touch` forks a process per call.
+// one per artifact.
 fn cache_copy_artifact_to_untouched(root: string, key: CacheKey, kind: string, dst_path: string) -> boolean ![io] {
     return _cache_copy_artifact_to_impl(root, key, kind, dst_path);
 }
@@ -1089,8 +1098,12 @@ fn cache_store_artifact(root: string, key: CacheKey, kind: string, src_path: str
     let entry_dir = _cache_entry_dir(root, key);
     _ensure_dir_recursive_cmd(entry_dir);
     let dst = cache_artifact_path(root, key, kind);
-    let stored = _cache_atomic_copy(src_path, dst);
-    if stored {
+    let copied_bytes = _cache_atomic_copy_counted(src_path, dst);
+    if copied_bytes >= 0 {
+        if !_record_artifact_bytes(entry_dir, kind, copied_bytes) {
+            return false;
+        }
+        if !cache_touch_entry(root, key) { return false; }
         // SFN-148: debug-gated emit ledger. A `.ll` store means a cache
         // miss→emit just happened; recording the key digest lets a
         // regression assert each dep module is emitted at most once per
@@ -1103,7 +1116,7 @@ fn cache_store_artifact(root: string, key: CacheKey, kind: string, src_path: str
             }
         }
     }
-    return stored;
+    return copied_bytes >= 0;
 }
 
 // ----------------------------------------------------------------

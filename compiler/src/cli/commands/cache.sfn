@@ -48,11 +48,45 @@ fn _format_bytes(bytes: int) -> string {
     return int_to_string(bytes) + " bytes (" + int_to_string(mib) + " MiB)";
 }
 
-fn _run_info(root: string) -> int ![io] {
+fn _json_string(value: string) -> string {
+    let mut escaped = "";
+    let mut i = 0;
+    loop {
+        if i >= value.length { break; }
+        let ch = char_at(value, i);
+        let code = char_code(ch);
+        if ch == "\\" { escaped = escaped + "\\\\"; } else if ch == "\"" {
+            escaped = escaped + "\\\"";
+        } else if ch == "\n" { escaped = escaped + "\\n"; } else if ch == "\t" {
+            escaped = escaped + "\\t";
+        } else if ch == "\r" { escaped = escaped + "\\r"; } else if code < 32 {
+            let hex = "0123456789abcdef";
+            escaped = escaped + "\\u00" + char_at(hex, code / 16) + char_at(hex, code % 16);
+        } else { escaped = escaped + ch; }
+        i += 1;
+    }
+    return "\"" + escaped + "\"";
+}
+
+fn _run_info(root: string, json_output: boolean) -> int ![io] {
     let info: CacheInfo = cache_info(root);
+    if json_output {
+        print("{\"root\":" + _json_string(info.root) + ",\"entries\":"
+            + int_to_string(info.entry_count)
+            + ",\"bytes\":"
+            + int_to_string(info.total_bytes)
+            + ",\"incomplete_entries\":"
+            + int_to_string(info.incomplete_entries)
+            + "}");
+        return 0;
+    }
     print("root: " + info.root);
     print("entries: " + int_to_string(info.entry_count));
     print("size: " + _format_bytes(info.total_bytes));
+    if info.incomplete_entries > 0 {
+        print("note: " + int_to_string(info.incomplete_entries)
+            + " entries have missing or corrupt size metadata; size is a known-byte subtotal");
+    }
     return 0;
 }
 
@@ -74,6 +108,9 @@ fn _run_prune(root: string, matches: Matches) -> int ![io] {
     print("pruned " + int_to_string(result.removed_entries) + " entries ("
         + _format_bytes(result.removed_bytes)
         + ")");
+    if result.truncated {
+        print.err("warning: some cache entries could not be removed");
+    }
     return 0;
 }
 
@@ -93,12 +130,12 @@ fn _run_clean(root: string, matches: Matches) -> int ![io] {
     return 0;
 }
 
-// The `sfn/cli` definition for `cache`, registered on the v2 root via
+// The `sfn/cli` definition for `cache`, registered on the CLI root via
 // `with_subcommand`. Three leaf subcommands: `info` (no flags), `prune`
 // (`--max-size <bytes>` / `--max-age <days>`), `clean` (`--all-schemas`).
 fn command_def() -> Command {
-    let info_cmd: Command = command("info", "Show the resolved cache root, entry count, and total on-disk size");
-    let prune_cmd: Command = with_flag(with_flag(command("prune", "Evict cache entries by size and/or age (LRU)"), flag_int("max-size", "Evict oldest-first until total on-disk size is <= N bytes")), flag_int("max-age", "Remove entries whose last use is older than N days"));
+    let info_cmd: Command = with_flag(command("info", "Show cache root, entry count, and apparent artifact bytes"), flag("json", "Print machine-readable cache accounting"));
+    let prune_cmd: Command = with_flag(with_flag(command("prune", "Evict cache entries by size and/or age (LRU)"), flag_int("max-size", "Evict oldest-first until apparent artifact bytes are <= N")), flag_int("max-age", "Remove entries whose last use is older than N days"));
     let clean_cmd: Command = with_flag(command("clean", "Remove the current cache schema tree"), flag("all-schemas", "Also sweep stale sibling cache schema versions"));
     let cmd: Command = with_subcommand(with_subcommand(with_subcommand(command("cache", "Inspect and garbage-collect the build artifact cache"), info_cmd), prune_cmd), clean_cmd);
     return with_usage(cmd, "build & run", "sfn cache <info|prune|clean>", "manage the build cache");
@@ -112,7 +149,9 @@ fn command_def() -> Command {
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     let root: string = cache_root("");
     let sub: string = subcommand(matches);
-    if strings_equal(sub, "info") { return _run_info(root); }
+    if strings_equal(sub, "info") {
+        return _run_info(root, has_flag(matches, "json"));
+    }
     if strings_equal(sub, "prune") { return _run_prune(root, matches); }
     if strings_equal(sub, "clean") { return _run_clean(root, matches); }
     print.err("usage: sfn cache <info|prune|clean>");
