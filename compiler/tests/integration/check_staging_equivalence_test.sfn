@@ -6,26 +6,20 @@
 // + `.layout-manifest` + `.srchash`) in a subprocess — bounding the
 // parent's arena the same way `sfn build` does — instead of the
 // in-process fallback that peaked 8.3GB on a cold
-// `check compiler/src/cli_main.sfn` (#1245).
+// `check compiler/src/cli_main.sfn` (#1245). The shared resolver now
+// recognizes native `.exe` names and the exact path of a renamed binary.
 //
-// The acceptance contract is *equivalence*: the staged artifact set
-// produced by the subprocess path must be byte-identical to the set
-// the legacy in-process path produces. This test drives both paths
-// end-to-end through the *shipped* `build/bin/sfn` binary:
+// The acceptance contract is *equivalence*: a canonical and a renamed
+// compiler produce byte-identical staged artifact sets. This test drives
+// both paths end-to-end through the *shipped* compiler binary:
 //
 //   - Run A invokes the binary normally. `fn main` threads
-//     `binary_dir` from `exe_path()`, `_resolve_check_self_path`
-//     finds `<binary_dir>/sailfin`, and staging takes the
-//     subprocess-per-module branch of `_cr_stage_one`.
-//   - Run B invokes a byte-identical COPY of the binary under a
-//     different filename. `binary_dir` resolves to the copy's
-//     directory, `<binary_dir>/sailfin` does not exist, the resolved
-//     exe is "", and staging falls back to the legacy in-process
-//     branch — the pre-#1246 behavior, preserved for callers that
-//     can't resolve their own path. The trick hinges on `exe_path()`
-//     (Linux `/proc/self/exe`) / `realpath(argv[0])` resolving to
-//     the *invoked filename's* directory, so the `cp` (not symlink)
-//     under a non-`sailfin` name is what forces the miss.
+//     `binary_dir` from `exe_path()`, and `_resolve_self_path` finds
+//     the canonical compiler for subprocess-per-module staging.
+//   - Run B invokes a byte-identical COPY under a different filename.
+//     `_resolve_self_path` falls back to `exe_path()` and stages through
+//     that exact renamed binary rather than silently reverting to
+//     in-process staging.
 //
 // Each run uses its own work directory (staging writes to
 // `<cwd>/build/compiler/import-context`), so the two staged trees can
@@ -203,7 +197,7 @@ fn _has_sfn_asm(files: string[]) -> boolean {
     return false;
 }
 
-test "check staging: subprocess path stages byte-identical artifacts to in-process path" ![io] {
+test "check staging: canonical and renamed compilers stage byte-identical artifacts" ![io] {
     let root = fs.mkdtemp("sfn-check-stage-eq-");
     assert root.length > 0;
     let src_dir = root + "/src";
@@ -219,9 +213,8 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
     let rc_a = process.run_capture_cwd([exe, "check", src_dir + "/main.sfn"], _check_env(), work_a);
     assert rc_a == 0;
 
-    // Run B: byte-identical copy under a different filename ->
-    // `<binary_dir>/sailfin` misses -> resolved exe is "" ->
-    // legacy in-process staging path.
+    // Run B: the name probes miss but `exe_path()` resolves the copy,
+    // preserving subprocess staging for a renamed compiler.
     let work_b = root + "/work_b";
     let bin_b = root + "/binb";
     fs.createDirectory(work_b, true);
