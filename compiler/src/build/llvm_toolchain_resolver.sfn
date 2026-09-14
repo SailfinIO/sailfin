@@ -710,6 +710,7 @@ export {
     llvm_version_skew_diagnostic,
     llvm_version_unparseable_diagnostic,
     parse_llvm_major,
+    _resolve_on_path,
     resolve_llvm_toolchain,
     resolve_llvm_toolchain_for_host
 };

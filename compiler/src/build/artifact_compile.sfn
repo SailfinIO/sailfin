@@ -32,7 +32,9 @@
 // foreign-C object cannot alias even when their source basenames and
 // contents coincide.
 //
-// This leaf preserves the legacy clang argv byte-for-byte on both paths.
+// The LLVM path preserves the legacy clang argv. Foreign C now uses the
+// executable selected by SAILFIN_FOREIGN_C_COMPILER and does not inherit an
+// LLVM-only warning flag.
 // The dedicated `llvm-as`/`opt`/`llc` provider is resolved but unwired
 // (`./llvm_toolchain_resolver`, SFN-948) and is wired by SFN-952; the full
 // LLVM-family fingerprint SFEP-0066 §3.8 requires becomes part of these
@@ -42,8 +44,9 @@
 // Like `./clang_argv`, this module must NOT import `../backend` — see that
 // file's header for the seed vtable-lowering hazard that constrains every
 // build-driver leaf.
-import { ends_with } from "sfn/strings";
+import { ends_with, int_to_string } from "sfn/strings";
 
+import { sha256_hex_of_string } from "./hash";
 import { build_target_triple, host_target_triple, target_clang_flags } from "./target";
 
 // Cache-namespace tags. Folded into every object cache key so the two
@@ -65,6 +68,7 @@ struct LlvmArtifactRequest {
 // (SFEP-0066 §3.9). `include_roots` are bare directories; this module owns
 // the `-I` spelling so no caller hand-builds a C flag.
 struct ForeignCRequest {
+    compiler_path: string;
     include_roots: string[];
     object_path: string;
     opt_flag: string;
@@ -80,12 +84,10 @@ fn classify_object_source(path: string) -> string {
     return "";
 }
 
-// The legacy shared clang `-c` argv shape, now private to this leaf. Both
-// public builders route through it so the emitted command stays
-// byte-identical to the pre-split form on each path (#1112, SFN-52).
+// The legacy clang `-c` argv shape for LLVM text artifacts (#1112, SFN-52).
 // `target_flags` carries the `-target <triple>` pair for a cross/Windows
 // target, or [] for the host default; it is spliced right after
-// `opt_flag`. `include_flags` is non-empty only on the foreign-C path.
+// `opt_flag`. LLVM requests never carry C include flags.
 fn _clang_object_argv(src: string, out: string, opt_flag: string, include_flags: string[], target_flags: string[]) -> string[] {
     let mut args: string[] = ["clang", opt_flag];
     let mut ti: int = 0;
@@ -123,14 +125,27 @@ fn llvm_artifact_argv_with_target(request: LlvmArtifactRequest, target_flags: st
 // compiled through the LLVM path and no `.ll` through this one.
 fn foreign_c_argv_with_target(request: ForeignCRequest, target_flags: string[]) -> string[] {
     if classify_object_source(request.source_path) != "foreign-c" { return []; }
-    let mut include_flags: string[] = [];
+    if request.compiler_path.length == 0 { return []; }
+    let mut args: string[] = [request.compiler_path, request.opt_flag];
+    let mut ti: int = 0;
+    loop {
+        if ti >= target_flags.length { break; }
+        args.push(target_flags[ti]);
+        ti += 1;
+    }
+    args.push("-ffunction-sections");
+    args.push("-fdata-sections");
     let mut i: int = 0;
     loop {
         if i >= request.include_roots.length { break; }
-        include_flags.push("-I" + request.include_roots[i]);
+        args.push("-I" + request.include_roots[i]);
         i += 1;
     }
-    return _clang_object_argv(request.source_path, request.object_path, request.opt_flag, include_flags, target_flags);
+    args.push("-c");
+    args.push(request.source_path);
+    args.push("-o");
+    args.push(request.object_path);
+    return args;
 }
 
 // Resolve the build target once, then build the LLVM-artifact argv. Every
@@ -169,6 +184,39 @@ fn foreign_c_cache_key(base_key: string) -> string {
     return base_key + "\n" + _FOREIGN_C_NAMESPACE;
 }
 
+// The object key records the executable identity and every output-affecting
+// request input. Length prefixes keep distinct flag arrays unambiguous.
+fn foreign_c_request_cache_key(base_key: string, request: ForeignCRequest, target_flags: string[], compiler_identity: string, header_identity: string) -> string {
+    let namespaced = foreign_c_cache_key(base_key);
+    if namespaced.length == 0 || compiler_identity.length == 0
+        || header_identity.length == 0 { return ""; }
+    let mut record = "foreign-c-request-v2";
+    let fields = [compiler_identity, header_identity, request.compiler_path, request.source_path, request.opt_flag];
+    let mut i: int = 0;
+    loop {
+        if i >= fields.length { break; }
+        record = record + int_to_string(fields[i].length) + ":" + fields[i];
+        i += 1;
+    }
+    let argv = foreign_c_argv_with_target(request, target_flags);
+    // The staged object path is deliberately excluded: it changes on each
+    // cache miss without changing the emitted object's semantics.
+    i = 1;
+    loop {
+        if i >= argv.length - 2 { break; }
+        record = record + int_to_string(argv[i].length) + ":" + argv[i];
+        i += 1;
+    }
+    return namespaced + "\nforeign-request:" + sha256_hex_of_string(record);
+}
+
+fn foreign_c_missing_compiler_diagnostic(capsule: string, source: string, target: string) -> string {
+    return "sfn build: capsule " + capsule + " c-source " + source
+        + " for target "
+        + target
+        + " requires SAILFIN_FOREIGN_C_COMPILER to name an external C compiler";
+}
+
 export {
     ForeignCRequest,
     LlvmArtifactRequest,
@@ -176,6 +224,8 @@ export {
     foreign_c_argv,
     foreign_c_argv_with_target,
     foreign_c_cache_key,
+    foreign_c_request_cache_key,
+    foreign_c_missing_compiler_diagnostic,
     llvm_artifact_argv,
     llvm_artifact_argv_with_target,
     llvm_artifact_cache_key,

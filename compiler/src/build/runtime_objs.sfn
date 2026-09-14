@@ -16,11 +16,12 @@ import {
     cache_store_artifact,
     empty_cache_stats,
     merge_cache_stats,
+    runtime_link_inputs_identity,
     runtime_object_cache_key,
     runtime_object_cache_key_with_identity,
     runtime_object_entry_key_from_str
 } from "../build_cache";
-import { _env_flag } from "../build_flags";
+import { _env_flag, _get_env_cmd } from "../build_flags";
 import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
 import { locate_runtime_dep_capsule_src } from "../capsule_resolver/locate";
 import { WorkspaceMember } from "../capsule_resolver/types";
@@ -33,13 +34,14 @@ import {
     source_role_runtime_provider
 } from "../module_paths";
 import { RuntimeCapsuleArtifacts, RuntimeTargetArtifacts } from "../runtime_capsule_resolver";
-import { contains_string } from "../string_utils";
+import { contains_string, index_of } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import {
     ForeignCRequest,
     LlvmArtifactRequest,
     foreign_c_argv,
-    foreign_c_cache_key,
+    foreign_c_missing_compiler_diagnostic,
+    foreign_c_request_cache_key,
     llvm_artifact_argv,
     llvm_artifact_cache_key
 } from "./artifact_compile";
@@ -49,8 +51,9 @@ import {
     _mktemp_sibling_cmd,
     _sha256_of_file
 } from "./fs";
-import { remove_empty_dirs_under, walk_dirs } from "./fs_tree";
+import { collect_foreign_c_files, remove_empty_dirs_under, walk_dirs } from "./fs_tree";
 import { sha256_hex_of_string } from "./hash";
+import { _resolve_on_path } from "./llvm_toolchain_resolver";
 import {
     _dirname,
     _ends_with,
@@ -66,10 +69,12 @@ import { runtime_demanded_dep_specs } from "./runtime_selection";
 // their runtime providers from `runtime/capsule.toml [targets.<triple>]`.
 // Identity off Windows, so Linux/macOS link inputs are byte-identical.
 import {
+    build_host_os,
     build_target_os,
     build_target_triple,
     host_target_triple,
     target_artifact_tag,
+    target_clang_flags,
     target_os_is_windows,
     triple_artifact_tags
 } from "./target";
@@ -94,12 +99,13 @@ fn _runtime_bundle_exists(root: string) -> boolean ![io] {
 // `kind = "runtime"` dep capsules. `object_paths` are the cached
 // `.o`s the runtime capsule's c-sources / ll-sources compiled
 // to; `link_libs` are the linker flags (e.g. `-lm`, `-lpthread`)
-// to append after the `.ll` inputs in the final clang invocation.
-// `success` is `false` when any clang sub-invocation exited
+// to append after the `.ll` inputs in the final link invocation.
+// `success` is `false` when any object-provider invocation exited
 // non-zero — the caller bails before invoking the final link.
 struct RuntimeLinkInputs {
     object_paths: string[];
     link_libs: string[];
+    foreign_c_provenance: string[];
     success: boolean;
     // Runtime C/LL/sfn object-cache activity accumulated while
     // compiling this capsule set (#915). Folded into the build-wide
@@ -114,6 +120,7 @@ fn _failed_runtime_link_inputs() -> RuntimeLinkInputs {
     return RuntimeLinkInputs {
         object_paths: empty,
         link_libs: empty2,
+        foreign_c_provenance: [],
         success: false,
         stats: empty_cache_stats()
     };
@@ -136,6 +143,86 @@ fn _runtime_obj_prefix(capsule_name: string) -> string {
         i += 1;
     }
     return out + "__";
+}
+
+// Resolve only after a C source is present. The executable path, complete
+// version response, and binary content form the foreign provider identity.
+// Resolving a bare name first prevents a later PATH change from selecting a
+// different compiler than the one whose bytes entered the object key.
+fn _foreign_c_compiler_path(configured: string) -> string ![io] {
+    if configured.length == 0 { return ""; }
+    if index_of(configured, "/") >= 0 || index_of(configured, "\\") >= 0 {
+        if fs.exists(configured) && fs.is_executable(configured) && !fs.is_directory(configured) {
+            return configured;
+        }
+        return "";
+    }
+    let host_os = build_host_os();
+    let found = _resolve_on_path(configured, host_os);
+    if found.length > 0 { return found; }
+    if host_os == "Windows" {
+        return _resolve_on_path(configured + ".exe", host_os);
+    }
+    return "";
+}
+
+fn _foreign_c_compiler_identity(path: string) -> string ![io] {
+    if path.length == 0 { return ""; }
+    let content = _sha256_of_file(path);
+    if content.length == 0 { return ""; }
+    let rc = process.run_capture([path, "--version"], process.environ());
+    let version = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    if rc != 0 || version.length == 0 { return ""; }
+    return sha256_hex_of_string(path + "\n" + content + "\n" + version);
+}
+
+struct ForeignCCompiler {
+    path: string;
+    identity: string;
+}
+
+fn foreign_c_compiler_from_config(configured: string) -> ForeignCCompiler ![io] {
+    let path = _foreign_c_compiler_path(configured);
+    if path.length == 0 {
+        return ForeignCCompiler { path: "", identity: "" };
+    }
+    let identity = _foreign_c_compiler_identity(path);
+    return ForeignCCompiler { path: path, identity: identity };
+}
+
+// A C source can include any file beneath its declared roots or own directory.
+// Hash that closure once per capsule so include-only edits invalidate objects.
+fn _foreign_c_header_identity(include_dirs: string[], c_sources: string[]) -> string ![io] {
+    let mut headers: string[] = [];
+    let mut roots: string[] = [];
+    let mut di: int = 0;
+    loop {
+        if di >= include_dirs.length { break; }
+        roots.push(include_dirs[di]);
+        di += 1;
+    }
+    // Quote includes search the source directory even without `-I`.
+    let mut si: int = 0;
+    loop {
+        if si >= c_sources.length { break; }
+        roots.push(_dirname(c_sources[si]));
+        si += 1;
+    }
+    di = 0;
+    loop {
+        if di >= roots.length { break; }
+        let found = collect_foreign_c_files(roots[di], 32);
+        let mut hi: int = 0;
+        loop {
+            if hi >= found.length { break; }
+            if _sha256_of_file(found[hi]).length == 0 { return ""; }
+            headers.push(found[hi]);
+            hi += 1;
+        }
+        di += 1;
+    }
+    return runtime_link_inputs_identity(headers, [], "foreign-c-headers");
 }
 
 // SFN-617: the single stem composer for a cached runtime object's
@@ -257,7 +344,7 @@ struct PendingRuntimeObjectAssembly {
 // `kind = "runtime"` capsule artifacts and return the resulting
 // `.o` paths plus the accumulated `link-libs`. Caches `.o` outputs
 // under `out_dir` keyed by source content SHA-256 + `opt_flag`
-// (#632) so a content edit recompiles while repeat builds skip clang.
+// (#632) so a content edit recompiles while repeat builds skip the provider.
 //
 // Used only when the resolver returns at least one runtime capsule
 // artifact (i.e. the project's `[dependencies]` declared a
@@ -265,12 +352,16 @@ struct PendingRuntimeObjectAssembly {
 // without a runtime dep, the caller falls through to the legacy
 // `_clang_compile_runtime_objects` helper that uses the
 // hardcoded `runtime_root/native/...` layout.
-fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int, target_triple: string) -> RuntimeLinkInputs ![io] {
+fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int, target_triple: string, configured_foreign_compiler: string) -> RuntimeLinkInputs ![io] {
     let target_tag = target_artifact_tag(target_triple);
     let mut objects: string[] = [];
     let mut link_libs: string[] = [];
+    let mut foreign_c_provenance: string[] = [];
     let mut pending: PendingRuntimeObjectAssembly[] = [];
     let mut can_parallel: boolean = true;
+    let mut foreign_compiler: string = "";
+    let mut foreign_identity: string = "";
+    let target_flags = target_clang_flags(target_triple, host_target_triple());
     // Per-call cache-stat accumulator (#915). Counting mirrors the
     // `.ll` module cache (`capsule_resolver.sfn::_cr_compile_one`): a
     // valid-key reuse is a `hit`; any recompile (the producer ran) is
@@ -292,7 +383,11 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         // declare same-basename sources without colliding (e.g.
         // both shipping a `util.c`).
         let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
-        // c-sources: clang -c each, cached by capsule-prefix +
+        let mut header_identity = "";
+        if cap.c_sources.length > 0 {
+            header_identity = _foreign_c_header_identity(cap.include_dirs, cap.c_sources);
+        }
+        // c-sources: use the configured foreign compiler, cached by capsule-prefix +
         // full basename (extension included so `foo.c` and
         // `foo.ll` from the same capsule don't collide on the
         // same `.o` output).
@@ -300,9 +395,47 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         loop {
             if ci >= cap.c_sources.length { break; }
             let src = cap.c_sources[ci];
+            if foreign_compiler.length == 0 {
+                let configured = configured_foreign_compiler;
+                if configured.length == 0 {
+                    print.err(foreign_c_missing_compiler_diagnostic(cap.capsule_name, src, target_triple));
+                    return _failed_runtime_link_inputs();
+                }
+                let selected = foreign_c_compiler_from_config(configured);
+                foreign_compiler = selected.path;
+                if foreign_compiler.length == 0 {
+                    print.err("sfn build: capsule " + cap.capsule_name
+                        + " c-source "
+                        + src
+                        + " for target "
+                        + target_triple
+                        + ": SAILFIN_FOREIGN_C_COMPILER does not name an executable: "
+                        + configured);
+                    return _failed_runtime_link_inputs();
+                }
+                foreign_identity = selected.identity;
+                if foreign_identity.length == 0 {
+                    print.err("sfn build: capsule " + cap.capsule_name
+                        + " c-source "
+                        + src
+                        + " for target "
+                        + target_triple
+                        + ": could not fingerprint SAILFIN_FOREIGN_C_COMPILER "
+                        + foreign_compiler);
+                    return _failed_runtime_link_inputs();
+                }
+            }
             let base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
             let obj = _path_join(out_dir, base + ".o");
-            let key = _runtime_obj_key_for_build(foreign_c_cache_key(runtime_object_cache_key(src, opt_flag)), target_triple);
+            let request = ForeignCRequest {
+                compiler_path: foreign_compiler,
+                include_roots: cap.include_dirs,
+                object_path: obj,
+                opt_flag: opt_flag,
+                source_path: src
+            };
+            let key = _runtime_obj_key_for_build(foreign_c_request_cache_key(runtime_object_cache_key(src, opt_flag), request, target_flags, foreign_identity, header_identity), target_triple);
+            foreign_c_provenance.push(cap.capsule_name + ":" + src + ":" + key);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
@@ -334,7 +467,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 pending.push(PendingRuntimeObjectAssembly {
                     cache_key: key, cache_suffix: base, object_path: obj, source_kind: "c", source_path: src, staged_path: obj_tmp, task: ParallelProcessTask {
                         argv: foreign_c_argv(ForeignCRequest {
-                            include_roots: cap.include_dirs, object_path: obj_target, opt_flag: opt_flag, source_path: src
+                            compiler_path: foreign_compiler, include_roots: cap.include_dirs, object_path: obj_target, opt_flag: opt_flag, source_path: src
                         })
                     }
                 });
@@ -428,6 +561,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
     return RuntimeLinkInputs {
         object_paths: objects,
         link_libs: link_libs,
+        foreign_c_provenance: foreign_c_provenance,
         success: true,
         stats: stats
     };
@@ -1061,6 +1195,7 @@ fn _finish_runtime_sfn_objects(plans: RuntimeSfnObjectPlan[], jobs: int, shared_
     return RuntimeLinkInputs {
         object_paths: objects,
         link_libs: empty_libs,
+        foreign_c_provenance: [],
         success: true,
         stats: stats
     };
@@ -1779,6 +1914,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         return RuntimeLinkInputs {
             object_paths: objects,
             link_libs: empty_libs,
+            foreign_c_provenance: [],
             success: true,
             stats: stats
         };
@@ -1801,6 +1937,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         return RuntimeLinkInputs {
             object_paths: objects,
             link_libs: empty_libs,
+            foreign_c_provenance: [],
             success: true,
             stats: stats
         };
@@ -2015,7 +2152,17 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     // One resolution feeds every clang phase, preserving the emit pool's
     // CPU/RAM ceiling and the SAILFIN_BUILD_JOBS=1 bisect path (SFN-612).
     let jobs = _cr_resolve_jobs();
-    let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root, jobs, target_triple);
+    let mut configured_foreign_compiler = "";
+    let mut ci: int = 0;
+    loop {
+        if ci >= capsules.length { break; }
+        if capsules[ci].c_sources.length > 0 {
+            configured_foreign_compiler = _get_env_cmd("SAILFIN_FOREIGN_C_COMPILER");
+            break;
+        }
+        ci += 1;
+    }
+    let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root, jobs, target_triple, configured_foreign_compiler);
     if !inputs.success { return _failed_runtime_link_inputs(); }
     let mut objects: string[] = inputs.object_paths;
     let mut link_libs: string[] = [];
@@ -2112,6 +2259,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     return RuntimeLinkInputs {
         object_paths: objects,
         link_libs: link_libs,
+        foreign_c_provenance: inputs.foreign_c_provenance,
         success: true,
         stats: stats
     };
@@ -2227,6 +2375,9 @@ fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_d
 }
 
 export {
+    ForeignCCompiler,
+    foreign_c_compiler_from_config,
+    _clang_compile_runtime_capsule_objects,
     RuntimeLinkInputs,
     RuntimeSfnObjectPlan,
     assemble_runtime_capsule_link_inputs,

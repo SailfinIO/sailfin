@@ -100,6 +100,10 @@ struct LinkPlan {
     // Pre-compiled `.o` inputs. SFN-453 makes this the complete link-input
     // boundary: textual LLVM IR is assembled before `Backend.link`.
     objects: string[];
+    // Capsule/source/object-key records for external C objects. A future
+    // direct linker can retain this provenance without reconstructing it
+    // from workdir sidecars; the current clang driver ignores this metadata.
+    foreign_c_provenance: string[];
     out_path: string;
     opt_flag: string;
     // Clang-driver flags the program link interleaves between
@@ -412,6 +416,7 @@ fn _target_conditioned_plan(plan: LinkPlan, triple: string) -> LinkPlan {
     }
     return LinkPlan {
         objects: plan.objects,
+        foreign_c_provenance: plan.foreign_c_provenance,
         out_path: plan.out_path,
         opt_flag: plan.opt_flag,
         link_flags: plan.link_flags,

@@ -1,0 +1,242 @@
+// SFN-949: foreign C is an explicitly configured, separately keyed provider.
+import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
+import { skip } from "sfn/test/skip";
+
+import {
+    ForeignCRequest,
+    foreign_c_argv_with_target,
+    foreign_c_missing_compiler_diagnostic,
+    foreign_c_request_cache_key
+} from "../../src/build/artifact_compile";
+import {
+    _clang_compile_runtime_capsule_objects,
+    foreign_c_compiler_from_config
+} from "../../src/build/runtime_objs";
+import { build_target_triple, host_is_windows } from "../../src/build/target";
+import { _test_bin_runtime_capsules_identity } from "../../src/cli/commands/test/cache_scratch";
+import {
+    RuntimeCapsuleArtifacts,
+    RuntimeTargetArtifacts,
+    runtime_capsule_from_root
+} from "../../src/runtime_capsule_resolver";
+
+fn _foreign_fixture_capsule(src: string, include_dir: string) -> RuntimeCapsuleArtifacts {
+    let mut sources: string[] = [];
+    if src.length > 0 { sources.push(src); }
+    let mut includes: string[] = [];
+    if include_dir.length > 0 { includes.push(include_dir); }
+    let empty_targets: RuntimeTargetArtifacts[] = [];
+    return RuntimeCapsuleArtifacts {
+        capsule_name: "sfn/foreign-fixture",
+        manifest_dir: include_dir,
+        c_sources: sources,
+        ll_sources: [],
+        sfn_sources: [],
+        include_dirs: includes,
+        link_libs: [],
+        prelude_entry: "",
+        sfn_source_root: "",
+        sfn_module_prefix: "",
+        capsule_deps: [],
+        sfn_source_gates: [],
+        target_artifacts: empty_targets
+    };
+}
+
+test "foreign C: first-party runtime closure has no C sources" ![io] {
+    let caps = runtime_capsule_from_root("runtime");
+    assert expect_eq_bool(caps.length > 0, true).ok;
+    let mut i: int = 0;
+    loop {
+        if i >= caps.length { break; }
+        assert expect_eq_bool(caps[i].c_sources.length == 0, true).ok;
+        i += 1;
+    }
+}
+
+test "foreign C: missing compiler names capsule source target and knob" ![pure] {
+    let diagnostic = foreign_c_missing_compiler_diagnostic("sfn/shim", "src/shim.c", "x86_64-unknown-linux-gnu");
+    assert expect_eq_str(diagnostic, "sfn build: capsule sfn/shim c-source src/shim.c for target x86_64-unknown-linux-gnu requires SAILFIN_FOREIGN_C_COMPILER to name an external C compiler").ok;
+}
+
+test "foreign C: configured compiler receives target include and optimization flags" ![pure] {
+    let request = ForeignCRequest {
+        compiler_path: "/fake/toolchain/cc",
+        include_roots: ["inc", "vendor/include"],
+        object_path: "out.o",
+        opt_flag: "-O2",
+        source_path: "shim.c"
+    };
+    let target_flags = ["-target", "aarch64-unknown-linux-gnu"];
+    let argv = foreign_c_argv_with_target(request, target_flags);
+    let expected = ["/fake/toolchain/cc", "-O2", "-target", "aarch64-unknown-linux-gnu", "-ffunction-sections", "-fdata-sections", "-Iinc", "-Ivendor/include", "-c", "shim.c", "-o", "out.o"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+test "foreign C: provider identity and flags invalidate the object key" ![pure] {
+    let request = ForeignCRequest {
+        compiler_path: "/fake/toolchain/cc",
+        include_roots: ["inc"],
+        object_path: "out.o",
+        opt_flag: "-O2",
+        source_path: "shim.c"
+    };
+    let base = "source-hash";
+    let target_flags = ["-target", "aarch64-unknown-linux-gnu"];
+    let key = foreign_c_request_cache_key(base, request, target_flags, "content-and-version-A", "headers-A");
+    assert expect_eq_bool(key.length > 0, true).ok;
+    assert expect_eq_bool(key != foreign_c_request_cache_key(base, request, target_flags, "content-and-version-B", "headers-A"), true).ok;
+    assert expect_eq_bool(key != foreign_c_request_cache_key(base, request, [], "content-and-version-A", "headers-A"), true).ok;
+    assert expect_eq_bool(key != foreign_c_request_cache_key(base, request, target_flags, "content-and-version-A", "headers-B"), true).ok;
+    let changed_include = ForeignCRequest {
+        compiler_path: "/fake/toolchain/cc",
+        include_roots: ["other"],
+        object_path: "out.o",
+        opt_flag: "-O2",
+        source_path: "shim.c"
+    };
+    assert expect_eq_bool(key != foreign_c_request_cache_key(base, changed_include, target_flags, "content-and-version-A", "headers-A"), true).ok;
+    let changed_path = ForeignCRequest {
+        compiler_path: "/fake/toolchain/other-cc",
+        include_roots: ["inc"],
+        object_path: "out.o",
+        opt_flag: "-O2",
+        source_path: "shim.c"
+    };
+    assert expect_eq_bool(key != foreign_c_request_cache_key(base, changed_path, target_flags, "content-and-version-A", "headers-A"), true).ok;
+    assert expect_eq_str(foreign_c_request_cache_key("", request, target_flags, "content-and-version-A", "headers-A"), "").ok;
+}
+
+test "foreign C: missing selection cannot form a spawnable request" ![pure] {
+    let request = ForeignCRequest {
+        compiler_path: "",
+        include_roots: [],
+        object_path: "out.o",
+        opt_flag: "-O2",
+        source_path: "shim.c"
+    };
+    assert expect_eq_bool(foreign_c_argv_with_target(request, []).length == 0, true).ok;
+}
+
+test "foreign C: configured executable is probed and fingerprinted" ![io] {
+    // The built Sailfin executable is a harmless fake C provider for the
+    // selection contract: it answers --version but cannot compile C.
+    let mut path = "build/bin/sfn";
+    if host_is_windows() { path = path + ".exe"; }
+    let selected = foreign_c_compiler_from_config(path);
+    assert expect_eq_str(selected.path, path).ok;
+    assert expect_eq_bool(selected.identity.length == 64, true).ok;
+}
+
+test "foreign C: empty configuration never resolves a compiler" ![io] {
+    let selected = foreign_c_compiler_from_config("");
+    assert expect_eq_str(selected.path, "").ok;
+    assert expect_eq_str(selected.identity, "").ok;
+}
+
+test "foreign C: pure capsule never selects a compiler" ![io] {
+    let scratch = fs.mkdtemp("sfn-foreign-pure-");
+    let cap = _foreign_fixture_capsule("", "");
+    let inputs = _clang_compile_runtime_capsule_objects([cap], scratch, "-O0", "", 1, build_target_triple(), "missing-compiler");
+    assert inputs.success;
+    assert inputs.object_paths.length == 0;
+    assert inputs.foreign_c_provenance.length == 0;
+}
+
+test "foreign C: missing compiler stops before spawning a C capsule" ![io] {
+    let scratch = fs.mkdtemp("sfn-foreign-missing-");
+    let src = scratch + "/probe.c";
+    fs.writeFile(src, "int foreign_probe(void) { return 1; }\n");
+    let cap = _foreign_fixture_capsule(src, scratch);
+    let inputs = _clang_compile_runtime_capsule_objects([cap], scratch, "-O0", "", 1, build_target_triple(), "");
+    assert ! inputs.success;
+    assert inputs.object_paths.length == 0;
+    assert inputs.stats.misses == 0;
+}
+
+test "foreign C: quoted include edits invalidate linked test identity" ![io] {
+    let scratch = fs.mkdtemp("sfn-foreign-test-id-");
+    let src = scratch + "/probe.c";
+    let include = scratch + "/probe.inc";
+    fs.writeFile(src, "#include \"probe.inc\"\nint foreign_probe(void) { return PROBE_VALUE; }\n");
+    fs.writeFile(include, "#define PROBE_VALUE 1\n");
+    let cap = _foreign_fixture_capsule(src, "");
+    let first = _test_bin_runtime_capsules_identity([cap], scratch);
+    fs.writeFile(include, "#define PROBE_VALUE 2\n");
+    let second = _test_bin_runtime_capsules_identity([cap], scratch);
+    assert first.length > 0;
+    assert second.length > 0;
+    assert first != second;
+}
+
+test "foreign C: configured fake compiler emits and rekeys a C capsule" ![io] {
+    let oracle = env.get("SAILFIN_TEST_FOREIGN_C_COMPILER");
+    if oracle.length == 0 {
+        skip("set SAILFIN_TEST_FOREIGN_C_COMPILER for the optional C-harness test");
+    }
+    let scratch = fs.mkdtemp("sfn-foreign-fake-");
+    let fake_src = scratch + "/fake.c";
+    let mut fake_bin = scratch + "/fake-cc";
+    if host_is_windows() { fake_bin = fake_bin + ".exe"; }
+    // The fake records argv and copies an oracle-built object. It never
+    // invokes a shell, so an oracle path containing spaces works on Windows.
+    fs.writeFile(fake_src, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n"
+        + "int main(int argc, char **argv) {\n"
+        + "  if (argc == 2 && strcmp(argv[1], \"--version\") == 0) { puts(\"fake-cc 1\"); return 0; }\n"
+        + "  const char *src = 0, *out = 0;\n"
+        + "  for (int i=1; i<argc; i++) { if (!strcmp(argv[i], \"-c\") && i+1<argc) src=argv[i+1]; if (!strcmp(argv[i], \"-o\") && i+1<argc) out=argv[i+1]; }\n"
+        + "  if (!src || !out) return 2;\n"
+        + "  char log[4096]; snprintf(log, sizeof(log), \"%s.args\", out); FILE *f=fopen(log, \"w\"); if (!f) return 3;\n"
+        + "  for (int i=1; i<argc; i++) fprintf(f, \"%s\\n\", argv[i]); fclose(f);\n"
+        + "  const char *slash=strrchr(argv[0], '/'); if (!slash) return 4;\n"
+        + "  char prepared[4096]; snprintf(prepared, sizeof(prepared), \"%.*sprepared.o\", (int)(slash-argv[0]+1), argv[0]);\n"
+        + "  FILE *in=fopen(prepared, \"rb\"), *dest=fopen(out, \"wb\"); if (!in || !dest) return 5;\n"
+        + "  char buf[8192]; size_t n; while ((n=fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, dest);\n"
+        + "  fclose(in); fclose(dest); return 0;\n"
+        + "}\n");
+    let prepared_src = scratch + "/prepared.c";
+    let prepared_obj = scratch + "/prepared.o";
+    fs.writeFile(prepared_src, "int foreign_probe(void) { return 1; }\n");
+    let prepared_rc = process.run_capture([oracle, "-c", prepared_src, "-o", prepared_obj], process.environ());
+    let prepared_out = process.capture_take_stdout();
+    let prepared_err = process.capture_take_stderr();
+    if prepared_rc != 0 {
+        print(prepared_out);
+        print(prepared_err);
+    }
+    assert prepared_rc == 0;
+    let build_rc = process.run_capture([oracle, fake_src, "-o", fake_bin], process.environ());
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    if build_rc != 0 {
+        print(build_out);
+        print(build_err);
+    }
+    assert build_rc == 0;
+    let source_dir = scratch + "/src";
+    let object_dir = scratch + "/objects";
+    assert fs.createDirectory(source_dir, true);
+    assert fs.createDirectory(object_dir, true);
+    let header = source_dir + "/probe.inc";
+    let source = source_dir + "/probe.c";
+    fs.writeFile(header, "#define PROBE_VALUE 1\n");
+    fs.writeFile(source, "#include \"probe.inc\"\nint foreign_probe(void) { return PROBE_VALUE; }\n");
+    // No declared include root: quote includes still search beside `probe.c`.
+    let cap = _foreign_fixture_capsule(source, "");
+    let first = _clang_compile_runtime_capsule_objects([cap], object_dir, "-O0", "", 1, build_target_triple(), fake_bin);
+    assert first.success;
+    assert first.stats.misses == 1;
+    assert first.object_paths.length == 1;
+    assert first.foreign_c_provenance.length == 1;
+    let object = first.object_paths[0];
+    assert fs.exists(object);
+    let first_key = fs.readFile(object + ".key");
+    let second = _clang_compile_runtime_capsule_objects([cap], object_dir, "-O0", "", 1, build_target_triple(), fake_bin);
+    assert second.success;
+    assert second.stats.hits == 1;
+    fs.writeFile(header, "#define PROBE_VALUE 2\n");
+    let third = _clang_compile_runtime_capsule_objects([cap], object_dir, "-O0", "", 1, build_target_triple(), fake_bin);
+    assert third.success;
+    assert third.stats.misses == 1;
+    assert fs.readFile(object + ".key") != first_key;
+}

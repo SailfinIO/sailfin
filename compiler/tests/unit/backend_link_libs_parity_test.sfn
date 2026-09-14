@@ -40,6 +40,7 @@ fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
 fn _representative_plan() -> LinkPlan ![pure] {
     return LinkPlan {
         objects: ["runtime.o", "main.o"],
+        foreign_c_provenance: [],
         out_path: "a.out",
         opt_flag: "-O0",
         link_flags: ["-fuse-ld=mold", "-ffunction-sections"],

@@ -105,11 +105,117 @@
 // its only `true` is "the loop drained" — which is why it is the one
 // walker that had to ask.
 import { starts_with } from "../string_utils";
-import { _copy_file_preserving_mode, _dir_is_enumerable, _dirname_cmd } from "./fs";
+import {
+    _copy_file_preserving_mode,
+    _dir_is_enumerable,
+    _dirname_cmd,
+    _ends_with_cmd,
+    _strip_trailing_slashes_cmd
+} from "./fs";
 
 let FS_TREE_MAX_DEPTH: int = 16;
 
 let FS_TREE_MAX_NODES: int = 200000;
+
+// Include-root headers are upstream inputs to both foreign C objects and
+// linked test binaries. Keep their enumeration identical across both caches.
+fn collect_header_files(root: string, max_depth: int) -> string[] ![io] {
+    let mut results: string[] = [];
+    if _ends_with_cmd(root, ".h") { return [root]; }
+    let root_norm = _strip_trailing_slashes_cmd(root);
+    let mut queue: string[] = [root_norm];
+    let mut depth: int = 0;
+    loop {
+        if depth >= max_depth || queue.length == 0 { break; }
+        let mut next_queue: string[] = [];
+        let mut qi: int = 0;
+        loop {
+            if qi >= queue.length { break; }
+            let dir = queue[qi];
+            if !fs.exists(dir) {
+                qi += 1;
+                continue;
+            }
+            let entries = fs.listDirectory(dir);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let entry = entries[ei];
+                // Empty entries would re-enqueue the same directory (#1409).
+                if entry.length == 0 {
+                    ei += 1;
+                    continue;
+                }
+                let full_path = dir + "/" + entry;
+                if _ends_with_cmd(entry, ".h") { results.push(full_path); } else {
+                    let child_entries = fs.listDirectory(full_path);
+                    if child_entries.length > 0 {
+                        next_queue.push(full_path);
+                    }
+                }
+                ei += 1;
+            }
+            qi += 1;
+        }
+        queue = next_queue;
+        depth += 1;
+    }
+    return results;
+}
+
+// Foreign C can `#include` files with any extension. Return every file under
+// a source directory or declared include root, not just `.h` files. An empty
+// path in the result signals an incomplete scan (depth/node bound or unreadable
+// directory); cache callers must treat that as an invalid identity.
+fn collect_foreign_c_files(root: string, max_depth: int) -> string[] ![io] {
+    let mut results: string[] = [];
+    if !fs.exists(root) { return results; }
+    if !fs.is_directory(root) { return [root]; }
+    let mut queue: string[] = [root];
+    let mut depth: int = 0;
+    let mut nodes: int = 0;
+    loop {
+        if queue.length == 0 { break; }
+        if depth >= max_depth || nodes >= FS_TREE_MAX_NODES {
+            results.push("");
+            break;
+        }
+        let mut next_queue: string[] = [];
+        let mut qi: int = 0;
+        loop {
+            if qi >= queue.length { break; }
+            if nodes >= FS_TREE_MAX_NODES {
+                results.push("");
+                return results;
+            }
+            let dir = queue[qi];
+            nodes += 1;
+            let entries = fs.listDirectory(dir);
+            if entries.length == 0 && !_dir_is_enumerable(dir) {
+                results.push("");
+                return results;
+            }
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let entry = entries[ei];
+                if entry.length == 0 {
+                    results.push("");
+                    return results;
+                }
+                let full_path = dir + "/" + entry;
+                if fs.is_directory(full_path) {
+                    next_queue.push(full_path);
+                } else { results.push(full_path); }
+                ei += 1;
+            }
+            qi += 1;
+        }
+        queue = next_queue;
+        depth += 1;
+    }
+    return results;
+}
 
 // The depth-1 directories directly under `dir`.
 fn list_child_dirs(dir: string) -> string[] ![io] {
@@ -415,6 +521,8 @@ fn ensure_dir_p(path: string) -> boolean ![io] {
 }
 
 export {
+    collect_header_files,
+    collect_foreign_c_files,
     walk_dirs,
     list_child_dirs,
     remove_tree,

@@ -508,6 +508,7 @@ test "target: host targets keep the POSIX X_OK fs_exec_mode module" ![io] {
 fn _driver_plan(test_mode: boolean) -> LinkPlan ![pure] {
     return LinkPlan {
         objects: ["runtime.o", "main.o"],
+        foreign_c_provenance: [],
         out_path: "a.exe",
         opt_flag: "-O2",
         link_flags: [],

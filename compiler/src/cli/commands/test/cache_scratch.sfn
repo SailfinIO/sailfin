@@ -1,9 +1,15 @@
-import { _ends_with_cmd, _strip_trailing_slashes_cmd } from "../../../build/fs";
-import { condition_runtime_capsules_for_target, runtime_stamp_identity } from "../../../build/runtime_objs";
+import { _strip_trailing_slashes_cmd } from "../../../build/fs";
+import { collect_foreign_c_files, collect_header_files } from "../../../build/fs_tree";
+import { _dirname } from "../../../build/paths";
+import {
+    condition_runtime_capsules_for_target,
+    foreign_c_compiler_from_config,
+    runtime_stamp_identity
+} from "../../../build/runtime_objs";
 import { build_target_os, build_target_triple, host_is_windows } from "../../../build/target";
 import { runtime_link_inputs_identity } from "../../../build_cache";
 import { _get_env_cmd } from "../../../build_flags";
-import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
+import { RuntimeCapsuleArtifacts, runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
 import { _has_prefix_cmd } from "../../../string_cmd_utils";
 
 // Resolve the per-test scratch root used for the test runner's
@@ -179,54 +185,7 @@ fn _cleanup_test_scratch(owned: boolean, scratch_root: string, success: boolean)
 // compiled runtime objects the test binary links against, so it must
 // bust the key even though the `.c`/`.ll` source list is unchanged.
 fn _collect_header_files_cmd(root: string, max_depth: int) -> string[] ![io] {
-    let mut results: string[] = [];
-    if _ends_with_cmd(root, ".h") { return [root]; }
-    let root_norm: string = _strip_trailing_slashes_cmd(root);
-    let mut queue: string[] = [root_norm];
-    let mut depth: int = 0;
-    loop {
-        if depth >= max_depth { break; }
-        if queue.length == 0 { break; }
-        let mut next_queue: string[] = [];
-        let mut qi: int = 0;
-        loop {
-            if qi >= queue.length { break; }
-            let dir = queue[qi];
-            if !fs.exists(dir) {
-                qi += 1;
-                continue;
-            }
-            let entries = fs.listDirectory(dir);
-            let mut ei: int = 0;
-            loop {
-                if ei >= entries.length { break; }
-                let entry = entries[ei];
-                // Defense-in-depth (#1409): never recurse on an empty entry
-                // name. `dir + "/" + ""` is `dir + "/"` — listing it re-lists
-                // the SAME directory, so a `listDirectory` that returns
-                // empty names (e.g. a wrong `struct dirent` offset on a
-                // platform) would re-enqueue this directory every level and
-                // blow the BFS up 4^depth to `max_depth`. A real directory
-                // entry always has a non-empty name.
-                if entry.length == 0 {
-                    ei += 1;
-                    continue;
-                }
-                let full_path = dir + "/" + entry;
-                if _ends_with_cmd(entry, ".h") { results.push(full_path); } else {
-                    let child_entries = fs.listDirectory(full_path);
-                    if child_entries.length > 0 {
-                        next_queue.push(full_path);
-                    }
-                }
-                ei += 1;
-            }
-            qi += 1;
-        }
-        queue = next_queue;
-        depth += 1;
-    }
-    return results;
+    return collect_header_files(root, max_depth);
 }
 
 // #1233: content identity of the runtime link inputs every test binary
@@ -260,16 +219,43 @@ fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> st
         if stamped_identity.length > 0 { return stamped_identity; }
     }
     let caps = condition_runtime_capsules_for_target(runtime_capsule_from_root(runtime_root), build_target_os(), build_target_triple());
+    return _test_bin_runtime_capsules_identity(caps, unique_suffix);
+}
+
+fn _test_bin_runtime_capsules_identity(caps: RuntimeCapsuleArtifacts[], unique_suffix: string) -> string ![io] {
     let mut sources: string[] = [];
     let mut values: string[] = [];
+    let mut foreign_recorded: boolean = false;
     let mut ci: int = 0;
     loop {
         if ci >= caps.length { break; }
         let cap = caps[ci];
+        // A restored test binary bypasses runtime-object assembly. Include
+        // the same foreign compiler identity here so changing its executable
+        // cannot serve an old linked binary, and a missing configuration
+        // cannot reuse one built when a compiler was configured.
+        if cap.c_sources.length > 0 && !foreign_recorded {
+            let configured = _get_env_cmd("SAILFIN_FOREIGN_C_COMPILER");
+            let compiler = foreign_c_compiler_from_config(configured);
+            values.push("foreign-c-compiler:" + compiler.identity);
+            foreign_recorded = true;
+        }
         let mut si: int = 0;
         loop {
             if si >= cap.c_sources.length { break; }
-            sources.push(cap.c_sources[si]);
+            let c_source = cap.c_sources[si];
+            sources.push(c_source);
+            // Quote includes also search beside a C source without `-I`.
+            // Match the foreign-object header closure so a cached linked
+            // test binary cannot bypass a header-only object rebuild.
+            let local_headers = collect_foreign_c_files(_dirname(c_source), 32);
+            let mut lhi: int = 0;
+            loop {
+                if lhi >= local_headers.length { break; }
+                if local_headers[lhi].length == 0 { return ""; }
+                sources.push(local_headers[lhi]);
+                lhi += 1;
+            }
             si += 1;
         }
         let mut li: int = 0;
@@ -295,10 +281,14 @@ fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> st
             if di >= cap.include_dirs.length { break; }
             let inc = cap.include_dirs[di];
             values.push("-I" + inc);
-            let headers = _collect_header_files_cmd(inc, 32);
+            let mut headers: string[] = [];
+            if cap.c_sources.length > 0 {
+                headers = collect_foreign_c_files(inc, 32);
+            } else { headers = _collect_header_files_cmd(inc, 32); }
             let mut hi: int = 0;
             loop {
                 if hi >= headers.length { break; }
+                if headers[hi].length == 0 { return ""; }
                 sources.push(headers[hi]);
                 hi += 1;
             }
@@ -322,5 +312,6 @@ export {
     _clean_lowering_state,
     _cleanup_test_scratch,
     _collect_header_files_cmd,
+    _test_bin_runtime_capsules_identity,
     _test_bin_runtime_identity
 };

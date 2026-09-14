@@ -22,22 +22,26 @@ Use this skill whenever a task touches Sailfin compiler sources, runtime code, t
 4. Compiler/runtime source change: run `sfn dev bootstrap build` when the change touches compiler self-hosting surface, then run the targeted `build/bin/sfn test <path>` / `-k` / `--tag` commands.
 5. Structural compiler change: rebuild with `sfn dev bootstrap build --clean-tree`.
 
-Use `sfn test`, `sfn dev verify`, or `sfn dev verify --strict` only when the issue
-explicitly requests a full-suite, release, determinism, or self-host fixed-point
-gate; when declaring a feature shipped or cutting a release; or when the final
-change is structural or high-risk. Structural work includes file splits, new
-modules, module-graph changes, and renamed exports. High-risk work includes
-self-host/bootstrap machinery, runtime ABI or startup, cross-pass compiler
-contracts, ABI-affecting or cross-cutting LLVM/codegen changes, and concurrency,
-cache-correctness, or determinism behavior. Merely touching compiler/runtime
-source, changing several files, or receiving a serious review finding does not
-by itself require a full gate.
+Use `sfn test`, `sfn dev verify`, or `sfn dev verify --strict` locally when the
+issue explicitly requires a local full-suite, release, determinism, or
+self-host fixed-point gate; when declaring a feature shipped or cutting a
+release; or when structural/high-risk work has no equivalent full CI gate.
+Structural work includes file splits, new modules, module-graph changes, and
+renamed exports. High-risk work includes self-host/bootstrap machinery,
+runtime ABI or startup, cross-pass compiler contracts, ABI-affecting or
+cross-cutting LLVM/codegen changes, and concurrency, cache-correctness, or
+determinism behavior. For a PR covered by Sailfin's Linux, macOS, and Windows
+compiler builds and full sharded test matrix, run the native clean-tree
+self-host build when structural, plus targeted tests locally; let that CI
+matrix perform the full platform gates. Do not run a multi-hour local
+triple-pass merely because the change is structural or high-risk.
 
 During an issue-pickup workflow, run fast checks, `sfn dev bootstrap build`, and
-targeted tests before independent review. Defer qualifying full gates until the candidate
-has no blocking review findings so the expensive result applies to the final
-revision. If a later source edit invalidates that result, repeat the affected
-verification on the new review-stable revision.
+targeted tests before independent review. Defer a required *local* full gate
+until the candidate has no blocking review findings. When the full gate is
+delegated to PR CI, record which CI jobs provide it and wait for their result
+after opening the PR. If a later source edit invalidates verification, repeat
+the affected checks on the new revision.
 
 ## SFEP and docs coupling
 
