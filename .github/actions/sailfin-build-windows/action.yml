@@ -233,7 +233,7 @@ runs:
         # seed IS the pinned release build, so running == pin, the gate is a
         # no-op, and neither the skew nor the TLS argument above holds — the
         # setting is harmless there, not load-bearing. It stays unconditional
-        # because `ci.yml` and `release-tag.yml` still pass `'cross'`.
+        # because `release-tag.yml` still passes `'cross'`.
         #
         # Removal condition, now half discharged: SFN-57 shipped the native
         # release seed and SFN-994 implemented `seed_source: 'release'`, so
@@ -347,7 +347,7 @@ runs:
     #
     # SFN-981 adds the complete cold workspace inventory downstream in the
     # nightly workflow. Keep this focused gate in the shared build action so
-    # every caller, including the path-filtered PR build, still proves the
+    # every caller, including the source-PR build, still proves the
     # test runner and SFN-927 Winsock fixes on one bounded portable fixture
     # without paying the full-suite cost.
     # That coverage matters because the fixes could otherwise ship without

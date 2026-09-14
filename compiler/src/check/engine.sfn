@@ -25,6 +25,7 @@ import { parse_program } from "sfn/syntax";
 import { Token } from "sfn/syntax";
 
 import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "../build/fs";
+import { _resolve_self_path } from "../build/paths";
 import { workspace_capability_gate } from "../capsule_resolver/capability";
 import { prepare_project_capsules_for_check } from "../capsule_resolver/check";
 import { discover_project_root } from "../capsule_resolver/paths";
@@ -156,26 +157,6 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
         print.err(render_terminal_diagnostic(diagnostic_to_diag(diag, "load"), empty_lines, "load"));
         p += 1;
     }
-}
-
-// Resolve the path to this compiler binary so the resolver can stage
-// each import-context module in a subprocess (#1246), bounding the
-// parent's arena the same way `sfn build` does. Mirrors
-// `_resolve_test_self_path` in `cli_commands.sfn` /
-// `_resolve_self_path` in `build/paths.sfn`: probe canonical `sfn`
-// before legacy `sailfin`. Self-host work roots may contain a
-// searchable `<binary_dir>/sailfin` cache directory beside the binary,
-// and POSIX access(X_OK) also succeeds for such directories (SFN-579).
-// Empty result falls back to in-process staging inside the resolver —
-// degraded memory bound, not an error.
-fn _resolve_check_self_path(binary_dir: string) -> string ![io] {
-    if binary_dir.length > 0 {
-        let candidate = _path_join_cmd(binary_dir, "sfn");
-        if fs.is_executable(candidate) { return candidate; }
-        let legacy = _path_join_cmd(binary_dir, "sailfin");
-        if fs.is_executable(legacy) { return legacy; }
-    }
-    return "";
 }
 
 // Compute the resolution-group key for a file path. Two files share a
@@ -336,12 +317,14 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
     }
     if cap_gate_failed { return 1; }
 
-    // #1246: resolve the self-executable once for every group's
-    // resolver pass. Non-empty ⇒ the resolver stages each cache-miss
-    // module in a subprocess (fresh arena per child), mirroring
-    // `sfn build`; empty ⇒ in-process fallback (e.g. a caller that
-    // couldn't resolve `binary_dir`).
-    let check_self_exe = _resolve_check_self_path(binary_dir);
+    // #1246 / SFN-1014: resolve the self-executable once for every
+    // group's resolver pass. The shared resolver recognizes `sfn.exe`
+    // on a cold native Windows runner; the former suffixless-only probe
+    // returned empty and staged the full compiler closure in-process.
+    // Non-empty ⇒ a fresh arena per cache-miss module, mirroring
+    // `sfn build`; empty ⇒ in-process fallback only when no real
+    // executable can be resolved.
+    let check_self_exe = _resolve_self_path(binary_dir);
 
     // Per-group resolution + load. Aggregated warnings are emitted
     // after the per-file analysis loop so they group together at the

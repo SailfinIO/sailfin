@@ -35,6 +35,7 @@ import {
     contains,
     ends_with,
     find,
+    int_to_string,
     split
 } from "sfn/strings";
 import { sfn_bin_path } from "sfn/test";
@@ -125,6 +126,11 @@ test "sfn check compiler/src: completes (no SIGSEGV) and walks every file" ![io]
 
     // (a) Never 139 (SIGSEGV — the Phase 5a arena regression). Exit is
     //     0 (clean) or 1 (diagnostics found); any other code is a fault.
+    if exit != 0 && exit != 1 {
+        print.err("sfn check compiler/src exit=" + int_to_string(exit));
+        print.err("stdout: " + out);
+        print.err("stderr: " + err);
+    }
     assert exit != 139;
     assert exit == 0 || exit == 1;
 

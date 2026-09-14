@@ -12,8 +12,8 @@ name: Seed per-shard test-bin cache (main scope)
 # that could change any test binary's identity, it builds the compiler once
 # per OS and runs each shard's test phase with the test-bin cache enabled,
 # then saves `test-bin-<os>-<shard>-<sha>` under the default-branch scope
-# (explicit `actions/cache/save`, gated on a green shard run — the
-# main-scoped-producer convention build-quality.yml uses). PRs then
+# (a cache post-save gated on a green shard run — the main-scoped-producer
+# convention build-quality.yml uses). PRs then
 # restore it via the `test-bin-<os>-<shard>-` prefix. Entry keys
 # self-validate (build_cache.sfn folds test-source hash + dep closure +
 # compiler + runtime identity, #1233), so a compiler-source PR still misses
@@ -42,6 +42,8 @@ on:
       - "bootstrap.toml"
       - ".github/workflows/seed-test-bin.yml"
       - ".github/actions/sailfin-build/**"
+      - ".github/actions/sailfin-build-windows/**"
+      - ".github/actions/sailfin-test-windows/**"
   # Manual re-seed (e.g. after a seed bump or a cache eviction).
   workflow_dispatch:
     inputs: {}
@@ -202,12 +204,45 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-compiler-windows:
+    name: Build compiler [windows-x86_64]
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      SAILFIN_TARGET_OS: Windows
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build native Windows compiler
+        id: build
+        uses: ./.github/actions/sailfin-build-windows
+        with:
+          seed_source: release
+
+      - name: Stage compiler artifact
+        shell: pwsh
+        env:
+          NATIVE_SFN: ${{ steps.build.outputs.native_sfn_relative }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force build/bin | Out-Null
+          Copy-Item -LiteralPath $env:NATIVE_SFN -Destination build/bin/sfn.exe
+
+      - name: Upload compiler build tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: seed-build-windows-x86_64
+          path: build/bin/sfn.exe
+          if-no-files-found: error
+          retention-days: 1
+
   # Seed legs: run this OS's shard tests with the test-bin cache enabled,
   # then save `build/cache/test-bin` under the main-scoped
   # `test-bin-<os>-<shard>-<sha>` key (success-gated `actions/cache/save`).
   #
-  # `seed-linux` is one leg per shard, so an entry holds exactly that
-  # shard's slice. `seed-macos` is NOT: it groups eight shards into five
+  # `seed-linux` and `seed-windows` are one leg per shard, so an entry holds
+  # exactly that shard's slice. `seed-macos` is NOT: it groups eight shards into five
   # legs to match `build-macos`, so a grouped leg's entry deliberately
   # carries both its shards' binaries under the leader shard's key. See the
   # comment on that job.
@@ -452,3 +487,23 @@ jobs:
         with:
           path: build/cache/test-bin
           key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
+
+  seed-windows:
+    name: Seed test-bin [windows-x86_64 / ${{ matrix.shard }}]
+    needs: build-compiler-windows
+    runs-on: windows-2025
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Seed native Windows shard cache
+        uses: ./.github/actions/sailfin-test-windows
+        with:
+          compiler_artifact: seed-build-windows-x86_64
+          shard: ${{ matrix.shard }}
+          timing_artifact_prefix: seed-test-timing-windows-x86_64

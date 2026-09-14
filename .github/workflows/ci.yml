@@ -112,15 +112,6 @@ jobs:
 
             mapfile -t workspace_roots < <(bash scripts/module_layout_fingerprint.sh --member-roots)
             mapfile -t workspace_inputs < <(bash scripts/module_layout_fingerprint.sh --layout-inputs)
-            driver_manifest="$(bash scripts/module_layout_fingerprint.sh --member-manifest sfn/compiler)"
-            driver_src="${driver_manifest%/capsule.toml}/src"
-            windows_roots=()
-            while IFS=$'\t' read -r name member kind _publish; do
-              case "$name" in
-                sfn/codegen|sfn/codegen-llvm) windows_roots+=("$member") ;;
-              esac
-              if [ "$kind" = "runtime" ]; then windows_roots+=("$member"); fi
-            done < <(bash scripts/module_layout_fingerprint.sh --member-records)
             if [ "${#workspace_roots[@]}" -eq 0 ] || [ "${#workspace_inputs[@]}" -eq 0 ]; then
               echo "::error::Workspace inventory is empty; refusing to narrow CI scope."
               exit 1
@@ -158,32 +149,13 @@ jobs:
                   public_claims_reason="public-claim contract path changed: $path"
                   ;;
               esac
-              # SFN-55 §4.1: every historically-traced Windows-only fix
-              # touched at least one of these paths. Widened past the
-              # starting `compiler/src/build/**`-only list because three
-              # traced fixes (SFN-488, SFN-857, SFN-374) landed in
-              # `backend.sfn`, `cli/commands/**`, and
-              # `runtime/sfn/adapters/**` — ordinary, frequently-edited
-              # surfaces the narrower glob does not name.
-              windows_changed=false
-              for root in "${windows_roots[@]}"; do
-                case "$path" in "$root"|"$root"/*) windows_changed=true; break ;; esac
-              done
-              if [ "$windows_changed" = true ]; then
-                windows=true
-                windows_reason="Windows-relevant workspace member changed: $path"
-              fi
-              case "$path" in
-                "$driver_src"/build/*|"$driver_src"/build_cache.sfn|"$driver_src"/build_stamp.sfn|"$driver_src"/backend.sfn|"$driver_src"/emit_helpers.sfn|"$driver_src"/capsule_emit_parallel.sfn|"$driver_src"/cli_selfhost.sfn|"$driver_src"/native_emit_subprocess.sfn|"$driver_src"/llvm_validation.sfn|"$driver_src"/codegen_driver.sfn|"$driver_src"/capsule_resolver/*|"$driver_src"/cli/*)
-                  windows=true
-                  windows_reason="Windows-relevant compiler driver path changed: $path"
-                  ;;
-                bootstrap.toml|workspace.toml|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
-                  windows=true
-                  windows_reason="Windows-relevant path changed: $path"
-                  ;;
-              esac
             done < changed-files.txt
+            # SFN-1014: Windows now follows the complete source-PR scope.
+            # Keep the output as a compatibility alias for required-ci's
+            # fail-closed scope validation and summary, but do not narrow it
+            # through a platform-specific path filter.
+            windows=$source
+            windows_reason="native Windows CI mirrors compiler source scope: $reason"
           fi
 
           # A draft PR cannot be merged, so nothing it pushes needs the heavy
@@ -2446,15 +2418,9 @@ jobs:
           set -euo pipefail
           "$SAILFIN_EXE" check examples/basics/hello-world.sfn
 
-  # SFN-55 (SFEP-0021 M9), tier A: the filtered native-Windows build + ABI
-  # gate. Sibling of `build-compiler-macos` above, but path-filtered on
-  # `ci-scope.outputs.windows` (§4.1's globs) rather than running on every
-  # source PR — the fixed point below (`windows-native-selfhost.yml`, tier
-  # B) is the unconditional backstop that bounds how long the filter can be
-  # wrong. `needs: build-compiler-linux` because the bootstrap seed staged
-  # here is the `ci-installer-windows-x86_64` artifact THAT job produces
-  # (the native MinGW build, already consumed by `smoke-windows` above) —
-  # no separate cross-seed job.
+  # SFN-1014: every source PR and merge-group run builds one native MSVC
+  # compiler from the published seed. The eight Windows shard legs below reuse
+  # that bounded artifact; the MinGW build remains isolated to smoke coverage.
   #
   # `windows-2025` is pinned, not `windows-latest` — an unpinned label has
   # already cost this workflow surprise migrations on other OSes (see the
@@ -2466,8 +2432,8 @@ jobs:
   # ABI proofs this job exists to run.
   build-compiler-windows:
     name: Build compiler [windows-x86_64]
-    needs: [ci-scope, build-compiler-linux]
-    if: ${{ needs.ci-scope.outputs.windows == 'true' }}
+    needs: ci-scope
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
     runs-on: windows-2025
     timeout-minutes: 45
     env:
@@ -2480,18 +2446,45 @@ jobs:
         id: build
         uses: ./.github/actions/sailfin-build-windows
         with:
-          seed_source: cross
+          seed_source: release
+
+      - name: Stage compiler artifact
+        shell: pwsh
+        env:
+          NATIVE_SFN: ${{ steps.build.outputs.native_sfn_relative }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force build/bin | Out-Null
+          Copy-Item -LiteralPath $env:NATIVE_SFN -Destination build/bin/sfn.exe
 
       - name: Upload native compiler
         uses: actions/upload-artifact@v7
         with:
           name: ci-build-windows-x86_64
-          # Workspace-relative, not `native_sfn`: `upload-artifact` runs under
-          # Node/Win32, and the absolute Git-Bash path resolves to a
-          # nonexistent `D:\d\a\...` there (B3, SFN-55 review).
-          path: ${{ steps.build.outputs.native_sfn_relative }}
+          path: build/bin/sfn.exe
           if-no-files-found: error
           retention-days: 1
+
+  build-windows:
+    name: Build + Test [windows-x86_64 / ${{ matrix.shard }}]
+    needs: [ci-scope, build-compiler-windows]
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
+    runs-on: windows-2025
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run required native Windows shard
+        uses: ./.github/actions/sailfin-test-windows
+        with:
+          compiler_artifact: ci-build-windows-x86_64
+          shard: ${{ matrix.shard }}
+          timing_artifact_prefix: ci-test-timing-windows-x86_64
 
   # SFN-55 (SFEP-0021 M9), tier A': the Windows-host regression guard.
   #
@@ -2778,6 +2771,7 @@ jobs:
       - smoke-windows
       - windows-host-guard
       - build-compiler-windows
+      - build-windows
       - aarch64-linux-result
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -2807,6 +2801,7 @@ jobs:
       SMOKE_WINDOWS: ${{ needs.smoke-windows.result }}
       WINDOWS_HOST_GUARD: ${{ needs.windows-host-guard.result }}
       BUILD_COMPILER_WINDOWS: ${{ needs.build-compiler-windows.result }}
+      BUILD_WINDOWS: ${{ needs.build-windows.result }}
       AARCH64_LINUX: ${{ needs.aarch64-linux-result.result }}
       AARCH64_SUPERSEDED: ${{ needs.aarch64-linux-result.outputs.superseded }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -2963,12 +2958,8 @@ jobs:
             check "Build + Test [macos-arm64]" "$BUILD_MACOS"
             check "Smoke test [windows-x86_64]" "$SMOKE_WINDOWS"
             check "Windows-host guard [linux-x86_64]" "$WINDOWS_HOST_GUARD"
-            if [ "${WINDOWS_CI:-}" = "true" ]; then
-              check "Build compiler [windows-x86_64]" "$BUILD_COMPILER_WINDOWS"
-            else
-              echo "[required-ci] native Windows CI is out of scope for this PR."
-              echo "| Native Windows CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
-            fi
+            check "Build compiler [windows-x86_64]" "$BUILD_COMPILER_WINDOWS"
+            check "Build + Test [windows-x86_64]" "$BUILD_WINDOWS"
             # `aarch64-linux-result` exits 0 when the PR moved past its head,
             # so its `result` alone cannot distinguish "the ARM matrix passed"
             # from "the ARM matrix never ran". Scoring that as a pass is how a
