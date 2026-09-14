@@ -37,6 +37,18 @@ Implement the smallest cohesive change that satisfies the contract. Follow
 `sailfin-check` skill for the appropriate formatting, self-hosting, and
 verification gates.
 
+Run the pickup checks with the host's native Sailfin toolchain. On Windows,
+use native `sfn.exe` and the Windows bootstrap/test commands; do not switch to
+WSL merely because a non-interactive shell lacks the user's `PATH` entries or
+this fresh worktree has no `build/bin/sfn`. Check the installed toolchain in
+the user's shell or local Sailfin version store first. Use WSL only when the
+issue explicitly needs a Linux-specific check. The pickup itself does not
+require a full triple-pass host check. Follow `sailfin-check`'s local-versus-CI
+gate split: native clean-tree self-hosting for structural changes and targeted
+tests locally; Sailfin's Linux, macOS, and Windows PR matrix runs the full
+sharded suite. Run a local full gate only when the issue explicitly requires it
+or CI does not provide an equivalent gate.
+
 Use Codex subagents when a bounded slice can proceed independently, such as
 read-only surface mapping, a mechanical implementation slice, or first-pass
 test-failure classification. Give each helper the issue contract and an exact
@@ -70,11 +82,12 @@ the current pull request lands. Leave uncertain or oversized discoveries in
 ## Review
 
 Before review, check every acceptance criterion and run the fast and targeted
-rungs selected by the `sailfin-check` ladder. If the issue requests `sfn test`,
-`sfn dev verify`, or `sfn dev verify --strict`, or the change qualifies for one of those
-full gates, record it as a deferred final gate rather than running it on a diff
-that review may invalidate. Do not omit the requested gate; run it after the
-change is review-stable.
+rungs selected by the `sailfin-check` ladder. If the issue requires a *local*
+`sfn test`, `sfn dev verify`, or `sfn dev verify --strict` gate, record it as a
+deferred final gate rather than running it on a diff that review may invalidate.
+Do not omit a requested local gate; run it after the change is review-stable.
+If the full gate belongs to PR CI under `sailfin-check`, record the covering CI
+jobs and check them after publishing the PR.
 
 Then spawn a fresh review subagent before committing or opening the PR. Keep the
 reviewer independent: provide the issue contract, cited design, repository
@@ -100,13 +113,15 @@ a blocking finding, or a later failure would require another source change,
 stop and report the review history and remaining evidence rather than starting
 a fourth pass.
 
-Once review has no blocking findings, run every deferred full gate on that
-review-stable revision. A source change made to fix a gate failure invalidates
-the review and requires affected targeted verification, another review pass
-within the limit above, and the deferred gate again. Do not commit or publish
-the PR until review is clear and all required gates pass. If subagents are
-unavailable, stop and report that the required independent review could not be
-run rather than silently replacing it with a self-review.
+Once review has no blocking findings, run every deferred *local* full gate on
+that review-stable revision. A source change made to fix a gate failure
+invalidates the review and requires affected targeted verification, another
+review pass within the limit above, and the deferred gate again. Do not commit
+or publish the PR until review is clear and all required local gates pass.
+After publication, wait for the CI full gates before marking the handoff
+complete. If subagents are unavailable, stop and report that the required
+independent review could not be run rather than silently replacing it with a
+self-review.
 
 ## Finish
 

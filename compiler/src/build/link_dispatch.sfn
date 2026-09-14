@@ -507,6 +507,7 @@ fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
     let backend = LlvmTextBackend { };
     let plan = LinkPlan {
         objects: link_objects,
+        foreign_c_provenance: inputs.foreign_c_provenance,
         out_path: request.out_path,
         opt_flag: request.opt_flag,
         link_flags: link_flags,

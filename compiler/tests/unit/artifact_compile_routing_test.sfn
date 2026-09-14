@@ -6,8 +6,8 @@
 // parameter and the same cache-key formula — with two request kinds. These
 // tests pin the four properties that split is supposed to buy:
 //
-//   1. Each path still emits the legacy clang argv byte-for-byte, so the
-//      refactor cannot change what any current caller compiles.
+//   1. LLVM keeps the legacy clang argv; foreign C uses its configured
+//      compiler without an LLVM-only warning flag.
 //   2. An LLVM request carries no C include roots and no C language mode.
 //   3. A misrouted source (a `c-sources` entry handed to the LLVM builder,
 //      or a `.ll` handed to the foreign-C builder) fails closed with an
@@ -65,22 +65,19 @@ test "artifact routing: llvm argv splices -target after the opt flag" ![pure] {
     assert expect_eq_str_array(argv, expected).ok;
 }
 
-test "artifact routing: foreign-c argv is byte-identical to the legacy include form" ![pure] {
-    // The pre-split call site hand-built `-Iinc` and passed it through the
-    // shared `include_flags` parameter; the request now owns the `-I`
-    // spelling and must land the flags in the same argv position.
+test "artifact routing: foreign-c argv carries the configured compiler and includes" ![pure] {
     let argv = foreign_c_argv_with_target(ForeignCRequest {
-        include_roots: ["inc"], object_path: "out.o", opt_flag: "-O2", source_path: "in.c"
+        compiler_path: "clang", include_roots: ["inc"], object_path: "out.o", opt_flag: "-O2", source_path: "in.c"
     }, _windows_target());
-    let expected: string[] = ["clang", "-O2", "-target", "x86_64-pc-windows-msvc", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-Iinc", "-c", "in.c", "-o", "out.o"];
+    let expected: string[] = ["clang", "-O2", "-target", "x86_64-pc-windows-msvc", "-ffunction-sections", "-fdata-sections", "-Iinc", "-c", "in.c", "-o", "out.o"];
     assert expect_eq_str_array(argv, expected).ok;
 }
 
 test "artifact routing: foreign-c argv carries every declared include root in order" ![pure] {
     let argv = foreign_c_argv_with_target(ForeignCRequest {
-        include_roots: ["a", "b/c"], object_path: "out.o", opt_flag: "-O0", source_path: "in.c"
+        compiler_path: "clang", include_roots: ["a", "b/c"], object_path: "out.o", opt_flag: "-O0", source_path: "in.c"
     }, _no_flags());
-    let expected: string[] = ["clang", "-O0", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-Ia", "-Ib/c", "-c", "in.c", "-o", "out.o"];
+    let expected: string[] = ["clang", "-O0", "-ffunction-sections", "-fdata-sections", "-Ia", "-Ib/c", "-c", "in.c", "-o", "out.o"];
     assert expect_eq_str_array(argv, expected).ok;
 }
 
@@ -109,7 +106,7 @@ test "artifact routing: a c-source cannot reach the llvm provider" ![pure] {
 
 test "artifact routing: an llvm artifact cannot reach the foreign-c provider" ![pure] {
     let argv = foreign_c_argv_with_target(ForeignCRequest {
-        include_roots: ["inc"], object_path: "out.o", opt_flag: "-O2", source_path: "runtime/sfn/string.ll"
+        compiler_path: "clang", include_roots: ["inc"], object_path: "out.o", opt_flag: "-O2", source_path: "runtime/sfn/string.ll"
     }, _no_flags());
     assert expect_eq_str_array(argv, []).ok;
 }
@@ -120,7 +117,7 @@ test "artifact routing: an unclassifiable source reaches neither provider" ![pur
     }, _no_flags());
     assert expect_eq_str_array(llvm_argv, []).ok;
     let c_argv = foreign_c_argv_with_target(ForeignCRequest {
-        include_roots: [], object_path: "out.o", opt_flag: "-O2", source_path: "mod.bc"
+        compiler_path: "clang", include_roots: [], object_path: "out.o", opt_flag: "-O2", source_path: "mod.bc"
     }, _no_flags());
     assert expect_eq_str_array(c_argv, []).ok;
 }

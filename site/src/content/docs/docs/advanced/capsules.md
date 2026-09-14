@@ -116,6 +116,16 @@ Declares which effects this capsule uses. See the [Capability Declarations](#cap
 | `full-runtime` | boolean | `false` | Opts this artifact out of demand-driven `sfn-sources` selection ([sfn-source-gates]) entirely, forcing every gated runtime source to compile regardless of the build's declared effect surface. Runtime-provider artifacts (the compiler binary itself) set this because they must carry every runtime module regardless of what their own sources declare (SFN-882). |
 | `link-libs` | array of strings | `[]` | Extra linker flags appended to the final link argv. Honored **only on the root capsule** being built — a dependency capsule's `link-libs` is ignored, and the build emits a non-fatal diagnostic naming that capsule, so a dependency cannot silently add a linker input to your binary. Root-declared flags are appended after the runtime's own `link-libs` and then flow through the same per-target filtering and extension as every other lib (SFN-1269). An entry declares a **build input, not provenance**: linking `-lSDL2` records that the build asked for it, not that the compiler vouches for what the host resolved it to. SFEP-0016 §3.5's `vetted-link-inputs` is the future digest-authoritative mechanism for that and is **not implemented** — see `docs/proposals/design-notes/sfn-1269-link-libs-build-input-not-provenance.md`. |
 
+For a runtime capsule, `c-sources` lists optional foreign C files and
+`include-dirs` supplies their include roots. A build whose resolved runtime
+source closure has no C files does not look for a C compiler. If C files are
+present, set `SAILFIN_FOREIGN_C_COMPILER` to the external compiler executable
+(a path or a name on `PATH`). Without it, the build reports the capsule,
+source, target, and required setting before compiling any C file. The compiler
+receives the target, optimization level, and include roots; its executable
+identity and those inputs are included in the foreign-object cache key.
+Foreign C objects are outside Sailfin's first-party clang-free support claim.
+
 #### `[sfn-source-gates]`
 
 Runtime-only: applies to `runtime/capsule.toml` (`kind = "runtime"`), not to library or application capsules. By default, every source listed in `[build] sfn-sources` compiles unconditionally into every artifact — including runtime subsystems, like the TLS 1.3 stack, that a given build never exercises. `[sfn-source-gates]` narrows that: it is a table keyed by canonical effect name (`"io"`, `"net"`, `"model"`, `"gpu"`, `"rand"`, `"clock"`), each value an array of `sfn-sources` paths gated behind that effect.
