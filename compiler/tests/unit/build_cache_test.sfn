@@ -36,15 +36,18 @@ import {
     cache_clean,
     cache_compiler_identity,
     cache_copy_artifact_to,
+    cache_info,
     cache_key_for,
     cache_lookup_artifact,
     cache_lookup_complete,
     cache_paths_for,
+    cache_prune,
     cache_root_from,
     cache_root_with_override,
     cache_stats_is_empty,
     cache_store,
     cache_store_artifact,
+    cache_touch_entry,
     canonicalize_flags,
     empty_build_cache_config,
     empty_cache_stats,
@@ -92,16 +95,16 @@ fn _write_file(path: string, content: string) ![io] {
 // --------------------------------------------------------------
 // Schema version
 // --------------------------------------------------------------
-test "build_cache: schema version is v2" {
-    assert build_cache_schema_version() == "v2";
+test "build_cache: schema version is v3" {
+    assert build_cache_schema_version() == "v3";
 }
 
 test "build_cache: cache_root_with_override empty -> in-tree default" {
-    assert cache_root_with_override("") == "build/cache/v2";
+    assert cache_root_with_override("") == "build/cache/v3";
 }
 
 test "build_cache: cache_root_with_override non-empty -> override + version" {
-    assert cache_root_with_override("/tmp/sfn-shared-cache") == "/tmp/sfn-shared-cache/v2";
+    assert cache_root_with_override("/tmp/sfn-shared-cache") == "/tmp/sfn-shared-cache/v3";
 }
 
 // Cache-root ladder (SFEP-0040 §3.1). Pure inputs so precedence is
@@ -109,12 +112,12 @@ test "build_cache: cache_root_with_override non-empty -> override + version" {
 test "build_cache: cache_root_from explicit override wins over all" {
     // Explicit ($SAILFIN_BUILD_CACHE_DIR) beats even the self-host
     // pin, so CI can redirect the compiler's own cache.
-    assert cache_root_from("/ci/cache", true, "/cfg", "/xdg", "/home/dev") == "/ci/cache/v2";
-    assert cache_root_from("/ci/cache", false, "/cfg", "/xdg", "/home/dev") == "/ci/cache/v2";
+    assert cache_root_from("/ci/cache", true, "/cfg", "/xdg", "/home/dev") == "/ci/cache/v3";
+    assert cache_root_from("/ci/cache", false, "/cfg", "/xdg", "/home/dev") == "/ci/cache/v3";
 }
 
 test "build_cache: cache_root_from self-host pins in-tree over XDG/HOME" {
-    assert cache_root_from("", true, "/cfg", "/xdg", "/home/dev") == "build/cache/v2";
+    assert cache_root_from("", true, "/cfg", "/xdg", "/home/dev") == "build/cache/v3";
 }
 
 // SFN-1260 / SFEP-0076 section 3.4: `[build] cache-dir` is the persisted
@@ -124,10 +127,10 @@ test "build_cache: cache_root_from self-host pins in-tree over XDG/HOME" {
 // `<value>/<schema>` exactly like the `explicit` rung, NOT as the XDG
 // rung's `<value>/sailfin/<schema>` — moving a value out of the
 // environment and into the file must not relocate the store. The
-// `/cfg/v2` (not `/cfg/sailfin/v2`) assertion below is what pins that.
+// `/cfg/v3` (not `/cfg/sailfin/v3`) assertion below is what pins that.
 test "build_cache: cache_root_from config cache-dir beats both XDG fallbacks" {
-    assert cache_root_from("", false, "/cfg", "/xdg", "/home/dev") == "/cfg/v2";
-    assert cache_root_from("", false, "/cfg", "", "") == "/cfg/v2";
+    assert cache_root_from("", false, "/cfg", "/xdg", "/home/dev") == "/cfg/v3";
+    assert cache_root_from("", false, "/cfg", "", "") == "/cfg/v3";
 }
 
 test "build_cache: scoped compiler identity selects the self-host cache" {
@@ -137,16 +140,16 @@ test "build_cache: scoped compiler identity selects the self-host cache" {
 }
 
 test "build_cache: cache_root_from XDG_CACHE_HOME beats HOME" {
-    assert cache_root_from("", false, "", "/xdg", "/home/dev") == "/xdg/sailfin/v2";
+    assert cache_root_from("", false, "", "/xdg", "/home/dev") == "/xdg/sailfin/v3";
 }
 
 test "build_cache: cache_root_from HOME is the global default" {
-    assert cache_root_from("", false, "", "", "/home/dev") == "/home/dev/.cache/sailfin/v2";
+    assert cache_root_from("", false, "", "", "/home/dev") == "/home/dev/.cache/sailfin/v3";
 }
 
 test "build_cache: cache_root_from all-empty falls back in-tree" {
     // Hermetic fallback when $HOME is unresolvable (containers, CI).
-    assert cache_root_from("", false, "", "", "") == "build/cache/v2";
+    assert cache_root_from("", false, "", "", "") == "build/cache/v3";
 }
 
 // --------------------------------------------------------------
@@ -841,6 +844,88 @@ test "build_cache: cache_store_artifact + cache_lookup_artifact round-trip ll" !
     assert ! cache_lookup_artifact(cache_root, key, "sfn-asm");
     assert ! cache_lookup_artifact(cache_root, key, "obj");
 
+    _cleanup(scratch);
+}
+
+test "build_cache: counted sidecars track an artifact overwrite and hit" ![io] {
+    let scratch = _test_tmp_root("sidecar_overwrite");
+    let root = scratch + "/v3";
+    let source = scratch + "/source.ll";
+    let key = CacheKey {
+        digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    };
+    let entry = root + "/aa/" + key.digest;
+    fs.writeFile(source, "four");
+    assert cache_store_artifact(root, key, "ll", source);
+    assert fs.readFile(entry + "/bytes") == "4";
+    assert fs.exists(entry + "/lastused");
+    fs.writeFile(source, "seven!!");
+    assert cache_store_artifact(root, key, "ll", source);
+    assert fs.readFile(entry + "/bytes") == "7";
+    // A late publisher can replace the aggregate with an earlier snapshot.
+    fs.writeFile(entry + "/bytes", "1");
+    fs.writeFile(entry + "/lastused", "946684800");
+    assert cache_touch_entry(root, key);
+    assert fs.readFile(entry + "/lastused") != "946684800";
+    let info = cache_info(root);
+    assert info.entry_count == 1;
+    assert info.total_bytes == 7;
+    assert info.incomplete_entries == 0;
+    assert fs.readFile(entry + "/bytes") == "7";
+    _cleanup(scratch);
+}
+
+test "build_cache: missing and corrupt sidecars are reported and evicted" ![io] {
+    let scratch = _test_tmp_root("sidecar_corrupt");
+    let root = scratch + "/v3";
+    let source = scratch + "/source.ll";
+    let key = CacheKey {
+        digest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    };
+    let entry = root + "/bb/" + key.digest;
+    fs.writeFile(source, "hello");
+    assert cache_store_artifact(root, key, "ll", source);
+    fs.writeFile(entry + "/bytes", "bad");
+    let info = cache_info(root);
+    assert info.entry_count == 1;
+    assert info.incomplete_entries == 1;
+    assert info.total_bytes == 0;
+    let pruned = cache_prune(root, -1, -1);
+    assert pruned.removed_entries == 1;
+    assert ! pruned.truncated;
+    assert ! fs.exists(entry);
+    _cleanup(scratch);
+}
+
+test "build_cache: overflowing decimal sidecar is treated as corrupt" ![io] {
+    let scratch = _test_tmp_root("sidecar_overflow");
+    let root = scratch + "/v3";
+    let source = scratch + "/source.ll";
+    let key = CacheKey {
+        digest: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    };
+    let entry = root + "/dd/" + key.digest;
+    fs.writeFile(source, "hello");
+    assert cache_store_artifact(root, key, "ll", source);
+    fs.writeFile(entry + "/bytes", "18446744073709551616");
+    let info = cache_info(root);
+    assert info.incomplete_entries == 1;
+    assert info.total_bytes == 0;
+    let pruned = cache_prune(root, -1, -1);
+    assert pruned.removed_entries == 1;
+    _cleanup(scratch);
+}
+
+test "build_cache: prune sweeps sidecar-only entry orphans" ![io] {
+    let scratch = _test_tmp_root("sidecar_orphan");
+    let root = scratch + "/v3";
+    let orphan = root + "/cc/orphan";
+    fs.createDirectory(orphan, true);
+    fs.writeFile(orphan + "/bytes", "8");
+    fs.writeFile(orphan + "/lastused", "946684800");
+    let result = cache_prune(root, -1, -1);
+    assert result.removed_entries == 0;
+    assert ! fs.exists(orphan);
     _cleanup(scratch);
 }
 

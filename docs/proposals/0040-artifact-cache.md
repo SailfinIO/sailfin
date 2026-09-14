@@ -121,11 +121,11 @@ content-addressed cache moves.
 A new top-level command (`compiler/src/cli/commands/cache.sfn`, registered in
 the dispatch table alongside `lock`, `add`, `package`):
 
-- `sfn cache info` — print the resolved cache root, entry count, and total size
-  on disk. Zero effects beyond `![io]`.
+- `sfn cache info [--json]` — print the resolved cache root, entry count, and
+  apparent artifact bytes. JSON also includes `incomplete_entries`.
 - `sfn cache prune [--max-size <bytes>] [--max-age <days>]` — LRU eviction. Walk
-  `v<N>/` entries, stat each entry directory's mtime (touched on cache *hit* so
-  mtime is a true recency signal — see 3.4), delete oldest-first until under
+  `v<N>/` entries, read each entry's `lastused` and `bytes` sidecars (refreshed
+  on publish and hit — see 3.4), delete oldest-first until under
   `--max-size`, and delete anything older than `--max-age`. Defaults chosen
   conservatively (e.g. `--max-size` ~5 GiB, `--max-age` 30 days) and documented;
   no implicit prune on normal builds (opt-in, like `cargo`'s ecosystem tools).
@@ -145,12 +145,15 @@ roots the user explicitly pointed at (they may be sharing a base with other
 tooling). Alternative if the eager sweep is deemed too aggressive: fold it into
 `sfn cache prune`/`clean --all-schemas` only. (See §6.)
 
-### 3.4 Mtime-on-hit for honest LRU
+### 3.4 Last-use sidecar for honest LRU
 
-For `prune` to evict by true recency rather than creation time, a cache *hit*
-must touch the entry's mtime. Add a single `fs` touch of the entry directory in
-the hit path (`build_cache.sfn` lookup, near the existing read at ~`:352-400`).
-This is the only change to the hot path and is a metadata-only write.
+For `prune` to evict by true recency rather than creation time, a cache hit
+updates the entry's `lastused` file with epoch seconds. A counted artifact
+publish updates `bytes` without a second artifact read; per-artifact counts
+let readers reconcile a stale aggregate after concurrent publishes. Schema v3 separates
+these entries from pre-sidecar caches. Missing or corrupt metadata favors
+eviction on both age and size axes; `info` reports a known-byte subtotal and
+the number of entries with unknown sizes.
 
 ## 4. Effect & capability impact
 

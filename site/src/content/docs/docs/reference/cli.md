@@ -379,7 +379,7 @@ build.
 
 | Form | Description |
 |---|---|
-| `sfn cache info` | Print the resolved cache root, entry count, and total on-disk size. |
+| `sfn cache info [--json]` | Print the resolved cache root, entry count, and apparent artifact bytes; `--json` emits the same accounting as one JSON object. |
 | `sfn cache prune [--max-size <bytes>] [--max-age <days>]` | LRU eviction: remove entries older than `--max-age` days, then delete oldest-first (by last-hit time) until total size is under `--max-size`. |
 | `sfn cache clean [--all-schemas]` | Remove the current cache schema tree. With `--all-schemas`, also sweep stale sibling schema-version trees left behind by a compiler upgrade. |
 
@@ -387,6 +387,7 @@ build.
 
 ```bash
 sfn cache info
+sfn cache info --json
 sfn cache prune                          # conservative defaults (~5 GiB / 30 days)
 sfn cache prune --max-size 1000000000    # cap the cache at 1 GB
 sfn cache prune --max-age 7              # evict anything not hit in 7 days
@@ -398,7 +399,8 @@ sfn cache clean --all-schemas            # also remove stale prior-schema trees
 **Behavior:**
 
 - `prune` is explicit and opt-in — it never runs automatically on `sfn build`/`sfn run`/`sfn check`/`sfn test`. With neither `--max-size` nor `--max-age` given, conservative defaults apply (~5 GiB total size, 30-day max age).
-- Eviction order is a true LRU: a cache *hit* touches the entry directory's mtime, so `prune` evicts by last-use recency rather than creation time.
+- Eviction order uses each entry's `lastused` epoch-seconds sidecar, refreshed on publish and hit. The `bytes` sidecar sums apparent artifact bytes, so `info` and `prune` use the same filesystem-independent size. Per-artifact byte sidecars let readers reconcile the total after concurrent publishes.
+- Schema v3 discards older cache entries on a cold rebuild. Missing or corrupt sidecars are eviction-favored on both axes. `info` reports the number of entries with unknown sizes and labels its byte count as a known-byte subtotal; `--json` exposes `incomplete_entries` alongside `root`, `entries`, and `bytes`.
 - The cache root follows the same resolution as the build cache generally: `$SAILFIN_BUILD_CACHE_DIR`, then (for the compiler's own self-host build only) the in-tree pin, then `~/.sfn/config.toml`'s `[build] cache-dir`, then `$XDG_CACHE_HOME/sailfin`, then `$HOME/.cache/sailfin`, falling back to the in-tree `build/cache` when `$HOME` is unresolvable. `cache-dir` must be an absolute path — a relative value is ignored with a warning. The compiler's own self-host build always pins the in-tree root and is unaffected by `sfn cache` or `cache-dir`.
 
 ---
