@@ -143,9 +143,9 @@ test "build --clean bypasses local and shared runtime object caches (SFN-1251)" 
     // Unrelated module, runtime-staging, runtime-object and future artifact
     // kinds all share the schema root. None belongs to this invocation.
     let unrelated = cache
-        + "/v2/ff/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        + "/v3/ff/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
     let runtime_stage = cache
-        + "/v2/ee/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        + "/v3/ee/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
     fs.createDirectory(unrelated, true);
     fs.createDirectory(runtime_stage, true);
     fs.writeFile(unrelated + "/ir.sfn-asm", "other module assembly");
