@@ -1,0 +1,82 @@
+// compiler/tests/unit/llvm_validation_test.sfn
+//
+// Pins SFN-951's coherent-family validation contract: llvm-as is the only
+// candidate, argv is shell-free, and tool absence is distinct from invalid IR.
+import {
+    expect_contains_str,
+    expect_eq_bool,
+    expect_eq_str,
+    expect_eq_str_array
+} from "sfn/test";
+
+import { LlvmTool } from "../../src/build/llvm_toolchain_resolver";
+import {
+    llvm_validation_argv,
+    llvm_validation_candidate_roles,
+    llvm_validation_request,
+    llvm_validation_result,
+    llvm_validator_from_tool,
+    llvm_validator_unavailable,
+    validate_llvm_ir
+} from "../../src/llvm_validation";
+
+fn _validator() -> LlvmTool {
+    return LlvmTool {
+        role: "llvm-as",
+        path: "C:/LLVM/bin/llvm-as.exe",
+        version_output: "LLVM version 18.1.8\nOptimized build.\n",
+        major: 18,
+        failure: ""
+    };
+}
+
+test "llvm validation: candidate census contains only the selected family role" {
+    assert expect_eq_str_array(llvm_validation_candidate_roles(), ["llvm-as"]).ok;
+}
+
+test "llvm validation: argv is native llvm-as data with no shell or null device" {
+    let validator = llvm_validator_from_tool(_validator(), "x86_64-pc-windows-msvc");
+    let request = llvm_validation_request(validator, "build/program.ll", "build/program.ll", "src/main.sfn");
+    let argv = llvm_validation_argv(request, "build/.sfn_stage.ABC123");
+    assert expect_eq_str_array(argv, ["C:/LLVM/bin/llvm-as.exe", "build/program.ll", "-o", "build/.sfn_stage.ABC123"]).ok;
+}
+
+test "llvm validation: missing validator is an installation failure" ![io] {
+    let validator = llvm_validator_unavailable("aarch64-unknown-linux-gnu", "LLVM llvm-as could not be resolved (searched llvm-as-18)");
+    let request = llvm_validation_request(validator, "build/mod.ll", "build/mod.ll", "src/mod.sfn");
+    let result = validate_llvm_ir(request);
+    assert expect_eq_bool(result.is_ok, false).ok;
+    assert expect_eq_str(result.classification, "tool_unavailable").ok;
+    assert expect_eq_str(result.retained_ir_path, "").ok;
+    assert expect_contains_str(result.diagnostic, "install the supported LLVM tool family").ok;
+    assert expect_contains_str(result.diagnostic, "aarch64-unknown-linux-gnu").ok;
+    assert expect_contains_str(result.diagnostic, "src/mod.sfn").ok;
+}
+
+test "llvm validation: nonzero validator exit is an invalid IR backend failure" {
+    let validator = llvm_validator_from_tool(_validator(), "x86_64-pc-windows-msvc");
+    let request = llvm_validation_request(validator, "build/.sfn_stage.BAD123", "build/program.ll", "src/main.sfn");
+    let argv = llvm_validation_argv(request, "build/.sfn_stage.BC1234");
+    let result = llvm_validation_result(request, argv, 1, "", "error: expected instruction opcode", "build/program.ll");
+    assert expect_eq_bool(result.is_ok, false).ok;
+    assert expect_eq_str(result.classification, "invalid_ir").ok;
+    assert expect_eq_str(result.retained_ir_path, "build/program.ll").ok;
+    assert expect_contains_str(result.diagnostic, "internal compiler error").ok;
+    assert expect_contains_str(result.diagnostic, "LLVM version 18.1.8").ok;
+    assert expect_contains_str(result.diagnostic, "x86_64-pc-windows-msvc").ok;
+    assert expect_contains_str(result.diagnostic, "src/main.sfn").ok;
+    assert expect_contains_str(result.diagnostic, "invalid IR retained at: build/program.ll").ok;
+    assert expect_contains_str(result.diagnostic, "expected instruction opcode").ok;
+}
+
+test "llvm validation: spawn failure remains a tool failure, not invalid IR" {
+    let validator = llvm_validator_from_tool(_validator(), "x86_64-pc-windows-msvc");
+    let request = llvm_validation_request(validator, "build/program.ll", "build/program.ll", "src/main.sfn");
+    let argv = llvm_validation_argv(request, "build/.sfn_stage.BC1234");
+    let result = llvm_validation_result(request, argv, -1, "", "", "");
+    assert expect_eq_bool(result.is_ok, false).ok;
+    assert expect_eq_str(result.classification, "tool_unavailable").ok;
+    assert expect_eq_str(result.retained_ir_path, "").ok;
+    assert expect_contains_str(result.diagnostic, "could not be started or reaped").ok;
+    assert expect_eq_bool(expect_contains_str(result.diagnostic, "internal compiler error").ok, false).ok;
+}

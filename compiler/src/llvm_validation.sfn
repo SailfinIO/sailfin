@@ -1,40 +1,264 @@
+// compiler/src/llvm_validation.sfn
+//
 // Driver-owned LLVM text validation shared by serial and parallel emitters.
-fn _validator_argv(tool: string, ll_path: string, out_path: string) -> string[] {
-    if tool == "llvm-as" || tool == "llvm-as-18" {
-        return [tool, ll_path, "-o", out_path];
-    }
-    return [tool, "-c", "-emit-llvm", "-x", "ir", ll_path, "-o", out_path];
+// The coherent LLVM-family resolver selects the validator once; every emitted
+// artifact then uses the same argv, result classification, and diagnostics.
+import { int_to_string } from "sfn/strings";
+
+import { _mktemp_sibling_cmd, _rename_preserving_source_on_failure } from "./build/fs";
+import { LlvmFamily, LlvmTool, resolve_llvm_toolchain } from "./build/llvm_toolchain_resolver";
+import { build_target_triple } from "./build/target";
+import { index_of, substring } from "./string_utils";
+
+struct LlvmValidator {
+    is_available: boolean;
+    path: string;
+    version_output: string;
+    major: int;
+    target_triple: string;
+    unavailable_diagnostic: string;
 }
 
-fn validate_llvm_ir(ll_path: string) -> boolean ![io] {
-    // This is a validator preference order, not the final-link driver. A bare
-    // clang is intentional after both llvm-as spellings: it validates the
-    // textual IR with the PATH-selected LLVM toolchain and never drives a
-    // platform linker (SFN-1077).
-    let candidates: string[] = ["llvm-as", "llvm-as-18", "clang", "clang-18"];
-    let child_env = process.environ();
-    let sink = ll_path + ".validate.bc";
-    let mut ok: boolean = false;
-    let mut index: int = 0;
+struct LlvmValidationRequest {
+    validator: LlvmValidator;
+    ir_path: string;
+    retained_ir_path: string;
+    source_path: string;
+}
+
+struct LlvmValidationResult {
+    is_ok: boolean;
+    classification: string;
+    exit_code: int;
+    argv: string[];
+    stdout: string;
+    stderr: string;
+    retained_ir_path: string;
+    diagnostic: string;
+}
+
+// The candidate census is intentionally a role census, not executable-name
+// discovery. Unsuffixed/versioned and Windows `.exe` spellings belong solely
+// to the coherent family resolver (SFN-948); validation can select only the
+// family's `llvm-as` member and therefore has no clang fallback.
+fn llvm_validation_candidate_roles() -> string[] { return ["llvm-as"]; }
+
+fn _validator_version_line(version_output: string) -> string {
+    let nl = index_of(version_output, "\n");
+    if nl < 0 { return version_output; }
+    return substring(version_output, 0, nl);
+}
+
+fn llvm_validator_unavailable(target_triple: string, diagnostic: string) -> LlvmValidator {
+    return LlvmValidator {
+        is_available: false,
+        path: "",
+        version_output: "",
+        major: 0,
+        target_triple: target_triple,
+        unavailable_diagnostic: diagnostic
+    };
+}
+
+fn llvm_validator_disabled() -> LlvmValidator {
+    return llvm_validator_unavailable("", "validation disabled");
+}
+
+fn llvm_validator_from_tool(tool: LlvmTool, target_triple: string) -> LlvmValidator {
+    return LlvmValidator {
+        is_available: tool.failure.length == 0,
+        path: tool.path,
+        version_output: tool.version_output,
+        major: tool.major,
+        target_triple: target_triple,
+        unavailable_diagnostic: ""
+    };
+}
+
+fn _validator_from_family(family: LlvmFamily) -> LlvmValidator {
+    if !family.ok {
+        let mut message = "LLVM toolchain resolution failed";
+        if family.diagnostic != null { message = family.diagnostic.message; }
+        return llvm_validator_unavailable(family.target_triple, message);
+    }
+    let roles = llvm_validation_candidate_roles();
+    let mut i: int = 0;
     loop {
-        if index >= candidates.length { break; }
-        let tool = candidates[index];
-        let probe_rc = process.run_capture([tool, "--version"], child_env);
-        let _probe_out = process.capture_take_stdout();
-        let _probe_err = process.capture_take_stderr();
-        if probe_rc == 0 {
-            let rc = process.run_capture(_validator_argv(tool, ll_path, sink), child_env);
-            let _out = process.capture_take_stdout();
-            let _err = process.capture_take_stderr();
-            if rc == 0 {
-                ok = true;
-                break;
-            }
+        if i >= family.tools.length { break; }
+        if family.tools[i].role == roles[0] {
+            return llvm_validator_from_tool(family.tools[i], family.target_triple);
         }
-        index += 1;
+        i += 1;
     }
-    if fs.exists(sink) { fs.deleteFile(sink); }
-    return ok;
+    return llvm_validator_unavailable(family.target_triple, "resolved LLVM family does not contain its llvm-as validator");
 }
 
-export { validate_llvm_ir };
+// Resolve the complete coherent family once, then retain only the selected
+// validator identity required by every validation request in this command.
+fn resolve_llvm_validator() -> LlvmValidator ![io] {
+    return _validator_from_family(resolve_llvm_toolchain(build_target_triple()));
+}
+
+fn llvm_validation_request(validator: LlvmValidator, ir_path: string, retained_ir_path: string, source_path: string) -> LlvmValidationRequest {
+    return LlvmValidationRequest {
+        validator: validator,
+        ir_path: ir_path,
+        retained_ir_path: retained_ir_path,
+        source_path: source_path
+    };
+}
+
+fn llvm_validation_argv(request: LlvmValidationRequest, output_path: string) -> string[] {
+    return [request.validator.path, request.ir_path, "-o", output_path];
+}
+
+fn _validation_context(request: LlvmValidationRequest) -> string {
+    let mut context = "note: validator: llvm-as";
+    if request.validator.path.length > 0 {
+        context = context + " at " + request.validator.path;
+    }
+    let version = _validator_version_line(request.validator.version_output);
+    if version.length > 0 { context = context + " (" + version + ")"; }
+    context = context + "\nnote: target: " + request.validator.target_triple;
+    context = context + "\nnote: source: " + request.source_path;
+    context = context + "\nnote: failing IR: " + request.ir_path;
+    return context;
+}
+
+fn _unavailable_result(request: LlvmValidationRequest) -> LlvmValidationResult {
+    let message = "error: LLVM IR validator is unavailable\n"
+        + _validation_context(request)
+        + "\nnote: "
+        + request.validator.unavailable_diagnostic
+        + "\nhelp: install the supported LLVM tool family or set SAILFIN_LLVM_ROOT to its installation root";
+    return LlvmValidationResult {
+        is_ok: false,
+        classification: "tool_unavailable",
+        exit_code: -1,
+        argv: [],
+        stdout: "",
+        stderr: "",
+        retained_ir_path: "",
+        diagnostic: message
+    };
+}
+
+fn _temporary_output_failure(request: LlvmValidationRequest) -> LlvmValidationResult {
+    return LlvmValidationResult {
+        is_ok: false,
+        classification: "temporary_output_failure",
+        exit_code: -1,
+        argv: [],
+        stdout: "",
+        stderr: "",
+        retained_ir_path: request.ir_path,
+        diagnostic: "error: could not create native temporary output for LLVM IR validation\n"
+            + _validation_context(request)
+    };
+}
+
+fn llvm_validation_result(request: LlvmValidationRequest, argv: string[], exit_code: int, stdout: string, stderr: string, retained_ir_path: string) -> LlvmValidationResult {
+    if exit_code == 0 {
+        return LlvmValidationResult {
+            is_ok: true,
+            classification: "ok",
+            exit_code: exit_code,
+            argv: argv,
+            stdout: stdout,
+            stderr: stderr,
+            retained_ir_path: "",
+            diagnostic: ""
+        };
+    }
+    if exit_code < 0 {
+        return LlvmValidationResult {
+            is_ok: false,
+            classification: "tool_unavailable",
+            exit_code: exit_code,
+            argv: argv,
+            stdout: stdout,
+            stderr: stderr,
+            retained_ir_path: "",
+            diagnostic: "error: LLVM IR validator is unavailable\n"
+                + _validation_context(request)
+                + "\nnote: the selected validator could not be started or reaped"
+                + "\nhelp: verify the selected LLVM installation and SAILFIN_LLVM_ROOT"
+        };
+    }
+    let mut message = "error: internal compiler error (ICE): LLVM IR validation failed (exit "
+        + int_to_string(exit_code)
+        + ")\n"
+        + _validation_context(request);
+    if retained_ir_path.length > 0 {
+        message = message + "\nnote: invalid IR retained at: "
+            + retained_ir_path;
+    }
+    if stderr.length > 0 {
+        message = message + "\nnote: validator stderr:\n" + stderr;
+    }
+    message = message
+        + "\nnote: file a report: https://github.com/SailfinIO/sailfin/issues/new?template=ice.md";
+    return LlvmValidationResult {
+        is_ok: false,
+        classification: "invalid_ir",
+        exit_code: exit_code,
+        argv: argv,
+        stdout: stdout,
+        stderr: stderr,
+        retained_ir_path: retained_ir_path,
+        diagnostic: message
+    };
+}
+
+// Validate one LLVM-text artifact without a shell or platform null device.
+// A sibling `mkstemp` path receives disposable bitcode. On invalid IR, a
+// staged input is atomically moved to the caller's stable artifact path so a
+// later diagnostic never points at a temp the retry loop has deleted.
+fn validate_llvm_ir(request: LlvmValidationRequest) -> LlvmValidationResult ![io] {
+    if !request.validator.is_available {
+        return _unavailable_result(request);
+    }
+    let sink = _mktemp_sibling_cmd(request.ir_path + ".validate.bc");
+    if sink.length == 0 { return _temporary_output_failure(request); }
+    let argv = llvm_validation_argv(request, sink);
+    let exit_code = process.run_capture(argv, process.environ());
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    if fs.exists(sink) { fs.deleteFile(sink); }
+    if exit_code == 0 {
+        return llvm_validation_result(request, argv, exit_code, stdout, stderr, "");
+    }
+    if exit_code < 0 {
+        return llvm_validation_result(request, argv, exit_code, stdout, stderr, "");
+    }
+
+    let mut retained = request.ir_path;
+    if request.retained_ir_path.length > 0 && request.retained_ir_path != request.ir_path {
+        if _rename_preserving_source_on_failure(request.ir_path, request.retained_ir_path) {
+            retained = request.retained_ir_path;
+        }
+    }
+    return llvm_validation_result(request, argv, exit_code, stdout, stderr, retained);
+}
+
+fn report_llvm_validation_failure(result: LlvmValidationResult) -> void ![io] {
+    if !result.is_ok && result.diagnostic.length > 0 {
+        print.err(result.diagnostic);
+    }
+}
+
+export {
+    LlvmValidationRequest,
+    LlvmValidationResult,
+    LlvmValidator,
+    llvm_validation_argv,
+    llvm_validation_candidate_roles,
+    llvm_validation_request,
+    llvm_validation_result,
+    llvm_validator_disabled,
+    llvm_validator_from_tool,
+    llvm_validator_unavailable,
+    report_llvm_validation_failure,
+    resolve_llvm_validator,
+    validate_llvm_ir
+};

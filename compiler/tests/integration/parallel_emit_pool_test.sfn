@@ -28,6 +28,7 @@ import {
     _cr_run_bounded_processes_with_stats,
     _cr_run_parallel_emit
 } from "../../src/capsule_emit_parallel";
+import { llvm_validator_disabled } from "../../src/llvm_validation";
 
 fn _valid_source(n: int) -> string {
     return "fn add" + int_to_string(n)
@@ -50,7 +51,7 @@ test "parallel emit: fan-out emits and publishes every task" ![io] {
 
     let tasks: ParallelEmitTask[] = [_write_task(dir, "task0", _valid_source(0)), _write_task(dir, "task1", _valid_source(1)), _write_task(dir, "task2", _valid_source(2))];
 
-    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 3, "");
+    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 3, "", llvm_validator_disabled());
     assert ok;
 
     let mut i = 0;
@@ -69,11 +70,14 @@ test "parallel emit: a failing child fails the round" ![io] {
     let dir = nested_runner_scratch("parallel-emit-pool-fail");
     fs.createDirectory(dir, true);
 
-    let tasks: ParallelEmitTask[] = [_write_task(dir, "good0", _valid_source(0)),
-    // Syntactically invalid: `sfn emit` for this task exits non-zero.
-    _write_task(dir, "broken", "fn broken( {\n"), _write_task(dir, "good1", _valid_source(1))];
+    let tasks: ParallelEmitTask[] = [
+        _write_task(dir, "good0", _valid_source(0)),
+        // Syntactically invalid: `sfn emit` for this task exits non-zero.
+        _write_task(dir, "broken", "fn broken( {\n"),
+        _write_task(dir, "good1", _valid_source(1))
+    ];
 
-    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 3, "");
+    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 3, "", llvm_validator_disabled());
     assert ! ok;
 
     // The pool drains the whole queue and reports failure rather than
@@ -95,7 +99,7 @@ test "parallel emit: jobs above task count still completes" ![io] {
 
     // jobs (8) exceeds tasks.length (2): the top-up loop's
     // `launched >= tasks.length` guard must still hold and complete.
-    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 8, "");
+    let ok = _cr_run_parallel_emit(tasks, "native", sfn_bin_path(), 8, "", llvm_validator_disabled());
     assert ok;
 
     assert fs.exists(tasks[0].output_path);

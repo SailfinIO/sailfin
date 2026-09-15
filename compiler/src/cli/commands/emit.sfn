@@ -153,7 +153,7 @@ fn _run_emit(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     }
     // `--no-retry` == `--attempts 1`; applied after `--attempts` so it wins.
     if has_flag(matches, "no-retry") { emit_attempts = 1; }
-    // `--validate` / `--no-validate` toggle the llvm-as/clang round-trip;
+    // `--validate` / `--no-validate` toggle the selected llvm-as round-trip;
     // `--no-validate` wins to match the legacy explicit-off.
     let mut emit_validate: boolean = has_flag(matches, "validate");
     if has_flag(matches, "no-validate") { emit_validate = false; }
@@ -211,7 +211,7 @@ fn _run_emit(matches: Matches, ctx: CliContext) -> int ![clock, io] {
                 let llvm = compile_to_llvm_with_module_timed(source, module_name);
                 _write_llvm_text(out_path, llvm);
             } else {
-                // #515: route through the shared retry+validator cascade.
+                // #515/SFN-951: route through shared retry + coherent validation.
                 // Empty `import_asm_paths` degrades to the legacy
                 // in-module-only effect gate.
                 let mut import_asm_paths: string[] = [];

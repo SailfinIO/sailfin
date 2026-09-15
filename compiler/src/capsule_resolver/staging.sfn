@@ -23,6 +23,7 @@ import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "../build/fs";
 import { BuildCacheConfig, CacheKey, sha256_of_file } from "../build_cache";
 import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../capsule_emit_parallel";
 import { _cr_find_substring } from "../capsule_import_scan";
+import { llvm_validator_disabled } from "../llvm_validation";
 import { module_name_from_path } from "../module_paths";
 import { write_staged_native_text_file } from "../native_artifact_writer";
 import { stage_native_text_with_retry } from "../native_emit_subprocess";
@@ -544,7 +545,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], config: BuildCacheConfig, sai
     }
 
     if needs_emit.length > 0 {
-        let emit_ok = _cr_run_parallel_emit(needs_emit, "native", sailfin_exe, jobs, "");
+        let emit_ok = _cr_run_parallel_emit(needs_emit, "native", sailfin_exe, jobs, "", llvm_validator_disabled());
         if !emit_ok {
             print.err("capsule-resolver: one or more parallel stage emits failed");
             return false;

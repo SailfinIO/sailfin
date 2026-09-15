@@ -15,8 +15,8 @@
 // coexisting with a system default, not the preferred spelling.
 //
 // This module resolves and validates the family and derives its cache
-// identity (§3.8); it does not spawn `clang`/`llvm-link`/the final linker
-// and is not wired into any consumer yet (SFN-951/SFN-952/SFN-956).
+// identity (§3.8); validation consumes its selected `llvm-as` identity, while
+// optimizer/object/link consumers remain owned by SFN-952 through SFN-956.
 import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { int_to_string } from "sfn/strings";
 

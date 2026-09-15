@@ -1,11 +1,11 @@
 import { int_to_string } from "sfn/strings";
 
-// Shared emit retry + LLVM-IR validator cascade (#515).
+// Shared emit retry + coherent LLVM-IR validation (#515, SFN-951).
 //
 // Lifts the robustness the multi-source `sfn build` path already
 // enjoyed — the resolver's per-module emit retry and the
-// `llvm-as → llvm-as-18 → clang -c -emit-llvm → clang-18` validator
-// cascade — into a single source of truth, so that single-shot
+// selected `llvm-as` validator contract — into a single source of truth, so
+// that single-shot
 // `sfn emit --validate llvm -o`, the resolver's `_cr_compile_one` /
 // `_cr_stage_one` subprocess loops, and the Makefile cross-build
 // staging all defend against the alpha.6+ seed's intermittent
@@ -18,9 +18,8 @@ import { int_to_string } from "sfn/strings";
 // that gap.
 //
 // Three entry points:
-//   - `validate_llvm_ir(path)`          — the cascade; the ONE place
-//     the `llvm-as`/`clang` discovery order lives. Every caller now CALLS
-//     it rather than re-implementing it: the resolver loops, the
+//   - `validate_llvm_ir(request)`       — the ONE structured argv/result
+//     contract. Every caller now uses the same selected validator: the resolver loops, the
 //     in-process retry, and the parallel emit fan-out
 //     (`capsule_emit_parallel::_cr_emit_pool_round`, which validates each
 //     reaped child's staged output in the parent before publishing it).
@@ -41,7 +40,14 @@ import { int_to_string } from "sfn/strings";
 import { emit_child_argv } from "./build/emit_child_argv";
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { _read_implicit_deps } from "./build/paths";
-import { validate_llvm_ir } from "./llvm_validation";
+import {
+    LlvmValidator,
+    llvm_validation_request,
+    llvm_validator_disabled,
+    report_llvm_validation_failure,
+    resolve_llvm_validator,
+    validate_llvm_ir
+} from "./llvm_validation";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_import_context_root,
@@ -148,6 +154,13 @@ fn emit_llvm_with_retry(source_path: string, module_name: string, out_path: stri
 // environment); tests call this directly because the runtime has no
 // `setenv` to stage the env var from inside a `.sfn` test process.
 fn emit_llvm_with_retry_injected(source_path: string, module_name: string, out_path: string, import_asm_paths: string[], import_context_root: string, max_attempts: int, validate: boolean, trace: boolean, inject_faults: int) -> boolean ![io] {
+    let mut validator = llvm_validator_disabled();
+    if validate { validator = resolve_llvm_validator(); }
+    if validate && !validator.is_available {
+        let unavailable = validate_llvm_ir(llvm_validation_request(validator, out_path, out_path, source_path));
+        report_llvm_validation_failure(unavailable);
+        return false;
+    }
     let mut ok: boolean = false;
     let mut attempt: int = 0;
     loop {
@@ -182,8 +195,12 @@ fn emit_llvm_with_retry_injected(source_path: string, module_name: string, out_p
             continue;
         }
         if validate {
-            if !validate_llvm_ir(out_path) {
+            let validation = validate_llvm_ir(llvm_validation_request(validator, out_path, out_path, source_path));
+            if !validation.is_ok {
                 _eh_trace(trace, module_name, attempt, max_attempts, "IR validation rejected output");
+                if attempt >= max_attempts {
+                    report_llvm_validation_failure(validation);
+                }
                 continue;
             }
         }
@@ -202,8 +219,13 @@ fn emit_llvm_with_retry_injected(source_path: string, module_name: string, out_p
 // to parse as LLVM IR. Unlike the in-process path, re-running the
 // subprocess re-rolls the seed's non-determinism, so this is the path
 // that actually recovers the IR-corruption flake.
-fn emit_subprocess_with_retry(sailfin_exe: string, module_name: string, source_path: string, out_path: string, mode: string, import_context_root: string, max_attempts: int, validate: boolean, trace: boolean) -> boolean ![io] {
+fn emit_subprocess_with_retry(sailfin_exe: string, module_name: string, source_path: string, out_path: string, mode: string, import_context_root: string, max_attempts: int, validate: boolean, trace: boolean, validator: LlvmValidator) -> boolean ![io] {
     let inject = _eh_resolve_inject();
+    if validate && !validator.is_available {
+        let unavailable = validate_llvm_ir(llvm_validation_request(validator, out_path, out_path, source_path));
+        report_llvm_validation_failure(unavailable);
+        return false;
+    }
     let mut ok: boolean = false;
     let mut attempt: int = 0;
     loop {
@@ -239,6 +261,7 @@ fn emit_subprocess_with_retry(sailfin_exe: string, module_name: string, source_p
         if staged.length > 0 { emit_target = staged; }
         let emit_args: string[] = emit_child_argv(sailfin_exe, module_name, emit_target, mode, source_path, import_context_root);
         let mut attempt_ok: boolean = true;
+        let mut preserved_failed_path: string = "";
         let rc = process.run(emit_args);
         if rc != 0 {
             _eh_trace(trace, module_name, attempt, max_attempts, "exit="
@@ -266,8 +289,13 @@ fn emit_subprocess_with_retry(sailfin_exe: string, module_name: string, source_p
         }
         if attempt_ok {
             if validate {
-                if !validate_llvm_ir(emit_target) {
+                let validation = validate_llvm_ir(llvm_validation_request(validator, emit_target, out_path, source_path));
+                if !validation.is_ok {
                     _eh_trace(trace, module_name, attempt, max_attempts, "IR validation rejected output");
+                    preserved_failed_path = validation.retained_ir_path;
+                    if attempt >= max_attempts {
+                        report_llvm_validation_failure(validation);
+                    }
                     attempt_ok = false;
                 }
             }
@@ -284,7 +312,9 @@ fn emit_subprocess_with_retry(sailfin_exe: string, module_name: string, source_p
         } else {
             // Failed attempt — drop the temp so retries don't accumulate
             // `.sfn_stage.*` litter in the staging directory.
-            if staged.length > 0 { fs.deleteFile(staged); }
+            if staged.length > 0 && staged != preserved_failed_path {
+                fs.deleteFile(staged);
+            }
         }
     }
     return ok;
