@@ -20,7 +20,7 @@ runs:
       uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.compiler_artifact }}
-        path: build/bin
+        path: build
 
     - name: Set up MSVC developer environment
       uses: ilammy/msvc-dev-cmd@v1
@@ -34,9 +34,18 @@ runs:
         if (-not (Test-Path -LiteralPath build/bin/sfn.exe -PathType Leaf)) {
           throw "shared artifact did not contain build/bin/sfn.exe"
         }
+        $llvmRoot = (Resolve-Path -LiteralPath build/llvm).Path
+        foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'lld-link.exe')) {
+          $toolPath = Join-Path $llvmRoot "bin\$tool"
+          if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+            throw "shared artifact did not contain $toolPath"
+          }
+        }
+        "SAILFIN_LLVM_ROOT=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         & build/bin/sfn.exe --version
         clang --version | Select-Object -First 1
-        lld-link --version
+        & (Join-Path $llvmRoot 'bin\llvm-as.exe') --version | Select-Object -First 1
+        & (Join-Path $llvmRoot 'bin\lld-link.exe') --version
 
     # The entry itself folds test source, dependency closure, compiler, and
     # runtime identities. A stale archive is therefore only a source of misses,

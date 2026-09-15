@@ -2456,12 +2456,19 @@ jobs:
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force build/bin | Out-Null
           Copy-Item -LiteralPath $env:NATIVE_SFN -Destination build/bin/sfn.exe
+          New-Item -ItemType Directory -Force build/llvm/bin | Out-Null
+          foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'lld-link.exe')) {
+            Copy-Item -LiteralPath (Join-Path $env:SAILFIN_LLVM_ROOT "bin\$tool") `
+              -Destination (Join-Path 'build/llvm/bin' $tool)
+          }
 
       - name: Upload native compiler
         uses: actions/upload-artifact@v7
         with:
           name: ci-build-windows-x86_64
-          path: build/bin/sfn.exe
+          path: |
+            build/bin/sfn.exe
+            build/llvm/bin/*.exe
           if-no-files-found: error
           retention-days: 1
 
