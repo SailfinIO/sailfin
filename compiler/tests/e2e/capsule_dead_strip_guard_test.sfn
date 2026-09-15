@@ -118,7 +118,7 @@ fn _symbol_defined(syms: string, bare: string) -> boolean {
 fn _dump_symbols(binary: string) -> string ![io] {
     let reader = symbol_reader();
     if reader.length == 0 {
-        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        skip("SFN-1284: no symbol reader is available; remove when the test resolves a PE-native reader and can assert symbol presence");
         return "";
     }
     let exit = process.run_capture([reader, binary], _child_env());
@@ -158,9 +158,9 @@ test "dead-strip guard: used capsule symbol (abs) is present in the linked binar
     // `lld-link` strips the PE symbol table entirely (msvc dead-strip is
     // `/OPT:REF`, not the POSIX `-ffunction-sections`/`--gc-sections`/
     // `-dead_strip` flags this guard pins — see `runtime/sfn/platform/
-    // fd_io.sfn:37-39`, SFN-943), so `llvm-nm` has nothing to check here.
+    // fd_io.sfn:37-39`, SFN-1284), so `llvm-nm` has nothing to check here.
     if host_is_windows() {
-        skip("SFN-943: msvc dead-strip is /OPT:REF and the linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts used-symbol retention");
+        skip("SFN-1284: msvc dead-strip is /OPT:REF and the linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts used-symbol retention");
     }
     let out_bin = _bin_path("present");
     let build_exit = _build_consumer(out_bin);
@@ -176,10 +176,10 @@ test "dead-strip guard: used capsule symbol (abs) is present in the linked binar
 // drops them. If #1047's strip flags regress, these functions reappear.
 test "dead-strip guard: unreferenced capsule symbols (clamp, mean) are stripped" ![io] {
     // See the Windows skip rationale on the sibling "used capsule symbol"
-    // test above (SFN-943): this guard pins a POSIX-only dead-strip
+    // test above (SFN-1284): this guard pins a POSIX-only dead-strip
     // mechanism, and the linked PE has no symbol table to inspect either way.
     if host_is_windows() {
-        skip("SFN-943: msvc dead-strip is /OPT:REF and the linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts unused-symbol removal");
+        skip("SFN-1284: msvc dead-strip is /OPT:REF and the linked PE has no llvm-nm symbol table; remove when a PE-native probe asserts unused-symbol removal");
     }
     let out_bin = _bin_path("strip");
     let build_exit = _build_consumer(out_bin);

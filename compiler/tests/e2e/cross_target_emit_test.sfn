@@ -168,7 +168,7 @@ test "cross-target emit: an unsupported --target triple is rejected with E0614, 
 
 test "cross-target emit: aarch64 Linux build emits target IR and an AArch64 ELF" ![io] {
     if !_aarch64_cross_toolchain_ready() {
-        skip("aarch64 glibc cross sysroot, clang, or ld.lld unavailable");
+        skip("SFN-1285: the aarch64 glibc cross sysroot, clang, or ld.lld is unavailable; remove when the canonical Windows test image provides that cross toolchain");
         return;
     }
 

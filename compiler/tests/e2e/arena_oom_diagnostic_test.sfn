@@ -158,7 +158,9 @@ fn _stderr_from_starved_arena(label: string) -> CapRun ![io] {
 }
 
 test "arena: page-allocation failure reports OOM exactly once, not aborting silently" ![io] {
-    if !_is_linux() { skip("RLIMIT_AS is a no-op on non-Linux hosts"); }
+    if !_is_linux() {
+        skip("SFN-1285: RLIMIT_AS is unavailable on non-Linux hosts; remove when the arena OOM test has a host-native memory-pressure fixture");
+    }
     let run = _stderr_from_starved_arena("arena_oom_sweep");
     let err = run.stderr;
     if err.length == 0 {

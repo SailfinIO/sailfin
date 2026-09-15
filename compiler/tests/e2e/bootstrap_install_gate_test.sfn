@@ -763,9 +763,9 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
 
 test "bootstrap: install.sh lands the seed where the native dispatch probes" ![io] {
     // install.sh is a bash script; there is no bash to drive it on native
-    // Windows (SFN-1163).
+    // Windows (SFN-1285).
     if host_is_windows() {
-        skip("install.sh is a bash script and there is no bash to drive it on native Windows");
+        skip("SFN-1285: install.sh requires Bash on native Windows; remove when the bootstrap layout contract has a Windows-capable installer fixture");
     }
     if !tool_present("bash") || !tool_present("tar") || !tool_present("jq") || !tool_present("curl") {
         skip("bash/tar/jq/curl are all required to drive the real install.sh, and not all are present on PATH");

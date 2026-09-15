@@ -158,7 +158,7 @@ test "dev-bootstrap install: untracked live entry is not overwritten" ![io] {
 
 test "dev-bootstrap install: dangling live entry is not overwritten" ![io] {
     if host_is_windows() {
-        skip("native Windows cannot create the POSIX dangling-symlink fixture; fs.exists uses no-follow GetFileAttributesA there");
+        skip("SFN-1285: native Windows cannot create this POSIX dangling-symlink fixture; remove when the ownership test uses a Windows-capable dangling-link fixture");
     }
     let root = nested_runner_scratch("dev_bootstrap_dangling_owned_entry");
     let prefix = root + "/managed-prefix";
@@ -256,7 +256,7 @@ test "dev-bootstrap install: DESTDIR cannot escape or disguise a live prefix" ![
 
 test "dev-bootstrap install: DESTDIR symlinks cannot redirect publication" ![io] {
     if host_is_windows() {
-        skip("native Windows does not provide the POSIX symlink fixture used by this containment test");
+        skip("SFN-1285: native Windows does not provide this POSIX symlink fixture; remove when the containment test uses Windows-native redirecting links");
     }
     let root = _physical_scratch("dev_bootstrap_destdir_symlink");
     let live_prefix = root + "/symlink-target";

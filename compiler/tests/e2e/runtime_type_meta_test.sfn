@@ -163,7 +163,7 @@ fn _runtime_object(module: string) -> string ![io] {
 fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
     let reader = symbol_reader();
     if reader.length == 0 {
-        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        skip("SFN-1284: no symbol reader is available; remove when the test resolves a PE-native reader and can assert symbol presence");
         return false;
     }
     let exit = process.run_capture([reader, binary], _child_env());
@@ -261,7 +261,7 @@ test "prelude emission routes type-meta calls through the sfn_* symbols" ![io] {
 test "compiler binary exports the defined sfn_* type-meta symbols" ![io] {
     let obj = _runtime_object("type_meta");
     if obj.length == 0 {
-        skip("build/sailfin/sfn__runtime-native__type_meta.sfn-*.o not found — tree not built yet (SFN-1114)");
+        skip("SFN-1284: the canonical Windows type-metadata runtime object was not found; remove when the probe resolves the native build artifact layout");
     }
     assert _nm_has_defined(obj, "sfn_type_register");
     assert _nm_has_defined(obj, "sfn_resolve_type");
