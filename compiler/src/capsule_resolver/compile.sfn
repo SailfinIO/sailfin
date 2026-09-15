@@ -32,6 +32,7 @@ import {
 } from "../build_cache";
 import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../capsule_emit_parallel";
 import { emit_subprocess_with_retry } from "../emit_helpers";
+import { LlvmValidator, llvm_validator_disabled, resolve_llvm_validator } from "../llvm_validation";
 import { compile_to_llvm_file_with_module_imports_and_implicit } from "../main";
 import { resolve_compiler_version_for_cache } from "../version";
 import {
@@ -77,7 +78,7 @@ import {
 // don't yet have `binary_dir` plumbed) keep their existing path;
 // their typical capsule dep counts are well under the in-process
 // budget.
-fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string, work_dir: string, target_triple: string) -> ModuleCacheEvent ![io] {
+fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string, work_dir: string, target_triple: string, validator: LlvmValidator) -> ModuleCacheEvent ![io] {
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);
         return _cr_module_cache_event_failure(src.slug);
@@ -149,9 +150,9 @@ fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: strin
         // validate+retry body into `emit_subprocess_with_retry`
         // so `_cr_stage_one_outcome`, single-shot `sfn emit --validate`,
         // and the Makefile cross-build staging share one cascade.
-        // `validate=true` here runs the `llvm-as`/`clang` round-
-        // trip; the empty-file probe lives inside the helper.
-        ok = emit_subprocess_with_retry(sailfin_exe, src.slug, src.source_path, src.ll_path, "llvm", context_root, 3, true, config.trace);
+        // `validate=true` here runs the selected family's `llvm-as`
+        // round-trip; the empty-file probe lives inside the helper.
+        ok = emit_subprocess_with_retry(sailfin_exe, src.slug, src.source_path, src.ll_path, "llvm", context_root, 3, true, config.trace, validator);
     } else {
         let source = fs.readFile(src.source_path);
         // #957: in-process path enforces the same cross-module effects
@@ -336,6 +337,8 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // resolver and a `SAILFIN_HOST_OS` override steers the key and the
     // emitted platform legs together (SFN-682).
     let target_triple = build_target_triple();
+    let mut validator = llvm_validator_disabled();
+    if sailfin_exe.length > 0 { validator = resolve_llvm_validator(); }
     let mut out: string[] = [];
     let mut stats = empty_cache_stats();
     let mut events: ModuleCacheEvent[] = [];
@@ -440,7 +443,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
 
         // Pass 2: parallel emit for misses.
         if needs_emit.length > 0 {
-            let emit_ok = _cr_run_parallel_emit(needs_emit, "llvm", sailfin_exe, jobs, _cr_import_context_root(work_dir));
+            let emit_ok = _cr_run_parallel_emit(needs_emit, "llvm", sailfin_exe, jobs, _cr_import_context_root(work_dir), validator);
             if !emit_ok {
                 print.err("capsule-resolver: one or more parallel module emits failed");
                 return CompileCapsuleResult {
@@ -515,7 +518,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
-        let evt = _cr_compile_one(sources[i], per_source_dep_slugs[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe, work_dir, target_triple);
+        let evt = _cr_compile_one(sources[i], per_source_dep_slugs[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe, work_dir, target_triple, validator);
         if !evt.success {
             // Stage C2c: even on the bail path we surface the
             // events accumulated so far. Sidecar emission is

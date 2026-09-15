@@ -86,8 +86,9 @@ present on disk; any miss falls back to clang with a traced reason, never
 silently. This means many Linux invocations link without clang, but the fallback
 prevents the required-owned claim until SFEP-0066's fail-closed gate lands.
 
-**The remaining first-party clang roles are LLVM validation/object emission and
-non-Linux link driving.** Every `.ll` → `.o` still goes through `clang -c`.
+**LLVM validation now invokes the coherent family's selected `llvm-as`; the
+remaining first-party clang roles are object emission and non-Linux link
+driving.** Every `.ll` → `.o` still goes through `clang -c`.
 SFEP-0066 replaces that driver route with a coherent
 `llvm-as` → `opt` → `llc -filetype=obj` family: LLVM keeps optimization,
 instruction selection, register allocation, MC encoding, and object writing,

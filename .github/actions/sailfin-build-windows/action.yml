@@ -149,15 +149,41 @@ runs:
       with:
         arch: x64
 
-    - name: Ensure LLVM (clang + lld-link) present
-      shell: bash
+    - name: Install supported LLVM tool family
+      shell: pwsh
       run: |
-        set -euo pipefail
-        # windows-2025 ships LLVM; surface the versions the native link
-        # will use so a toolchain mismatch is visible in the log.
-        clang --version | head -1
-        lld-link --version || true
-        echo "clang: $(command -v clang)"
+        $ErrorActionPreference = 'Stop'
+        $version = '18.1.8'
+        $distribution = "clang+llvm-$version-x86_64-pc-windows-msvc"
+        $archive = Join-Path $env:RUNNER_TEMP "$distribution.tar.xz"
+        $extractRoot = Join-Path $env:RUNNER_TEMP "sailfin-llvm-$version"
+        $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/clang%2Bllvm-$version-x86_64-pc-windows-msvc.tar.xz"
+        $expectedSha256 = '22c5907db053026cc2a8ff96d21c0f642a90d24d66c23c6d28ee7b1d572b82e8'
+
+        & curl.exe --fail --location --retry 3 --silent --show-error `
+            --output $archive $url
+        if ($LASTEXITCODE -ne 0) {
+          throw "Failed to download the complete LLVM $version distribution (exit $LASTEXITCODE)"
+        }
+        $actualSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualSha256 -ne $expectedSha256) {
+          throw "LLVM $version archive SHA256 mismatch: expected $expectedSha256, got $actualSha256"
+        }
+
+        New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+        & tar -xf $archive -C $extractRoot
+        if ($LASTEXITCODE -ne 0) {
+          throw "Failed to extract the complete LLVM $version distribution (exit $LASTEXITCODE)"
+        }
+        $llvmRoot = Join-Path $extractRoot $distribution
+        foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'ld.lld.exe', 'lld-link.exe')) {
+          $toolPath = Join-Path $llvmRoot "bin\$tool"
+          if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+            throw "LLVM $version distribution is missing $toolPath"
+          }
+        }
+        "SAILFIN_LLVM_ROOT=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        & (Join-Path $llvmRoot 'bin\llvm-as.exe') --version | Select-Object -First 1
 
     # ── Staircase (SFN-53) ────────────────────────────────────────
     # Four cheap rungs before the 281-module self-host, each proving one

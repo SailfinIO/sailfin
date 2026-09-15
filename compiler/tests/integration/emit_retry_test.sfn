@@ -1,9 +1,9 @@
 // compiler/tests/integration/emit_retry_test.sfn
 //
-// Regression coverage for the shared emit retry + validator cascade
+// Regression coverage for shared emit retry + coherent LLVM validation
 // (#515, `compiler/src/emit_helpers.sfn`). The cascade lifts the
 // robustness the multi-source `sfn build` path already had — up-to-3
-// re-emits + an `llvm-as`/`clang` IR round-trip — into one helper so
+// re-emits + a selected-family `llvm-as` IR round-trip — into one helper so
 // single-shot `sfn emit --validate llvm`, the resolver's
 // `_cr_compile_one` / `_cr_stage_one` loops, and the Makefile cross-
 // build staging all defend against the seed's intermittent IR-
@@ -23,11 +23,8 @@
 // `process.run_capture(argv, env)` REPLACES the child environment
 // (`runtime/sfn/process.sfn`: an empty array means the empty
 // environment), so a child seeded with only `SAILFIN_INJECT_FAULT`
-// loses PATH — and the `--validate` cascade's `command -v llvm-as` /
-// `clang` lookups (and `sh` itself) would then resolve only via the
-// kernel/shell default path, which omits CI's versioned `llvm-18`
-// dir. Hand the child the parent's real PATH, read straight from this
-// process's environment. Effect knobs (`SAILFIN_EFFECT_*`)
+// loses PATH and cannot resolve the coherent LLVM family. Hand the child the
+// parent's real PATH, read straight from this process's environment. Effect knobs (`SAILFIN_EFFECT_*`)
 // stay unset, so the child still exercises shipped defaults.
 import { sfn_bin_path } from "sfn/test";
 
@@ -89,7 +86,7 @@ test "emit_retry: recovery still validates the IR on the clean attempt" ![io] {
     let src = _retry_fixture();
     let out = src + ".ll";
     // Same recovery, but with the validator cascade on: attempt 3's IR
-    // must round-trip through llvm-as / clang for the emit to exit 0.
+    // must round-trip through the selected llvm-as for the emit to exit 0.
     let rc = _emit_with_faults(src, out, "3", true, "2");
     assert rc == 0;
     assert fs.exists(out);

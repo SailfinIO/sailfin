@@ -148,7 +148,7 @@ jobs:
               uses: ./.github/actions/apt-install
               timeout-minutes: 20
               with:
-                  packages: clang-18 llvm-18 jq
+                  packages: clang-18 llvm-18 lld jq
 
             - name: Set CLANG env (Linux)
               if: runner.os == 'Linux' && matrix.package_label != 'linux-arm64'
@@ -210,8 +210,8 @@ jobs:
               if: runner.os == 'macOS'
               shell: bash
               run: |
-                  brew install jq llvm
-                  echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+                  brew install jq llvm@18
+                  echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
 
             # Unlike release-tag.yml this leg runs the full suite (no
             # `mode:`, so the action's default `full` path), which makes

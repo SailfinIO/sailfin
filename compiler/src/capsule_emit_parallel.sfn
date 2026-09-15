@@ -11,7 +11,12 @@ import { int_to_string } from "sfn/strings";
 import { emit_child_argv } from "./build/emit_child_argv";
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { build_host_os } from "./build/target";
-import { validate_llvm_ir } from "./llvm_validation";
+import {
+    LlvmValidator,
+    llvm_validation_request,
+    report_llvm_validation_failure,
+    validate_llvm_ir
+} from "./llvm_validation";
 import { substring } from "./string_utils";
 import { user_config_build_jobs, user_config_origin } from "./user_config";
 
@@ -633,7 +638,7 @@ fn _cr_run_bounded_processes_with_stats(tasks: ParallelProcessTask[], jobs: int)
 // drained to EOF, so it always terminates and the window always advances,
 // even when peers are parked on a full pipe buffer. Same shape
 // `cli/commands/test/pool.sfn` runs its job pool with.
-fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int, import_context_root: string, child_env: string[]) -> ParallelEmitTask[] ![io] {
+fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int, import_context_root: string, child_env: string[], validator: LlvmValidator, report_failures: boolean) -> ParallelEmitTask[] ![io] {
     // `native` staging emits `.sfn-asm`, which does not round-trip through
     // `llvm-as`; only `llvm` output is validated. Same split the retired
     // worker's `[ "$SAILFIN_PE_MODE" != llvm ]` guard made.
@@ -671,6 +676,7 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
         let tmp = staged[ti];
         let rc = results[ti];
         let mut ok: boolean = rc == 0;
+        let mut preserved_failed_path: string = "";
         if !ok {
             // SFN-904: name what was spawned alongside the exit code. `127`
             // here is `_cr_reap_child`'s synthesized "could not execute"
@@ -700,7 +706,14 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
         }
         if ok {
             if validate {
-                if !validate_llvm_ir(target) { ok = false; }
+                let validation = validate_llvm_ir(llvm_validation_request(validator, target, t.output_path, t.source_path));
+                if !validation.is_ok {
+                    preserved_failed_path = validation.retained_ir_path;
+                    if report_failures {
+                        report_llvm_validation_failure(validation);
+                    }
+                    ok = false;
+                }
             }
         }
         if ok {
@@ -716,7 +729,9 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
             // failed `_atomic_rename_into_place` has already unlinked the
             // temp itself (`build/fs.sfn`), so that path lands here as a
             // harmless second unlink of an absent file.
-            if tmp.length > 0 { fs.deleteFile(tmp); }
+            if tmp.length > 0 && tmp != preserved_failed_path {
+                fs.deleteFile(tmp);
+            }
             failed.push(t);
         }
         ti += 1;
@@ -734,10 +749,17 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
 // the script was retired in Stage E PR7 / #383). With
 // `jobs == 1`, the helper sequentialises to keep the
 // regression-bisect path simple.
-fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int, import_context_root: string) -> boolean ![io] {
+fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int, import_context_root: string, validator: LlvmValidator) -> boolean ![io] {
     if tasks.length == 0 { return true; }
     let mut effective_jobs = jobs;
     if effective_jobs <= 0 { effective_jobs = 1; }
+    let validate = mode == "llvm";
+    if validate && !validator.is_available {
+        let first = tasks[0];
+        let unavailable = validate_llvm_ir(llvm_validation_request(validator, first.output_path, first.output_path, first.source_path));
+        report_llvm_validation_failure(unavailable);
+        return false;
+    }
 
     // Sequential fallback: keeps regression bisects (and any
     // SAILFIN_BUILD_JOBS=1 invocations) on the simple
@@ -756,8 +778,27 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
             let mut emit_target: string = t.output_path;
             if staged.length > 0 { emit_target = staged; }
             let rc = process.run(emit_child_argv(sailfin_exe, t.slug, emit_target, mode, t.source_path, import_context_root));
-            if rc != 0 {
-                if staged.length > 0 { fs.deleteFile(staged); }
+            let mut ok = rc == 0;
+            let mut preserved_failed_path: string = "";
+            if ok {
+                if !fs.exists(emit_target) { ok = false; }
+            }
+            if ok {
+                let probe = fs.readFile(emit_target);
+                if probe.length == 0 { ok = false; }
+            }
+            if ok && validate {
+                let validation = validate_llvm_ir(llvm_validation_request(validator, emit_target, t.output_path, t.source_path));
+                if !validation.is_ok {
+                    preserved_failed_path = validation.retained_ir_path;
+                    report_llvm_validation_failure(validation);
+                    ok = false;
+                }
+            }
+            if !ok {
+                if staged.length > 0 && staged != preserved_failed_path {
+                    fs.deleteFile(staged);
+                }
                 return false;
             }
             if staged.length > 0 {
@@ -790,7 +831,7 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
         if pending.length == 0 { break; }
         if round >= max_rounds { break; }
         round += 1;
-        pending = _cr_emit_pool_round(pending, mode, sailfin_exe, effective_jobs, import_context_root, child_env);
+        pending = _cr_emit_pool_round(pending, mode, sailfin_exe, effective_jobs, import_context_root, child_env, validator, round >= max_rounds);
     }
     return pending.length == 0;
 }

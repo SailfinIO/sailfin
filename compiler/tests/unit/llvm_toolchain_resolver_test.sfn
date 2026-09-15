@@ -281,21 +281,29 @@ test "llvm-toolchain-resolver: the LLD banner parses even though it omits \"LLVM
     assert parse_llvm_major("Ubuntu LLD version") == -1;
 }
 
-// Windows executable conventions, driven in-process. On a Linux runner the
-// `.exe` spellings resolve nothing, so the assertion is the fail-CLOSED one:
-// a named member and a real diagnostic, never the silent "" that
-// `_which`/`_linker_on_path` return on Windows today because `_shell_read_cmd`
-// self-disables there. Reaching a diagnostic at all also proves discovery ran
-// without a shell — a shelled probe could not have produced one.
-test "llvm-toolchain-resolver: a Windows host uses .exe conventions and fails closed" ![io] {
+// Windows executable conventions, driven in-process. A provisioned
+// SAILFIN_LLVM_ROOT resolves the complete family; an unprovisioned runner
+// fails closed with a named member and real diagnostic. Both outcomes must
+// use `.exe` spellings rather than silently returning an empty path.
+test "llvm-toolchain-resolver: a Windows host uses .exe conventions" ![io] {
     let family = resolve_llvm_toolchain_for_host("x86_64-pc-windows-msvc", "Windows");
-    assert expect_eq_bool(family.ok, false).ok;
-    assert family.fingerprint.length == 0;
-    if family.diagnostic != null {
-        let diag = family.diagnostic;
-        assert diag.code == "E0621";
-        assert expect_contains_str(diag.message, ".exe").ok;
-    } else { assert false; }
+    if family.ok {
+        let mut i: int = 0;
+        loop {
+            if i >= family.tools.length { break; }
+            assert expect_contains_str(family.tools[i].path, ".exe").ok;
+            i += 1;
+        }
+        assert family.tools.length > 0;
+        assert family.fingerprint.length > 0;
+    } else {
+        assert family.fingerprint.length == 0;
+        if family.diagnostic != null {
+            let diag = family.diagnostic;
+            assert diag.code == "E0621";
+            assert expect_contains_str(diag.message, ".exe").ok;
+        } else { assert false; }
+    }
 }
 
 // The A/B for the test above: the SAME triple under a Linux host, so the

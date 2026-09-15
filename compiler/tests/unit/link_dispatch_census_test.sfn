@@ -171,10 +171,9 @@ test "object census: every source-to-object call site is classified" ![io] {
     // the only consumers. `cli/commands/build` reaches the LLVM provider
     // indirectly through `backend.assemble`, which is itself in this set.
     //
-    // NOT in this set, deliberately: `llvm_validation.sfn`'s
-    // `_validator_argv` runs `clang -c -emit-llvm` to produce a discarded
-    // `.bc` sink. That is IR validation (SFEP-0066 §3.5), not object
-    // emission, so it is outside this boundary.
+    // `llvm_validation.sfn` is outside this set: it runs the coherent
+    // family's selected `llvm-as` to produce disposable bitcode and has no
+    // source-to-object or clang path (SFN-951, SFEP-0066 §3.5).
     let discovered = _sorted(_find_object_compile_sites());
     let expected = _sorted(["backend", "build/artifact_compile", "build/clang_argv", "build/runtime_objs"]);
     assert expect_eq_str_array(discovered, expected).ok;

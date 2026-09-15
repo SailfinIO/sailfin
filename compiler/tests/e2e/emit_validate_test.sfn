@@ -1,0 +1,61 @@
+// compiler/tests/e2e/emit_validate_test.sfn
+//
+// Exercises the user-facing missing-validator classification through
+// `sfn emit --validate` with an authoritative empty LLVM installation root.
+import {
+    clean_runner_env_without,
+    expect_contains_str,
+    expect_eq_bool,
+    expect_eq_int,
+    sfn_bin_path
+} from "sfn/test";
+
+fn _validation_fixture() -> string ![io] {
+    let dir = fs.mkdtemp("sfn-emit-validate-");
+    assert dir.length > 0;
+    let source = dir + "/sample.sfn";
+    fs.writeFile(source, "fn add(a: int, b: int) -> int {\n    return a + b;\n}\n");
+    return source;
+}
+
+test "emit validate: missing coherent validator reports installation context" ![io] {
+    let source = _validation_fixture();
+    let output = source + ".ll";
+    let missing_root = source + ".missing-llvm";
+    let argv: string[] = [sfn_bin_path(), "emit", "--validate", "--attempts", "1", "-o", output, "llvm", source];
+    let mut child_env = clean_runner_env_without("", ["SAILFIN_LLVM_ROOT", "SAILFIN_TARGET_TRIPLE", "SAILFIN_TOOLCHAIN"]);
+    child_env.push("SAILFIN_LLVM_ROOT=" + missing_root);
+    child_env.push("SAILFIN_TOOLCHAIN=off");
+    let exit_code = process.run_capture(argv, child_env);
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    assert expect_eq_bool(exit_code != 0, true).ok;
+    assert expect_eq_int(stdout.length, 0).ok;
+    assert expect_contains_str(stderr, "LLVM IR validator is unavailable").ok;
+    assert expect_contains_str(stderr, "install the supported LLVM tool family").ok;
+    assert expect_contains_str(stderr, "SAILFIN_LLVM_ROOT").ok;
+    assert expect_contains_str(stderr, source).ok;
+    fs.deleteFile(output);
+    fs.deleteFile(source);
+}
+
+test "emit validate: legacy cross target selects a governed provider family" ![io] {
+    let source = _validation_fixture();
+    let output = source + ".ll";
+    let missing_root = source + ".missing-llvm";
+    let argv: string[] = [sfn_bin_path(), "emit", "--validate", "--attempts", "1", "-o", output, "llvm", source];
+    let mut child_env = clean_runner_env_without("", ["SAILFIN_LLVM_ROOT", "SAILFIN_TARGET_TRIPLE", "SAILFIN_TOOLCHAIN"]);
+    child_env.push("SAILFIN_LLVM_ROOT=" + missing_root);
+    child_env.push("SAILFIN_TARGET_TRIPLE=x86_64-w64-mingw32");
+    child_env.push("SAILFIN_TOOLCHAIN=off");
+    let exit_code = process.run_capture(argv, child_env);
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    assert expect_eq_bool(exit_code != 0, true).ok;
+    assert expect_eq_int(stdout.length, 0).ok;
+    assert expect_contains_str(stderr, "LLVM IR validator is unavailable").ok;
+    assert expect_contains_str(stderr, "x86_64-w64-mingw32").ok;
+    assert expect_eq_bool(expect_contains_str(stderr, "is not supported by the LLVM toolchain").ok, false).ok;
+    fs.deleteFile(output);
+    fs.deleteFile(source);
+}

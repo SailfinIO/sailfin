@@ -102,7 +102,7 @@ jobs:
         uses: ./.github/actions/apt-install
         timeout-minutes: 20
         with:
-          packages: clang-18 llvm-18 jq time
+          packages: clang-18 llvm-18 lld jq time
 
       - name: Install jq + LLVM tools + GNU time (macOS)
         if: runner.os == 'macOS'
@@ -110,8 +110,8 @@ jobs:
         run: |
           # gnu-time provides `gtime`, which the bench scripts detect for RSS
           # (BSD /usr/bin/time has no -v).
-          brew install jq llvm gnu-time
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          brew install jq llvm@18 gnu-time
+          echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
 
       # Recreate the Darwin `clang` PATH shim the retired build driver
       # installed at parse time. This job does not go through
