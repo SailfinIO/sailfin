@@ -337,7 +337,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Exercise the verifier called by seed_source: release on real signed
+      # Exercise the native Windows seed verifier on real signed
       # assets, then prove each trust failure with isolated fixtures (SFN-1093).
       - name: Verify release seed and fail-closed fixtures without OpenSSL
         shell: pwsh

@@ -217,8 +217,6 @@ jobs:
       - name: Build native Windows compiler
         id: build
         uses: ./.github/actions/sailfin-build-windows
-        with:
-          seed_source: release
 
       - name: Stage compiler artifact
         shell: pwsh
