@@ -168,8 +168,8 @@ jobs:
       - name: Install jq + LLVM tools (macOS)
         shell: bash
         run: |
-          brew install jq llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          brew install jq llvm@18
+          echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
 
       - name: Build native compiler
         uses: ./.github/actions/sailfin-build
@@ -425,8 +425,8 @@ jobs:
       - name: Install jq + LLVM tools (macOS)
         shell: bash
         run: |
-          brew install jq llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          brew install jq llvm@18
+          echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
 
       - name: Download shared compiler build
         uses: actions/download-artifact@v8

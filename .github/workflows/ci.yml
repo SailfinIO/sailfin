@@ -499,7 +499,7 @@ jobs:
         uses: ./.github/actions/apt-install
         timeout-minutes: 20
         with:
-          packages: clang-18 llvm-18 jq
+          packages: clang-18 llvm-18 lld jq
 
       - name: Set CLANG env (Linux)
         shell: bash
@@ -679,8 +679,8 @@ jobs:
       - name: Install jq + LLVM tools (macOS)
         shell: bash
         run: |
-          brew install jq llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          brew install jq llvm@18
+          echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
 
       - name: Build native compiler
         uses: ./.github/actions/sailfin-build
@@ -1925,8 +1925,8 @@ jobs:
       - name: Install jq + LLVM tools (macOS)
         shell: bash
         run: |
-          brew install jq llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          brew install jq llvm@18
+          echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
 
       # Shared compiler build (#1234): download the per-OS tree built by
       # `build-compiler-macos` instead of running `make rebuild` here.
@@ -2538,7 +2538,7 @@ jobs:
         uses: ./.github/actions/apt-install
         timeout-minutes: 20
         with:
-          packages: clang-18 llvm-18 jq
+          packages: clang-18 llvm-18 lld jq
 
       - name: Set CLANG env (Linux)
         shell: bash

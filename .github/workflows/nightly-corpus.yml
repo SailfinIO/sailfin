@@ -78,7 +78,7 @@ jobs:
         uses: ./.github/actions/apt-install
         timeout-minutes: 20
         with:
-          packages: clang-18 llvm-18 jq
+          packages: clang-18 llvm-18 lld jq
 
       - name: Fetch released seed compiler (the oracle)
         id: seed_fetch

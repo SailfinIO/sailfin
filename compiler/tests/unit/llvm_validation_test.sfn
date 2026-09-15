@@ -13,6 +13,7 @@ import { LlvmTool } from "../../src/build/llvm_toolchain_resolver";
 import {
     llvm_validation_argv,
     llvm_validation_candidate_roles,
+    llvm_validation_family_triple,
     llvm_validation_request,
     llvm_validation_result,
     llvm_validator_from_tool,
@@ -32,6 +33,15 @@ fn _validator() -> LlvmTool {
 
 test "llvm validation: candidate census contains only the selected family role" {
     assert expect_eq_str_array(llvm_validation_candidate_roles(), ["llvm-as"]).ok;
+}
+
+test "llvm validation: governed targets select their own coherent family" {
+    assert expect_eq_str(llvm_validation_family_triple("aarch64-unknown-linux-gnu", "Linux", "x86_64-unknown-linux-gnu"), "aarch64-unknown-linux-gnu").ok;
+}
+
+test "llvm validation: legacy cross targets select the host provider family" {
+    assert expect_eq_str(llvm_validation_family_triple("x86_64-w64-mingw32", "Linux", "x86_64-unknown-linux-gnu"), "x86_64-unknown-linux-gnu").ok;
+    assert expect_eq_str(llvm_validation_family_triple("x86_64-apple-darwin", "Darwin", "x86_64-apple-darwin"), "arm64-apple-darwin").ok;
 }
 
 test "llvm validation: argv is native llvm-as data with no shell or null device" {

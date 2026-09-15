@@ -6,8 +6,13 @@
 import { int_to_string } from "sfn/strings";
 
 import { _mktemp_sibling_cmd, _rename_preserving_source_on_failure } from "./build/fs";
-import { LlvmFamily, LlvmTool, resolve_llvm_toolchain } from "./build/llvm_toolchain_resolver";
-import { build_target_triple } from "./build/target";
+import {
+    LlvmFamily,
+    LlvmTool,
+    llvm_triple_is_governed,
+    resolve_llvm_toolchain
+} from "./build/llvm_toolchain_resolver";
+import { build_host_os, build_target_triple, host_target_triple } from "./build/target";
 import { index_of, substring } from "./string_utils";
 
 struct LlvmValidator {
@@ -93,10 +98,26 @@ fn _validator_from_family(family: LlvmFamily) -> LlvmValidator {
     return llvm_validator_unavailable(family.target_triple, "resolved LLVM family does not contain its llvm-as validator");
 }
 
+// Legacy cross targets remain supported outside SFEP-0066's native-provider
+// claim. `llvm-as` itself is target-neutral, so those builds select the
+// coherent family for the host's governed provider context while retaining
+// the requested target in validation diagnostics. Governed cross targets keep
+// their own family/capability selection.
+fn llvm_validation_family_triple(target_triple: string, host_os: string, host_triple: string) -> string {
+    if llvm_triple_is_governed(target_triple) { return target_triple; }
+    if host_os == "Darwin" { return "arm64-apple-darwin"; }
+    if host_os == "Windows" { return "x86_64-pc-windows-msvc"; }
+    return host_triple;
+}
+
 // Resolve the complete coherent family once, then retain only the selected
 // validator identity required by every validation request in this command.
 fn resolve_llvm_validator() -> LlvmValidator ![io] {
-    return _validator_from_family(resolve_llvm_toolchain(build_target_triple()));
+    let target_triple = build_target_triple();
+    let family_triple = llvm_validation_family_triple(target_triple, build_host_os(), host_target_triple());
+    let mut validator = _validator_from_family(resolve_llvm_toolchain(family_triple));
+    validator.target_triple = target_triple;
+    return validator;
 }
 
 fn llvm_validation_request(validator: LlvmValidator, ir_path: string, retained_ir_path: string, source_path: string) -> LlvmValidationRequest {
@@ -253,6 +274,7 @@ export {
     LlvmValidator,
     llvm_validation_argv,
     llvm_validation_candidate_roles,
+    llvm_validation_family_triple,
     llvm_validation_request,
     llvm_validation_result,
     llvm_validator_disabled,
