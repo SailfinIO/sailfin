@@ -53,6 +53,14 @@ import { active_build_target } from "./target_state";
 fn build_host_os() -> string ![io] {
     let host_override = _get_env_cmd("SAILFIN_HOST_OS");
     if host_override.length > 0 { return host_override; }
+    return native_host_os();
+}
+
+// The actual OS hosting this process, intentionally ignoring the
+// SAILFIN_HOST_OS test seam. Native executable discovery needs this narrower
+// fact: a Linux-hosted Windows-seam test still launches suffixless tools,
+// while a real Windows process launches their `.exe` spellings.
+fn native_host_os() -> string ![io] {
     if fs.exists("/proc/self/status") { return "Linux"; }
     if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
     if _windows_host_evidence() { return "Windows"; }
@@ -529,6 +537,7 @@ fn target_artifact_tag(triple: string) -> string {
 
 export {
     build_host_os,
+    native_host_os,
     host_is_windows,
     build_target_os,
     build_target_triple,

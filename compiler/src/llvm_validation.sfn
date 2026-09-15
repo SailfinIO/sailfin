@@ -10,9 +10,14 @@ import {
     LlvmFamily,
     LlvmTool,
     llvm_triple_is_governed,
-    resolve_llvm_toolchain
+    resolve_llvm_toolchain_for_host
 } from "./build/llvm_toolchain_resolver";
-import { build_host_os, build_target_triple, host_target_triple } from "./build/target";
+import {
+    build_host_os,
+    build_target_triple,
+    host_target_triple,
+    native_host_os
+} from "./build/target";
 import { index_of, substring } from "./string_utils";
 
 struct LlvmValidator {
@@ -115,7 +120,7 @@ fn llvm_validation_family_triple(target_triple: string, host_os: string, host_tr
 fn resolve_llvm_validator() -> LlvmValidator ![io] {
     let target_triple = build_target_triple();
     let family_triple = llvm_validation_family_triple(target_triple, build_host_os(), host_target_triple());
-    let mut validator = _validator_from_family(resolve_llvm_toolchain(family_triple));
+    let mut validator = _validator_from_family(resolve_llvm_toolchain_for_host(family_triple, native_host_os()));
     validator.target_triple = target_triple;
     return validator;
 }
