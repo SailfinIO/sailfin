@@ -190,7 +190,7 @@ const releaseAssetTemplates = [
   },
   {
     source: "site/src/pages/dl.astro",
-    fragment: "sailfin_${releaseVersion}_windows_x86_64.tar.gz",
+    fragment: "sailfin_${releaseVersion}_windows_x86_64-msvc.tar.gz",
   },
   {
     source: "site/src/content/docs/docs/getting-started/install.md",

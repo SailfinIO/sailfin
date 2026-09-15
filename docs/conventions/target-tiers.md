@@ -31,7 +31,23 @@ must change in the same pull request.
 | Linux x86_64 | **Tier 1** | Primary compiler, test, merge-queue, release, and self-host host. The compiler memory cap and complete effect enforcement are load-bearing here. |
 | macOS arm64 (Apple Silicon) | **Tier 2** | Native compiler builds, tests, fixed-point validation, and a release asset are required. Effect enforcement remains partial ([#613](https://github.com/SailfinIO/sailfin/issues/613)); the compiler memory cap is not load-bearing on macOS. |
 | Linux aarch64 | **Tier 2** | Source PRs and merge queues require the `aarch64-linux-result` aggregate: cross-emit, native pass-1/pass-2 fixed point, smoke probe, shard-cover, and all eight test shards. The daily scheduled workflow adds a cache-independent full suite, and v0.9.3 publishes both native and installer ARM64 assets. This is base support only; Linux aarch64 is not a capability-seal target. |
-| Windows x86_64 | **Tier 3** | Natively self-hosts (SFEP-0021 M7-M9/SFN-55): a path-filtered `windows-2025` build + ABI gate (`build-compiler-windows`) blocks merges on PRs matching the Windows filter, and an unconditional nightly self-host fixed point (`windows-native-selfhost.yml`) backstops the filter. Not Tier 2: the gate is path-filtered rather than running on every PR, and `sfn test` has never run on a native Windows host — no suite coverage yet ([successor tracked, SFN-55 design note §10](../proposals/design-notes/sfn-55-windows-ci.md)). A published installer exists. |
+| Windows x86_64 | **Tier 2** | Native MSVC compiler builds, all eight required test shards, and the aggregate `required-ci` gate cover source PRs and merge queues (SFN-1014). The unconditional `windows-native-selfhost.yml` workflow adds the strict fixed point and complete cold suite on every main push and nightly schedule. Releases require the signed MSVC installer/seed asset, and all Windows bootstrap paths consume it without a MinGW fallback (SFEP-0021 M7-M12/SFN-58). |
+
+## Windows x86_64 promotion record
+
+Windows x86_64 earned Tier 2 through the following evidence:
+
+- Native MSVC release assets shipped through a full release cycle and the
+  compiler seed advanced to v0.12.0.
+- [Native nightly run 34859956286](https://github.com/SailfinIO/sailfin/actions/runs/34859956286)
+  passed the strict fixed point and complete cold suite after the release-seed
+  cutover.
+- SFN-1014 made the canonical eight-shard native Windows union a checked
+  dependency of `required-ci`;
+  [run 35009089880](https://github.com/SailfinIO/sailfin/actions/runs/35009089880)
+  passed that required union.
+- SFN-1274 assigned active owners and observable removal conditions to every
+  declared Windows skip before SFN-58 retired the MinGW bootstrap fallback.
 
 ## Linux aarch64 promotion record
 

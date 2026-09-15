@@ -25,12 +25,12 @@ parses and nothing yet reads). This retires `make ci-cross-windows`
 (`Makefile:1119-1308`, ~190 lines) and, with it, the entire `make rebuild`
 post-build staging block (`Makefile:1001-1097`) that exists only to feed it.
 
-The strategic point is a **reframe**: SFN-58 is written as "retire the mingw
-cross path", which is why it sits behind SFN-57 (the native MSVC seed) and the
-whole Native Windows project. This proposal **rehosts** the mingw path instead
-of retiring it — mingw becomes one entry in a closed triple table owned by the
-driver. The Makefile can then be deleted on this work alone, and SFN-58 later
-degrades to deleting a `[targets.x86_64-w64-mingw32]` table plus one CI step.
+The strategic point is a **reframe**: SFN-58 retires MinGW from Windows
+bootstrap and release production, while this proposal **rehosts** the supported
+cross target as one entry in a closed triple table owned by the driver. The
+Makefile can then be deleted without deleting the target. SFN-58 ultimately
+removed the obsolete bootstrap/release legs while retaining the
+`[targets.x86_64-w64-mingw32]` table and its ordinary CI build/smoke coverage.
 
 ## 2. Motivation
 
@@ -426,8 +426,8 @@ Both e2e tests must isolate their nested build via `SAILFIN_TEST_SCRATCH` +
 
 **Integration/CI acceptance:** `build/bin/sfn build --target=x86_64-w64-mingw32
 -p compiler` produces a `sailfin.exe` that boots (`--version`, `check`) on
-`windows-latest` — the same gate `windows-native-selfhost.yml`'s cross-seed
-job applies today.
+`windows-latest` — retained by `ci.yml`'s MinGW cross-build and `smoke-windows`
+jobs after SFN-58 removed the bootstrap/release consumers.
 
 ## 9. References
 

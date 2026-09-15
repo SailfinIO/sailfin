@@ -1,5 +1,4 @@
-# Windows Native Self-Host (M7/M8/M9 tier B) — the unconditional nightly
-# fixed point.
+# Windows Native Self-Host — the unconditional nightly deep gate.
 #
 # Executes SFEP-0021 milestones M7 (SFN-53) and M8 (SFN-54) once nightly.
 # `native-build` fetches the PUBLISHED native MSVC
@@ -12,15 +11,10 @@
 # byte-identical to pass-1. The fixed-point compiler then runs the complete
 # workspace test inventory cold (`--no-test-cache`).
 #
-# `cross-seed` no longer feeds it. It exercises the native MinGW target build
-# on Linux and keeps the `seed_source: cross` escape hatch proven; the two jobs
-# run in parallel.
-#
-# This is SFN-55 (SFEP-0021 M9) tier B: the *unconditional* backstop to tier
-# A's path-filtered `build-compiler-windows` job in `ci.yml`. Tier A only
-# runs on PRs whose changed paths match the Windows filter (SFN-55 §4); this
-# workflow runs on a daily cron regardless of what changed, so a false
-# negative in tier A's filter is caught within 24h instead of never.
+# This complements `ci.yml`, where every source PR builds the native MSVC
+# compiler and runs eight owned Windows shards. The daily cron and manual
+# dispatch add the more expensive strict fixed point and complete uncached
+# suite.
 name: Windows native self-host (fixed point)
 
 # SFN-55 review A3: ci.yml sets this at workflow scope (`ci.yml:17`), so tier
@@ -47,94 +41,6 @@ permissions:
   contents: read
 
 jobs:
-  # SFN-994 flipped `native-build` to bootstrap from the published native
-  # seed, so nothing consumes this artifact any more. The job stays for its
-  # other stated purpose — exercising the native MinGW target build nightly
-  # — and as the escape hatch: if a bad native seed ever ships,
-  # `seed_source: cross` remains implemented and this job proves it works.
-  cross-seed:
-    name: Build mingw-cross bootstrap seed [linux]
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Resolve seed version from bootstrap.toml
-        id: seed
-        shell: bash
-        run: |
-          set -euo pipefail
-          pin="$(awk '
-            /^\[[^]]+\]/ { section=$0 }
-            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
-          ' bootstrap.toml)"
-          [ -n "$pin" ] || { echo "[seed] bootstrap.toml [seed].version empty" >&2; exit 1; }
-          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
-
-      - name: Install clang + llvm (Linux)
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 20
-        with:
-          packages: clang-18 llvm-18 lld jq
-
-      - name: Set CLANG env (Linux)
-        shell: bash
-        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
-
-      - name: Build native compiler (self-host main)
-        uses: ./.github/actions/sailfin-build
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          mode: build-only
-          target: linux-x86_64
-          clang: clang-18
-          seed_version: ${{ steps.seed.outputs.seed_version }}
-          package: 'false'
-
-      - name: Install MinGW-w64 cross-compiler (Linux)
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 20
-        with:
-          packages: gcc-mingw-w64-x86-64
-          no-install-recommends: 'true'
-
-      - name: Verify MinGW-w64 cross-compiler (Linux)
-        shell: bash
-        run: x86_64-w64-mingw32-gcc --version | head -1
-
-      # `SAILFIN_BOOTSTRAP: "off"` is load-bearing, not hygiene (SFN-1108) —
-      # see the fuller note on the same step in `ci.yml`. This job normally
-      # checks out `main`, which carries a version-skew window between
-      # `release.yml`'s fast-forward of the version bump and
-      # `cadence-seed-pin.yml`'s separate seed-pin PR; inside it this step
-      # would cross-build with the previous seed and fail to link.
-      # Remove when the pinned seed carries the target-aware gate (SFN-1111).
-      - name: Cross-compile the bootstrap seed (Linux)
-        shell: bash
-        env:
-          SAILFIN_BOOTSTRAP: "off"
-        run: |
-          build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
-          build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
-
-      # Named to match ci.yml's `build-compiler-linux` upload: the
-      # `sailfin-build-windows` composite (used by both tier A in ci.yml and
-      # this job) downloads `ci-installer-windows-x86_64` unconditionally,
-      # so both callers can share one download step regardless of which
-      # workflow produced the artifact.
-      - name: Upload mingw-cross bootstrap seed
-        uses: actions/upload-artifact@v7
-        with:
-          name: ci-installer-windows-x86_64
-          path: dist/installer-windows-x86_64.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-
-  # No `needs: cross-seed` since SFN-994 — this job bootstraps from the
-  # published native seed, so a cross-seed failure must not gate it. The two
-  # now run in parallel; `notify-failure` still watches both.
   native-build:
     name: Native MSVC build from release seed [windows-2025]
     runs-on: windows-2025 # pinned, not `windows-latest` — SFN-55 Risk R3
@@ -156,25 +62,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # SFN-994: bootstrap from the published native MSVC seed named by
+      # Bootstrap from the published native MSVC seed named by
       # `bootstrap.toml [seed].version`, signature- and digest-verified before
-      # it is executed, rather than from a same-run mingw-cross artifact.
-      #
-      # This is the nightly, so it is the right leg to flip first: it proves
-      # the native bootstrap daily without gating anything. `ci.yml`'s tier A
-      # and `release-tag.yml`'s release leg stay on `cross` for now — which is
-      # also what keeps both modes exercised while the cross path still exists.
-      #
-      # It is a real dependency change: this job can now fail because a
-      # PUBLISHED asset is missing, unverifiable, or broken, not only because
-      # this checkout is. That is the signal SFN-58 needs before retiring the
-      # mingw path — a nightly that quietly fell back to `cross` would hide
-      # exactly the failure that should block the retirement.
+      # it is executed (SFN-994/SFN-58). A missing, unverifiable, or broken
+      # published seed fails closed.
       - name: Build native Windows compiler
         id: build_windows
         uses: ./.github/actions/sailfin-build-windows
-        with:
-          seed_source: release
 
       # M8 (SFN-54) + SFN-981: use the compiler-owned self-host driver for
       # the two isolated no-cache rebuilds and strict canonical module-IR
@@ -542,29 +436,24 @@ jobs:
   # SFN-55 review A2: a nightly nobody reads is the same rot this issue exists
   # to close. Instantiates `build-quality.yml`'s existing
   # mechanism (`:621-869`) rather than inventing a second one; adapted to
-  # this workflow's two-job shape (no separate cache-warmer job) instead of
+  # this workflow's single build job instead of
   # build-quality's three-gate one. Triage runbook:
   # `docs/runbooks/windows-native.md`.
   notify-failure:
-    name: Open regression issue on failure
-    needs: [cross-seed, native-build]
+    name: Open regression issue + PR comment on failure
+    needs: native-build
     # `always()`, not `!cancelled()`: a `timeout-minutes` expiry on the
-    # job-level caps (`cross-seed`: 90 minutes; `native-build`: 360 minutes)
+    # job-level cap (`native-build`: 360 minutes)
     # surfaces as a `cancelled` job conclusion — a step-level timeout (the
     # fixed-point step's own 30 min) instead marks the step and the job
     # `failure`, already caught by the `== 'failure'` disjuncts below without
-    # needing `always()`. A job-level cancellation is an important failure
-    # signal, and `!cancelled()` would suppress it (copied verbatim from
-    # `build-quality.yml:632-638`). `cross-seed` gets the same `cancelled`
-    # disjunct as `native-build`: it carries its own 90-minute timeout and
-    # does real work (a full Linux self-host + native MinGW target build), and
-    # without it a `cross-seed` cancellation leaves `native-build` `skipped`
-    # — no disjunct holds, and nothing is filed (SFN-55 review, round 2).
+    # needing `always()`. After A1, a job-level cancellation is the single
+    # most likely failure signal this workflow can produce, and
+    # `!cancelled()` would suppress it (copied verbatim from
+    # `build-quality.yml:632-638`).
     if: >-
       always() &&
-      (needs.cross-seed.result == 'failure' ||
-       needs.cross-seed.result == 'cancelled' ||
-       needs.native-build.result == 'failure' ||
+      (needs.native-build.result == 'failure' ||
        needs.native-build.result == 'cancelled')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -582,24 +471,10 @@ jobs:
       actions: read
       issues: write
     env:
-      # `gate` becomes the regression issue's title, and open issues dedup on
-      # that title (see `Identify failed gate`), so a wrong value does not just
-      # mislead — it appends a Linux native MinGW-build flake onto an open
-      # Windows-compiler regression issue.
-      #
-      # `cross-seed` is checked FIRST, and only when `native-build` did not
-      # itself fail. Since SFN-994 dropped `needs: cross-seed` the two run in
-      # parallel, so "cross-seed broke while the Windows build was green" is
-      # now reachable; previously `native-build` would have been `skipped` and
-      # the fallback produced the same misleading title.
       GATE_NAME: >-
-        ${{ (needs.cross-seed.result == 'failure' || needs.cross-seed.result == 'cancelled')
-            && needs.native-build.result != 'failure'
-            && needs.native-build.result != 'cancelled'
-            && 'windows-cross-seed'
-            || (needs.native-build.outputs.gate_name != ''
-                && needs.native-build.outputs.gate_name
-                || 'windows-native-build') }}
+        ${{ needs.native-build.outputs.gate_name != ''
+            && needs.native-build.outputs.gate_name
+            || 'windows-native-build' }}
       FAIL_SHA: ${{ github.sha }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       EVENT_NAME: ${{ github.event_name }}
@@ -621,10 +496,8 @@ jobs:
         run: |
           set -euo pipefail
           report=true
-          if [ "${{ needs.cross-seed.result }}" != "failure" ] &&
-             [ "${{ needs.native-build.result }}" != "failure" ] &&
-             { [ "${{ needs.cross-seed.result }}" = "cancelled" ] ||
-               [ "${{ needs.native-build.result }}" = "cancelled" ]; }; then
+          if [ "${{ needs.native-build.result }}" != "failure" ] &&
+             [ "${{ needs.native-build.result }}" = "cancelled" ]; then
             # Scheduled runs always target `main`, but `workflow_dispatch`
             # can run on any ref — strip the `refs/heads/`
             # prefix so a manual dispatch from a feature branch compares
@@ -663,7 +536,6 @@ jobs:
             echo "**Commit:** \`${FAIL_SHA}\`"
             echo "**Event:** \`${EVENT_NAME}\` on \`${REF}\`"
             echo "**Gate:** \`${gate}\`"
-            echo "**cross-seed result:** \`${{ needs.cross-seed.result }}\`"
             echo "**native-build result:** \`${{ needs.native-build.result }}\`"
           } > regression-body.md
 

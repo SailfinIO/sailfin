@@ -393,13 +393,18 @@ The design for the content-addressed key derivation lives in
   verified native compiler artifact but runs one unsharded full suite with
   `--no-test-cache`. It restores no test-bin cache, pins no `SAILFIN_TEST_JOBS`, and a
   failure fails the scheduled workflow.
-- **Windows** — boot/frontend smoke only via `smoke-windows`; no suite run. This
-  is the whole of the Windows contract: Tier 3, best effort
-  (`docs/conventions/target-tiers.md`).
+- **Windows** — `build-compiler-windows` builds the native MSVC compiler from
+  the signed released MSVC seed, then `build-windows` runs the same eight named
+  test shards as Linux and macOS on `windows-2025`. Both jobs block every
+  source PR. `smoke-windows` separately executes the supported MinGW cross
+  target on Windows; that target is not a bootstrap or release vehicle. The
+  scheduled native workflow adds a strict self-host fixed point and an
+  unsharded cold suite (`docs/conventions/target-tiers.md`).
 - **`required-ci`** — the merge gate. Needs `ci-scope`,
   `linear-branch-claim`, `check-public-claims`, `check-fast`,
   `build-compiler-linux`, `build-compiler-macos`, `shard-cover`, `build-linux`,
-  `build-macos`, `smoke-windows`, and `aarch64-linux-result` — eleven jobs, not
+  `build-macos`, `smoke-windows`, `windows-host-guard`,
+  `build-compiler-windows`, `build-windows`, and `aarch64-linux-result` — not
   just the test legs. The ARM aggregate is the Tier-2 promotion gate (SFN-476).
   `linear-branch-claim` is the gate that
   fails an `sfn-<N>` branch whose PR body does not close `SFN-<N>`; see

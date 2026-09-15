@@ -16,16 +16,9 @@ if [ ! -d "${payload_dir}" ]; then
     exit 1
 fi
 
-# Both Windows ABIs are required (SFN-1024). The native MSVC payload was
-# previously presence-optional, on the reasoning that a missing optional asset
-# is a lost signal rather than a broken release. That reasoning expired once
-# the asset became seed-consumed: `seed_source: 'release'`
-# (.github/actions/sailfin-build-windows/verify-release-seed.ps1) bootstraps
-# Windows CI from `sailfin_<version>_windows_x86_64-msvc.tar.gz` and fails
-# closed with no mingw fallback, and SFN-1037 stalls the cadence seed pin when
-# the asset is absent. A release without it now degrades Windows CI silently.
-# The legacy mingw payload stays required until its own leg retires (SFN-58);
-# installers still fall back to it for pre-v0.10.3 tags and for arm64.
+# The native MSVC payload is the sole Windows release/bootstrap artifact
+# (SFN-58). Windows CI fails closed when it is absent or unverifiable, and
+# SFN-1037 stalls cadence seed advancement before such a release can be pinned.
 required=(
     "sailfin-native-linux-x86_64-${version}.tar.gz"
     "sailfin_${version}_linux_x86_64.tar.gz"
@@ -33,7 +26,6 @@ required=(
     "sailfin_${version}_linux_arm64.tar.gz"
     "sailfin-native-macos-arm64-${version}.tar.gz"
     "sailfin_${version}_macos_arm64.tar.gz"
-    "sailfin_${version}_windows_x86_64.tar.gz"
     "sailfin_${version}_windows_x86_64-msvc.tar.gz"
 )
 
