@@ -46,7 +46,12 @@ import {
     toolchain_update_policy_read,
     toolchain_user_config_path
 } from "../../toolchain/update_policy";
-import { user_config_dir, user_config_dir_is_default, user_config_path } from "../../user_config";
+import {
+    user_config_dir,
+    user_config_dir_is_default,
+    user_config_origin,
+    user_config_path
+} from "../../user_config";
 import { CliContext } from "../context";
 import {
     _is_valid_registry_url_cmd,
@@ -88,7 +93,6 @@ struct ConfigKey {
     known: boolean
 }
 
-let _CONFIG_FILE_ORIGIN: string = "~/.sfn/config.toml";
 let _CONFIG_DEFAULT_ORIGIN: string = "default";
 
 // Shown by `get`/`list` for a build or target key with no configured value:
@@ -470,7 +474,7 @@ fn _config_resolve_cmd(k: ConfigKey) -> ConfigResolved ![io] {
         if file_url.length > 0 && _is_valid_registry_url_cmd(file_url) {
             return ConfigResolved {
                 value: file_url,
-                source: _CONFIG_FILE_ORIGIN
+                source: user_config_origin()
             };
         }
         return ConfigResolved {
@@ -483,7 +487,7 @@ fn _config_resolve_cmd(k: ConfigKey) -> ConfigResolved ![io] {
         if policy.length > 0 {
             return ConfigResolved {
                 value: policy,
-                source: _CONFIG_FILE_ORIGIN
+                source: user_config_origin()
             };
         }
         return ConfigResolved {
@@ -504,7 +508,7 @@ fn _config_resolve_cmd(k: ConfigKey) -> ConfigResolved ![io] {
     if from_file.length > 0 && _config_file_value_is_usable_cmd(k, from_file) {
         return ConfigResolved {
             value: from_file,
-            source: _CONFIG_FILE_ORIGIN
+            source: user_config_origin()
         };
     }
     return ConfigResolved {

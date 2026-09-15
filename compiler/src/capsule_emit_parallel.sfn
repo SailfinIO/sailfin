@@ -89,11 +89,11 @@ fn _cr_resolve_jobs() -> int ![io] {
         // sends them to lower the value again for no reason.
         let ceilinged = _cr_jobs_ceiling(configured);
         if ceilinged < configured {
-            print.err(_cr_jobs_ceiling_warning(configured, ceilinged));
+            print.err(_cr_jobs_ceiling_warning(user_config_origin(), configured, ceilinged));
         }
         let effective = _cr_ram_budget_jobs(memsize, ceilinged);
         if effective < ceilinged {
-            print.err(_cr_jobs_memory_warning(ceilinged, effective));
+            print.err(_cr_jobs_memory_warning(user_config_origin(), ceilinged, effective));
         }
         return effective;
     }
@@ -121,18 +121,16 @@ fn _cr_resolve_jobs() -> int ![io] {
 // they persisted is not the number in force. Emitting either requires a host
 // that actually binds, which a test cannot arrange without depending on the
 // runner's real memory (SFN-1260). Both compose their provenance from
-// `user_config_origin()` so the path cannot drift from the module that reads
-// it (SFN-1258 may change it).
-fn _cr_jobs_ceiling_warning(configured: int, ceilinged: int) -> string {
-    return "sfn: warning: " + user_config_origin() + " [build] jobs = "
-        + int_to_string(configured)
+// a caller-resolved `user_config_origin()` so the formatting stays pure while
+// the path cannot drift from the module that reads it (SFN-1266).
+fn _cr_jobs_ceiling_warning(origin: string, configured: int, ceilinged: int) -> string {
+    return "sfn: warning: " + origin + " [build] jobs = " + int_to_string(configured)
         + " exceeds the 8-worker emit ceiling; using "
         + int_to_string(ceilinged);
 }
 
-fn _cr_jobs_memory_warning(requested: int, effective: int) -> string {
-    return "sfn: warning: " + user_config_origin() + " [build] jobs = "
-        + int_to_string(requested)
+fn _cr_jobs_memory_warning(origin: string, requested: int, effective: int) -> string {
+    return "sfn: warning: " + origin + " [build] jobs = " + int_to_string(requested)
         + " exceeds this host's memory budget; using "
         + int_to_string(effective);
 }
