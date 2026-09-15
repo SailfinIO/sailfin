@@ -41,3 +41,10 @@ test "Windows CI: PR and main seeder share the cache and shard action" ![io] {
     assert contains(seeder, "compiler_artifact: seed-build-windows-x86_64");
     assert contains(seeder, "uses: ./.github/actions/sailfin-test-windows");
 }
+
+test "Windows CI: full native self-host runs nightly, not after each merge" ![io] {
+    let workflow = fs.readFile(".github/workflows/windows-native-selfhost.yml");
+    assert contains(workflow, "  schedule:\n    - cron: \"0 8 * * *\"");
+    assert contains(workflow, "  workflow_dispatch:");
+    assert ! contains(workflow, "\n  push:");
+}

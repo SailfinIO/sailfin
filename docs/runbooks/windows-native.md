@@ -2,8 +2,8 @@
 
 `.github/workflows/windows-native-selfhost.yml` is SFN-55 (SFEP-0021 M9)
 **tier B**: the unconditional backstop to `ci.yml`'s path-filtered
-`build-compiler-windows` (tier A). It runs on every `push` to `main`, once
-nightly at 08:00 UTC, and on manual `workflow_dispatch`, with no path
+`build-compiler-windows` (tier A). It runs nightly at 08:00 UTC and on manual
+`workflow_dispatch`, with no path
 filter — that asymmetry is deliberate (SFN-55 §4.3): tier A only fires on
 PRs whose changed paths match the Windows glob, so tier B is what catches a
 false negative in that filter, at up to 24h latency instead of never.
@@ -62,9 +62,6 @@ have:
   values above: seed staging (including a seed-fetch/verification failure —
   see §1b), the SFN-53 diagnostic ladder, the Stage 2 build, or an R1/R3 ABI
   gate.
-
-If the failing event is `push: main`, the merging PR also gets a comment
-linking the regression issue and the failing run.
 
 This page is the triage runbook for those regressions.
 
@@ -206,14 +203,11 @@ under test ever ran.
 Either `cross-seed` or `native-build` can end up `cancelled`, for two
 different reasons, and only one of them is a regression:
 
-- **Expected concurrency coalescing.** `push: main` and `workflow_dispatch`
-  share one concurrency group per event type with `cancel-in-progress:
-  true` (SFN-55 review A1) — landing a merge every ~20 minutes against a
-  ~45-60 minute job means an older in-flight `push` run is routinely
-  cancelled by a newer one, taking both jobs down together. `notify-failure`'s
-  classify step checks whether a newer run of the same event type (and, for
-  `workflow_dispatch`, the same ref) has since started; if so, it skips
-  notification.
+- **Expected concurrency coalescing.** Manual `workflow_dispatch` runs share
+  one concurrency group per ref with `cancel-in-progress: true` (SFN-55
+  review A1). A newer dispatch can therefore cancel an older in-flight run.
+  `notify-failure`'s classify step checks whether a newer run of the same ref
+  has since started; if so, it skips notification.
 - **A genuine timeout.** `cross-seed` and `native-build` each carry a
   90-minute job timeout; within `native-build`, the `Self-host pass 1 + pass
   2 (native MSVC)` step carries its own 30-minute step timeout, and the
@@ -228,9 +222,9 @@ different reasons, and only one of them is a regression:
   build+boot+ABI, ~14m27s for both fixed-point passes; a run running
   meaningfully longer than that on a warm-cache run is itself the finding).
 
-`schedule` runs never cancel each other or a `push` run — the concurrency
-group is keyed by `github.event_name`, not just `github.ref`
-(SFN-55 review A1).
+`schedule` runs never cancel each other or a manual run — the concurrency
+group is keyed by `github.event_name`, not just `github.ref` (SFN-55 review
+A1).
 
 ---
 

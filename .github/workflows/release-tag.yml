@@ -493,9 +493,9 @@ jobs:
   # pinned Linux seed that ships through this exact path, runs a self-host
   # fixed point in the release run. Determinism for every platform is
   # `nightly-selfhost.yml`'s (Linux/macOS) and `windows-native-selfhost.yml`'s
-  # (Windows) job, both running the fixed point unconditionally on every
-  # push to `main` and on a daily cron — the released commit is already
-  # fixed-point-verified by that mechanism before this leg ever builds it.
+  # (Windows) job, both running the fixed point on a daily cron. The release
+  # train requires a green nightly covering the release input, so the commit
+  # is fixed-point-verified before this leg ever builds it.
   #
   # Duplicating cross-seed rather than adding `needs: build` is deliberate
   # — the matrix's linux-arm64 leg alone runs up to ~240 minutes (qemu
@@ -687,10 +687,10 @@ jobs:
       # `bootstrap.toml`-pinned Linux seed that ships through this exact
       # path. Determinism for all platforms — this one included — is
       # `nightly-selfhost.yml`'s and `windows-native-selfhost.yml`'s job:
-      # both run the fixed point unconditionally on every push to `main`
-      # and on a daily cron, so the released commit is already
-      # fixed-point-verified by the same mechanism the other platforms
-      # rely on before this leg ever builds it again here. Re-running it
+      # both run the fixed point on a daily cron. The release train requires
+      # a green nightly covering the release input, so the commit is
+      # fixed-point-verified by the same mechanism the other platforms rely
+      # on before this leg ever builds it again here. Re-running it
       # inside the release critical path would apply a stricter bar to
       # Windows than to the platform we self-host on every day — do not
       # re-add it on the assumption its absence is an oversight.
