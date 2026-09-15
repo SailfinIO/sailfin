@@ -447,6 +447,19 @@ struct ParallelProcessTask {
     argv: string[];
 }
 
+// One ordered external-tool pipeline per artifact. Each stage fan-outs through
+// the same bounded worker window, then the next stage starts only after every
+// artifact completed the preceding stage. This keeps at most `jobs` provider
+// processes live while preserving task/result order (SFN-952).
+struct ParallelProcessPipelineTask {
+    stages: string[][];
+}
+
+struct ParallelProcessPipelineRun {
+    exit_codes: int[];
+    failed_stages: int[];
+}
+
 // Observable result for bounded-pool regression coverage. `peak_in_flight`
 // counts spawned handles not yet reaped; it must never exceed the requested
 // job limit even when the queue is longer than the worker window.
@@ -569,7 +582,7 @@ fn _cr_reap_child(handle: int) -> int ![io] {
 // Run argv-only subprocesses through the same bounded, in-order-reap window
 // used by the parallel emit fan-out. Results preserve task order. There are
 // no retries at this layer: emit owns its retry rounds, while deterministic
-// compiler phases such as `clang -c` must surface their first failure.
+// compiler phases such as LLVM object emission must surface their first failure.
 fn _cr_run_bounded_processes_with_env(tasks: ParallelProcessTask[], jobs: int, child_env: string[]) -> ParallelProcessRun ![io] {
     let mut results: int[] = [];
     if tasks.length == 0 {
@@ -621,6 +634,63 @@ fn _cr_run_bounded_processes(tasks: ParallelProcessTask[], jobs: int) -> int[] !
 // outstanding child handles.
 fn _cr_run_bounded_processes_with_stats(tasks: ParallelProcessTask[], jobs: int) -> ParallelProcessRun ![io] {
     return _cr_run_bounded_processes_with_env(tasks, jobs, process.environ());
+}
+
+// Run ordered per-artifact pipelines without a shell. A failed artifact is
+// excluded from later rounds; its first failing stage and exit code remain at
+// the original task index. Stages are deliberately synchronized across the
+// batch so independent objects retain bounded parallelism at llvm-as, opt,
+// and llc rather than each task serializing all three tools in one worker.
+fn _cr_run_bounded_process_pipelines(tasks: ParallelProcessPipelineTask[], jobs: int) -> ParallelProcessPipelineRun ![io] {
+    let mut exit_codes: int[] = [];
+    let mut failed_stages: int[] = [];
+    let mut active: boolean[] = [];
+    let mut max_stages: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        exit_codes.push(0);
+        failed_stages.push(-1);
+        active.push(true);
+        if tasks[i].stages.length > max_stages {
+            max_stages = tasks[i].stages.length;
+        }
+        i += 1;
+    }
+    let mut stage: int = 0;
+    loop {
+        if stage >= max_stages { break; }
+        let mut round: ParallelProcessTask[] = [];
+        let mut indices: int[] = [];
+        i = 0;
+        loop {
+            if i >= tasks.length { break; }
+            if active[i] && stage < tasks[i].stages.length {
+                round.push(ParallelProcessTask {
+                    argv: tasks[i].stages[stage]
+                });
+                indices.push(i);
+            }
+            i += 1;
+        }
+        let results = _cr_run_bounded_processes(round, jobs);
+        let mut ri: int = 0;
+        loop {
+            if ri >= results.length { break; }
+            let task_index = indices[ri];
+            if results[ri] != 0 {
+                active[task_index] = false;
+                exit_codes[task_index] = results[ri];
+                failed_stages[task_index] = stage;
+            }
+            ri += 1;
+        }
+        stage += 1;
+    }
+    return ParallelProcessPipelineRun {
+        exit_codes: exit_codes,
+        failed_stages: failed_stages
+    };
 }
 
 // Run one fan-out round over `tasks`; return the tasks that did NOT
@@ -838,6 +908,8 @@ export {
     ParallelEmitTask,
     ParallelProcessRun,
     ParallelProcessTask,
+    ParallelProcessPipelineRun,
+    ParallelProcessPipelineTask,
     _cr_count_cpuinfo_processors,
     _cr_jobs_ceiling,
     _cr_jobs_ceiling_warning,
@@ -849,6 +921,7 @@ export {
     _cr_ram_budget_jobs,
     _cr_resolve_jobs,
     _cr_run_bounded_processes,
+    _cr_run_bounded_process_pipelines,
     _cr_run_bounded_processes_with_stats,
     _cr_run_parallel_emit
 };

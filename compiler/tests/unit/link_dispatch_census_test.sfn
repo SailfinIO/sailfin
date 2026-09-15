@@ -90,7 +90,8 @@ fn _find_object_compile_sites() -> string[] ![io] {
         let full = files[i];
         i += 1;
         let source = fs.readFile(full);
-        if contains(source, "llvm_artifact_argv(") || contains(source, "foreign_c_argv(")
+        if contains(source, "llvm_object_pipeline_argv(") || contains(source, "prepare_llvm_object_pipeline(")
+            || contains(source, "foreign_c_argv(")
             || contains(source, "run_llvm_artifact(") {
             out.push(_relative_module_path(full));
         }
@@ -157,11 +158,10 @@ test "link census: the resolver-free link entry points stay deleted" ![io] {
 // so without a classification check or a namespaced cache key. Enumerating
 // `compiler/src` rather than trusting a list is what makes an unknown
 // future call site fail loudly instead of silently.
-test "object census: the clang -c argv is built in exactly one module" ![io] {
-    // `_clang_object_argv` is the single legacy `clang -c` shape both
-    // providers delegate to. A second module building its own object argv
-    // is an unclassified source-to-object path by construction.
-    let discovered = _sorted(_find_modules_containing("_clang_object_argv("));
+test "object census: the explicit clang oracle argv is built in exactly one module" ![io] {
+    // The migration oracle has one driver-parameterized argv builder. A
+    // hardcoded or second clang object route would bypass provider selection.
+    let discovered = _sorted(_find_modules_containing("_clang_object_argv_with_driver("));
     let expected = _sorted(["build/artifact_compile"]);
     assert expect_eq_str_array(discovered, expected).ok;
 }

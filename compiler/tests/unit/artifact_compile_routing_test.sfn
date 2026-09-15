@@ -6,8 +6,8 @@
 // parameter and the same cache-key formula — with two request kinds. These
 // tests pin the four properties that split is supposed to buy:
 //
-//   1. LLVM keeps the legacy clang argv; foreign C uses its configured
-//      compiler without an LLVM-only warning flag.
+//   1. LLVM uses the structured provider pipeline; foreign C uses its
+//      configured compiler without LLVM-only flags.
 //   2. An LLVM request carries no C include roots and no C language mode.
 //   3. A misrouted source (a `c-sources` entry handed to the LLVM builder,
 //      or a `.ll` handed to the foreign-C builder) fails closed with an
@@ -24,17 +24,34 @@ import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 import {
     ForeignCRequest,
     LlvmArtifactRequest,
+    LlvmObjectProvider,
     classify_object_source,
     foreign_c_argv_with_target,
     foreign_c_cache_key,
-    llvm_artifact_argv_with_target,
-    llvm_artifact_cache_key
+    llvm_artifact_cache_key,
+    llvm_object_pipeline_argv
 } from "../../src/build/artifact_compile";
 
 fn _no_flags() -> string[] ![pure] { return []; }
 
 fn _windows_target() -> string[] ![pure] {
     return ["-target", "x86_64-pc-windows-msvc"];
+}
+
+fn _llvm_provider() -> LlvmObjectProvider {
+    return LlvmObjectProvider {
+        ok: true,
+        kind: "llvm-cli",
+        target_triple: "x86_64-pc-windows-msvc",
+        host_triple: "x86_64-unknown-linux-gnu",
+        object_format: "coff",
+        fingerprint: "family",
+        llvm_as_path: "llvm-as",
+        opt_path: "opt",
+        llc_path: "llc",
+        clang_path: "",
+        diagnostic: ""
+    };
 }
 
 // ---- Classification ----
@@ -46,23 +63,6 @@ test "artifact routing: sources classify by artifact kind" ![pure] {
     assert expect_eq_str(classify_object_source("mod.o"), "").ok;
     assert expect_eq_str(classify_object_source("mod.bc"), "").ok;
     assert expect_eq_str(classify_object_source("mod"), "").ok;
-}
-
-// ---- Legacy argv byte-identity ----
-test "artifact routing: llvm argv is byte-identical to the legacy no-include form" ![pure] {
-    let argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
-        ir_path: "in.ll", object_path: "out.o", opt_flag: "-O2"
-    }, _no_flags());
-    let expected: string[] = ["clang", "-O2", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", "in.ll", "-o", "out.o"];
-    assert expect_eq_str_array(argv, expected).ok;
-}
-
-test "artifact routing: llvm argv splices -target after the opt flag" ![pure] {
-    let argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
-        ir_path: "in.ll", object_path: "out.o", opt_flag: "-O2"
-    }, _windows_target());
-    let expected: string[] = ["clang", "-O2", "-target", "x86_64-pc-windows-msvc", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", "in.ll", "-o", "out.o"];
-    assert expect_eq_str_array(argv, expected).ok;
 }
 
 test "artifact routing: foreign-c argv carries the configured compiler and includes" ![pure] {
@@ -83,25 +83,31 @@ test "artifact routing: foreign-c argv carries every declared include root in or
 
 // ---- An LLVM request cannot carry C include flags or a C language mode ----
 test "artifact routing: no llvm argv carries an include root or a language mode" ![pure] {
-    let argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
+    let pipeline = llvm_object_pipeline_argv(LlvmArtifactRequest {
         ir_path: "in.ll", object_path: "out.o", opt_flag: "-O2"
-    }, _windows_target());
-    let mut i: int = 0;
+    }, _llvm_provider());
+    let mut stage: int = 0;
     loop {
-        if i >= argv.length { break; }
-        assert expect_eq_bool(starts_with(argv[i], "-I"), false).ok;
-        assert expect_eq_bool(starts_with(argv[i], "-std="), false).ok;
-        assert expect_eq_bool(argv[i] == "-x", false).ok;
-        i += 1;
+        if stage >= pipeline.stages.length { break; }
+        let mut i: int = 0;
+        loop {
+            if i >= pipeline.stages[stage].length { break; }
+            assert expect_eq_bool(starts_with(pipeline.stages[stage][i], "-I"), false).ok;
+            assert expect_eq_bool(starts_with(pipeline.stages[stage][i], "-std="), false).ok;
+            assert expect_eq_bool(pipeline.stages[stage][i] == "-x", false).ok;
+            i += 1;
+        }
+        stage += 1;
     }
 }
 
 // ---- Fail-closed on a misrouted source ----
 test "artifact routing: a c-source cannot reach the llvm provider" ![pure] {
-    let argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
+    let pipeline = llvm_object_pipeline_argv(LlvmArtifactRequest {
         ir_path: "runtime/c/shim.c", object_path: "out.o", opt_flag: "-O2"
-    }, _no_flags());
-    assert expect_eq_str_array(argv, []).ok;
+    }, _llvm_provider());
+    assert expect_eq_bool(pipeline.ok, false).ok;
+    assert expect_eq_bool(pipeline.stages.length == 0, true).ok;
 }
 
 test "artifact routing: an llvm artifact cannot reach the foreign-c provider" ![pure] {
@@ -112,10 +118,10 @@ test "artifact routing: an llvm artifact cannot reach the foreign-c provider" ![
 }
 
 test "artifact routing: an unclassifiable source reaches neither provider" ![pure] {
-    let llvm_argv = llvm_artifact_argv_with_target(LlvmArtifactRequest {
+    let llvm_pipeline = llvm_object_pipeline_argv(LlvmArtifactRequest {
         ir_path: "mod.bc", object_path: "out.o", opt_flag: "-O2"
-    }, _no_flags());
-    assert expect_eq_str_array(llvm_argv, []).ok;
+    }, _llvm_provider());
+    assert expect_eq_bool(llvm_pipeline.ok, false).ok;
     let c_argv = foreign_c_argv_with_target(ForeignCRequest {
         compiler_path: "clang", include_roots: [], object_path: "out.o", opt_flag: "-O2", source_path: "mod.bc"
     }, _no_flags());

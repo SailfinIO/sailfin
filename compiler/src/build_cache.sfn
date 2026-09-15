@@ -1286,7 +1286,7 @@ fn runtime_object_cache_key(src_path: string, opt_flag: string) -> string ![io] 
 //
 // `runtime_object_cache_key` keys a runtime object purely on its source
 // content + opt flag + a hand-maintained ABI tag. That is correct for the
-// C / LL object path (`clang -c` output does not depend on the Sailfin
+// C / LL object path (provider output does not depend on the Sailfin
 // compiler's codegen), but it is UNSOUND for runtime `.sfn` sources, which
 // are emitted to `.ll`/`.o` BY the Sailfin compiler: a codegen change in
 // `compiler/src` alters the emitted IR of a runtime module WITHOUT touching

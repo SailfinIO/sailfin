@@ -258,16 +258,29 @@ fn _linux_host_arch() -> string ![io] {
     return _linux_host_arch_from_evidence(maps, fs.exists("/lib/ld-linux-aarch64.so.1"), x86_64_loader);
 }
 
+fn _darwin_host_arch_from_evidence(arm64_capable: string) -> string {
+    if index_of(arm64_capable, "1") >= 0 { return "aarch64"; }
+    return "x86_64";
+}
+
+fn _darwin_host_arch() -> string ![io] {
+    let rc = process.run_capture(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"], process.environ());
+    let evidence = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if rc != 0 { return "x86_64"; }
+    return _darwin_host_arch_from_evidence(evidence);
+}
+
 // Map a `build_host_os()`-shaped OS string to the native host triple in the
 // closed set. This resolver deliberately ignores `SAILFIN_TARGET_ARCH`: target
 // emulation must never change the baseline used to decide whether clang needs
 // an explicit `-target`.
 fn _host_default_triple(os: string) -> string ![io] {
     if os == "Windows" { return "x86_64-pc-windows-msvc"; }
-    // Known limitation: hardcodes the x86_64 Darwin triple, so an Apple
-    // Silicon host mislabels its own tag. Not fixed here (SFN-774, Slice
-    // A1) — Darwin arm64 host detection is out of scope for this slice.
-    if os == "Darwin" { return "x86_64-apple-darwin"; }
+    if os == "Darwin" {
+        if _darwin_host_arch() == "aarch64" { return "arm64-apple-darwin"; }
+        return "x86_64-apple-darwin";
+    }
     let arch = _linux_host_arch();
     if arch == "aarch64" { return "aarch64-unknown-linux-gnu"; }
     return "x86_64-unknown-linux-gnu";
@@ -292,12 +305,6 @@ fn _target_default_triple(os: string) -> string ![io] {
 // equivalent, because a Windows host cross-building the mingw ABI resolves
 // the same OS on both sides (SFN-1108).
 //
-// One limitation inherited from `_host_default_triple` above moves this
-// answer: Darwin is hardcoded to `x86_64-apple-darwin` (SFN-774, Slice A1), so an
-//     Apple Silicon host misreports itself: `--target=arm64-apple-darwin`
-//     there classifies as cross and `--target=x86_64-apple-darwin` as host —
-//     each the inverse of the truth. No in-tree invocation passes `--target`
-//     on Darwin today.
 fn host_target_triple() -> string ![io] {
     return _host_default_triple(build_host_os());
 }
@@ -542,6 +549,7 @@ export {
     build_target_os,
     build_target_triple,
     host_target_triple,
+    _darwin_host_arch_from_evidence,
     _linux_host_arch_from_evidence,
     target_os_is_windows,
     target_exe_name,

@@ -41,6 +41,9 @@ fn _linux_context() -> LLVMProviderContext {
     return LLVMProviderContext {
         target_os: "Linux",
         target_arch: "x86_64",
+        target_triple: "x86_64-unknown-linux-gnu",
+        target_data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+        target_frame_pointer: "none",
         trace_lowering: false,
         trace_call_lowering: false,
         skip_module_globals: false,
@@ -53,6 +56,9 @@ fn _windows_context() -> LLVMProviderContext {
     return LLVMProviderContext {
         target_os: "Windows",
         target_arch: "x86_64",
+        target_triple: "x86_64-pc-windows-msvc",
+        target_data_layout: "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+        target_frame_pointer: "none",
         trace_lowering: false,
         trace_call_lowering: false,
         skip_module_globals: false,
@@ -150,6 +156,9 @@ test "fs is_directory sentinel: the st_mode offset tracks the target arch" ![io]
     let aarch64_context = LLVMProviderContext {
         target_os: "Linux",
         target_arch: "aarch64",
+        target_triple: "aarch64-unknown-linux-gnu",
+        target_data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32",
+        target_frame_pointer: "non-leaf",
         trace_lowering: false,
         trace_call_lowering: false,
         skip_module_globals: false,
@@ -181,6 +190,9 @@ test "fs is_directory sentinel: the st_mode offset tracks the target arch" ![io]
     let darwin_context = LLVMProviderContext {
         target_os: "Darwin",
         target_arch: "aarch64",
+        target_triple: "arm64-apple-macosx15.0.0",
+        target_data_layout: "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32",
+        target_frame_pointer: "non-leaf",
         trace_lowering: false,
         trace_call_lowering: false,
         skip_module_globals: false,

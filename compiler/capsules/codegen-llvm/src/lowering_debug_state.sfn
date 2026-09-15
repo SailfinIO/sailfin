@@ -8,6 +8,9 @@
 struct LLVMProviderContext {
     target_os: string;
     target_arch: string;
+    target_triple: string;
+    target_data_layout: string;
+    target_frame_pointer: string;
     trace_lowering: boolean;
     trace_call_lowering: boolean;
     skip_module_globals: boolean;
@@ -17,6 +20,9 @@ struct LLVMProviderContext {
 
 let mut _target_os: string = "Linux";
 let mut _target_arch: string = "x86_64";
+let mut _target_triple: string = "x86_64-unknown-linux-gnu";
+let mut _target_data_layout: string = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+let mut _target_frame_pointer: string = "none";
 let mut _trace_lowering: boolean = false;
 let mut _trace_call_lowering: boolean = false;
 let mut _skip_module_globals: boolean = false;
@@ -27,6 +33,9 @@ let mut _lowering_trace_buffer: string = "";
 fn install_llvm_provider_context(context: LLVMProviderContext) {
     _target_os = context.target_os;
     _target_arch = context.target_arch;
+    _target_triple = context.target_triple;
+    _target_data_layout = context.target_data_layout;
+    _target_frame_pointer = context.target_frame_pointer;
     _trace_lowering = context.trace_lowering;
     _trace_call_lowering = context.trace_call_lowering;
     _skip_module_globals = context.skip_module_globals;
@@ -38,6 +47,27 @@ fn install_llvm_provider_context(context: LLVMProviderContext) {
 fn build_target_os() -> string { return _target_os; }
 
 fn target_arch_for_lowering() -> string { return _target_arch; }
+
+fn target_triple_for_lowering() -> string { return _target_triple; }
+
+fn target_data_layout_for_lowering() -> string { return _target_data_layout; }
+
+fn target_frame_pointer_for_lowering() -> string {
+    return _target_frame_pointer;
+}
+
+fn target_cpu_for_lowering() -> string {
+    if _target_arch == "aarch64" && _target_os == "Darwin" { return "apple-m1"; }
+    if _target_arch == "aarch64" { return "generic"; }
+    return "x86-64";
+}
+
+fn target_features_for_lowering() -> string {
+    if _target_arch == "aarch64" && _target_os == "Linux" {
+        return "+neon,+v8a";
+    }
+    return "";
+}
 
 fn trace_lowering() -> boolean { return _trace_lowering; }
 
@@ -136,6 +166,11 @@ export {
     install_llvm_provider_context,
     build_target_os,
     target_arch_for_lowering,
+    target_triple_for_lowering,
+    target_data_layout_for_lowering,
+    target_frame_pointer_for_lowering,
+    target_cpu_for_lowering,
+    target_features_for_lowering,
     trace_lowering,
     trace_call_lowering,
     skip_module_globals,

@@ -1,15 +1,12 @@
 // compiler/src/backend.sfn
 //
 // The external-tool invocation seam (SFEP-0066 §3.2): a `Backend`
-// interface that hides the driver's `process.run(["clang", …])` codegen
-// and link call sites behind a single seam. Today's textual-LLVM-IR +
-// clang path is the sole implementation (`LlvmTextBackend`); it
-// reproduces every existing clang invocation byte-for-byte (zero
-// behaviour change — `--check-determinism` must still pass with no
-// rebaseline), with two deliberate Darwin link exceptions: the driver is
-// Apple's `/usr/bin/clang` (or the explicit `SAILFIN_CC` override), and the
-// argv self-supplies `-isysroot`/`-L<sdk>/usr/lib` (see the helpers below,
-// #1914 and SFN-1077). The Linux invocation is unchanged.
+// interface that hides the driver's external object/link tool calls behind a
+// single seam. `LlvmTextBackend` assembles textual LLVM IR through the
+// coherent llvm-as/opt/llc family; clang remains only as an explicit object
+// migration oracle and as a final-link fallback/driver where native linking
+// is not yet governed. Darwin link argv uses Apple's `/usr/bin/clang` (or the
+// explicit `SAILFIN_CC` override) and supplies its SDK/deployment inputs.
 //
 // Later codegen/link work plugs in here instead of re-hardcoding LLVM
 // assumptions across the driver: the LLVM C-API binding (#347) lands as
@@ -39,7 +36,7 @@
 // `.o` without importing this module (and emitting the `LlvmTextBackend`
 // vtable). See `build/clang_argv.sfn`'s header for the seed-lowering
 // reason (#1730).
-import { LlvmArtifactRequest, run_llvm_artifact } from "./build/artifact_compile";
+import { LlvmArtifactRequest, darwin_deployment_target, run_llvm_artifact } from "./build/artifact_compile";
 // Sailfin owns the Link role on Linux x86-64 (SFEP-0066 §3.1 role table,
 // `direct_link.sfn`): a direct `ld.lld` invocation instead of clang.
 // Resolves `ok=false` (a controlled fallback to the clang path) on any
@@ -255,9 +252,7 @@ fn _probe_macos_sdk_root() -> string ![io] {
 // explicit caller-provided `MACOSX_DEPLOYMENT_TARGET`.
 fn _probe_macos_deployment_target() -> string ![io] {
     if build_target_os() != "Darwin" { return ""; }
-    let explicit = _get_env_cmd("MACOSX_DEPLOYMENT_TARGET");
-    if explicit.length > 0 { return explicit; }
-    return _shell_read_cmd("v=\"$(SYSTEM_VERSION_COMPAT=0 sw_vers -productVersion 2>/dev/null)\"; IFS=.; set -- $v; if [ -n \"$1\" ] && [ -n \"$2\" ]; then printf '%s.%s' \"$1\" \"$2\"; fi");
+    return darwin_deployment_target();
 }
 
 // Build the clang link argv for the `sfn test` layout:
@@ -425,9 +420,9 @@ fn _target_conditioned_plan(plan: LinkPlan, triple: string) -> LinkPlan {
     };
 }
 
-// The current behaviour: emit textual LLVM IR and drive `clang` for
-// assembly and linking. The methods delegate argv construction to the
-// free functions above (see the self-host note in the file header).
+// The current behaviour: emit textual LLVM IR, assemble through the selected
+// LLVM object provider, and use the platform link provider. The methods
+// delegate argv construction to the free functions above.
 struct LlvmTextBackend {
     fn assemble(self, src: string, out: string, opt_flag: string) -> int ![io] {
         return _assemble_llvm_artifact(src, out, opt_flag);
