@@ -127,6 +127,13 @@ M5; the symbols its `extern` decls referenced
 `SailfinPtrArray` construction helpers) are now reached entirely
 through Sailfin code paths.
 
+Native Windows compiler and release builds use the MSVC ABI and bootstrap from
+the signed MSVC release seed. MinGW is not a release or bootstrap provider; the
+`x86_64-w64-mingw32` triple remains available as an explicit cross-compilation
+target. See the completed
+[Native Windows Self-Host proposal (SFEP-0021)](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/0021-windows-native-selfhost.md)
+for the migration design and acceptance record.
+
 ## ABI Versioning
 
 Every emitted Sailfin LLVM module defines two global symbols with

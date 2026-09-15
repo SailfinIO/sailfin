@@ -60,24 +60,22 @@ No public mutation.
 Still no public mutation. Called with `ref: <staging_ref>`,
 `expect_sha: <staging_sha>`, `promote: true`.
 
-Each matrix leg (`macos-arm64`, `linux-x86_64`, `linux-arm64`; Windows is
-cross-built inside the `linux-x86_64` leg) checks out the staging branch,
+Each matrix leg (`macos-arm64`, `linux-x86_64`, `linux-arm64`) checks out the
+staging branch,
 asserts `HEAD` equals `expect_sha`, then builds, packages, and runs the
 per-leg gates: hello-world smoke, compiler-version-matches-tag, installer
-payload version, installer payload dependency closure (and the Windows
-tarball's closure on the `linux-x86_64` leg). All matrix legs are required
+payload version, and installer payload dependency closure. All matrix legs are
+required
 — `fail-fast: false` plus a required-leg policy means a failed
 `linux-arm64` withholds publication rather than shipping an incomplete
 platform set (SFN-799).
 
-**`native-windows-cross-seed` + `native-windows-build` (SFEP-0021 M11 /
-SFN-57), running parallel to the matrix above, not sequenced after it.**
-Builds a native MSVC compiler on `windows-2025` (mirroring
-`windows-native-selfhost.yml`'s own `cross-seed` + `native-build` jobs: its
-own mingw-cross bootstrap seed, the `sailfin-build-windows` composite, then
-`sfn package --installer --target windows-x86_64-msvc`), producing
-`sailfin_<version>_windows_x86_64-msvc.tar.gz` alongside the mingw-cross
-`sailfin_<version>_windows_x86_64.tar.gz` asset the matrix already produces.
+**`native-windows-build` (SFEP-0021 M11/M12), running parallel to the matrix
+above, not sequenced after it.** Builds a native MSVC compiler on
+`windows-2025` from the signed release seed via the
+`sailfin-build-windows` composite, then runs
+`sfn package --installer --target windows-x86_64-msvc`, producing
+`sailfin_<version>_windows_x86_64-msvc.tar.gz` as the sole Windows payload.
 It does **not** run the self-host fixed point — deliberately, and in the same
 shape as the other three platform legs, none of which run one in the release
 path either (`release-tag.yml:630-645`). Determinism is
@@ -103,11 +101,9 @@ leg's failures go unenforced: as of SFN-1024 its payload is required by
 `scripts/verify-release-payloads.sh` (step 7 below), so a failed or missing
 native leg still blocks publication — via the payload gate, not this `if:`.
 
-6. Download every leg's artifacts, normalize the layout, rename installers
-   to their final `sailfin_<version>_<os>_<arch>.tar.gz` names (the MSVC
-   asset gets its own `-msvc` variant suffix via a `*windows-x86_64-msvc*`
-   classifier arm ordered before the broader `*windows-x86_64*` one — first
-   match wins, and the mingw pattern also matches the msvc filename).
+6. Download every leg's artifacts, normalize the layout, and rename installers
+   to their final `sailfin_<version>_<os>_<arch>.tar.gz` names. The Windows
+   asset keeps its `-msvc` ABI suffix.
 7. Verify expected platform payloads are all present
    (`scripts/verify-release-payloads.sh`).
 8. Verify the dependency closure inside every platform tarball
@@ -269,10 +265,9 @@ mutated `main`.
 - **The native Windows leg's accepted latency cost.** Measured release
   durations (the 0.10.1 cut) put the matrix's own critical path around
   10 minutes (`macos-arm64`, its slowest leg) and the whole run at roughly
-  12 minutes end to end. `native-windows-cross-seed` +
-  `native-windows-build` run in parallel with the matrix rather than after
-  it specifically to avoid stacking their own ~45-75 minute chain (bootstrap
-  seed + staircase + Stage 2 self-host + fixed point + packaging) on top of
+  12 minutes end to end. `native-windows-build` runs in parallel with the
+  matrix rather than after it specifically to avoid stacking its staircase,
+  Stage 2 self-host, and packaging time on top of
   that — but `upload` still `needs:` the native leg to finish (even though
   it ignores the result), so a slow-but-not-failing run can still stretch
   the pre-`Promote` window well past the ~12-minute baseline. Every added
@@ -290,6 +285,6 @@ mutated `main`.
 - SFN-57 / SFEP-0021 M11 — the native MSVC Windows leg.
 - `.github/workflows/release.yml` — stages 1 and 4.
 - `.github/workflows/release-tag.yml` — stages 2 and 3.
-- `.github/workflows/windows-native-selfhost.yml` — the nightly job the
-  native leg's `cross-seed`/`native-build` shape is modelled on.
+- `.github/workflows/windows-native-selfhost.yml` — the nightly native MSVC
+  fixed-point job.
 - `.claude/commands/release.md` — the `/release` dispatch playbook.

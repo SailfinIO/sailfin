@@ -43,7 +43,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0018](./0018-borrow-checking-1.0.md) | Borrow / Ownership Checking for the Native Runtime | Accepted | runtime |
 | [0019](./0019-sfn-http-capsule.md) | `sfn/http` — Typed HTTP Surface | Implemented | tooling |
 | [0020](./0020-compiler-decomposition.md) | Role-Oriented Compiler Capsules | Implemented | tooling |
-| [0021](./0021-windows-native-selfhost.md) | Native Windows Self-Host (MSVC ABI) | Accepted | runtime |
+| [0021](./0021-windows-native-selfhost.md) | Native Windows Self-Host (MSVC ABI) | Implemented | runtime |
 | [0022](./0022-darwin-memory-governor.md) | Darwin (macOS arm64) Memory Governor | Accepted | runtime |
 | [0023](./0023-capsule-decorators.md) | Capsule-Defined Decorators | Accepted | language |
 | [0024](./0024-model-engines-and-training.md) | Model Engines, Adapters, Tensors, Training | Superseded | informational |

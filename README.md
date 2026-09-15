@@ -125,14 +125,13 @@ Current releases provide pre-built archives for Linux x86_64, Linux arm64
 the compiler as both `sailfin` and `sfn`.
 
 A published asset is not by itself a support claim. Linux x86_64 is **Tier 1**;
-Linux arm64 and macOS arm64 are **Tier 2**; **Windows x86_64 is Tier 3 — best
-effort.** The Windows binary is cross-compiled from Linux, and the merge gate
-proves only that it boots (`--version`) and runs `sfn check` on one example; a
-separate advisory job smoke-tests the PowerShell installer. Compiling, linking,
-the test suite, and self-hosting are not exercised on Windows by merge-blocking
-CI — the native MSVC build and self-host path exists only as an exploratory,
-dispatch-only harness. Use WSL for day-to-day Sailfin work there. Native MSVC
-self-hosting is tracked by
+Linux arm64, macOS arm64, and Windows x86_64 are **Tier 2**. Windows releases
+ship a native MSVC compiler bootstrapped from the signed MSVC seed named by
+`bootstrap.toml`; every source PR builds that compiler and runs the eight owned
+Windows test shards, while the nightly workflow proves the strict self-host
+fixed point and complete cold suite. The `x86_64-w64-mingw32` backend remains a
+supported cross target and is built on Linux and smoke-tested on Windows, but it
+is not a bootstrap or release vehicle. Native MSVC self-hosting is specified by
 [SFEP-0021](docs/proposals/0021-windows-native-selfhost.md); the tier
 definitions and full matrix live in
 [`docs/conventions/target-tiers.md`](docs/conventions/target-tiers.md).
