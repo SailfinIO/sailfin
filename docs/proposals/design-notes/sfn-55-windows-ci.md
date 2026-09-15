@@ -129,7 +129,7 @@ Three jobs, two triggers, one filter.
 |---|---|---|---|---|
 | **A′** | `windows-host-guard` | ubuntu-24.04 | every source PR — **not** Windows-filtered | **yes** |
 | **A** | `build-compiler-windows` | windows-2025 | source PR **matching the Windows filter**; always in `merge_group` | **yes, when in scope** |
-| **B** | `windows-native-selfhost` (fixed point) | windows-2025 | push:main + nightly cron — **no filter** | no (nightly-alerting) |
+| **B** | `windows-native-selfhost` (fixed point) | windows-2025 | nightly cron + manual dispatch — **no filter** | no (nightly-alerting) |
 
 ### 3.1 A′ is what makes the filter safe
 
@@ -212,11 +212,9 @@ that is the whole point of the nightly. Retain the fixed-point step
 still holds.
 
 Keeping this file rather than folding Tier B into `build-quality.yml`: that
-workflow is the right *genre* (determinism, push:main + nightly — its header at
-`:19-24` records the same per-PR-wall-time verdict reached here independently)
-but is deliberately Linux-only and `make`-driven, and a move would strand ~200
-lines of earned rationale. Its own header instruction is "fold into M9", which
-changing its triggers satisfies.
+workflow is the right *genre* (scheduled determinism), but is deliberately
+Linux-only and `make`-driven, and a move would strand ~200 lines of earned
+rationale.
 
 ## 4. The path filter
 
@@ -423,11 +421,11 @@ check.
 ## 6. Nightly failure routing
 
 A nightly that fails into a void is the rot mode one level up. **Do not invent a
-mechanism — `build-quality.yml` already has the right one**, and it is the same
-genre of gate (post-merge structural backstop, push:main + cron).
+mechanism — `build-quality.yml` already has the right issue-deduplication and
+notification pattern.**
 
-`notify-failure` (`build-quality.yml:621-860`) does three things Tier B should
-reuse verbatim:
+`notify-failure` (`build-quality.yml:621-860`) provides two pieces Tier B
+should reuse:
 
 1. **Dedupes into one tracking issue** — lists open issues by a marker label and
    matches on exact title (`:786-799`), so a gate that fails ten nights running
@@ -437,11 +435,6 @@ reuse verbatim:
    and a log excerpt. Per CLAUDE.md ## Task tracking, GitHub issues mirror into
    the `SFN` team's `Triage` — so this *is* the Linear-native routing, and no
    direct Linear API call is needed.
-3. **Comments on the merging PR** for `push: main` events (`:844-860`) — the
-   highest-value half. A push:main Tier B failure names the PR that just landed,
-   which for a false-negative-of-the-filter is precisely the PR that should have
-   run Windows and did not.
-
 For Tier B, instantiate it with `gate_name` values `windows-fixed-point` /
 `windows-native-build` and label `windows-native-regression`. Copy the
 `always()`-not-`!cancelled()` reasoning (`:632-638`) — a `timeout-minutes` expiry
@@ -592,7 +585,7 @@ risk, no `sfn fmt` surface, no seed dependency.
 |---|---|
 | `.github/actions/sailfin-build-windows/action.yml` | **new** — `seed_source` (`cross`\|`release`), MSVC env, LLVM probe, ladder, `build -p compiler` + heartbeat, locate/assert the `.exe` |
 | `.github/workflows/ci.yml` | `ci-scope`: third output `windows` + `case` arm (§4.1) + fail-closed validation; new `windows-host-guard`; new `build-compiler-windows` after `smoke-windows` (`:2037`); `required-ci` `needs:`/`env:`/conditional-`check` wiring (`:2160-2270`) |
-| `.github/workflows/windows-native-selfhost.yml` | drop `cross-seed` + the dead branch filter (`:28-30`); retrigger push:main + cron; call the composite; retain the fixed point (`:328-353`); append pass-3 + `sfn selfhost` strict (SFN-668 absorption); add `notify-failure` |
+| `.github/workflows/windows-native-selfhost.yml` | retain the `cross-seed` escape-hatch proof; schedule nightly with manual dispatch; call the composite; retain the fixed point (`:328-353`); append pass-3 + `sfn selfhost` strict (SFN-668 absorption); add `notify-failure` |
 | `docs/runbooks/windows-native.md` | **new** — triage runbook the regression issue body links |
 | `docs/conventions/target-tiers.md:36` | strengthen the Windows Tier 3 evidence row; **no promotion** |
 | `docs/status.md` | record the path-filtered Windows build gate + the nightly fixed point |
@@ -670,13 +663,12 @@ Acceptance criteria:
 4. `Windows-host guard [linux-x86_64]` runs and is `check`ed on **both** of the
    above.
 5. R1 and R3 gates run without `continue-on-error`.
-6. A forced Tier B failure opens exactly one labelled GitHub issue and comments
-   on the merging PR; a second forced failure appends a comment rather than
-   opening a second issue.
+6. A forced Tier B failure opens exactly one labelled GitHub issue; a second
+   forced failure appends a comment rather than opening a second issue.
 7. The Windows chain does not become the run's critical path (compare against
    run 32044504912's 32m34s).
-8. `windows-native-selfhost.yml` has no `cross-seed` job and no `claude/sfn-53-*`
-   push filter, and its fixed point runs on push:main.
+8. `windows-native-selfhost.yml` has no push trigger, and its fixed point runs
+   on the nightly cadence.
 9. `docs/conventions/target-tiers.md` Windows row updated; tier still **3**.
 
 ## 14. Future considerations
