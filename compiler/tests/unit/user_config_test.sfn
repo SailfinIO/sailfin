@@ -20,6 +20,7 @@ import {
     user_config_build_key_is_admitted,
     user_config_key_is_admitted,
     user_config_linker_origin,
+    user_config_path,
     user_config_target_section,
     user_config_target_value_at,
     user_config_target_value_from_text
@@ -78,8 +79,9 @@ test "user_config: quoted and unquoted values strip to the same result" ![pure] 
     assert user_config_target_value_from_text(quoted, triple, "linker") == "mold";
 }
 
-test "user_config: linker_origin names the config path, section, and key" ![pure] {
-    assert user_config_linker_origin("x86_64-unknown-linux-gnu") == "~/.sfn/config.toml target.x86_64-unknown-linux-gnu.linker";
+test "user_config: linker_origin names the resolved config path, section, and key" ![io] {
+    assert user_config_linker_origin("x86_64-unknown-linux-gnu") == user_config_path()
+        + " target.x86_64-unknown-linux-gnu.linker";
 }
 
 test "user_config: malformed lines are reported only for the named section" ![pure] {

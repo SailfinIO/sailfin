@@ -236,7 +236,19 @@ test "config: list shows file provenance" ![io] {
     let r = _run(home, ["config", "list"], []);
     assert r.exit == 0;
     assert find(r.out, "build.jobs = ", 0) >= 0;
-    assert find(r.out, "~/.sfn/config.toml", 0) >= 0;
+    assert find(r.out, home + "/.sfn/config.toml", 0) >= 0;
+}
+
+test "config: list shows relocated file provenance" ![io] {
+    let home = _home("list_relocated_file_provenance");
+    let config_dir = home + "/relocated";
+    let config_env = ["SAILFIN_CONFIG_DIR=" + config_dir];
+    let s = _run(home, ["config", "set", "build.jobs", "8"], config_env);
+    assert s.exit == 0;
+    let r = _run(home, ["config", "list"], config_env);
+    assert r.exit == 0;
+    assert find(r.out, config_dir + "/config.toml", 0) >= 0;
+    assert find(r.out, "~/.sfn/config.toml", 0) < 0;
 }
 
 // ---- Test 13: list provenance flips to env when an env var is set ----

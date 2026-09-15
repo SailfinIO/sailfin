@@ -94,7 +94,7 @@ fn _build(tag: string, home: string, extra_env: string[]) -> int ![io] {
     // it would shadow the config value and make any assertion on where the
     // cache materialised vacuous.
     let mut e = clean_runner_env_without(nested_runner_scratch("user-config-precedence-"
-        + tag), ["HOME", "SAILFIN_LINKER", "SAILFIN_TARGET_TRIPLE", "SAILFIN_BUILD_CACHE_DIR"]);
+        + tag), ["HOME", "SAILFIN_CONFIG_DIR", "SAILFIN_LINKER", "SAILFIN_TARGET_TRIPLE", "SAILFIN_BUILD_CACHE_DIR"]);
     e.push("HOME=" + home);
     e.push("SAILFIN_TRACE_LINK=1");
     let target_env = _target_env();
@@ -126,7 +126,8 @@ test "user_config: config supplies the linker when SAILFIN_LINKER is unset" ![io
     let rc = _build("config-only", home, []);
     assert rc == 0;
     let err = fs.readFile(_dir("config-only") + "/build.err");
-    assert find(err, "[link] linker: system default (~/.sfn/config.toml target."
+    assert find(err, "[link] linker: system default (" + home
+        + "/.sfn/config.toml target."
         + triple
         + ".linker=ld)", 0) >= 0;
     let run_rc = process.run_capture([_bin("config-only")], []);
@@ -145,7 +146,7 @@ test "user_config: SAILFIN_LINKER beats a persisted config default" ![io] {
     assert rc == 0;
     let err = fs.readFile(_dir("env-wins") + "/build.err");
     assert find(err, "[link] linker: system default (SAILFIN_LINKER=ld)", 0) >= 0;
-    assert find(err, "~/.sfn/config.toml", 0) < 0;
+    assert find(err, home + "/.sfn/config.toml", 0) < 0;
     let run_rc = process.run_capture([_bin("env-wins")], []);
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();
@@ -160,7 +161,7 @@ test "user_config: an absent config file changes nothing" ![io] {
     let rc = _build("no-config", home, []);
     assert rc == 0;
     let err = fs.readFile(_dir("no-config") + "/build.err");
-    assert find(err, "~/.sfn/config.toml", 0) < 0;
+    assert find(err, home + "/.sfn/config.toml", 0) < 0;
     let run_rc = process.run_capture([_bin("no-config")], []);
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();
@@ -182,6 +183,26 @@ test "user_config: an unadmitted key warns to stderr without failing the build" 
     assert find(out, "is not a recognised key", 0) < 0;
 }
 
+test "user_config: relocated config provenance names the file actually read" ![io] {
+    let tag = "relocated-origin";
+    let triple = build_target_triple();
+    let home = _home(tag);
+    let config_dir = _dir(tag) + "/relocated";
+    fs.createDirectory(config_dir, true);
+    fs.writeFile(config_dir + "/config.toml", "[target." + triple
+        + "]\nsysroot = \"/nope\"\nlinker = \"ld\"\n");
+    let rc = _build(tag, home, ["SAILFIN_CONFIG_DIR=" + config_dir]);
+    assert rc == 0;
+    let err = fs.readFile(_dir(tag) + "/build.err");
+    assert find(err, config_dir + "/config.toml [target." + triple
+        + "] sysroot is not a recognised key; ignoring", 0) >= 0;
+    assert find(err, "[link] linker: system default (" + config_dir
+        + "/config.toml target."
+        + triple
+        + ".linker=ld)", 0) >= 0;
+    assert find(err, "~/.sfn/config.toml", 0) < 0;
+}
+
 // SFN-1260 / SFEP-0076 section 3.4: `[build]` admits only `cache-dir` and
 // `jobs`. An unrecognised `[build]` key warns the same way an unrecognised
 // `[target.<triple>]` key does, and never fails the build.
@@ -192,7 +213,8 @@ test "user_config: an unadmitted [build] key warns to stderr without failing the
     assert rc == 0;
     let out = fs.readFile(_dir("build-unadmitted-key") + "/build.out");
     let err = fs.readFile(_dir("build-unadmitted-key") + "/build.err");
-    assert find(err, "~/.sfn/config.toml [build] sysroot is not a recognised key; ignoring", 0) >= 0;
+    assert find(err, home
+        + "/.sfn/config.toml [build] sysroot is not a recognised key; ignoring", 0) >= 0;
     assert find(out, "is not a recognised key", 0) < 0;
 }
 
@@ -205,7 +227,8 @@ test "user_config: a relative [build] cache-dir warns to stderr without failing 
     assert rc == 0;
     let out = fs.readFile(_dir("build-relative-cache-dir") + "/build.out");
     let err = fs.readFile(_dir("build-relative-cache-dir") + "/build.err");
-    assert find(err, "~/.sfn/config.toml [build] cache-dir must be an absolute path; ignoring:", 0) >= 0;
+    assert find(err, home
+        + "/.sfn/config.toml [build] cache-dir must be an absolute path; ignoring:", 0) >= 0;
     assert find(out, "must be an absolute path", 0) < 0;
 }
 

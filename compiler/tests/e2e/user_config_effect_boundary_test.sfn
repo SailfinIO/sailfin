@@ -315,7 +315,8 @@ fn _without_config_warnings(text: string) -> string {
     let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
-        if !starts_with(trim(lines[i]), "sfn: warning: ~/.sfn/config.toml") {
+        let line = trim(lines[i]);
+        if !starts_with(line, "sfn: warning:") || find(line, " [build] jobs = ", 0) < 0 {
             kept.push(lines[i]);
         }
         i += 1;

@@ -57,11 +57,6 @@ let _UC_BUILD_JOBS: string = "jobs";
 // any legitimate value and far below the int range.
 let _UC_JOBS_MAX: int = 1000000;
 
-// Provenance label used in caller-side traces and warnings, so a user reading
-// `SAILFIN_TRACE_LINK` output can tell a persisted default from a one-shot
-// environment override.
-let _UC_ORIGIN: string = "~/.sfn/config.toml";
-
 // One warning pass per process, not per resolver call. `backend.link` runs once
 // per linked binary and `sfn test` links one binary per test file, so warning
 // at each call site would repeat an identical line hundreds of times in a
@@ -85,10 +80,11 @@ let mut _uc_build_warned: boolean = false;
 let mut _uc_text_loaded: boolean = false;
 let mut _uc_text: string = "";
 
-// The provenance label, exposed so a warning emitted from another module
-// cannot drift from the path this one actually reads. There must be exactly
-// one place that path is spelled.
-fn user_config_origin() -> string { return _UC_ORIGIN; }
+// Resolve provenance through the same path function as the read itself. This
+// is deliberately effectful rather than latched beside `_uc_text`: callers can
+// ask for provenance before or after a read without acquiring a hidden
+// ordering contract (SFN-1266).
+fn user_config_origin() -> string ![io] { return user_config_path(); }
 
 // The one resolver for the per-user config directory: `SAILFIN_CONFIG_DIR`
 // when set, else `env.home() + "/.sfn"`. `""` means home is unresolvable and
@@ -153,8 +149,8 @@ fn user_config_key_is_admitted(key: string) -> boolean {
 // `SAILFIN_TRACE_LINK` trace distinguishes a persisted default from a one-shot
 // environment override. Shaped to substitute for the literal "SAILFIN_LINKER"
 // in the messages the link paths already emit.
-fn user_config_linker_origin(triple: string) -> string {
-    return _UC_ORIGIN + " target." + triple + "." + _UC_TARGET_LINKER;
+fn user_config_linker_origin(triple: string) -> string ![io] {
+    return user_config_origin() + " target." + triple + "." + _UC_TARGET_LINKER;
 }
 
 // Pure resolver over already-read file text. The whole parse contract lives
@@ -176,12 +172,13 @@ fn _uc_warn_ignored(text: string, triple: string) -> void ![io] {
     let section = user_config_target_section(triple);
     if section.length == 0 { return; }
     _uc_warned = true;
+    let origin = user_config_origin();
 
     let malformed = toml_section_malformed_lines(text, section);
     let mut i: int = 0;
     loop {
         if i >= malformed.length { break; }
-        print.err("sfn: warning: " + _UC_ORIGIN + " [" + section
+        print.err("sfn: warning: " + origin + " [" + section
             + "] line is not `key = value`; ignoring: "
             + malformed[i]);
         i += 1;
@@ -192,8 +189,7 @@ fn _uc_warn_ignored(text: string, triple: string) -> void ![io] {
     loop {
         if j >= keys.length { break; }
         if !user_config_key_is_admitted(keys[j]) {
-            print.err("sfn: warning: " + _UC_ORIGIN + " [" + section + "] "
-                + keys[j]
+            print.err("sfn: warning: " + origin + " [" + section + "] " + keys[j]
                 + " is not a recognised key; ignoring");
         }
         j += 1;
@@ -318,12 +314,13 @@ fn user_config_build_jobs_from_text(text: string) -> int {
 fn _uc_warn_build_ignored(text: string) -> void ![io] {
     if _uc_build_warned { return; }
     _uc_build_warned = true;
+    let origin = user_config_origin();
 
     let malformed = toml_section_malformed_lines(text, _UC_BUILD_SECTION);
     let mut i: int = 0;
     loop {
         if i >= malformed.length { break; }
-        print.err("sfn: warning: " + _UC_ORIGIN + " [" + _UC_BUILD_SECTION
+        print.err("sfn: warning: " + origin + " [" + _UC_BUILD_SECTION
             + "] line is not `key = value`; ignoring: "
             + malformed[i]);
         i += 1;
@@ -334,7 +331,7 @@ fn _uc_warn_build_ignored(text: string) -> void ![io] {
     loop {
         if j >= keys.length { break; }
         if !user_config_build_key_is_admitted(keys[j]) {
-            print.err("sfn: warning: " + _UC_ORIGIN + " [" + _UC_BUILD_SECTION
+            print.err("sfn: warning: " + origin + " [" + _UC_BUILD_SECTION
                 + "] "
                 + keys[j]
                 + " is not a recognised key; ignoring");
@@ -344,8 +341,7 @@ fn _uc_warn_build_ignored(text: string) -> void ![io] {
 
     let raw_dir = user_config_build_value_from_text(text, _UC_BUILD_CACHE_DIR);
     if raw_dir.length > 0 && !is_absolute_path(raw_dir) {
-        print.err("sfn: warning: " + _UC_ORIGIN + " [" + _UC_BUILD_SECTION
-            + "] "
+        print.err("sfn: warning: " + origin + " [" + _UC_BUILD_SECTION + "] "
             + _UC_BUILD_CACHE_DIR
             + " must be an absolute path; ignoring: "
             + raw_dir);
@@ -353,8 +349,7 @@ fn _uc_warn_build_ignored(text: string) -> void ![io] {
 
     let raw_jobs = user_config_build_value_from_text(text, _UC_BUILD_JOBS);
     if raw_jobs.length > 0 && _uc_parse_jobs(raw_jobs) <= 0 {
-        print.err("sfn: warning: " + _UC_ORIGIN + " [" + _UC_BUILD_SECTION
-            + "] "
+        print.err("sfn: warning: " + origin + " [" + _UC_BUILD_SECTION + "] "
             + _UC_BUILD_JOBS
             + " must be a positive whole number (1-"
             + int_to_string(_UC_JOBS_MAX)
