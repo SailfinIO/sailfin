@@ -476,8 +476,9 @@ fn toml_get_build_full_runtime(text: string) -> boolean {
 //
 // `kind = "runtime"` capsules ship declarative C / LL source lists
 // rather than walking `src/**/*.sfn` like a `kind = "library"`
-// capsule. The driver compiles each `c-sources` entry with clang,
-// assembles each `ll-sources` entry with clang, propagates
+// capsule. The driver compiles each `c-sources` entry with the configured C
+// compiler, lowers each `ll-sources` entry through the LLVM object provider,
+// and propagates
 // `include-dirs` to downstream C compiles, and appends `link-libs`
 // to the final link.
 //
@@ -523,7 +524,7 @@ fn toml_get_link_libs(text: string) -> string[] {
 // capsule's C sources. Each entry is a path (relative to the
 // manifest dir) to a `.sfn` module the resolver hands the
 // driver, which then spawns the compiler subprocess to emit
-// `.ll` then `clang -c` to produce a `.o`. This is the
+// `.ll` then the LLVM object provider to produce a `.o`. This is the
 // production-ready replacement for the Makefile-staged
 // `prelude.o` pattern: any `runtime/sfn/*.sfn` module a
 // runtime capsule wants linked into every consumer ships

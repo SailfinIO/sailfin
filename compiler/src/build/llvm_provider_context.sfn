@@ -8,6 +8,11 @@ import { ImportedModuleContext } from "sfn/ir";
 
 import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../build_flags";
 import { test_runner_active, test_runner_trace } from "../test_runner_state";
+import {
+    effective_llvm_target_triple,
+    llvm_profile_frame_pointer,
+    llvm_target_data_layout
+} from "./artifact_compile";
 import { build_target_os, build_target_triple, triple_target_arch } from "./target";
 
 // SFN-923: consults the resolved TARGET triple before falling back to a
@@ -28,9 +33,15 @@ fn _resolve_llvm_target_arch() -> string ![io] {
 }
 
 fn resolve_llvm_provider_context() -> LLVMProviderContext ![io] {
+    let target_triple = effective_llvm_target_triple(build_target_triple());
+    let mut opt_flag = "-O2";
+    if test_runner_active() { opt_flag = "-O0"; }
     return LLVMProviderContext {
         target_os: build_target_os(),
         target_arch: _resolve_llvm_target_arch(),
+        target_triple: target_triple,
+        target_data_layout: llvm_target_data_layout(target_triple),
+        target_frame_pointer: llvm_profile_frame_pointer(target_triple, opt_flag),
         trace_lowering: _env_flag("SAILFIN_TRACE_LOWERING") || _legacy_flag_file("build/sailfin/.trace_lowering"),
         trace_call_lowering: _env_flag("SAILFIN_TRACE_CALL_LOWERING")
             || _legacy_flag_file("build/sailfin/.trace_call_lowering"),

@@ -5,6 +5,14 @@
 // artifact then uses the same argv, result classification, and diagnostics.
 import { int_to_string } from "sfn/strings";
 
+import {
+    effective_llvm_target_triple,
+    llvm_ir_matches_object_profile,
+    llvm_profile_cpu,
+    llvm_profile_features,
+    llvm_profile_frame_pointer,
+    llvm_target_data_layout
+} from "./build/artifact_compile";
 import { _mktemp_sibling_cmd, _rename_preserving_source_on_failure } from "./build/fs";
 import {
     LlvmFamily,
@@ -19,6 +27,7 @@ import {
     native_host_os
 } from "./build/target";
 import { index_of, substring } from "./string_utils";
+import { test_runner_active } from "./test_runner_state";
 
 struct LlvmValidator {
     is_available: boolean;
@@ -26,6 +35,11 @@ struct LlvmValidator {
     version_output: string;
     major: int;
     target_triple: string;
+    target_data_layout: string;
+    target_cpu: string;
+    target_features: string;
+    frame_pointer: string;
+    opt_flag: string;
     unavailable_diagnostic: string;
 }
 
@@ -66,6 +80,11 @@ fn llvm_validator_unavailable(target_triple: string, diagnostic: string) -> Llvm
         version_output: "",
         major: 0,
         target_triple: target_triple,
+        target_data_layout: "",
+        target_cpu: "",
+        target_features: "",
+        frame_pointer: "",
+        opt_flag: "",
         unavailable_diagnostic: diagnostic
     };
 }
@@ -74,15 +93,24 @@ fn llvm_validator_disabled() -> LlvmValidator {
     return llvm_validator_unavailable("", "validation disabled");
 }
 
-fn llvm_validator_from_tool(tool: LlvmTool, target_triple: string) -> LlvmValidator {
+fn llvm_validator_from_tool_with_opt(tool: LlvmTool, target_triple: string, opt_flag: string) -> LlvmValidator {
     return LlvmValidator {
         is_available: tool.failure.length == 0,
         path: tool.path,
         version_output: tool.version_output,
         major: tool.major,
         target_triple: target_triple,
+        target_data_layout: llvm_target_data_layout(target_triple),
+        target_cpu: llvm_profile_cpu(target_triple),
+        target_features: llvm_profile_features(target_triple),
+        frame_pointer: llvm_profile_frame_pointer(target_triple, opt_flag),
+        opt_flag: opt_flag,
         unavailable_diagnostic: ""
     };
+}
+
+fn llvm_validator_from_tool(tool: LlvmTool, target_triple: string) -> LlvmValidator {
+    return llvm_validator_from_tool_with_opt(tool, target_triple, "-O2");
 }
 
 fn _validator_from_family(family: LlvmFamily) -> LlvmValidator {
@@ -121,7 +149,16 @@ fn resolve_llvm_validator() -> LlvmValidator ![io] {
     let target_triple = build_target_triple();
     let family_triple = llvm_validation_family_triple(target_triple, build_host_os(), host_target_triple());
     let mut validator = _validator_from_family(resolve_llvm_toolchain_for_host(family_triple, native_host_os()));
-    validator.target_triple = target_triple;
+    let mut effective_triple = effective_llvm_target_triple(target_triple);
+    if effective_triple.length == 0 { effective_triple = target_triple; }
+    let mut opt_flag = "-O2";
+    if test_runner_active() { opt_flag = "-O0"; }
+    validator.target_triple = effective_triple;
+    validator.target_data_layout = llvm_target_data_layout(effective_triple);
+    validator.target_cpu = llvm_profile_cpu(effective_triple);
+    validator.target_features = llvm_profile_features(effective_triple);
+    validator.frame_pointer = llvm_profile_frame_pointer(effective_triple, opt_flag);
+    validator.opt_flag = opt_flag;
     return validator;
 }
 
@@ -180,6 +217,28 @@ fn _temporary_output_failure(request: LlvmValidationRequest) -> LlvmValidationRe
         retained_ir_path: request.ir_path,
         diagnostic: "error: could not create native temporary output for LLVM IR validation\n"
             + _validation_context(request)
+    };
+}
+
+fn _profile_mismatch_result(request: LlvmValidationRequest) -> LlvmValidationResult {
+    return LlvmValidationResult {
+        is_ok: false,
+        classification: "profile_mismatch",
+        exit_code: 1,
+        argv: [],
+        stdout: "",
+        stderr: "",
+        retained_ir_path: request.ir_path,
+        diagnostic: "error: internal compiler error (ICE): LLVM IR target profile mismatch\n"
+            + _validation_context(request)
+            + "\nnote: expected data layout: "
+            + request.validator.target_data_layout
+            + "\nnote: expected CPU/features/frame-pointer: "
+            + request.validator.target_cpu
+            + "/"
+            + request.validator.target_features
+            + "/"
+            + request.validator.frame_pointer
     };
 }
 
@@ -244,6 +303,10 @@ fn validate_llvm_ir(request: LlvmValidationRequest) -> LlvmValidationResult ![io
     if !request.validator.is_available {
         return _unavailable_result(request);
     }
+    let ir = fs.readFile(request.ir_path);
+    if !llvm_ir_matches_object_profile(ir, request.validator.target_triple, request.validator.opt_flag) {
+        return _profile_mismatch_result(request);
+    }
     let sink = _mktemp_sibling_cmd(request.ir_path + ".validate.bc");
     if sink.length == 0 { return _temporary_output_failure(request); }
     let argv = llvm_validation_argv(request, sink);
@@ -284,6 +347,7 @@ export {
     llvm_validation_result,
     llvm_validator_disabled,
     llvm_validator_from_tool,
+    llvm_validator_from_tool_with_opt,
     llvm_validator_unavailable,
     report_llvm_validation_failure,
     resolve_llvm_validator,

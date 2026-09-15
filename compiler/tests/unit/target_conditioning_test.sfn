@@ -27,6 +27,7 @@ import {
     trace_lowering
 } from "sfn/codegen-llvm/lowering_debug_state";
 import { contains } from "sfn/strings";
+import { parse_program } from "sfn/syntax";
 import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import {
@@ -72,6 +73,7 @@ import {
     set_build_target,
     set_static_link
 } from "../../src/build/target_state";
+import { emit_native_text_with_module_name } from "../../src/codegen_driver";
 import {
     RuntimeCapsuleArtifacts,
     RuntimeTargetArtifacts,
@@ -142,23 +144,32 @@ test "target: runtime cache identity and linker share the effective target input
     // and added runtime provider despite the invocation stamp.
     let multi_file_src = fs.readFile("compiler/src/cli/commands/test/multi_file_run.sfn");
     assert contains(multi_file_src, "let stamp_caps = condition_runtime_capsules_for_target(");
-    assert contains(multi_file_src, "write_runtime_identity_stamp(stamp_caps,");
+    assert contains(multi_file_src, "write_runtime_identity_stamp_with_provider(stamp_caps,");
 }
 
 // An LLVM entrypoint must replace the complete primitive snapshot on every
 // invocation. This guards in-process compiler/test runs from inheriting a
 // previous target, debug toggle, or test-runner state.
 test "target: provider entrypoint overwrites its complete context" ![io] {
+    let native = emit_native_text_with_module_name(parse_program("fn profile_probe() -> int { return 1; }"), "provider_context_probe");
     let first = LLVMProviderContext {
         target_os: "Darwin",
         target_arch: "aarch64",
+        target_triple: "arm64-apple-macosx15.0.0",
+        target_data_layout: "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32",
+        target_frame_pointer: "non-leaf",
         trace_lowering: false,
         trace_call_lowering: false,
         skip_module_globals: false,
         test_runner_active: false,
         test_runner_trace: false
     };
-    let _first_ir = lower_to_llvm_ir_from_text_with_provider_context("", "provider_context_first", empty_llvm_import_context(), first);
+    let first_ir = lower_to_llvm_ir_from_text_with_provider_context(native, "provider_context_first", empty_llvm_import_context(), first);
+    assert contains(first_ir, "target triple = \"arm64-apple-macosx15.0.0\"");
+    assert contains(first_ir, "target datalayout = \"e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32\"");
+    assert contains(first_ir, "uwtable(sync)");
+    assert contains(first_ir, "\"frame-pointer\"=\"non-leaf\"");
+    assert contains(first_ir, "\"target-cpu\"=\"apple-m1\"");
     assert expect_eq_str(build_target_os(), "Darwin").ok;
     assert expect_eq_str(target_arch_for_lowering(), "aarch64").ok;
     assert expect_eq_bool(trace_lowering(), false).ok;
@@ -170,13 +181,21 @@ test "target: provider entrypoint overwrites its complete context" ![io] {
     let second = LLVMProviderContext {
         target_os: "Windows",
         target_arch: "x86_64",
+        target_triple: "x86_64-pc-windows-msvc",
+        target_data_layout: "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+        target_frame_pointer: "none",
         trace_lowering: true,
         trace_call_lowering: true,
         skip_module_globals: true,
         test_runner_active: true,
         test_runner_trace: true
     };
-    let _second_ir = lower_to_llvm_ir_from_text_with_provider_context("", "provider_context_second", empty_llvm_import_context(), second);
+    let second_ir = lower_to_llvm_ir_from_text_with_provider_context(native, "provider_context_second", empty_llvm_import_context(), second);
+    assert contains(second_ir, "target triple = \"x86_64-pc-windows-msvc\"");
+    assert contains(second_ir, "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"");
+    assert contains(second_ir, "uwtable(sync)");
+    assert contains(second_ir, "\"frame-pointer\"=\"none\"");
+    assert contains(second_ir, "\"target-cpu\"=\"x86-64\"");
     assert expect_eq_str(build_target_os(), "Windows").ok;
     assert expect_eq_str(target_arch_for_lowering(), "x86_64").ok;
     assert expect_eq_bool(trace_lowering(), true).ok;

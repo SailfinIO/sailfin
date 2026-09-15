@@ -21,28 +21,34 @@
 // is emitted there. (The underlying seed vtable-lowering bug is tracked
 // separately; this leaf is the source-level avoidance.)
 //
-// The Assemble role deliberately keeps a bare `clang` resolved through PATH.
-// On macOS, Homebrew LLVM is placed there so `llvm-link`, `llvm-as`, and clang
-// come from one compatible toolchain; compiling LLVM IR to a Mach-O object does
-// not ask clang to own the Darwin SDK/linker contract. The final Link role is
-// separate and resolves Apple's driver in `backend.sfn` (SFN-1077).
-import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
+// The historical filename is retained to avoid a structural module-graph
+// change during the migration. Assemble/object emission now resolves one
+// coherent LLVM family and runs llvm-as, opt, and llc; clang is reachable only
+// through the explicitly configured migration oracle (SFN-952).
+import {
+    ParallelProcessPipelineTask,
+    _cr_resolve_jobs,
+    _cr_run_bounded_process_pipelines
+} from "../capsule_emit_parallel";
 import {
     LlvmArtifactRequest,
+    LlvmObjectPipeline,
+    LlvmObjectProvider,
     classify_object_source,
-    llvm_artifact_argv,
-    llvm_artifact_cache_key,
-    run_llvm_artifact
+    llvm_artifact_request_cache_key,
+    llvm_object_provider_failure,
+    prepare_llvm_object_pipeline,
+    resolve_llvm_object_provider_for_target,
+    run_llvm_artifact_with_provider
 } from "./artifact_compile";
 import {
     _atomic_rename_into_place,
     _ensure_dir_cmd,
     _mktemp_sibling_cmd,
-    _sha256_of_file,
-    _shell_read_cmd
+    _sha256_of_file
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
-import { build_target_triple, host_target_triple, target_clang_flags } from "./target";
+import { build_target_triple } from "./target";
 
 // Result of separating LLVM assembly from the final link. `object_paths`
 // preserves the input order exactly; callers splice the returned objects
@@ -59,28 +65,25 @@ struct PendingLinkObjectAssembly {
     object_index: int;
     object_path: string;
     staged_path: string;
-    task: ParallelProcessTask;
+    pipeline: LlvmObjectPipeline;
 }
 
-fn _link_input_task(ll_path: string, out_path: string, opt_flag: string) -> ParallelProcessTask ![io] {
-    return ParallelProcessTask {
-        argv: llvm_artifact_argv(LlvmArtifactRequest {
-            ir_path: ll_path, object_path: out_path, opt_flag: opt_flag
-        })
-    };
+fn _link_input_pipeline(ll_path: string, out_path: string, opt_flag: string, provider: LlvmObjectProvider) -> LlvmObjectPipeline ![io] {
+    return prepare_llvm_object_pipeline(LlvmArtifactRequest {
+        ir_path: ll_path, object_path: out_path, opt_flag: opt_flag
+    }, provider);
 }
 
 // Assemble a list of textual LLVM modules before the final link (SFN-453).
 //
-// The content-addressed key covers every input that changes clang's object
-// output: IR bytes, optimization level, target flags, clang identity, and the
-// section-splitting flag scheme owned by `_clang_object_argv`. The
-// LLVM-artifact namespace fold (SFN-950) keeps these objects out of the
-// foreign-C key space. Objects live under the caller's work/shared cache. If
+// The content-addressed key covers IR bytes, optimization, the complete LLVM
+// family fingerprint, target/object profile, and pipeline schema. The
+// LLVM-artifact namespace fold keeps these objects out of the foreign-C key
+// space. Objects live under the caller's work/shared cache. If
 // that cache is unwritable, use an ephemeral object beside the `.ll` input
 // instead of falling back to feeding raw IR into the final link; the
 // object-only backend boundary is invariant.
-fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string) -> LinkObjectAssembly ![io] {
+fn assemble_link_inputs_with_provider(ll_paths: string[], object_dir: string, opt_flag: string, provider: LlvmObjectProvider) -> LinkObjectAssembly ![io] {
     // Fail closed on a misrouted artifact before any cache or spawn work
     // (SFN-950, SFEP-0066 §3.3): this provider owns LLVM text only, so a
     // `c-sources` entry that reached a link plan is rejected here rather
@@ -95,18 +98,10 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
         ci += 1;
     }
     _ensure_dir_cmd(object_dir);
-    let triple = build_target_triple();
-    let target_flags = target_clang_flags(triple, host_target_triple());
-    let clang_line = _shell_read_cmd("clang --version 2>/dev/null | head -n 1");
-    let mut target_key: string = triple;
-    let mut ti: int = 0;
-    loop {
-        if ti >= target_flags.length { break; }
-        target_key = target_key + "\n" + target_flags[ti];
-        ti += 1;
+    if !provider.ok {
+        print.err(provider.diagnostic);
+        return LinkObjectAssembly { success: false, object_paths: [] };
     }
-    let toolchain_key = llvm_artifact_cache_key(clang_line + "\n" + target_key
-        + "\nlink-obj-v1-secsplit1");
     let mut objects: string[] = [];
     let mut pending: PendingLinkObjectAssembly[] = [];
     let mut can_parallel: boolean = true;
@@ -115,21 +110,26 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
         if i >= ll_paths.length { break; }
         let ll_path = ll_paths[i];
         let content_hash = _sha256_of_file(ll_path);
+        let request = LlvmArtifactRequest {
+            ir_path: ll_path,
+            object_path: "",
+            opt_flag: opt_flag
+        };
+        let request_key = llvm_artifact_request_cache_key(content_hash, request, provider);
         if content_hash.length == 0 {
             let fallback_key = sha256_hex_of_string(ll_path + "\n" + opt_flag
                 + "\n"
-                + toolchain_key);
+                + provider.fingerprint);
             let fallback = ll_path + ".link-" + fallback_key + ".o";
             objects.push(fallback);
             can_parallel = false;
             pending.push(PendingLinkObjectAssembly {
-                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: "", staged_path: "", task: _link_input_task(ll_path, fallback, opt_flag)
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: "", staged_path: "", pipeline: _link_input_pipeline(ll_path, fallback, opt_flag, provider)
             });
             i += 1;
             continue;
         }
-        let cache_key = content_hash + "\n" + opt_flag + "\n" + toolchain_key;
-        let key_hash = sha256_hex_of_string(cache_key);
+        let key_hash = sha256_hex_of_string(request_key);
         let obj_path = object_dir + "/" + key_hash + ".o";
         if fs.exists(obj_path) {
             objects.push(obj_path);
@@ -142,7 +142,7 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
         if tmp.length > 0 {
             objects.push(obj_path);
             pending.push(PendingLinkObjectAssembly {
-                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: tmp, task: _link_input_task(ll_path, tmp, opt_flag)
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: tmp, pipeline: _link_input_pipeline(ll_path, tmp, opt_flag, provider)
             });
         } else {
             // Cache publication cannot be staged without a sibling temp. The
@@ -151,7 +151,7 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
             objects.push(fallback);
             can_parallel = false;
             pending.push(PendingLinkObjectAssembly {
-                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: "", task: _link_input_task(ll_path, fallback, opt_flag)
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: "", pipeline: _link_input_pipeline(ll_path, fallback, opt_flag, provider)
             });
         }
         i += 1;
@@ -159,11 +159,12 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
 
     let mut jobs = _cr_resolve_jobs();
     if !can_parallel { jobs = 1; }
-    let results = _cr_run_bounded_processes(_link_object_tasks(pending), jobs);
+    let run = _cr_run_bounded_process_pipelines(_link_object_tasks(pending), jobs);
     let mut pi: int = 0;
     loop {
         if pi >= pending.length { break; }
-        if results[pi] != 0 {
+        if run.exit_codes[pi] != 0 {
+            print.err(llvm_object_provider_failure(provider, pending[pi].pipeline, run.failed_stages[pi], pending[pi].ll_path, run.exit_codes[pi]));
             _delete_link_object_staging(pending);
             return LinkObjectAssembly { success: false, object_paths: [] };
         }
@@ -177,9 +178,9 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
             if _atomic_rename_into_place(item.staged_path, item.object_path) {
                 objects[item.object_index] = item.object_path;
             } else {
-                if run_llvm_artifact(LlvmArtifactRequest {
+                if run_llvm_artifact_with_provider(LlvmArtifactRequest {
                     ir_path: item.ll_path, object_path: item.fallback_path, opt_flag: opt_flag
-                }) != 0 {
+                }, provider) != 0 {
                     _delete_link_object_staging(pending);
                     return LinkObjectAssembly {
                         success: false,
@@ -191,7 +192,29 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
         }
         pi += 1;
     }
+    _delete_link_object_intermediates(pending);
     return LinkObjectAssembly { success: true, object_paths: objects };
+}
+
+fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string) -> LinkObjectAssembly ![io] {
+    return assemble_link_inputs_with_provider(ll_paths, object_dir, opt_flag, resolve_llvm_object_provider_for_target(build_target_triple()));
+}
+
+fn _delete_link_object_intermediates(pending: PendingLinkObjectAssembly[]) ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= pending.length { break; }
+        if pending[i].pipeline.verified_path.length > 0 && fs.exists(pending[i].pipeline.verified_path) {
+            fs.deleteFile(pending[i].pipeline.verified_path);
+        }
+        if pending[i].pipeline.optimized_path.length > 0 && fs.exists(pending[i].pipeline.optimized_path) {
+            fs.deleteFile(pending[i].pipeline.optimized_path);
+        }
+        if pending[i].pipeline.profiled_path.length > 0 && fs.exists(pending[i].pipeline.profiled_path) {
+            fs.deleteFile(pending[i].pipeline.profiled_path);
+        }
+        i += 1;
+    }
 }
 
 fn _delete_link_object_staging(pending: PendingLinkObjectAssembly[]) ![io] {
@@ -203,17 +226,24 @@ fn _delete_link_object_staging(pending: PendingLinkObjectAssembly[]) ![io] {
         }
         i += 1;
     }
+    _delete_link_object_intermediates(pending);
 }
 
-fn _link_object_tasks(pending: PendingLinkObjectAssembly[]) -> ParallelProcessTask[] {
-    let mut tasks: ParallelProcessTask[] = [];
+fn _link_object_tasks(pending: PendingLinkObjectAssembly[]) -> ParallelProcessPipelineTask[] {
+    let mut tasks: ParallelProcessPipelineTask[] = [];
     let mut i: int = 0;
     loop {
         if i >= pending.length { break; }
-        tasks.push(pending[i].task);
+        tasks.push(ParallelProcessPipelineTask {
+            stages: pending[i].pipeline.stages
+        });
         i += 1;
     }
     return tasks;
 }
 
-export { LinkObjectAssembly, assemble_link_inputs };
+export {
+    LinkObjectAssembly,
+    assemble_link_inputs,
+    assemble_link_inputs_with_provider
+};

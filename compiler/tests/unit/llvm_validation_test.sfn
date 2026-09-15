@@ -6,7 +6,8 @@ import {
     expect_contains_str,
     expect_eq_bool,
     expect_eq_str,
-    expect_eq_str_array
+    expect_eq_str_array,
+    with_tmp_dir
 } from "sfn/test";
 
 import { LlvmTool } from "../../src/build/llvm_toolchain_resolver";
@@ -89,4 +90,19 @@ test "llvm validation: spawn failure remains a tool failure, not invalid IR" {
     assert expect_eq_str(result.retained_ir_path, "").ok;
     assert expect_contains_str(result.diagnostic, "could not be started or reaped").ok;
     assert expect_eq_bool(expect_contains_str(result.diagnostic, "internal compiler error").ok, false).ok;
+}
+
+test "llvm validation: a syntactically valid mismatched profile is rejected before llvm-as" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let path = dir + "/mismatched.ll";
+        fs.writeFile(path, "target datalayout = \"wrong\"\ntarget triple = \"x86_64-pc-windows-msvc\"\n\ndefine i32 @probe() #0 {\n  ret i32 0\n}\nattributes #0 = { uwtable(sync) \"frame-pointer\"=\"none\" }\n");
+        let validator = llvm_validator_from_tool(_validator(), "x86_64-pc-windows-msvc");
+        let request = llvm_validation_request(validator, path, path, "src/profile.sfn");
+        let result = validate_llvm_ir(request);
+        assert expect_eq_bool(result.is_ok, false).ok;
+        assert expect_eq_str(result.classification, "profile_mismatch").ok;
+        assert expect_contains_str(result.diagnostic, "target profile mismatch").ok;
+        return 0;
+    });
+    assert outcome == 0;
 }

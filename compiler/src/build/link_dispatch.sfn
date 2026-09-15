@@ -15,7 +15,8 @@ import { _env_flag, _get_env_cmd } from "../build_flags";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { render_terminal_diagnostic } from "../terminal_output";
 import { user_config_linker, user_config_linker_origin } from "../user_config";
-import { assemble_link_inputs } from "./clang_argv";
+import { resolve_llvm_object_provider_for_target } from "./artifact_compile";
+import { assemble_link_inputs_with_provider } from "./clang_argv";
 import { resolve_link_contract } from "./direct_link";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
 import {
@@ -24,7 +25,7 @@ import {
     runtime_dep_link_failure_message
 } from "./link_contract";
 import { _ensure_dir, _find_substring_from } from "./paths";
-import { assemble_runtime_capsule_link_inputs } from "./runtime_objs";
+import { assemble_runtime_capsule_link_inputs_with_provider } from "./runtime_objs";
 import { runtime_demanded_dep_specs } from "./runtime_selection";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A); promoted to the triple
 // axis by SFN-774 / SFEP-0068 §3.1): the msvc ABI forces `-fuse-ld=lld`
@@ -214,8 +215,7 @@ fn _resolve_linker() -> string ![io] {
 }
 
 // Dead-code-strip linker flag for the final link (#1047). With every
-// `clang -c` (and the inline `.ll` compile in the link below) emitting
-// `-ffunction-sections -fdata-sections`, the linker's section garbage
+// `llc -filetype=obj` emitting function/data sections, the linker's section garbage
 // collector drops any function/datum unreferenced from the entry point —
 // so importing one symbol from a multi-function capsule no longer drags
 // the whole `src/` closure into the binary. The GC flag is platform-
@@ -329,7 +329,23 @@ fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
 
     _ensure_dir(request.runtime_cache_dir);
 
-    let inputs = assemble_runtime_capsule_link_inputs(request.runtime_capsules, request.runtime_cache_dir, request.opt_flag, request.binary_dir, request.shared_cache_root);
+    // Resolve the coherent object family once for the entire command. Runtime,
+    // primary, dependency, cache, trace, and diagnostic consumers reuse this
+    // immutable result so no phase can observe a different tool family.
+    let object_provider = resolve_llvm_object_provider_for_target(build_target_triple());
+    if !object_provider.ok {
+        print.err(object_provider.diagnostic);
+        return LinkOutcome {
+            rc: 1,
+            ran_backend: false,
+            failure: LinkFailure {
+                stage: "object-provider-resolution",
+                reason: object_provider.diagnostic
+            },
+            runtime_stats: empty_cache_stats()
+        };
+    }
+    let inputs = assemble_runtime_capsule_link_inputs_with_provider(request.runtime_capsules, request.runtime_cache_dir, request.opt_flag, request.binary_dir, request.shared_cache_root, object_provider);
     if !inputs.success {
         return LinkOutcome {
             rc: 1,
@@ -344,7 +360,7 @@ fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
     let runtime_objs = inputs.object_paths;
     let runtime_link_libs = inputs.link_libs;
 
-    let primary_result = assemble_link_inputs(request.primary_lls, request.link_obj_dir, request.opt_flag);
+    let primary_result = assemble_link_inputs_with_provider(request.primary_lls, request.link_obj_dir, request.opt_flag, object_provider);
     if !primary_result.success {
         return LinkOutcome {
             rc: 1,
@@ -353,7 +369,7 @@ fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
             runtime_stats: inputs.stats
         };
     }
-    let dep_result = assemble_link_inputs(request.dep_lls, request.link_obj_dir, request.opt_flag);
+    let dep_result = assemble_link_inputs_with_provider(request.dep_lls, request.link_obj_dir, request.opt_flag, object_provider);
     if !dep_result.success {
         return LinkOutcome {
             rc: 1,

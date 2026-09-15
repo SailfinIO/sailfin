@@ -357,13 +357,10 @@ fn llvm_target_unsupported_diagnostic(triple: string, llc_path: string) -> Diagn
     };
 }
 
-// Build the canonical fingerprint text, then hash it. Executable content
-// digests are NOT an ingredient: hashing multi-hundred-megabyte LLVM
-// binaries on every command is not affordable, and the complete `--version`
-// output already carries the LLVM build revision, so a rebuilt binary at
-// the same path still moves the fingerprint. `LLVM_PIPELINE_SCHEMA` is the
-// lever that invalidates every cache if a digest ingredient is ever added
-// (SFEP-0066 §3.8).
+// Build the canonical fingerprint text, then hash it. Object-provider cache
+// identity adds executable content digests once per batch (SFN-952); keeping
+// them out of this resolver avoids rehashing large tools in each isolated
+// llvm-as validation child.
 fn llvm_family_fingerprint(tools: LlvmTool[], major: int, triple: string, object_format: string, target_supported: boolean) -> string {
     let mut text = LLVM_PIPELINE_SCHEMA + "\n" + int_to_string(major) + "\n"
         + triple

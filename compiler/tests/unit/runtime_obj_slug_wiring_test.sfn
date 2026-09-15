@@ -29,6 +29,7 @@
 import { remove_all } from "sfn/fs";
 import { default_scratch_dir } from "sfn/test";
 
+import { LlvmObjectProvider } from "../../src/build/artifact_compile";
 import {
     RuntimeSfnObjectPlan,
     _prepare_runtime_sfn_object,
@@ -45,6 +46,22 @@ fn _ros_unusable_self_path() -> string {
 }
 
 fn _ros_identity() -> string { return "sfn-870-wiring-identity"; }
+
+fn _ros_provider(target_triple: string) -> LlvmObjectProvider {
+    return LlvmObjectProvider {
+        ok: true,
+        kind: "llvm-cli",
+        target_triple: target_triple,
+        host_triple: target_triple,
+        object_format: "elf",
+        fingerprint: "test-family",
+        llvm_as_path: "llvm-as",
+        opt_path: "opt",
+        llc_path: "llc",
+        clang_path: "",
+        diagnostic: ""
+    };
+}
 
 fn _ros_tmp_root(label: string) -> string ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
@@ -108,7 +125,8 @@ test "runtime-obj slug wiring: a shared entry stored under one slug is never ser
     // actually guards the slug fold, and it does not need a hand-rolled key
     // to do it — see this file's header.
     let alpha_slug = "runtime/alpha";
-    let alpha_key = _runtime_sfn_object_key(alpha_src, opt_flag, compiler_identity, ctx_root, alpha_slug, target_triple);
+    let provider = _ros_provider(target_triple);
+    let alpha_key = _runtime_sfn_object_key(alpha_src, opt_flag, compiler_identity, ctx_root, alpha_slug, target_triple, provider);
 
     // Store a sentinel object under that exact key.
     let sentinel_path = out_dir_store + "/sentinel.o";
@@ -119,7 +137,7 @@ test "runtime-obj slug wiring: a shared entry stored under one slug is never ser
     // Non-vacuity leg: `alpha` must HIT via the shared cache. An unusable
     // `self_path` means any success here can only come from the stored
     // entry, proving this test's key composition matches the function's.
-    let hit_plan: RuntimeSfnObjectPlan = _prepare_runtime_sfn_object(_ros_unusable_self_path(), cap_prefix, alpha_src, out_dir_hit, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap, target_triple);
+    let hit_plan: RuntimeSfnObjectPlan = _prepare_runtime_sfn_object(_ros_unusable_self_path(), cap_prefix, alpha_src, out_dir_hit, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap, target_triple, provider);
     assert hit_plan.obj_path.length > 0;
 
     // Discrimination leg: `beta` is byte-identical content under a
@@ -128,7 +146,7 @@ test "runtime-obj slug wiring: a shared entry stored under one slug is never ser
     // stored entry and this would wrongly hit too. With the fold intact it
     // misses the shared cache and falls through to a real emit, which
     // fails because `self_path` cannot run.
-    let miss_plan: RuntimeSfnObjectPlan = _prepare_runtime_sfn_object(_ros_unusable_self_path(), cap_prefix, beta_src, out_dir_miss, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap, target_triple);
+    let miss_plan: RuntimeSfnObjectPlan = _prepare_runtime_sfn_object(_ros_unusable_self_path(), cap_prefix, beta_src, out_dir_miss, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap, target_triple, provider);
     assert miss_plan.obj_path.length == 0;
 
     _ros_cleanup(manifest_dir);
