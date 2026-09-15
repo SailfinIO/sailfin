@@ -16,7 +16,7 @@ import {
 
 fn _require_posix_shell() -> bool ![io] {
     if env.get("COMSPEC").length == 0 { return true; }
-    skip("SFN-1156: pre-commit inventory validates a POSIX hook installer; remove this skip when native Windows has a bounded POSIX-shell provider instead of the WSL bash launcher");
+    skip("SFN-1285: pre-commit inventory validates a POSIX hook installer; remove this skip when native Windows has a bounded POSIX-shell provider instead of the WSL bash launcher");
     return false;
 }
 

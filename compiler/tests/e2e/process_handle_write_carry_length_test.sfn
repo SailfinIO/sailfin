@@ -188,7 +188,7 @@ fn _runtime_object(module: string) -> string ![io] {
 fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
     let reader = symbol_reader();
     if reader.length == 0 {
-        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        skip("SFN-1284: no symbol reader is available; remove when the test resolves a PE-native reader and can assert symbol presence");
         return false;
     }
     let exit = process.run_capture([reader, binary], _child_env());
@@ -310,7 +310,7 @@ test "probe routes process.handle_write through @sfn_process_handle_write_bytes"
 test "runtime object exports both write twins" ![io] {
     let obj = _runtime_object("process");
     if obj.length == 0 {
-        skip("build/sailfin/sfn__runtime-native__process.sfn-*.o not found — tree not built yet (SFN-1114)");
+        skip("SFN-1284: the canonical Windows process runtime object was not found; remove when the probe resolves the native build artifact layout");
     }
     assert _nm_has_defined(obj, "sfn_process_handle_write");
     assert _nm_has_defined(obj, "sfn_process_handle_write_bytes");

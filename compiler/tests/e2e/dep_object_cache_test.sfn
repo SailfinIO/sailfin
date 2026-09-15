@@ -82,7 +82,7 @@ test "test link: dep objects stay isolated from the shared runtime objdir" ![io]
 
 test "test link: unwritable link-obj dir uses ephemeral objects" ![io] {
     if host_is_windows() {
-        skip("Windows UCRT chmod does not deny directory writes; this POSIX permission-path test requires mode-bit enforcement");
+        skip("SFN-1285: Windows UCRT chmod does not deny directory writes; remove when this test has a Windows-native write-denial fixture");
         return;
     }
     let base = _scratch_base();

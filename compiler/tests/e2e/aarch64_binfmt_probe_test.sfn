@@ -25,11 +25,11 @@ import {
 // The subject is a Linux bootstrap script whose probe depends on POSIX shell
 // execution and permission bits. Windows still runs the portable source and
 // workflow assertions above it, but must not turn a failed bash launch into a
-// probe verdict. SFN-1150 owns the exclusion; remove it when the binfmt probe
+// probe verdict. SFN-1285 owns the exclusion; remove it when the binfmt probe
 // has a host-portable native fixture instead of the Linux shell seam.
 fn _require_linux_binfmt_fixture() -> void ![io] {
     if env.get("COMSPEC").length > 0 {
-        skip("SFN-1150: Linux binfmt execution requires POSIX shell and permission semantics; remove when the probe has a host-portable native fixture");
+        skip("SFN-1285: Linux binfmt execution requires POSIX shell and permission semantics; remove when the probe has a host-portable native fixture");
     }
 }
 

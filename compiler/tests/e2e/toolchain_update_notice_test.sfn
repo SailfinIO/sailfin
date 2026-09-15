@@ -539,7 +539,7 @@ fn _stall_harness_c() -> string {
 // (`update_notify.sfn::_update_notify_run_bounded`) can explain.
 test "toolchain update notice: a stalling endpoint does not hang the wrapped command" ![clock, io] {
     if host_is_windows() {
-        skip("stalling-listener harness uses POSIX sockets only");
+        skip("SFN-1285: the stalling-listener harness uses POSIX sockets; remove when the timeout test has a Winsock-capable listener fixture");
     }
     let label = "stall-budget";
     let cwd = _neutral_cwd(label);

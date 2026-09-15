@@ -226,7 +226,7 @@ fn _count_defined_symbol(output: string, symbol: string) -> int {
 fn _defined_symbol_count(binary: string, symbol: string, label: string) -> int ![io] {
     let reader = symbol_reader();
     if reader.length == 0 {
-        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        skip("SFN-1284: no symbol reader is available; remove when the test resolves a PE-native reader and can assert symbol presence");
         return -1;
     }
     // A linked Windows PE carries no symbol table for `llvm-nm` to read: the
@@ -338,7 +338,7 @@ fn _build_implicit_provenance_fixture(root: string, label: string) -> int ![io] 
     // `llvm-nm` rather than `nm` (SFN-1114) — see `_defined_symbol_count` above.
     let reader = symbol_reader();
     if reader.length == 0 {
-        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        skip("SFN-1284: no symbol reader is available; remove when the test resolves a PE-native reader and can assert symbol presence");
         return 95;
     }
     let mut symbols: string = "";
