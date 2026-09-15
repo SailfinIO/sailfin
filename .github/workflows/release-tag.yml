@@ -404,59 +404,6 @@ jobs:
           set -euo pipefail
           bash scripts/verify-payload-dep-closure.sh "dist/installer-${{ matrix.package_label }}.tar.gz"
 
-      # --- Native driver cross-build for Windows ---
-      - name: Install MinGW-w64 cross-compiler (Linux)
-        if: matrix.package_label == 'linux-x86_64'
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 20
-        with:
-          # Only the x86-64 C cross toolchain is used by the native driver;
-          # the `mingw-w64` metapackage pulls ~277 MB of
-          # i686 / g++ / win32 packages this build never touches and which
-          # stalled the Ubuntu/Azure mirror fetch (#1402).
-          #
-          # The bounded retry AND the `.deb` cache that used to be hand-rolled
-          # here now live in the composite (SFN-982), so this is no longer a
-          # second implementation of them to keep in sync.
-          packages: gcc-mingw-w64-x86-64
-          no-install-recommends: 'true'
-
-      - name: Verify MinGW-w64 cross-compiler (Linux)
-        if: matrix.package_label == 'linux-x86_64'
-        shell: bash
-        run: x86_64-w64-mingw32-gcc --version | head -1
-
-      # `SAILFIN_BOOTSTRAP: "off"` is load-bearing here, not hygiene
-      # (SFN-1108). This ref carries the release version bump, so the running
-      # compiler no longer matches `bootstrap.toml [seed].version` and
-      # `bootstrap_gate_or_dispatch` would re-exec the PINNED SEED, replaying
-      # `--target` into a binary whose target conditioning is frozen at its
-      # cut. Seed 0.10.4 omitted `-lbcrypt` for the gnu ABI, which is exactly
-      # how v0.10.5 failed with `undefined reference to BCryptGenRandom`.
-      # Stage0 purity is unaffected: the compiler binary above is still
-      # self-hosted from the pinned seed by `make rebuild`; this step is a
-      # consumer build that needs current-tree target conditioning.
-      # Remove when the pinned seed carries the target-aware gate (SFN-1111).
-      - name: Cross-compile for Windows (Linux)
-        if: matrix.package_label == 'linux-x86_64'
-        shell: bash {0}
-        env:
-          SAILFIN_BOOTSTRAP: "off"
-        run: |
-          set -euo pipefail
-          build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
-          build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
-
-      # Windows is cross-built inside this linux-x86_64 leg rather than
-      # having its own matrix entry, so the per-leg dependency closure check
-      # above never inspects its tarball -- verify it here instead.
-      - name: Verify Windows installer payload dependency closure
-        if: matrix.package_label == 'linux-x86_64'
-        shell: bash {0}
-        run: |
-          set -euo pipefail
-          bash scripts/verify-payload-dep-closure.sh "dist/installer-windows-x86_64.tar.gz"
-
       - name: Upload native artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -474,18 +421,7 @@ jobs:
           path: dist/installer-${{ matrix.package_label }}.tar.gz
           if-no-files-found: error
 
-      - name: Upload Windows installer archive
-        if: matrix.package_label == 'linux-x86_64'
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-installer-windows-x86_64
-          path: dist/installer-windows-x86_64.tar.gz
-          if-no-files-found: error
-
-  # SFEP-0021 M11 / SFN-57: the native MSVC release leg, split into a
-  # cross-seed job (duplicated rather than reused from the `build` matrix's
-  # linux-x86_64 leg or from windows-native-selfhost.yml's own cross-seed
-  # job) and a windows-2025 build job that brings Windows to the SAME
+  # SFEP-0021 M11/M12: the native MSVC release leg brings Windows to the SAME
   # release-leg shape the other three platforms already have: build,
   # package, verify — no fixed-point gate. Every other leg in this workflow
   # is `mode: build-package` via the `sailfin-build` composite plus a smoke
@@ -493,29 +429,12 @@ jobs:
   # pinned Linux seed that ships through this exact path, runs a self-host
   # fixed point in the release run. Determinism for every platform is
   # `nightly-selfhost.yml`'s (Linux/macOS) and `windows-native-selfhost.yml`'s
-  # (Windows) job, both running the fixed point unconditionally on every
-  # push to `main` and on a daily cron — the released commit is already
-  # fixed-point-verified by that mechanism before this leg ever builds it.
+  # (Windows) job, both running the fixed point on a daily cron. The release
+  # train requires a green nightly covering the release input, so the commit
+  # is fixed-point-verified before this leg ever builds it.
   #
-  # Duplicating cross-seed rather than adding `needs: build` is deliberate
-  # — the matrix's linux-arm64 leg alone runs up to ~240 minutes (qemu
-  # bootstrap), and `upload` would then wait on it before even starting the
-  # native Windows leg. Running these two jobs in parallel with `build`
-  # instead costs, split honestly into its transitional and steady-state
-  # parts:
-  #   - Transitional: `native-windows-cross-seed` (~10-15 min). Both of its
-  #     preconditions for removal are now met — native seeds publish (SFN-57)
-  #     and `seed_source: 'release'` is implemented (SFN-994) — but this leg
-  #     deliberately stays on `cross` for now. A release must be buildable
-  #     from its own checkout: making the release path depend on a PREVIOUS
-  #     release's asset is a bootstrap risk the nightly should absorb first.
-  #     `windows-native-selfhost.yml` runs `release` daily; this leg follows
-  #     once that has soaked.
-  #   - Steady state: `native-windows-build` itself — slower than the other
-  #     platforms' Windows runners tend to be, but build+package only (no
-  #     fixed point), and it runs parallel to the `build` matrix rather than
-  #     after it, so its contribution to the critical path is materially
-  #     smaller than the transitional cross-seed cost above.
+  # The job bootstraps only from the previous signed native MSVC release seed
+  # and runs in parallel with the other platform builds.
   #
   # This leg is no longer best-effort (SFN-1024). `upload` below still
   # proceeds on a failed or cancelled `native-windows-build` — see its `if:`
@@ -523,101 +442,8 @@ jobs:
   # the payload gate and fails there, naming the missing asset, rather than
   # hard-skipping `upload` and both notify jobs. The msvc payload is required,
   # so a failed Windows leg blocks the release like any other platform's.
-  native-windows-cross-seed:
-    name: Build mingw-cross bootstrap seed [native windows leg]
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository (build ref)
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          ref: ${{ env.BUILD_REF }}
-
-      - name: Resolve seed version (input override → bootstrap.toml)
-        id: seed
-        shell: bash
-        env:
-          INPUT_SEED_VERSION: ${{ inputs.seed_version }}
-        run: |
-          set -euo pipefail
-          override="$(printf '%s' "$INPUT_SEED_VERSION" | tr -d '[:space:]')"
-          if [ -n "$override" ]; then
-            pin="$override"
-          else
-            if [ ! -f bootstrap.toml ]; then
-              echo "[seed-pin][error] tag ${RELEASE_TAG} predates bootstrap.toml." >&2
-              echo "[seed-pin][error] re-run this workflow with the 'seed_version' input set." >&2
-              exit 1
-            fi
-            pin="$(awk '
-              /^\[[^]]+\]/ { section=$0 }
-              section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
-            ' bootstrap.toml)"
-            if [ -z "$pin" ]; then
-              echo "[seed-pin][error] bootstrap.toml has no [seed].version at tag ${RELEASE_TAG}" >&2
-              exit 1
-            fi
-          fi
-          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
-
-      - name: Install clang + llvm (Linux)
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 20
-        with:
-          packages: clang-18 llvm-18 lld jq
-
-      - name: Set CLANG env (Linux)
-        shell: bash
-        run: echo "CLANG=clang-18" >> "$GITHUB_ENV"
-
-      - name: Build native compiler (self-host main)
-        uses: ./.github/actions/sailfin-build
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-        with:
-          mode: build-only
-          target: linux-x86_64
-          clang: clang-18
-          seed_version: ${{ steps.seed.outputs.seed_version }}
-          package: 'false'
-
-      - name: Install MinGW-w64 cross-compiler (Linux)
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 20
-        with:
-          packages: gcc-mingw-w64-x86-64
-          no-install-recommends: 'true'
-
-      - name: Verify MinGW-w64 cross-compiler (Linux)
-        shell: bash
-        run: x86_64-w64-mingw32-gcc --version | head -1
-
-      # See the identical note on `Cross-compile for Windows (Linux)` in the
-      # `build` matrix above: the version bump on this ref would otherwise
-      # hand this cross build to the pinned seed (SFN-1108).
-      - name: Cross-compile the bootstrap seed (Linux)
-        shell: bash
-        env:
-          SAILFIN_BOOTSTRAP: "off"
-        run: |
-          set -euo pipefail
-          build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
-          build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
-
-      - name: Upload mingw-cross bootstrap seed
-        uses: actions/upload-artifact@v7
-        with:
-          name: ci-installer-windows-x86_64
-          path: dist/installer-windows-x86_64.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-
   native-windows-build:
     name: Build + package [native windows-x86_64-msvc]
-    needs: native-windows-cross-seed
     runs-on: windows-2025 # pinned, not `windows-latest` — SFN-55 Risk R3
     timeout-minutes: 90
     permissions:
@@ -675,8 +501,6 @@ jobs:
       - name: Build native Windows compiler
         id: build_windows
         uses: ./.github/actions/sailfin-build-windows
-        with:
-          seed_source: cross
 
       # Deliberately build + package, no fixed-point gate — matching the
       # other three platform legs' shape, not a lesser standard for
@@ -687,19 +511,17 @@ jobs:
       # `bootstrap.toml`-pinned Linux seed that ships through this exact
       # path. Determinism for all platforms — this one included — is
       # `nightly-selfhost.yml`'s and `windows-native-selfhost.yml`'s job:
-      # both run the fixed point unconditionally on every push to `main`
-      # and on a daily cron, so the released commit is already
-      # fixed-point-verified by the same mechanism the other platforms
-      # rely on before this leg ever builds it again here. Re-running it
+      # both run the fixed point on a daily cron. The release train requires
+      # a green nightly covering the release input, so the commit is
+      # fixed-point-verified by the same mechanism the other platforms rely
+      # on before this leg ever builds it again here. Re-running it
       # inside the release critical path would apply a stricter bar to
       # Windows than to the platform we self-host on every day — do not
       # re-add it on the assumption its absence is an oversight.
       #
-      # Transitional artifact label (SFEP-0021 M11): the native MinGW build
-      # already owns the `installer-windows-x86_64.tar.gz` basename for the
-      # mingw-cross leg, so this leg must use a distinct `--target` rather
-      # than colliding with it. `_package_target_os` prefix-matches
-      # `windows-` so `.exe` staging still applies to the MSVC target.
+      # Keep the ABI-qualified target in the published filename so release
+      # seed selection and per-user toolchain storage retain an explicit MSVC
+      # identity (SFEP-0073).
       - name: Package native MSVC installer
         shell: bash
         run: |
@@ -708,8 +530,7 @@ jobs:
           ls -la dist/installer-windows-x86_64-msvc.tar.gz
 
       # Every other payload's closure is checked inside the job that builds
-      # it (`:376-380` per matrix leg, `:415-420` for the mingw cross-build).
-      # This leg had no such step, so with the msvc payload now required
+      # it. With the MSVC payload required,
       # (SFN-1024) its first closure check would otherwise happen in `upload`
       # — ~90 minutes in, past the point where failing is cheap. Checking
       # here fails the leg instead of aborting the release.
@@ -926,17 +747,10 @@ jobs:
                 os="macos"
                 arch="arm64"
                 ;;
-              # Must precede the *windows-x86_64* arm below — bash `case` is
-              # first-match-wins, and `installer-windows-x86_64-msvc.tar.gz`
-              # also matches the broader mingw pattern.
               *windows-x86_64-msvc*)
                 os="windows"
                 arch="x86_64"
                 variant="-msvc"
-                ;;
-              *windows-x86_64*)
-                os="windows"
-                arch="x86_64"
                 ;;
               *)
                 echo "unknown installer payload $label" >&2
@@ -1358,9 +1172,6 @@ jobs:
         env:
           SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
           IS_PROMOTE: ${{ inputs.promote }}
-          BUILD_RESULT: ${{ needs.build.result }}
-          UPLOAD_RESULT: ${{ needs.upload.result }}
-          NATIVE_WINDOWS_RESULT: ${{ needs.native-windows-build.result }}
         run: |
           set -euo pipefail
           if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
@@ -1371,29 +1182,19 @@ jobs:
           import os
           tag = os.environ["RELEASE_TAG"]
           run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          core_failed = os.environ.get("BUILD_RESULT") == "failure" or os.environ.get("UPLOAD_RESULT") == "failure"
-          native_result = os.environ.get("NATIVE_WINDOWS_RESULT", "")
-          if core_failed:
-              # On a promoting cut the gates run before anything is public, so the
-              # usual outcome of this failure is a clean no-op rather than a
-              # half-finished release (SFN-829). Say so: the remediation is "fix and
-              # re-cut", not "go clean up main". Since SFN-1024 made the msvc
-              # payload required, a native-leg failure lands here too: it
-              # fails the payload gate, so `UPLOAD_RESULT` is `failure` and
-              # this branch — not the `else` below — produces the message.
-              suffix = (
-                  " Payload gates run before promotion, so `main` is most likely unbumped and untagged"
-                  " — check the run for whether the Promote step was reached."
-                  if os.environ.get("IS_PROMOTE") == "true"
-                  else ""
-              )
-              print(json.dumps({
-                  "text": f":x: Sailfin release asset build/upload failed for {tag}.{suffix}\\nRun: {run_url}"
-              }))
-          else:
-              print(json.dumps({
-                  "text": f":warning: Sailfin release {tag} published, but the native MSVC Windows seed leg ({native_result}) did not produce an asset. The mingw-cross Windows installer still shipped normally; only the native seed is missing from this release.\\nRun: {run_url}"
-              }))
+          # Payload gates run before promotion, so the usual outcome is a clean
+          # no-op rather than a half-finished release (SFN-829). A native-Windows
+          # failure also fails the required payload gate; there is no legacy
+          # Windows artifact fallback (SFN-58).
+          suffix = (
+              " Payload gates run before promotion, so `main` is most likely unbumped and untagged"
+              " — check the run for whether the Promote step was reached."
+              if os.environ.get("IS_PROMOTE") == "true"
+              else ""
+          )
+          print(json.dumps({
+              "text": f":x: Sailfin release asset build/upload failed for {tag}.{suffix}\\nRun: {run_url}"
+          }))
           PY
           curl -fsS -X POST \
             -H 'Content-type: application/json' \

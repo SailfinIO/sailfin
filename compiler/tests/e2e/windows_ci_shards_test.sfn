@@ -16,7 +16,7 @@ test "Windows CI: every source PR builds once and gates all shards" ![io] {
     _assert_canonical_shards(workflow);
     assert contains(workflow, "build-compiler-windows:\n    name: Build compiler [windows-x86_64]\n    needs: ci-scope\n    if: "
         + source_scope);
-    assert contains(workflow, "seed_source: release");
+    assert ! contains(workflow, "seed_source:");
     assert contains(workflow, "compiler_artifact: ci-build-windows-x86_64");
     assert contains(workflow, "BUILD_WINDOWS: " + windows_result);
     assert contains(workflow, "check \"Build + Test [windows-x86_64]\" \"$BUILD_WINDOWS\"");
@@ -37,7 +37,39 @@ test "Windows CI: PR and main seeder share the cache and shard action" ![io] {
     let seeder = fs.readFile(".github/workflows/seed-test-bin.yml");
     _assert_canonical_shards(seeder);
     assert contains(seeder, "build-compiler-windows:");
-    assert contains(seeder, "seed_source: release");
+    assert ! contains(seeder, "seed_source:");
     assert contains(seeder, "compiler_artifact: seed-build-windows-x86_64");
     assert contains(seeder, "uses: ./.github/actions/sailfin-test-windows");
+}
+
+test "Windows CI: full native self-host runs nightly, not after each merge" ![io] {
+    let workflow = fs.readFile(".github/workflows/windows-native-selfhost.yml");
+    assert contains(workflow, "  schedule:\n    - cron: \"0 8 * * *\"");
+    assert contains(workflow, "  workflow_dispatch:");
+    assert ! contains(workflow, "\n  push:");
+}
+
+test "Windows CI: native builds have one signed release-seed path" ![io] {
+    let workflow = fs.readFile(".github/workflows/ci.yml");
+    let action = fs.readFile(".github/actions/sailfin-build-windows/action.yml");
+    assert contains(action, "Fetch and verify the native release seed");
+    assert ! contains(action, "seed_source:");
+    assert ! contains(action, "mingw-cross bootstrap seed");
+    assert ! contains(action, "ci-installer-windows-x86_64");
+
+    let nightly = fs.readFile(".github/workflows/windows-native-selfhost.yml");
+    assert ! contains(nightly, "cross-seed:");
+    assert ! contains(nightly, "windows-cross-seed");
+
+    let release = fs.readFile(".github/workflows/release-tag.yml");
+    assert ! contains(release, "native-windows-cross-seed:");
+    let legacy_payload = "sailfin_" + "$" + "{version}_windows_x86_64.tar.gz";
+    assert ! contains(release, legacy_payload);
+    assert ! contains(release, "*windows-x86_64*)");
+
+    // Retirement removes bootstrap and release production, not the supported
+    // cross target. The Linux PR build still compiles and smoke-tests it.
+    assert contains(workflow, "build --target=x86_64-w64-mingw32 -p compiler");
+    assert contains(workflow, "Smoke test [windows-x86_64]");
+    assert contains(workflow, "ci-cross-target-windows-x86_64");
 }

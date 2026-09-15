@@ -40,7 +40,7 @@ fn _is_windows() -> bool ![io] {
 fn _require_symlink(target: string, link: string) -> void ![io] {
     if symlink(target, link) { return; }
     if _is_windows() {
-        skip("SFN-1143: Windows symlink creation unavailable; remove this skip when runners guarantee Developer Mode or SeCreateSymbolicLinkPrivilege");
+        skip("SFN-1285: Windows symlink creation unavailable; remove this skip when runners guarantee Developer Mode or SeCreateSymbolicLinkPrivilege");
         return;
     }
     assert false;

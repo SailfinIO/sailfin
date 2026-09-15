@@ -260,7 +260,7 @@ fn _clock_ll(build_dir: string) -> string ![io] {
 fn _nm_has_defined(obj: string, sym: string) -> boolean ![io] {
     let reader = symbol_reader();
     if reader.length == 0 {
-        skip("no symbol reader on PATH (llvm-nm / nm / llvm-nm-18) — cannot assert symbol presence (SFN-1114)");
+        skip("SFN-1284: no symbol reader is available; remove when the test resolves a PE-native reader and can assert symbol presence");
         return false;
     }
     let no_extra: string[] = [];

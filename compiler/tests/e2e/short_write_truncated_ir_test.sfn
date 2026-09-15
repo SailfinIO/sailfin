@@ -41,7 +41,7 @@ import {
 
 fn _require_posix_file_limit() -> bool ![io] {
     if env.get("COMSPEC").length == 0 { return true; }
-    skip("SFN-1156: short-write injection requires POSIX ulimit and SIGXFSZ; remove this skip when Windows has a native bounded-write fault injector");
+    skip("SFN-1138: short-write injection requires POSIX ulimit and SIGXFSZ; remove this skip when Windows has a native bounded-write fault injector");
     return false;
 }
 

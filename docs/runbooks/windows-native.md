@@ -1,12 +1,10 @@
 # Windows native self-host runbook
 
-`.github/workflows/windows-native-selfhost.yml` is SFN-55 (SFEP-0021 M9)
-**tier B**: the unconditional backstop to `ci.yml`'s path-filtered
-`build-compiler-windows` (tier A). It runs on every `push` to `main`, once
-nightly at 08:00 UTC, and on manual `workflow_dispatch`, with no path
-filter — that asymmetry is deliberate (SFN-55 §4.3): tier A only fires on
-PRs whose changed paths match the Windows glob, so tier B is what catches a
-false negative in that filter, at up to 24h latency instead of never.
+`.github/workflows/windows-native-selfhost.yml` is the unconditional deep
+backstop to the merge-blocking native Windows build and eight-shard suite in
+`ci.yml`. It runs nightly at 08:00 UTC and on manual `workflow_dispatch`.
+Pull requests get fast, owned shard coverage; this workflow adds the strict
+fixed point and complete uncached suite.
 
 It proves two things in sequence:
 
@@ -17,38 +15,20 @@ It proves two things in sequence:
    `.github/release-signing/ed25519-release.pub.pem` — SFN-994), stages it,
    and runs the SFN-53 diagnostic ladder plus the boot / check / run / R1
    (try-throw) / R3 (struct-channel) ABI gates via the shared
-   `.github/actions/sailfin-build-windows` composite. Verification fails
-   closed: a missing/404 asset, a bad signature, a bad digest, or missing
-   OpenSSL all abort the job, with no fallback to the mingw asset (§1b).
+   `.github/actions/sailfin-build-windows` composite. Verification uses the
+   PowerShell verifier's embedded Ed25519 implementation and fails closed on a
+   missing/404 asset, bad signature, or bad digest, with no fallback artifact
+   (§1b).
 2. **The self-host fixed point** (M8/SFN-54) — the native compiler rebuilds
    itself twice, and pass-2 must be byte-identical to pass-1.
 
-`cross-seed` (ubuntu) still runs, but no longer feeds `native-build`
-(SFN-994 dropped `needs: cross-seed`, so the two jobs now run in parallel).
-It stays for two reasons: to exercise the native MinGW target build nightly,
-and to keep the `seed_source: cross` escape hatch on the shared composite
-proven, in case a bad release seed ever ships.
-
-When either job fails, or either job is cancelled after it started (a
+When the job fails, or is cancelled after it started (a
 `timeout-minutes` expiry, not an expected concurrency supersede — see
 §2 below), the `notify-failure` job opens a deduplicated regression issue
 labeled `area:architecture` and `windows-native-regression`. The issue title
-suffix names the failing gate — five values now. Four are checked
-most-specific first in the `Identify failed gate` step, scoped to the
-`native-build` job (`windows-native-selfhost.yml:390-411`); the fifth is
-checked ahead of those four, directly in the `notify-failure` job's
-`GATE_NAME` env expression (`windows-native-selfhost.yml:470-477`), since it
-needs visibility into `cross-seed`'s result that `identify_gate` does not
-have:
+suffix names the failing gate — four values, checked most-specific first in
+the `Identify failed gate` step:
 
-- `windows-cross-seed` — `cross-seed` failed or was cancelled while
-  `native-build` did not itself fail or get cancelled. This is the Linux job
-  that rebuilds the mingw-cross bootstrap seed breaking, not the Windows
-  native compiler — triage the native MinGW target build, not the compiler.
-  Reachable only since SFN-994 made the two jobs run in parallel; before
-  that, a `cross-seed` failure left `native-build` skipped, and the title
-  fell through to the `windows-native-build` fallback below — misleadingly,
-  since nothing about the Windows build had broken.
 - `windows-selfhost-passes` — the native compiler itself failed to complete
   either self-host pass (the `Self-host pass 1 + pass 2 (native MSVC)` step).
 - `windows-fixed-point` — both passes completed but pass-2 was not
@@ -63,9 +43,6 @@ have:
   see §1b), the SFN-53 diagnostic ladder, the Stage 2 build, or an R1/R3 ABI
   gate.
 
-If the failing event is `push: main`, the merging PR also gets a comment
-linking the regression issue and the failing run.
-
 This page is the triage runbook for those regressions.
 
 ---
@@ -78,21 +55,13 @@ Linux or macOS. On a Windows host with the toolchain from
 `ilammy/msvc-dev-cmd@v1` on `PATH`:
 
 ```bash
-# Fetch + verify the published native MSVC seed (mirrors CI's
-# `seed_source: release`, SFN-994) — requires `pwsh` and OpenSSL 3.0+, both
-# present on the `windows-2025` runner image. $ver is
-# `bootstrap.toml [seed].version`.
+# Fetch + verify the published native MSVC seed (SFN-994). The PowerShell
+# verifier has no OpenSSL dependency. $ver is `bootstrap.toml [seed].version`.
 ver=<bootstrap.toml [seed].version>
 pwsh -File .github/actions/sailfin-build-windows/verify-release-seed.ps1 -Version "$ver"
 mkdir -p seed
 tar -xzf "seed-dl/sailfin_${ver}_windows_x86_64-msvc.tar.gz" -C seed
 SEED_EXE="$(find "$PWD/seed" -name sailfin.exe | head -1)"
-
-# Fallback (`seed_source: cross` on the composite): stage a mingw-cross
-# bootstrap seed with the native target driver on Linux or macOS, then copy
-# and extract the archive on the Windows host as SEED_EXE instead.
-#   build/bin/sfn build --target=x86_64-w64-mingw32 -p compiler -o build/windows/sailfin.exe
-#   build/bin/sfn package --installer --target windows-x86_64 --out dist --compiler-bin build/windows/sailfin.exe
 
 SAILFIN_TARGET_OS=Windows "$SEED_EXE" build -p compiler
 NATIVE_SFN=<path to the resulting compiler.exe / sfn.exe under build/>
@@ -165,7 +134,7 @@ placebo.
 
 Since SFN-994, `native-build` bootstraps from a fetched, signed artifact
 instead of a same-run build, so it can now fail for reasons that predate
-this checkout's compiler ever running. All three fail during the `Fetch and
+this checkout's compiler ever running. Both fail during the `Fetch and
 verify the native release seed` / `Stage the release seed` steps
 (`.github/actions/sailfin-build-windows/action.yml`, driving
 `verify-release-seed.ps1`) — before the SFN-53 ladder, the Stage 2 build, or
@@ -189,13 +158,7 @@ gate, whose name reads as a compiler problem when it is not one:
   a release-infrastructure incident — a corrupted or tampered asset, or a
   signing-key mismatch — and escalate immediately rather than working
   around it: the verifier has no downgrade path or override knob, by design.
-- **OpenSSL missing or too old.** The verifier requires OpenSSL 3.0+
-  (`pkeyutl -rawin` needs it) and fails closed if it is absent or older. The
-  pinned `windows-2025` image is expected to carry it; if this fires, the
-  runner image changed under the pin — a CI-infrastructure regression, not a
-  compiler one.
-
-All three are outside `compiler/src/` and `compiler/capsules/` — do not
+Both are outside `compiler/src/` and `compiler/capsules/` — do not
 bisect commits under §3 for a failure that happened before the compiler
 under test ever ran.
 
@@ -203,34 +166,30 @@ under test ever ran.
 
 ## 2. Cancelled vs. failed
 
-Either `cross-seed` or `native-build` can end up `cancelled`, for two
-different reasons, and only one of them is a regression:
+`native-build` can end up `cancelled` for two different reasons, and only one
+of them is a regression:
 
-- **Expected concurrency coalescing.** `push: main` and `workflow_dispatch`
-  share one concurrency group per event type with `cancel-in-progress:
-  true` (SFN-55 review A1) — landing a merge every ~20 minutes against a
-  ~45-60 minute job means an older in-flight `push` run is routinely
-  cancelled by a newer one, taking both jobs down together. `notify-failure`'s
-  classify step checks whether a newer run of the same event type (and, for
-  `workflow_dispatch`, the same ref) has since started; if so, it skips
-  notification.
-- **A genuine timeout.** `cross-seed` and `native-build` each carry a
-  90-minute job timeout; within `native-build`, the `Self-host pass 1 + pass
+- **Expected concurrency coalescing.** Manual `workflow_dispatch` runs share
+  one concurrency group per ref with `cancel-in-progress: true` (SFN-55
+  review A1). A newer dispatch can therefore cancel an older in-flight run.
+  `notify-failure`'s classify step checks whether a newer run of the same ref
+  has since started; if so, it skips notification.
+- **A genuine timeout.** `native-build` carries a 360-minute job timeout;
+  within it, the `Self-host pass 1 + pass
   2 (native MSVC)` step carries its own 30-minute step timeout, and the
   downstream `Gate — self-host fixed point (pass-2 == pass-1)` comparison
   step carries a separate 5-minute step timeout — a step-level timeout
   surfaces as `failure`, not `cancelled` (see §1's "either job fails"). If
   this run is still the newest of its event type/ref and shows `cancelled`,
-  it hit one of the job-level caps. Check the job log for where it stopped —
-  the Linux self-host/native MinGW build step in `cross-seed`, or a
-  heartbeat gap in `native-build`'s Stage 2 build step — and treat it as a
+  it hit the job-level cap. Check the job log for where it stopped — typically
+  a heartbeat gap in `native-build`'s Stage 2 build step — and treat it as a
   build-setup regression (SFN-55 §2's measured budget: ~13m30s
   build+boot+ABI, ~14m27s for both fixed-point passes; a run running
   meaningfully longer than that on a warm-cache run is itself the finding).
 
-`schedule` runs never cancel each other or a `push` run — the concurrency
-group is keyed by `github.event_name`, not just `github.ref`
-(SFN-55 review A1).
+`schedule` runs never cancel each other or a manual run — the concurrency
+group is keyed by `github.event_name`, not just `github.ref` (SFN-55 review
+A1).
 
 ---
 
@@ -281,10 +240,9 @@ automatically on merge.
 
 ## 5. Escalation
 
-Per the design note (`docs/proposals/design-notes/sfn-55-windows-ci.md` §6):
-an open `windows-native-regression` issue older than one week means the
-Windows leg is rotting again. The corrective action at that point is to
-**drop tier A's path filter** (promote `build-compiler-windows` to
-unconditional `source` scope in `ci.yml`), not to keep widening the filter's
-globs — a filter that is silently wrong is worse than no filter, because it
-reads as coverage that is not there.
+Per the design note (`docs/proposals/design-notes/sfn-55-windows-ci.md` §6), an
+open `windows-native-regression` issue older than one week means the Windows
+leg is rotting again. The original escalation was to drop the native build's
+path filter; that escalation has been completed. Both `build-compiler-windows`
+and the eight `build-windows` shards now run for every source-scoped PR, so an
+extended regression requires investigation rather than further filter changes.

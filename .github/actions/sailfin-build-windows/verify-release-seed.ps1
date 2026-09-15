@@ -1,7 +1,7 @@
 # Fetch the published native MSVC Windows seed named by
 # `bootstrap.toml [seed].version` and verify it before anything executes it.
-# Called by `.github/actions/sailfin-build-windows/action.yml` when
-# `seed_source: 'release'` (SFN-994).
+# Called unconditionally by `.github/actions/sailfin-build-windows/action.yml`
+# (SFN-994/SFN-58).
 #
 # Lives in its own file, rather than inline in `action.yml`, so it can be
 # parsed by `[Parser]::ParseFile` in CI the way `install.ps1` already is.
@@ -219,10 +219,8 @@ $ver = $Version
 $asset = "sailfin_${ver}_windows_x86_64-msvc.tar.gz"
 $base  = "https://github.com/SailfinIO/sailfin/releases/download/v$ver"
 
-# The msvc asset only, with NO fallback to the plain mingw asset. The
-# point of this mode is bootstrapping from a NATIVE seed; silently
-# falling back to the build being retired (SFN-58) would defeat it and
-# would report green. A missing msvc asset is a real failure.
+# The MSVC asset is the sole Windows bootstrap source. A missing asset is a
+# real failure; there is no downgrade path (SFN-58).
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 $archive  = Join-Path $WorkDir $asset
 $manifest = Join-Path $WorkDir "SHA256SUMS"

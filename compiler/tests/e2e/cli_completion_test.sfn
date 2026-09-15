@@ -63,7 +63,7 @@ test "cli completion: bash script is deterministic and names registered commands
 test "cli completion: generated bash script passes bash -n syntax check" ![io] {
     let bash = git_bash_path();
     if !tool_present(bash) {
-        skip("Bash syntax oracle unavailable: no Git Bash provider or bash executable was found");
+        skip("SFN-1285: no Git Bash provider or bash executable was found; remove when the syntax oracle has a host-native parser fixture");
     }
     let exit = process.run_capture([sfn_bin_path(), "completion", "bash"], _child_env());
     let script = process.capture_take_stdout();

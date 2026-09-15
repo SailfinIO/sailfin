@@ -11,16 +11,12 @@ The compiler self-hosts from the exact released seed pinned in
 
 ## Supported hosts
 
-Linux and macOS are the primary development hosts for compiler/runtime work.
-Windows release artifacts are built through the cross-Windows target from
-Linux; for day-to-day compiler work on Windows, use WSL or a Linux/macOS
-machine unless you are specifically working on the Windows toolchain path.
-
-Windows x86_64 is a **Tier 3 — best effort** target
-(`docs/conventions/target-tiers.md`): there is no supported native Windows
-build of the compiler from source, and neither `sfn dev bootstrap build` nor
-the test suite runs on Windows. Native MSVC self-hosting is tracked by SFEP-0021.
-Treat WSL as the supported path — it runs the Tier 1 Linux x86_64 toolchain.
+Linux remains the primary development host for compiler/runtime work. macOS
+arm64 and Windows x86_64 are supported Tier 2 hosts
+(`docs/conventions/target-tiers.md`). Windows builds bootstrap from the signed
+native MSVC release seed, self-host with the MSVC ABI, and run the required
+test shards on `windows-2025`; MinGW remains available only as the supported
+`x86_64-w64-mingw32` cross-compilation target.
 
 The current backend lowers Sailfin IR through LLVM and links with the platform
 toolchain. LLVM/clang independence is planned work, not the current build path.
