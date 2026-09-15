@@ -35,7 +35,7 @@ runs:
           throw "shared artifact did not contain build/bin/sfn.exe"
         }
         $llvmRoot = (Resolve-Path -LiteralPath build/llvm).Path
-        foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'lld-link.exe')) {
+        foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'ld.lld.exe', 'lld-link.exe')) {
           $toolPath = Join-Path $llvmRoot "bin\$tool"
           if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
             throw "shared artifact did not contain $toolPath"

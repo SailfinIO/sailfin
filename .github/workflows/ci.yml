@@ -2457,7 +2457,7 @@ jobs:
           New-Item -ItemType Directory -Force build/bin | Out-Null
           Copy-Item -LiteralPath $env:NATIVE_SFN -Destination build/bin/sfn.exe
           New-Item -ItemType Directory -Force build/llvm/bin | Out-Null
-          foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'lld-link.exe')) {
+          foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'ld.lld.exe', 'lld-link.exe')) {
             Copy-Item -LiteralPath (Join-Path $env:SAILFIN_LLVM_ROOT "bin\$tool") `
               -Destination (Join-Path 'build/llvm/bin' $tool)
           }

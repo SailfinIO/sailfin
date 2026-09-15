@@ -176,7 +176,7 @@ runs:
           throw "Failed to extract the complete LLVM $version distribution (exit $LASTEXITCODE)"
         }
         $llvmRoot = Join-Path $extractRoot $distribution
-        foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'lld-link.exe')) {
+        foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'ld.lld.exe', 'lld-link.exe')) {
           $toolPath = Join-Path $llvmRoot "bin\$tool"
           if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
             throw "LLVM $version distribution is missing $toolPath"
