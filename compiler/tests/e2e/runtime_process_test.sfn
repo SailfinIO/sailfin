@@ -72,7 +72,8 @@ test "runtime/process: emit produces sfn_process_run define + posix calls" ![io]
     // The Sailfin function must emit at the bare unmangled name with the
     // SfnArray ABI shape `{ i8**, i64, i64 }*` so the runtime helper
     // descriptor's `native_signature` redirect lands at link time.
-    assert contains(ir, "define double @sfn_process_run({ i8**, i64, i64 }* %argv) {");
+    // LLVM may add function attributes between the signature and opening brace.
+    assert contains(ir, "define double @sfn_process_run({ i8**, i64, i64 }* %argv)");
     // The body must call posix_spawnp + waitpid directly (the point of the
     // M2.9 migration). `call i32 @posix_spawnp(` does not match the
     // `declare i32 @posix_spawnp(` line.

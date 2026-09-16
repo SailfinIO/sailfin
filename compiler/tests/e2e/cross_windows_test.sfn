@@ -1,7 +1,7 @@
 // Cross-target object acceptance for the SFN-952 llvm-cli provider. This
 // exercises the real resolved LLVM family and checks the emitted COFF header;
 // hosts without a complete LLVM 18 Windows-capable family skip explicitly.
-import { byte_at, free_bytes, read_bytes } from "sfn/fs";
+import { free_bytes, read_bytes } from "sfn/fs";
 import { skip, with_tmp_dir } from "sfn/test";
 
 import {
@@ -37,8 +37,8 @@ test "cross windows: llvm-cli emits x86-64 COFF without clang" ![io] {
         assert bytes.status == 0;
         assert bytes.length > 20;
         // IMAGE_FILE_MACHINE_AMD64 (0x8664), little endian.
-        assert byte_at(bytes, 0) == 100;
-        assert byte_at(bytes, 1) == 134;
+        assert load_byte(bytes.addr) == 100;
+        assert load_byte(bytes.addr + 1) == 134;
         free_bytes(bytes);
         return 0;
     });

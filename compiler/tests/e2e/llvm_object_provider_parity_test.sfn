@@ -70,17 +70,24 @@ fn _behavior_source(as_test: boolean) -> string {
         + "    print.info(\"provider parity ok\");\n}\n";
 }
 
-fn _provider_child_env(scratch: string, kind: string, oracle: string) -> string[] ![io] {
+fn _configured_oracle() -> string ![io] {
+    let mut path = env.get("SAILFIN_CLANG_ORACLE");
+    if path.length == 0 { path = env.get("CLANG"); }
+    if path.length == 0 { path = "clang"; }
+    return path;
+}
+
+fn _provider_child_env(scratch: string, kind: string) -> string[] ![io] {
     let mut child = clean_runner_env_without(scratch, ["SAILFIN_OBJECT_PROVIDER", "SAILFIN_CLANG_ORACLE"]);
     child.push("SAILFIN_OBJECT_PROVIDER=" + kind);
     if kind == "clang-oracle" {
-        child.push("SAILFIN_CLANG_ORACLE=" + oracle);
+        child.push("SAILFIN_CLANG_ORACLE=" + _configured_oracle());
     }
     return child;
 }
 
-fn _run_provider(argv: string[], scratch: string, kind: string, oracle: string) -> int ![io] {
-    let rc = process.run_capture(argv, _provider_child_env(scratch, kind, oracle));
+fn _run_provider(argv: string[], scratch: string, kind: string) -> int ![io] {
+    let rc = process.run_capture(argv, _provider_child_env(scratch, kind));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if rc != 0 { print.err(kind + " parity child failed:\n" + out + err); }
@@ -90,9 +97,7 @@ fn _run_provider(argv: string[], scratch: string, kind: string, oracle: string) 
 test "llvm object provider parity: O0 and O2 match the explicit clang oracle" ![io] {
     let triple = build_target_triple();
     let llvm = resolve_llvm_object_provider_for_target(triple);
-    let mut oracle_path = env.get("SAILFIN_CLANG_ORACLE");
-    if oracle_path.length == 0 { oracle_path = env.get("CLANG"); }
-    if oracle_path.length == 0 { oracle_path = "clang"; }
+    let oracle_path = _configured_oracle();
     let oracle_probe = process.run_capture([oracle_path, "--version"], process.environ());
     let _oracle_out = process.capture_take_stdout();
     let _oracle_err = process.capture_take_stderr();
@@ -132,8 +137,8 @@ test "llvm object provider parity: O0 and O2 match the explicit clang oracle" ![
             assert _run_pipeline(oracle_pipeline.stages) == 0;
             let llvm_exe = target_exe_name(dir + "/llvm-" + levels[i], build_target_os());
             let oracle_exe = target_exe_name(dir + "/oracle-" + levels[i], build_target_os());
-            assert process.run([oracle_path, llvm_obj, "-o", llvm_exe]) == 0;
-            assert process.run([oracle_path, oracle_obj, "-o", oracle_exe]) == 0;
+            assert process.run([_configured_oracle(), llvm_obj, "-o", llvm_exe]) == 0;
+            assert process.run([_configured_oracle(), oracle_obj, "-o", oracle_exe]) == 0;
             let llvm_exit = process.run([llvm_exe]);
             let oracle_exit = process.run([oracle_exe]);
             assert llvm_exit == 41;
@@ -148,9 +153,7 @@ test "llvm object provider parity: O0 and O2 match the explicit clang oracle" ![
 test "llvm object provider parity: exceptions and concurrent channels match at O0 and O2" ![io] {
     let triple = build_target_triple();
     let llvm = resolve_llvm_object_provider_for_target(triple);
-    let mut oracle_path = env.get("SAILFIN_CLANG_ORACLE");
-    if oracle_path.length == 0 { oracle_path = env.get("CLANG"); }
-    if oracle_path.length == 0 { oracle_path = "clang"; }
+    let oracle_path = _configured_oracle();
     let oracle_probe = process.run_capture([oracle_path, "--version"], process.environ());
     let _oracle_out = process.capture_take_stdout();
     let _oracle_err = process.capture_take_stderr();
@@ -164,13 +167,13 @@ test "llvm object provider parity: exceptions and concurrent channels match at O
         fs.writeFile(test_src, _behavior_source(true));
         fs.writeFile(app_src, _behavior_source(false));
         let sfn = sfn_bin_path();
-        let llvm_o0 = _run_provider([sfn, "test", test_src], dir + "/llvm-o0", "llvm-cli", oracle_path);
+        let llvm_o0 = _run_provider([sfn, "test", test_src], dir + "/llvm-o0", "llvm-cli");
         let oracle_o0 = _run_provider([sfn, "test", test_src], dir
-            + "/oracle-o0", "clang-oracle", oracle_path);
+            + "/oracle-o0", "clang-oracle");
         let llvm_o2 = _run_provider([sfn, "run", "--no-cache", app_src], dir
-            + "/llvm-o2", "llvm-cli", oracle_path);
+            + "/llvm-o2", "llvm-cli");
         let oracle_o2 = _run_provider([sfn, "run", "--no-cache", app_src], dir
-            + "/oracle-o2", "clang-oracle", oracle_path);
+            + "/oracle-o2", "clang-oracle");
         assert llvm_o0 == 0;
         assert llvm_o0 == oracle_o0;
         assert llvm_o2 == 0;
