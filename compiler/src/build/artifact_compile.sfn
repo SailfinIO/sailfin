@@ -572,27 +572,7 @@ fn llvm_ir_matches_object_profile(ir: string, triple: string, opt_flag: string) 
 fn prepare_llvm_object_pipeline(request: LlvmArtifactRequest, provider: LlvmObjectProvider) -> LlvmObjectPipeline ![io] {
     let base = llvm_object_pipeline_argv(request, provider);
     if !base.ok { return base; }
-    let ir = fs.readFile(request.ir_path);
-    let canonical_ir = canonicalize_llvm_target_directives(ir, provider.target_triple);
-    let profiled_ir = _replace_profile_frame_pointer(canonical_ir, llvm_profile_frame_pointer(provider.target_triple, request.opt_flag));
-    if profiled_ir.length == 0 || !llvm_ir_matches_object_profile(profiled_ir, provider.target_triple, request.opt_flag) {
-        let mut failed = base;
-        failed.ok = false;
-        failed.diagnostic = "LLVM object provider rejected module profile mismatch for target "
-            + provider.target_triple
-            + " at "
-            + request.ir_path;
-        return failed;
-    }
     let profiled_path = request.object_path + ".profiled.ll";
-    fs.writeFile(profiled_path, profiled_ir);
-    if !fs.exists(profiled_path) {
-        let mut failed = base;
-        failed.ok = false;
-        failed.diagnostic = "LLVM object provider could not materialize target profile at "
-            + profiled_path;
-        return failed;
-    }
     let profiled_request = LlvmArtifactRequest {
         ir_path: profiled_path,
         object_path: request.object_path,
@@ -600,6 +580,30 @@ fn prepare_llvm_object_pipeline(request: LlvmArtifactRequest, provider: LlvmObje
     };
     let mut pipeline = llvm_object_pipeline_argv(profiled_request, provider);
     pipeline.profiled_path = profiled_path;
+    // Runtime object batches retain every pipeline until the bounded worker
+    // pool completes. Keep only argv/path data alive across iterations; the
+    // full IR and its canonical/profile copies are per-object scratch.
+    let scratch_mark = sailfin_intrinsic_runtime_arena_mark();
+    let ir = fs.readFile(request.ir_path);
+    let canonical_ir = canonicalize_llvm_target_directives(ir, provider.target_triple);
+    let profiled_ir = _replace_profile_frame_pointer(canonical_ir, llvm_profile_frame_pointer(provider.target_triple, request.opt_flag));
+    if profiled_ir.length == 0 || !llvm_ir_matches_object_profile(profiled_ir, provider.target_triple, request.opt_flag) {
+        sailfin_intrinsic_runtime_arena_rewind(scratch_mark);
+        pipeline.ok = false;
+        pipeline.diagnostic = "LLVM object provider rejected module profile mismatch for target "
+            + provider.target_triple
+            + " at "
+            + request.ir_path;
+        return pipeline;
+    }
+    fs.writeFile(profiled_path, profiled_ir);
+    sailfin_intrinsic_runtime_arena_rewind(scratch_mark);
+    if !fs.exists(profiled_path) {
+        pipeline.ok = false;
+        pipeline.diagnostic = "LLVM object provider could not materialize target profile at "
+            + profiled_path;
+        return pipeline;
+    }
     return pipeline;
 }
 
