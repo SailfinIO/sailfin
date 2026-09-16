@@ -43,7 +43,6 @@
 import {
     ends_with,
     int_to_string,
-    split,
     starts_with,
     trim
 } from "sfn/strings";
@@ -512,33 +511,48 @@ fn _replace_profile_frame_pointer(ir: string, frame_pointer: string) -> string {
 // rejects it. Make the object-provider boundary authoritative by moving the
 // existing directives into a canonical header without changing the published
 // `.ll` artifact.
+fn _remove_llvm_directive_line(ir: string, line: string) -> string {
+    let at_start = line + "\n";
+    if starts_with(ir, at_start) {
+        return substring(ir, at_start.length, ir.length);
+    }
+    let embedded = "\n" + line + "\n";
+    let pos = index_of(ir, embedded);
+    if pos >= 0 {
+        return substring(ir, 0, pos) + substring(ir, pos + embedded.length - 1, ir.length);
+    }
+    if ends_with(ir, "\n" + line) {
+        return substring(ir, 0, ir.length - line.length - 1);
+    }
+    return ir;
+}
+
 fn canonicalize_llvm_target_directives(ir: string, triple: string) -> string {
-    let lines = split(ir, "\n");
-    let mut source_filename = "";
-    let mut body = "";
     let expected_layout = "target datalayout = \"" + llvm_target_data_layout(triple)
         + "\"";
     let expected_triple = "target triple = \"" + triple + "\"";
-    let mut has_layout = false;
-    let mut has_triple = false;
-    let mut i: int = 0;
-    loop {
-        if i >= lines.length { break; }
-        let line = lines[i];
-        if starts_with(line, "source_filename = ") {
-            source_filename = line + "\n";
-        } else if line == expected_layout { has_layout = true; } else if line == expected_triple {
-            has_triple = true;
-        } else {
-            body = body + line;
-            if i + 1 < lines.length { body = body + "\n"; }
-        }
-        i += 1;
+    let mut source_end: int = 0;
+    if starts_with(ir, "source_filename = ") {
+        let newline = index_of(ir, "\n");
+        if newline >= 0 { source_end = newline + 1; }
     }
-    let mut header = source_filename;
-    if has_layout { header = header + expected_layout + "\n"; }
-    if has_triple { header = header + expected_triple + "\n"; }
-    return header + body;
+    let canonical_header = expected_layout + "\n" + expected_triple + "\n";
+    if starts_with(substring(ir, source_end, ir.length), canonical_header) {
+        return ir;
+    }
+    let without_layout = _remove_llvm_directive_line(ir, expected_layout);
+    let without_targets = _remove_llvm_directive_line(without_layout, expected_triple);
+    // Missing/mismatched directives must still fail profile validation.
+    if without_targets == ir || without_layout == ir || without_targets == without_layout {
+        return ir;
+    }
+    source_end = 0;
+    if starts_with(without_targets, "source_filename = ") {
+        let newline = index_of(without_targets, "\n");
+        if newline >= 0 { source_end = newline + 1; }
+    }
+    return substring(without_targets, 0, source_end) + canonical_header
+        + substring(without_targets, source_end, without_targets.length);
 }
 
 fn llvm_ir_matches_object_profile(ir: string, triple: string, opt_flag: string) -> boolean {

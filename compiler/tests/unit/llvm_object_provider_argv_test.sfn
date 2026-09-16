@@ -131,6 +131,25 @@ test "llvm object provider: target directives are canonicalized ahead of entitie
         + "\"\n";
     assert expect_eq_bool(index_of(canonical, expected_prefix) == 0, true).ok;
     assert expect_eq_bool(index_of(canonical, "define i32 @probe()") > index_of(canonical, "target triple ="), true).ok;
+    assert expect_eq_str(canonicalize_llvm_target_directives(canonical, triple), canonical).ok;
+
+    let mut large_body = "@payload = private constant [4 x i8] c\"abc\\00\"\n";
+    let mut n: int = 0;
+    loop {
+        if n >= 14 { break; }
+        large_body = large_body + large_body;
+        n += 1;
+    }
+    let large_ir = "source_filename = \"large\"\n" + large_body
+        + "target datalayout = \""
+        + llvm_target_data_layout(triple)
+        + "\"\ntarget triple = \""
+        + triple
+        + "\"\n"
+        + llvm_object_profile_attributes(triple, "-O2");
+    let large_canonical = canonicalize_llvm_target_directives(large_ir, triple);
+    assert expect_eq_bool(index_of(large_canonical, large_body) > 0, true).ok;
+    assert expect_eq_bool(llvm_ir_matches_object_profile(large_canonical, triple, "-O2"), true).ok;
 
     let wrong = "target datalayout = \"wrong\"\ntarget triple = \"x86_64-unknown-linux-gnu\"\n"
         + llvm_object_profile_attributes(triple, "-O2");
